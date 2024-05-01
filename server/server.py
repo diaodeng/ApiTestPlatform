@@ -19,6 +19,8 @@ from module_admin.controller.job_controller import jobController
 from module_admin.controller.server_controller import serverController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.common_controller import commonController
+from module_hrm.controller.project_controller import projectController
+from module_hrm.controller.debugtalk_controller import debugtalkController
 from module_hrm.controller.env_controller import envController
 from config.env import AppConfig
 from config.get_redis import RedisUtil
@@ -78,7 +80,10 @@ controller_list = [
     {'router': serverController, 'tags': ['系统监控-菜单管理']},
     {'router': cacheController, 'tags': ['系统监控-缓存监控']},
     {'router': commonController, 'tags': ['通用模块']},
-    {'router': envController, 'tags': ['自动化平台-环境管理']}
+    {'router': projectController, 'tags': ['HRM-项目管理']},
+    {'router': debugtalkController, 'tags': ['项目管理-DebugTalk']},
+    {'router': envController, 'tags': ['HRM-环境管理']},
+
 ]
 
 for controller in controller_list:

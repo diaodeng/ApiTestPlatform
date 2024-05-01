@@ -14,9 +14,9 @@ envController = APIRouter(prefix='/hrm/env', dependencies=[Depends(LoginService.
 
 
 @envController.get("/list", response_model=List[EnvModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:env:list'))])
-async def get_hrm_env_list(request: Request, dept_query: EnvQueryModel = Depends(EnvQueryModel.as_query), query_db: Session = Depends(get_db), data_scope_sql: str = Depends(GetDataScope('HrmEnv'))):
+async def get_hrm_env_list(request: Request, env_query: EnvQueryModel = Depends(EnvQueryModel.as_query), query_db: Session = Depends(get_db), data_scope_sql: str = Depends(GetDataScope('HrmEnv'))):
     try:
-        evn_query_result = EnvService.get_env_list_services(query_db, dept_query, data_scope_sql)
+        evn_query_result = EnvService.get_env_list_services(query_db, env_query, data_scope_sql)
         logger.info('获取成功')
         return ResponseUtil.success(data=evn_query_result)
     except Exception as e:
@@ -30,7 +30,7 @@ async def add_hrm_env(request: Request, add_env: EnvModel, query_db: Session = D
     try:
         add_env.create_by = current_user.user.user_name
         add_env.update_by = current_user.user.user_name
-        add_env_result = EnvService.add_dept_services(query_db, add_env)
+        add_env_result = EnvService.add_env_services(query_db, add_env)
         if add_env_result.is_success:
             logger.info(add_env_result.message)
             return ResponseUtil.success(data=add_env_result)
@@ -48,7 +48,7 @@ async def edit_hrm_env(request: Request, edit_env: EnvModel, query_db: Session =
     try:
         edit_env.update_by = current_user.user.user_name
         edit_env.update_time = datetime.now()
-        edit_env_result = EnvService.edit_dept_services(query_db, edit_env)
+        edit_env_result = EnvService.edit_env_services(query_db, edit_env)
         if edit_env_result.is_success:
             logger.info(edit_env_result.message)
             return ResponseUtil.success(msg=edit_env_result.message)
@@ -64,7 +64,8 @@ async def edit_hrm_env(request: Request, edit_env: EnvModel, query_db: Session =
 @log_decorator(title='环境管理', business_type=3)
 async def delete_hrm_env(request: Request, env_ids: str, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        delete_env = DeleteEnvModel(deptIds=env_ids)
+        print(env_ids)
+        delete_env = DeleteEnvModel(envIds=env_ids)
         delete_env.update_by = current_user.user.user_name
         delete_env.update_time = datetime.now()
         delete_env_result = EnvService.delete_env_services(query_db, delete_env)
@@ -80,10 +81,10 @@ async def delete_hrm_env(request: Request, env_ids: str, query_db: Session = Dep
 
 
 @envController.get("/{env_id}", response_model=EnvModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:env:query'))])
-async def query_detail_system_dept(request: Request, env_id: int, query_db: Session = Depends(get_db)):
+async def query_detail_system_env(request: Request, env_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_env_result = EnvService.env_detail_services(query_db, env_id)
-        logger.info(f'获取dept_id为{env_id}的信息成功')
+        logger.info(f'获取env_id为{env_id}的信息成功')
         return ResponseUtil.success(data=detail_env_result)
     except Exception as e:
         logger.exception(e)
