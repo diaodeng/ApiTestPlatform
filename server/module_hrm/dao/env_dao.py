@@ -30,7 +30,7 @@ class EnvDao:
         """
         用于获取环境列表的工具方法
         :param db: orm对象
-        :param dept_id: 环境id
+        :param env_id: 环境id
         :return: 环境id对应的信息对象
         """
         env_info = db.query(HrmEnv) \
@@ -45,7 +45,7 @@ class EnvDao:
         """
         根据环境id获取环境详细信息
         :param db: orm对象
-        :param dept_id: 部门id
+        :param env_id: 部门id
         :return: 部门信息对象
         """
         env_info = db.query(HrmEnv) \
@@ -60,14 +60,13 @@ class EnvDao:
         """
         根据环境参数获取环境信息
         :param db: orm对象
-        :param dept: 部门参数对象
+        :param env: 部门参数对象
         :return: 部门信息对象
         """
         env_info = db.query(HrmEnv) \
             .filter(HrmEnv.env_url == env.env_url if env.env_url else True,
-                    HrmEnv.env_name == env.env_name if env.env_name else True) \
+                    HrmEnv.env_name == env.env_name if env.env_name else False) \
             .first()
-
         return env_info
 
     @classmethod
