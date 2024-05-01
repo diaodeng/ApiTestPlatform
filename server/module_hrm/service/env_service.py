@@ -35,7 +35,7 @@ class EnvService:
         return CamelCaseUtil.transform_result(env_list_result)
 
     @classmethod
-    def add_dept_services(cls, query_db: Session, page_object: EnvModel):
+    def add_env_services(cls, query_db: Session, page_object: EnvModel):
         """
         新增环境信息service
         :param query_db: orm对象
@@ -57,7 +57,7 @@ class EnvService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def edit_dept_services(cls, query_db: Session, env_object: EnvModel):
+    def edit_env_services(cls, query_db: Session, env_object: EnvModel):
         """
         编辑环境信息service
         :param query_db: orm对象
@@ -92,11 +92,12 @@ class EnvService:
         :param page_object: 删除环境对象
         :return: 删除环境校验结果
         """
+        print(page_object.env_ids.split(','))
         if page_object.env_ids.split(','):
             env_id_list = page_object.env_ids.split(',')
             try:
                 for env_id in env_id_list:
-                    EnvDao.delete_env_dao(query_db, EnvModel(env_id=env_id))
+                    EnvDao.delete_env_dao(query_db, EnvModel(envId=env_id))
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
             except Exception as e:
@@ -114,7 +115,7 @@ class EnvService:
         :param env_id: 环境id
         :return: 环境id对应的信息
         """
-        dept = EnvDao.get_env_detail_by_id(query_db, env_id=env_id)
-        result = EnvModel(**CamelCaseUtil.transform_result(dept))
+        env = EnvDao.get_env_detail_by_id(query_db, env_id=env_id)
+        result = EnvModel(**CamelCaseUtil.transform_result(env))
 
         return result
