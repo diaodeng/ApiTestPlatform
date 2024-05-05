@@ -61,9 +61,6 @@ class DebugTalkService:
         :return: 编辑DebugTalk校验结果
         """
         edit_debugtalk = debugtalk_object.model_dump(exclude_unset=True)
-        print('##################')
-        print(debugtalk_object)
-        print(edit_debugtalk)
         info = cls.debugtalk_detail_services(query_db, edit_debugtalk.get('debugtalk_id'))
         if info:
             try:
