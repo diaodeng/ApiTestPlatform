@@ -33,10 +33,12 @@
 
       <!-- 添加或修改项目对话框 -->
       <el-dialog :title="title" v-model="open" width="800px" append-to-body>
-         <el-form ref="debugtalkRef" :model="form" :rules="rules" label-width="90px">
-            <div>
-              <MonacoEditor v-model="debugtalk" language="javascript" />
-            </div>
+         <el-form ref="debugtalkRef" :model="form" :rules="rules" label-width="5px">
+           <el-form-item>
+
+                <MonacoEditor v-model="debugtalk" language="javascript" />
+
+            </el-form-item>
          </el-form>
          <template #footer>
             <div class="dialog-footer">
@@ -174,7 +176,6 @@ function handleUpdate(row) {
 
 /** 提交按钮 */
 function submitForm() {
-  console.log(this.debugtalk);
   proxy.$refs["debugtalkRef"].validate(valid => {
     if (valid) {
       if (form.value.debugtalkId != undefined) {

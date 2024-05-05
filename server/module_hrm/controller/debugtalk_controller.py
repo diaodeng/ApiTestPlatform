@@ -48,8 +48,6 @@ async def edit_hrm_debugtalk(request: Request, edit_debugtalk: DebugTalkModel, q
     try:
         edit_debugtalk.update_by = current_user.user.user_name
         edit_debugtalk.update_time = datetime.now()
-        print(edit_debugtalk)
-        print('####################')
         edit_debugtalk_result = DebugTalkService.edit_dept_services(query_db, edit_debugtalk)
         if edit_debugtalk_result.is_success:
             logger.info(edit_debugtalk_result.message)

@@ -26,7 +26,7 @@ class ProjectService:
     @classmethod
     def get_project_list_services(cls, query_db: Session, page_object: ProjectModel, data_scope_sql: str):
         """
-        获取部门列表信息service
+        获取部项目列表信息service
         :param query_db: orm对象
         :param page_object: 分页查询参数对象
         :param data_scope_sql: 数据权限对应的查询sql语句
