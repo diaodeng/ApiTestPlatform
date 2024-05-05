@@ -57,12 +57,12 @@
                <dict-tag :options="sys_normal_disable" :value="scope.row.status" />
             </template>
          </el-table-column>
-         <el-table-column label="创建时间" align="center" prop="createTime" width="200">
+         <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
             <template #default="scope">
                <span>{{ parseTime(scope.row.createTime) }}</span>
             </template>
          </el-table-column>
-        <el-table-column label="更新时间" align="center" prop="updateTime" width="200">
+        <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">
             <template #default="scope">
                <span>{{ parseTime(scope.row.updateTime) }}</span>
             </template>
@@ -70,7 +70,7 @@
          <el-table-column label="操作" align="center" class-name="small-padding fixed-width">
             <template #default="scope">
                <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:project:edit']">修改</el-button>
-               <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['hrm:project:add']">新增</el-button>
+<!--               <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['hrm:project:add']">新增</el-button>-->
                <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['hrm:project:remove']">删除</el-button>
             </template>
          </el-table-column>
