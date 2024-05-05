@@ -83,6 +83,8 @@ class CaseDao:
             query = query.filter(HrmCase.case_name.like(f'%{query_object.case_name}%'))
         if query_object.status is not None:
             query = query.filter(HrmCase.status == query_object.status)
+        if query_object.case_id is not None:
+            query = query.filter(HrmCase.case_id == query_object.case_id)
 
         # 添加排序条件
         query = query.order_by(HrmCase.sort).distinct()
