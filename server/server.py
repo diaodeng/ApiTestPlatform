@@ -21,6 +21,7 @@ from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.common_controller import commonController
 from module_hrm.controller.project_controller import projectController
 from module_hrm.controller.debugtalk_controller import debugtalkController
+from module_hrm.controller.module_controler import moduleController
 from module_hrm.controller.env_controller import envController
 from config.env import AppConfig
 from config.get_redis import RedisUtil
@@ -82,6 +83,7 @@ controller_list = [
     {'router': commonController, 'tags': ['通用模块']},
     {'router': projectController, 'tags': ['HRM-项目管理']},
     {'router': debugtalkController, 'tags': ['项目管理-DebugTalk']},
+    {'router': moduleController, 'tags': ['HRM-模块管理']},
     {'router': envController, 'tags': ['HRM-环境管理']},
 
 ]
