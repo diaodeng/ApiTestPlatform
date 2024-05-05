@@ -175,7 +175,7 @@ const { queryParams, form, rules } = toRefs(data);
 function getList() {
   loading.value = true;
   listProject(queryParams.value).then(response => {
-    projectList.value = proxy.handleTree(response.data, "projectId");
+    projectList.value = response.data;
     loading.value = false;
   });
 }
