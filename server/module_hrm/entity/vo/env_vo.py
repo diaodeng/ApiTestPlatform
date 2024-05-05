@@ -14,6 +14,7 @@ class EnvModel(BaseModel):
     env_id: Optional[int] = None
     env_name: Optional[str] = None
     env_url: Optional[str] = None
+    env_config: Optional[str] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
     status: Optional[str] = None

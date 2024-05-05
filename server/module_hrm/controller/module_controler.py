@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi import Depends
 from config.get_db import get_db
+from module_admin.aspect.data_scope import GetDataScope
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.service.module_service import *
 from module_hrm.entity.vo.module_vo import *
@@ -16,12 +17,34 @@ moduleController = APIRouter(prefix='/hrm/module', dependencies=[Depends(LoginSe
 
 
 @moduleController.get("/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:module:list'))])
-async def get_module_hrm_module(request: Request, page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_query), query_db: Session = Depends(get_db)):
+async def get_hrm_module_list(request: Request, page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_query), query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
         page_query_result = ModuleService.get_module_list_services(query_db, page_query, is_page=True)
         logger.info('获取成功')
         return ResponseUtil.success(model_content=page_query_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@moduleController.get("/selectModuleList", response_model=List[ModuleModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
+async def get_hrm_module_list_all(request: Request, query: ModuleQueryModel = Depends(ModuleQueryModel), query_db: Session = Depends(get_db)):
+    try:
+        query_result = ModuleService.get_module_list_services_all(query_db, query)
+        logger.info('获取成功')
+        return ResponseUtil.success(data=query_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@moduleController.get("/showModuleList", response_model=List[ModuleModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
+async def get_hrm_module_list_show(request: Request, query: ModuleQueryModel = Depends(ModuleQueryModel), query_db: Session = Depends(get_db)):
+    try:
+        query_result = ModuleService.get_module_list_services_show(query_db, query)
+        logger.info('获取成功')
+        return ResponseUtil.success(data=query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

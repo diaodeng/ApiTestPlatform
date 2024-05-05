@@ -3,20 +3,22 @@ from config.database import Base
 from datetime import datetime
 
 
-class HrmModule(Base):
+class HrmCase(Base):
     """
     模块信息表
     """
     class Meta:
-        verbose_name = '模块信息'
-    __tablename__ = 'hrm_module'
+        verbose_name = '用例信息'
+    __tablename__ = 'hrm_case'
 
-    module_id = Column(Integer, primary_key=True, autoincrement=True, comment='模块ID')
+    case_id = Column(Integer, primary_key=True, autoincrement=True, comment='模块ID')
+    type = Column(Integer, comment='test/config', default=1)
+    case_name = Column(String(120), nullable=False, comment='用例名称')
     project_id = Column(Integer, nullable=True, comment='项目ID')
-    module_name = Column(String(50), nullable=False, comment='模块名称')
-    test_user = Column(String(50), nullable=True, comment='测试负责人')
-    simple_desc = Column(String(200), nullable=True, comment='简要信息')
-    other_desc = Column(String(200), nullable=True, comment='其他信息')
+    module_id = Column(Integer, nullable=True, comment='模块ID')
+    include = Column(String(1024), nullable=True, comment='前置config/test')
+    request = Column(Text, nullable=True, comment='请求信息')
+    notes = Column(String(1024), nullable=True, comment='注释')
     desc2mind = Column(Text, nullable=True, comment='脑图')
     sort = Column(Integer, nullable=False, default=0, comment='显示顺序')
     status = Column(String(1), nullable=False, default='0', comment='状态（0正常 1停用）')
@@ -27,13 +29,14 @@ class HrmModule(Base):
     remark = Column(String(500), nullable=True, default='', comment='备注')
 
 
-class HrmModuleProject(Base):
+class HrmCaseModuleProject(Base):
     """
-    模块和项目关联表
+    用例、模块、项目关联表
     """
     class Meta:
-        verbose_name = "模块和项目关联表"
-    __tablename__ = 'hrm_module_project'
+        verbose_name = "用例和模块和项目关联表"
+    __tablename__ = 'hrm_case_module_project'
 
-    module_id = Column(Integer, primary_key=True, nullable=False, comment='模块ID')
+    case_id = Column(Integer, primary_key=True, nullable=False, comment='用例ID')
+    module_id = Column(Integer, primary_key=True, nullable=False, comment='项目ID')
     project_id = Column(Integer, primary_key=True, nullable=False, comment='项目ID')

@@ -77,6 +77,35 @@ class ModuleDao:
         return post_list
 
     @classmethod
+    def get_module_list_all(cls, db: Session, page_object: ModuleModel):
+        """
+        根据查询参数获取模块列表信息
+        :param db: orm对象
+        :param page_object: 查询参数对象
+        :param data_scope_sql: 数据权限对应的查询sql语句
+        :return: 模块列表信息对象
+        """
+        result = db.query(HrmModule) \
+            .filter(HrmModule.project_id == page_object.project_id) \
+            .distinct().all()
+
+        return result
+
+    @classmethod
+    def get_module_list_show(cls, db: Session, page_object: ModuleModel):
+        """
+        根据查询参数获取模块列表信息
+        :param db: orm对象
+        :param page_object: 查询参数对象
+        :param data_scope_sql: 数据权限对应的查询sql语句
+        :return: 模块列表信息对象
+        """
+        result = (db.query(HrmModule).distinct().all())
+
+        return result
+
+
+    @classmethod
     def add_module_dao(cls, db: Session, module: ModuleModel):
         """
         新增模块数据库操作

@@ -23,6 +23,8 @@ from module_hrm.controller.project_controller import projectController
 from module_hrm.controller.debugtalk_controller import debugtalkController
 from module_hrm.controller.module_controler import moduleController
 from module_hrm.controller.env_controller import envController
+from module_hrm.controller.case_controler import caseController
+
 from config.env import AppConfig
 from config.get_redis import RedisUtil
 from config.get_db import init_create_table
@@ -85,6 +87,7 @@ controller_list = [
     {'router': debugtalkController, 'tags': ['项目管理-DebugTalk']},
     {'router': moduleController, 'tags': ['HRM-模块管理']},
     {'router': envController, 'tags': ['HRM-环境管理']},
+    {'router': caseController, 'tags': ['HRM-用例管理']},
 
 ]
 

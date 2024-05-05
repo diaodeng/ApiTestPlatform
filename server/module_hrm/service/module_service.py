@@ -17,7 +17,35 @@ class ModuleService:
         :return: 模块列表信息对象
         """
         list_result = ModuleDao.get_module_list(query_db, query_object, is_page)
-        return list_result
+
+        return CamelCaseUtil.transform_result(list_result)
+
+
+    @classmethod
+    def get_module_list_services_all(cls, query_db: Session, page_object: ModuleModel):
+        """
+        获取项目信息service
+        :param query_db: orm对象
+        :param page_object: 查询参数对象
+        :param data_scope_sql: 数据权限对应的查询sql语句
+        :return: 项目信息对象
+        """
+        project_list_result = ModuleDao.get_module_list_all(query_db, page_object)
+
+        return CamelCaseUtil.transform_result(project_list_result)
+
+    @classmethod
+    def get_module_list_services_show(cls, query_db: Session, page_object: ModuleModel):
+        """
+        获取项目信息service
+        :param query_db: orm对象
+        :param page_object: 查询参数对象
+        :param data_scope_sql: 数据权限对应的查询sql语句
+        :return: 项目信息对象
+        """
+        project_list_result = ModuleDao.get_module_list_show(query_db, page_object)
+
+        return CamelCaseUtil.transform_result(project_list_result)
 
     @classmethod
     def add_module_services(cls, query_db: Session, page_object: AddModuleModel):
