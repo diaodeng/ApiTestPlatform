@@ -18,7 +18,7 @@ class ModuleService:
         """
         list_result = ModuleDao.get_module_list(query_db, query_object, is_page)
 
-        return CamelCaseUtil.transform_result(list_result)
+        return list_result
 
 
     @classmethod

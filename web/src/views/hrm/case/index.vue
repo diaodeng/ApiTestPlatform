@@ -99,7 +99,7 @@
 
       <el-table v-loading="loading" :data="caseList" @selection-change="handleSelectionChange">
          <el-table-column type="selection" width="55" align="center" />
-         <el-table-column label="用例ID" align="center" prop="moduleId" />
+         <el-table-column label="用例ID" align="center" prop="caseId" />
          <el-table-column label="用例名称" align="center" prop="caseName" />
          <el-table-column label="所属项目" align="center" :formatter="formatProject" />
          <el-table-column label="所属模块" align="center" :formatter="formatModule" />

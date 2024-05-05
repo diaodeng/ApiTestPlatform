@@ -62,8 +62,6 @@ class ModulePageQueryModel(ModuleQueryModel):
     page_num: int = 1
     page_size: int = 10
 
-    project_id: Optional[int] = None
-
 
 class AddModuleModel(ModuleModel):
     """
