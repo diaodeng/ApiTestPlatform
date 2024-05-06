@@ -262,6 +262,7 @@ function reset() {
 /** 搜索按钮操作 */
 function handleQuery() {
   queryParams.value.pageNum = 1;
+  getProjectSelect();
   getList();
 }
 /** 重置按钮操作 */

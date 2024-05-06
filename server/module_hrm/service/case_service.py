@@ -103,7 +103,6 @@ class CaseService:
         :param case_id: 用例id
         :return: 用例id对应的信息
         """
-        print('&&&&&&&&&&&&&&&&&&&&&')
         case = CaseDao.get_case_by_id(query_db, case_id=case_id)
         result = CaseModel(**CamelCaseUtil.transform_result(case))
 

@@ -83,7 +83,6 @@ async def delete_hrm_case(request: Request, case_ids: str, query_db: Session = D
 @caseController.get("/{case_id}", response_model=CaseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:query'))])
 async def query_detail_hrm_case(request: Request, case_id: int, query_db: Session = Depends(get_db)):
     try:
-        print(case_id)
         detail_result = CaseService.case_detail_services(query_db, case_id)
         logger.info(f'获取case_id为{case_id}的信息成功')
         return ResponseUtil.success(data=detail_result)

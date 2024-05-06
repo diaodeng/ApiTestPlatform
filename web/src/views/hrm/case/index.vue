@@ -167,6 +167,13 @@
            <el-form-item label="请求信息" prop="request">
                <el-input v-model="form.request" placeholder="请求信息" />
            </el-form-item>
+           <el-form-item>
+<!--             <JsonEditorVue v-model="form.request"-->
+<!--              :mode-list="couldView"-->
+<!--              :current-mode="tree"-->
+<!--             >-->
+<!--             </JsonEditorVue>-->
+           </el-form-item>
            <el-form-item label="注释" prop="notes">
                <el-input v-model="form.notes" placeholder="注释" />
            </el-form-item>
@@ -201,10 +208,12 @@
 import { listCase, addCase, delCase, getCase, updateCase } from "@/api/hrm/case";
 import {selectModulList, showModulList} from "@/api/hrm/module";
 import {listProject} from "@/api/hrm/project";
+// import JsonEditorVue from "json-editor-vue3";
 
 const { proxy } = getCurrentInstance();
 const { sys_normal_disable } = proxy.useDict("sys_normal_disable");
 
+const couldView = ref(["tree", "code", "form", "view"]);
 const caseList = ref([]);
 const projectOptions = ref([]);
 const moduleOptions = ref([]);
