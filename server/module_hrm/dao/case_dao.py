@@ -89,14 +89,6 @@ class CaseDao:
         # 添加排序条件
         query = query.order_by(HrmCase.sort).distinct()
 
-        # query = db.query(HrmCase) \
-        #     .filter(HrmCase.case_id.in_(db.query(HrmCaseModuleProject.case_id).filter(
-        #     HrmCaseModuleProject.module_id == query_object.module_id & HrmCaseModuleProject.project_id == query_object.project_id)) if query_object.module_id else True,
-        #             HrmCase.case_name.like(f'%{query_object.case_name}%') if query_object.case_name else True,
-        #             HrmCase.status == query_object.status if query_object.status else True
-        #             ) \
-        #     .order_by(HrmCase.sort) \
-        #     .distinct()
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
 
         return post_list
@@ -124,7 +116,12 @@ class CaseDao:
         :return:
         """
         db.query(HrmCase).filter(HrmCase.case_id == case.get('case_id')).update(case)
-        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.get('case_id')).update(case)
+        case_module_project = {
+            'module_id': case.get('module_id'),
+            'project_id': case.get('project_id')
+        }
+        # 更新用例、模块、项目关系表
+        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.get('case_id')).update(case_module_project)
 
     @classmethod
     def delete_case_dao(cls, db: Session, case: CaseModel):
@@ -135,6 +132,7 @@ class CaseDao:
         :return:
         """
         db.query(HrmCase).filter(HrmCase.case_id == case.case_id).delete()
+        # 删除用例、模块、项目关系
         db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).delete()
 
     @classmethod
