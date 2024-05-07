@@ -5,7 +5,7 @@
 """
 
 import time
-import logging
+from utils.log_util import *
 
 
 # 64位ID的划分
@@ -27,9 +27,6 @@ SEQUENCE_MASK = -1 ^ (-1 << SEQUENCE_BITS)
 
 # Twitter元年时间戳
 TWEPOCH = 1288834974657
-
-
-logger = logging.getLogger('flask.app')
 
 
 class InvalidSystemClock(Exception):
@@ -80,7 +77,7 @@ class IdWorker(object):
 
         # 时钟回拨
         if timestamp < self.last_timestamp:
-            logging.error('clock is moving backwards. Rejecting requests until {}'.format(self.last_timestamp))
+            logger.error('clock is moving backwards. Rejecting requests until {}'.format(self.last_timestamp))
             raise InvalidSystemClock
 
         if timestamp == self.last_timestamp:
