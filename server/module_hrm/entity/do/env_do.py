@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, DateTime, Text, BigInteger
 from config.database import Base
 from datetime import datetime
 
@@ -11,7 +11,8 @@ class HrmEnv(Base):
         verbose_name = '环境管理'
     __tablename__ = 'hrm_env'
 
-    env_id = Column(Integer, primary_key=True, autoincrement=True, comment='环境id')
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='id')
+    env_id = Column(BigInteger, primary_key=True, unique=True, nullable=False, comment='环境id')
     env_name = Column(String(30), nullable=True, default='', comment='环境名称')
     env_url = Column(String(120), nullable=True, default=None, comment='环境地址')
     env_config = Column(String(1024), nullable=True, default=None, comment='环境配置')

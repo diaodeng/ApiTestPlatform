@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, BigInteger
 from config.database import Base
 from datetime import datetime
 
@@ -11,7 +11,8 @@ class HrmConfig(Base):
         verbose_name = '配置信息'
     __tablename__ = 'hrm_config'
 
-    config_id = Column(Integer, primary_key=True, autoincrement=True, comment='配置ID')
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='ID')
+    config_id = Column(BigInteger, primary_key=True, unique=True, nullable=False, comment='配置ID')
     config_name = Column(String(50), nullable=False, comment='配置名称')
     config_info = Column(String(1024), nullable=True, comment='配置信息')
     sort = Column(Integer, nullable=False, default=0, comment='显示顺序')

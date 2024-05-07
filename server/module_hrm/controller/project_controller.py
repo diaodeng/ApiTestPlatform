@@ -9,7 +9,7 @@ from utils.log_util import *
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.annotation.log_annotation import log_decorator
-
+from utils.snowflake import snowIdWorker
 
 projectController = APIRouter(prefix='/hrm/project', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -31,6 +31,7 @@ async def add_hrm_project(request: Request, add_project: ProjectModel, query_db:
     try:
         add_project.create_by = current_user.user.user_name
         add_project.update_by = current_user.user.user_name
+        add_project.project_id =snowIdWorker.get_id()
         add_project_result = ProjectService.add_project_services(query_db, add_project)
         if add_project_result.is_success:
             logger.info(add_project_result.message)

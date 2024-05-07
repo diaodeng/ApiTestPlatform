@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, BigInteger
 from config.database import Base
 from datetime import datetime
 
@@ -11,11 +11,12 @@ class HrmCase(Base):
         verbose_name = '用例信息'
     __tablename__ = 'hrm_case'
 
-    case_id = Column(Integer, primary_key=True, autoincrement=True, comment='模块ID')
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='ID')
+    case_id = Column(BigInteger, unique=True, primary_key=True, nullable=False, comment='用例、配置ID')
     type = Column(Integer, comment='test/config', default=1)
     case_name = Column(String(120), nullable=False, comment='用例名称')
-    project_id = Column(Integer, nullable=True, comment='项目ID')
-    module_id = Column(Integer, nullable=True, comment='模块ID')
+    project_id = Column(BigInteger, nullable=True, comment='项目ID')
+    module_id = Column(BigInteger, nullable=True, comment='模块ID')
     include = Column(String(1024), nullable=True, comment='前置config/test')
     request = Column(Text, nullable=True, comment='请求信息')
     notes = Column(String(1024), nullable=True, comment='注释')
@@ -37,6 +38,6 @@ class HrmCaseModuleProject(Base):
         verbose_name = "用例和模块和项目关联表"
     __tablename__ = 'hrm_case_module_project'
 
-    case_id = Column(Integer, primary_key=True, nullable=False, comment='用例ID')
-    module_id = Column(Integer, primary_key=True, nullable=False, comment='项目ID')
-    project_id = Column(Integer, primary_key=True, nullable=False, comment='项目ID')
+    case_id = Column(BigInteger, primary_key=True, nullable=False, comment='用例ID')
+    module_id = Column(BigInteger, primary_key=True, nullable=False, comment='项目ID')
+    project_id = Column(BigInteger, primary_key=True, nullable=False, comment='项目ID')
