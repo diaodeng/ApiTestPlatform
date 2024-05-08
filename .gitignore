@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+server/.env.dev
+server/.env.prod
 .idea
 
 # C extensions
