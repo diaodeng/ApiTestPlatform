@@ -1,3 +1,4 @@
+from loguru import logger
 import pandas as pd
 import io
 import os
@@ -9,6 +10,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from sqlalchemy.engine.row import Row
 from typing import List
 from config.env import CachePathConfig
+from config.database import Base
 
 
 def worship():
@@ -82,7 +84,16 @@ class CamelCaseUtil:
             return [cls.transform_result(row) if isinstance(row, (dict, Row)) else (cls.transform_result({c.name: getattr(row, c.name) for c in row.__table__.columns}) if row else row) for row in result]
         # 如果是sqlalchemy的Row实例，遍历Row进行转换
         elif isinstance(result, Row):
-            return [cls.transform_result(row) if isinstance(row, dict) else (cls.transform_result({c.name: getattr(row, c.name) for c in row.__table__.columns}) if row else row) for row in result]
+            data_dict_old = result._asdict()
+            data_dict = {}
+            for key, value in data_dict_old.items():
+                if isinstance(value, Base):
+                    data_dict.update(
+                        cls.transform_result({c.name: getattr(value, c.name) for c in value.__table__.columns}))
+                else:
+                    data_dict[cls.snake_to_camel(key)] = value
+            return data_dict
+            # return [cls.transform_result(row) if isinstance(row, dict) else (cls.transform_result({c.name: getattr(row, c.name) for c in row.__table__.columns}) if row else row) for row in result]
         # 如果是其他类型，如模型实例，先转换为字典
         else:
             return cls.transform_result({c.name: getattr(result, c.name) for c in result.__table__.columns})

@@ -1,6 +1,9 @@
+import loguru
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseModuleProject
+from module_hrm.entity.do.project_do import HrmProject
+from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.vo.case_vo import *
 from utils.page_util import PageUtil
 
@@ -52,7 +55,12 @@ class CaseDao:
         :return: 用例列表信息对象
         """
         # 创建查询的基本部分
-        query = db.query(HrmCase)
+        query = db.query(HrmCase,
+                         HrmProject.project_name,
+                         HrmModule.module_name
+                         ).join(HrmProject,
+                                HrmCase.project_id == HrmProject.project_id).join(HrmModule,
+                                                                                  HrmCase.module_id == HrmModule.module_id)
 
         # 根据module_id和project_id是否提供来构建子查询条件
         if query_object.module_id is not None and query_object.project_id is not None:
@@ -88,6 +96,8 @@ class CaseDao:
 
         # 添加排序条件
         query = query.order_by(HrmCase.sort).distinct()
+        for i in query.all():
+            loguru.logger.info(i)
 
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
 
@@ -121,7 +131,8 @@ class CaseDao:
             'project_id': case.get('project_id')
         }
         # 更新用例、模块、项目关系表
-        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.get('case_id')).update(case_module_project)
+        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.get('case_id')).update(
+            case_module_project)
 
     @classmethod
     def delete_case_dao(cls, db: Session, case: CaseModel):
