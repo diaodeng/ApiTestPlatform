@@ -2,7 +2,7 @@
    <div class="app-container">
       <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
          <el-form-item label="所属项目" prop="projectId">
-            <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule">
+            <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable>
               <el-option
                 v-for="option in projectOptions"
                 :key="option.projectId"
@@ -12,7 +12,7 @@
             </el-select>
          </el-form-item>
         <el-form-item label="所属模块" prop="moduleId">
-            <el-select v-model="queryParams.moduleId" placeholder="请选择">
+            <el-select v-model="queryParams.moduleId" placeholder="请选择" clearable>
               <el-option
                 v-for="option in moduleOptions"
                 :key="option.moduleId"
@@ -139,7 +139,7 @@
       <el-dialog :title="title" v-model="open" width="800px" append-to-body>
          <el-form ref="postRef" :model="form" :rules="rules" label-width="150px">
             <el-form-item label="用例名称" prop="caseName">
-               <el-input v-model="form.caseName" placeholder="请输入用例名称" />
+               <el-input v-model="form.caseName" placeholder="请输入用例名称" clearable />
             </el-form-item>
             <el-form-item label="所属项目" prop="projectId">
               <el-select v-model="form.projectId" placeholder="请选择" @change="resetModuleHandl">
@@ -364,7 +364,7 @@ function resetQuery() {
 }
 /** 多选框选中数据 */
 function handleSelectionChange(selection) {
-  ids.value = selection.map(item => item.moduleId);
+  ids.value = selection.map(item => item.caseId);
   single.value = selection.length != 1;
   multiple.value = !selection.length;
 }
@@ -379,6 +379,10 @@ function handleUpdate(row) {
   reset();
   const caseId = row.caseId || ids.value;
   getCase(caseId).then(response => {
+    if (!response.data || Object.keys(response.data).length === 0){
+      alert("未查到对应数据！");
+      return;
+    }
     form.value.projectId = response.data.projectId;
     getModuleSelectHandl();
     form.value = response.data;

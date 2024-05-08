@@ -2,7 +2,7 @@
    <div class="app-container">
       <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
          <el-form-item label="项目" prop="projectId">
-            <el-select v-model="queryParams.projectId" placeholder="请选择">
+            <el-select v-model="queryParams.projectId" placeholder="请选择" clearable>
               <el-option
                 v-for="option in projectOptions"
                 :key="option.projectId"
