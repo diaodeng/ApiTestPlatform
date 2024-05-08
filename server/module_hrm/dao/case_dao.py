@@ -62,30 +62,12 @@ class CaseDao:
                                 HrmCase.project_id == HrmProject.project_id).join(HrmModule,
                                                                                   HrmCase.module_id == HrmModule.module_id)
 
-        # 根据module_id和project_id是否提供来构建子查询条件
-        if query_object.module_id is not None and query_object.project_id is not None:
-            # 如果两个ID都提供了，添加它们到子查询条件中
-            subquery = db.query(HrmCaseModuleProject.case_id).filter(
-                and_(
-                    HrmCaseModuleProject.module_id == query_object.module_id,
-                    HrmCaseModuleProject.project_id == query_object.project_id
-                )
-            )
-            query = query.filter(HrmCase.case_id.in_(subquery))
-        elif query_object.module_id is not None:
-            subquery = db.query(HrmCaseModuleProject.case_id).filter(
-                and_(
-                    HrmCaseModuleProject.module_id == query_object.module_id
-                )
-            )
-            query = query.filter(HrmCase.case_id.in_(subquery))
-        elif query_object.project_id is not None:
-            subquery = db.query(HrmCaseModuleProject.case_id).filter(
-                and_(
-                    HrmCaseModuleProject.project_id == query_object.project_id
-                )
-            )
-            query = query.filter(HrmCase.case_id.in_(subquery))
+        # 根据module_id和project_id是否提供来查询
+        if query_object.project_id:
+            query = query.filter( HrmCase.project_id == query_object.project_id)
+        if query_object.module_id:
+            query = query.filter(HrmCase.module_id == query_object.module_id)
+
         # 根据其他查询参数添加过滤条件
         if query_object.case_name:
             query = query.filter(HrmCase.case_name.like(f'%{query_object.case_name}%'))

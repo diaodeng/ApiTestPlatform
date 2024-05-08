@@ -379,6 +379,8 @@ function handleUpdate(row) {
   reset();
   const caseId = row.caseId || ids.value;
   getCase(caseId).then(response => {
+    form.value.projectId = response.data.projectId;
+    getModuleSelectHandl();
     form.value = response.data;
     open.value = true;
     title.value = "修改用例";
