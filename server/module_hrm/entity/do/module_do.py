@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, BigInteger
 from config.database import Base
 from datetime import datetime
 
@@ -11,8 +11,9 @@ class HrmModule(Base):
         verbose_name = '模块信息'
     __tablename__ = 'hrm_module'
 
-    module_id = Column(Integer, primary_key=True, autoincrement=True, comment='模块ID')
-    project_id = Column(Integer, nullable=True, comment='项目ID')
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='ID')
+    module_id = Column(BigInteger, primary_key=True, nullable=False, unique=True, comment='模块ID')
+    project_id = Column(BigInteger, nullable=True, comment='项目ID')
     module_name = Column(String(50), nullable=False, comment='模块名称')
     test_user = Column(String(50), nullable=True, comment='测试负责人')
     simple_desc = Column(String(200), nullable=True, comment='简要信息')
@@ -35,5 +36,5 @@ class HrmModuleProject(Base):
         verbose_name = "模块和项目关联表"
     __tablename__ = 'hrm_module_project'
 
-    module_id = Column(Integer, primary_key=True, nullable=False, comment='模块ID')
-    project_id = Column(Integer, primary_key=True, nullable=False, comment='项目ID')
+    module_id = Column(BigInteger, primary_key=True, nullable=False, comment='模块ID')
+    project_id = Column(BigInteger, primary_key=True, nullable=False, comment='项目ID')

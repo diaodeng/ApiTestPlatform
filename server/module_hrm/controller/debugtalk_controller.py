@@ -8,7 +8,7 @@ from utils.log_util import *
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.annotation.log_annotation import log_decorator
-
+from utils.snowflake import snowIdWorker
 
 debugtalkController = APIRouter(prefix='/hrm/debugtalk', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -30,6 +30,7 @@ async def add_hrm_debugtalk(request: Request, add_debugtalk: DebugTalkModel, que
     try:
         add_debugtalk.create_by = current_user.user.user_name
         add_debugtalk.update_by = current_user.user.user_name
+        add_debugtalk.debugtalk_id = snowIdWorker.get_id()
         add_debugtalk_result = DebugTalkService.add_debugtalk_services(query_db, add_debugtalk)
         if add_debugtalk_result.is_success:
             logger.info(add_debugtalk_result.message)

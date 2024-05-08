@@ -11,7 +11,7 @@ from utils.page_util import *
 from utils.common_util import bytes2file_response
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.annotation.log_annotation import log_decorator
-
+from utils.snowflake import snowIdWorker
 
 moduleController = APIRouter(prefix='/hrm/module', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -56,6 +56,7 @@ async def add_hrm_module(request: Request, add_module: AddModuleModel, query_db:
     try:
         add_module.create_by = current_user.user.user_name
         add_module.update_by = current_user.user.user_name
+        add_module.module_id = snowIdWorker.get_id()
         add_module_result = ModuleService.add_module_services(query_db, add_module)
         if add_module_result.is_success:
             logger.info(add_module_result.message)

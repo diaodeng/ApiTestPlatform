@@ -10,7 +10,7 @@ from utils.page_util import *
 from utils.common_util import bytes2file_response
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.annotation.log_annotation import log_decorator
-
+from utils.snowflake import snowIdWorker
 
 caseController = APIRouter(prefix='/hrm/case', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -21,7 +21,8 @@ async def get_hrm_case(request: Request, page_query: CasePageQueryModel = Depend
         # 获取分页数据
         page_query_result = CaseService.get_case_list_services(query_db, page_query, is_page=True)
         logger.info('获取成功')
-        return ResponseUtil.success(model_content=page_query_result)
+        data = ResponseUtil.success(model_content=page_query_result)
+        return data
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -33,6 +34,7 @@ async def add_hrm_case(request: Request, add_case: AddCaseModel, query_db: Sessi
     try:
         add_case.create_by = current_user.user.user_name
         add_case.update_by = current_user.user.user_name
+        add_case.case_id = snowIdWorker.get_id()
         add_module_result = CaseService.add_case_services(query_db, add_case)
         if add_module_result.is_success:
             logger.info(add_module_result.message)
