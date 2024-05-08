@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, DateTime, Text, BigInteger
 from sqlalchemy.orm import relationship, backref
 
 from config.database import Base
@@ -13,7 +13,8 @@ class HrmProject(Base):
         verbose_name = '项目管理'
     __tablename__ = 'hrm_project'
 
-    project_id = Column(Integer, primary_key=True, autoincrement=True, comment='项目id')
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='项目id')
+    project_id = Column(BigInteger, primary_key=True, nullable=False, unique=True, comment='项目id')
     project_name = Column(String(120), nullable=True, default='', comment='项目名称')
     responsible_name = Column(String(30), nullable=True, default='', comment='负责人')
     test_user = Column(String(30), nullable=True, default='', comment='测试人员')

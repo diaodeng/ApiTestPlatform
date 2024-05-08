@@ -1,6 +1,7 @@
 from module_hrm.dao.debugtalk_dao import *
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import CamelCaseUtil
+from utils.snowflake import snowIdWorker
 
 
 class DebugTalkService:
@@ -43,6 +44,7 @@ class DebugTalkService:
         """
 
         try:
+            page_object.debugtalk_id = snowIdWorker.get_id()
             DebugTalkDao.add_debugtalk_dao(query_db, page_object)
             query_db.commit()
             result = dict(is_success=True, message='新增成功')
