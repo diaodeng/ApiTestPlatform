@@ -46,7 +46,7 @@
          row-key="projectId"
          :default-expand-all="isExpandAll"
       >
-         <el-table-column prop="projectId" label="ID" width="100"></el-table-column>
+         <el-table-column prop="projectId" label="ID" width="150"></el-table-column>
          <el-table-column prop="projectName" align="center" label="项目名称" width="200"></el-table-column>
          <el-table-column prop="responsibleName" align="center" label="负责人" width="120"></el-table-column>
          <el-table-column prop="testUser" label="测试负责人" align="center" width="120"></el-table-column>

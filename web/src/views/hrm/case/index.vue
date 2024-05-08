@@ -240,7 +240,9 @@ const data = reactive({
     status: undefined
   },
   rules: {
-    caseName: [{ required: true, message: "用例名称不能为空", trigger: "blur" }]
+    caseName: [{ required: true, message: "用例名称不能为空", trigger: "blur" }],
+    projectId: [{ required: true, message: "所属项目不能为空", trigger: "blur" }],
+    moduleId: [{ required: true, message: "所属模块不能为空", trigger: "blur" }]
   }
 });
 

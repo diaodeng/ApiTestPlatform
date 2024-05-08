@@ -202,6 +202,7 @@ const data = reactive({
   },
   rules: {
     moduleName: [{ required: true, message: "模块名称不能为空", trigger: "blur" }],
+    projectId: [{ required: true, message: "所属项目不能为空", trigger: "blur" }],
     testUser:[{ required: true, message: "测试负责人不能为空", trigger: "blur" }],
     sort: [{ required: true, message: "模块顺序不能为空", trigger: "blur" }]
   }
