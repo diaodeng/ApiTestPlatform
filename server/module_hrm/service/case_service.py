@@ -104,6 +104,8 @@ class CaseService:
         :return: 用例id对应的信息
         """
         case = CaseDao.get_case_by_id(query_db, case_id=case_id)
+        if not case:
+            return {}
         result = CaseModel(**CamelCaseUtil.transform_result(case))
 
         return result
