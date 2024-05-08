@@ -4,14 +4,13 @@
 雪花id
 """
 
-import time
 from utils.log_util import *
 
 
 # 64位ID的划分
-WORKER_ID_BITS = 5
-DATACENTER_ID_BITS = 5
-SEQUENCE_BITS = 12
+WORKER_ID_BITS = 1
+DATACENTER_ID_BITS = 1
+SEQUENCE_BITS = 10
 
 # 最大取值计算
 MAX_WORKER_ID = -1 ^ (-1 << WORKER_ID_BITS)  # 2**5-1 0b11111
@@ -104,3 +103,4 @@ class IdWorker(object):
 
 
 snowIdWorker = IdWorker(1, 1)
+print(snowIdWorker.get_id())
