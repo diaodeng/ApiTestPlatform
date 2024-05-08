@@ -101,8 +101,8 @@
          <el-table-column type="selection" width="55" align="center" />
          <el-table-column label="用例ID" align="center" prop="caseId" />
          <el-table-column label="用例名称" align="center" prop="caseName" />
-         <el-table-column label="所属项目" align="center" :formatter="formatProject" />
-         <el-table-column label="所属模块" align="center" :formatter="formatModule" />
+         <el-table-column label="所属项目" align="center" prop="projectName" />
+         <el-table-column label="所属模块" align="center" prop="moduleName" />
          <el-table-column label="用例排序" align="center" prop="sort" />
          <el-table-column label="状态" align="center" prop="status">
             <template #default="scope">
@@ -351,8 +351,8 @@ function reset() {
 /** 搜索按钮操作 */
 function handleQuery() {
   queryParams.value.pageNum = 1;
-  getProjectSelect();
-  getModuleShow();
+  // getProjectSelect();
+  // getModuleShow();
   getList();
 }
 /** 重置按钮操作 */
