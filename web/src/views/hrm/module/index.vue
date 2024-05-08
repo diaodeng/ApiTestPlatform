@@ -2,7 +2,7 @@
    <div class="app-container">
       <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
          <el-form-item label="项目" prop="projectId">
-            <el-select v-model="queryParams.projectId" placeholder="请选择">
+            <el-select v-model="queryParams.projectId" placeholder="请选择" clearable>
               <el-option
                 v-for="option in projectOptions"
                 :key="option.projectId"
@@ -202,6 +202,7 @@ const data = reactive({
   },
   rules: {
     moduleName: [{ required: true, message: "模块名称不能为空", trigger: "blur" }],
+    projectId: [{ required: true, message: "所属项目不能为空", trigger: "blur" }],
     testUser:[{ required: true, message: "测试负责人不能为空", trigger: "blur" }],
     sort: [{ required: true, message: "模块顺序不能为空", trigger: "blur" }]
   }
