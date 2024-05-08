@@ -11,7 +11,6 @@ export function listProject(query) {
 
 // 查询项目详细
 export function getProject(projectId) {
-  alert(projectId);
   return request({
     url: '/hrm/project/' + projectId,
     method: 'get'
