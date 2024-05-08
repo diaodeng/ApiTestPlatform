@@ -8,7 +8,7 @@ from utils.log_util import *
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.annotation.log_annotation import log_decorator
-
+from utils.snowflake import snowIdWorker
 
 envController = APIRouter(prefix='/hrm/env', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -30,6 +30,7 @@ async def add_hrm_env(request: Request, add_env: EnvModel, query_db: Session = D
     try:
         add_env.create_by = current_user.user.user_name
         add_env.update_by = current_user.user.user_name
+        add_env.env_id =snowIdWorker.get_id()
         add_env_result = EnvService.add_env_services(query_db, add_env)
         if add_env_result.is_success:
             logger.info(add_env_result.message)

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, BigInteger
 from sqlalchemy.orm import relationship
 
 from config.database import Base
@@ -14,10 +14,11 @@ class HrmDebugTalk(Base):
         verbose_name = '驱动py文件'
     __tablename__ = 'hrm_debugtalk'
 
-    debugtalk_id = Column(Integer, primary_key=True, autoincrement=True, comment='DebugTalkID')
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='ID')
+    debugtalk_id = Column(BigInteger, primary_key=True, unique=True, nullable=False, comment='DebugTalkID')
 
     # 外键字段，引用 Project 的 id
-    project_id = Column(Integer, ForeignKey('hrm_project.project_id'), nullable=False)
+    project_id = Column(BigInteger, ForeignKey('hrm_project.project_id'), nullable=False)
 
     # 引用 Project，表示 DebugTalk 属于哪个 Project
     # project = relationship("HrmProject", back_populates="hrm_debugtalk")
