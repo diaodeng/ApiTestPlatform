@@ -81,7 +81,7 @@ async def delete_hrm_env(request: Request, env_ids: str, query_db: Session = Dep
         return ResponseUtil.error(msg=str(e))
 
 
-@envController.get("/{env_id}", response_model=EnvModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:env:query'))])
+@envController.get("/{env_id}", response_model=EnvModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:env:query', "hrm:env:edit"], False))])
 async def query_detail_system_env(request: Request, env_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_env_result = EnvService.env_detail_services(query_db, env_id)

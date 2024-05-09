@@ -97,13 +97,16 @@
          <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
       </el-row>
 
-      <el-table v-loading="loading" :data="caseList" @selection-change="handleSelectionChange">
+      <el-table v-loading="loading" :data="caseList"
+                @selection-change="handleSelectionChange"
+                border
+      >
          <el-table-column type="selection" width="55" align="center" />
          <el-table-column label="用例ID" align="center" prop="caseId" />
          <el-table-column label="用例名称" align="center" prop="caseName" />
          <el-table-column label="所属项目" align="center" prop="projectName" />
          <el-table-column label="所属模块" align="center" prop="moduleName" />
-         <el-table-column label="用例排序" align="center" prop="sort" />
+<!--         <el-table-column label="用例排序" align="center" prop="sort" />-->
          <el-table-column label="状态" align="center" prop="status">
             <template #default="scope">
                <dict-tag :options="sys_normal_disable" :value="scope.row.status" />
@@ -119,8 +122,9 @@
                <span>{{ parseTime(scope.row.updateTime) }}</span>
             </template>
          </el-table-column>
-         <el-table-column label="操作" width="180" align="center" class-name="small-padding fixed-width">
+         <el-table-column label="操作" width="200" align="center" class-name="small-padding fixed-width">
             <template #default="scope">
+               <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:detail']">查看</el-button>
                <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:edit']">修改</el-button>
                <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['hrm:case:remove']">删除</el-button>
             </template>
@@ -196,7 +200,7 @@
          </el-form>
          <template #footer>
             <div class="dialog-footer">
-               <el-button type="primary" @click="submitForm">确 定</el-button>
+               <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">确 定</el-button>
                <el-button @click="cancel">取 消</el-button>
             </div>
          </template>
