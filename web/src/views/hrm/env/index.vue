@@ -40,6 +40,7 @@
       </el-row>
 
       <el-table
+          border
          v-if="refreshTable"
          v-loading="loading"
          :data="envList"

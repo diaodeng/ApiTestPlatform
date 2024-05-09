@@ -104,7 +104,7 @@ async def delete_hrm_module(request: Request, module_ids: str, query_db: Session
         return ResponseUtil.error(msg=str(e))
 
 
-@moduleController.get("/{module_id}", response_model=ModuleModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:module:query'))])
+@moduleController.get("/{module_id}", response_model=ModuleModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:module:detail', 'hrm:module:edit'], False))])
 async def query_detail_hrm_module(request: Request, module_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_result = ModuleService.module_detail_services(query_db, module_id)

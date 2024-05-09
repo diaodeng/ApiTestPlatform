@@ -86,7 +86,7 @@ async def delete_hrm_project(request: Request, project_ids: str, query_db: Sessi
         return ResponseUtil.error(msg=str(e))
 
 
-@projectController.get("/{project_id}", response_model=ProjectModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:query'))])
+@projectController.get("/{project_id}", response_model=ProjectModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:project:detail', "hrm:project:edit"], False))])
 async def query_detail_system_project(request: Request, project_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_project_result = ProjectService.project_detail_services(query_db, project_id)

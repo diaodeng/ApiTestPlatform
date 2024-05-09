@@ -82,7 +82,7 @@ async def delete_hrm_case(request: Request, case_ids: str, query_db: Session = D
         return ResponseUtil.error(msg=str(e))
 
 
-@caseController.get("/{case_id}", response_model=CaseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:query'))])
+@caseController.get("/{case_id}", response_model=CaseModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:case:detail', "hrm.case:edit"], False))])
 async def query_detail_hrm_case(request: Request, case_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_result = CaseService.case_detail_services(query_db, case_id)

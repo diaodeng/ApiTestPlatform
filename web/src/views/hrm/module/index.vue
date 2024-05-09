@@ -78,7 +78,7 @@
          <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
       </el-row>
 
-      <el-table v-loading="loading" :data="moduleList" @selection-change="handleSelectionChange">
+      <el-table border v-loading="loading" :data="moduleList" @selection-change="handleSelectionChange">
          <el-table-column type="selection" width="55" align="center" />
          <el-table-column label="模块ID" align="center" prop="moduleId" />
          <el-table-column label="模块名称" align="center" prop="moduleName" />
