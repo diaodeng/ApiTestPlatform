@@ -1,6 +1,7 @@
 from module_hrm.dao.case_dao import *
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
+from utils.page_util import PageResponseModel
 
 
 class CaseService:
@@ -17,7 +18,18 @@ class CaseService:
         :return: 用例列表信息对象
         """
         list_result = CaseDao.get_case_list(query_db, query_object, is_page)
-        return list_result
+        if is_page:
+            case_list_result = PageResponseModel(
+                **{
+                    **list_result.model_dump(by_alias=True),
+                    'rows': [{**row[0], **row[1], **row[2]} for row in list_result.rows]
+                }
+            )
+        else:
+            case_list_result = []
+            if list_result:
+                case_list_result = [{**row[0], **row[1], **row[2]} for row in list_result]
+        return case_list_result
 
     @classmethod
     def add_case_services(cls, query_db: Session, page_object: AddCaseModel):
