@@ -80,7 +80,7 @@ async def delete_hrm_debugtalk(request: Request, project_ids: str, query_db: Ses
         return ResponseUtil.error(msg=str(e))
 
 
-@debugtalkController.get("/{debugtalk_id}", response_model=DebugTalkModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:debugtalk:query', "hrm:debugtalk:edit"], False))])
+@debugtalkController.get("/{debugtalk_id}", response_model=DebugTalkModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:debugtalk:detail', "hrm:debugtalk:edit"], False))])
 async def query_detail_system_debugtalk(request: Request, debugtalk_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_debugtalk_result = DebugTalkService.debugtalk_detail_services(query_db, debugtalk_id)
