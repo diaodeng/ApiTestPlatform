@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 
 .idea
+server/.env.dev
+server/.env.prod
 
 # C extensions
 *.so
