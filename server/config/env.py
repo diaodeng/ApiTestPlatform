@@ -179,7 +179,10 @@ class GetConfig:
         if run_env != '':
             env_file = f'.env.{run_env}'
         # 加载配置
-        load_dotenv(env_file)
+
+        if os.path.exists(env_file):
+            load_dotenv(env_file)
+        load_dotenv(".env.base")
 
 
 # 实例化获取配置类
