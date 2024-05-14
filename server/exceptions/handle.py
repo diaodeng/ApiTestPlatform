@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request
-from fastapi.exceptions import HTTPException
+from fastapi.exceptions import HTTPException, RequestValidationError
+from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY
+
 from exceptions.exception import AuthException, PermissionException
 from utils.response_util import ResponseUtil, JSONResponse, jsonable_encoder
 
@@ -25,3 +27,20 @@ def handle_exception(app: FastAPI):
             content=jsonable_encoder({"code": exc.status_code, "msg": exc.detail}),
             status_code=exc.status_code
         )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_exception_handler(
+            request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """
+        捕捉422报错并进行自定义处理
+        :param request:
+        :param exc:
+        :return:
+        """
+        x = exc.errors()
+        return JSONResponse(
+            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": jsonable_encoder(exc.errors())},
+        )
+
