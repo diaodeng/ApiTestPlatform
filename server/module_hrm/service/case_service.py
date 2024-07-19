@@ -1,4 +1,5 @@
 from module_hrm.dao.case_dao import *
+from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseDetailForHandle
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
 from utils.page_util import PageResponseModel
@@ -65,8 +66,8 @@ class CaseService:
         :param page_object: 编辑用例对象
         :return: 编辑用例校验结果
         """
-        edit = page_object.model_dump(exclude_unset=True)
-        info = cls.case_detail_services(query_db, edit.get('case_id'))
+        # edit = page_object.model_dump(exclude_unset=True)
+        info = cls.case_detail_services(query_db, page_object.case_id)
         if info:
             if info.case_name != page_object.case_name:
                 case = CaseDao.get_case_detail_by_info(query_db, CaseModel(caseName=page_object.case_name))
@@ -74,7 +75,7 @@ class CaseService:
                     result = dict(is_success=False, message='用例名称已存在')
                     return CrudResponseModel(**result)
             try:
-                CaseDao.edit_case_dao(query_db, edit)
+                CaseDao.edit_case_dao(query_db, page_object)
                 query_db.commit()
                 result = dict(is_success=True, message='更新成功')
             except Exception as e:
@@ -108,7 +109,7 @@ class CaseService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def case_detail_services(cls, query_db: Session, case_id: int):
+    def case_detail_services(cls, query_db: Session, case_id: int) -> CaseModelForApi:
         """
         获取用例详细信息service
         :param query_db: orm对象
@@ -118,7 +119,11 @@ class CaseService:
         case = CaseDao.get_case_by_id(query_db, case_id=case_id)
         if not case:
             return {}
-        result = CaseModel(**CamelCaseUtil.transform_result(case))
+        result = CaseModelForApi(**CamelCaseUtil.transform_result(case))
+        if result.include is not None:
+            result.include = json.loads(result.include)
+        # new_request = TestCase(**result.request).model_dump(by_alias=True)
+        # result.request = new_request
 
         return result
 

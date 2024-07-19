@@ -1,0 +1,34 @@
+<script setup>
+// variables、data、param使用
+import CommonTable from './table-common.vue';
+
+const props = defineProps(["data"])
+const tableCols = [{
+  name: "key",
+  prop: "key",
+  width: 300
+},
+  {
+    name: "type",
+    prop: "type",
+    width: 115,
+    type: 'select'
+  }, {
+    name: "value",
+    prop: "value",
+    width: ""
+  }, {
+    name: "desc",
+    prop: "desc",
+    width: ""
+  }]
+
+</script>
+
+<template>
+  <CommonTable :cols="tableCols" :data="data"></CommonTable>
+</template>
+
+<style scoped lang="scss">
+
+</style>

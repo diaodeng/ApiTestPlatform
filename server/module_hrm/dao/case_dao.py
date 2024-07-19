@@ -1,9 +1,9 @@
-import loguru
-from sqlalchemy import and_
 from sqlalchemy.orm import Session
+
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseModuleProject
-from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.entity.do.project_do import HrmProject
+from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import *
 from utils.page_util import PageUtil
 
@@ -84,34 +84,40 @@ class CaseDao:
         return post_list
 
     @classmethod
-    def add_case_dao(cls, db: Session, case: CaseModel):
+    def add_case_dao(cls, db: Session, case: CaseModel|CaseModelForApi):
         """
         新增用例数据库操作
         :param db: orm对象
         :param case: 用例对象
         :return:
         """
-        db_case = HrmCase(**case.model_dump())
+        if not isinstance(case, CaseModel):
+            case = CaseModel(**case.model_dump(exclude_unset=True))
+        db_case = HrmCase(**case.model_dump(exclude_unset=True))
         db.add(db_case)
         db.flush()
 
         return db_case
 
     @classmethod
-    def edit_case_dao(cls, db: Session, case: dict):
+    def edit_case_dao(cls, db: Session, case: CaseModel|CaseModelForApi):
         """
         编辑用例数据库操作
         :param db: orm对象
-        :param case: 需要更新的用例字典
+        :param case: 编辑页面获取的CaseModel对象
         :return:
         """
-        db.query(HrmCase).filter(HrmCase.case_id == case.get('case_id')).update(case)
+        if not isinstance(case, CaseModel):
+            case = CaseModel(**case.model_dump(exclude_unset=True))
+
+        case_data = case.model_dump(exclude_unset=True)
+        db.query(HrmCase).filter(HrmCase.case_id == case.case_id).update(case_data)
         case_module_project = {
-            'module_id': case.get('module_id'),
-            'project_id': case.get('project_id')
+            'module_id': case.module_id,
+            'project_id': case.project_id
         }
         # 更新用例、模块、项目关系表
-        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.get('case_id')).update(
+        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).update(
             case_module_project)
 
     @classmethod
