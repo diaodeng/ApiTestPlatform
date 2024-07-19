@@ -2,7 +2,8 @@
   <div class="app-container">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
       <el-form-item label="所属项目" prop="projectId">
-        <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable>
+        <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable
+                   style="width: 150px">
           <el-option
               v-for="option in projectOptions"
               :key="option.projectId"
@@ -12,7 +13,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="所属模块" prop="moduleId">
-        <el-select v-model="queryParams.moduleId" placeholder="请选择" clearable>
+        <el-select v-model="queryParams.moduleId" placeholder="请选择" clearable style="width: 150px">
           <el-option
               v-for="option in moduleOptions"
               :key="option.moduleId"
@@ -40,7 +41,7 @@
         />
       </el-form-item>
       <el-form-item label="状态" prop="status">
-        <el-select v-model="queryParams.status" placeholder="用例状态" clearable style="width: 200px">
+        <el-select v-model="queryParams.status" placeholder="用例状态" clearable style="width: 100px">
           <el-option
               v-for="dict in sys_normal_disable"
               :key="dict.value"
@@ -51,7 +52,7 @@
       </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
-        <el-button icon="Refresh" @click="resetQuery">重置</el-button>
+        <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
       </el-form-item>
     </el-form>
 
@@ -131,10 +132,10 @@
           <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:detail']">
             查看
           </el-button>
-          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:edit']">
+          <el-button link type="warning" icon="Edit" v-loading="loading" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:edit']">
             修改
           </el-button>
-          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
+          <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
                      v-hasPermi="['hrm:case:remove']">删除
           </el-button>
         </template>
@@ -151,28 +152,28 @@
 
     <!-- 添加或修改用例对话框 -->
     <el-dialog fullscreen :title="title" v-model="open" append-to-body>
-      <el-form ref="postRef" :model="form" :rules="rules" label-width="100px">
+      <el-form ref="postRef" :model="form" :rules="rules" label-width="100px" style="height: 100%">
         <el-container style="height: 100%">
           <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
             用例修改
             <el-button-group>
               <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">确 定</el-button>
               <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">执行
-
               </el-button>
-              <el-select v-model="select" placeholder="Select" style="width: 115px">
-                    <el-option label="Restaurant" value="1"/>
-                    <el-option label="Order No." value="2"/>
-                    <el-option label="Tel" value="3"/>
-                  </el-select>
+              <el-select placeholder="Select" style="width: 115px">
+                <el-option label="Restaurant" value="1"/>
+                <el-option label="Order No." value="2"/>
+                <el-option label="Tel" value="3"/>
+              </el-select>
             </el-button-group>
 
           </el-header>
           <el-main>
+<!--            <div>{{ form }}</div>-->
             <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;">
-              <el-tab-pane label="config" name="first">
+              <el-tab-pane label="config" name="caseConfig">
                 <el-tabs type="" v-model="activeMessageName">
-                  <el-tab-pane label="messages" name="first1">
+                  <el-tab-pane label="messages" name="caseMessages">
                     <el-form-item label="用例名称" prop="caseName">
                       <el-input v-model="form.caseName" placeholder="请输入用例名称" clearable/>
                     </el-form-item>
@@ -207,81 +208,32 @@
                         <el-radio
                             v-for="dict in sys_normal_disable"
                             :key="dict.value"
-                            :label="dict.value"
-                        >{{ dict.label }}
-                        </el-radio>
+                            :label="dict.label"
+                            :value="dict.value"
+                        ></el-radio>
                       </el-radio-group>
                     </el-form-item>
                     <el-form-item label="备注" prop="remark">
                       <el-input v-model="form.remark" type="textarea" placeholder="请输入内容"/>
                     </el-form-item>
                   </el-tab-pane>
-                  <el-tab-pane label="headers" name="second1">
-                    <el-table
-                        table-layout="fixed"
-                        ref="multipleTable"
-                        tooltip-effect="dark"
-                        style="width: 100%"
-                        size="small"
-                        border
-                        :data="headerData"
-                    >
-                      <el-table-column type="selection" width="30"></el-table-column>
-                      <el-table-column prop="key" label="key" width="300"></el-table-column>
-                      <el-table-column prop="value" label="value" width="300"></el-table-column>
-                      <el-table-column prop="desc" label="desc" show-overflow-tooltip></el-table-column>
-                    </el-table>
+                  <el-tab-pane label="headers" name="caseHeaders">
+                    <TableExtract :data="form.request.config.headers"></TableExtract>
                   </el-tab-pane>
-                  <el-tab-pane label="variables/parameters/hooks" name="third1">
+                  <el-tab-pane label="variables/parameters/hooks" name="caseVph">
                     variables
-                    <el-table
-                        table-layout="fixed"
-                        ref="multipleTable"
-                        tooltip-effect="dark"
-                        style="width: 100%"
-                        size="small"
-                        border
-                        :data="headerData"
-                    >
-                      <el-table-column type="selection" width="30"></el-table-column>
-                      <el-table-column prop="key" label="key" width="300"></el-table-column>
-                      <el-table-column prop="value" label="type" width="100"></el-table-column>
-                      <el-table-column prop="desc" label="value" show-overflow-tooltip></el-table-column>
-                    </el-table>
+                    <TableVariables :data="form.request.config.variables"></TableVariables>
                     parameters
-                    <el-table
-                        table-layout="fixed"
-                        ref="multipleTable"
-                        tooltip-effect="dark"
-                        style="width: 100%"
-                        size="small"
-                        border
-                        :data="headerData"
-                    >
-                      <el-table-column type="selection" width="30"></el-table-column>
-                      <el-table-column prop="key" label="key" width="300"></el-table-column>
-                      <el-table-column prop="value" label="type" width="100"></el-table-column>
-                      <el-table-column prop="desc" label="value" show-overflow-tooltip></el-table-column>
-                    </el-table>
-                    hooks
-                    <el-table
-                        table-layout="fixed"
-                        ref="multipleTable"
-                        tooltip-effect="dark"
-                        style="width: 100%"
-                        size="small"
-                        border
-                        :data="headerData"
-                    >
-                      <el-table-column type="selection" width="30"></el-table-column>
-                      <el-table-column prop="key" label="setup_hooks"></el-table-column>
-                      <el-table-column prop="value" label="teardown_hooks"></el-table-column>
-                    </el-table>
+                    <TableVariables :data="form.request.config.parameters"></TableVariables>
+                    setup_hooks
+                    <TableHooks :data="form.request.config.setup_hooks"></TableHooks>
+                    teardown_hooks
+                    <TableHooks :data="form.request.config.teardown_hooks"></TableHooks>
                   </el-tab-pane>
-                  <el-tab-pane label="thinktime" name="fourth1">
+                  <el-tab-pane label="thinktime" name="caseThinktime">
                     <div>
                       <el-input
-                          v-model="form.casethinktime"
+                          v-model="form.request.config.think_time.limit"
                           style="max-width: 600px"
                           placeholder="Please input"
                       >
@@ -291,45 +243,48 @@
                   </el-tab-pane>
                 </el-tabs>
               </el-tab-pane>
-              <el-tab-pane label="steps" name="second">
+              <el-tab-pane label="teststeps" name="caseSteps">
                 <el-container>
                   <el-main>
-                    <el-tabs tab-position="left" class="demo-tabs" closable>
-                      <el-tab-pane label="User">
+                    <el-tabs tab-position="left" class="demo-tabs" closable @edit="editTabs" v-model="activeTestStepName" style="height: 100%">
+                      <el-tab-pane v-for="(step, index) in form.request.teststeps" :key="index" :name="index">
+                        <template #label>
+                          <span class="custom-tabs-label">
+                            <el-icon><briefcase /></el-icon>
+                            <span>{{ step.name }}</span>
+                            <el-icon :size="20">
+                              <Edit />
+                            </el-icon>
+                            <el-icon :size="20" @click="editTabs(index, 'add')">
+                              <CirclePlus />
+                            </el-icon>
+                          </span>
+                        </template>
                         <el-tabs type="" v-model="activeRequestName">
-                          <el-tab-pane label="request" name="first2">
-                            <el-row type="flex" class="row-bg">
+                          <el-tab-pane  label="request" name="stepRequest">
+                            <el-row :gutter="10" type="flex" class="row-bg">
                               <el-col :span="2">
-                                <el-select v-model="form.Method" placeholder="请选择">
-                                  <el-option
-                                      v-for="item in requestMethod"
-                                      :key="item.value"
-                                      :label="item.label"
-                                      :value="item.value">
-                                  </el-option>
-                                </el-select>
+                                <DictSelect :options-dict="sys_request_method" v-model="step.request.method"
+                                            style="width: 130px"></DictSelect>
                               </el-col>
-                              <el-col :span="22" offset="10">
+                              <el-col :span="22">
                                 <div>
                                   <el-input
-                                      v-model="form.url"
+                                      v-model="step.request.url"
                                       placeholder="Please input"
                                   >
                                     <template #prepend>URL</template>
                                     <template #append>
                                       <el-dropdown>
-                                    <span class="el-dropdown-link">
-                                      <el-icon class="el-icon--right">
-                                        <arrow-down/>
-                                      </el-icon>
-                                    </span>
+                                        <span class="el-dropdown-link">
+                                          <el-icon class="el-icon--right">
+                                            <arrow-down/>
+                                          </el-icon>
+                                        </span>
                                         <template #dropdown>
                                           <el-dropdown-menu>
-                                            <el-dropdown-item>Action 1</el-dropdown-item>
-                                            <el-dropdown-item>Action 2</el-dropdown-item>
-                                            <el-dropdown-item>Action 3</el-dropdown-item>
-                                            <el-dropdown-item disabled>Action 4</el-dropdown-item>
-                                            <el-dropdown-item divided>Action 5</el-dropdown-item>
+                                            <el-dropdown-item disabled>111</el-dropdown-item>
+                                            <el-dropdown-item disabled>222</el-dropdown-item>
                                           </el-dropdown-menu>
                                         </template>
                                       </el-dropdown>
@@ -340,26 +295,13 @@
                             </el-row>
                             <el-row type="flex" class="row-bg" justify="start">
                               <el-tabs v-model="activeRequestDetailName" style="width: 100%">
-                                <el-tab-pane label="header" name="first3">header
-                                  <el-table
-                                      table-layout="fixed"
-                                      ref="multipleTable"
-                                      tooltip-effect="dark"
-                                      style="width: 100%"
-                                      size="small"
-                                      border
-                                      :data="headerData"
-                                  >
-                                    <el-table-column type="selection" width="30"></el-table-column>
-                                    <el-table-column prop="key" label="key" width="300"></el-table-column>
-                                    <el-table-column prop="value" label="value" width="300"></el-table-column>
-                                    <el-table-column prop="desc" label="desc" show-overflow-tooltip></el-table-column>
-                                  </el-table>
+                                <el-tab-pane label="header" name="requestHeader">header
+                                  <TableExtract :data="step.request.headers"></TableExtract>
                                 </el-tab-pane>
-                                <el-tab-pane label="json" name="second3">
+                                <el-tab-pane label="json" name="requestJson">
                                   <div>
                                     <el-input
-                                        v-model="form.json"
+                                        v-model="step.request.json"
                                         style="width: 100%"
                                         placeholder="Please input"
                                         type="textarea"
@@ -368,136 +310,33 @@
                                     </el-input>
                                   </div>
                                 </el-tab-pane>
-                                <el-tab-pane label="data" name="third3">data
-                                  <el-table
-                                      table-layout="fixed"
-                                      ref="multipleTable"
-                                      tooltip-effect="dark"
-                                      style="width: 100%"
-                                      size="small"
-                                      border
-                                      :data="headerData"
-                                  >
-                                    <el-table-column type="selection" width="30"></el-table-column>
-                                    <el-table-column prop="key" label="key" width="300"></el-table-column>
-                                    <el-table-column prop="value" label="type" width="300"></el-table-column>
-                                    <el-table-column prop="desc" label="vlaue" show-overflow-tooltip></el-table-column>
-                                  </el-table>
+                                <el-tab-pane label="data" name="requestData">data
+                                  <TableVariables :data="step.request.data"></TableVariables>
                                 </el-tab-pane>
-                                <el-tab-pane label="param" name="fourth3">param
-                                  <el-table
-                                      table-layout="fixed"
-                                      ref="multipleTable"
-                                      tooltip-effect="dark"
-                                      style="width: 100%"
-                                      size="small"
-                                      border
-                                      :data="headerData"
-                                  >
-                                    <el-table-column type="selection" width="30"></el-table-column>
-                                    <el-table-column prop="key" label="key" width="300"></el-table-column>
-                                    <el-table-column prop="value" label="type" width="300"></el-table-column>
-                                    <el-table-column prop="desc" label="value" show-overflow-tooltip></el-table-column>
-                                  </el-table>
+                                <el-tab-pane label="param" name="requestParam">param
+                                  <TableVariables :data="step.request.params"></TableVariables>
                                 </el-tab-pane>
                               </el-tabs>
                             </el-row>
                           </el-tab-pane>
-                          <el-tab-pane label="extract/validate" name="second2">extract
-                            <el-table
-                                table-layout="fixed"
-                                ref="multipleTable"
-                                tooltip-effect="dark"
-                                style="width: 100%"
-                                size="small"
-                                border
-                                :data="headerData"
-                            >
-                              <el-table-column type="selection" width="30"></el-table-column>
-                              <el-table-column prop="key" label="key" width="300"></el-table-column>
-                              <el-table-column prop="value" label="value" width=""></el-table-column>
-                              <el-table-column prop="desc" label="desc" width="400"></el-table-column>
-                            </el-table>
+                          <el-tab-pane label="extract/validate" name="stepEv">
+                            extract
+                            <TableExtract :data="step.extract"></TableExtract>
                             validate
-                            <el-table
-                                table-layout="fixed"
-                                ref="multipleTable"
-                                tooltip-effect="dark"
-                                style="width: 100%"
-                                size="small"
-                                border
-                                :data="headerData"
-                            >
-                              <el-table-column type="selection" width="30"></el-table-column>
-                              <el-table-column prop="key" label="Check" width="300"></el-table-column>
-                              <el-table-column prop="value" label="Comparator" width="100"></el-table-column>
-                              <el-table-column prop="value" label="Type" width="100"></el-table-column>
-                              <el-table-column prop="desc" label="Expected" show-overflow-tooltip></el-table-column>
-                            </el-table>
-                            valiCustom
-                            <el-table
-                                table-layout="fixed"
-                                ref="multipleTable"
-                                tooltip-effect="dark"
-                                style="width: 100%"
-                                size="small"
-                                border
-                                :data="headerData"
-                            >
-                              <el-table-column type="selection" width="30"></el-table-column>
-                              <el-table-column prop="key" label="Comparator" width="300"></el-table-column>
-                              <el-table-column prop="value" label="Check" width="100"></el-table-column>
-                              <el-table-column prop="desc " label="Expected"></el-table-column>
-                            </el-table>
+                            <TableValidate :data="step.validate"></TableValidate>
                           </el-tab-pane>
-                          <el-tab-pane label="variables/hooks" name="third2">variables
-                            <el-table
-                                table-layout="fixed"
-                                ref="multipleTable"
-                                tooltip-effect="dark"
-                                style="width: 100%"
-                                size="small"
-                                border
-                                :data="headerData"
-                            >
-                              <el-table-column type="selection" width="30"></el-table-column>
-                              <el-table-column prop="key" label="key" width="300"></el-table-column>
-                              <el-table-column prop="value" label="type" width="100">
-                                <el-select
-                                  v-model="type"
-                                  placeholder="Select"
-                                  size="small"
-                                  style="width: 90px"
-                                >
-                                  <el-option
-                                    v-for="item in options"
-                                    :key="item.value"
-                                    :label="item.label"
-                                    :value="item.value"
-                                  />
-                                </el-select>
-                              </el-table-column>
-                              <el-table-column prop="desc" label="value"></el-table-column>
-                            </el-table>
-                            hooks
-                            <el-table
-                                table-layout="fixed"
-                                ref="multipleTable"
-                                tooltip-effect="dark"
-                                style="width: 100%"
-                                size="small"
-                                border
-                                :data="headerData"
-                            >
-                              <el-table-column type="selection" width="30"></el-table-column>
-                              <el-table-column prop="key" label="setup_hooks" width="300"></el-table-column>
-                              <el-table-column prop="desc" label="teardown_hooks" show-overflow-tooltip></el-table-column>
-                            </el-table>
+                          <el-tab-pane label="variables/hooks" name="stepVh">
+                            variables
+                            <TableVariables :data="step.variables"></TableVariables>
+                            setup_hooks
+                            <TableHooks :data="step.setup_hooks"></TableHooks>
+                            teardown_hooks
+                            <TableHooks :data="step.teardown_hooks"></TableHooks>
                           </el-tab-pane>
-                          <el-tab-pane label="thinktime" name="fourth2">
+                          <el-tab-pane label="thinktime" name="stepThinktime">
                             <div>
                               <el-input
-                                  v-model="form.thinktime"
+                                  v-model="step.think_time.limit"
                                   style="max-width: 600px"
                                   placeholder="Please input"
                               >
@@ -507,9 +346,6 @@
                           </el-tab-pane>
                         </el-tabs>
                       </el-tab-pane>
-                      <el-tab-pane label="Config">Config</el-tab-pane>
-                      <el-tab-pane label="Role">Role</el-tab-pane>
-                      <el-tab-pane label="Task">Task</el-tab-pane>
                     </el-tabs>
                   </el-main>
                 </el-container>
@@ -529,32 +365,22 @@
 import {listCase, addCase, delCase, getCase, updateCase} from "@/api/hrm/case";
 import {selectModulList, showModulList} from "@/api/hrm/module";
 import {listProject} from "@/api/hrm/project";
+import TableExtract from '../../../components/hrm/table-extract.vue';
+import TableValidate from '../../../components/hrm/table-validate.vue';
+import TableValiCustom from '../../../components/hrm/table-valiCustom.vue';
+import TableVariables from '../../../components/hrm/table-variables.vue';
+import TableHooks from '../../../components/hrm/table-hooks.vue';
+import DictSelect from '../../../components/select/dict_select.vue'
+import {Briefcase, CirclePlus, Suitcase} from "@element-plus/icons-vue";
 // import JsonEditorVue from "json-editor-vue3";
 
-const headerData = [
-  {
-    key: '2016-05-03',
-    value: 'Tom',
-    desc: 'No. 189, Grove St, Los Angeles',
-  },
-  {
-    key: '2016-05-02',
-    value: 'Tom',
-    desc: 'No. 189, Grove St, Los Angeles',
-  },
-  {
-    key: '2016-05-04',
-    value: 'Tom',
-    desc: 'No. 189, Grove St, Los Angeles',
-  },
-  {
-    key: '2016-05-01',
-    value: 'Tom',
-    desc: 'No. 189, Grove St, Los Angeles',
-  },
-]
+
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {sys_request_method} = proxy.useDict("sys_request_method");
+const {hrm_data_type} = proxy.useDict("hrm_data_type");
+
+provide("hrm_data_type", hrm_data_type);
 
 const couldView = ref(["tree", "code", "form", "view"]);
 const caseList = ref([]);
@@ -572,14 +398,14 @@ const total = ref(0);
 const title = ref("");
 
 const requestMethod = ref([]);
-const activeCaseName = ref('first')
-const activeMessageName = ref('first1')
-const activeStepsName = ref('first11')
-const activeRequestName = ref('first2')
-const activeRequestDetailName = ref('first3')
+const activeCaseName = ref("caseConfig")
+const activeMessageName = ref("caseMessages")
+const activeRequestName = ref("stepRequest")
+const activeRequestDetailName = ref("requestHeader")
+const activeTestStepName = ref(0)
 
 const data = reactive({
-  form: {request: {steps: {request: {url: "test"}}}},
+  // form: {},
   queryParams: {
     pageNum: 1,
     pageSize: 10,
@@ -596,7 +422,87 @@ const data = reactive({
   }
 });
 
-const {queryParams, form, rules} = toRefs(data);
+const initFormRequestData = {
+    config: {
+      think_time: {
+        strategy: "",
+        limit: 0
+      },
+      setup_hooks: [],
+      teardown_hooks: [],
+      variables: [],
+      headers: [],
+      parameters: [],
+      base_url: ""
+    },
+    teststeps: [
+      {
+        step_type: 1,
+        step_id: "tmp6eb66f3f-cf37-35bb-b050-1219b8eac0b9",
+        name: "新增测试步骤",
+        request: {
+          dataType: "",
+          method: "GET",
+          url: "",
+          json: {},
+          headers: [],
+          params: [],
+          data: []
+        },
+        include: {
+          config: {
+            id: "",
+            name: ""
+          }
+        },
+        think_time: {
+          time: 0
+        },
+        validate: [],
+        extract: [],
+        variables: [],
+        setup_hooks: [],
+        teardown_hooks: []
+      }
+    ]
+
+  }
+
+const {queryParams, rules} = toRefs(data);
+const form = ref({
+  include: {},
+  request: JSON.parse(JSON.stringify(initFormRequestData))
+});
+
+
+function editTabs(paneName, action) {
+  // const testStepsData = form.value.request.teststeps
+  console.log(initFormRequestData.teststeps[0])
+  if (action === "remove"){
+    const activeTabIndex = paneName !== undefined ? paneName:activeTestStepName.value;
+
+    form.value.request.teststeps.splice(activeTabIndex, 1);
+    if (form.value.request.teststeps.length <= 0){
+      form.value.request.teststeps.push(JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0]);
+      return
+    }
+
+    const stepsData = form.value.request.teststeps;
+
+    const nextTabIndex = stepsData.length > activeTabIndex ? activeTabIndex : activeTabIndex - 1;
+    if (nextTabIndex) {
+      activeTestStepName.value = nextTabIndex
+    }
+
+  }else if(action === "add"){
+    let newTabName = paneName !== undefined ? paneName+1:activeTestStepName.value + 1;
+    form.value.request.teststeps.splice(activeTestStepName.value + 1, 0, JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0])
+    activeTestStepName.value = newTabName
+  }else {
+    console.log("other")
+  }
+}
+
 
 /** 查询用例列表 */
 function getList() {
@@ -687,17 +593,22 @@ function cancel() {
 
 /** 表单重置 */
 function reset() {
+  activeCaseName.value = "caseConfig"
+  activeMessageName.value = "caseMessages"
+  activeRequestName.value = "stepRequest"
+  activeRequestDetailName.value = "requestHeader"
+  activeTestStepName.value = 0
   form.value = {
     caseId: undefined,
     moduleId: undefined,
     projectId: undefined,
     caseName: undefined,
-    request: undefined,
     notes: undefined,
-    include: undefined,
     sort: 0,
     status: "0",
-    remark: undefined
+    remark: undefined,
+    include: {},
+    request: JSON.parse(JSON.stringify(initFormRequestData))
   };
   proxy.resetForm("postRef");
 }
@@ -739,7 +650,7 @@ function handleUpdate(row) {
       alert("未查到对应数据！");
       return;
     }
-    form.value.projectId = response.data.projectId;
+    // form.value.projectId = response.data.projectId;
     getModuleSelectHandl();
     form.value = response.data;
     open.value = true;
@@ -751,14 +662,16 @@ function handleUpdate(row) {
 function submitForm() {
   proxy.$refs["postRef"].validate(valid => {
     if (valid) {
-      if (form.value.caseId != undefined) {
-        updateCase(form.value).then(response => {
+      const caseData = form.value
+      caseData.request.config.name = caseData.caseName;
+      if (caseData.caseId != undefined) {
+        updateCase(caseData).then(response => {
           proxy.$modal.msgSuccess("修改成功");
           open.value = false;
           getList();
         });
       } else {
-        addCase(form.value).then(response => {
+        addCase(caseData).then(response => {
           proxy.$modal.msgSuccess("新增成功");
           open.value = false;
           getList();
