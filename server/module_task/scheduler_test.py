@@ -1,7 +1,8 @@
+from loguru import logger
 from datetime import datetime
 
 
 def job(*args, **kwargs):
-    print(args)
-    print(kwargs)
-    print(f"{datetime.now()}执行了")
+    logger.info(args)
+    logger.info(kwargs)
+    logger.info(f"{datetime.now()}执行了")

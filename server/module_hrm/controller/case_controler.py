@@ -69,7 +69,7 @@ async def edit_hrm_case(request: Request, edit_module: CaseModel, query_db: Sess
 @log_decorator(title='用例管理', business_type=3)
 async def delete_hrm_case(request: Request, case_ids: str, query_db: Session = Depends(get_db)):
     try:
-        delete_module = DeleteCaseModel(moduleIds=case_ids)
+        delete_module = DeleteCaseModel(caseIds=case_ids)
         delete_module_result = CaseService.delete_case_services(query_db, delete_module)
         if delete_module_result.is_success:
             logger.info(delete_module_result.message)
@@ -87,7 +87,7 @@ async def query_detail_hrm_case(request: Request, case_id: int, query_db: Sessio
     try:
         detail_result = CaseService.case_detail_services(query_db, case_id)
         logger.info(f'获取case_id为{case_id}的信息成功')
-        return ResponseUtil.success(data=detail_result)
+        return ResponseUtil.success(data=detail_result.model_dump(exclude_unset=True, by_alias=True))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
