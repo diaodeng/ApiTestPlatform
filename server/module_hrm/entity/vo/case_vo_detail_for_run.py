@@ -2,8 +2,6 @@
 这个是用例数据详情的模型，不是对应于数据库用例表的数据模型，是对应于数据库用例表的request字段的模型
 """
 
-
-
 import datetime
 import os
 from enum import Enum
@@ -163,7 +161,7 @@ class TRequest(BaseModel):
 
     method: MethodEnum
     url: Url
-    params: Dict[Text, Text] = {}
+    params: Dict[Text, Text | int | float | bool | None] = {}
     headers: Headers = {}
     req_json: Union[Dict, List, Text, None] = Field(None, alias="json")
     data: Union[Text, Dict[Text, Any], None] = None

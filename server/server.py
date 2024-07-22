@@ -24,6 +24,7 @@ from module_hrm.controller.debugtalk_controller import debugtalkController
 from module_hrm.controller.module_controler import moduleController
 from module_hrm.controller.env_controller import envController
 from module_hrm.controller.case_controler import caseController
+from module_hrm.controller.runner_controler import runnerController
 
 from config.env import AppConfig
 from config.get_redis import RedisUtil
@@ -88,6 +89,7 @@ controller_list = [
     {'router': moduleController, 'tags': ['HRM-模块管理']},
     {'router': envController, 'tags': ['HRM-环境管理']},
     {'router': caseController, 'tags': ['HRM-用例管理']},
+    {'router': runnerController, 'tags': ['HRM-运行管理']},
 
 ]
 

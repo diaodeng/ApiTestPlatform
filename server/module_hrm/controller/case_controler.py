@@ -34,7 +34,7 @@ async def add_hrm_case(request: Request, add_case: AddCaseModel, query_db: Sessi
     try:
         add_case.create_by = current_user.user.user_name
         add_case.update_by = current_user.user.user_name
-        add_case.case_id = snowIdWorker.get_id()
+        # add_case.case_id = snowIdWorker.get_id()
         add_module_result = CaseService.add_case_services(query_db, add_case)
         if add_module_result.is_success:
             logger.info(add_module_result.message)

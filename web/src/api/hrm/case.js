@@ -42,3 +42,13 @@ export function delCase(caseId) {
     method: 'delete'
   })
 }
+
+
+// debug用例
+export function debugCase(data) {
+  return request({
+    url: '/hrm/runner/debug',
+    method: 'POST',
+    data: data
+  })
+}
