@@ -1,9 +1,11 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, BigInteger
+from sqlalchemy import Column, Integer, String, Text, BigInteger
+
 from config.database import Base
-from datetime import datetime
+from module_hrm.entity.do.common_do import BaseModel
+from utils.snowflake import snowIdWorker
 
 
-class HrmModule(Base):
+class HrmModule(Base, BaseModel):
     """
     模块信息表
     """
@@ -11,8 +13,7 @@ class HrmModule(Base):
         verbose_name = '模块信息'
     __tablename__ = 'hrm_module'
 
-    id = Column(Integer, primary_key=True, autoincrement=True, comment='ID')
-    module_id = Column(BigInteger, primary_key=True, nullable=False, unique=True, comment='模块ID')
+    module_id = Column(BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id(), comment='模块ID')
     project_id = Column(BigInteger, nullable=True, comment='项目ID')
     module_name = Column(String(50), nullable=False, comment='模块名称')
     test_user = Column(String(50), nullable=True, comment='测试负责人')
@@ -21,10 +22,6 @@ class HrmModule(Base):
     desc2mind = Column(Text, nullable=True, comment='脑图')
     sort = Column(Integer, nullable=False, default=0, comment='显示顺序')
     status = Column(String(1), nullable=False, default='0', comment='状态（0正常 1停用）')
-    create_by = Column(String(64), default='', comment='创建者')
-    create_time = Column(DateTime, nullable=True, default=datetime.now(), comment='创建时间')
-    update_by = Column(String(64), default='', comment='更新者')
-    update_time = Column(DateTime, nullable=True, default=datetime.now(), comment='更新时间')
     remark = Column(String(500), nullable=True, default='', comment='备注')
 
 

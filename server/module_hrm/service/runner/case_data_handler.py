@@ -37,7 +37,7 @@ class CaseInfoHandle():
             case_obj = CaseModelForApi(**case_obj)
         return case_obj
 
-    def from_db(self, case_obj: CaseModel | CaseModelForApi | dict):
+    def from_db(self, case_obj: CaseModel | CaseModelForApi | dict = {}):
         """
         处理数据库查出来的数据，用于运行、前端展示
         """
@@ -47,7 +47,7 @@ class CaseInfoHandle():
             case_obj = self.case_obj
         return InToOut(case_obj)
 
-    def from_page(self, case_obj: CaseModel | CaseModelForApi | dict):
+    def from_page(self, case_obj: CaseModel | CaseModelForApi | dict = {}):
         """
         处理前端来的数据，处理后用于运行、保存
         """
@@ -153,7 +153,7 @@ class CaseInfoToRun(object):
             step_dict["request"]["params"] = key_value_dict(teststep.request.params)
             teststeps_list.append(step_dict)
         test_case_dict["request"]["teststeps"] = teststeps_list
-        CaseModelForApi.validate(test_case_dict)
+        TestCase.validate(test_case_dict["request"])
         return TestCase(**test_case_dict["request"])
 
     def debug_data(self):

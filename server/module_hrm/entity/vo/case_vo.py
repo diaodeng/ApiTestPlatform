@@ -70,10 +70,10 @@ class CaseRunModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
-    ids: Optional[int | List]
+    ids: Optional[int | List | None] = None
     run_type: Optional[int]
     env: int
-    case_data: Optional[CaseModel|dict] = None
+    case_data: Optional[CaseModel | dict | None] = None
 
 
 class CaseModuleProjectModel(BaseModel):

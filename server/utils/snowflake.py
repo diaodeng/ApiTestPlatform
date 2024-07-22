@@ -103,4 +103,4 @@ class IdWorker(object):
 
 
 snowIdWorker = IdWorker(1, 1)
-print(snowIdWorker.get_id())
+# print(snowIdWorker.get_id())
