@@ -18,10 +18,11 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.annotation.log_annotation import log_decorator
 from utils.snowflake import snowIdWorker
 
-caseController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginService.get_current_user)])
+runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@caseController.post("/test", response_model=CaseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:test'))])
+@runnerController.post("/test", response_model=CaseModel,
+                       dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:test'))])
 async def run_test(request: Request,
                    run_info: CaseRunModel,
                    query_db: Session = Depends(get_db),
@@ -29,7 +30,8 @@ async def run_test(request: Request,
                    ):
     try:
         # 获取分页数据
-        run_result = run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_type, user=current_user.user.user_id)
+        run_result = run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_type,
+                                  user=current_user.user.user_id)
         logger.info('执行成功')
         data = ResponseUtil.success(data=run_result)
         return data
@@ -38,15 +40,17 @@ async def run_test(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@caseController.post("/debug", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:debug'))])
+@runnerController.post("/debug", response_model=PageResponseModel,
+                       dependencies=[Depends(CheckUserInterfaceAuth(['hrm:api:debug', 'hrm:case:debug']))])
 async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
-        page_query_result = CaseModelForApi(**debug_info.case_data.model_dump())
+        case_data = debug_info.case_data
+        page_query_result = CaseModelForApi(**case_data)
         env_obj = EnvDao.get_env_by_id(query_db, debug_info.env)
-        data_for_run = CaseInfoHandle().from_page(page_query_result).toDebug(EnvModel(**env_obj)).run_data()
-        TestRunner(data_for_run).start()
-        logger.info('获取成功')
+        data_for_run = CaseInfoHandle(page_query_result).from_page().toDebug(EnvModel.from_orm(env_obj)).run_data()
+        test_res = TestRunner(data_for_run).start()
+        logger.info('执行成功')
         data = ResponseUtil.success(model_content=page_query_result)
         return data
     except Exception as e:

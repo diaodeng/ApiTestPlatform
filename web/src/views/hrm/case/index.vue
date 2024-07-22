@@ -158,7 +158,7 @@
             用例修改
             <el-button-group>
               <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">确 定</el-button>
-              <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">执行
+              <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']">执行
               </el-button>
               <el-select placeholder="Select" style="width: 115px">
                 <el-option label="Restaurant" value="1"/>
@@ -362,7 +362,7 @@
 </template>
 
 <script setup name="Case">
-import {listCase, addCase, delCase, getCase, updateCase} from "@/api/hrm/case";
+import {listCase, addCase, delCase, getCase, updateCase, debugCase} from "@/api/hrm/case";
 import {selectModulList, showModulList} from "@/api/hrm/module";
 import {listProject} from "@/api/hrm/project";
 import TableExtract from '../../../components/hrm/table-extract.vue';
@@ -655,6 +655,26 @@ function handleUpdate(row) {
     form.value = response.data;
     open.value = true;
     title.value = "修改用例";
+  });
+}
+
+function debugForm() {
+  proxy.$refs["postRef"].validate(valid => {
+    if (valid) {
+      const caseData = form.value;
+      caseData.request.config.name = caseData.caseName;
+      const req_data = {
+        "env": "1746540889545728",
+        "runType": 3,
+        "caseData": caseData
+      }
+        debugCase(req_data).then(response => {
+          proxy.$modal.msgSuccess("修改成功");
+          open.value = false;
+          getList();
+        });
+
+    }
   });
 }
 
