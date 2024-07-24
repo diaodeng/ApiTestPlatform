@@ -25,7 +25,7 @@ if "WSL" in str(platform.platform()):
 
 def run_by_single(query_db: Session, index, env_obj, func_map=None):
     case_data_obj = CaseDao.get_case_by_id(query_db, index)
-    test_case = CaseInfoHandle().from_db(case_data_obj).toRun(env_obj).run_data(func_map)
+    test_case = CaseInfoHandle().from_db(case_data_obj).toRun(env_obj).run_data()
     case_res_datas = TestRunner(test_case, func_map).start()
     all_result = []
     for case_res_data in case_res_datas:
