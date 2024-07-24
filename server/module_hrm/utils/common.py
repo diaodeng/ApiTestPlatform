@@ -107,8 +107,9 @@ def key_value_dict(cover_list: list[dict]|dict, ignore_type=False):
         if not ignore_type:
             type = value.pop("type", "str")
             val = type_change(type, val)
-
-        dicts[key] = val
+        enable = value.pop("enable", False)
+        if enable:
+            dicts[key] = val
     return dicts
 
 
