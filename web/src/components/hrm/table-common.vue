@@ -2,7 +2,9 @@
 import SelectDataType from "@/components/hrm/select-dataType.vue";
 import {ElMessageBox} from 'element-plus';
 
-const props = defineProps(["cols", "data"]);
+const props = defineProps(["cols"]);
+
+const selfData = defineModel();
 
 const multipleTable = ref(null);
 
@@ -15,8 +17,8 @@ function colWith(content) {
 
 function addRow(event) {
 
-  if (props.data && typeof props.data === "object") {
-    props.data.push({
+  if (selfData.value && typeof selfData.value === "object") {
+    selfData.value.push({
       key: '',
       value: '',
       type: 'string',
@@ -44,7 +46,7 @@ function delRow(event) {
   }
 
   selectedRows.forEach((row) => {
-    props.data.splice(props.data.indexOf(row), 1);
+    selfData.value.splice(selfData.value.indexOf(row), 1);
   })
 
   // 重置选中的行
@@ -92,7 +94,7 @@ function paste(event) {
       style="width: 100%"
       size="small"
       border
-      :data="data"
+      :data="selfData"
   >
     <el-table-column type="selection" width="30"></el-table-column>
     <el-table-column v-for="col in cols" :label="col.name" v-bind="colWith(col.width)">

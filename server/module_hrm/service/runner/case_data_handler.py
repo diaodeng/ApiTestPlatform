@@ -136,14 +136,14 @@ class CaseInfoToRun(object):
         # self._ensure_case_dir()
 
         test_case = self.case_obj
-        test_case_dict = self.case_obj.model_dump(exclude_unset=True, by_alias=True)
+        test_case_dict = self.case_obj.model_dump(by_alias=True)
         test_case_dict["request"]["config"]["headers"] = key_value_dict(test_case.request.config.headers, True)
         test_case_dict["request"]["config"]["variables"] = key_value_dict(test_case.request.config.variables)
         test_case_dict["request"]["config"]["parameters"] = key_value_dict(test_case.request.config.parameters)
 
         teststeps_list = []
         for teststep in test_case.request.teststeps:
-            step_dict = teststep.model_dump(exclude_unset=True, by_alias=True)
+            step_dict = teststep.model_dump(by_alias=True)
             step_dict["variables"] = key_value_dict(teststep.variables)
             step_dict["extract"] = key_value_dict(teststep.extract)
 

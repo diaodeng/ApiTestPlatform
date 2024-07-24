@@ -34,7 +34,8 @@
     "pinia": "2.1.7",
     "vue": "3.4.27",
     "vue-cropper": "1.1.1",
-    "vue-router": "4.3.2"
+    "vue-router": "4.3.2",
+    "vue3-ace-editor": "^2.2.4"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "5.0.4",

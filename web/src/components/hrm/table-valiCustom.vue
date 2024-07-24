@@ -1,7 +1,7 @@
 <script setup>
 import CommonTable from './table-common.vue';
 
-const props = defineProps(["data"])
+const selfData = defineModel();
 const tableCols = [{
       name: "Comparator",
       prop: "key",
@@ -18,7 +18,7 @@ const tableCols = [{
 </script>
 
 <template>
-  <CommonTable :cols="tableCols" :data="data"></CommonTable>
+  <CommonTable :cols="tableCols" v-model="selfData"></CommonTable>
 </template>
 
 <style scoped lang="scss">

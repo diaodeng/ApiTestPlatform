@@ -132,7 +132,8 @@
           <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:detail']">
             查看
           </el-button>
-          <el-button link type="warning" icon="Edit" v-loading="loading" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:edit']">
+          <el-button link type="warning" icon="Edit" v-loading="loading" @click="handleUpdate(scope.row)"
+                     v-hasPermi="['hrm:case:edit']">
             修改
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
@@ -160,16 +161,19 @@
               <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">确 定</el-button>
               <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']">执行
               </el-button>
-              <el-select placeholder="Select" style="width: 115px">
-                <el-option label="Restaurant" value="1"/>
-                <el-option label="Order No." value="2"/>
-                <el-option label="Tel" value="3"/>
+              <el-select placeholder="Select" v-model="selectedEnv" style="width: 115px">
+                <el-option
+                    v-for="option in envOptions"
+                    :key="option.envId"
+                    :label="option.envName"
+                    :value="option.envId">
+                </el-option>
               </el-select>
             </el-button-group>
 
           </el-header>
           <el-main>
-<!--            <div>{{ form }}</div>-->
+            <!--            <div>{{ form }}</div>-->
             <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;">
               <el-tab-pane label="config" name="caseConfig">
                 <el-tabs type="" v-model="activeMessageName">
@@ -218,17 +222,17 @@
                     </el-form-item>
                   </el-tab-pane>
                   <el-tab-pane label="headers" name="caseHeaders">
-                    <TableExtract :data="form.request.config.headers"></TableExtract>
+                    <TableExtract v-model="form.request.config.headers"></TableExtract>
                   </el-tab-pane>
                   <el-tab-pane label="variables/parameters/hooks" name="caseVph">
                     variables
-                    <TableVariables :data="form.request.config.variables"></TableVariables>
+                    <TableVariables v-model="form.request.config.variables"></TableVariables>
                     parameters
-                    <TableVariables :data="form.request.config.parameters"></TableVariables>
+                    <TableVariables v-model="form.request.config.parameters"></TableVariables>
                     setup_hooks
-                    <TableHooks :data="form.request.config.setup_hooks"></TableHooks>
+                    <TableHooks v-model="form.request.config.setup_hooks"></TableHooks>
                     teardown_hooks
-                    <TableHooks :data="form.request.config.teardown_hooks"></TableHooks>
+                    <TableHooks v-model="form.request.config.teardown_hooks"></TableHooks>
                   </el-tab-pane>
                   <el-tab-pane label="thinktime" name="caseThinktime">
                     <div>
@@ -246,22 +250,23 @@
               <el-tab-pane label="teststeps" name="caseSteps">
                 <el-container>
                   <el-main>
-                    <el-tabs tab-position="left" class="demo-tabs" closable @edit="editTabs" v-model="activeTestStepName" style="height: 100%">
+                    <el-tabs tab-position="left" class="demo-tabs" closable @edit="editTabs"
+                             v-model="activeTestStepName" style="height: 100%">
                       <el-tab-pane v-for="(step, index) in form.request.teststeps" :key="index" :name="index">
                         <template #label>
                           <span class="custom-tabs-label">
-                            <el-icon><briefcase /></el-icon>
+                            <el-icon><briefcase/></el-icon>
                             <span>{{ step.name }}</span>
                             <el-icon :size="20">
-                              <Edit />
+                              <Edit/>
                             </el-icon>
                             <el-icon :size="20" @click="editTabs(index, 'add')">
-                              <CirclePlus />
+                              <CirclePlus/>
                             </el-icon>
                           </span>
                         </template>
                         <el-tabs type="" v-model="activeRequestName">
-                          <el-tab-pane  label="request" name="stepRequest">
+                          <el-tab-pane label="request" name="stepRequest">
                             <el-row :gutter="10" type="flex" class="row-bg">
                               <el-col :span="2">
                                 <DictSelect :options-dict="sys_request_method" v-model="step.request.method"
@@ -295,43 +300,61 @@
                             </el-row>
                             <el-row type="flex" class="row-bg" justify="start">
                               <el-tabs v-model="activeRequestDetailName" style="width: 100%">
-                                <el-tab-pane label="header" name="requestHeader">header
-                                  <TableExtract :data="step.request.headers"></TableExtract>
-                                </el-tab-pane>
-                                <el-tab-pane label="json" name="requestJson">
-                                  <div>
-                                    <el-input
-                                        v-model="step.request.json"
-                                        style="width: 100%"
-                                        placeholder="Please input"
-                                        type="textarea"
-                                        rows="20"
-                                    >
-                                    </el-input>
-                                  </div>
-                                </el-tab-pane>
-                                <el-tab-pane label="data" name="requestData">data
-                                  <TableVariables :data="step.request.data"></TableVariables>
-                                </el-tab-pane>
-                                <el-tab-pane label="param" name="requestParam">param
-                                  <TableVariables :data="step.request.params"></TableVariables>
-                                </el-tab-pane>
+                                <el-row>
+                                  <el-col :span="14">
+                                    <el-tab-pane label="header" name="requestHeader">header
+                                      <TableExtract v-model="step.request.headers"></TableExtract>
+                                    </el-tab-pane>
+                                    <el-tab-pane label="json" name="requestJson">
+                                      <div style="width: 100%">
+<!--                                        <el-input-->
+<!--                                            v-model="step.request.json"-->
+<!--                                            style="width: 100%"-->
+<!--                                            placeholder="Please input"-->
+<!--                                            type="textarea"-->
+<!--                                            rows="20"-->
+<!--                                        >-->
+<!--                                        </el-input>-->
+                                        <AceEditor v-model:content="step.request.json"></AceEditor>
+                                      </div>
+                                    </el-tab-pane>
+                                    <el-tab-pane label="data" name="requestData">data
+                                      <TableVariables v-model="step.request.data"></TableVariables>
+                                    </el-tab-pane>
+                                    <el-tab-pane label="param" name="requestParam">param
+                                      <TableVariables v-model="step.request.params"></TableVariables>
+                                    </el-tab-pane>
+                                  </el-col>
+                                  <el-col :span="10">
+                                    <div>
+                                      <el-input
+                                          v-model="responseData"
+                                          style="width: 100%"
+                                          placeholder="Please input"
+                                          type="textarea"
+                                          rows="20"
+                                      >
+                                      </el-input>
+                                    </div>
+                                  </el-col>
+                                </el-row>
+
                               </el-tabs>
                             </el-row>
                           </el-tab-pane>
                           <el-tab-pane label="extract/validate" name="stepEv">
                             extract
-                            <TableExtract :data="step.extract"></TableExtract>
+                            <TableExtract v-model="step.extract"></TableExtract>
                             validate
-                            <TableValidate :data="step.validate"></TableValidate>
+                            <TableValidate v-model="step.validate"></TableValidate>
                           </el-tab-pane>
                           <el-tab-pane label="variables/hooks" name="stepVh">
                             variables
-                            <TableVariables :data="step.variables"></TableVariables>
+                            <TableVariables v-model="step.variables"></TableVariables>
                             setup_hooks
-                            <TableHooks :data="step.setup_hooks"></TableHooks>
+                            <TableHooks v-model="step.setup_hooks"></TableHooks>
                             teardown_hooks
-                            <TableHooks :data="step.teardown_hooks"></TableHooks>
+                            <TableHooks v-model="step.teardown_hooks"></TableHooks>
                           </el-tab-pane>
                           <el-tab-pane label="thinktime" name="stepThinktime">
                             <div>
@@ -362,12 +385,13 @@
 </template>
 
 <script setup name="Case">
+import AceEditor from "../../../components/hrm/common/ace-editor.vue"
 import {listCase, addCase, delCase, getCase, updateCase, debugCase} from "@/api/hrm/case";
 import {selectModulList, showModulList} from "@/api/hrm/module";
+import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
 import TableExtract from '../../../components/hrm/table-extract.vue';
 import TableValidate from '../../../components/hrm/table-validate.vue';
-import TableValiCustom from '../../../components/hrm/table-valiCustom.vue';
 import TableVariables from '../../../components/hrm/table-variables.vue';
 import TableHooks from '../../../components/hrm/table-hooks.vue';
 import DictSelect from '../../../components/select/dict_select.vue'
@@ -386,6 +410,7 @@ const couldView = ref(["tree", "code", "form", "view"]);
 const caseList = ref([]);
 const projectOptions = ref([]);
 const moduleOptions = ref([]);
+const envOptions = ref([]);
 const moduleShow = ref([]);
 const moduleOptionsHandl = ref([]);
 const open = ref(false);
@@ -396,8 +421,9 @@ const single = ref(true);
 const multiple = ref(true);
 const total = ref(0);
 const title = ref("");
+const selectedEnv = ref("");
+const responseData = ref("");
 
-const requestMethod = ref([]);
 const activeCaseName = ref("caseConfig")
 const activeMessageName = ref("caseMessages")
 const activeRequestName = ref("stepRequest")
@@ -423,50 +449,50 @@ const data = reactive({
 });
 
 const initFormRequestData = {
-    config: {
-      think_time: {
-        strategy: "",
-        limit: 0
-      },
-      setup_hooks: [],
-      teardown_hooks: [],
-      variables: [],
-      headers: [],
-      parameters: [],
-      base_url: ""
+  config: {
+    think_time: {
+      strategy: "",
+      limit: 0
     },
-    teststeps: [
-      {
-        step_type: 1,
-        step_id: "tmp6eb66f3f-cf37-35bb-b050-1219b8eac0b9",
-        name: "新增测试步骤",
-        request: {
-          dataType: "",
-          method: "GET",
-          url: "",
-          json: {},
-          headers: [],
-          params: [],
-          data: []
-        },
-        include: {
-          config: {
-            id: "",
-            name: ""
-          }
-        },
-        think_time: {
-          time: 0
-        },
-        validate: [],
-        extract: [],
-        variables: [],
-        setup_hooks: [],
-        teardown_hooks: []
-      }
-    ]
+    setup_hooks: [],
+    teardown_hooks: [],
+    variables: [],
+    headers: [],
+    parameters: [],
+    base_url: ""
+  },
+  teststeps: [
+    {
+      step_type: 1,
+      step_id: "tmp6eb66f3f-cf37-35bb-b050-1219b8eac0b9",
+      name: "新增测试步骤",
+      request: {
+        dataType: "",
+        method: "GET",
+        url: "",
+        json: {},
+        headers: [],
+        params: [],
+        data: []
+      },
+      include: {
+        config: {
+          id: "",
+          name: ""
+        }
+      },
+      think_time: {
+        time: 0
+      },
+      validate: [],
+      extract: [],
+      variables: [],
+      setup_hooks: [],
+      teardown_hooks: []
+    }
+  ]
 
-  }
+}
 
 const {queryParams, rules} = toRefs(data);
 const form = ref({
@@ -478,11 +504,11 @@ const form = ref({
 function editTabs(paneName, action) {
   // const testStepsData = form.value.request.teststeps
   console.log(initFormRequestData.teststeps[0])
-  if (action === "remove"){
-    const activeTabIndex = paneName !== undefined ? paneName:activeTestStepName.value;
+  if (action === "remove") {
+    const activeTabIndex = paneName !== undefined ? paneName : activeTestStepName.value;
 
     form.value.request.teststeps.splice(activeTabIndex, 1);
-    if (form.value.request.teststeps.length <= 0){
+    if (form.value.request.teststeps.length <= 0) {
       form.value.request.teststeps.push(JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0]);
       return
     }
@@ -494,11 +520,11 @@ function editTabs(paneName, action) {
       activeTestStepName.value = nextTabIndex
     }
 
-  }else if(action === "add"){
-    let newTabName = paneName !== undefined ? paneName+1:activeTestStepName.value + 1;
+  } else if (action === "add") {
+    let newTabName = paneName !== undefined ? paneName + 1 : activeTestStepName.value + 1;
     form.value.request.teststeps.splice(activeTestStepName.value + 1, 0, JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0])
     activeTestStepName.value = newTabName
-  }else {
+  } else {
     console.log("other")
   }
 }
@@ -651,8 +677,9 @@ function handleUpdate(row) {
       return;
     }
     // form.value.projectId = response.data.projectId;
-    getModuleSelectHandl();
     form.value = response.data;
+    getModuleSelectHandl();
+
     open.value = true;
     title.value = "修改用例";
   });
@@ -664,15 +691,16 @@ function debugForm() {
       const caseData = form.value;
       caseData.request.config.name = caseData.caseName;
       const req_data = {
-        "env": "1746540889545728",
+        "env": selectedEnv.value,
         "runType": 3,
         "caseData": caseData
       }
-        debugCase(req_data).then(response => {
-          proxy.$modal.msgSuccess("修改成功");
-          open.value = false;
-          getList();
-        });
+      debugCase(req_data).then(response => {
+        proxy.$modal.msgSuccess(response.msg);
+        responseData.value = response.data
+        // open.value = false;
+        // getList();
+      });
 
     }
   });
@@ -720,7 +748,15 @@ function handleExport() {
   }, `Case_${new Date().getTime()}.xlsx`);
 }
 
+
+function envList() {
+  listEnv().then(response => {
+    envOptions.value = response.data;
+  });
+}
+
 getProjectSelect();
 getModuleShow();
 getList();
+envList();
 </script>

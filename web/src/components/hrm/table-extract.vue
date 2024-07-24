@@ -2,7 +2,7 @@
 // header、extract使用
 import CommonTable from './table-common.vue';
 
-const props = defineProps(["data"])
+const selfData = defineModel();
 const tableCols = [
   {
     name: "key",
@@ -22,7 +22,7 @@ const tableCols = [
 </script>
 
 <template>
-  <CommonTable :cols="tableCols" :data="data" @data-change="(newData) => {props.data = newData}"></CommonTable>
+  <CommonTable :cols="tableCols" v-model="selfData"></CommonTable>
 </template>
 
 <style scoped lang="scss">

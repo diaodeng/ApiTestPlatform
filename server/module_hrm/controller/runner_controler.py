@@ -5,6 +5,7 @@ from config.get_loger import get_case_log, TestLog
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.service.case_service import *
 from module_hrm.entity.vo.case_vo import *
+from module_hrm.utils.util import decompress_text
 from utils.response_util import *
 from utils.log_util import *
 from utils.page_util import *
@@ -51,7 +52,10 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
         data_for_run = CaseInfoHandle(page_query_result).from_page().toDebug(EnvModel.from_orm(env_obj)).run_data()
         test_res = TestRunner(data_for_run).start()
         logger.info('执行成功')
-        data = ResponseUtil.success(model_content=page_query_result)
+        all_log = []
+        for result in test_res[0].results:
+            all_log.append(decompress_text(result.logs))
+        data = ResponseUtil.success(data="\n".join(all_log))
         return data
     except Exception as e:
         logger.exception(e)
