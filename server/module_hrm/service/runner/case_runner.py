@@ -10,16 +10,16 @@ from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TConfig, TStep
 from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
 from module_hrm.exceptions import TestFailError
 from module_hrm.utils import debugtalk_common, comparators
-from module_hrm.utils.CaseRunLogHandle import log_context, RunLogCaptureHandler
+from module_hrm.utils.CaseRunLogHandle import log_context, RunLogCaptureHandler, TestLog
 from module_hrm.utils.parser import parse_data
 from module_hrm.utils.util import replace_variables, compress_text, get_func_map, ensure_str, load_csv_file_to_test
 from utils.log_util import logger
 
 
 class CaseRunner(object):
-    def __init__(self, case_data: TestCase, debugtalk_func_map={}):
+    def __init__(self, case_data: TestCase, debugtalk_func_map={}, logger=None):
         self.case_data = case_data
-        self.logger = log_context.logger if hasattr(log_context, 'logger') else logger
+        self.logger = logger
         self.handler = RunLogCaptureHandler()
         self.logger.addHandler(self.handler)
 
@@ -49,7 +49,7 @@ class CaseRunner(object):
         self.logger.info(start_info)
         start_time = time.time()
         for step in self.case_data.teststeps:
-            step_type = step.type
+            step_type = step.step_type
             if step_type == TstepTypeEnum.api.value:
                 # TODO 测试步骤根据不同请求类型做不同处理
                 pass
@@ -80,7 +80,6 @@ class CaseRunner(object):
 
             self.case_data.config.variables.update(step_obj.extract_variable)
             self.response.append(step_obj.response)
-            self.logs.append(compress_text(step_obj.logs))
             self.results.append(step_obj.result)
 
             del step_obj.debugtalk_func_map
@@ -121,7 +120,6 @@ class Request(object):
         self.validates = step_data.validators
         self.response: requests.Response = None
         self.extract_variable: dict = {}
-        self.logs: str = ""
         self.result: Result = Result()
 
     def __step_failed(self):
@@ -189,7 +187,6 @@ class Request(object):
             self.logger.error(f'error:{json.dumps({"args": str(e.args), "msg": str(e)}, indent=4, ensure_ascii=False)}')
             self.response = None
             self.result.response = self.response
-            self.result.logs = compress_text(self.logs)
             self.result.name = self.step_name
             self.result.status = CaseRunStatus.failed.value
             self.__step_failed()
@@ -229,7 +226,6 @@ class Request(object):
 
         # self.result = Result(self.response, compress_text(self.logs), name=self.step_name)
         self.result.response = self.response
-        self.result.logs = compress_text(self.logs)
         self.result.name = self.step_name
 
         return self
@@ -289,10 +285,12 @@ class Request(object):
                 func(self.__get_validate_key(check_key), expect, msg)
                 self.logger.info(f'断言成功，{assert_key}({check_key}, {expect}, {msg})')
             except Exception as e:
-                logger.error(f'断言失败：{e}')
+                logger.error(f'断言失败：{assert_key}({check_key}, {expect}, {msg})')
+                logger.exception(e)
                 self.__step_failed()
                 # self.logger.error(f'{e}')
                 self.logger.error(f'断言失败：{assert_key}({check_key}, {expect}, {msg})')
+
                 self.logger.exception(e)
                 self.result.status = CaseRunStatus.failed.value
                 continue
@@ -358,43 +356,50 @@ class TestRunner(object):
         self.parameters = case_data.config.parameters
         self.case_data = case_data
         self.debugtalk_func_map = debugtalk_func_map
+        self.logger = TestLog()
 
     def start(self) -> list[CaseRunner]:
-        # 处理before_test, 执行开始测试之前的回调
-        before_test = self.debugtalk_func_map.get("before_test", None)
-        if before_test:
-            try:
-                logger.info("开始处理before_test")
-                before_test_res = before_test(self.case_data.config.variables)
-                if isinstance(before_test_res, dict):
-                    self.case_data.config.variables.update(before_test_res)
-                logger.info("before_test处理完成")
-            except Exception as e:
-                logger.error(f"before_test处理失败：{e}")
-                logger.exception(e)
-                raise TestFailError(f"before_test处理失败")
+        try:
+            # 处理before_test, 执行开始测试之前的回调
+            before_test = self.debugtalk_func_map.get("before_test", None)
+            if before_test:
+                try:
+                    logger.info("开始处理before_test")
+                    before_test_res = before_test(self.case_data.config.variables)
+                    if isinstance(before_test_res, dict):
+                        self.case_data.config.variables.update(before_test_res)
+                    logger.info("before_test处理完成")
+                except Exception as e:
+                    logger.error(f"before_test处理失败：{e}")
+                    logger.exception(e)
+                    raise TestFailError(f"before_test处理失败")
 
-        if not self.parameters:
-            data = CaseRunner(self.case_data, self.debugtalk_func_map).run().close_handler()
-            return [data]
+            if not self.parameters:
+                data = CaseRunner(self.case_data, self.debugtalk_func_map, self.logger.logger).run().close_handler()
+                return [data]
 
-        params = []
-        params = params[1:]
+            params = self.parameters["caseParamters"]
+            params = params[1:]
 
-        all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
-        for param in params:
-            tmp_case_data = copy.deepcopy(self.case_data)
-            tmp_debugtalk_func_map = copy.deepcopy(self.debugtalk_func_map)
-            old_variables: dict = tmp_case_data.config.variables
-            old_variables.update(param)
-            tmp_debugtalk_func_map.update(param)
-            tmp_case_data.config.variables = old_variables
-            name = tmp_case_data.config.name
-            if "case_name" in param:
-                tmp_case_data.config.name = f"{name}[{param['case_name']}]"
-            data = CaseRunner(tmp_case_data, tmp_debugtalk_func_map).run().close_handler()
-            all_data.append(data)
-        return all_data
+            all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
+            for param in params:
+                tmp_case_data = copy.deepcopy(self.case_data)
+                tmp_debugtalk_func_map = copy.deepcopy(self.debugtalk_func_map)
+                old_variables: dict = tmp_case_data.config.variables
+                old_variables.update(param)
+                tmp_debugtalk_func_map.update(param)
+                tmp_case_data.config.variables = old_variables
+                name = tmp_case_data.config.name
+                if "case_name" in param:
+                    tmp_case_data.config.name = f"{name}[{param['case_name']}]"
+                data = CaseRunner(tmp_case_data, tmp_debugtalk_func_map, self.logger.logger).run().close_handler()
+                all_data.append(data)
+            return all_data
+        except Exception as e:
+            self.logger.reset()
+            logger.error(f"测试用例执行失败：{e}")
+            logger.exception(e)
+            raise TestFailError(f"测试用例执行失败: {e}")
 
 
 def formate_response_body(response: requests.Response | None) -> dict | str:

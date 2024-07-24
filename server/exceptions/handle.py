@@ -41,6 +41,6 @@ def handle_exception(app: FastAPI):
         x = exc.errors()
         return JSONResponse(
             status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"detail": jsonable_encoder(exc.errors())},
+            content={"detail": jsonable_encoder(exc.errors()), "msg": "参数或数据异常"},
         )
 
