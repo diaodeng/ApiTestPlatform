@@ -21,6 +21,7 @@ function addRow(event) {
     selfData.value.push({
       key: '',
       value: '',
+      enable: true,
       type: 'string',
       desc: '',
     })
@@ -102,6 +103,9 @@ function paste(event) {
       <template #default="{ row, $index }">
         <template v-if="col.type === 'select'">
           <SelectDataType v-model="row.type"></SelectDataType>
+        </template>
+        <template v-else-if="col.type === 'switch'">
+          <el-switch v-model="row[col.prop]"></el-switch>
         </template>
         <template v-else>
           <el-input v-model="row[col.prop]"></el-input>
