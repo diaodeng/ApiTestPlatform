@@ -91,12 +91,12 @@
                </el-col>
                <el-col :span="12">
                   <el-form-item label="环境地址" prop="envUrl">
-                     <el-input v-model="form.envUrl" placeholder="请输入URL地址" maxlength="20" />
+                     <el-input v-model="form.envUrl" placeholder="请输入URL地址" maxlength="200" />
                   </el-form-item>
                </el-col>
                <el-col :span="12">
                   <el-form-item label="环境描述" prop="simpleDesc">
-                     <el-input v-model="form.simpleDesc" placeholder="请输入描述" maxlength="11" />
+                     <el-input v-model="form.simpleDesc" placeholder="请输入描述" maxlength="400" />
                   </el-form-item>
                </el-col>
                <el-col :span="12">
