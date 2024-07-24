@@ -307,14 +307,14 @@
                                     </el-tab-pane>
                                     <el-tab-pane label="json" name="requestJson">
                                       <div style="width: 100%">
-<!--                                        <el-input-->
-<!--                                            v-model="step.request.json"-->
-<!--                                            style="width: 100%"-->
-<!--                                            placeholder="Please input"-->
-<!--                                            type="textarea"-->
-<!--                                            rows="20"-->
-<!--                                        >-->
-<!--                                        </el-input>-->
+                                        <!--                                        <el-input-->
+                                        <!--                                            v-model="step.request.json"-->
+                                        <!--                                            style="width: 100%"-->
+                                        <!--                                            placeholder="Please input"-->
+                                        <!--                                            type="textarea"-->
+                                        <!--                                            rows="20"-->
+                                        <!--                                        >-->
+                                        <!--                                        </el-input>-->
                                         <AceEditor v-model:content="step.request.json"></AceEditor>
                                       </div>
                                     </el-tab-pane>
@@ -502,9 +502,12 @@ const form = ref({
 
 
 function editTabs(paneName, action) {
+  debugger
   // const testStepsData = form.value.request.teststeps
   console.log(initFormRequestData.teststeps[0])
   if (action === "remove") {
+    const oldActiveStep = activeTestStepName.value;
+
     const activeTabIndex = paneName !== undefined ? paneName : activeTestStepName.value;
 
     form.value.request.teststeps.splice(activeTabIndex, 1);
@@ -513,11 +516,12 @@ function editTabs(paneName, action) {
       return
     }
 
-    const stepsData = form.value.request.teststeps;
-
-    const nextTabIndex = stepsData.length > activeTabIndex ? activeTabIndex : activeTabIndex - 1;
-    if (nextTabIndex) {
-      activeTestStepName.value = nextTabIndex
+    if (oldActiveStep >= activeTabIndex) {
+      if (oldActiveStep === 0){
+          activeTestStepName.value = 0;
+          return;
+      }
+      activeTestStepName.value = oldActiveStep - 1;
     }
 
   } else if (action === "add") {

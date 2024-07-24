@@ -1,22 +1,6 @@
-import copy
-import csv
-import datetime
-import io
-import json
-import os
-import shutil
-import subprocess
-from json import JSONDecodeError
-
-import yaml
-
-from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TConfig, TStep
-from module_hrm.enums.enums import CaseType, DataType
-from module_hrm.exceptions import ParamsError
-from module_hrm.utils import util
-from utils.log_util import logger
-from module_hrm.entity.vo.case_vo import CaseModel
 from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_vo import CaseModel
+from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
 from module_hrm.utils.common import key_value_dict
 
@@ -112,14 +96,14 @@ class CaseInfoToDb(object):
     def __init__(self, out_to_in: OutToIn):
         self.case_obj: CaseModelForApi = out_to_in.case_data
 
-    def asCase(self) -> dict:
-        case_data = CaseModel(**self.case_obj)
+    def asCase(self) -> CaseModel:
+        case_data = CaseModel(**self.case_obj.model_dump(by_alias=True))
         return case_data
 
-    def asApi(self) -> dict:
+    def asApi(self) -> CaseModel:
         return self.asCase()
 
-    def asConfig(self) -> dict:
+    def asConfig(self) -> CaseModel:
         return self.asCase()
 
 
@@ -129,7 +113,7 @@ class CaseInfoToRun(object):
         self.env_obj = env_obj
         self.case_obj = case_obj
 
-    def run_data(self, callback_func_map=None) -> TestCase:
+    def run_data(self) -> TestCase:
         """
         这里会创建目录和保存case数据为文件
         """
@@ -156,153 +140,15 @@ class CaseInfoToRun(object):
         TestCase.validate(test_case_dict["request"])
         return TestCase(**test_case_dict["request"])
 
-    def debug_data(self):
+    def debug_data(self) -> TestCase:
         """
         用测试用例入库的数据转成测试用的数据
         """
-        case_name = self._case_data.get("name")
-        include = self._case_data.get("include")
-        request = self._case_data.get("request")
-        return self._case_data_handle(case_name, include, request)
+        return self.run_data()
 
     def case_data(self) -> TestCase:
         """
         这里只是处理数据，不会处理文件目录
         """
-        include = eval(self.case_obj.include or '[]')
-        request = eval(self.case_obj.request)
-        test_case = self._case_data_handle(self.case_obj.name, include, request)
+        return self.run_data()
 
-        return test_case
-
-    def parameter_handle(self, parameter: list):
-        """
-        返回元祖，第一个数字典类型的参数化内容（字典），一个是参数化用到的文件的路径（列表）
-        """
-        if not parameter:
-            return {}, []
-        new_parameter = {}
-        parameter_file = []  # 参数化用到的文件路径
-        for p in parameter:
-            new_parameter[p['key']] = p.get("file_path")
-            file_path = p.get("file_path")
-            if file_path:  # 使用csv文件参数化的才需要这一步
-                parameter_file.append(file_path)
-
-        return new_parameter, parameter_file
-
-    def update_config(self, old_config: dict, new_config: dict):
-        """
-        用新的配置更新老的配置，如果有相同字段会覆盖
-        """
-        headers = old_config.get("headers", {})
-        headers.update(key_value_dict(new_config.pop("headers", {}), True))
-
-        variables = old_config.get("variables", {})
-        variables.update(key_value_dict(new_config.pop("variables", {})))
-
-        environs = old_config.get("environs", {})
-        environs.update(key_value_dict(new_config.pop("environs", {})))
-
-        parameters = old_config.get("parameters", {})
-        parameters.update(key_value_dict(new_config.pop("parameters", {})))
-
-        websocket = old_config.get("websocket", {})
-        websocket.update(key_value_dict(new_config.pop("websocket", {})))
-
-        if headers:
-            old_config["headers"] = headers
-
-        if variables:
-            old_config["variables"] = variables
-
-        if environs:
-            old_config["environs"] = environs
-
-        if parameters:
-            old_config["parameters"] = parameters
-
-        if websocket:
-            old_config["websocket"] = websocket
-
-        old_config.update(new_config)
-
-        return old_config
-
-    def case_step_handle(self, case_name, case_request, case_config, is_include=False) -> list[TStep]:
-        pre_request = case_request
-        steps = []
-        if "test" in pre_request:
-            steps = [pre_request.get("test", {})]
-        else:
-            steps = pre_request.get('steps', [])
-        for step in steps:
-            if step['request']['url'] == "":
-                raise TypeError(f"请求不能缺少URL：{case_name}")
-            step.pop("step_id", "")
-            all_new_valis = util.ensure_validate_v4(step.get('validate', []))
-            step['validate'] = all_new_valis
-
-            step["extract"] = key_value_dict(step.get("extract", []))
-            step["variables"] = key_value_dict(step.get("variables", []))
-
-            # 请求参数处理，这里可以不做处理，前端保存的时候数据已经处理了，只是为了兼容老数据
-            if "data" in step.get('request').keys():
-                data = step.get('request').pop('data', "")
-                data_dict = key_value_dict('data', data)
-                step.get('request').setdefault("data", data_dict)
-            if "params" in step.get('request').keys():
-                params = step.get('request').pop('params', "")
-                data_dict = key_value_dict('data', params)
-                step.get('request').setdefault("params", data_dict)
-
-            #  headers处理
-            pre_old_headers = step["request"].get("headers", {})
-            step_include_config = step.get("include", {}).get("config", {})
-            step_config_id = step_include_config.get("id")
-            if step_config_id and step_config_id != "请选择":
-                step_config_obj = TestCaseInfo.objects.get(id=step_config_id)
-                step_config_headers = eval(step_config_obj.request).get("config", {}).get("headers", {})
-                step_config_headers.update(pre_old_headers)
-                pre_old_headers = step_config_headers
-
-            # 没明白为什么config可以设置头，但是config设置了没在request中设置，执行用例时不会带上config中的
-            # 所以这里手动赋值
-            allow_extend = step_include_config.get("allowExtend", "1")
-            if not step.get("include", {}):  # 老数据没有配置step的include，默认允许扩展
-                allow_extend = "1"
-
-            # 如果配置的允许扩展才将配置的请求头扩展到测试步骤的请求头中
-            if allow_extend == "on" or allow_extend == "1":
-                config_headers = copy.deepcopy(case_config.get("headers", {}))
-                config_headers.update(pre_old_headers)
-                pre_old_headers = config_headers
-            step["request"]["headers"] = pre_old_headers
-
-            # hooks处理
-            setup_hooks = step.get("setup_hooks", [])
-            setup_hooks.extend(case_config.get("setup_hooks", []))
-            [st for st in setup_hooks if st.strip()]
-            step["setup_hooks"] = setup_hooks
-
-            teardown_hooks = step.get("teardown_hooks", [])
-            teardown_hooks.extend(case_config.get("teardown_hooks", []))
-            [st for st in teardown_hooks if st.strip()]
-            step["teardown_hooks"] = teardown_hooks
-
-            # parameters处理
-            if is_include:
-                # 引用的用例不能参数化，会影响当前用例本身
-                logger.warning(f"引用的用例不能参数化，会影响当前用例本身:引用的用例名称：{case_name}")
-                # raise TypeError("引用的用例不能参数化，会影响当前用例本身")
-                # test_case['config']["parameters"] = list_dict_2_dict(params)
-                # case_files.extend(pre_request["test"].pop("case_files", []))
-            else:  # 老数据处理，新数据在步骤中不会有parameters，parameters在整个用例的config中
-                params = step.pop("parameters", [])
-                new_parameter, file_path = self.parameter_handle(params)
-                self._case_files.extend(file_path)
-                config_parameters = copy.deepcopy(case_config.get("parameters", {}))
-                config_parameters.update(new_parameter)
-                case_config["parameters"] = config_parameters
-
-        return steps

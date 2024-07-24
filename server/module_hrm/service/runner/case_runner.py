@@ -271,7 +271,7 @@ class Request(object):
             msg = vali.get("msg", assert_expression)
             msg = parse_data(msg, self.case_runner.case_data.config.variables, self.debugtalk_func_map)
 
-            func = self.debugtalk_func_map.get(assert_key, None)
+            func = self.debugtalk_func_map.get(assert_key, None)  # 自定义断言方法
             if not func and hasattr(comparators, assert_key):
                 func = getattr(comparators, assert_key)
 
