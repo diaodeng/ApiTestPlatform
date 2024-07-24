@@ -121,20 +121,20 @@ class CaseInfoToRun(object):
 
         test_case = self.case_obj
         test_case_dict = self.case_obj.model_dump(by_alias=True)
-        test_case_dict["request"]["config"]["headers"] = key_value_dict(test_case.request.config.headers, True)
-        test_case_dict["request"]["config"]["variables"] = key_value_dict(test_case.request.config.variables)
+        test_case_dict["request"]["config"]["headers"] = key_value_dict(test_case.request.config.headers, True, True)
+        test_case_dict["request"]["config"]["variables"] = key_value_dict(test_case.request.config.variables, checkEnable=True)
         test_case_dict["request"]["config"]["parameters"] = key_value_dict(test_case.request.config.parameters)
 
         teststeps_list = []
         for teststep in test_case.request.teststeps:
             step_dict = teststep.model_dump(by_alias=True)
-            step_dict["variables"] = key_value_dict(teststep.variables)
+            step_dict["variables"] = key_value_dict(teststep.variables, checkEnable=True)
             step_dict["extract"] = key_value_dict(teststep.extract)
 
-            step_dict["request"]["headers"] = key_value_dict(teststep.request.headers, True)
-            step_dict["request"]["data"] = key_value_dict(teststep.request.data)
+            step_dict["request"]["headers"] = key_value_dict(teststep.request.headers, True, True)
+            step_dict["request"]["data"] = key_value_dict(teststep.request.data, checkEnable=True)
             step_dict["request"]["cookies"] = key_value_dict(teststep.request.cookies)
-            step_dict["request"]["params"] = key_value_dict(teststep.request.params)
+            step_dict["request"]["params"] = key_value_dict(teststep.request.params, checkEnable=True)
             teststeps_list.append(step_dict)
         test_case_dict["request"]["teststeps"] = teststeps_list
         TestCase.validate(test_case_dict["request"])
