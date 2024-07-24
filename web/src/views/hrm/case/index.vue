@@ -222,7 +222,7 @@
                     </el-form-item>
                   </el-tab-pane>
                   <el-tab-pane label="headers" name="caseHeaders">
-                    <TableExtract v-model="form.request.config.headers"></TableExtract>
+                    <TableHeaders v-model="form.request.config.headers"></TableHeaders>
                   </el-tab-pane>
                   <el-tab-pane label="variables/parameters/hooks" name="caseVph">
                     variables
@@ -303,7 +303,7 @@
                                 <el-row>
                                   <el-col :span="14">
                                     <el-tab-pane label="header" name="requestHeader">header
-                                      <TableExtract v-model="step.request.headers"></TableExtract>
+                                      <TableHeaders v-model="step.request.headers"></TableHeaders>
                                     </el-tab-pane>
                                     <el-tab-pane label="json" name="requestJson">
                                       <div style="width: 100%">
@@ -391,6 +391,7 @@ import {selectModulList, showModulList} from "@/api/hrm/module";
 import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
 import TableExtract from '../../../components/hrm/table-extract.vue';
+import TableHeaders from '../../../components/hrm/table-headers.vue';
 import TableValidate from '../../../components/hrm/table-validate.vue';
 import TableVariables from '../../../components/hrm/table-variables.vue';
 import TableHooks from '../../../components/hrm/table-hooks.vue';

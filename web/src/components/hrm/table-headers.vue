@@ -1,5 +1,5 @@
 <script setup>
-// variables、data、param使用
+// header、extract使用
 import CommonTable from './table-common.vue';
 
 const selfData = defineModel();
@@ -13,15 +13,11 @@ const tableCols = [
     name: "key",
     prop: "key",
     width: 300
-  }, {
-    name: "type",
-    prop: "type",
-    width: 115,
-    type: 'select'
-  }, {
+  },
+  {
     name: "value",
     prop: "value",
-    width: ""
+    width: 300,
   }, {
     name: "desc",
     prop: "desc",
