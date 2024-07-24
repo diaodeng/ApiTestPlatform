@@ -86,7 +86,7 @@ def key_value_list(keyword, cover_list: list):
     return lists
 
 
-def key_value_dict(cover_list: list[dict] | dict, ignore_type=False):
+def key_value_dict(cover_list: list[dict] | dict, ignore_type=False, checkEnable=False):
     """
     根据数据类型处理字典数据,如果参数cover_list不是列表则原样返回
     [{"key": "key1", "value": "value1", "type": "sting"}，{"key": "key2", "value": "value2", "type": "int"}] => {"key1": "value1", "key2": value2}
@@ -99,7 +99,7 @@ def key_value_dict(cover_list: list[dict] | dict, ignore_type=False):
         return cover_list
     dicts = {}
     for value in cover_list:
-        if not value.pop("enable", False): continue
+        if checkEnable and not value.pop("enable", False): continue
         key = value.pop('key')
         if not key:
             continue
