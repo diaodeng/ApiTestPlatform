@@ -315,7 +315,7 @@
                                         <!--                                            rows="20"-->
                                         <!--                                        >-->
                                         <!--                                        </el-input>-->
-                                        <AceEditor v-model:content="step.request.json"></AceEditor>
+                                        <AceEditor v-model:content="step.request.json" can-set="true"></AceEditor>
                                       </div>
                                     </el-tab-pane>
                                     <el-tab-pane label="data" name="requestData">data
