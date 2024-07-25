@@ -250,20 +250,11 @@
               <el-tab-pane label="teststeps" name="caseSteps">
                 <el-container>
                   <el-main>
-                    <el-tabs tab-position="left" class="demo-tabs" closable @edit="editTabs"
+                    <el-tabs tab-position="left" class="demo-tabs"
                              v-model="activeTestStepName" style="height: 100%">
                       <el-tab-pane v-for="(step, index) in form.request.teststeps" :key="index" :name="index">
                         <template #label>
-                          <span class="custom-tabs-label">
-                            <el-icon><briefcase/></el-icon>
-                            <span>{{ step.name }}</span>
-                            <el-icon :size="20">
-                              <Edit/>
-                            </el-icon>
-                            <el-icon :size="20" @click="editTabs(index, 'add')">
-                              <CirclePlus/>
-                            </el-icon>
-                          </span>
+                          <EditLabel v-model="step.name" :index-key="index" @edit-element="editTabs"></EditLabel>
                         </template>
                         <el-tabs type="" v-model="activeRequestName">
                           <el-tab-pane label="request" name="stepRequest">
@@ -386,6 +377,7 @@
 
 <script setup name="Case">
 import AceEditor from "../../../components/hrm/common/ace-editor.vue"
+import EditLabel from "../../../components/hrm/common/edite-label.vue"
 import {listCase, addCase, delCase, getCase, updateCase, debugCase} from "@/api/hrm/case";
 import {selectModulList, showModulList} from "@/api/hrm/module";
 import {listEnv} from "@/api/hrm/env";
@@ -396,7 +388,7 @@ import TableValidate from '../../../components/hrm/table-validate.vue';
 import TableVariables from '../../../components/hrm/table-variables.vue';
 import TableHooks from '../../../components/hrm/table-hooks.vue';
 import DictSelect from '../../../components/select/dict_select.vue'
-import {Briefcase, CirclePlus, Suitcase} from "@element-plus/icons-vue";
+import {Briefcase, CirclePlus, EditPen, Remove, Right, Suitcase} from "@element-plus/icons-vue";
 // import JsonEditorVue from "json-editor-vue3";
 
 
@@ -504,30 +496,29 @@ const form = ref({
 
 function editTabs(paneName, action) {
   debugger
-  // const testStepsData = form.value.request.teststeps
-  console.log(initFormRequestData.teststeps[0])
   if (action === "remove") {
     const oldActiveStep = activeTestStepName.value;
 
-    const activeTabIndex = paneName !== undefined ? paneName : activeTestStepName.value;
+    const currentTabIndex = paneName !== undefined ? paneName : activeTestStepName.value;
 
-    form.value.request.teststeps.splice(activeTabIndex, 1);
+    form.value.request.teststeps.splice(currentTabIndex, 1);
     if (form.value.request.teststeps.length <= 0) {
       form.value.request.teststeps.push(JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0]);
+      activeTestStepName.value = 0;
       return
     }
 
-    if (oldActiveStep >= activeTabIndex) {
-      if (oldActiveStep === 0){
-          activeTestStepName.value = 0;
-          return;
+    if (oldActiveStep >= currentTabIndex) {
+      if (oldActiveStep === 0) {
+        activeTestStepName.value = 0;
+        return;
       }
       activeTestStepName.value = oldActiveStep - 1;
     }
 
   } else if (action === "add") {
     let newTabName = paneName !== undefined ? paneName + 1 : activeTestStepName.value + 1;
-    form.value.request.teststeps.splice(activeTestStepName.value + 1, 0, JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0])
+    form.value.request.teststeps.splice(newTabName, 0, JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0])
     activeTestStepName.value = newTabName
   } else {
     console.log("other")
