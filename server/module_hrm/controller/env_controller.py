@@ -86,7 +86,8 @@ async def query_detail_system_env(request: Request, env_id: int, query_db: Sessi
     try:
         detail_env_result = EnvService.env_detail_services(query_db, env_id)
         logger.info(f'获取env_id为{env_id}的信息成功')
-        return ResponseUtil.success(data=detail_env_result)
+        dict_content = detail_env_result.model_dump(exclude_unset=True, by_alias=True)
+        return ResponseUtil.success(data=dict_content)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
