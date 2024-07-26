@@ -116,6 +116,6 @@ class EnvService:
         :return: 环境id对应的信息
         """
         env = EnvDao.get_env_detail_by_id(query_db, env_id=env_id)
-        result = EnvModel(**CamelCaseUtil.transform_result(env))
+        result = EnvModelForApi(**CamelCaseUtil.transform_result(env))
 
         return result

@@ -129,8 +129,10 @@ class Request(object):
     def request(self):
         request_data: TRequest = self.__request_data.model_dump(by_alias=True)
 
+        temp_all_val = copy.deepcopy(self.case_runner.case_data.config.variables)
+        temp_all_val.update(self.variables)
         request_data = parse_data(request_data,
-                                  self.case_runner.case_data.config.variables,
+                                  temp_all_val,
                                   self.debugtalk_func_map)
 
         request_data_obj = TRequest(**request_data)
@@ -235,10 +237,8 @@ class Request(object):
         从请求响应中提取变量
         """
         try:
-            res_json = self.response.json()
             for key in self.extract:
-                va = ".".join(self.extract[key].strip().split(".")[1:])  # 为了兼容hr，抽取的jmsepath路劲前有data/body/json等字样需要去掉
-                val = jmespath.search(va, res_json)
+                val = self.__get_validate_key(self.extract[key])
                 self.extract_variable[key] = val
             logger.info(f'{self.step_name} extract_variable: {self.extract_variable}')
             self.logger.info(f'{self.step_name} extract_variable: {json.dumps(self.extract_variable)}')
