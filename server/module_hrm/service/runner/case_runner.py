@@ -1,18 +1,17 @@
 import copy
 import json
-import os.path
 import time
 
 import jmespath
 import requests
 
-from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TConfig, TStep, TRequest
+from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep, TRequest
 from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
 from module_hrm.exceptions import TestFailError
 from module_hrm.utils import debugtalk_common, comparators
-from module_hrm.utils.CaseRunLogHandle import log_context, RunLogCaptureHandler, TestLog
+from module_hrm.utils.CaseRunLogHandle import RunLogCaptureHandler, TestLog
 from module_hrm.utils.parser import parse_data
-from module_hrm.utils.util import replace_variables, compress_text, get_func_map, ensure_str, load_csv_file_to_test
+from module_hrm.utils.util import replace_variables, compress_text, get_func_map, ensure_str
 from utils.log_util import logger
 
 
@@ -127,7 +126,7 @@ class Request(object):
         self.case_runner.status = CaseRunStatus.failed.value
 
     def request(self):
-        request_data: TRequest = self.__request_data.model_dump(by_alias=True)
+        request_data = self.__request_data.model_dump(by_alias=True)
 
         temp_all_val = copy.deepcopy(self.case_runner.case_data.config.variables)
         temp_all_val.update(self.variables)
@@ -259,17 +258,19 @@ class Request(object):
         else:
             validates = self.validates
 
+        temp_var = copy.deepcopy(self.case_runner.case_data.config.variables)
+        temp_var.update(self.extract_variable)
         for vali in validates:
             assert_key = vali["assert"]
-            assert_key = parse_data(assert_key, self.case_runner.case_data.config.variables, self.debugtalk_func_map)
+            assert_key = parse_data(assert_key, temp_var, self.debugtalk_func_map)
             check_key = vali["check"]
-            check_key: str = parse_data(check_key, self.case_runner.case_data.config.variables, self.debugtalk_func_map)
+            check_key: str = parse_data(check_key, temp_var, self.debugtalk_func_map)
             expect = vali["expect"]
-            expect = parse_data(expect, self.case_runner.case_data.config.variables, self.debugtalk_func_map)
+            expect = parse_data(expect, temp_var, self.debugtalk_func_map)
 
             assert_expression = f'{assert_key}({check_key}, {expect})'
             msg = vali.get("msg", assert_expression)
-            msg = parse_data(msg, self.case_runner.case_data.config.variables, self.debugtalk_func_map)
+            msg = parse_data(msg, temp_var, self.debugtalk_func_map)
 
             func = self.debugtalk_func_map.get(assert_key, None)  # 自定义断言方法
             if not func and hasattr(comparators, assert_key):
