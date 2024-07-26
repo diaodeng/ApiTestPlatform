@@ -1,7 +1,7 @@
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import CaseModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
-from module_hrm.entity.vo.env_vo import EnvModel
+from module_hrm.entity.vo.env_vo import EnvModel, EnvModelForApi
 from module_hrm.utils.common import key_value_dict
 
 
@@ -108,7 +108,7 @@ class CaseInfoToDb(object):
 
 
 class CaseInfoToRun(object):
-    def __init__(self, env_obj: EnvModel, case_obj: CaseModelForApi):
+    def __init__(self, env_obj: EnvModelForApi, case_obj: CaseModelForApi):
 
         self.env_obj = env_obj
         self.case_obj = case_obj
@@ -118,11 +118,16 @@ class CaseInfoToRun(object):
         这里会创建目录和保存case数据为文件
         """
         # self._ensure_case_dir()
+        env_varables = {}
+        for group_name, group_value in self.env_obj.env_config.variables.items():
+            env_varables.update(key_value_dict(group_value))
 
         test_case = self.case_obj
         test_case_dict = self.case_obj.model_dump(by_alias=True)
         test_case_dict["request"]["config"]["headers"] = key_value_dict(test_case.request.config.headers, True, True)
-        test_case_dict["request"]["config"]["variables"] = key_value_dict(test_case.request.config.variables, checkEnable=True)
+
+        env_varables.update(key_value_dict(test_case.request.config.variables, checkEnable=True))
+        test_case_dict["request"]["config"]["variables"] = env_varables
         test_case_dict["request"]["config"]["parameters"] = key_value_dict(test_case.request.config.parameters)
 
         teststeps_list = []
