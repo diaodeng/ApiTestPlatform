@@ -22,8 +22,8 @@ class CaptchaService:
         font = ImageFont.truetype(os.path.join(os.path.abspath(os.getcwd()), 'assets', 'font', 'Arial.ttf'), size=30)
 
         # 生成两个0-9之间的随机整数
-        num1 = random.randint(0, 9)
-        num2 = random.randint(0, 9)
+        num1 = random.randint(5, 10)
+        num2 = random.randint(0, 5)
         # 从运算符列表中随机选择一个
         operational_character_list = ['+', '-', '*']
         operational_character = random.choice(operational_character_list)
