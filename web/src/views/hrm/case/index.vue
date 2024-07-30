@@ -158,7 +158,7 @@
           <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
             用例修改
             <el-button-group>
-              <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">确 定</el-button>
+              <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">确定</el-button>
               <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']">执行
               </el-button>
               <el-select placeholder="Select" v-model="selectedEnv" style="width: 115px">
