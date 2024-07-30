@@ -47,4 +47,12 @@ class CaseRunStatus(Enum):
 
 class TstepTypeEnum(Enum):
     api = 1
-    webui = 2
+    websocket = 2
+    webui = 3
+
+
+class RunType(Enum):
+    case = 1
+    api = 2
+    case_debug = 3
+    api_debug = 4

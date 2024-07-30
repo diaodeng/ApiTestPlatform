@@ -6,6 +6,7 @@ from typing import Union, Optional, List, Any, Text, Dict
 from datetime import datetime
 from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
+from module_hrm.enums.enums import RunType
 from utils.common_util import CamelCaseUtil
 
 
@@ -71,7 +72,7 @@ class CaseRunModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
     ids: Optional[int | List | None] = None
-    run_type: Optional[int]
+    run_type: Optional[int] = RunType.case.value
     env: int
     case_data: Optional[CaseModel | dict | None] = None
 
