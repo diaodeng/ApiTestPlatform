@@ -7,8 +7,9 @@ import os
 from enum import Enum
 from typing import Any, Callable, Dict, List, Text, Union
 
-from pydantic import BaseModel, Field, HttpUrl, root_validator, model_validator
+from pydantic import BaseModel, Field, HttpUrl
 
+from module_hrm.enums.enums import TstepTypeEnum
 from utils.utils import get_platform
 
 
@@ -176,11 +177,24 @@ class TStepInclude(BaseModel):
     config: Headers = {}  # {"id":1, "name": "configName"}
 
 
+class TWebsocket(BaseModel):
+    """TWebsocket"""
+    url: Url
+    params: VariablesMapping = {}
+    headers: Headers = {}
+    data: Text | None = ""
+    cookies: Cookies = {}
+    timeout: float = 120
+    allow_redirects: bool = False
+    verify: Verify = False
+    recv_num: int = 1  # 消息接受条数，1表示只接受一条
+
+
 class TStep(BaseModel):
     name: Name
     step_type: int = 1  # 1 api, 2 webUI
     step_id: Text = ""
-    request: Union[TRequest, None] = None
+    request: Union[TRequest, TWebsocket, None] = None
     include: TStepInclude = {}
     testcase: Union[Text, Callable, None] = None
     variables: VariablesMapping = {}
@@ -200,6 +214,7 @@ class TStep(BaseModel):
 
 
 class TestCase(BaseModel):
+    case_id: Any = None
     config: TConfig
     teststeps: List[TStep]
 
@@ -221,8 +236,10 @@ class TestsMapping(BaseModel):
 
 
 class TestCaseTime(BaseModel):
-    start_at: float = 0
-    start_at_iso_format: Text = ""
+    start_time: float = 0
+    end_time: float = 0
+    start_time_iso_format: Text = ""
+    end_time_iso_format: Text = ""
     duration: float = 0
 
 
@@ -244,26 +261,19 @@ class AddressData(BaseModel):
     server_port: int = 0
 
 
-class RequestData(BaseModel):
-    method: MethodEnum = MethodEnum.GET
-    url: Url
-    headers: Headers = {}
-    cookies: Cookies = {}
-    body: Union[Text, bytes, List, Dict, None] = {}
-
-
 class ResponseData(BaseModel):
-    status_code: int
-    headers: Dict
-    cookies: Cookies
+    status_code: int = 200
+    headers: Dict = {}
+    cookies: Cookies = {}
     encoding: Union[Text, None] = None
-    content_type: Text
-    body: Union[Text, bytes, List, Dict, None]
+    content_type: Text = ""
+    body: Union[Text, bytes, List, Dict, None] = ""
+    content: Text|List = ""
 
 
 class ReqRespData(BaseModel):
-    request: RequestData
-    response: ResponseData
+    request: TRequest|TWebsocket|None = None
+    response: ResponseData|None = None
 
 
 class SessionData(BaseModel):
@@ -282,12 +292,16 @@ class StepResult(BaseModel):
     """teststep data, each step maybe corresponding to one request or one testcase"""
 
     name: Text = ""  # teststep name
-    step_type: Text = ""  # teststep type, request or testcase
-    success: bool = False
+    step_type: int = TstepTypeEnum.api.value  # teststep type
+    step_id: Text|int = ""  # teststep id
+    success: bool = True
+    duration: float = 0.0  # teststep duration
+    status: Text = CaseRunStatus.passed.value
     data: Union[SessionData, List["StepResult"]] = None
     elapsed: float = 0.0  # teststep elapsed time
     content_size: float = 0  # response content size
     export_vars: VariablesMapping = {}
+    log: Text = ""
     attachment: Text = ""  # teststep attachment
 
 
@@ -311,11 +325,12 @@ class IStep(object):
 
 class TestCaseSummary(BaseModel):
     name: Text
-    success: bool
-    case_id: Text
-    time: TestCaseTime
-    in_out: TestCaseInOut = {}
-    log: Text = ""
+    success: bool = True
+    status: Text = CaseRunStatus.passed.value
+    case_id: Text | int | None = None
+    time: TestCaseTime = TestCaseTime()
+    in_out: TestCaseInOut = TestCaseInOut()
+    log: Dict[Text, Any] = {}
     step_results: List[StepResult] = []
 
 

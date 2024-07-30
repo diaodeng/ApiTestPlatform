@@ -172,7 +172,7 @@
             </el-button-group>
 
           </el-header>
-          <el-main>
+          <el-main style="max-height: calc(100vh - 95px);">
             <!--            <div>{{ form }}</div>-->
             <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;">
               <el-tab-pane label="config" name="caseConfig">
@@ -250,117 +250,7 @@
               <el-tab-pane label="teststeps" name="caseSteps">
                 <el-container>
                   <el-main>
-                    <el-tabs tab-position="left" class="demo-tabs"
-                             v-model="activeTestStepName" style="height: 100%">
-                      <el-tab-pane v-for="(step, index) in form.request.teststeps" :key="index" :name="index">
-                        <template #label>
-                          <EditLabel v-model="step.name" :index-key="index" @edit-element="editTabs"></EditLabel>
-                        </template>
-                        <el-tabs type="" v-model="activeRequestName">
-                          <el-tab-pane label="request" name="stepRequest">
-                            <el-row :gutter="10" type="flex" class="row-bg">
-                              <el-col :span="2">
-                                <DictSelect :options-dict="sys_request_method" v-model="step.request.method"
-                                            style="width: 130px"></DictSelect>
-                              </el-col>
-                              <el-col :span="22">
-                                <div>
-                                  <el-input
-                                      v-model="step.request.url"
-                                      placeholder="Please input"
-                                  >
-                                    <template #prepend>URL</template>
-                                    <template #append>
-                                      <el-dropdown>
-                                        <span class="el-dropdown-link">
-                                          <el-icon class="el-icon--right">
-                                            <arrow-down/>
-                                          </el-icon>
-                                        </span>
-                                        <template #dropdown>
-                                          <el-dropdown-menu>
-                                            <el-dropdown-item disabled>111</el-dropdown-item>
-                                            <el-dropdown-item disabled>222</el-dropdown-item>
-                                          </el-dropdown-menu>
-                                        </template>
-                                      </el-dropdown>
-                                    </template>
-                                  </el-input>
-                                </div>
-                              </el-col>
-                            </el-row>
-                            <el-row type="flex" class="row-bg" justify="start">
-                              <el-tabs v-model="activeRequestDetailName" style="width: 100%">
-                                <el-row>
-                                  <el-col :span="14">
-                                    <el-tab-pane label="header" name="requestHeader">header
-                                      <TableHeaders v-model="step.request.headers"></TableHeaders>
-                                    </el-tab-pane>
-                                    <el-tab-pane label="json" name="requestJson">
-                                      <div style="width: 100%">
-                                        <!--                                        <el-input-->
-                                        <!--                                            v-model="step.request.json"-->
-                                        <!--                                            style="width: 100%"-->
-                                        <!--                                            placeholder="Please input"-->
-                                        <!--                                            type="textarea"-->
-                                        <!--                                            rows="20"-->
-                                        <!--                                        >-->
-                                        <!--                                        </el-input>-->
-                                        <AceEditor v-model:content="step.request.json" can-set="true"></AceEditor>
-                                      </div>
-                                    </el-tab-pane>
-                                    <el-tab-pane label="data" name="requestData">data
-                                      <TableVariables v-model="step.request.data"></TableVariables>
-                                    </el-tab-pane>
-                                    <el-tab-pane label="param" name="requestParam">param
-                                      <TableVariables v-model="step.request.params"></TableVariables>
-                                    </el-tab-pane>
-                                  </el-col>
-                                  <el-col :span="10">
-                                    <div>
-                                      <el-input
-                                          v-model="responseData"
-                                          style="width: 100%"
-                                          placeholder="Please input"
-                                          type="textarea"
-                                          rows="20"
-                                      >
-                                      </el-input>
-                                    </div>
-                                  </el-col>
-                                </el-row>
-
-                              </el-tabs>
-                            </el-row>
-                          </el-tab-pane>
-                          <el-tab-pane label="extract/validate" name="stepEv">
-                            extract
-                            <TableExtract v-model="step.extract"></TableExtract>
-                            validate
-                            <TableValidate v-model="step.validate"></TableValidate>
-                          </el-tab-pane>
-                          <el-tab-pane label="variables/hooks" name="stepVh">
-                            variables
-                            <TableVariables v-model="step.variables"></TableVariables>
-                            setup_hooks
-                            <TableHooks v-model="step.setup_hooks"></TableHooks>
-                            teardown_hooks
-                            <TableHooks v-model="step.teardown_hooks"></TableHooks>
-                          </el-tab-pane>
-                          <el-tab-pane label="thinktime" name="stepThinktime">
-                            <div>
-                              <el-input
-                                  v-model="step.think_time.limit"
-                                  style="max-width: 600px"
-                                  placeholder="Please input"
-                              >
-                                <template #prepend>thinktime</template>
-                              </el-input>
-                            </div>
-                          </el-tab-pane>
-                        </el-tabs>
-                      </el-tab-pane>
-                    </el-tabs>
+                    <TestStep v-model:test-steps-data="form.request.teststeps" v-model:response-data="responseData"></TestStep>
                   </el-main>
                 </el-container>
 
@@ -376,19 +266,16 @@
 </template>
 
 <script setup name="Case">
-import AceEditor from "../../../components/hrm/common/ace-editor.vue"
-import EditLabel from "../../../components/hrm/common/edite-label.vue"
-import {listCase, addCase, delCase, getCase, updateCase, debugCase} from "@/api/hrm/case";
+import {randomString} from "@/utils/tools.js"
+import {addCase, debugCase, delCase, getCase, listCase, updateCase} from "@/api/hrm/case";
 import {selectModulList, showModulList} from "@/api/hrm/module";
 import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
-import TableExtract from '../../../components/hrm/table-extract.vue';
 import TableHeaders from '../../../components/hrm/table-headers.vue';
-import TableValidate from '../../../components/hrm/table-validate.vue';
 import TableVariables from '../../../components/hrm/table-variables.vue';
 import TableHooks from '../../../components/hrm/table-hooks.vue';
-import DictSelect from '../../../components/select/dict_select.vue'
-import {Briefcase, CirclePlus, EditPen, Remove, Right, Suitcase} from "@element-plus/icons-vue";
+import TestStep from "@/components/hrm/case/step.vue"
+import {initCaseFormData} from "@/components/hrm/data-template.js";
 // import JsonEditorVue from "json-editor-vue3";
 
 
@@ -396,6 +283,7 @@ const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
+
 
 provide("hrm_data_type", hrm_data_type);
 
@@ -419,9 +307,7 @@ const responseData = ref("");
 
 const activeCaseName = ref("caseConfig")
 const activeMessageName = ref("caseMessages")
-const activeRequestName = ref("stepRequest")
-const activeRequestDetailName = ref("requestHeader")
-const activeTestStepName = ref(0)
+
 
 const data = reactive({
   // form: {},
@@ -441,90 +327,11 @@ const data = reactive({
   }
 });
 
-const initFormRequestData = {
-  config: {
-    think_time: {
-      strategy: "",
-      limit: 0
-    },
-    setup_hooks: [],
-    teardown_hooks: [],
-    variables: [],
-    headers: [],
-    parameters: [],
-    base_url: ""
-  },
-  teststeps: [
-    {
-      step_type: 1,
-      step_id: "tmp6eb66f3f-cf37-35bb-b050-1219b8eac0b9",
-      name: "新增测试步骤",
-      request: {
-        dataType: "",
-        method: "GET",
-        url: "",
-        json: {},
-        headers: [],
-        params: [],
-        data: []
-      },
-      include: {
-        config: {
-          id: "",
-          name: ""
-        }
-      },
-      think_time: {
-        time: 0
-      },
-      validate: [],
-      extract: [],
-      variables: [],
-      setup_hooks: [],
-      teardown_hooks: []
-    }
-  ]
-
-}
-
 const {queryParams, rules} = toRefs(data);
 const form = ref({
   include: {},
-  request: JSON.parse(JSON.stringify(initFormRequestData))
+  request: JSON.parse(JSON.stringify(initCaseFormData))
 });
-
-
-function editTabs(paneName, action) {
-  debugger
-  if (action === "remove") {
-    const oldActiveStep = activeTestStepName.value;
-
-    const currentTabIndex = paneName !== undefined ? paneName : activeTestStepName.value;
-
-    form.value.request.teststeps.splice(currentTabIndex, 1);
-    if (form.value.request.teststeps.length <= 0) {
-      form.value.request.teststeps.push(JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0]);
-      activeTestStepName.value = 0;
-      return
-    }
-
-    if (oldActiveStep >= currentTabIndex) {
-      if (oldActiveStep === 0) {
-        activeTestStepName.value = 0;
-        return;
-      }
-      activeTestStepName.value = oldActiveStep - 1;
-    }
-
-  } else if (action === "add") {
-    let newTabName = paneName !== undefined ? paneName + 1 : activeTestStepName.value + 1;
-    form.value.request.teststeps.splice(newTabName, 0, JSON.parse(JSON.stringify(initFormRequestData)).teststeps[0])
-    activeTestStepName.value = newTabName
-  } else {
-    console.log("other")
-  }
-}
-
 
 /** 查询用例列表 */
 function getList() {
@@ -617,9 +424,9 @@ function cancel() {
 function reset() {
   activeCaseName.value = "caseConfig"
   activeMessageName.value = "caseMessages"
-  activeRequestName.value = "stepRequest"
-  activeRequestDetailName.value = "requestHeader"
-  activeTestStepName.value = 0
+  // activeRequestName.value = "stepRequest"
+  // activeRequestDetailName.value = "requestHeader"
+  // activeTestStepName.value = 0
   form.value = {
     caseId: undefined,
     moduleId: undefined,
@@ -630,7 +437,7 @@ function reset() {
     status: "0",
     remark: undefined,
     include: {},
-    request: JSON.parse(JSON.stringify(initFormRequestData))
+    request: JSON.parse(JSON.stringify(initCaseFormData))
   };
   proxy.resetForm("postRef");
 }
@@ -693,7 +500,7 @@ function debugForm() {
       }
       debugCase(req_data).then(response => {
         proxy.$modal.msgSuccess(response.msg);
-        responseData.value = response.data
+        responseData.value = response.data.log
         // open.value = false;
         // getList();
       });
