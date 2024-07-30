@@ -33,3 +33,16 @@ class UploadResponseModel(BaseModel):
     new_file_name: Optional[str] = None
     original_filename: Optional[str] = None
     url: Optional[str] = None
+
+
+class QueryModel(BaseModel):
+    """
+    通用查询模型
+    """
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    page_num: int = 1
+    page_size: int = 10
+    begin_time: Optional[str] = None
+    end_time: Optional[str] = None
+    status: Optional[str] = None
+    id: Optional[int] = None
