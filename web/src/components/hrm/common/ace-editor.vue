@@ -1,4 +1,18 @@
 <script setup>
+import {
+  CirclePlus,
+  Plus,
+  Edit,
+  Message,
+  Star,
+  Delete,
+  Check,
+  Search,
+  Setting,
+  SuccessFilled
+} from "@element-plus/icons-vue";
+import {Json} from "@/utils/tools.js";
+
 onErrorCaptured((error) => {
   console.log(error);
 })
@@ -85,36 +99,83 @@ function updataValue(newVal) {
   modelContent.value = newVal;
 }
 
+function jsonFormat(env) {
+  modelContent.value = Json.beautifulJson(modelContent.value);
+}
+
+function jsonCompress(env) {
+  modelContent.value = Json.compressJson(modelContent.value);
+}
+
+function jsonCompressAndEscape(env) {
+  modelContent.value = Json.compressAndEscape(modelContent.value);
+}
+
+function jsonRemoveEscapeAndBeautiful(env) {
+  const tmpData = Json.removeEscape(modelContent.value);
+  modelContent.value = Json.beautifulJson(tmpData)
+}
 
 </script>
 
 <template>
   <div>
-    <el-row v-if="canSet" class="editor-row">
-      <el-text>语言：</el-text>
-      <el-col :span="5">
-        <el-select v-model="languageValue">
-          <el-option v-for="item in language"
-                     :key="item.value"
-                     :label="item.label"
-                     :value="item.value"
-                     :disabled="!item.enable"
 
-          ></el-option>
-        </el-select>
-      </el-col>
-      <el-text>主题：</el-text>
-      <el-col :span="5">
-        <el-select v-model="themesValue">
-          <el-option v-for="item in themes"
-                     :key="item.value"
-                     :label="item.label"
-                     :value="item.value"
-                     :disabled="!item.enable"
-          ></el-option>
-        </el-select>
-      </el-col>
+    <el-row>
+      <el-tooltip content="格式化JSON" placement="bottom-start" effect="light">
+        <el-button type="primary" size="small" circle @click="jsonFormat">B</el-button>
+      </el-tooltip>
+      <el-tooltip content="压缩JSON" placement="bottom-start" effect="light">
+        <el-button type="success" size="small" circle @click="jsonCompress">C</el-button>
+      </el-tooltip>
+      <el-tooltip content="移除转义符并格式化JSON" placement="bottom-start" effect="light">
+        <el-button type="info" size="small" circle @click="jsonRemoveEscapeAndBeautiful">RB</el-button>
+      </el-tooltip>
+      <el-tooltip content="压缩并转义JSON" placement="bottom-start" effect="light">
+        <el-button type="warning" size="small" circle @click="jsonCompressAndEscape">CE</el-button>
+      </el-tooltip>
+      <div class="flex-grow"></div>
 
+      <el-popover v-if="canSet"
+                  placement="top-start"
+                  title="设置"
+                  :width="200"
+                  trigger="click"
+                  content="this is content, this is content, this is content"
+      >
+        <template #reference>
+          <el-button size="small" circle :icon="Setting"/>
+        </template>
+        <template #default>
+          <el-row v-if="canSet" class="editor-row">
+            <el-text>语言：</el-text>
+            <el-col>
+              <el-select v-model="languageValue">
+                <el-option v-for="item in language"
+                           :key="item.value"
+                           :label="item.label"
+                           :value="item.value"
+                           :disabled="!item.enable"
+
+                ></el-option>
+              </el-select>
+            </el-col>
+          </el-row>
+          <el-row>
+            <el-col>
+              <el-text>主题：</el-text>
+              <el-select v-model="themesValue">
+                <el-option v-for="item in themes"
+                           :key="item.value"
+                           :label="item.label"
+                           :value="item.value"
+                           :disabled="!item.enable"
+                ></el-option>
+              </el-select>
+            </el-col>
+          </el-row>
+        </template>
+      </el-popover>
     </el-row>
 
 
@@ -144,5 +205,7 @@ function updataValue(newVal) {
 </template>
 
 <style scoped lang="scss">
-
+.flex-grow {
+  flex-grow: 1;
+}
 </style>

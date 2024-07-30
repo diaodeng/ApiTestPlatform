@@ -2,15 +2,11 @@
 这个是用例数据详情的模型，不是对应于数据库用例表的数据模型，是对应于数据库用例表的request字段的模型
 """
 
-import datetime
 import os
 from enum import Enum
 from typing import Any, Callable, Dict, List, Text, Union
 
-from pydantic import BaseModel, Field, HttpUrl, root_validator, model_validator, ConfigDict
-from pydantic.alias_generators import to_camel
-
-from utils.utils import get_platform
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class CaseRunStatus(Enum):
@@ -177,11 +173,24 @@ class TStepInclude(BaseModel):
     config: Headers = {}  # {"id":1, "name": "configName"}
 
 
+class TWebsocket(BaseModel):
+    """TWebsocket"""
+    url: Url
+    params: List[Headers] = []
+    headers: List[Headers] = []
+    data: Text | None = ""
+    cookies: List[Cookies] = []
+    timeout: float = 120
+    allow_redirects: bool = False
+    verify: Verify = False
+    recv_num: int = 0  # 消息接受条数，0表示不显示，1表示只接受一条
+
+
 class TStep(BaseModel):
     name: Name
     step_type: int = 1  # 1 api, 2 webUI
     step_id: Text = ""
-    request: Union[TRequest, None] = None
+    request: Union[TRequest, TWebsocket,  None] = None
     include: TStepInclude = {}
     testcase: Union[Text, Callable, None] = None
     variables: List[VariablesMapping] | Text = []
@@ -244,137 +253,3 @@ class AddressData(BaseModel):
     server_ip: Text = "N/A"
     server_port: int = 0
 
-
-class RequestData(BaseModel):
-    method: MethodEnum = MethodEnum.GET
-    url: Url
-    headers: Headers = {}
-    cookies: Cookies = {}
-    body: Union[Text, bytes, List, Dict, None] = {}
-
-
-class ResponseData(BaseModel):
-    status_code: int
-    headers: Dict
-    cookies: Cookies
-    encoding: Union[Text, None] = None
-    content_type: Text
-    body: Union[Text, bytes, List, Dict, None]
-
-
-class ReqRespData(BaseModel):
-    request: RequestData
-    response: ResponseData
-
-
-class SessionData(BaseModel):
-    """request session data, including request, response, validators and stat data"""
-
-    success: bool = False
-    # in most cases, req_resps only contains one request & response
-    # while when 30X redirect occurs, req_resps will contain multiple request & response
-    req_resps: List[ReqRespData] = []
-    stat: RequestStat = RequestStat()
-    address: AddressData = AddressData()
-    validators: Dict = {}
-
-
-class StepResult(BaseModel):
-    """teststep data, each step maybe corresponding to one request or one testcase"""
-
-    name: Text = ""  # teststep name
-    step_type: Text = ""  # teststep type, request or testcase
-    success: bool = False
-    data: Union[SessionData, List["StepResult"]] = None
-    elapsed: float = 0.0  # teststep elapsed time
-    content_size: float = 0  # response content size
-    export_vars: VariablesMapping = {}
-    attachment: Text = ""  # teststep attachment
-
-
-StepResult.update_forward_refs()
-
-
-class IStep(object):
-    def name(self) -> str:
-        raise NotImplementedError
-
-    def type(self) -> str:
-        raise NotImplementedError
-
-    def struct(self) -> TStep:
-        raise NotImplementedError
-
-    def run(self, runner) -> StepResult:
-        # runner: HttpRunner
-        raise NotImplementedError
-
-
-class TestCaseSummary(BaseModel):
-    name: Text
-    success: bool
-    case_id: Text
-    time: TestCaseTime
-    in_out: TestCaseInOut = {}
-    log: Text = ""
-    step_results: List[StepResult] = []
-
-
-class PlatformInfo(BaseModel):
-    httprunner_version: Text
-    python_version: Text
-    platform: Text
-
-
-class Stat(BaseModel):
-    total: int = 0
-    success: int = 0
-    fail: int = 0
-
-
-class TestSuiteSummary(BaseModel):
-    success: bool = False
-    stat: Stat = Stat()
-    time: TestCaseTime = TestCaseTime()
-    platform: PlatformInfo
-    testcases: List[TestCaseSummary]
-
-
-"""
-============================
-测试报告相关
-============================
-"""
-
-
-class CaseRunResultCount(BaseModel):
-    total: int = 0
-    passed: int = 0
-    failed: int = 0
-    skipped: int = 0
-
-
-class ReportDtailToView(BaseModel):
-    """
-    测试报告用于前端显示的模型
-    """
-    exitstatus: int = 0
-    status_items: List[str] = [st.value for st in CaseRunStatus]
-    platform: Dict = get_platform()
-    start_time: str = ''
-    results: List[Dict] = []
-    status_count: Dict[str, int] | CaseRunResultCount = {}
-
-
-class ReportInfo(BaseModel):
-    """
-    测试报告入库数据模型
-    """
-    name: str = "",
-    status: bool = False,
-    successes: int = 0,  # 成功case数量
-    test_run: int = 0,  # 执行case总数
-    run_test_time: str = datetime.datetime.now().strftime("%y-%m-%d %H:%M:%S"),  # 开始执行的时间,
-    report_path: str = "",  # 报告路径
-    report_id: Any = None,  # 报告ID
-    type: str = 'html'
