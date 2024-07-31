@@ -65,14 +65,14 @@
         <el-container style="height: 100%">
           <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
             <el-button-group>
-              <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:debugtalk:edit']">保存</el-button>
-              <el-button type="primary" @click="cancel" >取消</el-button>
+              <el-button type="primary" icon="Save" @click="submitForm" v-hasPermi="['hrm:debugtalk:edit']">保存</el-button>
+              <el-button type="primary" icon="Cancel" @click="cancel" >取消</el-button>
             </el-button-group>
           </el-header>
 
           <el-main style="max-height: calc(100vh - 95px);">
 
-            <AceEditor v-model:content="form.debugtalk" can-set="true" languageValue="python"></AceEditor>
+            <AceEditor v-model:content="form.debugtalk" can-set="true" lang="python" themes="monokai"></AceEditor>
 
           </el-main>
         </el-container>
