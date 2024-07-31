@@ -59,3 +59,17 @@ export const initCaseFormData = {
     teststeps: [initStepData]
 
 }
+
+export const initDebugTalkFormData ={
+    debugtalk: "def setup():" +
+        "pass" +
+        "" +
+        "" +
+        "" +
+        "" +
+        "def tearndown():" +
+        "pass" +
+        "" +
+        "" +
+        ""
+}
