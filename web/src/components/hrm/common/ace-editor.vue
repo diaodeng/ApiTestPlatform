@@ -1,32 +1,33 @@
 <script setup>
-import {
-  CirclePlus,
-  Plus,
-  Edit,
-  Message,
-  Star,
-  Delete,
-  Check,
-  Search,
-  Setting,
-  SuccessFilled
-} from "@element-plus/icons-vue";
+import {Setting} from "@element-plus/icons-vue";
 import {Json} from "@/utils/tools.js";
+import {VAceEditor} from 'vue3-ace-editor';
+import "./aceConfig.js"
 
 onErrorCaptured((error) => {
   console.log(error);
 })
-import {VAceEditor} from 'vue3-ace-editor';
-import "./aceConfig.js"
-import ace from "ace-builds/src-noconflict/ace"
-// import "ace-builds/src-noconflict/mode-json"
-// import "ace-builds/src-noconflict/theme-github"
-// import workerJsonUrl from 'ace-builds/src-noconflict/worker-json?url'
 
-// ace.config.set("basePath", "/node_modules/ace-builds/src-noconflict")
-// ace.config.setModuleUrl("ace/mode/json_worker", workerJsonUrl)
-
-const props = defineProps(["canSet", "lang", "theme", "height", "width"]);
+const props = defineProps({
+  canSet: {
+    type: Boolean,
+    default: false
+  },
+  lang: {
+    type: String,
+    default: "json"
+  },
+  themes: {
+    type: String,
+    default: "github"
+  },
+  height: {
+    type: [String, Number]
+  },
+  width: {
+    type: [String, Number]
+  }
+});
 const modelContent = defineModel("content");
 const languageValue = ref("json");
 const themesValue = ref("github");
@@ -72,6 +73,9 @@ const themes = ref([{
   "value": "eclipse",
   "enable": true
 }])
+
+languageValue.value = props.lang;
+themesValue.value = props.themes;
 
 onMounted(() => {
   console.log("挂载了编辑器")
@@ -122,18 +126,21 @@ function jsonRemoveEscapeAndBeautiful(env) {
   <div>
 
     <el-row>
-      <el-tooltip content="格式化JSON" placement="bottom-start" effect="light">
-        <el-button type="primary" size="small" circle @click="jsonFormat">B</el-button>
-      </el-tooltip>
-      <el-tooltip content="压缩JSON" placement="bottom-start" effect="light">
-        <el-button type="success" size="small" circle @click="jsonCompress">C</el-button>
-      </el-tooltip>
-      <el-tooltip content="移除转义符并格式化JSON" placement="bottom-start" effect="light">
-        <el-button type="info" size="small" circle @click="jsonRemoveEscapeAndBeautiful">RB</el-button>
-      </el-tooltip>
-      <el-tooltip content="压缩并转义JSON" placement="bottom-start" effect="light">
-        <el-button type="warning" size="small" circle @click="jsonCompressAndEscape">CE</el-button>
-      </el-tooltip>
+      <div v-if="languageValue === 'json'">
+        <el-tooltip content="格式化JSON" placement="bottom-start" effect="light">
+          <el-button type="primary" size="small" circle @click="jsonFormat">B</el-button>
+        </el-tooltip>
+        <el-tooltip content="压缩JSON" placement="bottom-start" effect="light">
+          <el-button type="success" size="small" circle @click="jsonCompress">C</el-button>
+        </el-tooltip>
+        <el-tooltip content="移除转义符并格式化JSON" placement="bottom-start" effect="light">
+          <el-button type="info" size="small" circle @click="jsonRemoveEscapeAndBeautiful">RB</el-button>
+        </el-tooltip>
+        <el-tooltip content="压缩并转义JSON" placement="bottom-start" effect="light">
+          <el-button type="warning" size="small" circle @click="jsonCompressAndEscape">CE</el-button>
+        </el-tooltip>
+      </div>
+
       <div class="flex-grow"></div>
 
       <el-popover v-if="canSet"
