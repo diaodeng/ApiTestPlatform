@@ -39,7 +39,7 @@ class DebugTalkService:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: DebugTalk列表信息对象
         """
-        debugtalk_list_result = DebugTalkDao.get_debugtalk_list(query_db)
+        debugtalk_list_result = DebugTalkDao.get_debugtalk_list(query_db, page_object, data_scope_sql)
         return CamelCaseUtil.transform_result(debugtalk_list_result)
 
     @classmethod
