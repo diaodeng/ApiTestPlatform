@@ -36,7 +36,8 @@
          :default-expand-all="isExpandAll">
          <el-table-column prop="debugtalkId" label="ID" width="120"></el-table-column>
          <el-table-column label="项目ID" width="140" prop="projectId" align="center"></el-table-column>
-         <el-table-column label="所属项目" width="260" :formatter="formatProject" align="center"></el-table-column>
+         <el-table-column label="所属项目" width="260" prop="projectName" align="center"></el-table-column>
+<!--         <el-table-column label="所属项目" width="260" :formatter="formatProject" align="center"></el-table-column>-->
          <el-table-column align="center" label="DebugTalk" width="260">
            <template #default="scope">
              <el-button link type="primary" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:debugtalk:edit']">debugtalk.py</el-button>
