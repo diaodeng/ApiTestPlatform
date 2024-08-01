@@ -56,3 +56,10 @@ class RunType(Enum):
     api = 2
     case_debug = 3
     api_debug = 4
+
+
+class RunModeEnum(Enum):
+    case = 1
+    model = 2
+    suite = 3
+    project = 4

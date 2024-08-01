@@ -10,14 +10,14 @@ class CaseInfoHandle():
     用例、配置、API数据处理
     """
 
-    def __init__(self, case_obj: CaseModel | CaseModelForApi | dict):
+    def __init__(self, case_obj: CaseModel | CaseModelForApi | dict = None):
         self.case_obj = self.__ensure_obj(case_obj)
 
     def __ensure_obj(self, case_obj):
         """
 
         """
-        if not isinstance(case_obj, CaseModelForApi):
+        if case_obj and not isinstance(case_obj, CaseModelForApi):
             case_obj = CaseModelForApi(**case_obj)
         return case_obj
 
@@ -143,7 +143,9 @@ class CaseInfoToRun(object):
             teststeps_list.append(step_dict)
         test_case_dict["request"]["teststeps"] = teststeps_list
         TestCase.validate(test_case_dict["request"])
-        return TestCase(**test_case_dict["request"])
+        test_case_obj = TestCase(**test_case_dict["request"])
+        test_case_obj.case_id = self.case_obj.case_id
+        return test_case_obj
 
     def debug_data(self) -> TestCase:
         """

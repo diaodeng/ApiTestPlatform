@@ -13,7 +13,7 @@ class HrmCase(Base, BaseModel):
         verbose_name = '用例信息'
     __tablename__ = 'hrm_case'
 
-    case_id = Column(BigInteger, unique=True, primary_key=True, nullable=False, default=snowIdWorker.get_id(), comment='用例、配置ID')
+    case_id = Column(BigInteger, unique=True, primary_key=True, nullable=False, default=snowIdWorker.get_id, comment='用例、配置ID')
     type = Column(Integer, comment='test/config', default=1)
     case_name = Column(String(120), nullable=False, comment='用例名称')
     project_id = Column(BigInteger, nullable=True, comment='项目ID')

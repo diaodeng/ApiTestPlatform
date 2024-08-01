@@ -73,6 +73,7 @@ class CaseRunModel(BaseModel):
 
     ids: Optional[int | List | None] = None
     run_type: Optional[int] = RunType.case.value
+    run_model: Optional[int|None] = None
     env: int
     case_data: Optional[CaseModel | dict | None] = None
 

@@ -129,15 +129,22 @@
       </el-table-column>
       <el-table-column label="操作" width="200" align="center" class-name="small-padding fixed-width">
         <template #default="scope">
-          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:detail']">
-            查看
+          <el-button link type="primary" icon="Histogram" @click="showHistory(scope.row)" v-hasPermi="['hrm:case:history']"
+                     title="执行历史">
+
+          </el-button>
+          <el-button link type="primary" icon="View" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:detail']"
+                     title="查看">
+
           </el-button>
           <el-button link type="warning" icon="Edit" v-loading="loading" @click="handleUpdate(scope.row)"
-                     v-hasPermi="['hrm:case:edit']">
-            修改
+                     v-hasPermi="['hrm:case:edit']" title="编辑">
+          </el-button>
+          <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
+                     v-hasPermi="['hrm:case:edit']" title="运行">
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
-                     v-hasPermi="['hrm:case:remove']">删除
+                     v-hasPermi="['hrm:case:remove']" title="删除">
           </el-button>
         </template>
       </el-table-column>
@@ -250,7 +257,8 @@
               <el-tab-pane label="teststeps" name="caseSteps">
                 <el-container>
                   <el-main>
-                    <TestStep v-model:test-steps-data="form.request.teststeps" v-model:response-data="responseData"></TestStep>
+                    <TestStep v-model:test-steps-data="form.request.teststeps"
+                              v-model:response-data="responseData"></TestStep>
                   </el-main>
                 </el-container>
 
@@ -262,12 +270,25 @@
 
       </el-form>
     </el-dialog>
+
+
+    <el-dialog fullscreen :title="form.case_name" v-model="history" append-to-body>
+      <el-container style="height: 100%">
+        <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
+        <!--          </el-header>-->
+        <el-main style="max-height: calc(100vh - 95px);">
+          <RunDetail :run-id="currentRunId"></RunDetail>
+        </el-main>
+      </el-container>
+    </el-dialog>
+
   </div>
 </template>
 
 <script setup name="Case">
 import {randomString} from "@/utils/tools.js"
 import {addCase, debugCase, delCase, getCase, listCase, updateCase} from "@/api/hrm/case";
+import {testRun} from "@/api/hrm/run_detail.js";
 import {selectModulList, showModulList} from "@/api/hrm/module";
 import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
@@ -276,6 +297,8 @@ import TableVariables from '../../../components/hrm/table-variables.vue';
 import TableHooks from '../../../components/hrm/table-hooks.vue';
 import TestStep from "@/components/hrm/case/step.vue"
 import {initCaseFormData} from "@/components/hrm/data-template.js";
+import RunDetail from '@/components/hrm/common/run-detail.vue';
+import { runModelEnum } from "@/components/hrm/enum.js";
 // import JsonEditorVue from "json-editor-vue3";
 
 
@@ -305,6 +328,9 @@ const title = ref("");
 const selectedEnv = ref("");
 const responseData = ref("");
 
+const history = ref(false);
+const currentRunId = ref();
+
 const activeCaseName = ref("caseConfig")
 const activeMessageName = ref("caseMessages")
 
@@ -332,6 +358,19 @@ const form = ref({
   include: {},
   request: JSON.parse(JSON.stringify(initCaseFormData))
 });
+
+
+function runTest(row) {
+  let data = {
+    ids: [row.caseId],
+    runModel: runModelEnum.case,
+    env: 1746540889545728
+  }
+  testRun(data).then(response => {
+    alert('执行完成');
+  })
+}
+
 
 /** 查询用例列表 */
 function getList() {
@@ -486,6 +525,12 @@ function handleUpdate(row) {
     open.value = true;
     title.value = "修改用例";
   });
+}
+
+function showHistory(row) {
+  const caseId = row.caseId || ids.value;
+  currentRunId.value = caseId;
+  history.value = true;
 }
 
 function debugForm() {

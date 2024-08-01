@@ -7,11 +7,14 @@ from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.do.suite_do import HrmSuite, HrmSuiteDetail
+from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_vo_detail_for_run import TestCaseSummary
 from module_hrm.entity.vo.env_vo import EnvModel
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle
 from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkService
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.utils.util import compress_text
+from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from module_hrm.enums.enums import DataType
 from sqlalchemy.orm import Session
@@ -23,45 +26,30 @@ if "WSL" in str(platform.platform()):
     multiprocessing.set_start_method("spawn")
 
 
-def run_by_single(query_db: Session, index, env_obj, func_map=None):
+async def run_by_single(query_db: Session, index, env_obj, func_map=None) -> list[TestCaseSummary]:
     case_data_obj = CaseDao.get_case_by_id(query_db, index)
-    test_case = CaseInfoHandle().from_db(case_data_obj).toRun(env_obj).run_data()
-    case_res_datas = TestRunner(test_case, func_map).start()
+    data_model = CaseModelForApi(**CamelCaseUtil.transform_result(case_data_obj))
+    test_case = CaseInfoHandle().from_db(data_model).toRun(env_obj).run_data()
+    runner = TestRunner(test_case, func_map)
+    case_res_datas = await runner.start()
     all_result = []
     for case_res_data in case_res_datas:
-        case_result_data = case_res_data.results
-        case_res_data_json = {'status': case_res_data.status,
-                              'steps': "",
-                              'name': case_res_data.case_data.config.name,
-                              'duration': case_res_data.duration,
-                              "id": index
-                              }
-        steps_list = []
-        for res in case_result_data:
-            data = {"name": res.name,
-                    "logs": res.logs,
-                    'status': res.status,
-                    "step_id": res.step_id,
-                    "duration": res.duration
-                    }
-            steps_list.append(data)
-        case_res_data_json['steps'] = compress_text(json.dumps(steps_list))
-        all_result.append(case_res_data_json)
+        all_result.append(case_res_data.result)
 
     return all_result
 
 
-def run_by_suite(query_db: Session, index, env, func_map=None):
+async def run_by_suite(query_db: Session, index, env, func_map=None):
     case_ids = query_db.query(HrmSuiteDetail.case_id).filter(HrmSuiteDetail.suite_id == index).distinct()
     include_case = list(case_ids)
     result = []
     for val in include_case:
-        res_data = run_by_single(val, env, func_map)
+        res_data = await run_by_single(val, env, func_map)
         result.extend(res_data)
     return result
 
 
-def run_by_batch(query_db: Session, test_list: list[int | str], env_id, type: int=None, mode=False, user=None):
+async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, type: int=None, mode=False, user=None) -> list[TestCaseSummary]:
     """
     批量组装用例数据
     :param test_list:
@@ -87,30 +75,30 @@ def run_by_batch(query_db: Session, test_list: list[int | str], env_id, type: in
         project_ids = list(set(project_ids))
 
     # init_data_handle(path, project_names)
-    debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(project_ids=project_ids)
+    debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(query_db=query_db, project_ids=project_ids)
     debugtalk_obj = DebugTalkHandler(debugtalk_source)
     debugtalk_func_map = debugtalk_obj.func_map(user)
-
-    env_obj = EnvModel(**EnvDao.get_env_by_id(query_db, env_id))
+    env_data = CamelCaseUtil.transform_result(EnvDao.get_env_by_id(query_db, env_id))
+    env_obj = EnvModel.from_orm(env_data)
 
     try:
         result = []
         for value in test_list:
             if type == DataType.project:
-                res_data = run_by_project(query_db, value, env_obj, debugtalk_func_map)
+                res_data = await run_by_project(query_db, value, env_obj, debugtalk_func_map)
             elif type == DataType.module:
-                res_data = run_by_module(query_db, value, env_obj, debugtalk_func_map)
+                res_data = await run_by_module(query_db, value, env_obj, debugtalk_func_map)
             elif type == DataType.suite:
-                res_data = run_by_suite(query_db, value, env_obj, debugtalk_func_map)
+                res_data = await run_by_suite(query_db, value, env_obj, debugtalk_func_map)
             else:
-                res_data = run_by_single(query_db, value, env_obj, debugtalk_func_map)
+                res_data = await run_by_single(query_db, value, env_obj, debugtalk_func_map)
             result.extend(res_data)
     finally:
         debugtalk_obj.del_import()
     return result
 
 
-def run_by_module(query_db: Session, id, env, func_map=None):
+async def run_by_module(query_db: Session, id, env, func_map=None):
     """
     组装模块用例
     :param id: int or str：模块索引
@@ -121,12 +109,12 @@ def run_by_module(query_db: Session, id, env, func_map=None):
     test_index_list = query_db.query(HrmCase.case_id).filter(HrmCase.module_id == id).distinct()
     result = []
     for index in test_index_list:
-        res_data = run_by_single(query_db, index[0], env, func_map)
+        res_data = await run_by_single(query_db, index[0], env, func_map)
         result.extend(res_data)
     return result
 
 
-def run_by_project(query_db: Session, id, env_obj, func_map=None):
+async def run_by_project(query_db: Session, id, env_obj, func_map=None):
     """
     组装项目用例
     :param id: int or str：项目索引
@@ -137,7 +125,7 @@ def run_by_project(query_db: Session, id, env_obj, func_map=None):
     result = []
     for index in module_index_list:
         module_id = index[0]
-        res_data = run_by_module(query_db, module_id, env_obj, func_map)
+        res_data = await run_by_module(query_db, module_id, env_obj, func_map)
         result.extend(res_data)
     return result
 
