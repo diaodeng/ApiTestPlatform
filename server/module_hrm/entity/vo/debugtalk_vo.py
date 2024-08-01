@@ -27,6 +27,8 @@ class DebugTalkQueryModel(DebugTalkModel):
     """
     DebugTalk管理不分页查询模型
     """
+    project_id: Optional[int] = None
+    status: Optional[str] = None
     begin_time: Optional[str] = None
     end_time: Optional[str] = None
 
