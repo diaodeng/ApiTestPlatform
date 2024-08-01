@@ -9,6 +9,7 @@ export function listCase(query) {
   })
 }
 
+
 // 查询用例详细
 export function getCase(caseId) {
   return request({

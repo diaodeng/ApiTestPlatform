@@ -1,4 +1,3 @@
-import datetime
 import importlib.util
 import sys
 
@@ -133,10 +132,10 @@ class DebugTalkService:
         all_source = ["import logging", "logger = logging.getLogger('HttpRunnerManager')"]
 
         common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id == None)).first().debugtalk
+            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id == None)).first()
 
         if common_debugtalk:
-            all_source.append(common_debugtalk)
+            all_source.append(common_debugtalk.debugtalk)
 
         if case_ids:
             case_projects = query_db.query(HrmCase).filter(HrmCase.case_id.in_(case_ids)).group_by(HrmCase.project_id)
@@ -176,7 +175,7 @@ class DebugTalkHandler:
         return self.debugtalks_data
 
     def _import_debugtalk(self, user=None):
-        self.module_name = f'Debugtalk{user or ""}{int(datetime.datetime.now().timestamp() * 100000)}'
+        self.module_name = f'Debugtalk{user or ""}{int(datetime.now().timestamp() * 100000)}'
         logger.info(f"开始载入模块 {self.module_name}")
         # 创建模块规范对象
         spec = importlib.util.spec_from_loader(self.module_name, loader=None)

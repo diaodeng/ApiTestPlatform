@@ -13,11 +13,11 @@ class HrmRunDetail(Base, BaseModel):
 
     __tablename__ = 'hrm_run_detail'
 
-    detail_id = Column(BigInteger, unique=True, primary_key=True, nullable=False, default=snowIdWorker.get_id(),
+    detail_id = Column(BigInteger, unique=True, primary_key=True, nullable=False, default=snowIdWorker.get_id,
                        comment='报告ID')
     run_id = Column(BigInteger, comment='用例ID/api_id')
     report_id = Column(BigInteger, nullable=True, default=None, comment='测试报告ID')
-    run_name = Column(BigInteger, comment='用例名称/api_名称')
+    run_name = Column(String(200), comment='用例名称/api_名称')
     run_type = Column(BigInteger, nullable=False, comment='执行方式：1-用例，2-api，3-case_debug, 4-api_debug')
     run_start_time = Column(DateTime, nullable=False, default=datetime.now(), comment='执行开始时间')
     run_end_time = Column(DateTime, nullable=False, default=datetime.now(), comment='执行结束时间')

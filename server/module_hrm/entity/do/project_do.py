@@ -14,7 +14,7 @@ class HrmProject(Base, BaseModel):
         verbose_name = '项目管理'
     __tablename__ = 'hrm_project'
 
-    project_id = Column(BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id(), comment='项目id')
+    project_id = Column(BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment='项目id')
     project_name = Column(String(120), nullable=True, default='', comment='项目名称')
     responsible_name = Column(String(30), nullable=True, default='', comment='负责人')
     test_user = Column(String(30), nullable=True, default='', comment='测试人员')

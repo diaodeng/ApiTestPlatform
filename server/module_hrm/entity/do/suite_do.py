@@ -10,7 +10,7 @@ class HrmSuite(Base, BaseModel):
         verbose_name = '用例集合'
     __tablename__ = 'hrm_suite'
 
-    suite_id = Column(BigInteger, unique=True, primary_key=True, nullable=False, default=snowIdWorker.get_id(), comment='套件ID')
+    suite_id = Column(BigInteger, unique=True, primary_key=True, nullable=False, default=snowIdWorker.get_id, comment='套件ID')
     project_id = Column(BigInteger, nullable=False, comment='项目id')
     suite_name = Column(String(120), nullable=False, comment='套件名')
 

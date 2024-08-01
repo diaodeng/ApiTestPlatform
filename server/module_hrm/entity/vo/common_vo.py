@@ -42,7 +42,19 @@ class QueryModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
     page_num: int = 1
     page_size: int = 10
-    begin_time: Optional[str] = None
-    end_time: Optional[str] = None
-    status: Optional[str] = None
-    id: Optional[int] = None
+    begin_time: Optional[Any] = None
+    end_time: Optional[Any] = None
+    status: Optional[Any] = None
+    id: Optional[Any] = None
+
+
+class CommonDataModel(BaseModel):
+    """
+    通用数据模型（包含数据库对应的通用字段）
+    """
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    id: int | None = None
+    create_by: Optional[str | Any] = None
+    update_by: Optional[str | Any] = None
+    create_time: Optional[str | Any] = None
+    update_time: Optional[str | Any] = None
