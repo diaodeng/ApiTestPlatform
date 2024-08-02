@@ -1,4 +1,8 @@
 <script setup>
+
+/*
+* 各种配置小表哥的通用模板
+* */
 import SelectDataType from "@/components/hrm/select-dataType.vue";
 import {ElMessageBox} from 'element-plus';
 

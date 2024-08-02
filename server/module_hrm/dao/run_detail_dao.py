@@ -75,6 +75,9 @@ class RunDetailDao:
         if query_info.report_id:
             query = query.filter(HrmRunDetail.report_id == query_info.report_id)
 
+        if query_info.run_name:
+            query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
+
         result = PageUtil.paginate(query, query_info.page_num, query_info.page_size, True)
         rows = []
         for row in result.rows:

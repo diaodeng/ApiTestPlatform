@@ -8,16 +8,6 @@ class PageType(Enum):
     config = 4
 
 
-class CaseType(Enum):
-    case = 1
-    config = 2
-
-
-class ApiType(Enum):
-    api = 2
-    folder = 1
-
-
 class DataType(Enum):
     project = 1
     module = 2
