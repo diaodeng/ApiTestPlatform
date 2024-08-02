@@ -1,5 +1,5 @@
 <template>
-  <div class="app-container">
+  <div class="hrm-report">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
       <el-form-item label="报告名称" prop="reportName">
         <el-input
@@ -23,7 +23,7 @@
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
         <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
-        <el-button type="danger" icon="Refresh" @click="handleDelete" v-hasPermi="['hrm:report:delete']">删除</el-button>
+        <el-button type="danger" icon="Delete" @click="handleDelete" v-hasPermi="['hrm:report:delete']">删除</el-button>
       </el-form-item>
     </el-form>
 
@@ -84,7 +84,6 @@
 </template>
 
 <script setup name="RunDetail">
-import * as ApiRunDetail from "@/api/hrm/run_detail.js";
 import * as ReportApi from "@/api/hrm/report.js";
 import {runDetailViewTypeEnum} from "@/components/hrm/enum.js";
 import DictTag from "@/components/DictTag/index.vue";
@@ -96,7 +95,6 @@ const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {hrm_run_status} = proxy.useDict("hrm_run_status");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
-const props = defineProps(["runId", "viewType"]);
 
 
 provide("hrm_data_type", hrm_data_type);

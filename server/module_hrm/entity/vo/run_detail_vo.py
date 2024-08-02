@@ -15,7 +15,8 @@ class RunDetailQueryModel(QueryModel):
     """
     run_id: Any = None
     run_type: Any = None
-    report_id: int | Any = None
+    report_id: Any = None
+    run_name: Text | None = None
 
 
 class RunDetailDelModel(BaseModel):

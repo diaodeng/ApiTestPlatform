@@ -1,5 +1,5 @@
 <script setup>
-import CommonTable from './table-common.vue';
+import CommonTable from './table-config-common.vue';
 
 const props = defineProps(["data"])
 const selfData = defineModel();

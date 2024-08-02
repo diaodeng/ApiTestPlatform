@@ -129,19 +129,20 @@
       </el-table-column>
       <el-table-column label="操作" width="200" align="center" class-name="small-padding fixed-width">
         <template #default="scope">
-          <el-button link type="primary" icon="Histogram" @click="showHistory(scope.row)" v-hasPermi="['hrm:case:history']"
-                     title="执行历史">
+          <el-button link type="primary" icon="Histogram" @click="showHistory(scope.row)"
+                     v-hasPermi="['hrm:case:history']"
+                     title="执行历史" v-if="hrmDataType === HrmDataTypeEnum.case">
 
           </el-button>
-          <el-button link type="primary" icon="View" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:detail']"
-                     title="查看">
+          <!--          <el-button link type="primary" icon="View" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:case:detail']"-->
+          <!--                     title="查看">-->
 
-          </el-button>
+          <!--          </el-button>-->
           <el-button link type="warning" icon="Edit" v-loading="loading" @click="handleUpdate(scope.row)"
                      v-hasPermi="['hrm:case:edit']" title="编辑">
           </el-button>
           <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
-                     v-hasPermi="['hrm:case:edit']" title="运行">
+                     v-hasPermi="['hrm:case:edit']" title="运行" v-if="hrmDataType === HrmDataTypeEnum.case">
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
                      v-hasPermi="['hrm:case:remove']" title="删除">
@@ -159,16 +160,17 @@
     />
 
     <!-- 添加或修改用例对话框 -->
-    <el-dialog fullscreen :title="title" v-model="open" append-to-body>
+    <el-dialog fullscreen :title="title + '【' + form.caseId + '】' + form.caseName" v-model="open" append-to-body>
       <el-form ref="postRef" :model="form" :rules="rules" label-width="100px" style="height: 100%">
         <el-container style="height: 100%">
           <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
-            用例修改
             <el-button-group>
-              <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">确定</el-button>
-              <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']">执行
+              <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">保存</el-button>
+              <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']"
+                         v-if="hrmDataType === HrmDataTypeEnum.case">调试
               </el-button>
-              <el-select placeholder="Select" v-model="selectedEnv" style="width: 115px">
+              <el-select placeholder="Select" v-model="selectedEnv" style="width: 115px"
+                         v-if="hrmDataType === HrmDataTypeEnum.case">
                 <el-option
                     v-for="option in envOptions"
                     :key="option.envId"
@@ -180,79 +182,12 @@
 
           </el-header>
           <el-main style="max-height: calc(100vh - 95px);">
-            <!--            <div>{{ form }}</div>-->
-            <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;">
+            <CaseConfig v-model:form-data="form" :project-options="projectOptions"
+                        v-if="hrmDataType === HrmDataTypeEnum.config"></CaseConfig>
+            <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;"
+                     v-else-if="hrmDataType === HrmDataTypeEnum.case">
               <el-tab-pane label="config" name="caseConfig">
-                <el-tabs type="" v-model="activeMessageName">
-                  <el-tab-pane label="messages" name="caseMessages">
-                    <el-form-item label="用例名称" prop="caseName">
-                      <el-input v-model="form.caseName" placeholder="请输入用例名称" clearable/>
-                    </el-form-item>
-                    <el-form-item label="所属项目" prop="projectId">
-                      <el-select v-model="form.projectId" placeholder="请选择" @change="resetModuleHandl">
-                        <el-option
-                            v-for="option in projectOptions"
-                            :key="option.projectId"
-                            :label="option.projectName"
-                            :value="option.projectId">
-                        </el-option>
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item label="所属模块" prop="moduleId">
-                      <el-select v-model="form.moduleId" placeholder="请选择">
-                        <el-option
-                            v-for="option in moduleOptionsHandl"
-                            :key="option.moduleId"
-                            :label="option.moduleName"
-                            :value="option.moduleId">
-                        </el-option>
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item label="注释" prop="notes">
-                      <el-input v-model="form.notes" placeholder="注释"/>
-                    </el-form-item>
-                    <el-form-item label="用例顺序" prop="sort">
-                      <el-input-number v-model="form.sort" controls-position="right" :min="0"/>
-                    </el-form-item>
-                    <el-form-item label="用例状态" prop="status">
-                      <el-radio-group v-model="form.status">
-                        <el-radio
-                            v-for="dict in sys_normal_disable"
-                            :key="dict.value"
-                            :label="dict.label"
-                            :value="dict.value"
-                        ></el-radio>
-                      </el-radio-group>
-                    </el-form-item>
-                    <el-form-item label="备注" prop="remark">
-                      <el-input v-model="form.remark" type="textarea" placeholder="请输入内容"/>
-                    </el-form-item>
-                  </el-tab-pane>
-                  <el-tab-pane label="headers" name="caseHeaders">
-                    <TableHeaders v-model="form.request.config.headers"></TableHeaders>
-                  </el-tab-pane>
-                  <el-tab-pane label="variables/parameters/hooks" name="caseVph">
-                    variables
-                    <TableVariables v-model="form.request.config.variables"></TableVariables>
-                    parameters
-                    <TableVariables v-model="form.request.config.parameters"></TableVariables>
-                    setup_hooks
-                    <TableHooks v-model="form.request.config.setup_hooks"></TableHooks>
-                    teardown_hooks
-                    <TableHooks v-model="form.request.config.teardown_hooks"></TableHooks>
-                  </el-tab-pane>
-                  <el-tab-pane label="thinktime" name="caseThinktime">
-                    <div>
-                      <el-input
-                          v-model="form.request.config.think_time.limit"
-                          style="max-width: 600px"
-                          placeholder="Please input"
-                      >
-                        <template #prepend>thinktime</template>
-                      </el-input>
-                    </div>
-                  </el-tab-pane>
-                </el-tabs>
+                <CaseConfig v-model:form-data="form" :project-options="projectOptions"></CaseConfig>
               </el-tab-pane>
               <el-tab-pane label="teststeps" name="caseSteps">
                 <el-container>
@@ -272,7 +207,8 @@
     </el-dialog>
 
 
-    <el-dialog fullscreen :title="form.case_name" v-model="history" append-to-body>
+    <el-dialog fullscreen :title="'【' + form.caseId + '】' + form.caseName" v-model="history" append-to-body
+               v-if="hrmDataType==HrmDataTypeEnum.case">
       <el-container style="height: 100%">
         <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
         <!--          </el-header>-->
@@ -286,19 +222,16 @@
 </template>
 
 <script setup name="Case">
-import {randomString} from "@/utils/tools.js"
 import {addCase, debugCase, delCase, getCase, listCase, updateCase} from "@/api/hrm/case";
 import {testRun} from "@/api/hrm/run_detail.js";
 import {selectModulList, showModulList} from "@/api/hrm/module";
 import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
-import TableHeaders from '../../../components/hrm/table-headers.vue';
-import TableVariables from '../../../components/hrm/table-variables.vue';
-import TableHooks from '../../../components/hrm/table-hooks.vue';
 import TestStep from "@/components/hrm/case/step.vue"
+import CaseConfig from "@/components/hrm/case/case-config.vue"
 import {initCaseFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run-detail.vue';
-import { runModelEnum } from "@/components/hrm/enum.js";
+import {runModelEnum, HrmDataTypeEnum} from "@/components/hrm/enum.js";
 // import JsonEditorVue from "json-editor-vue3";
 
 
@@ -306,17 +239,18 @@ const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
+const props = defineProps({
+  hrmDataType: {type: Number, default: HrmDataTypeEnum.case}
+});
 
 
 provide("hrm_data_type", hrm_data_type);
+provide('sys_normal_disable', sys_normal_disable);
 
-const couldView = ref(["tree", "code", "form", "view"]);
 const caseList = ref([]);
 const projectOptions = ref([]);
 const moduleOptions = ref([]);
 const envOptions = ref([]);
-const moduleShow = ref([]);
-const moduleOptionsHandl = ref([]);
 const open = ref(false);
 const loading = ref(true);
 const showSearch = ref(true);
@@ -340,6 +274,7 @@ const data = reactive({
   queryParams: {
     pageNum: 1,
     pageSize: 10,
+    type: props.hrmDataType,
     caseId: undefined,
     caseName: undefined,
     projectId: undefined,
@@ -355,6 +290,15 @@ const data = reactive({
 
 const {queryParams, rules} = toRefs(data);
 const form = ref({
+  caseId: undefined,
+  moduleId: undefined,
+  projectId: undefined,
+  caseName: undefined,
+  notes: undefined,
+  sort: 0,
+  status: "0",
+  remark: undefined,
+  type: props.hrmDataType,
   include: {},
   request: JSON.parse(JSON.stringify(initCaseFormData))
 });
@@ -396,67 +340,11 @@ function getModuleSelect() {
   });
 }
 
-/** 查询所有模块信息，用于列表展示 */
-function getModuleShow() {
-  showModulList(null).then(response => {
-    moduleShow.value = response.data;
-  });
-}
-
-/** 查询模块列表-新增、修改窗口 */
-function getModuleSelectHandl() {
-  selectModulList(form.value).then(response => {
-    moduleOptionsHandl.value = response.data;
-  });
-}
-
-
-// 格式化项目名称的函数
-function formatProject(row, column, cellValue) {
-  // 假设每个debugtalk对象都有一个projectId属性，用于从其他地方获取项目名称
-  return getProjectName(row.projectId); // getProjectName是一个根据projectId获取项目名称的函数
-}
-
-// 获取项目名称的函数（这里应该是你的实际逻辑）
-function getProjectName(projectId) {
-  // 根据projectId从某个地方（例如另一个数组或API）获取项目名称
-  for (const project of projectOptions.value) {
-    if (projectId === project.projectId) {
-      return project.projectName;
-    }
-  }
-}
-
-function formatModule(row, column, cellValue) {
-  return getModuleName(row.moduleId);
-
-}
-
-function getModuleName(moduleId) {
-  for (const module of moduleShow.value) {
-    if (moduleId === module.moduleId) {
-      return module.moduleName;
-    }
-  }
-}
 
 /**重置查询条件所属模块下拉框*/
 function resetModule() {
   queryParams.value.moduleId = undefined;
   getModuleSelect();
-}
-
-/**重置新增、修改窗口所属模块下拉框*/
-function resetModuleHandl() {
-  form.value.moduleId = undefined;
-  getModuleSelectHandl();
-}
-
-
-/** 取消按钮 */
-function cancel() {
-  open.value = false;
-  reset();
 }
 
 /** 表单重置 */
@@ -475,6 +363,7 @@ function reset() {
     sort: 0,
     status: "0",
     remark: undefined,
+    type: props.hrmDataType,
     include: {},
     request: JSON.parse(JSON.stringify(initCaseFormData))
   };
@@ -484,8 +373,6 @@ function reset() {
 /** 搜索按钮操作 */
 function handleQuery() {
   queryParams.value.pageNum = 1;
-  // getProjectSelect();
-  // getModuleShow();
   getList();
 }
 
@@ -520,7 +407,7 @@ function handleUpdate(row) {
     }
     // form.value.projectId = response.data.projectId;
     form.value = response.data;
-    getModuleSelectHandl();
+    // getModuleSelectHandl();
 
     open.value = true;
     title.value = "修改用例";
@@ -604,7 +491,6 @@ function envList() {
 }
 
 getProjectSelect();
-getModuleShow();
 getList();
 envList();
 </script>
