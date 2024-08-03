@@ -110,14 +110,14 @@ class DebugTalkService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def debugtalk_detail_services(cls, query_db: Session, debugtalk_id: int):
+    def debugtalk_detail_services(cls, query_db: Session, id: int):
         """
         获取DebugTalk详细信息service
         :param query_db: orm对象
-        :param debugtalk_id: DebugTalkid
+        :param debugtalk_id: DebugTalkid / project_id
         :return: DebugTalkid对应的信息
         """
-        debugtalk = DebugTalkDao.get_debugtalk_detail_by_id(query_db, debugtalk_id=debugtalk_id)
+        debugtalk = DebugTalkDao.get_debugtalk_detail_by_id(query_db, id=id)
         result = DebugTalkModel(**CamelCaseUtil.transform_result(debugtalk))
 
         return result
@@ -129,10 +129,10 @@ class DebugTalkService:
         合并过程中不同文件如果存在相同名称的方法会抛出异常：ApiManager.exceptions.DebugtalkRepeatedError
         """
         # 校验多个debugtalk文件中有没有相同的类和方法,有重复的则中断执行
-        all_source = ["import logging", "logger = logging.getLogger('HttpRunnerManager')"]
+        all_source = ["import logging", "logger = logging.getLogger('QTestRunner')"]
 
         common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id == None)).first()
+            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id is not None)).first()
 
         if common_debugtalk:
             all_source.append(common_debugtalk.debugtalk)

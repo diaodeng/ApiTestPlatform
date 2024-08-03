@@ -191,7 +191,7 @@ function jsonRemoveEscapeAndBeautiful(env) {
         @update:value="updataValue"
         :lang="languageValue"
         :theme="themesValue"
-        style="height: 600px; width: 100%"
+        style="height: calc(100vh - 160px); width: 100%"
         :options="{
     useWorker: true,
     enableBasicAutocompletion: true,

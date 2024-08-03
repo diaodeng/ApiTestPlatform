@@ -18,9 +18,11 @@ from module_hrm.service.case_service import *
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_batch
+from module_hrm.service.debugtalk_service import DebugTalkService
 from utils.log_util import *
 from utils.page_util import *
 from utils.response_util import *
+from module_hrm.utils.util import get_func_doc_map
 
 runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -76,9 +78,12 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
         env_obj = EnvDao.get_env_by_id(query_db, debug_info.env)
         data_for_run = CaseInfoHandle(page_query_result).from_page().toDebug(EnvModel.from_orm(env_obj)).run_data()
 
+        # 读取项目debugtalk
+        debugtalk = DebugTalkService.debugtalk_detail_services(query_db, case_data["projectId"]).debugtalk
+        debugtalk = {"debugtalk": get_func_doc_map(debugtalk)}
         data_for_run.case_id = case_id
 
-        test_runner = TestRunner(data_for_run)
+        test_runner = TestRunner(data_for_run, debugtalk)
         all_case_res = await test_runner.start()
         logger.info('执行成功')
         all_log = []
