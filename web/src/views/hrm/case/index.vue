@@ -160,7 +160,7 @@
     />
 
     <!-- 添加或修改用例对话框 -->
-    <el-dialog fullscreen :title="title + '【' + form.caseId + '】' + form.caseName" v-model="open" append-to-body>
+    <el-dialog fullscreen :title="title + '【' + form.caseId + ' - ' + form.caseName +'】'" v-model="open" append-to-body>
       <el-form ref="postRef" :model="form" :rules="rules" label-width="100px" style="height: 100%">
         <el-container style="height: 100%">
           <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">

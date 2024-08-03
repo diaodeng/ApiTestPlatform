@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from module_hrm.entity.do.debugtalk_do import HrmDebugTalk
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.debugtalk_vo import *
@@ -40,21 +41,20 @@ class DebugTalkDao:
         debugtalk_list = [{"debugtalk_id": obj.debugtalk_id, "project_id": obj.project_id,
                            "debugtalk": obj.debugtalk, "status": obj.status,
                            "project_name": obj.project.project_name, "create_by": obj.create_by,
-                           "update_by": obj.update_by, "create_time": obj.create_time, "update_time": obj.update_time} for obj in debugtalk_list]
+                           "update_by": obj.update_by, "create_time": obj.create_time, "update_time": obj.update_time}
+                          for obj in debugtalk_list]
         return debugtalk_list
 
     @classmethod
-    def get_debugtalk_detail_by_id(cls, db: Session, debugtalk_id: int):
+    def get_debugtalk_detail_by_id(cls, db: Session, id: int):
         """
         根据DebugTalkid获取DebugTalk详细信息
         :param db: orm对象
         :param dept_id: DebugTalkid
         :return: DebugTalk信息对象
         """
-        debugtalk_info = db.query(HrmDebugTalk) \
-            .filter(HrmDebugTalk.debugtalk_id == debugtalk_id,
-                    HrmDebugTalk.del_flag == 0) \
-            .first()
+        debugtalk_info = (db.query(HrmDebugTalk).filter(
+            (or_(HrmDebugTalk.debugtalk_id == id, HrmDebugTalk.project_id == id)), HrmDebugTalk.del_flag == 0).first())
 
         return debugtalk_info
 
