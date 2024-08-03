@@ -8,16 +8,6 @@ class PageType(Enum):
     config = 4
 
 
-class CaseType(Enum):
-    case = 1
-    config = 2
-
-
-class ApiType(Enum):
-    api = 2
-    folder = 1
-
-
 class DataType(Enum):
     project = 1
     module = 2
@@ -56,3 +46,10 @@ class RunType(Enum):
     api = 2
     case_debug = 3
     api_debug = 4
+
+
+class RunModeEnum(Enum):
+    case = 1
+    model = 2
+    suite = 3
+    project = 4
