@@ -128,7 +128,8 @@ function dragController(e) {
 }
 
 .right {
-  width: calc(50%);
+  height: 100%;
+  width: calc(100%);
   min-width: 50px;
 }
 

@@ -5,6 +5,7 @@ from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import *
+from module_hrm.enums.enums import DataType
 from utils.page_util import PageUtil
 
 
@@ -62,9 +63,12 @@ class CaseDao:
                                 HrmCase.project_id == HrmProject.project_id).join(HrmModule,
                                                                                   HrmCase.module_id == HrmModule.module_id)
 
+        if query_object.type:
+            query = query.filter(HrmCase.type == query_object.type)
+
         # 根据module_id和project_id是否提供来查询
         if query_object.project_id:
-            query = query.filter( HrmCase.project_id == query_object.project_id)
+            query = query.filter(HrmCase.project_id == query_object.project_id)
         if query_object.module_id:
             query = query.filter(HrmCase.module_id == query_object.module_id)
 
@@ -84,7 +88,7 @@ class CaseDao:
         return post_list
 
     @classmethod
-    def add_case_dao(cls, db: Session, case: CaseModel|CaseModelForApi):
+    def add_case_dao(cls, db: Session, case: CaseModel | CaseModelForApi):
         """
         新增用例数据库操作
         :param db: orm对象
@@ -100,7 +104,7 @@ class CaseDao:
         return db_case
 
     @classmethod
-    def edit_case_dao(cls, db: Session, case: CaseModel|CaseModelForApi):
+    def edit_case_dao(cls, db: Session, case: CaseModel | CaseModelForApi):
         """
         编辑用例数据库操作
         :param db: orm对象

@@ -13,7 +13,7 @@ class HrmModule(Base, BaseModel):
         verbose_name = '模块信息'
     __tablename__ = 'hrm_module'
 
-    module_id = Column(BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id(), comment='模块ID')
+    module_id = Column(BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment='模块ID')
     project_id = Column(BigInteger, nullable=True, comment='项目ID')
     module_name = Column(String(50), nullable=False, comment='模块名称')
     test_user = Column(String(50), nullable=True, comment='测试负责人')

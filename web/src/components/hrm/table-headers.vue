@@ -1,6 +1,6 @@
 <script setup>
 // header、extract使用
-import CommonTable from './table-common.vue';
+import CommonTable from './table-config-common.vue';
 
 const selfData = defineModel();
 const tableCols = [

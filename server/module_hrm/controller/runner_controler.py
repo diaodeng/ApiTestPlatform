@@ -1,4 +1,4 @@
-from datetime import timezone, timedelta
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
@@ -7,6 +7,9 @@ from config.get_db import get_db
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.dao.env_dao import EnvDao
+from module_hrm.dao.report_dao import ReportDao
+from module_hrm.entity.vo.report_vo import ReportCreatModel
+from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel, HrmRunDetailModel
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.vo.case_vo import *
 from module_hrm.entity.vo.env_vo import EnvModel
@@ -31,10 +34,29 @@ async def run_test(request: Request,
                    ):
     try:
         # 获取分页数据
-        run_result = run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_type,
-                                  user=current_user.user.user_id)
+        run_result = await run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_model,
+                                        user=current_user.user.user_id)
         logger.info('执行成功')
-        data = ResponseUtil.success(data=run_result)
+        report_data = ReportCreatModel(**{"reportName": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+        report_info = ReportDao.create(query_db, report_data)
+        for step_result in run_result:
+            run_detail = RunDetailDao.create(query_db,
+                                             step_result.case_id,
+                                             report_info.report_id,
+                                             RunType.case.value,
+                                             step_result.name,
+                                             datetime.fromtimestamp(step_result.time.start_time,
+                                                                    timezone.utc).astimezone(
+                                                 timezone(timedelta(hours=8))),
+                                             datetime.fromtimestamp(step_result.time.end_time,
+                                                                    timezone.utc).astimezone(
+                                                 timezone(timedelta(hours=8))),
+                                             step_result.time.duration,
+                                             step_result.model_dump_json(by_alias=True),
+                                             1 if step_result.status == CaseRunStatus.passed.value else 2,
+                                             )
+
+        data = ResponseUtil.success(data="执行成功")
         return data
     except Exception as e:
         logger.exception(e)
@@ -59,23 +81,51 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
         test_runner = TestRunner(data_for_run)
         all_case_res = await test_runner.start()
         logger.info('执行成功')
-        result_data = all_case_res[0]
-        run_detail = RunDetailDao.create(query_db,
-                                         result_data.result.case_id,
-                                         None,
-                                         debug_info.run_type,
-                                         result_data.result.name,
-                                         datetime.fromtimestamp(result_data.result.time.start_time).astimezone(timezone(timedelta(hours=8))),
-                                         datetime.fromtimestamp(result_data.result.time.end_time).astimezone(timezone(timedelta(hours=8))),
-                                         result_data.result.time.duration,
-                                         result_data.result.model_dump_json(by_alias=True),
-                                         1 if result_data.result.status == CaseRunStatus.passed.value else 2,
-                                         )
         all_log = []
         for step_result in all_case_res:
+            run_detail = RunDetailDao.create(query_db,
+                                             case_id,
+                                             None,
+                                             debug_info.run_type,
+                                             step_result.result.name,
+                                             datetime.fromtimestamp(step_result.result.time.start_time,
+                                                                    timezone.utc).astimezone(
+                                                 timezone(timedelta(hours=8))),
+                                             datetime.fromtimestamp(step_result.result.time.end_time,
+                                                                    timezone.utc).astimezone(
+                                                 timezone(timedelta(hours=8))),
+                                             step_result.result.time.duration,
+                                             step_result.result.model_dump_json(by_alias=True),
+                                             1 if step_result.result.status == CaseRunStatus.passed.value else 2,
+                                             )
+
             all_log.append("\n".join(step_result.result.log.values()))
         data = ResponseUtil.success(data={"log": "\n".join(all_log), "runId": run_detail.run_id})
         return data
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+@runnerController.get("/runHistory/{detail_id}", response_model=PageResponseModel,
+                      dependencies=[Depends(CheckUserInterfaceAuth(['hrm:history:detail']))])
+async def run_history_detail(request: Request, detail_id: int, query_db: Session = Depends(get_db)):
+    result = RunDetailDao.get_by_id(query_db, detail_id)
+    return ResponseUtil.success(
+        data=HrmRunDetailModel(**CamelCaseUtil.transform_result(result)).model_dump(by_alias=True))
+
+
+@runnerController.get("/runHistoryList", response_model=PageResponseModel,
+                      dependencies=[
+                          Depends(CheckUserInterfaceAuth(['hrm:history:list', 'hrm:case:history', 'hrm:api:history']))])
+async def run_history_list(request: Request, query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
+                           query_db: Session = Depends(get_db)):
+    result = RunDetailDao.list(query_db, query_info)
+    return ResponseUtil.success(model_content=result)
+
+
+@runnerController.delete("/runHistory", response_model=PageResponseModel,
+                         dependencies=[Depends(CheckUserInterfaceAuth(['hrm:history:delete']))])
+async def run_history_del(request: Request, query_info: RunDetailDelModel, query_db: Session = Depends(get_db)):
+    result = RunDetailDao.delete(query_db, query_info.detail_ids)
+    return ResponseUtil.success(dict_content={"msg": "删除成功"})

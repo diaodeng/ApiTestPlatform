@@ -1,6 +1,6 @@
 import asyncio
 import copy
-import datetime
+from datetime import datetime, timezone, timedelta
 import json
 import re
 import threading
@@ -64,6 +64,7 @@ class CaseRunner(object):
 
         self.result: TestCaseSummary = TestCaseSummary(**{"name": self.case_data.config.name})
         self.result.in_out.config_vars = self.case_data.config.variables
+        self.result.case_id = self.case_data.case_id
 
         default_func_map: dict = copy.deepcopy(get_func_map(debugtalk_common))  # 公用debugtalk方法
         default_func_map.update(debugtalk_func_map)
@@ -83,9 +84,9 @@ class CaseRunner(object):
         start_info = f"{'>>>开始执行用例：' + self.case_data.config.name:>^100}"
         logger.info(start_info)
         self.logger.info(start_info)
-        start_time = datetime.datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         self.result.time.start_time = start_time.timestamp()
-        self.result.time.start_time_iso_format = start_time.strftime("%Y-%m-%d %H:%M:%S")
+        self.result.time.start_time_iso_format = start_time.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
 
         for step in self.case_data.teststeps:
 
@@ -114,10 +115,10 @@ class CaseRunner(object):
         self.logger.info(end_info)
         del self.debugtalk_func_map
 
-        end_time = datetime.datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         self.result.time.end_time = end_time.timestamp()
-        self.result.time.end_time_iso_format = end_time.strftime("%Y-%m-%d %H:%M:%S")
-        self.result.time.duration = (end_time - start_time).seconds
+        self.result.time.end_time_iso_format = end_time.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+        self.result.time.duration = (end_time - start_time).microseconds / 1000000
 
         return self
 

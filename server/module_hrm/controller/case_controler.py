@@ -19,6 +19,8 @@ caseController = APIRouter(prefix='/hrm/case', dependencies=[Depends(LoginServic
 async def get_hrm_case(request: Request, page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query), query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
+        if not page_query.type:
+            raise ValueError("参数错误")
         page_query_result = CaseService.get_case_list_services(query_db, page_query, is_page=True)
         logger.info('获取成功')
         data = ResponseUtil.success(model_content=page_query_result)
@@ -32,6 +34,8 @@ async def get_hrm_case(request: Request, page_query: CasePageQueryModel = Depend
 @log_decorator(title='用例管理', business_type=1)
 async def add_hrm_case(request: Request, add_case: AddCaseModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
+        if not add_case.type:
+            raise ValueError("参数错误")
         add_case.create_by = current_user.user.user_name
         add_case.update_by = current_user.user.user_name
         # add_case.case_id = snowIdWorker.get_id()

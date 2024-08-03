@@ -14,7 +14,7 @@ class HrmDebugTalk(Base, BaseModel):
         verbose_name = '驱动py文件'
     __tablename__ = 'hrm_debugtalk'
 
-    debugtalk_id = Column(BigInteger, primary_key=True, unique=True, nullable=False, default=snowIdWorker.get_id(), comment='DebugTalkID')
+    debugtalk_id = Column(BigInteger, primary_key=True, unique=True, nullable=False, default=snowIdWorker.get_id, comment='DebugTalkID')
 
     # 外键字段，引用 Project 的 id
     project_id = Column(BigInteger, ForeignKey('hrm_project.project_id'), nullable=False)
