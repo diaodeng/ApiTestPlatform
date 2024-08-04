@@ -132,7 +132,7 @@ class DebugTalkService:
         all_source = ["import logging", "logger = logging.getLogger('QTestRunner')"]
 
         common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id is not None)).first()
+            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id is None)).first()
 
         if common_debugtalk:
             all_source.append(common_debugtalk.debugtalk)

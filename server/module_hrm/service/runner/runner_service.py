@@ -72,7 +72,8 @@ async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, ty
         project_ids = query_db.query(HrmCase.project_id).filter(HrmCase.case_id.in_(test_list)).distinct()
 
     if project_ids:
-        project_ids = list(set(project_ids))
+        # project_ids = list(set(project_ids))
+        project_ids = list([item for tuple_ in project_ids for item in tuple_])
 
     # init_data_handle(path, project_names)
     debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(query_db=query_db, project_ids=project_ids)

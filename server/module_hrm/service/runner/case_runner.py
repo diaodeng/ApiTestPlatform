@@ -19,6 +19,9 @@ from module_hrm.utils.CaseRunLogHandle import RunLogCaptureHandler, TestLog
 from module_hrm.utils.parser import parse_data
 from module_hrm.utils.util import replace_variables, get_func_map, ensure_str
 from utils.log_util import logger
+import urllib3
+# 忽略requests库https请求的警告
+urllib3.disable_warnings()
 
 
 class Response:
