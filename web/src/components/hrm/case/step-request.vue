@@ -60,7 +60,7 @@ const activeRequestDetailName = ref("requestHeader")
           </el-tab-pane>
           <el-tab-pane label="json" name="requestJson">
             <div style="width: 100%">
-              <AceEditor v-model:content="requestDetailData.json" can-set="true"></AceEditor>
+              <AceEditor v-model:content="requestDetailData.json" can-set="true" height="600px" ></AceEditor>
             </div>
           </el-tab-pane>
           <el-tab-pane label="data" name="requestData">data
