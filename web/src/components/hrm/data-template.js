@@ -46,7 +46,7 @@ export const initStepData =
 export const initCaseFormData = {
     config: {
         think_time: {
-            strategy: "",
+            strategy: null,
             limit: 0
         },
         setup_hooks: [],

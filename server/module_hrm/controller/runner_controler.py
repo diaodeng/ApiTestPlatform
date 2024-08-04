@@ -18,11 +18,10 @@ from module_hrm.service.case_service import *
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_batch
-from module_hrm.service.debugtalk_service import DebugTalkService
+from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
 from utils.log_util import *
 from utils.page_util import *
 from utils.response_util import *
-from module_hrm.utils.util import get_func_doc_map
 
 runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -67,7 +66,8 @@ async def run_test(request: Request,
 
 @runnerController.post("/debug", response_model=PageResponseModel,
                        dependencies=[Depends(CheckUserInterfaceAuth(['hrm:api:debug', 'hrm:case:debug']))])
-async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Session = Depends(get_db)):
+async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Session = Depends(get_db),
+                    current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         # 获取分页数据
         case_data = debug_info.case_data
@@ -79,11 +79,13 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
         data_for_run = CaseInfoHandle(page_query_result).from_page().toDebug(EnvModel.from_orm(env_obj)).run_data()
 
         # 读取项目debugtalk
-        debugtalk = DebugTalkService.debugtalk_detail_services(query_db, case_data["projectId"]).debugtalk
-        debugtalk = {"debugtalk": get_func_doc_map(debugtalk)}
+        projectId = [case_data["projectId"]]
+        debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(query_db, project_ids=projectId)
+        debugtalk_obj = DebugTalkHandler(debugtalk_source)
+        debugtalk_func_map = debugtalk_obj.func_map(user=current_user.user.user_id)
         data_for_run.case_id = case_id
 
-        test_runner = TestRunner(data_for_run, debugtalk)
+        test_runner = TestRunner(data_for_run, debugtalk_func_map)
         all_case_res = await test_runner.start()
         logger.info('执行成功')
         all_log = []
