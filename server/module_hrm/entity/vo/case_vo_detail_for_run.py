@@ -135,7 +135,7 @@ class TSqlRequest(BaseModel):
 
 
 class ThinkTime(BaseModel):
-    strategy: Any = None
+    strategy: str = ""
     limit: int = 0
 
 

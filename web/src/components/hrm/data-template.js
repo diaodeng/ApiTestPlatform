@@ -32,7 +32,7 @@ export const initStepData =
             }
         },
         think_time: {
-            strategy: null,
+            strategy: "",
             limit: 0
         },
         validate: [],
@@ -46,7 +46,7 @@ export const initStepData =
 export const initCaseFormData = {
     config: {
         think_time: {
-            strategy: null,
+            strategy: "",
             limit: 0
         },
         setup_hooks: [],
