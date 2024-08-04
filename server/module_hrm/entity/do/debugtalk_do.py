@@ -7,7 +7,12 @@ from utils.snowflake import snowIdWorker
 
 
 def _set_default_debugtalk():
-    debugtalk_str = """import logging \r\n\r\nimport json \r\nimport requests \r\n\r\nlogger = logging.getLogger('QTestRunner') \r\ndef before_request(req):\r\n\tpass\r\n\r\ndef after_request(res):\r\n\tpass\r\n"""
+    common_str = """import logging \r\n\r\nimport json \r\nimport requests \r\n\r\nlogger = logging.getLogger('QTestRunner') \r\n"""
+    before_test = "def before_test(request):\r\n\t'''# 用例执行前调用'''\r\n\tpass\r\n\r\n"
+    after_test = "def after_test(response):\r\n\t'''# 测试执行后调用'''\r\n\tpass\r\n\r\n"
+    before_request = """def before_request(request):\r\n\t'''# 步骤执行前调用'''\r\n\tpass\r\n\r\n"""
+    after_request = """def after_request(response):\r\n\t'''# 步骤执行后调用'''\r\n\tpass\r\n"""
+    debugtalk_str = common_str + before_test + after_test + before_request + after_request
 
     return debugtalk_str
 
