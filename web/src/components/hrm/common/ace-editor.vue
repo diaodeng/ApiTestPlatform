@@ -10,7 +10,7 @@ onErrorCaptured((error) => {
 
 const props = defineProps({
   canSet: {
-    type: Boolean,
+    type: [Boolean, String],
     default: false
   },
   lang: {

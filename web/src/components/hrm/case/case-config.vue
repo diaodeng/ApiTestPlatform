@@ -5,15 +5,26 @@ import TableHeaders from "@/components/hrm/table-headers.vue";
 import TableHooks from "@/components/hrm/table-hooks.vue";
 import TableVariables from "@/components/hrm/table-variables.vue";
 import {selectModulList} from "@/api/hrm/module.js";
+import {list as listConfig} from "@/api/hrm/config.js";
+import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
 
 const sys_normal_disable = inject("sys_normal_disable");
 
 const props = defineProps({
-    projectOptions: {
-        type: Object,
-        default: () => ([])
-    }
+  projectOptions: {
+    type: Object,
+    default: () => ([])
+  },
+  dataName: {
+    type: String,
+    default: "用例"
+  },
+  dataType: {
+    type: Number,
+    default: HrmDataTypeEnum.case
+  }
 })
+const selectConfigList = ref([]);
 const formData = defineModel("formData", {required: true});
 
 const activeTabName = ref("caseMessages");
@@ -27,18 +38,40 @@ function getModuleSelect() {
   });
 }
 
+function getConfigSelect() {
+  let data = {
+    projectId: formData.value.projectId,
+    moduleId: formData.value.moduleId,
+    type: HrmDataTypeEnum.config
+  }
+  listConfig(data).then(response => {
+    selectConfigList.value = response.rows;
+  });
+}
+
 function resetModule() {
   formData.value.moduleId = undefined;
+  formData.value.request.config.include.configId = null;
   getModuleSelect();
 }
 
+function resetConfig() {
+  formData.value.request.config.include.configId = null;
+  getConfigSelect();
+}
+
 getModuleSelect();
+
+if (props.dataType === HrmDataTypeEnum.case){
+  getConfigSelect();
+}
+
 </script>
 
 <template>
   <el-tabs type="" v-model="activeTabName">
     <el-tab-pane label="messages" name="caseMessages">
-      <el-form-item label="用例名称" prop="caseName">
+      <el-form-item :label="dataName+'名称'" prop="caseName">
         <el-input v-model="formData.caseName" placeholder="请输入用例名称" clearable/>
       </el-form-item>
       <el-form-item label="所属项目" prop="projectId">
@@ -52,12 +85,22 @@ getModuleSelect();
         </el-select>
       </el-form-item>
       <el-form-item label="所属模块" prop="moduleId">
-        <el-select v-model="formData.moduleId" placeholder="请选择">
+        <el-select v-model="formData.moduleId" placeholder="请选择" @change="resetConfig">
           <el-option
               v-for="option in moduleOptions"
               :key="option.moduleId"
               :label="option.moduleName"
               :value="option.moduleId">
+          </el-option>
+        </el-select>
+      </el-form-item>
+      <el-form-item label="可选配置" v-if="dataType === HrmDataTypeEnum.case">
+        <el-select v-model="formData.request.config.include.configId" placeholder="请选择" clearable>
+          <el-option
+              v-for="option in selectConfigList"
+              :key="option.caseId"
+              :label="option.caseName"
+              :value="option.caseId">
           </el-option>
         </el-select>
       </el-form-item>

@@ -1,4 +1,5 @@
 import {randomString} from "@/utils/tools.js";
+import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
 
 
 export const initRequestData = {
@@ -43,7 +44,10 @@ export const initStepData =
     }
 
 
-export const initCaseFormData = {
+    /*
+    * 用例表request字段对应的数据
+    * */
+export const initCaseRequestData = {
     config: {
         think_time: {
             strategy: "",
@@ -54,10 +58,27 @@ export const initCaseFormData = {
         variables: [],
         headers: [],
         parameters: [],
-        base_url: ""
+        base_url: "",
+        include: {
+            configId: null
+        }
     },
     teststeps: [initStepData]
 
+}
+
+export const initCaseFormData = {
+  caseId: undefined,
+  moduleId: undefined,
+  projectId: undefined,
+  caseName: undefined,
+  notes: undefined,
+  sort: 0,
+  status: "0",
+  remark: undefined,
+  type: HrmDataTypeEnum.case,
+  include: {},
+  request: initCaseRequestData
 }
 
 export const initDebugTalkFormData ={
