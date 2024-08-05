@@ -25,8 +25,8 @@ Url = Text
 BaseUrl = Union[HttpUrl, Text]
 VariablesMapping = Dict[Text, Any]
 FunctionsMapping = Dict[Text, Callable]
-Headers = Dict[Text, Text|bool]
-Cookies = Dict[Text, Text|bool]
+Headers = Dict[Text, Text | bool]
+Cookies = Dict[Text, Text | bool]
 Verify = bool
 Hooks = List[Union[Text, Dict[Text, Text]]]
 Export = List[Text]
@@ -131,8 +131,12 @@ class TSqlRequest(BaseModel):
 
 
 class ThinkTime(BaseModel):
-    strategy: Text|None = ""
+    strategy: Text | None = ""
     limit: int = 0
+
+
+class Include(BaseModel):
+    configId: Text | int | None = None
 
 
 class TConfig(BaseModel):
@@ -151,6 +155,7 @@ class TConfig(BaseModel):
     # thrift: TConfigThrift|None = None
     db: TConfigDB = TConfigDB()
     think_time: ThinkTime = ThinkTime()
+    include: Dict = Include()
 
 
 class TRequest(BaseModel):
@@ -190,7 +195,7 @@ class TStep(BaseModel):
     name: Name
     step_type: int = 1  # 1 api, 2 webUI
     step_id: Text = ""
-    request: Union[TRequest, TWebsocket,  None] = None
+    request: Union[TRequest, TWebsocket, None] = None
     include: TStepInclude = {}
     testcase: Union[Text, Callable, None] = None
     variables: List[VariablesMapping] | Text = []
@@ -252,4 +257,3 @@ class AddressData(BaseModel):
     client_port: int = 0
     server_ip: Text = "N/A"
     server_port: int = 0
-

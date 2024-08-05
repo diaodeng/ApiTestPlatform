@@ -59,8 +59,8 @@ class CaseDao:
         query = db.query(HrmCase,
                          HrmProject.project_name,
                          HrmModule.module_name
-                         ).join(HrmProject,
-                                HrmCase.project_id == HrmProject.project_id).join(HrmModule,
+                         ).outerjoin(HrmProject,
+                                HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
                                                                                   HrmCase.module_id == HrmModule.module_id)
 
         if query_object.type:
@@ -99,7 +99,7 @@ class CaseDao:
             case = CaseModel(**case.model_dump(exclude_unset=True))
         db_case = HrmCase(**case.model_dump(exclude_unset=True))
         db.add(db_case)
-        db.flush()
+        db.commit()
 
         return db_case
 
