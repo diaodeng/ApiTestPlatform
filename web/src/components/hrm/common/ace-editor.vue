@@ -22,15 +22,18 @@ const props = defineProps({
     default: "github"
   },
   height: {
-    type: [String, Number]
+    type: [String, Number],
+    default: "calc(100vh - 160px)"
   },
   width: {
-    type: [String, Number]
+    type: [String, Number],
+    default: "100%"
   }
 });
 const modelContent = defineModel("content");
 const languageValue = ref("json");
 const themesValue = ref("github");
+
 const language = ref([{
   "label": "json",
   "value": "json",
@@ -191,7 +194,7 @@ function jsonRemoveEscapeAndBeautiful(env) {
         @update:value="updataValue"
         :lang="languageValue"
         :theme="themesValue"
-        style="height: calc(100vh - 160px); width: 100%"
+        :style="{height: height, width: width}"
         :options="{
     useWorker: true,
     enableBasicAutocompletion: true,
