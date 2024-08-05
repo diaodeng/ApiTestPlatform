@@ -46,11 +46,7 @@ class CaseService:
             result = dict(is_success=False, message='用例名称已存在')
         else:
             try:
-                if page_object.module_id and page_object.project_id:
-                    add_result = CaseDao.add_case_dao(query_db, add_case)
-                    case_id = add_result.case_id
-                    CaseDao.add_case_module_project_dao(query_db, CaseModuleProjectModel(caseId=case_id, moduleId=page_object.module_id, projectId=page_object.project_id))
-                query_db.commit()
+                CaseDao.add_case_dao(query_db, add_case)
                 result = dict(is_success=True, message='新增成功')
             except Exception as e:
                 query_db.rollback()
