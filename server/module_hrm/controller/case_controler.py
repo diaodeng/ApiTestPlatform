@@ -1,16 +1,16 @@
 from fastapi import APIRouter, Request
 from fastapi import Depends
+
 from config.get_db import get_db
+from module_admin.annotation.log_annotation import log_decorator
+from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.service.case_service import *
 from module_hrm.entity.vo.case_vo import *
-from utils.response_util import *
+from module_hrm.service.case_service import *
+from utils.common_util import bytes2file_response
 from utils.log_util import *
 from utils.page_util import *
-from utils.common_util import bytes2file_response
-from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.annotation.log_annotation import log_decorator
-from utils.snowflake import snowIdWorker
+from utils.response_util import *
 
 caseController = APIRouter(prefix='/hrm/case', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -38,7 +38,6 @@ async def add_hrm_case(request: Request, add_case: AddCaseModel, query_db: Sessi
             raise ValueError("参数错误")
         add_case.create_by = current_user.user.user_name
         add_case.update_by = current_user.user.user_name
-        # add_case.case_id = snowIdWorker.get_id()
         add_module_result = CaseService.add_case_services(query_db, add_case)
         if add_module_result.is_success:
             logger.info(add_module_result.message)
@@ -91,7 +90,7 @@ async def query_detail_hrm_case(request: Request, case_id: int, query_db: Sessio
     try:
         detail_result = CaseService.case_detail_services(query_db, case_id)
         logger.info(f'获取case_id为{case_id}的信息成功')
-        return ResponseUtil.success(data=detail_result.model_dump(exclude_unset=True, by_alias=True))
+        return ResponseUtil.success(data=detail_result.model_dump(by_alias=True))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
