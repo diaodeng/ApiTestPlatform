@@ -74,6 +74,9 @@ class CaseRunModel(BaseModel):
     ids: Optional[int | List | None] = None
     run_type: Optional[int] = RunType.case.value
     run_model: Optional[int | None] = None
+    report_name: Optional[str] = None
+    isAsync: Optional[bool] = False
+    repeat_num: Optional[int] = 1
     env: int
     case_data: Optional[CaseModel | dict | None] = None
 

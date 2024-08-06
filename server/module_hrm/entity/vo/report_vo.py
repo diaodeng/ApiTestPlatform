@@ -6,6 +6,7 @@ from typing import Union, Optional, List, Any, Text, Dict
 
 from module_admin.annotation.pydantic_annotation import as_query
 from module_hrm.entity.vo.common_vo import QueryModel, CommonDataModel
+from module_hrm.enums.enums import CaseRunStatus
 
 
 @as_query
@@ -23,7 +24,8 @@ class ReportListModel(CommonDataModel):
     report_id: int
     report_name: Text = ""
     start_at: Any = ""
-    status: int = 1
+    test_duration: float = 0
+    status: int = CaseRunStatus.passed.value
     total: int = 0
     success: int = 0
 
