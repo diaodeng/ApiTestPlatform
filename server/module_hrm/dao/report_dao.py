@@ -52,6 +52,8 @@ class ReportDao:
         if query_object.status:
             query = query.filter(HrmReport.status == query_object.status)
 
+        query = query.order_by(HrmReport.create_time.desc())
+
         result = PageUtil.paginate(query, query_object.page_num, query_object.page_size, True)
 
         rows = []

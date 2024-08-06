@@ -48,7 +48,7 @@
       </el-table-column>
       <el-table-column label="执行时长(S)" align="center" prop="createTime" class-name="small-padding fixed-width">
         <template #default="scope">
-          <span>{{ parseTime(scope.row.runEndTime) }}</span>
+          <span>{{ scope.row.testDuration }}</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="200" align="center" class-name="small-padding fixed-width">

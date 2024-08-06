@@ -155,7 +155,7 @@ class TConfig(BaseModel):
     # thrift: TConfigThrift|None = None
     db: TConfigDB = TConfigDB()
     think_time: ThinkTime = ThinkTime()
-    include: Dict = Include()
+    include: Include = Include()
 
 
 class TRequest(BaseModel):

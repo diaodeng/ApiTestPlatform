@@ -25,14 +25,14 @@ class DataType(Enum):
 
 
 class CaseRunStatus(Enum):
-    failed = 'failed'
-    passed = 'passed'
-    skipped = 'skipped'
-    deselected = 'deselected'
-    xfailed = 'xfailed'
-    xpassed = 'xpassed'
-    warnings = 'warnings'
-    error = 'error'
+    passed = 1
+    failed = 2
+    skipped = 3
+    deselected = 4
+    xfailed = 5
+    xpassed = 6
+    warnings = 7
+    error = 8
 
 
 class TstepTypeEnum(Enum):

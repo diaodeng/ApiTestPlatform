@@ -9,19 +9,8 @@ from typing import Any, Callable, Dict, List, Text, Union
 
 from pydantic import BaseModel, Field, HttpUrl
 
-from module_hrm.enums.enums import TstepTypeEnum
+from module_hrm.enums.enums import TstepTypeEnum, CaseRunStatus
 from utils.utils import get_platform
-
-
-class CaseRunStatus(Enum):
-    failed = 'failed'
-    passed = 'passed'
-    skipped = 'skipped'
-    deselected = 'deselected'
-    xfailed = 'xfailed'
-    xpassed = 'xpassed'
-    warnings = 'warnings'
-    error = 'error'
 
 
 Name = Text
@@ -213,7 +202,12 @@ class TStep(BaseModel):
     think_time: ThinkTime = {}
 
 
+class Include(BaseModel):
+    config: TConfig = {}
+
+
 class TestCase(BaseModel):
+    include: Include = Include()
     case_id: Any = None
     config: TConfig
     teststeps: List[TStep]
@@ -373,7 +367,7 @@ class ReportDtailToView(BaseModel):
     测试报告用于前端显示的模型
     """
     exitstatus: int = 0
-    status_items: List[str] = [st.value for st in CaseRunStatus]
+    status_items: List[str] = [st.name for st in CaseRunStatus]
     platform: Dict = get_platform()
     start_time: str = ''
     results: List[Dict] = []
