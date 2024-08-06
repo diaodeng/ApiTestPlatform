@@ -35,27 +35,43 @@ async def run_test(request: Request,
                    ):
     try:
         # 获取分页数据
-        run_result = await run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_model,
-                                        user=current_user.user.user_id)
-        logger.info('执行成功')
-        report_data = ReportCreatModel(**{"reportName": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
-        report_info = ReportDao.create(query_db, report_data)
-        for step_result in run_result:
-            run_detail = RunDetailDao.create(query_db,
-                                             step_result.case_id,
-                                             report_info.report_id,
-                                             RunType.case.value,
-                                             step_result.name,
-                                             datetime.fromtimestamp(step_result.time.start_time,
-                                                                    timezone.utc).astimezone(
-                                                 timezone(timedelta(hours=8))),
-                                             datetime.fromtimestamp(step_result.time.end_time,
-                                                                    timezone.utc).astimezone(
-                                                 timezone(timedelta(hours=8))),
-                                             step_result.time.duration,
-                                             step_result.model_dump_json(by_alias=True),
-                                             1 if step_result.status == CaseRunStatus.passed.value else 2,
-                                             )
+        for i in range(run_info.repeat_num):
+            run_result = await run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_model,
+                                            user=current_user.user.user_id)
+            logger.info('执行成功')
+            report_data = ReportCreatModel(**{"reportName": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                              "status": CaseRunStatus.passed.value
+                                              })
+            report_info = ReportDao.create(query_db, report_data)
+            report_status = report_info.status
+            report_total = 0
+            report_success = 0
+            for step_result in run_result:
+                run_detail = RunDetailDao.create(query_db,
+                                                 step_result.case_id,
+                                                 report_info.report_id,
+                                                 RunType.case.value,
+                                                 step_result.name,
+                                                 datetime.fromtimestamp(step_result.time.start_time,
+                                                                        timezone.utc).astimezone(
+                                                     timezone(timedelta(hours=8))),
+                                                 datetime.fromtimestamp(step_result.time.end_time,
+                                                                        timezone.utc).astimezone(
+                                                     timezone(timedelta(hours=8))),
+                                                 step_result.time.duration,
+                                                 step_result.model_dump_json(by_alias=True),
+                                                 step_result.status == CaseRunStatus.passed.value,
+                                                 )
+                report_total += 1
+                if step_result.status == CaseRunStatus.failed.value:
+                    report_status = CaseRunStatus.failed.value
+                elif step_result.status == CaseRunStatus.passed.value:
+                    report_success += 1
+
+            report_info.status = report_status
+            report_info.total = report_total
+            report_info.success = report_success
+            query_db.commit()
 
         data = ResponseUtil.success(data="执行成功")
         return data
@@ -71,19 +87,15 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
     try:
         # 获取分页数据
         case_data = debug_info.case_data
-        case_id = case_data["caseId"]
-        if isinstance(case_data, CaseModel):
-            case_data = case_data.model_dump(by_alias=True)
         page_query_result = CaseModelForApi(**case_data)
-        env_obj = EnvDao.get_env_by_id(query_db, debug_info.env)
-        data_for_run = CaseInfoHandle(page_query_result).from_page().toDebug(EnvModel.from_orm(env_obj)).run_data()
+        data_for_run = CaseInfoHandle(query_db).from_page(case_data).toDebug(debug_info.env).run_data()
 
         # 读取项目debugtalk
-        projectId = [case_data["projectId"]]
+        projectId = [page_query_result.project_id]
         debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(query_db, project_ids=projectId)
         debugtalk_obj = DebugTalkHandler(debugtalk_source)
         debugtalk_func_map = debugtalk_obj.func_map(user=current_user.user.user_id)
-        data_for_run.case_id = case_id
+        data_for_run.case_id = page_query_result.case_id
 
         test_runner = TestRunner(data_for_run, debugtalk_func_map)
         all_case_res = await test_runner.start()
@@ -91,7 +103,7 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
         all_log = []
         for step_result in all_case_res:
             run_detail = RunDetailDao.create(query_db,
-                                             case_id,
+                                             page_query_result.case_id,
                                              None,
                                              debug_info.run_type,
                                              step_result.result.name,

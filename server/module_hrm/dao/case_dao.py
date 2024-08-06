@@ -81,7 +81,7 @@ class CaseDao:
             query = query.filter(HrmCase.case_id == query_object.case_id)
 
         # 添加排序条件
-        query = query.order_by(HrmCase.sort).distinct()
+        query = query.order_by(HrmCase.create_time.desc()).order_by(HrmCase.sort).distinct()
 
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
 
