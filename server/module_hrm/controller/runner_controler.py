@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Request
@@ -36,13 +37,18 @@ async def run_test(request: Request,
     try:
         # 获取分页数据
         for i in range(run_info.repeat_num):
+            test_start_time = time.time()
             run_result = await run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_model,
                                             user=current_user.user.user_id)
+            test_end_time = time.time()
             logger.info('执行成功')
             report_data = ReportCreatModel(**{"reportName": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                              "status": CaseRunStatus.passed.value
+                                              "status": CaseRunStatus.passed.value,
                                               })
             report_info = ReportDao.create(query_db, report_data)
+            report_info.start_at = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
+                timezone(timedelta(hours=8)))
+            report_info.test_duration = test_end_time - test_start_time
             report_status = report_info.status
             report_total = 0
             report_success = 0

@@ -24,6 +24,7 @@ class ReportListModel(CommonDataModel):
     report_id: int
     report_name: Text = ""
     start_at: Any = ""
+    test_duration: float = 0
     status: int = CaseRunStatus.passed.value
     total: int = 0
     success: int = 0
