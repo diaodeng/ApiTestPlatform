@@ -27,9 +27,7 @@ if "WSL" in str(platform.platform()):
 
 
 async def run_by_single(query_db: Session, index, env_obj, func_map=None) -> list[TestCaseSummary]:
-    case_data_obj = CaseDao.get_case_by_id(query_db, index)
-    data_model = CaseModelForApi(**CamelCaseUtil.transform_result(case_data_obj))
-    test_case = CaseInfoHandle().from_db(data_model).toRun(env_obj).run_data()
+    test_case = CaseInfoHandle(query_db).from_db(index).toRun(env_obj).run_data()
     runner = TestRunner(test_case, func_map)
     case_res_datas = await runner.start()
     all_result = []

@@ -70,7 +70,7 @@ class ModuleDao:
                     HrmModule.module_name.like(f'%{query_object.module_name}%') if query_object.module_name else True,
                     HrmModule.status == query_object.status if query_object.status else True
                     ) \
-            .order_by(HrmModule.sort) \
+            .order_by(HrmModule.create_time.desc()).order_by(HrmModule.sort) \
             .distinct()
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
 
