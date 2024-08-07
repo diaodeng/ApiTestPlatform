@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import os
 import platform
+from collections import defaultdict
 
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.do.module_do import HrmModule
@@ -42,12 +43,13 @@ async def run_by_suite(query_db: Session, index, env, func_map=None):
     include_case = list(case_ids)
     result = []
     for val in include_case:
-        res_data = await run_by_single(val, env, func_map)
+        res_data = await run_by_single(query_db, val, env, func_map)
         result.extend(res_data)
     return result
 
 
-async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, type: int=None, mode=False, user=None) -> list[TestCaseSummary]:
+async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, type: int = None, mode=False,
+                       user=None) -> list[TestCaseSummary]:
     """
     批量组装用例数据
     :param test_list:
@@ -56,44 +58,61 @@ async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, ty
     :param mode: boolean：True 同步 False: 异步
     :return: list
     """
-    project_ids = []
-    if type == DataType.project:
-        project_ids = test_list
-    elif type == DataType.module:
-        project_ids = query_db.query(HrmModule.project_id).filter(HrmModule.module_id.in_(test_list)).distinct()
-    elif type == DataType.suite:
-        suite_ids = query_db.query(HrmSuite.project_id).filter(HrmSuite.id.in_(test_list)).distinct()
-        case_ids = query_db.query(HrmSuiteDetail.case_id).filter(HrmSuiteDetail.suite_id.in_(set(suite_ids))).distinct()
-        include_case = list(case_ids)
-        project_ids = query_db.query(HrmCase.project_id).filter(HrmCase.case_id.in_(include_case)).distinct()
-    else:
-        project_ids = query_db.query(HrmCase.project_id).filter(HrmCase.case_id.in_(test_list)).distinct()
 
-    if project_ids:
-        # project_ids = list(set(project_ids))
-        project_ids = list([item for tuple_ in project_ids for item in tuple_])
+    project_cases = defaultdict(list)
+    if type == DataType.project.value:
+        for project_id in test_list:
+            project_cases[project_id].append(project_id)
+    elif type == DataType.module.value:
+        all_module_obj = query_db.query(HrmModule.project_id, HrmModule.module_id).filter(
+            HrmModule.module_id.in_(test_list)).all()
+        for project_id, module_id in all_module_obj:
+            project_cases[project_id].append(module_id)
+    elif type == DataType.suite.value:
+        project_case_ids = (query_db.query(HrmSuite.project_id, HrmSuiteDetail.case_id).
+                            join(HrmSuiteDetail, HrmSuite.suite_id == HrmSuiteDetail.suite_id).
+                            filter(HrmSuite.id.in_(test_list)).all())
+        for project_id, case_id in project_case_ids:
+            project_cases[project_id].append(case_id)
+    else:
+        project_case_ids = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(
+            HrmCase.case_id.in_(test_list)).all()
+        for project_id, case_id in project_case_ids:
+            project_cases[project_id].append(case_id)
+
+    # project_ids = project_cases.keys()
 
     # init_data_handle(path, project_names)
-    debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(query_db=query_db, project_ids=project_ids)
-    debugtalk_obj = DebugTalkHandler(debugtalk_source)
-    debugtalk_func_map = debugtalk_obj.func_map(user)
+    # debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(query_db=query_db, project_ids=project_ids)
+    # debugtalk_obj = DebugTalkHandler(debugtalk_source)
+    # debugtalk_func_map = debugtalk_obj.func_map(user)
+
     env_data = CamelCaseUtil.transform_result(EnvDao.get_env_by_id(query_db, env_id))
     env_obj = EnvModel.from_orm(env_data)
 
     try:
         result = []
-        for value in test_list:
-            if type == DataType.project:
-                res_data = await run_by_project(query_db, value, env_obj, debugtalk_func_map)
-            elif type == DataType.module:
-                res_data = await run_by_module(query_db, value, env_obj, debugtalk_func_map)
-            elif type == DataType.suite:
-                res_data = await run_by_suite(query_db, value, env_obj, debugtalk_func_map)
-            else:
-                res_data = await run_by_single(query_db, value, env_obj, debugtalk_func_map)
-            result.extend(res_data)
+        for project_id, ids in project_cases.items():  # 按项目执行
+            if not ids: continue
+            commom_debugtalk, project_debugtalk = DebugTalkService.debugtalk_source_for_projectid(query_db, project_id)
+            debugtalk_handler = DebugTalkHandler(project_debugtalk, commom_debugtalk)
+            try:
+                debugtalk_func_map = debugtalk_handler.func_map(user)
+                for value in ids:
+                    if type == DataType.project.value:
+                        res_data = await run_by_project(query_db, value, env_obj, debugtalk_func_map)
+                    elif type == DataType.module.value:
+                        res_data = await run_by_module(query_db, value, env_obj, debugtalk_func_map)
+                    # elif type == DataType.suite:
+                    #     res_data = await run_by_suite(query_db, value, env_obj, debugtalk_func_map)
+                    else:
+                        res_data = await run_by_single(query_db, value, env_obj, debugtalk_func_map)
+                    result.extend(res_data)
+            finally:
+                debugtalk_handler.del_import()
     finally:
-        debugtalk_obj.del_import()
+        pass
+        # debugtalk_obj.del_import()
     return result
 
 
@@ -105,7 +124,8 @@ async def run_by_module(query_db: Session, id, env, func_map=None):
     :return: list
     """
     # obj = HrmModule.objects.get(id=id)
-    test_index_list = query_db.query(HrmCase.case_id).filter(HrmCase.module_id == id).distinct()
+    test_index_list = query_db.query(HrmCase.case_id).filter(HrmCase.module_id == id).filter(
+        HrmCase.type == DataType.case.value).distinct()
     result = []
     for index in test_index_list:
         res_data = await run_by_single(query_db, index[0], env, func_map)

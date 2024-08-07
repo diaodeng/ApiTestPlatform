@@ -5,6 +5,7 @@ from module_hrm.dao.debugtalk_dao import *
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.exceptions import DebugtalkRepeatedError
+from module_hrm.utils import debugtalk_common
 from module_hrm.utils.util import find_source_repeat, get_func_map, get_func_doc_map
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -150,7 +151,6 @@ class DebugTalkService:
 
         repeated_symbols = find_source_repeat(all_source)
         if repeated_symbols:
-            print(repeated_symbols)
             raise DebugtalkRepeatedError(f"debugtalk中存在重复的方法或者类：{','.join(repeated_symbols)}")
 
         # 合并debugtalk文件源码
@@ -161,44 +161,75 @@ class DebugTalkService:
         debugtalks_data = "\n".join(all_source)
         return debugtalks_data
 
+    @classmethod
+    def debugtalk_source_for_projectid(cls, query_db: Session, project_id: int) -> tuple:
+        """
+
+        """
+        head_source = "import logging \nlogger = logging.getLogger('QTestRunner')"
+
+        common_debugtalk = query_db.query(HrmDebugTalk).filter(
+            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id == None)).first()
+        common_debugtalk = head_source + "\n" + common_debugtalk.debugtalk if common_debugtalk else ""
+
+        project_debugtalk = query_db.query(HrmDebugTalk).filter(
+            HrmDebugTalk.project_id == project_id).first()
+        project_debugtalk = head_source + "\n" + project_debugtalk.debugtalk if project_debugtalk else ""
+
+        return common_debugtalk, project_debugtalk
+
 
 class DebugTalkHandler:
-    def __init__(self, debugtalk_source: str):
+    def __init__(self, debugtalk_source: str, common_debugtalk_source:str=None):
         """
         :param case_ids:
         :param project_names:
         """
+        self.common_debugtalk_source: str = common_debugtalk_source
         self.debugtalks_data: str = debugtalk_source
-        self.module_name = None
+        self.module_names = []
 
     def source(self):
         return self.debugtalks_data
 
-    def _import_debugtalk(self, user=None):
-        self.module_name = f'Debugtalk{user or ""}{int(datetime.now().timestamp() * 100000)}'
-        logger.info(f"开始载入模块 {self.module_name}")
+    def _import_debugtalk(self, debugtalk_source, user=None):
+        module_name = f'Debugtalk{user or ""}{int(datetime.now().timestamp() * 100000)}'
+        self.module_names.append(module_name)
+        logger.info(f"开始载入模块 {module_name}")
         # 创建模块规范对象
-        spec = importlib.util.spec_from_loader(self.module_name, loader=None)
+        spec = importlib.util.spec_from_loader(module_name, loader=None)
 
         # 创建模块对象
         module = importlib.util.module_from_spec(spec)
 
         # 将数据流中的代码加载到模块对象中
-        exec(self.debugtalks_data, module.__dict__)
+        exec(debugtalk_source, module.__dict__)
 
         # 将模块对象添加到 sys.modules 中，以便后续导入
-        sys.modules[self.module_name] = module
+        sys.modules[module_name] = module
         return module
 
     def func_map(self, user=None) -> dict:
-        module = self._import_debugtalk(user)
-        return get_func_map(module)
+        default_debugtalk = get_func_map(debugtalk_common)
+
+        module = self._import_debugtalk(self.common_debugtalk_source, user)
+        common_debugtalk = get_func_map(module)
+
+        project_debugtalk_module = self._import_debugtalk(self.debugtalks_data, user)
+        project_debugtalk = get_func_map(project_debugtalk_module)
+
+        default_debugtalk.update(common_debugtalk)
+        default_debugtalk.update(project_debugtalk)
+
+        return default_debugtalk
 
     def func_doc_map(self, user=None, filter=None) -> dict:
         module = self._import_debugtalk(user)
         return get_func_doc_map(module, filter=filter)
 
     def del_import(self):
-        if self.module_name:
-            del sys.modules[self.module_name]
-            logger.info(f"成功卸载模块 {self.module_name}")
+        if self.module_names:
+            for module_name in self.module_names:
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+                    logger.info(f"成功卸载模块 {module_name}")

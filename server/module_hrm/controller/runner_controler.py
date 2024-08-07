@@ -38,11 +38,15 @@ async def run_test(request: Request,
         # 获取分页数据
         for i in range(run_info.repeat_num):
             test_start_time = time.time()
-            run_result = await run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_model,
+            run_result = await run_by_batch(query_db, run_info.ids, run_info.env, run_info.run_type, run_info.run_model,
                                             user=current_user.user.user_id)
             test_end_time = time.time()
             logger.info('执行成功')
-            report_data = ReportCreatModel(**{"reportName": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if run_info.repeat_num > 1:
+                report_name = f"{report_name}-{i + 1}"
+
+            report_data = ReportCreatModel(**{"reportName": report_name,
                                               "status": CaseRunStatus.passed.value,
                                               })
             report_info = ReportDao.create(query_db, report_data)
@@ -66,7 +70,7 @@ async def run_test(request: Request,
                                                      timezone(timedelta(hours=8))),
                                                  step_result.time.duration,
                                                  step_result.model_dump_json(by_alias=True),
-                                                 step_result.status == CaseRunStatus.passed.value,
+                                                 step_result.status,
                                                  )
                 report_total += 1
                 if step_result.status == CaseRunStatus.failed.value:
@@ -79,7 +83,7 @@ async def run_test(request: Request,
             report_info.success = report_success
             query_db.commit()
 
-        data = ResponseUtil.success(data="执行成功")
+        data = ResponseUtil.success(data=f"执行成功，执行了{run_info.repeat_num}次，请前往报告查看")
         return data
     except Exception as e:
         logger.exception(e)
@@ -90,16 +94,16 @@ async def run_test(request: Request,
                        dependencies=[Depends(CheckUserInterfaceAuth(['hrm:api:debug', 'hrm:case:debug']))])
 async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Session = Depends(get_db),
                     current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    debugtalk_obj = None
     try:
-        # 获取分页数据
         case_data = debug_info.case_data
         page_query_result = CaseModelForApi(**case_data)
         data_for_run = CaseInfoHandle(query_db).from_page(case_data).toDebug(debug_info.env).run_data()
 
         # 读取项目debugtalk
-        projectId = [page_query_result.project_id]
-        debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(query_db, project_ids=projectId)
-        debugtalk_obj = DebugTalkHandler(debugtalk_source)
+        common_debugtalk_source, project_debugtalk_source = DebugTalkService.debugtalk_source_for_projectid(query_db,
+                                                                                                            project_id=page_query_result.project_id)
+        debugtalk_obj = DebugTalkHandler(project_debugtalk_source, common_debugtalk_source)
         debugtalk_func_map = debugtalk_obj.func_map(user=current_user.user.user_id)
         data_for_run.case_id = page_query_result.case_id
 
@@ -108,28 +112,31 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
         logger.info('执行成功')
         all_log = []
         for step_result in all_case_res:
-            run_detail = RunDetailDao.create(query_db,
-                                             page_query_result.case_id,
-                                             None,
-                                             debug_info.run_type,
-                                             step_result.result.name,
-                                             datetime.fromtimestamp(step_result.result.time.start_time,
-                                                                    timezone.utc).astimezone(
-                                                 timezone(timedelta(hours=8))),
-                                             datetime.fromtimestamp(step_result.result.time.end_time,
-                                                                    timezone.utc).astimezone(
-                                                 timezone(timedelta(hours=8))),
-                                             step_result.result.time.duration,
-                                             step_result.result.model_dump_json(by_alias=True),
-                                             1 if step_result.result.status == CaseRunStatus.passed.value else 2,
-                                             )
+            RunDetailDao.create(query_db,
+                                page_query_result.case_id,
+                                None,
+                                debug_info.run_type,
+                                step_result.result.name,
+                                datetime.fromtimestamp(step_result.result.time.start_time,
+                                                       timezone.utc).astimezone(
+                                    timezone(timedelta(hours=8))),
+                                datetime.fromtimestamp(step_result.result.time.end_time,
+                                                       timezone.utc).astimezone(
+                                    timezone(timedelta(hours=8))),
+                                step_result.result.time.duration,
+                                step_result.result.model_dump_json(by_alias=True),
+                                1 if step_result.result.status == CaseRunStatus.passed.value else 2,
+                                )
 
             all_log.append("\n".join(step_result.result.log.values()))
-        data = ResponseUtil.success(data={"log": "\n".join(all_log), "runId": run_detail.run_id})
+        data = ResponseUtil.success(data={"log": "\n".join(all_log), "runId": page_query_result.case_id})
         return data
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+    finally:
+        if debugtalk_obj:
+            debugtalk_obj.del_import()
 
 
 @runnerController.get("/runHistory/{detail_id}", response_model=PageResponseModel,

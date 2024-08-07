@@ -320,7 +320,7 @@ class IStep(object):
 class TestCaseSummary(BaseModel):
     name: Text
     success: bool = True
-    status: Text = CaseRunStatus.passed.value
+    status: int = CaseRunStatus.passed.value
     case_id: Text | int | None = None
     time: TestCaseTime = TestCaseTime()
     in_out: TestCaseInOut = TestCaseInOut()
