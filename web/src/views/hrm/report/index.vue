@@ -1,5 +1,5 @@
 <template>
-  <div class="hrm-report">
+  <div class="app-container">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
       <el-form-item label="报告名称" prop="reportName">
         <el-input

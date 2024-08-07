@@ -99,6 +99,12 @@
         >导出
         </el-button>
       </el-col>
+      <el-col :span="1.5">
+        <el-button type="warning" icon="CaretRight" @click="runTest"
+                     v-hasPermi="['hrm:case:run']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
+          执行
+          </el-button>
+      </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
     </el-row>
 
@@ -150,7 +156,7 @@
                      v-hasPermi="['hrm:case:edit']" title="编辑">
           </el-button>
           <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
-                     v-hasPermi="['hrm:case:edit']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
+                     v-hasPermi="['hrm:case:run']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
                      v-hasPermi="['hrm:case:remove']" title="删除">
@@ -228,6 +234,9 @@
       </el-container>
     </el-dialog>
 
+      <!-- 运行用例对话框 -->
+    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.case" :run-ids="runIds"></RunDialog>
+
   </div>
 </template>
 
@@ -241,7 +250,9 @@ import TestStep from "@/components/hrm/case/step.vue"
 import CaseConfig from "@/components/hrm/case/case-config.vue"
 import {initCaseFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run-detail.vue';
+import RunDialog from '@/components/hrm/common/run_dialog.vue';
 import {runModelEnum, HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {ElMessageBox} from "element-plus";
 // import JsonEditorVue from "json-editor-vue3";
 
 
@@ -286,6 +297,10 @@ const title = ref("");
 const selectedEnv = ref("");
 const responseData = ref("");
 
+
+const runDialogShow = ref(false);
+const runIds = ref([]);
+
 const history = ref(false);
 const currentRunId = ref();
 
@@ -312,14 +327,16 @@ function nameOrGlob(val) {
 
 
 function runTest(row) {
-  let data = {
-    ids: [row.caseId],
-    runModel: runModelEnum.case,
-    env: 1746540889545728
+  if (row && "caseId" in row && row.caseId){
+    runIds.value = [row.caseId];
   }
-  testRun(data).then(response => {
-    alert('执行完成');
-  })
+  if (!runIds.value || runIds.value.length === 0) {
+    ElMessageBox.alert('请选择要运行的用例', "提示！", {type: "warning"});
+      return;
+  }
+
+  runDialogShow.value = true;
+
 }
 
 
@@ -381,6 +398,7 @@ function resetQuery() {
 /** 多选框选中数据 */
 function handleSelectionChange(selection) {
   ids.value = selection.map(item => item.caseId);
+  runIds.value = ids.value;
   single.value = selection.length != 1;
   multiple.value = !selection.length;
 }
