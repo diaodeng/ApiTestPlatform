@@ -34,8 +34,8 @@
          :data="debugtalkList"
          row-key="debugtalkId"
          :default-expand-all="isExpandAll">
-         <el-table-column prop="debugtalkId" label="ID" width="120"></el-table-column>
-         <el-table-column label="项目ID" width="140" prop="projectId" align="center"></el-table-column>
+         <el-table-column prop="debugtalkId" label="ID" width="150"></el-table-column>
+         <el-table-column label="项目ID" width="150" prop="projectId" align="center"></el-table-column>
          <el-table-column label="所属项目" width="260" prop="projectName" align="center"></el-table-column>
 <!--         <el-table-column label="所属项目" width="260" :formatter="formatProject" align="center"></el-table-column>-->
          <el-table-column align="center" label="DebugTalk" width="260">
