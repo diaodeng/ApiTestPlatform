@@ -48,7 +48,7 @@
         row-key="envId"
         :default-expand-all="isExpandAll"
     >
-      <el-table-column prop="envId" label="ID" width="100"></el-table-column>
+      <el-table-column prop="envId" label="ID" width="160"></el-table-column>
       <el-table-column prop="envName" label="环境名称" width="200"></el-table-column>
       <el-table-column prop="envUrl" label="环境URL" width="260"></el-table-column>
       <el-table-column prop="orderNum" label="排序" width="200"></el-table-column>

@@ -1,5 +1,7 @@
 <template>
   <div class="app-container">
+    <div>{{reportId}}</div>
+    <div>{{queryParams.reportId}}</div>
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
       <el-form-item label="ID" prop="runId" v-if="viewType === runDetailViewTypeEnum.report">
         <el-input
@@ -58,7 +60,7 @@
       </el-table-column>
       <el-table-column label="执行时长(S)" align="center" prop="createTime" class-name="small-padding fixed-width">
         <template #default="scope">
-          <span>{{ parseTime(scope.row.runEndTime) }}</span>
+          <span>{{ scope.row.runDuration }}</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="200" align="center" class-name="small-padding fixed-width">
@@ -111,9 +113,21 @@ const single = ref(true);
 const multiple = ref(true);
 const total = ref(0);
 
-const data = reactive({
-  // form: {},
-  queryParams: {
+// const data = reactive({
+//   // form: {},
+//   queryParams: {
+//     pageNum: 1,
+//     pageSize: 10,
+//     runId: props.runId,
+//     reportId: props.reportId,
+//     runName: undefined,
+//     projectId: undefined,
+//     moduleId: undefined,
+//     status: undefined
+//   }
+// });
+
+const queryParams = ref({
     pageNum: 1,
     pageSize: 10,
     runId: props.runId,
@@ -122,19 +136,23 @@ const data = reactive({
     projectId: undefined,
     moduleId: undefined,
     status: undefined
-  }
-});
-
-const {queryParams} = toRefs(data);
+  });
 
 watch(() => props.runId, () => {
   queryParams.value.runId = props.runId;
   handleQuery();
 });
 
+watch(() => props.reportId, () => {
+  queryParams.value.reportId = props.reportId;
+  handleQuery();
+});
+
 /** 查询用例列表 */
 function getList() {
   loading.value = true;
+  queryParams.value.runId = props.runId;
+  queryParams.value.reportId = props.reportId;
   ApiRunDetail.list(queryParams.value).then(response => {
     runDetailList.value = response.rows;
     total.value = response.total;
@@ -196,5 +214,6 @@ function handleView(row) {
 
 getProjectSelect();
 // getModuleShow();
+handleQuery();
 getList();
 </script>
