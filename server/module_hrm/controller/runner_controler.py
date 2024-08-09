@@ -112,6 +112,7 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
         logger.info('执行成功')
         all_log = []
         for step_result in all_case_res:
+            case_run_data = step_result.case_data
             RunDetailDao.create(query_db,
                                 page_query_result.case_id,
                                 None,
@@ -125,7 +126,7 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
                                     timezone(timedelta(hours=8))),
                                 step_result.result.time.duration,
                                 step_result.result.model_dump_json(by_alias=True),
-                                1 if step_result.result.status == CaseRunStatus.passed.value else 2,
+                                step_result.result.status,
                                 )
 
             all_log.append("\n".join(step_result.result.log.values()))

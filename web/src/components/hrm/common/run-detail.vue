@@ -1,7 +1,5 @@
 <template>
   <div class="app-container">
-    <div>{{reportId}}</div>
-    <div>{{queryParams.reportId}}</div>
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
       <el-form-item label="ID" prop="runId" v-if="viewType === runDetailViewTypeEnum.report">
         <el-input
@@ -82,14 +80,18 @@
         v-model:limit="queryParams.pageSize"
         @pagination="getList"
     />
+
+    <CaseEditDialog v-model:open-case-edit-dialog="showCaseEdit" :form-datas="caseDetailData"></CaseEditDialog>
   </div>
 </template>
 
 <script setup name="RunDetail">
 import * as ApiRunDetail from "@/api/hrm/run_detail.js";
 import {listProject} from "@/api/hrm/project";
+import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import {runDetailViewTypeEnum} from "@/components/hrm/enum.js";
 import DictTag from "@/components/DictTag/index.vue";
+import {initCaseFormData} from "@/components/hrm/data-template.js";
 // import JsonEditorVue from "json-editor-vue3";
 
 
@@ -113,19 +115,9 @@ const single = ref(true);
 const multiple = ref(true);
 const total = ref(0);
 
-// const data = reactive({
-//   // form: {},
-//   queryParams: {
-//     pageNum: 1,
-//     pageSize: 10,
-//     runId: props.runId,
-//     reportId: props.reportId,
-//     runName: undefined,
-//     projectId: undefined,
-//     moduleId: undefined,
-//     status: undefined
-//   }
-// });
+const showCaseEdit = ref(false);
+const caseDetailData = ref(JSON.parse(JSON.stringify(initCaseFormData)));
+
 
 const queryParams = ref({
     pageNum: 1,
@@ -207,7 +199,12 @@ function handleDelete(row) {
 function handleView(row) {
   let detailIds = row.detailId;
   ApiRunDetail.detail(detailIds).then(response => {
-    alert(JSON.stringify(response, null, 4));
+    caseDetailData.value.caseId = response.data;
+    caseDetailData.value.projectId = response.data;
+    caseDetailData.value.moduleId = response.data;
+    caseDetailData.value.request.teststeps = response.data;
+    showCaseEdit.value = true;
+    // alert(JSON.stringify(response, null, 4));
   });
 }
 
