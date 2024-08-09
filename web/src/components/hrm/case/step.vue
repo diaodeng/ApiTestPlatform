@@ -1,5 +1,5 @@
 <script setup>
-
+import {ElMessageBox} from "element-plus";
 import TableExtract from "@/components/hrm/table-extract.vue";
 import EditLabel from "@/components/hrm/common/edite-label.vue";
 import TableHooks from "@/components/hrm/table-hooks.vue";
@@ -9,17 +9,18 @@ import StepRequest from "@/components/hrm/case/step-request.vue";
 import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
 import {randomString} from "@/utils/tools.js";
 import {initStepData, initWebsocketData} from "@/components/hrm/data-template.js";
+import {CaseStepTypeEnum} from "@/components/hrm/enum.js";
 
 // const {proxy} = getCurrentInstance();
-const activeRequestName = ref("stepRequest")
-const activeTestStepName = ref(0)
+const activeRequestName = ref("stepRequest");
+const activeTestStepName = ref(0);
 
 // const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 // const {hrm_data_type} = proxy.useDict("hrm_data_type");
 // const {sys_request_method} = proxy.useDict("sys_request_method");
 
 const testStepsData = defineModel('testStepsData', {required: true});
-const responseData = defineModel('responseData')
+const responseData = defineModel('responseData');
 
 
 function editTabs(paneName, action, tapType) {
@@ -30,11 +31,11 @@ function editTabs(paneName, action, tapType) {
 
     testStepsData.value.splice(currentTabIndex, 1);
     if (testStepsData.value.length <= 0) {
-      let tmpStepData = JSON.parse(JSON.stringify(initStepData))
+      let tmpStepData = JSON.parse(JSON.stringify(initStepData));
       tmpStepData.step_id = randomString(10);
       testStepsData.value.push(tmpStepData);
       activeTestStepName.value = 0;
-      return
+      return;
     }
 
     if (oldActiveStep >= currentTabIndex) {
@@ -47,11 +48,17 @@ function editTabs(paneName, action, tapType) {
 
   } else if (action === "add") {
     if (!tapType) {
-      alert("参数错误")
+      ElMessageBox.alert("参数错误", "错误提示", {type: "error"});
+      return;
+    }
+    debugger
+    if (tapType !==CaseStepTypeEnum.api && tapType !== CaseStepTypeEnum.websocket){
+      ElMessageBox.alert("不支持的测试步骤类型", "错误提示", {type: "error"});
+      return;
     }
     let newTabName = paneName !== undefined ? paneName + 1 : activeTestStepName.value + 1;
-    const tapData = JSON.parse(JSON.stringify(initStepData));
-    if (tapType === 2){
+    let tapData = JSON.parse(JSON.stringify(initStepData));
+    if (tapType === CaseStepTypeEnum.websocket) {
       tapData.request = JSON.parse(JSON.stringify(initWebsocketData));
     }
     tapData.step_id = randomString(10);
@@ -76,10 +83,10 @@ function editTabs(paneName, action, tapType) {
       </template>
       <el-tabs type="" v-model="activeRequestName">
         <el-tab-pane label="request" name="stepRequest">
-          <template v-if="step.step_type === 1">
+          <template v-if="step.step_type === CaseStepTypeEnum.api">
             <StepRequest v-model:request-detail-data="step.request" v-model:response-data="responseData"></StepRequest>
           </template>
-          <template v-if="step.step_type === 2">
+          <template v-if="step.step_type === CaseStepTypeEnum.websocket">
             <StepWebsocket v-model:request-detail-data="step.request"
                            v-model:response-data="responseData"></StepWebsocket>
           </template>

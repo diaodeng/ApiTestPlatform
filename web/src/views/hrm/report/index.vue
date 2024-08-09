@@ -71,7 +71,7 @@
         @pagination="getList"
     />
 
-    <el-dialog fullscreen v-model="showReportDetail" append-to-body>
+    <el-dialog fullscreen v-model="showReportDetail" append-to-body destroy-on-close>
       <el-container style="height: 100%">
         <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
         <!--          </el-header>-->
