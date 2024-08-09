@@ -105,6 +105,9 @@ class CaseRunner(object):
                 step_obj = Websocket(self, step)
                 await step_obj.run()
                 step_obj = step_obj.validate()
+            else:
+                raise Exception(f"step type {step.step_type} not support")
+
             log_content = self.handler.get_log()
             step_obj.result.log = log_content
 
@@ -254,6 +257,7 @@ class RequestRunner(object):
             req_resps_data = ReqRespData()
             req_resps_data.request = TRequest(**request_data)
             self.result.data.req_resps.append(req_resps_data)
+            # self.step_data.request = req_resps_data.request
 
             start_time = time.time()
             res_response = requests.request(**request_data)

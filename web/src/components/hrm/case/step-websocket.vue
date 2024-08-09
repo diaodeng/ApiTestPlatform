@@ -54,12 +54,12 @@ const activeRequestDetailName = ref("requestHeader")
           </el-tab-pane>
           <el-tab-pane label="data" name="requestJson">
             <div style="width: 100%">
-              <AceEditor v-model:content="requestDetailData.data" can-set="true"></AceEditor>
+              <AceEditor v-model:content="requestDetailData.data" can-set="true" height="calc(100vh - 410px)"></AceEditor>
             </div>
           </el-tab-pane>
         </template>
         <template #right>
-          <AceEditor v-model:content="responseData" can-set="true"></AceEditor>
+          <AceEditor v-model:content="responseData" can-set="true" height="calc(100vh - 410px)"></AceEditor>
         </template>
       </SplitWindow>
     </el-tabs>

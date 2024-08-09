@@ -174,57 +174,17 @@
     />
 
     <!-- 添加或修改用例对话框 -->
-    <el-dialog fullscreen :title="title + '【' + form.caseId + ' - ' + form.caseName +'】'" v-model="open" append-to-body>
-      <el-form ref="postRef" :model="form" :rules="formRules" label-width="100px" style="height: 100%">
-        <el-container style="height: 100%">
-          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
-            <el-button-group>
-              <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">保存</el-button>
-              <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']"
-                         v-if="dataType === HrmDataTypeEnum.case">调试
-              </el-button>
-              <el-select placeholder="Select" v-model="selectedEnv" style="width: 115px"
-                         v-if="dataType === HrmDataTypeEnum.case">
-                <el-option
-                    v-for="option in envOptions"
-                    :key="option.envId"
-                    :label="option.envName"
-                    :value="option.envId">
-                </el-option>
-              </el-select>
-            </el-button-group>
+    <CaseEditDialog :form-datas="form"
+                    :data-type="dataType"
+                    :form-rules="formRules"
+                    v-model:open-case-edit-dialog="open"
+                    :title = caseEditDialogTitle
 
-          </el-header>
-          <el-main style="max-height: calc(100vh - 95px);">
-            <CaseConfig v-model:form-data="form" :project-options="projectOptions"
-                        v-if="dataType === HrmDataTypeEnum.config"
-                        :data-type="dataType" :data-name="dataName"></CaseConfig>
-            <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;"
-                     v-else-if="dataType === HrmDataTypeEnum.case">
-              <el-tab-pane label="config" name="caseConfig">
-                <CaseConfig v-model:form-data="form" :project-options="projectOptions"
-                            :data-type="dataType"></CaseConfig>
-              </el-tab-pane>
-              <el-tab-pane label="teststeps" name="caseSteps">
-                <el-container>
-                  <el-main>
-                    <TestStep v-model:test-steps-data="form.request.teststeps"
-                              v-model:response-data="responseData"></TestStep>
-                  </el-main>
-                </el-container>
-
-              </el-tab-pane>
-            </el-tabs>
-          </el-main>
-        </el-container>
-
-
-      </el-form>
-    </el-dialog>
+    ></CaseEditDialog>
 
 
     <el-dialog fullscreen :title="'【' + form.caseId + '】' + form.caseName" v-model="history" append-to-body
-               v-if="dataType==HrmDataTypeEnum.case">
+               v-if="dataType==HrmDataTypeEnum.case" destroy-on-close>
       <el-container style="height: 100%">
         <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
         <!--          </el-header>-->
@@ -241,17 +201,15 @@
 </template>
 
 <script setup name="Case">
-import {addCase, debugCase, delCase, getCase, listCase, updateCase} from "@/api/hrm/case";
-import {testRun} from "@/api/hrm/run_detail.js";
-import {selectModulList, showModulList} from "@/api/hrm/module";
+import {delCase, getCase, listCase} from "@/api/hrm/case";
+import {selectModulList} from "@/api/hrm/module";
 import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
-import TestStep from "@/components/hrm/case/step.vue"
-import CaseConfig from "@/components/hrm/case/case-config.vue"
+import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import {initCaseFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run-detail.vue';
 import RunDialog from '@/components/hrm/common/run_dialog.vue';
-import {runModelEnum, HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
 import {ElMessageBox} from "element-plus";
 // import JsonEditorVue from "json-editor-vue3";
 
@@ -278,6 +236,10 @@ const dataName = computed(() => {
   return props.dataType === HrmDataTypeEnum.case ? "用例" : "配置";
 });
 
+const caseEditDialogTitle = computed(() => {
+    return title.value + '【' + form.value.caseId + ' - ' + form.value.caseName +'】'
+});
+
 
 provide("hrm_data_type", hrm_data_type);
 provide('sys_normal_disable', sys_normal_disable);
@@ -294,18 +256,12 @@ const single = ref(true);
 const multiple = ref(true);
 const total = ref(0);
 const title = ref("");
-const selectedEnv = ref("");
-const responseData = ref("");
-
 
 const runDialogShow = ref(false);
 const runIds = ref([]);
 
 const history = ref(false);
 const currentRunId = ref();
-
-const activeCaseName = ref("caseConfig")
-const activeMessageName = ref("caseMessages")
 
 const queryParams = toRef({
   pageNum: 1,
@@ -317,14 +273,13 @@ const queryParams = toRef({
   moduleId: undefined,
   status: undefined
 });
-const form = ref(initCaseFormData);
 
+const form = ref(initCaseFormData);
 
 function nameOrGlob(val) {
   return val ? val : "全局";
 
 }
-
 
 function runTest(row) {
   if (row && "caseId" in row && row.caseId){
@@ -371,17 +326,6 @@ function resetModule() {
   getModuleSelect();
 }
 
-/** 表单重置 */
-function reset() {
-  activeCaseName.value = "caseConfig"
-  activeMessageName.value = "caseMessages"
-  // activeRequestName.value = "stepRequest"
-  // activeRequestDetailName.value = "requestHeader"
-  // activeTestStepName.value = 0
-  form.value = JSON.parse(JSON.stringify(initCaseFormData));
-  form.value.type = props.dataType
-  proxy.resetForm("postRef");
-}
 
 /** 搜索按钮操作 */
 function handleQuery() {
@@ -405,24 +349,20 @@ function handleSelectionChange(selection) {
 
 /** 新增按钮操作 */
 function handleAdd() {
-  reset();
   open.value = true;
   title.value = "添加" + dataName.value;
+  form.value = JSON.parse(JSON.stringify(initCaseFormData));
 }
 
 /** 修改按钮操作 */
 function handleUpdate(row) {
-  reset();
   const caseId = row.caseId || ids.value;
   getCase(caseId).then(response => {
     if (!response.data || Object.keys(response.data).length === 0) {
       alert("未查到对应数据！");
       return;
     }
-    // form.value.projectId = response.data.projectId;
     form.value = response.data;
-    // getModuleSelectHandl();
-
     open.value = true;
     title.value = "修改" + dataName.value;
   });
@@ -432,50 +372,6 @@ function showHistory(row) {
   const caseId = row.caseId || ids.value;
   currentRunId.value = caseId;
   history.value = true;
-}
-
-function debugForm() {
-  proxy.$refs["postRef"].validate(valid => {
-    if (valid) {
-      const caseData = form.value;
-      caseData.request.config.name = caseData.caseName;
-      const req_data = {
-        "env": selectedEnv.value,
-        "runType": 3,
-        "caseData": caseData
-      }
-      debugCase(req_data).then(response => {
-        proxy.$modal.msgSuccess(response.msg);
-        responseData.value = response.data.log
-        // open.value = false;
-        // getList();
-      });
-
-    }
-  });
-}
-
-/** 提交按钮 */
-function submitForm() {
-  proxy.$refs["postRef"].validate(valid => {
-    if (valid) {
-      const caseData = form.value
-      caseData.request.config.name = caseData.caseName;
-      if (caseData.caseId != undefined) {
-        updateCase(caseData).then(response => {
-          proxy.$modal.msgSuccess("修改成功");
-          open.value = false;
-          getList();
-        });
-      } else {
-        addCase(caseData).then(response => {
-          proxy.$modal.msgSuccess("新增成功");
-          open.value = false;
-          getList();
-        });
-      }
-    }
-  });
 }
 
 /** 删除按钮操作 */

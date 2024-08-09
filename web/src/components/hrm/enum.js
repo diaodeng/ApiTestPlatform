@@ -12,6 +12,13 @@ export const runModelEnum = {
     project: 4
 }
 
+export const RunTypeEnum = {
+    case: 1,
+    api: 2,
+    case_debug: 3,
+    api_debug: 4
+}
+
 
 export const HrmDataTypeEnum = {
     project: 1,
@@ -27,4 +34,10 @@ export const HrmDataTypeEnum = {
     folder: 11,
     suite_detail: 12,
     suite_case_list: 13
+}
+
+export const CaseStepTypeEnum = {
+    api: 1,
+    websocket: 2,
+    webui: 3
 }
