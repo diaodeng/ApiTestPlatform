@@ -1,5 +1,5 @@
 import {randomString} from "@/utils/tools.js";
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {HrmDataTypeEnum, CaseStepTypeEnum} from "@/components/hrm/enum.js";
 
 
 export const initRequestData = {
@@ -22,7 +22,7 @@ export const initWebsocketData = {
 
 export const initStepData =
     {
-        step_type: 1,
+        step_type: CaseStepTypeEnum.api,
         step_id: `${randomString(10)}`,
         name: "新增测试步骤",
         request: initRequestData,
@@ -71,7 +71,7 @@ export const initCaseFormData = {
   caseId: undefined,
   moduleId: undefined,
   projectId: undefined,
-  caseName: undefined,
+  caseName: "新增测试用例",
   notes: undefined,
   sort: 0,
   status: "0",
