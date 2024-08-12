@@ -11,6 +11,7 @@ const tableCols = [{
   {
     name: "Comparator",
     prop: "assert",
+    type: "compaList",
     width: 100
   }, {
     name: "Type",

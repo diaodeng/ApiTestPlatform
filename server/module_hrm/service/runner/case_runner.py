@@ -11,7 +11,7 @@ import requests
 import websockets
 
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep, TRequest, TWebsocket, ResponseData, \
-    TestCaseSummary, StepResult, ReqRespData, SessionData
+    TestCaseSummary, StepResult, ReqRespData, SessionData, Result
 from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
 from module_hrm.exceptions import TestFailError
 from module_hrm.utils import debugtalk_common, comparators
@@ -20,6 +20,7 @@ from module_hrm.utils.parser import parse_data
 from module_hrm.utils.util import replace_variables, get_func_map, ensure_str
 from utils.log_util import logger
 import urllib3
+
 # 忽略requests库https请求的警告
 urllib3.disable_warnings()
 
@@ -65,13 +66,9 @@ class CaseRunner(object):
         self.handler = RunLogCaptureHandler()
         self.logger.addHandler(self.handler)
 
-        self.result: TestCaseSummary = TestCaseSummary(**{"name": self.case_data.config.name})
-        self.result.in_out.config_vars = self.case_data.config.variables
-        self.result.case_id = self.case_data.case_id
-
-        default_func_map: dict = copy.deepcopy(get_func_map(debugtalk_common))  # 公用debugtalk方法
-        default_func_map.update(debugtalk_func_map)
-        self.debugtalk_func_map: dict = default_func_map  # 对应项目debugtalk方法
+        # default_func_map: dict = copy.deepcopy(get_func_map(debugtalk_common))  # 公用debugtalk方法
+        # default_func_map.update(debugtalk_func_map)
+        self.debugtalk_func_map: dict = debugtalk_func_map  # 对应项目debugtalk方法
         # 全局变量中自身替换
         self.case_data.config.variables = json.loads(
             parse_data(json.dumps(self.case_data.config.variables), self.case_data.config.variables,
@@ -85,11 +82,13 @@ class CaseRunner(object):
 
     async def run(self):
         start_info = f"{'>>>开始执行用例：' + self.case_data.config.name:>^100}"
+        self.case_data.config.result = Result()
         logger.info(start_info)
         self.logger.info(start_info)
         start_time = datetime.now(timezone.utc)
-        self.result.time.start_time = start_time.timestamp()
-        self.result.time.start_time_iso_format = start_time.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+        self.case_data.config.result.start_time_stamp = start_time.timestamp()
+        self.case_data.config.result.start_time_iso = start_time.astimezone(timezone(timedelta(hours=8))).strftime(
+            "%Y-%m-%d %H:%M:%S")
 
         for step in self.case_data.teststeps:
 
@@ -99,7 +98,7 @@ class CaseRunner(object):
                                         )
 
             # 发起请求
-            if step.step_type == TstepTypeEnum.api.value:
+            if step.step_type == TstepTypeEnum.http.value:
                 step_obj = RequestRunner(self, step).request().validate()
             elif step.step_type == TstepTypeEnum.websocket.value:
                 step_obj = Websocket(self, step)
@@ -109,22 +108,21 @@ class CaseRunner(object):
                 raise Exception(f"step type {step.step_type} not support")
 
             log_content = self.handler.get_log()
-            step_obj.result.log = log_content
+            step_obj.step_data.result.logs.after_response += log_content
 
             self.case_data.config.variables.update(step_obj.extract_variable)
-            self.result.step_results.append(step_obj.result)
-            self.result.log[step_obj.step_data.step_id] = log_content
 
-            del step_obj.debugtalk_func_map
+            # del step_obj.debugtalk_func_map
         end_info = f"{'执行结束用例：' + self.case_data.config.name + '<<<':<^100}"
         logger.info(end_info)
         self.logger.info(end_info)
         del self.debugtalk_func_map
 
         end_time = datetime.now(timezone.utc)
-        self.result.time.end_time = end_time.timestamp()
-        self.result.time.end_time_iso_format = end_time.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-        self.result.time.duration = (end_time - start_time).microseconds / 1000000
+        self.case_data.config.result.end_time_stamp = end_time.timestamp()
+        self.case_data.config.result.end_time_iso = end_time.astimezone(timezone(timedelta(hours=8))).strftime(
+            "%Y-%m-%d %H:%M:%S")
+        self.case_data.config.result.duration = (end_time - start_time).microseconds / 1000000
 
         return self
 
@@ -151,17 +149,20 @@ class RequestRunner(object):
         self.files = None
         self.response: Response = None
         self.extract_variable: dict = {}
-        self.result: StepResult = StepResult()
+        self.step_data.result = Result()
 
-        self.result.name = self.step_data.name
-        self.result.step_id = self.step_data.step_id
-        self.result.step_type = self.step_data.step_type
+    def format_time(self, start_time: int, end_time: int):
+        self.step_data.result.duration = round(end_time - start_time, 2)
+        self.step_data.result.start_time_stamp = start_time
+        self.step_data.result.start_time_iso = datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S")
+        self.step_data.result.end_time_stamp = end_time
+        self.step_data.result.end_time_iso = datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S")
 
     def set_step_failed(self):
-        self.result.status = CaseRunStatus.failed.value
-        self.result.success = False
-        self.case_runner.result.status = CaseRunStatus.failed.value
-        self.case_runner.result.success = False
+        self.step_data.result.status = CaseRunStatus.failed.value
+        self.step_data.result.success = False
+        self.case_runner.case_data.config.result.status = CaseRunStatus.failed.value
+        self.case_runner.case_data.config.result.success = False
 
     def parse_request_data(self):
         temp_all_val = copy.deepcopy(self.case_runner.case_data.config.variables)
@@ -185,8 +186,10 @@ class RequestRunner(object):
                                           self.debugtalk_func_map)
                 return request_data
             except Exception as e:
+                self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
                 self.set_step_failed()
                 self.logger.error(f"before_request函数执行失败: {e}")
+                self.step_data.result.logs.error += self.case_runner.handler.get_log()
                 return CaseRunStatus.failed.value
 
     def after_request(self, response: requests.Response):
@@ -198,11 +201,13 @@ class RequestRunner(object):
                 after_request(response)
             self.logger.info(f"{self.step_data.name} 响应回调执行完毕")
         except Exception as ef:
+            self.step_data.result.logs.after_response += self.case_runner.handler.get_log()
             self.set_step_failed()
             logger.exception(ef)
             self.logger.info(f"response.text: {self.response.text}")
             self.logger.error(
                 f'回调after_request处理异常，error:{json.dumps({"args": str(ef.args), "msg": str(ef)}, indent=4, ensure_ascii=False)}')
+            self.step_data.result.logs.error += self.case_runner.handler.get_log()
             return CaseRunStatus.failed.value
 
     def request(self):
@@ -241,6 +246,7 @@ class RequestRunner(object):
         if self.before_request(request_data) == CaseRunStatus.failed.value:
             return self
 
+        self.step_data.request = TRequest(**request_data)
         logger.info(f'{">>>请求:" + self.step_data.name:=^100}')
         self.logger.info(f'{">>>请求:" + self.step_data.name:=^100}')
         logger.info(f"url: {self.step_data.request.url}")
@@ -251,34 +257,30 @@ class RequestRunner(object):
         self.logger.info(f"Request: {json.dumps(request_data, indent=4, ensure_ascii=False)}")
 
         try:
-            data = SessionData()
-            self.result.data = data
 
-            req_resps_data = ReqRespData()
-            req_resps_data.request = TRequest(**request_data)
-            self.result.data.req_resps.append(req_resps_data)
-            # self.step_data.request = req_resps_data.request
-
+            self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
             start_time = time.time()
             res_response = requests.request(**request_data)
             end_time = time.time()
-            self.result.duration = round(end_time - start_time, 2)
+            self.format_time(start_time, end_time)
+
             if self.step_data.think_time.limit:
                 time.sleep(self.step_data.think_time.limit)
 
             res_obj = ResponseData()
-            res_obj.content = res_response.text
-            res_obj.body = res_response.content
+            res_obj.text = res_response.text
+            res_obj.content = res_response.content
             res_obj.status_code = res_response.status_code
             res_obj.headers = dict(res_response.headers)
             res_obj.cookies = dict(res_response.cookies)
-            req_resps_data.response = res_obj
+            self.step_data.result.response = res_obj
             self.response = Response(res_obj)
         except Exception as e:
             logger.exception(e)
             self.logger.error(f'error:{json.dumps({"args": str(e.args), "msg": str(e)}, indent=4, ensure_ascii=False)}')
             self.response = None
             self.set_step_failed()
+            self.step_data.result.logs.error += self.case_runner.handler.get_log()
             return self
 
         if self.after_request(self.response) == CaseRunStatus.failed.value:
@@ -324,7 +326,7 @@ class RequestRunner(object):
             logger.error("提取变量失败")
             logger.error(e)
             self.logger.error(f'{self.step_data.name} 提取变量失败\n {e}')
-            self.result.status = CaseRunStatus.failed.value
+            self.step_data.result.logs.error += self.case_runner.handler.get_log()
 
     def validate(self):
         # 校验数据处理回调
@@ -370,7 +372,7 @@ class RequestRunner(object):
                 self.logger.error(f'断言失败：{assert_key}({check_key}, {expect}, {msg})')
 
                 self.logger.exception(e)
-                self.result.status = CaseRunStatus.failed.value
+                self.step_data.result.logs.error += self.case_runner.handler.get_log()
                 continue
             self.logger.info("\n")
         self.logger.info(f"{self.step_data.name} 校验完成")
@@ -429,17 +431,12 @@ class Websocket(RequestRunner):
 
     async def run(self):
         self.logger.info(f'{self.step_data.name} 开始执行')
-        self.parse_request_data()
+        request_data = self.parse_request_data()
+        self.step_data.request = TWebsocket(**request_data)
         if self.before_request(self.step_data.request.model_dump(by_alias=True)) == CaseRunStatus.failed.value:
             return self
 
         try:
-            session_data = SessionData()
-            self.result.data = session_data
-            req_resps_data = ReqRespData()
-            req_resps_data.request = self.step_data.request
-            self.result.data.req_resps.append(req_resps_data)
-
             start_time = time.time()
             self.logger.info(f'{self.step_data.name} 开始执行')
             async with websockets.connect(self.step_data.request.url) as websocket:
@@ -454,19 +451,22 @@ class Websocket(RequestRunner):
                     res_data.append(response)
                 self.logger.info(f'{self.step_data.name} 接收数据成功')
                 self.logger.info(f'响应数据：{res_data}')
-                req_resps_data.response = ResponseData(**{"headers": websocket.response_headers,
-                                                          "body": res_data,
-                                                          "content": res_data,
-                                                          "status_code": 200})
-                self.response = Response(req_resps_data.response)
+                response_data = ResponseData(**{"headers": websocket.response_headers,
+                                                "body": res_data,
+                                                "content": res_data,
+                                                "status_code": 200})
+                self.step_data.result.response = response_data
+                self.response = Response(response_data)
             end_time = time.time()
-            self.result.duration = round(end_time - start_time, 2)
+            self.format_time(start_time, end_time)
             if self.step_data.think_time.limit:
                 await asyncio.sleep(self.step_data.think_time.limit)
         except Exception as e:
+            self.step_data.result.logs.after_response += self.case_runner.handler.get_log()
             logger.exception(e)
             self.logger.error(f'error:{json.dumps({"args": str(e.args), "msg": str(e)}, indent=4, ensure_ascii=False)}')
             self.set_step_failed()
+            self.step_data.result.logs.error += self.case_runner.handler.get_log()
             return self
 
         if self.after_request(self.response) == CaseRunStatus.failed.value:
@@ -516,17 +516,6 @@ class WebSocketClient:
 
     async def _close(self):
         await self.connection.close()
-
-
-class Result(object):
-    def __init__(self, response=None, logs='', name=''):
-        self.response: ResponseData = response
-        self.request_detail: TRequest | TWebsocket | dict = {}
-        self.logs: str = logs
-        self.name = name
-        self.status = 'passed'
-        self.duration = 0
-        self.step_id = int(time.time() * 1000)
 
 
 class TestRunner(object):

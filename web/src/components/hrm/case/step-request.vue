@@ -9,8 +9,6 @@ import DictSelect from "@/components/select/dict_select.vue";
 
 const {proxy} = getCurrentInstance();
 
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
-const {hrm_data_type} = proxy.useDict("hrm_data_type");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 
 const requestDetailData = defineModel("requestDetailData", {required:true});

@@ -1,5 +1,6 @@
 <script setup>
 
+import {getComparator} from "@/api/hrm/case.js"
 import {HrmDataTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
 import TestStep from "@/components/hrm/case/step.vue";
 import CaseConfig from "@/components/hrm/case/case-config.vue";
@@ -16,10 +17,11 @@ const props = defineProps({
     type: Object,
     default: {}
   },
-  formDatas:{type: Object, default: initCaseFormData},
+  formDatas: {type: Object, default: initCaseFormData},
   openCaseEditDialog: {type: Boolean, default: false},
   title: {type: String, default: "编辑页面"}
 });
+
 
 // const formData = defineModel("formData");
 const openCaseEditDialog = defineModel("openCaseEditDialog");
@@ -30,15 +32,21 @@ const envOptions = ref([]);
 const projectOptions = ref([]);
 const activeCaseName = ref("caseConfig")
 const responseData = ref("");
+const hrm_comparator_dict = ref({});
 
 const dataName = computed(() => {
   return props.dataType === HrmDataTypeEnum.case ? "用例" : "配置";
 });
 
+
+provide("hrm_comparator_dict", hrm_comparator_dict);
+
 watch(() => props.formDatas, () => {
   formData.value = props.formDatas;
   activeCaseName.value = "caseConfig"
+  getComparatorFromNetwork();
 })
+
 
 /** 提交按钮 */
 function submitForm() {
@@ -106,6 +114,16 @@ function reset() {
   // formData.value = JSON.parse(JSON.stringify(initCaseFormData));
   // formData.value.type = props.dataType
   proxy.resetForm("postRef");
+}
+
+function getComparatorFromNetwork() {
+  let data = "";
+  if (formData.value && formData.value.caseId){
+    data = formData.value.caseId;
+  }
+  getComparator({caseId: data}).then(response => {
+    hrm_comparator_dict.value = response.data;
+  });
 }
 
 reset();

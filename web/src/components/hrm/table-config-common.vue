@@ -4,13 +4,18 @@
 * 各种配置小表哥的通用模板
 * */
 import SelectDataType from "@/components/hrm/select-dataType.vue";
+import SelectComparator from '@/components/select/popover-select.vue'
 import {ElMessageBox} from 'element-plus';
+import {inject} from "vue";
 
 const props = defineProps(["cols"]);
 
 const selfData = defineModel();
 
 const multipleTable = ref(null);
+
+const hrm_data_type = inject("hrm_data_type");
+const hrm_comparator_dict = inject("hrm_comparator_dict");
 
 function colWith(content) {
   if (content) {
@@ -39,6 +44,7 @@ function addRow(event) {
     // }])
   }
 }
+
 
 function delRow(event) {
   const selectedRows = multipleTable.value.getSelectionRows();
@@ -106,7 +112,10 @@ function paste(event) {
 
       <template #default="{ row, $index }">
         <template v-if="col.type === 'select'">
-          <SelectDataType v-model="row.type"></SelectDataType>
+          <SelectDataType v-model="row.type" :options="hrm_data_type"></SelectDataType>
+        </template>
+        <template v-else-if="col.type === 'compaList'">
+          <SelectComparator v-model="row[col.prop]" :options-dict="hrm_comparator_dict"></SelectComparator>
         </template>
         <template v-else-if="col.type === 'switch'">
           <el-switch v-model="row[col.prop]"></el-switch>
