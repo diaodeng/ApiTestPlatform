@@ -201,7 +201,7 @@
 </template>
 
 <script setup name="Case">
-import {delCase, getCase, listCase} from "@/api/hrm/case";
+import {delCase, getCase, getComparator, listCase} from "@/api/hrm/case";
 import {selectModulList} from "@/api/hrm/module";
 import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
@@ -241,8 +241,10 @@ const caseEditDialogTitle = computed(() => {
 });
 
 
+
 provide("hrm_data_type", hrm_data_type);
 provide('sys_normal_disable', sys_normal_disable);
+
 
 const caseList = ref([]);
 const projectOptions = ref([]);
@@ -280,6 +282,7 @@ function nameOrGlob(val) {
   return val ? val : "全局";
 
 }
+
 
 function runTest(row) {
   if (row && "caseId" in row && row.caseId){

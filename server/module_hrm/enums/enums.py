@@ -36,7 +36,7 @@ class CaseRunStatus(Enum):
 
 
 class TstepTypeEnum(Enum):
-    api = 1  # http
+    http = 1
     websocket = 2
     webui = 3
 

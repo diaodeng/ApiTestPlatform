@@ -37,7 +37,7 @@ export const HrmDataTypeEnum = {
 }
 
 export const CaseStepTypeEnum = {
-    api: 1,
+    http: 1,
     websocket: 2,
     webui: 3
 }

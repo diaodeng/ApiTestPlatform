@@ -199,10 +199,11 @@ function handleDelete(row) {
 function handleView(row) {
   let detailIds = row.detailId;
   ApiRunDetail.detail(detailIds).then(response => {
-    caseDetailData.value.caseId = response.data;
-    caseDetailData.value.projectId = response.data;
-    caseDetailData.value.moduleId = response.data;
-    caseDetailData.value.request.teststeps = response.data;
+    console.log(response)
+    // caseDetailData.value = response.data;
+    // caseDetailData.value.projectId = response.data;
+    // caseDetailData.value.moduleId = response.data;
+    // caseDetailData.value.request.teststeps = response.data;
     showCaseEdit.value = true;
     // alert(JSON.stringify(response, null, 4));
   });

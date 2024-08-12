@@ -7,6 +7,7 @@ import TableVariables from "@/components/hrm/table-variables.vue";
 import {selectModulList} from "@/api/hrm/module.js";
 import {list as listConfig} from "@/api/hrm/config.js";
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {getComparator} from "@/api/hrm/case.js";
 
 const sys_normal_disable = inject("sys_normal_disable");
 
@@ -31,6 +32,8 @@ const activeTabName = ref("caseMessages");
 // const projectOptions = ref([]);
 const moduleOptions = ref([]);
 
+const hrm_comparator_dict = inject("hrm_comparator_dict");
+
 
 function getModuleSelect() {
   selectModulList(formData.value).then(response => {
@@ -53,6 +56,14 @@ function resetModule() {
   formData.value.moduleId = undefined;
   formData.value.request.config.include.configId = null;
   getModuleSelect();
+  let projectId = "";
+  if (formData.value && formData.value.projectId){
+    projectId = formData.value.projectId;
+  }
+
+  getComparator({projectId: projectId}).then(response => {
+    hrm_comparator_dict.value = response.data
+  })
 }
 
 function resetConfig() {
@@ -62,7 +73,7 @@ function resetConfig() {
 
 getModuleSelect();
 
-if (props.dataType === HrmDataTypeEnum.case){
+if (props.dataType === HrmDataTypeEnum.case) {
   getConfigSelect();
 }
 

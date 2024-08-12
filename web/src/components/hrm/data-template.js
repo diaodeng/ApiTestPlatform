@@ -22,7 +22,7 @@ export const initWebsocketData = {
 
 export const initStepData =
     {
-        step_type: CaseStepTypeEnum.api,
+        step_type: CaseStepTypeEnum.http,
         step_id: `${randomString(10)}`,
         name: "新增测试步骤",
         request: initRequestData,
