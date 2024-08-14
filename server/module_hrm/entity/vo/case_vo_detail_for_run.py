@@ -3,33 +3,19 @@
 """
 
 import datetime
-import os
-from enum import Enum
-from typing import Any, Callable, Dict, List, Text, Union
+from typing import Any, Dict, List, Text, Union
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel
 
+from module_hrm.entity.vo import case_vo_detail_for_handle as caseVoHandle
 from module_hrm.enums.enums import TstepTypeEnum, CaseRunStatus
 from utils.utils import get_platform
-
-Name = Text
-Url = Text
-BaseUrl = Union[HttpUrl, Text]
-VariablesMapping = Dict[Text, Any]
-FunctionsMapping = Dict[Text, Callable]
-Headers = Dict[Text, Text]
-Cookies = Dict[Text, Text]
-Verify = bool
-Hooks = List[Union[Text, Dict[Text, Text]]]
-Export = List[Text]
-Validators = List[Dict]
-Env = Dict[Text, Any]
 
 
 class ResponseData(BaseModel):
     status_code: int = 200
     headers: Dict = {}
-    cookies: Cookies = {}
+    cookies: caseVoHandle.Cookies = {}
     encoding: Union[Text, None] = None
     content_type: Text = ""
     body: Union[Text, bytes, List, Dict, None] = ""
@@ -55,209 +41,46 @@ class Result(BaseModel):
     logs: StepLogs = StepLogs()
 
 
-class MethodEnum(Text, Enum):
-    GET = "GET"
-    POST = "POST"
-    PUT = "PUT"
-    DELETE = "DELETE"
-    HEAD = "HEAD"
-    OPTIONS = "OPTIONS"
-    PATCH = "PATCH"
+class TConfig(caseVoHandle.TConfig):
+    # variables: Union[caseVoHandle.VariablesMapping, Text] = {}
+    # parameters: Union[caseVoHandle.VariablesMapping, Text] = {}
+    # headers: caseVoHandle.Headers = {}
+    result: Union[Result, None] = Result()
 
 
-class ProtoType(Enum):
-    Binary = 1
-    CyBinary = 2
-    Compact = 3
-    Json = 4
-
-
-class TransType(Enum):
-    Buffered = 1
-    CyBuffered = 2
-    Framed = 3
-    CyFramed = 4
-
-
-# configs for thrift rpc
-class TConfigThrift(BaseModel):
-    psm: Text = None
-    env: Text = None
-    cluster: Text = None
-    target: Text = None
-    include_dirs: List[Text] = None
-    thrift_client: Any = None
-    timeout: int = 10
-    idl_path: Text = None
-    method: Text = None
-    ip: Text = "127.0.0.1"
-    port: int = 9000
-    service_name: Text = None
-    proto_type: ProtoType = ProtoType.Binary
-    trans_type: TransType = TransType.Buffered
-
-
-# configs for db
-class TConfigDB(BaseModel):
-    psm: Text = None
-    user: Text = None
-    password: Text = None
-    ip: Text = None
-    port: int = 3306
-    database: Text = None
-
-
-class TransportEnum(Text, Enum):
-    BUFFERED = "buffered"
-    FRAMED = "framed"
-
-
-class TThriftRequest(BaseModel):
-    """rpc request model"""
-
-    method: Text = ""
-    params: Dict = {}
-    thrift_client: Any = None
-    idl_path: Text = ""  # idl local path
-    timeout: int = 10  # sec
-    transport: TransportEnum = TransportEnum.BUFFERED
-    include_dirs: List[Union[Text, None]] = []  # param of thriftpy2.load
-    target: Text = ""  # tcp://{ip}:{port} or sd://psm?cluster=xx&env=xx
-    env: Text = "prod"
-    cluster: Text = "default"
-    psm: Text = ""
-    service_name: Text = None
-    ip: Text = None
-    port: int = None
-    proto_type: ProtoType = None
-    trans_type: TransType = None
-
-
-class SqlMethodEnum(Text, Enum):
-    FETCHONE = "FETCHONE"
-    FETCHMANY = "FETCHMANY"
-    FETCHALL = "FETCHALL"
-    INSERT = "INSERT"
-    UPDATE = "UPDATE"
-    DELETE = "DELETE"
-
-
-class TSqlRequest(BaseModel):
-    """sql request model"""
-
-    db_config: TConfigDB = TConfigDB()
-    method: SqlMethodEnum = None
-    sql: Text = None
-    size: int = 0  # limit nums of sql result
-
-
-class ThinkTime(BaseModel):
-    strategy: str = ""
-    limit: int = 0
-
-
-class TConfig(BaseModel):
-    name: Name = ""
-    verify: Verify = False
-    base_url: BaseUrl = ""
-    # Text: prepare variables in debugtalk.py, ${gen_variables()}
-    variables: Union[VariablesMapping, Text] = {}
-    parameters: Union[VariablesMapping, Text] = {}
-    headers: Headers = {}
-    setup_hooks: Hooks = []
-    teardown_hooks: Hooks = []
-    export: Export = []
-    path: Text = None
-    # configs for other protocols
-    thrift: Union[TConfigThrift, None] = None
-    db: TConfigDB = TConfigDB()
-    think_time: ThinkTime = ThinkTime()
-    result: Union[Result, None] = None
-
-
-class TRequest(BaseModel):
+class TRequest(caseVoHandle.TRequest):
     """requests.Request model"""
 
-    method: MethodEnum
-    url: Url
-    params: Dict[Text, Text | int | float | bool | None] = {}
-    headers: Headers = {}
-    req_json: Union[Dict, List, Text, None] = Field(None, alias="json")
-    data: Union[Text, Dict[Text, Any], None] = None
-    cookies: Cookies = {}
-    timeout: float = 120
-    allow_redirects: bool = False
-    verify: Verify = False
-    upload: Dict = {}  # used for upload files
+    # params: Dict[Text, Text | int | float | bool | None] = {}
+    # headers: caseVoHandle.Headers = {}
+    # data: Union[Text, Dict[Text, Any], None] = None
+    # cookies: caseVoHandle.Cookies = {}
+    pass
 
 
-class TStepInclude(BaseModel):
-    config: Headers = {}  # {"id":1, "name": "configName"}
-
-
-class TWebsocket(BaseModel):
+class TWebsocket(caseVoHandle.TWebsocket):
     """TWebsocket"""
-    url: Url
-    params: VariablesMapping = {}
-    headers: Headers = {}
-    data: Text | None = ""
-    result: Union[Result, None] = None
-    cookies: Cookies = {}
-    timeout: float = 120
-    allow_redirects: bool = False
-    verify: Verify = False
+    # params: caseVoHandle.VariablesMapping = {}
+    # headers: caseVoHandle.Headers = {}
+    result: Union[Result, None] = Result()
+    # cookies: caseVoHandle.Cookies = {}
     recv_num: int = 1  # 消息接受条数，1表示只接受一条
 
 
-class TStep(BaseModel):
-    name: Name
-    step_type: int = 1  # 1 api, 2 webUI
-    step_id: Text = ""
-    request: Union[TRequest, TWebsocket, None] = None
-    result: Union[Result, None] = None
-    include: TStepInclude = {}
-    testcase: Union[Text, Callable, None] = None
-    variables: VariablesMapping = {}
-    setup_hooks: Hooks = []
-    teardown_hooks: Hooks = []
-    # used to extract request's response field
-    extract: VariablesMapping = {}
+class TStep(caseVoHandle.TStep):
+    result: Union[Result, None] = Result()
+    # variables: caseVoHandle.VariablesMapping = {}
+    # extract: caseVoHandle.VariablesMapping = {}
+    # request: Union[TRequest, TWebsocket, None] = None
     # used to export session variables from referenced testcase
-    export: Export = []
-    validators: Validators = Field([], alias="validate")
-    validate_script: List[Text] = []
-    retry_times: int = 0
-    retry_interval: int = 0  # sec
-    thrift_request: Union[TThriftRequest, None] = None
-    sql_request: Union[TSqlRequest, None] = None
-    think_time: ThinkTime = {}
 
 
-class Include(BaseModel):
-    config: TConfig = {}
-
-
-class TestCase(BaseModel):
-    include: Include = Include()
+class TestCase(caseVoHandle.TestCase):
+    module_id: Union[int, None] = None
+    project_id: Union[int, None] = None
     case_id: Any = None
     config: TConfig
     teststeps: List[TStep]
-
-
-class ProjectMeta(BaseModel):
-    debugtalk_py: Text = ""  # debugtalk.py file content
-    debugtalk_path: Text = ""  # debugtalk.py file path
-    dot_env_path: Text = ""  # .env file path
-    functions: FunctionsMapping = {}  # functions defined in debugtalk.py
-    env: Env = {}
-    RootDir: Text = (
-        os.getcwd()
-    )  # project root directory (ensure absolute), the path debugtalk.py located
-
-
-class TestsMapping(BaseModel):
-    project_meta: ProjectMeta
-    testcases: List[TestCase]
 
 
 class TestCaseTime(BaseModel):
@@ -269,7 +92,7 @@ class TestCaseTime(BaseModel):
 
 
 class TestCaseInOut(BaseModel):
-    config_vars: VariablesMapping = {}
+    config_vars: caseVoHandle.VariablesMapping = {}
     export_vars: Dict = {}
 
 
@@ -315,7 +138,7 @@ class StepResult(BaseModel):
     data: Union[SessionData, List["StepResult"]] = None
     elapsed: float = 0.0  # teststep elapsed time
     content_size: float = 0  # response content size
-    export_vars: VariablesMapping = {}
+    export_vars: caseVoHandle.VariablesMapping = {}
     log: Text = ""
     attachment: Text = ""  # teststep attachment
 

@@ -16,6 +16,7 @@ from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
 from module_hrm.exceptions import TestFailError
 from module_hrm.utils import debugtalk_common, comparators
 from module_hrm.utils.CaseRunLogHandle import RunLogCaptureHandler, TestLog
+from module_hrm.utils.common import key_value_dict, update_or_extend_list, dict2list
 from module_hrm.utils.parser import parse_data
 from module_hrm.utils.util import replace_variables, get_func_map, ensure_str
 from utils.log_util import logger
@@ -71,7 +72,7 @@ class CaseRunner(object):
         self.debugtalk_func_map: dict = debugtalk_func_map  # 对应项目debugtalk方法
         # 全局变量中自身替换
         self.case_data.config.variables = json.loads(
-            parse_data(json.dumps(self.case_data.config.variables), self.case_data.config.variables,
+            parse_data(json.dumps(self.case_data.config.variables), key_value_dict(self.case_data.config.variables),
                        self.debugtalk_func_map))
 
     def close_handler(self):
@@ -82,7 +83,8 @@ class CaseRunner(object):
 
     async def run(self):
         start_info = f"{'>>>开始执行用例：' + self.case_data.config.name:>^100}"
-        self.case_data.config.result = Result()
+        # self.case_data.config.result = Result()
+        setattr(self.case_data.config, "result", Result())
         logger.info(start_info)
         self.logger.info(start_info)
         start_time = datetime.now(timezone.utc)
@@ -92,10 +94,10 @@ class CaseRunner(object):
 
         for step in self.case_data.teststeps:
 
-            step.variables = parse_data(step.variables,
-                                        self.case_data.config.variables,
-                                        self.debugtalk_func_map
-                                        )
+            # step.variables = parse_data(step.variables,
+            #                             key_value_dict(self.case_data.config.variables),
+            #                             self.debugtalk_func_map
+            #                             )
 
             # 发起请求
             if step.step_type == TstepTypeEnum.http.value:
@@ -110,7 +112,7 @@ class CaseRunner(object):
             log_content = self.handler.get_log()
             step_obj.step_data.result.logs.after_response += log_content
 
-            self.case_data.config.variables.update(step_obj.extract_variable)
+            update_or_extend_list(self.case_data.config.variables, dict2list(step_obj.extract_variable))
 
             # del step_obj.debugtalk_func_map
         end_info = f"{'执行结束用例：' + self.case_data.config.name + '<<<':<^100}"
@@ -151,7 +153,7 @@ class RequestRunner(object):
         self.extract_variable: dict = {}
         self.step_data.result = Result()
 
-    def format_time(self, start_time: int, end_time: int):
+    def format_time(self, start_time: int | float, end_time: int | float):
         self.step_data.result.duration = round(end_time - start_time, 2)
         self.step_data.result.start_time_stamp = start_time
         self.step_data.result.start_time_iso = datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S")
@@ -166,12 +168,13 @@ class RequestRunner(object):
 
     def parse_request_data(self):
         temp_all_val = copy.deepcopy(self.case_runner.case_data.config.variables)
-        temp_all_val.update(self.step_data.variables)
+        update_or_extend_list(temp_all_val, self.step_data.variables)
+        self.step_data.variables = temp_all_val
 
         request_data = self.step_data.request.model_dump(by_alias=True)
 
         request_data = parse_data(request_data,
-                                  temp_all_val,
+                                  key_value_dict(temp_all_val),
                                   self.debugtalk_func_map)
         return request_data
 
@@ -182,14 +185,16 @@ class RequestRunner(object):
             try:
                 request_data = before_request(request_data)
                 request_data = parse_data(request_data,
-                                          self.case_runner.case_data.config.variables,
+                                          key_value_dict(self.case_runner.case_data.config.variables),
                                           self.debugtalk_func_map)
                 return request_data
             except Exception as e:
                 self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
                 self.set_step_failed()
                 self.logger.error(f"before_request函数执行失败: {e}")
-                self.step_data.result.logs.error += self.case_runner.handler.get_log()
+                error_info = self.case_runner.handler.get_log()
+                self.step_data.result.logs.before_request += error_info
+                self.step_data.result.logs.error += error_info
                 return CaseRunStatus.failed.value
 
     def after_request(self, response: requests.Response):
@@ -207,7 +212,9 @@ class RequestRunner(object):
             self.logger.info(f"response.text: {self.response.text}")
             self.logger.error(
                 f'回调after_request处理异常，error:{json.dumps({"args": str(ef.args), "msg": str(ef)}, indent=4, ensure_ascii=False)}')
-            self.step_data.result.logs.error += self.case_runner.handler.get_log()
+            error_info = self.case_runner.handler.get_log()
+            self.step_data.result.logs.after_response += error_info
+            self.step_data.result.logs.error += error_info
             return CaseRunStatus.failed.value
 
     def request(self):
@@ -216,8 +223,8 @@ class RequestRunner(object):
         json_data = request_data.get("json", None)
         if json_data and isinstance(json_data, str):
             temp_all_val = copy.deepcopy(self.case_runner.case_data.config.variables)
-            temp_all_val.update(self.step_data.variables)
-            json_data_parsed = parse_data(json_data, temp_all_val, self.debugtalk_func_map)
+            update_or_extend_list(temp_all_val, self.step_data.variables)
+            json_data_parsed = parse_data(json_data, key_value_dict(temp_all_val), self.debugtalk_func_map)
             json_data_obj = json.loads(json_data_parsed)
             self.step_data.request.req_json = json_data_obj
 
@@ -247,6 +254,11 @@ class RequestRunner(object):
             return self
 
         self.step_data.request = TRequest(**request_data)
+        request_data["data"] = key_value_dict(self.step_data.request.data)
+        request_data["params"] = key_value_dict(self.step_data.request.params)
+        request_data["headers"] = key_value_dict(self.step_data.request.headers)
+        request_data["cookies"] = key_value_dict(self.step_data.request.cookies)
+
         logger.info(f'{">>>请求:" + self.step_data.name:=^100}')
         self.logger.info(f'{">>>请求:" + self.step_data.name:=^100}')
         logger.info(f"url: {self.step_data.request.url}")
@@ -257,7 +269,6 @@ class RequestRunner(object):
         self.logger.info(f"Request: {json.dumps(request_data, indent=4, ensure_ascii=False)}")
 
         try:
-
             self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
             start_time = time.time()
             res_response = requests.request(**request_data)
@@ -280,7 +291,9 @@ class RequestRunner(object):
             self.logger.error(f'error:{json.dumps({"args": str(e.args), "msg": str(e)}, indent=4, ensure_ascii=False)}')
             self.response = None
             self.set_step_failed()
-            self.step_data.result.logs.error += self.case_runner.handler.get_log()
+            error_info = self.case_runner.handler.get_log()
+            self.step_data.result.logs.before_request += error_info
+            self.step_data.result.logs.error += error_info
             return self
 
         if self.after_request(self.response) == CaseRunStatus.failed.value:
@@ -314,9 +327,9 @@ class RequestRunner(object):
         """
         self.logger.info(f"{self.step_data.name} 开始提取变量")
         try:
-            for key in self.step_data.extract:
-                val = self.__get_validate_key(self.step_data.extract[key])
-                self.extract_variable[key] = val
+            for item in self.step_data.extract:
+                val = self.__get_validate_key(self.step_data.extract[item['key']])
+                self.extract_variable[item["key"]] = val
             logger.info(f'{self.step_data.name} extract_variable: {self.extract_variable}')
             self.logger.info(f'{self.step_data.name} extract_variable: {json.dumps(self.extract_variable)}')
             self.logger.info(f"{self.step_data.name} 变量提取完成")
@@ -326,20 +339,22 @@ class RequestRunner(object):
             logger.error("提取变量失败")
             logger.error(e)
             self.logger.error(f'{self.step_data.name} 提取变量失败\n {e}')
-            self.step_data.result.logs.error += self.case_runner.handler.get_log()
+            self.logger.exception(e)
+            error_info = self.case_runner.handler.get_log()
+            self.step_data.result.logs.after_response += error_info
+            self.step_data.result.logs.error += error_info
 
     def validate(self):
         # 校验数据处理回调
         self.logger.info(f"{self.step_data.name} 开始校验")
         before_request_validate = self.debugtalk_func_map.get("before_request_validate", None)
         if before_request_validate:
-            validates = before_request_validate(self.step_data.validators)
-        else:
-            validates = self.step_data.validators
+            before_request_validate(self.step_data.validators)
 
         temp_var = copy.deepcopy(self.case_runner.case_data.config.variables)
-        temp_var.update(self.extract_variable)
-        for vali in validates:
+        update_or_extend_list(temp_var, dict2list(self.extract_variable))
+        temp_var = key_value_dict(temp_var)
+        for vali in self.step_data.validators:
             assert_key = vali["assert"]
             assert_key = parse_data(assert_key, temp_var, self.debugtalk_func_map)
             check_key = vali["check"]
@@ -372,7 +387,9 @@ class RequestRunner(object):
                 self.logger.error(f'断言失败：{assert_key}({check_key}, {expect}, {msg})')
 
                 self.logger.exception(e)
-                self.step_data.result.logs.error += self.case_runner.handler.get_log()
+                error_info = self.case_runner.handler.get_log()
+                self.step_data.result.logs.after_response += error_info
+                self.step_data.result.logs.error += error_info
                 continue
             self.logger.info("\n")
         self.logger.info(f"{self.step_data.name} 校验完成")
@@ -466,7 +483,10 @@ class Websocket(RequestRunner):
             logger.exception(e)
             self.logger.error(f'error:{json.dumps({"args": str(e.args), "msg": str(e)}, indent=4, ensure_ascii=False)}')
             self.set_step_failed()
-            self.step_data.result.logs.error += self.case_runner.handler.get_log()
+            self.logger.exception(e)
+            error_info = self.case_runner.handler.get_log()
+            self.step_data.result.logs.before_request += error_info
+            self.step_data.result.logs.error += error_info
             return self
 
         if self.after_request(self.response) == CaseRunStatus.failed.value:
@@ -536,9 +556,7 @@ class TestRunner(object):
             if before_test:
                 try:
                     logger.info("开始处理before_test")
-                    before_test_res = before_test(self.case_data.config.variables)
-                    if isinstance(before_test_res, dict):
-                        self.case_data.config.variables.update(before_test_res)
+                    before_test(self.case_data.config.variables)
                     logger.info("before_test处理完成")
                 except Exception as e:
                     logger.error(f"before_test处理失败：{e}")

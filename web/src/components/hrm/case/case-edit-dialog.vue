@@ -54,6 +54,11 @@ function submitForm() {
     if (valid) {
       const caseData = formData.value
       caseData.request.config.name = caseData.caseName;
+      caseData.request.config.result = {}
+      for (let step of caseData.request.teststeps) {
+        step.result = {}
+      }
+
       if (caseData.caseId !== undefined) {
         updateCase(caseData).then(response => {
           proxy.$modal.msgSuccess("修改成功");
@@ -83,7 +88,11 @@ function debugForm() {
       }
       debugCase(req_data).then(response => {
         proxy.$modal.msgSuccess(response.msg);
-        responseData.value = response.data.log
+        for (const step_result_key in response.data) {
+          formData.value.request.teststeps.find(dict => dict['step_id'] === step_result_key).result = response.data[step_result_key]
+        }
+
+        // responseData.value = response.data.log
         // open.value = false;
         // getList();
       });
@@ -118,7 +127,7 @@ function reset() {
 
 function getComparatorFromNetwork() {
   let data = "";
-  if (formData.value && formData.value.caseId){
+  if (formData.value && formData.value.caseId) {
     data = formData.value.caseId;
   }
   getComparator({caseId: data}).then(response => {
@@ -138,12 +147,15 @@ envList();
       <el-container style="height: 100%">
         <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
           <el-button-group>
-            <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']">保存</el-button>
+            <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']"
+                       v-if="dataType !== HrmDataTypeEnum.run_detail"
+            >保存
+            </el-button>
             <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']"
-                       v-if="dataType === HrmDataTypeEnum.case">调试
+                       v-if="dataType !== HrmDataTypeEnum.config">调试
             </el-button>
             <el-select placeholder="Select" v-model="selectedEnv" style="width: 115px"
-                       v-if="dataType === HrmDataTypeEnum.case">
+                       v-if="dataType !== HrmDataTypeEnum.config">
               <el-option
                   v-for="option in envOptions"
                   :key="option.envId"
@@ -159,7 +171,7 @@ envList();
                       v-if="dataType === HrmDataTypeEnum.config"
                       :data-type="dataType" :data-name="dataName"></CaseConfig>
           <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;"
-                   v-else-if="dataType === HrmDataTypeEnum.case">
+                   v-else-if="dataType !== HrmDataTypeEnum.config">
             <el-tab-pane label="config" name="caseConfig">
               <CaseConfig v-model:form-data="formData" :project-options="projectOptions"
                           :data-type="dataType"></CaseConfig>

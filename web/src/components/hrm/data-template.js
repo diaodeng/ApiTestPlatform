@@ -40,7 +40,8 @@ export const initStepData =
         extract: [],
         variables: [],
         setup_hooks: [],
-        teardown_hooks: []
+        teardown_hooks: [],
+        result: {response: {}, logs: {}},
     }
 
 
@@ -61,7 +62,8 @@ export const initCaseRequestData = {
         base_url: "",
         include: {
             configId: null
-        }
+        },
+        result: {response: {}, logs: {}}
     },
     teststeps: [initStepData]
 

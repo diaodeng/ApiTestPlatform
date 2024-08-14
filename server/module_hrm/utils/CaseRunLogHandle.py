@@ -37,16 +37,19 @@ class RunLogCaptureHandler(logging.Handler):
     def __init__(self):
         super().__init__()
         self.log_capture_string = StringIO()
+        self.log_lock = threading.Lock()
         self.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(name)s:%(module)s:%(funcName)s:%(lineno)d - %(message)s'))
 
     def emit(self, record):
         log_entry = self.format(record)
-        self.log_capture_string.write(log_entry + '\n')
+        with self.log_lock:
+            self.log_capture_string.write(log_entry + '\n')
 
     def get_log(self):
-        log_data = self.log_capture_string.getvalue()
-        self.log_capture_string.seek(0)
-        self.log_capture_string.truncate(0)
+        with self.log_lock:
+            log_data = self.log_capture_string.getvalue()
+            self.log_capture_string.seek(0)
+            self.log_capture_string.truncate(0)
         return log_data
 
     def reset(self):

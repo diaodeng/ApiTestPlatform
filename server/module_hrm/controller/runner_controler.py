@@ -94,6 +94,8 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
     debugtalk_obj = None
     try:
         case_data = debug_info.case_data
+        if not isinstance(case_data, dict):
+            case_data = case_data.dict()
         page_query_result = CaseModelForApi(**case_data)
         data_for_run = CaseInfoHandle(query_db).from_page(case_data).toDebug(debug_info.env).run_data()
 
@@ -102,15 +104,16 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
                                                                                                             project_id=page_query_result.project_id)
         debugtalk_obj = DebugTalkHandler(project_debugtalk_source, common_debugtalk_source)
         debugtalk_func_map = debugtalk_obj.func_map(user=current_user.user.user_id)
-        data_for_run.case_id = page_query_result.case_id
 
         test_runner = TestRunner(data_for_run, debugtalk_func_map)
         all_case_res = await test_runner.start()
         logger.info('执行成功')
         all_log = []
+        steps_result = {}
         for case_result in all_case_res:
             case_run_data = case_result.case_data
             for step in case_run_data.teststeps:
+                steps_result[step.step_id] = step.result.model_dump(by_alias=True)
                 all_log.append(step.result.logs)
 
             RunDetailDao.create(query_db,
@@ -126,7 +129,7 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
                                 )
 
             # all_log.append("\n".join(step_result.result.log.values()))
-        data = ResponseUtil.success(data={"log": "\n".join(["\n".join(log.model_dump().values()) for log in all_log]), "runId": page_query_result.case_id})
+        data = ResponseUtil.success(data=steps_result)
         return data
     except Exception as e:
         logger.exception(e)
@@ -140,8 +143,9 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
                       dependencies=[Depends(CheckUserInterfaceAuth(['hrm:history:detail']))])
 async def run_history_detail(request: Request, detail_id: int, query_db: Session = Depends(get_db)):
     result = RunDetailDao.get_by_id(query_db, detail_id)
+    run_detail = CaseInfoHandle(query_db).from_db_run_detail(result.run_detail).toPage().asCase().model_dump(by_alias=True)
     return ResponseUtil.success(
-        data=HrmRunDetailModel(**CamelCaseUtil.transform_result(result)).model_dump(by_alias=True))
+        data=run_detail)
 
 
 @runnerController.get("/runHistoryList", response_model=PageResponseModel,

@@ -14,7 +14,7 @@ class RunDetailDao:
     """
 
     @classmethod
-    def get_by_id(cls, db: Session, detail_id: int):
+    def get_by_id(cls, db: Session, detail_id: int) -> HrmRunDetail:
         data = db.query(HrmRunDetail).filter(HrmRunDetail.detail_id == detail_id).first()
         return data
 

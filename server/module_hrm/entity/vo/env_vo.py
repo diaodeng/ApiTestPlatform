@@ -12,7 +12,7 @@ class EnvConfig(BaseModel):
     """
     环境配置模型
     """
-    variables: Optional[Dict[Text, List[Dict]]] = {"default": []}
+    variables: Optional[List[Dict[Text, List[Dict] | Text]]] = [{"key": "default", "value": [], "desc": ""}]
 
 
 class EnvModel(BaseModel):

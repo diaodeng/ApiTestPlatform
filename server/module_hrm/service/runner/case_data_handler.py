@@ -1,10 +1,13 @@
+import json
+
 from module_hrm.dao.case_dao import CaseDao
 from module_hrm.dao.env_dao import EnvDao
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import CaseModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
+from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseForHandle
 from module_hrm.entity.vo.env_vo import EnvModel, EnvModelForApi
-from module_hrm.utils.common import key_value_dict
+from module_hrm.utils.common import key_value_dict, dict2list, update_or_extend_list
 from sqlalchemy.orm import Session
 
 from utils.common_util import CamelCaseUtil
@@ -34,11 +37,23 @@ class CaseInfoHandle():
             case_obj = CaseModelForApi(**case_obj.dict())
         return case_obj
 
-    def from_db(self, case_obj: CaseModel | CaseModelForApi | dict | int | str):
+    def from_db(self, case_obj: CaseModel | CaseModelForApi | TestCase | dict | int | str):
         """
         处理数据库查出来的数据，用于运行、前端展示
         """
+
         self.case_obj = self.__ensure_obj(case_obj)
+        return InToOut(self.query_db, self.case_obj)
+
+    def from_db_run_detail(self, case_obj: TestCase|str):
+        if isinstance(case_obj, str):
+            case_obj = TestCase(**json.loads(case_obj))
+        self.case_obj = CaseModelForApi()
+        self.case_obj.case_id = case_obj.case_id
+        self.case_obj.module_id = case_obj.module_id
+        self.case_obj.project_id = case_obj.project_id
+        self.case_obj.case_name = case_obj.case_name
+        self.case_obj.request = case_obj
         return InToOut(self.query_db, self.case_obj)
 
     def from_page(self, case_obj: CaseModel | CaseModelForApi | dict | int | str):
@@ -78,11 +93,44 @@ class CaseInfoToPage(object):
     def __init__(self, data_obj: InToOut):
         self.case_obj = data_obj.case_obj
 
+    def __dict_to_list(self, data: TestCase) -> CaseModelForApi:
+        """
+        字典转列表
+        """
+        test_case = data
+        test_case_dict = data.model_dump(by_alias=True)
+        test_case_dict["config"]["headers"] = dict2list(test_case.config.headers, True, )
+
+        test_case_dict["config"]["variables"] = dict2list(test_case.config.variables, True)
+        test_case_dict["config"]["parameters"] = dict2list(test_case.config.parameters)
+
+        teststeps_list = []
+        for teststep in test_case.teststeps:
+            step_dict = teststep.model_dump(by_alias=True)
+            step_dict["variables"] = dict2list(teststep.variables, True)
+            step_dict["extract"] = dict2list(teststep.extract)
+
+            step_dict["request"]["headers"] = dict2list(teststep.request.headers, True)
+            step_dict["request"]["data"] = dict2list(teststep.request.data, True)
+            step_dict["request"]["cookies"] = dict2list(teststep.request.cookies)
+            step_dict["request"]["params"] = dict2list(teststep.request.params, True)
+            teststeps_list.append(step_dict)
+        test_case_dict["teststeps"] = teststeps_list
+        # TestCase.validate(test_case_dict["request"])
+        test_case_obj = TestCaseForHandle(**test_case_dict)
+        data = {"projectId": test_case.project_id,
+                "caseId": test_case.case_id,
+                "moduleId": test_case.module_id,
+                "request": test_case_obj.model_dump(by_alias=True)}
+        case_data_obj = CaseModelForApi(**data)
+
+        return case_data_obj
+
     def asApi(self) -> dict:
         return self.case_obj.model_dump(exclude_unset=True, by_alias=True)
 
-    def asCase(self) -> dict:
-        return self.asApi()
+    def asCase(self) -> CaseModelForApi:
+        return self.case_obj
 
     def asConfig(self) -> dict:
         return self.asApi()
@@ -177,25 +225,26 @@ class CaseInfoToRun(object):
         """
         # self._ensure_case_dir()
 
-        env_varables = {}
-        for group_name, group_value in self.env_obj.env_config.variables.items():
-            env_varables.update(key_value_dict(group_value))
+        env_varables = []
+        for env_group in self.env_obj.env_config.variables:
+            update_or_extend_list(env_varables, env_group.get("value", []))
 
         include_config_obj = self.__include_handle()
-        include_config_obj_for_run =None
-        if include_config_obj:
-            include_config_obj_for_run = self.__data_covert(include_config_obj)
 
-        test_case_obj = self.__data_covert(self.case_obj)
-        test_case_obj.case_id = self.case_obj.case_id
+        self.case_obj.request.case_id = self.case_obj.case_id
 
         # 处理变量， 优先级： 环境变量 < include < case
-        if include_config_obj_for_run:
-            env_varables.update(include_config_obj_for_run.config.variables)
-        env_varables.update(test_case_obj.config.variables)
-        test_case_obj.config.variables = env_varables
+        if include_config_obj:
+            update_or_extend_list(env_varables, include_config_obj.request.config.variables)
 
-        return test_case_obj
+        update_or_extend_list(env_varables, self.case_obj.request.config.variables)
+        self.case_obj.request.config.variables = env_varables
+        self.case_obj.request.project_id = self.case_obj.project_id
+        self.case_obj.request.module_id = self.case_obj.module_id
+        self.case_obj.request.case_id = self.case_obj.case_id
+        self.case_obj.request.case_name = self.case_obj.case_name
+
+        return self.case_obj.request
 
     def debug_data(self) -> TestCase:
         """
