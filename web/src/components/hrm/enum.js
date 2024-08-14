@@ -33,7 +33,8 @@ export const HrmDataTypeEnum = {
     api: 10,
     folder: 11,
     suite_detail: 12,
-    suite_case_list: 13
+    suite_case_list: 13,
+    run_detail:14
 }
 
 export const CaseStepTypeEnum = {

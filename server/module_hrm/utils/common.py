@@ -86,7 +86,7 @@ def key_value_list(keyword, cover_list: list):
     return lists
 
 
-def key_value_dict(cover_list: list[dict] | dict, ignore_type=False, checkEnable=False):
+def key_value_dict(cover_list: list[dict] | dict, ignore_type=False, checkEnable=True):
     """
     根据数据类型处理字典数据,如果参数cover_list不是列表则原样返回
     [{"key": "key1", "value": "value1", "type": "sting"}，{"key": "key2", "value": "value2", "type": "int"}] => {"key1": "value1", "key2": value2}
@@ -99,17 +99,60 @@ def key_value_dict(cover_list: list[dict] | dict, ignore_type=False, checkEnable
         return cover_list
     dicts = {}
     for value in cover_list:
-        if checkEnable and not value.pop("enable", False): continue
-        key = value.pop('key')
+        if checkEnable and not value.get("enable", False): continue
+        key = value.get('key')
         if not key:
             continue
-        val = value.pop('value')
+        val = value.get('value')
         if not ignore_type:
-            type = value.pop("type", "str")
+            type = value.get("type", "str")
             val = type_change(type, val)
 
         dicts[key] = val
     return dicts
+
+
+def dict2list(datas: dict, ignore_type=False):
+    """
+    {"key1": "value1", "key2": value2} => [{"key": "key1", "value": "value1", "type": "sting"}，{"key": "key2", "value": "value2", "type": "int"}]
+    """
+    new_data = []
+    for key, value in datas.items():
+        if ignore_type:
+            data_type = "any"
+        elif isinstance(value, (dict, list, tuple)):
+            data_type = "json"
+        elif isinstance(value, str):
+            data_type = "string"
+        elif isinstance(value, int):
+            data_type = "int"
+        elif isinstance(value, float):
+            data_type = "float"
+        elif isinstance(value, bool):
+            data_type = "boolean"
+        else:
+            data_type = "string"
+        new_data.append({"key": key, "value": value, "type": data_type, "enable": True})
+    return new_data
+
+
+def update_or_extend_list(old_dict_list: list[dict], new_dict_list: list[dict], key: str = "key",
+                          check_enable: bool = True):
+    """
+    更新列表中的字典
+    """
+    if not new_dict_list:
+        return
+    list1_dict = {d[key]: d for d in old_dict_list if d.get("key", None)}
+
+    for item in new_dict_list:
+        if check_enable and not item.get("enable", False): continue
+        # 如果list2中的key在list1中存在，则更新list1中的字典
+        if item[key] in list1_dict:
+            list1_dict[item[key]].update(item)
+        else:
+            # 如果list1中没有该key，则将item添加到list1中
+            old_dict_list.append(item)
 
 
 def relative_path(path_str: str):

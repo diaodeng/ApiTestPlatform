@@ -2,23 +2,12 @@
 这个是用例数据详情的模型，不是对应于数据库用例表的数据模型，是对应于数据库用例表的request字段的模型
 """
 
-import os
 from enum import Enum
 from typing import Any, Callable, Dict, List, Text, Union
 
 from pydantic import BaseModel, Field, HttpUrl
 
-
-class CaseRunStatus(Enum):
-    failed = 'failed'
-    passed = 'passed'
-    skipped = 'skipped'
-    deselected = 'deselected'
-    xfailed = 'xfailed'
-    xpassed = 'xpassed'
-    warnings = 'warnings'
-    error = 'error'
-
+from module_hrm.enums.enums import CaseRunStatus
 
 Name = Text
 Url = Text
@@ -31,7 +20,36 @@ Verify = bool
 Hooks = List[Union[Text, Dict[Text, Text]]]
 Export = List[Text]
 Validators = List[Dict]
-Env = Dict[Text, Any]
+
+
+class ResponseData(BaseModel):
+    status_code: int = 200
+    headers: Dict = {}
+    cookies: Cookies = {}
+    encoding: Union[Text, None] = None
+    content_type: Text = ""
+    body: Union[Text, bytes, List, Dict, None] = ""
+    content: Text | List = ""
+    text: Union[Text, None] = ""
+
+
+class StepLogs(BaseModel):
+    before_request: Text = ""
+    after_response: Text = ""
+    error: Text = ""
+
+
+class Result(BaseModel):
+    success: bool = True
+    status: int = CaseRunStatus.passed.value
+    start_time_stamp: float = 0
+    start_time_iso: str = ""
+    end_time_iso: str = ""
+    end_time_stamp: float = 0
+    duration: float = 0
+    response: ResponseData = ResponseData()
+    logs: StepLogs = StepLogs()
+
 
 
 class MethodEnum(Text, Enum):
@@ -140,7 +158,7 @@ class Include(BaseModel):
 
 
 class TConfig(BaseModel):
-    name: Name
+    name: Name = ""
     verify: Verify = False
     base_url: BaseUrl = ""
     # Text: prepare variables in debugtalk.py, ${gen_variables()}
@@ -155,7 +173,8 @@ class TConfig(BaseModel):
     # thrift: TConfigThrift|None = None
     db: TConfigDB = TConfigDB()
     think_time: ThinkTime = ThinkTime()
-    include: Include = Include()
+    include: Union[Include, None] = Include()
+    result: Union[Result, None] = Result()
 
 
 class TRequest(BaseModel):
@@ -189,6 +208,7 @@ class TWebsocket(BaseModel):
     allow_redirects: bool = False
     verify: Verify = False
     recv_num: int = 0  # 消息接受条数，0表示不显示，1表示只接受一条
+    result: Union[Result, None] = Result()
 
 
 class TStep(BaseModel):
@@ -212,48 +232,13 @@ class TStep(BaseModel):
     thrift_request: Union[TThriftRequest, None] = None
     sql_request: Union[TSqlRequest, None] = None
     think_time: ThinkTime = ThinkTime()
+    result: Union[Result, None] = Result()
 
 
 class TestCase(BaseModel):
+    case_name: Union[Text, None] = None
+    module_id: Union[int, None] = None
+    project_id: Union[int, None] = None
+    case_id: Any = None
     config: TConfig
     teststeps: List[TStep]
-
-
-class ProjectMeta(BaseModel):
-    debugtalk_py: Text = ""  # debugtalk.py file content
-    debugtalk_path: Text = ""  # debugtalk.py file path
-    dot_env_path: Text = ""  # .env file path
-    functions: FunctionsMapping = {}  # functions defined in debugtalk.py
-    env: Env = {}
-    RootDir: Text = (
-        os.getcwd()
-    )  # project root directory (ensure absolute), the path debugtalk.py located
-
-
-class TestsMapping(BaseModel):
-    project_meta: ProjectMeta
-    testcases: List[TestCase]
-
-
-class TestCaseTime(BaseModel):
-    start_at: float = 0
-    start_at_iso_format: Text = ""
-    duration: float = 0
-
-
-class TestCaseInOut(BaseModel):
-    config_vars: VariablesMapping = {}
-    export_vars: Dict = {}
-
-
-class RequestStat(BaseModel):
-    content_size: float = 0
-    response_time_ms: float = 0
-    elapsed_ms: float = 0
-
-
-class AddressData(BaseModel):
-    client_ip: Text = "N/A"
-    client_port: int = 0
-    server_ip: Text = "N/A"
-    server_port: int = 0

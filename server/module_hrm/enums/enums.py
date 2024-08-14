@@ -22,6 +22,7 @@ class DataType(Enum):
     folder = 11
     suite_detail = 12
     suite_case_list = 13
+    run_detail = 14
 
 
 class CaseRunStatus(Enum):

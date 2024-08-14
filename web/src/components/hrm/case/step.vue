@@ -51,7 +51,6 @@ function editTabs(paneName, action, tapType) {
       ElMessageBox.alert("参数错误", "错误提示", {type: "error"});
       return;
     }
-    debugger
     if (tapType !==CaseStepTypeEnum.http && tapType !== CaseStepTypeEnum.websocket){
       ElMessageBox.alert("不支持的测试步骤类型", "错误提示", {type: "error"});
       return;
@@ -71,7 +70,6 @@ function editTabs(paneName, action, tapType) {
   }
 }
 
-
 </script>
 
 <template>
@@ -84,11 +82,11 @@ function editTabs(paneName, action, tapType) {
       <el-tabs type="" v-model="activeRequestName">
         <el-tab-pane label="request" name="stepRequest">
           <template v-if="step.step_type === CaseStepTypeEnum.http">
-            <StepRequest v-model:request-detail-data="step.request" v-model:response-data="responseData"></StepRequest>
+            <StepRequest v-model:request-detail-data="step.request" v-model:response-data="step.result"></StepRequest>
           </template>
           <template v-if="step.step_type === CaseStepTypeEnum.websocket">
             <StepWebsocket v-model:request-detail-data="step.request"
-                           v-model:response-data="responseData"></StepWebsocket>
+                           v-model:response-data="step.result"></StepWebsocket>
           </template>
 
         </el-tab-pane>

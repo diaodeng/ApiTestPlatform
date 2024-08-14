@@ -117,13 +117,29 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-row style="padding-bottom: 20px">
+          <el-col>
+            <el-text>添加环境分组：</el-text>
+            <el-tooltip content="添加环境变量分组"
+                        placement="top-start"
+            >
+              <el-button size="small" type="success" icon="Plus" @click="addEnvGroup"></el-button>
+            </el-tooltip>
+          </el-col>
+        </el-row>
+
         <el-row>
-          <div>
-            <el-button size="small" type="success" icon="Plus" @click="addEnvGroup"></el-button>
-          </div>
-          <el-col v-for="item in form.envConfig.variables" :key="item.key">
-            <!--              <el-text>{{ key }}</el-text>-->
-            <el-button size="small" type="danger" icon="Delete" @click="delEnvGroup"></el-button>
+
+          <el-col v-for="(item, index) in form.envConfig.variables" :key="index" style="padding-bottom: 20px">
+            <div style="padding-bottom: 10px">
+              <el-text>分组名称：</el-text>
+              <EditLabelText v-model:="item.key"></EditLabelText>
+            </div>
+            <el-tooltip content="删除环境变量分组"
+                        placement="top-start"
+            >
+              <el-button size="small" type="danger" icon="Delete" @click="delEnvGroup(index)"></el-button>
+            </el-tooltip>
             <TableVariables v-model="item.value"></TableVariables>
           </el-col>
 
@@ -142,6 +158,7 @@
 <script setup name="Env">
 import {listEnv, getEnv, delEnv, addEnv, updateEnv} from "@/api/hrm/env";
 import TableVariables from '../../../components/hrm/table-variables.vue';
+import EditLabelText from "@/components/hrm/common/edit-label-text.vue";
 
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
@@ -187,8 +204,8 @@ function addEnvGroup() {
   })
 }
 
-function delEnvGroup() {
-
+function delEnvGroup(index) {
+  form.value.envConfig.variables.splice(index, 1);
 }
 
 /** 查询环境列表 */

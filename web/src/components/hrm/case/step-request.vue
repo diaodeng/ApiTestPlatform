@@ -11,10 +11,42 @@ const {proxy} = getCurrentInstance();
 
 const {sys_request_method} = proxy.useDict("sys_request_method");
 
-const requestDetailData = defineModel("requestDetailData", {required:true});
+const requestDetailData = defineModel("requestDetailData", {required: true});
 const responseData = defineModel("responseData");
 
 const activeRequestDetailName = ref("requestHeader")
+const activeResultTab = ref("response")
+
+const calcResponse = computed({
+  get() {
+    console.log(responseData.value);
+    if (responseData.value && responseData.value.response) {
+      return responseData.value.response.text;
+    } else {
+      return "";
+    }
+  },
+  set(newValue) {
+    responseData.value.response.text = newValue
+  }
+
+})
+
+const calcLogs = computed(() => {
+  if (responseData.value && responseData.value.logs) {
+    return responseData.value.logs.after_response + "\n" + responseData.value.logs.after_response + "\n" + responseData.value.logs.error;
+  } else {
+    return "";
+  }
+})
+
+const calcErrorLogs = computed(() => {
+  if (responseData.value && responseData.value.logs) {
+    return responseData.value.logs.error;
+  } else {
+    return "";
+  }
+})
 </script>
 
 <template>
@@ -58,7 +90,8 @@ const activeRequestDetailName = ref("requestHeader")
           </el-tab-pane>
           <el-tab-pane label="json" name="requestJson">
             <div style="width: 100%">
-              <AceEditor v-model:content="requestDetailData.json" can-set="true" height="calc(100vh - 410px)" ></AceEditor>
+              <AceEditor v-model:content="requestDetailData.json" can-set="true"
+                         height="calc(100vh - 410px)"></AceEditor>
             </div>
           </el-tab-pane>
           <el-tab-pane label="data" name="requestData">data
@@ -69,7 +102,18 @@ const activeRequestDetailName = ref("requestHeader")
           </el-tab-pane>
         </template>
         <template #right>
-          <AceEditor v-model:content="responseData" can-set="true" height="calc(100vh - 410px)"></AceEditor>
+          <el-tabs v-model="activeResultTab">
+            <el-tab-pane label="响应" name="response">
+              <AceEditor v-model:content="calcResponse" can-set="true" height="calc(100vh - 470px)"></AceEditor>
+            </el-tab-pane>
+            <el-tab-pane label="日志" name="logs">
+              <AceEditor v-model:content="calcLogs" can-set="true" height="calc(100vh - 470px)"></AceEditor>
+            </el-tab-pane>
+            <el-tab-pane label="异常" name="errorLogs">
+              <AceEditor v-model:content="calcErrorLogs" can-set="true" height="calc(100vh - 470px)"></AceEditor>
+            </el-tab-pane>
+          </el-tabs>
+
         </template>
       </SplitWindow>
     </el-tabs>

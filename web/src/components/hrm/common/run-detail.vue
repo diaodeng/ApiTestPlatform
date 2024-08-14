@@ -81,7 +81,7 @@
         @pagination="getList"
     />
 
-    <CaseEditDialog v-model:open-case-edit-dialog="showCaseEdit" :form-datas="caseDetailData"></CaseEditDialog>
+    <CaseEditDialog v-model:open-case-edit-dialog="showCaseEdit" :form-datas="caseDetailData" :data-type="HrmDataTypeEnum.run_detail"></CaseEditDialog>
   </div>
 </template>
 
@@ -89,7 +89,7 @@
 import * as ApiRunDetail from "@/api/hrm/run_detail.js";
 import {listProject} from "@/api/hrm/project";
 import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
-import {runDetailViewTypeEnum} from "@/components/hrm/enum.js";
+import {HrmDataTypeEnum, runDetailViewTypeEnum} from "@/components/hrm/enum.js";
 import DictTag from "@/components/DictTag/index.vue";
 import {initCaseFormData} from "@/components/hrm/data-template.js";
 // import JsonEditorVue from "json-editor-vue3";
@@ -200,7 +200,11 @@ function handleView(row) {
   let detailIds = row.detailId;
   ApiRunDetail.detail(detailIds).then(response => {
     console.log(response)
-    // caseDetailData.value = response.data;
+    caseDetailData.value.request = response.data.request;
+    caseDetailData.value.projectId = response.data.projectId;
+    caseDetailData.value.moduleId = response.data.moduleId;
+    caseDetailData.value.caseId = response.data.caseId;
+    caseDetailData.value.caseName = response.data.caseName;
     // caseDetailData.value.projectId = response.data;
     // caseDetailData.value.moduleId = response.data;
     // caseDetailData.value.request.teststeps = response.data;
