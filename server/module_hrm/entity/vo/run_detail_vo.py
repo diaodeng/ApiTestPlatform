@@ -6,6 +6,8 @@ from typing import Union, Optional, List, Any, Text, Dict
 
 from module_admin.annotation.pydantic_annotation import as_query
 from module_hrm.entity.vo.common_vo import QueryModel
+from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
+from utils.common_util import CamelCaseUtil
 
 
 @as_query
@@ -49,4 +51,15 @@ class HrmRunDetailModel(HrmRunListModel):
     """
     报告模型
     """
-    run_detail: Text = None
+    run_detail: TestCase | None = None
+
+    @model_validator(mode="before")
+    def convert_address(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        values = CamelCaseUtil.transform_result(values)
+        request_data = values.get('runDetail')
+        if isinstance(request_data, str):
+            values["runDetail"] = TestCase(**json.loads(request_data))
+        elif isinstance(request_data, dict):
+            values["runDetail"] = TestCase(**request_data)
+        return values
+

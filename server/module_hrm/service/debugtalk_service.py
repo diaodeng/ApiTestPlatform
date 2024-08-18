@@ -124,66 +124,42 @@ class DebugTalkService:
         return result
 
     @classmethod
-    def debugtalk_source_for_caseid_or_projectid(cls, query_db: Session, case_ids=[], project_ids=[]):
+    def debugtalk_source(cls, query_db: Session, project_id: int = None, case_id: int = None) -> tuple:
         """
-        根据用例ID或者项目名称查询相关的所有debugtalk，并将所有debugtalk合并为一个文件；
-        合并过程中不同文件如果存在相同名称的方法会抛出异常：ApiManager.exceptions.DebugtalkRepeatedError
-        """
-        # 校验多个debugtalk文件中有没有相同的类和方法,有重复的则中断执行
-        all_source = ["import logging", "logger = logging.getLogger('QTestRunner')"]
+        根据项目ID或者caseId查询debugtalk
+        project_id and case_id，优先使用projectId,不会使用case_id
+        project_id or case_id，根据给的ID查询debugtalk
+        not any([project_id, case_id])，只返回公共的debugtalk内容
 
-        common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id == None)).first()
 
-        if common_debugtalk:
-            all_source.append(common_debugtalk.debugtalk)
-
-        if case_ids:
-            case_projects = query_db.query(HrmCase).filter(HrmCase.case_id.in_(case_ids)).group_by(HrmCase.project_id)
-
-            if case_projects:
-                project_ids = project_ids.extend([case_project.project_id for case_project in case_projects])
-
-        if project_ids:
-            debugtalks = query_db.query(HrmDebugTalk).filter(
-                HrmDebugTalk.project_id.in_(project_ids)).all()
-            all_source.extend([debugtalk.debugtalk for debugtalk in debugtalks])
-
-        repeated_symbols = find_source_repeat(all_source)
-        if repeated_symbols:
-            raise DebugtalkRepeatedError(f"debugtalk中存在重复的方法或者类：{','.join(repeated_symbols)}")
-
-        # 合并debugtalk文件源码
-        # debugtalk_data = ""
-        # for debugtalk in debugtalks:
-        #     debugtalk_data += f"{debugtalk[0]}\n"
-
-        debugtalks_data = "\n".join(all_source)
-        return debugtalks_data
-
-    @classmethod
-    def debugtalk_source_for_projectid(cls, query_db: Session, project_id: int) -> tuple:
+        :param query_db:
+        :param project_id:
+        :param case_id:
+        :return: tuple(common_debugtalk, project_debugtalk),其中project_debugtalk可能为None
         """
 
-        """
         head_source = "import logging \nlogger = logging.getLogger('QTestRunner')"
 
         common_debugtalk = query_db.query(HrmDebugTalk).filter(
             or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id == None)).first()
         common_debugtalk = head_source + "\n" + common_debugtalk.debugtalk if common_debugtalk else ""
 
-        project_debugtalk = query_db.query(HrmDebugTalk).filter(
-            HrmDebugTalk.project_id == project_id).first()
-        project_debugtalk = head_source + "\n" + project_debugtalk.debugtalk if project_debugtalk else ""
+        project_debugtalk = None
+        if not project_id and case_id:
+            project_id = query_db.query(HrmCase).filter(HrmCase.case_id == case_id).first().project_id
+        if project_id:
+            project_debugtalk = query_db.query(HrmDebugTalk).filter(
+                HrmDebugTalk.project_id == project_id).first()
+            project_debugtalk = head_source + "\n" + project_debugtalk.debugtalk if project_debugtalk else ""
 
         return common_debugtalk, project_debugtalk
 
 
 class DebugTalkHandler:
-    def __init__(self, debugtalk_source: str, common_debugtalk_source:str=None):
+    def __init__(self, debugtalk_source: str, common_debugtalk_source: str = None):
         """
-        :param case_ids:
-        :param project_names:
+        :param debugtalk_source:
+        :param common_debugtalk_source:
         """
         self.common_debugtalk_source: str = common_debugtalk_source
         self.debugtalks_data: str = debugtalk_source
@@ -224,12 +200,22 @@ class DebugTalkHandler:
         return default_debugtalk
 
     def func_doc_map(self, user=None, filter=None) -> dict:
-        module = self._import_debugtalk(user)
-        return get_func_doc_map(module, filter=filter)
+        default_debugtalk = get_func_doc_map(debugtalk_common, filter)
+
+        if self.common_debugtalk_source:
+            module = self._import_debugtalk(self.common_debugtalk_source, user)
+            common_debugtalk = get_func_doc_map(module, filter)
+            default_debugtalk.update(common_debugtalk)
+
+        if self.debugtalks_data:
+            project_debugtalk_module = self._import_debugtalk(self.debugtalks_data, user)
+            project_debugtalk = get_func_doc_map(project_debugtalk_module, filter)
+            default_debugtalk.update(project_debugtalk)
+
+        return default_debugtalk
 
     def del_import(self):
-        if self.module_names:
-            for module_name in self.module_names:
-                if module_name in sys.modules:
-                    del sys.modules[module_name]
-                    logger.info(f"成功卸载模块 {module_name}")
+        for module_name in self.module_names:
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+                logger.info(f"成功卸载模块 {module_name}")
