@@ -53,3 +53,11 @@ export function debugCase(data) {
     data: data
   })
 }
+
+export function getComparator(data) {
+  return request({
+    url: '/hrm/common/comparator',
+    method: 'GET',
+    params: data
+  })
+}

@@ -118,9 +118,13 @@
           </el-col>
         </el-row>
         <el-row>
-          <el-col v-for="(value, key, index) in form.envConfig.variables" :key="key">
+          <div>
+            <el-button size="small" type="success" icon="Plus" @click="addEnvGroup"></el-button>
+          </div>
+          <el-col v-for="item in form.envConfig.variables" :key="item.key">
             <!--              <el-text>{{ key }}</el-text>-->
-            <TableVariables v-model="form.envConfig.variables[key]"></TableVariables>
+            <el-button size="small" type="danger" icon="Delete" @click="delEnvGroup"></el-button>
+            <TableVariables v-model="item.value"></TableVariables>
           </el-col>
 
         </el-row>
@@ -167,12 +171,25 @@ const data = reactive({
 
 const {queryParams, rules} = toRefs(data);
 const form = ref({
-  envConfig:{variables: {default: []}},
+  envConfig: {variables: [{key: "default", value: []}]},
   envName: "",
-  envUrl:"",
+  envUrl: "",
   orderNum: 0,
   simpleDesc: ""
 });
+
+
+function addEnvGroup() {
+  form.value.envConfig.variables.push({
+    key: "default",
+    desc: "",
+    value: []
+  })
+}
+
+function delEnvGroup() {
+
+}
 
 /** 查询环境列表 */
 function getList() {
@@ -198,7 +215,7 @@ function reset() {
     envUrl: undefined,
     simpleDesc: undefined,
     status: "0",
-    envConfig: {variables: {default: []}}
+    envConfig: {variables: [{value: [], key: "default"}]}
   };
   proxy.resetForm("envRef");
 }
@@ -217,9 +234,9 @@ function resetQuery() {
 /** 新增按钮操作 */
 function handleAdd(row) {
   reset();
-  listEnv().then(response => {
-    envOptions.value = proxy.handleTree(response.data, "envId");
-  });
+  // listEnv().then(response => {
+  //   envOptions.value = proxy.handleTree(response.data, "envId");
+  // });
   open.value = true;
   title.value = "添加环境";
 }

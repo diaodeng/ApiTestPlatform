@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field, HttpUrl
 from module_hrm.enums.enums import TstepTypeEnum, CaseRunStatus
 from utils.utils import get_platform
 
-
 Name = Text
 Url = Text
 BaseUrl = Union[HttpUrl, Text]
@@ -25,6 +24,35 @@ Hooks = List[Union[Text, Dict[Text, Text]]]
 Export = List[Text]
 Validators = List[Dict]
 Env = Dict[Text, Any]
+
+
+class ResponseData(BaseModel):
+    status_code: int = 200
+    headers: Dict = {}
+    cookies: Cookies = {}
+    encoding: Union[Text, None] = None
+    content_type: Text = ""
+    body: Union[Text, bytes, List, Dict, None] = ""
+    content: Text | List = ""
+    text: Union[Text, None] = ""
+
+
+class StepLogs(BaseModel):
+    before_request: Text = ""
+    after_response: Text = ""
+    error: Text = ""
+
+
+class Result(BaseModel):
+    success: bool = True
+    status: int = CaseRunStatus.passed.value
+    start_time_stamp: float = 0
+    start_time_iso: str = ""
+    end_time_iso: str = ""
+    end_time_stamp: float = 0
+    duration: float = 0
+    response: ResponseData = ResponseData()
+    logs: StepLogs = StepLogs()
 
 
 class MethodEnum(Text, Enum):
@@ -129,7 +157,7 @@ class ThinkTime(BaseModel):
 
 
 class TConfig(BaseModel):
-    name: Name
+    name: Name = ""
     verify: Verify = False
     base_url: BaseUrl = ""
     # Text: prepare variables in debugtalk.py, ${gen_variables()}
@@ -141,9 +169,10 @@ class TConfig(BaseModel):
     export: Export = []
     path: Text = None
     # configs for other protocols
-    thrift: TConfigThrift = None
+    thrift: Union[TConfigThrift, None] = None
     db: TConfigDB = TConfigDB()
-    think_time: ThinkTime = {}
+    think_time: ThinkTime = ThinkTime()
+    result: Union[Result, None] = None
 
 
 class TRequest(BaseModel):
@@ -172,6 +201,7 @@ class TWebsocket(BaseModel):
     params: VariablesMapping = {}
     headers: Headers = {}
     data: Text | None = ""
+    result: Union[Result, None] = None
     cookies: Cookies = {}
     timeout: float = 120
     allow_redirects: bool = False
@@ -184,6 +214,7 @@ class TStep(BaseModel):
     step_type: int = 1  # 1 api, 2 webUI
     step_id: Text = ""
     request: Union[TRequest, TWebsocket, None] = None
+    result: Union[Result, None] = None
     include: TStepInclude = {}
     testcase: Union[Text, Callable, None] = None
     variables: VariablesMapping = {}
@@ -255,19 +286,9 @@ class AddressData(BaseModel):
     server_port: int = 0
 
 
-class ResponseData(BaseModel):
-    status_code: int = 200
-    headers: Dict = {}
-    cookies: Cookies = {}
-    encoding: Union[Text, None] = None
-    content_type: Text = ""
-    body: Union[Text, bytes, List, Dict, None] = ""
-    content: Text|List = ""
-
-
 class ReqRespData(BaseModel):
-    request: TRequest|TWebsocket|None = None
-    response: ResponseData|None = None
+    request: TRequest | TWebsocket | None = None
+    response: ResponseData | None = None
 
 
 class SessionData(BaseModel):
@@ -286,8 +307,8 @@ class StepResult(BaseModel):
     """teststep data, each step maybe corresponding to one request or one testcase"""
 
     name: Text = ""  # teststep name
-    step_type: int = TstepTypeEnum.api.value  # teststep type
-    step_id: Text|int = ""  # teststep id
+    step_type: int = TstepTypeEnum.http.value  # teststep type
+    step_id: Text | int = ""  # teststep id
     success: bool = True
     duration: float = 0.0  # teststep duration
     status: Text = CaseRunStatus.passed.value

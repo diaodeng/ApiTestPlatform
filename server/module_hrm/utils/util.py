@@ -13,7 +13,6 @@ import socket
 import sys
 from itertools import combinations
 
-
 from module_hrm import exceptions
 from utils.log_util import logger
 
@@ -71,7 +70,6 @@ def ensure_validate_v4(vali):
                         cv["expected"] = json.dumps([[expect[0], expect[1]] for expect in expected], ensure_ascii=False)
                     except:
                         cv["expected"] = expected_str
-
 
                 all_valis.append(cv)
             # all_valis.extend(cvli["valicustom"])
@@ -195,6 +193,7 @@ def get_func_doc_map(module_obj: object, filter=None) -> dict:
     """
     从对象中获取包含的方法名及方法的注释
     :param module_obj:
+    :param filter: 过滤函数，返回true/false
     :return:
     """
     func_map = {}
@@ -373,7 +372,6 @@ def load_csv_file_to_test(keys, path):
         #     csv_content_list.append(row)
 
     return csv_content_list
-
 
 
 def get_local_ip():

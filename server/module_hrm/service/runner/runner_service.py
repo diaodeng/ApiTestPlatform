@@ -9,7 +9,7 @@ from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.do.suite_do import HrmSuite, HrmSuiteDetail
 from module_hrm.entity.dto.case_dto import CaseModelForApi
-from module_hrm.entity.vo.case_vo_detail_for_run import TestCaseSummary
+from module_hrm.entity.vo.case_vo_detail_for_run import TestCaseSummary, TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle
 from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkService
@@ -27,13 +27,13 @@ if "WSL" in str(platform.platform()):
     multiprocessing.set_start_method("spawn")
 
 
-async def run_by_single(query_db: Session, index, env_obj, func_map=None) -> list[TestCaseSummary]:
+async def run_by_single(query_db: Session, index, env_obj, func_map=None) -> list[TestCase]:
     test_case = CaseInfoHandle(query_db).from_db(index).toRun(env_obj).run_data()
     runner = TestRunner(test_case, func_map)
     case_res_datas = await runner.start()
     all_result = []
     for case_res_data in case_res_datas:
-        all_result.append(case_res_data.result)
+        all_result.append(case_res_data.case_data)
 
     return all_result
 
@@ -49,7 +49,7 @@ async def run_by_suite(query_db: Session, index, env, func_map=None):
 
 
 async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, type: int = None, mode=False,
-                       user=None) -> list[TestCaseSummary]:
+                       user=None) -> list[TestCase]:
     """
     批量组装用例数据
     :param test_list:
@@ -94,7 +94,7 @@ async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, ty
         result = []
         for project_id, ids in project_cases.items():  # 按项目执行
             if not ids: continue
-            commom_debugtalk, project_debugtalk = DebugTalkService.debugtalk_source_for_projectid(query_db, project_id)
+            commom_debugtalk, project_debugtalk = DebugTalkService.debugtalk_source(query_db, project_id=project_id)
             debugtalk_handler = DebugTalkHandler(project_debugtalk, commom_debugtalk)
             try:
                 debugtalk_func_map = debugtalk_handler.func_map(user)
