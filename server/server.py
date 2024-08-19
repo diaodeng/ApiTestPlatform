@@ -28,6 +28,7 @@ from module_hrm.controller.runner_controler import runnerController
 from module_hrm.controller.report_controler import reportController
 from module_hrm.controller.config_controller import hrmConfigController
 from module_hrm.controller.common_controller import hrmCommonController
+from module_hrm.controller.plan_controller import planController
 
 from config.env import AppConfig
 from config.get_redis import RedisUtil
@@ -96,6 +97,8 @@ controller_list = [
     {'router': reportController, 'tags': ['HRM-报告管理']},
     {'router': hrmConfigController, 'tags': ['HRM-配置管理']},
     {'router': hrmCommonController, 'tags': ['HRM-common']},
+    {'router': planController, 'tags': ['HRM-测试计划']},
+
 
 ]
 
