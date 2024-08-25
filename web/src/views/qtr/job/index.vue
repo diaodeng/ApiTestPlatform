@@ -43,7 +43,7 @@
                plain
                icon="Plus"
                @click="handleAdd"
-               v-hasPermi="['monitor:job:add']"
+               v-hasPermi="['qtr:job:add']"
             >新增</el-button>
          </el-col>
          <el-col :span="1.5">
@@ -53,7 +53,7 @@
                icon="Edit"
                :disabled="single"
                @click="handleUpdate"
-               v-hasPermi="['monitor:job:edit']"
+               v-hasPermi="['qtr:job:edit']"
             >修改</el-button>
          </el-col>
          <el-col :span="1.5">
@@ -63,7 +63,7 @@
                icon="Delete"
                :disabled="multiple"
                @click="handleDelete"
-               v-hasPermi="['monitor:job:remove']"
+               v-hasPermi="['qtr:job:remove']"
             >删除</el-button>
          </el-col>
          <el-col :span="1.5">
@@ -72,7 +72,7 @@
                plain
                icon="Download"
                @click="handleExport"
-               v-hasPermi="['monitor:job:export']"
+               v-hasPermi="['qtr:job:export']"
             >导出</el-button>
          </el-col>
          <el-col :span="1.5">
@@ -81,7 +81,7 @@
                plain
                icon="Operation"
                @click="handleJobLog"
-               v-hasPermi="['monitor:job:query']"
+               v-hasPermi="['qtr:job:query']"
             >日志</el-button>
          </el-col>
          <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
@@ -111,19 +111,19 @@
          <el-table-column label="操作" align="center" width="200" class-name="small-padding fixed-width">
             <template #default="scope">
                <el-tooltip content="修改" placement="top">
-                  <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['monitor:job:edit']"></el-button>
+                  <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['qtr:job:edit']"></el-button>
                </el-tooltip>
                <el-tooltip content="删除" placement="top">
-                  <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['monitor:job:remove']"></el-button>
+                  <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:job:remove']"></el-button>
                </el-tooltip>
                <el-tooltip content="执行一次" placement="top">
-                  <el-button link type="primary" icon="CaretRight" @click="handleRun(scope.row)" v-hasPermi="['monitor:job:changeStatus']"></el-button>
+                  <el-button link type="primary" icon="CaretRight" @click="handleRun(scope.row)" v-hasPermi="['qtr:job:changeStatus']"></el-button>
                </el-tooltip>
                <el-tooltip content="任务详细" placement="top">
-                  <el-button link type="primary" icon="View" @click="handleView(scope.row)" v-hasPermi="['monitor:job:query']"></el-button>
+                  <el-button link type="primary" icon="View" @click="handleView(scope.row)" v-hasPermi="['qtr:job:query']"></el-button>
                </el-tooltip>
                <el-tooltip content="调度日志" placement="top">
-                  <el-button link type="primary" icon="Operation" @click="handleJobLog(scope.row)" v-hasPermi="['monitor:job:query']"></el-button>
+                  <el-button link type="primary" icon="Operation" @click="handleJobLog(scope.row)" v-hasPermi="['qtr:job:query']"></el-button>
                </el-tooltip>
             </template>
          </el-table-column>
@@ -315,8 +315,8 @@
    </div>
 </template>
 
-<script setup name="Job">
-import { listJob, getJob, delJob, addJob, updateJob, runJob, changeJobStatus } from "@/api/monitor/job.js";
+<script setup name="QtrJob">
+import { listJob, getJob, delJob, addJob, updateJob, runJob, changeJobStatus } from "@/api/qtr/job.js";
 import Crontab from '@/components/Crontab/index.vue'
 const router = useRouter();
 const { proxy } = getCurrentInstance();
@@ -459,7 +459,7 @@ function crontabFill(value) {
 /** 任务日志列表查询 */
 function handleJobLog(row) {
   const jobId = row.jobId || 0;
-  router.push('/monitor/job-log/index/' + jobId)
+  router.push('/qtr/qtr-job-log/index/' + jobId)
 }
 /** 新增按钮操作 */
 function handleAdd() {
@@ -509,7 +509,7 @@ function handleDelete(row) {
 }
 /** 导出按钮操作 */
 function handleExport() {
-  proxy.download("monitor/job/export", {
+  proxy.download("qtr/job/export", {
     ...queryParams.value,
   }, `job_${new Date().getTime()}.xlsx`);
 }

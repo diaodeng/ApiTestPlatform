@@ -64,7 +64,7 @@ class DebugTalkService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def edit_dept_services(cls, query_db: Session, debugtalk_object: DebugTalkModel):
+    def edit_debugtalk_services(cls, query_db: Session, debugtalk_object: DebugTalkModel):
         """
         编辑DebugTalk信息service
         :param query_db: orm对象

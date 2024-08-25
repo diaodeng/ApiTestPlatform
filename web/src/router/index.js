@@ -157,6 +157,20 @@ export const dynamicRoutes = [
         meta: { title: '修改生成配置', activeMenu: '/tool/gen' }
       }
     ]
+  },
+  {
+    path: '/qtr/qtr-job-log',
+    component: Layout,
+    hidden: true,
+    permissions: ['qtr:job:list'],
+    children: [
+      {
+        path: 'index/:jobId(\\d+)',
+        component: () => import('@/views/qtr/job/log'),
+        name: 'QtrJobLog',
+        meta: { title: 'QTR调度日志', activeMenu: '/qtr/job' }
+      }
+    ]
   }
 ]
 

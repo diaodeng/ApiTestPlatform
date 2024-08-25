@@ -2,8 +2,8 @@ from fastapi import APIRouter
 from fastapi import Depends
 from config.get_db import get_db
 from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_admin.service.job_service import *
-from module_admin.service.job_log_service import *
+from module_hrm.service.job_service import *
+from module_hrm.service.job_log_service import *
 from utils.response_util import *
 from utils.log_util import *
 from utils.page_util import *
@@ -12,10 +12,10 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.annotation.log_annotation import log_decorator
 
 
-planController = APIRouter(prefix='/hrm/plan', dependencies=[Depends(LoginService.get_current_user)])
+qtrJobController = APIRouter(prefix='/qtr', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@planController.get("/job", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:list'))])
+@qtrJobController.get("/job/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:list'))])
 async def get_system_job_list(request: Request, job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_query), query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
@@ -27,7 +27,7 @@ async def get_system_job_list(request: Request, job_page_query: JobPageQueryMode
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.post("/job", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:add'))])
+@qtrJobController.post("/job", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:add'))])
 @log_decorator(title='定时任务管理', business_type=1)
 async def add_system_job(request: Request, add_job: JobModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
@@ -45,7 +45,7 @@ async def add_system_job(request: Request, add_job: JobModel, query_db: Session 
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.put("/job", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:edit'))])
+@qtrJobController.put("/job", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:edit'))])
 @log_decorator(title='定时任务管理', business_type=2)
 async def edit_system_job(request: Request, edit_job: EditJobModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
@@ -63,7 +63,7 @@ async def edit_system_job(request: Request, edit_job: EditJobModel, query_db: Se
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.put("/job/changeStatus", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:changeStatus'))])
+@qtrJobController.put("/job/changeStatus", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:changeStatus'))])
 @log_decorator(title='定时任务管理', business_type=2)
 async def edit_system_job(request: Request, edit_job: EditJobModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
@@ -82,7 +82,7 @@ async def edit_system_job(request: Request, edit_job: EditJobModel, query_db: Se
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.put("/job/run", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:changeStatus'))])
+@qtrJobController.put("/job/run", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:changeStatus'))])
 @log_decorator(title='定时任务管理', business_type=2)
 async def execute_system_job(request: Request, execute_job: JobModel, query_db: Session = Depends(get_db)):
     try:
@@ -98,7 +98,7 @@ async def execute_system_job(request: Request, execute_job: JobModel, query_db: 
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.delete("/job/{job_ids}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:remove'))])
+@qtrJobController.delete("/job/{job_ids}", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:remove'))])
 @log_decorator(title='定时任务管理', business_type=3)
 async def delete_system_job(request: Request, job_ids: str, query_db: Session = Depends(get_db)):
     try:
@@ -115,7 +115,7 @@ async def delete_system_job(request: Request, job_ids: str, query_db: Session = 
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.get("/job/{job_id}", response_model=JobModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:query'))])
+@qtrJobController.get("/job/{job_id}", response_model=JobModel, dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:query'))])
 async def query_detail_system_job(request: Request, job_id: int, query_db: Session = Depends(get_db)):
     try:
         job_detail_result = JobService.job_detail_services(query_db, job_id)
@@ -126,7 +126,7 @@ async def query_detail_system_job(request: Request, job_id: int, query_db: Sessi
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.post("/job/export", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:export'))])
+@qtrJobController.post("/job/export", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:export'))])
 @log_decorator(title='定时任务管理', business_type=5)
 async def export_system_job_list(request: Request, job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_form), query_db: Session = Depends(get_db)):
     try:
@@ -140,7 +140,7 @@ async def export_system_job_list(request: Request, job_page_query: JobPageQueryM
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.get("/planLog/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:plan:list'))])
+@qtrJobController.get("/jobLog/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:list'))])
 async def get_system_job_log_list(request: Request, job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_query), query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
@@ -152,7 +152,7 @@ async def get_system_job_log_list(request: Request, job_log_page_query: JobLogPa
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.delete("/jobLog/{job_log_ids}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:remove'))])
+@qtrJobController.delete("/jobLog/{job_log_ids}", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:remove'))])
 @log_decorator(title='定时任务日志管理', business_type=3)
 async def delete_system_job_log(request: Request, job_log_ids: str, query_db: Session = Depends(get_db)):
     try:
@@ -169,7 +169,7 @@ async def delete_system_job_log(request: Request, job_log_ids: str, query_db: Se
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.post("/jobLog/clean", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:remove'))])
+@qtrJobController.post("/jobLog/clean", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:remove'))])
 @log_decorator(title='定时任务日志管理', business_type=9)
 async def clear_system_job_log(request: Request, query_db: Session = Depends(get_db)):
     try:
@@ -185,7 +185,7 @@ async def clear_system_job_log(request: Request, query_db: Session = Depends(get
         return ResponseUtil.error(msg=str(e))
 
 
-@planController.post("/jobLog/export", dependencies=[Depends(CheckUserInterfaceAuth('hrm:job:export'))])
+@qtrJobController.post("/jobLog/export", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:export'))])
 @log_decorator(title='定时任务日志管理', business_type=5)
 async def export_system_job_log_list(request: Request, job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_form), query_db: Session = Depends(get_db)):
     try:
