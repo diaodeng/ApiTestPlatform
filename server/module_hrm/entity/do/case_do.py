@@ -26,7 +26,7 @@ class HrmCase(Base, BaseModel):
     sort = Column(Integer, nullable=False, default=0, comment='显示顺序')
     status = Column(String(1), nullable=False, default='0', comment='状态（0正常 1停用）')
     remark = Column(String(500), nullable=True, default='', comment='备注')
-    hrm_suite_detail = relationship("HrmSuiteDetail", back_populates="cases")
+    # qtr_suite_detail = relationship("QtrSuiteDetail", backref="cases")
 
 
 class HrmCaseModuleProject(Base):
