@@ -30,11 +30,14 @@ from module_hrm.controller.config_controller import hrmConfigController
 from module_hrm.controller.common_controller import hrmCommonController
 from module_hrm.controller.api_controler import hrmApiController
 from module_hrm.controller.loaddata_controller import hrmLoadController
+from module_hrm.controller.qtrJob_controller import qtrJobController
+from module_hrm.controller.suite_controller import suiteController
 
 from config.env import AppConfig
 from config.get_redis import RedisUtil
 from config.get_db import init_create_table
 from config.get_scheduler import SchedulerUtil
+from config.get_qtr_scheduler import QtrSchedulerUtil
 from utils.log_util import logger
 from utils.common_util import worship
 
@@ -49,10 +52,12 @@ async def lifespan(app: FastAPI):
     await RedisUtil.init_sys_dict(app.state.redis)
     await RedisUtil.init_sys_config(app.state.redis)
     await SchedulerUtil.init_system_scheduler()
+    await QtrSchedulerUtil.init_qtr_scheduler()
     logger.info(f"{AppConfig.app_name}启动成功")
     yield
     await RedisUtil.close_redis_pool(app)
     await SchedulerUtil.close_system_scheduler()
+    await QtrSchedulerUtil.close_qtr_scheduler()
 
 
 # 初始化FastAPI对象
@@ -100,6 +105,8 @@ controller_list = [
     {'router': hrmCommonController, 'tags': ['HRM-common']},
     {'router': hrmApiController, 'tags': ['HRM-接口管理']},
     {'router': hrmLoadController, 'tags': ['HRM-迁移数据']},
+    {'router': qtrJobController, 'tags': ['HRM-测试计划']},
+    {'router': suiteController, 'tags': ['HRM-测试套件']},
 
 ]
 

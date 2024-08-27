@@ -7,7 +7,7 @@ from collections import defaultdict
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
-from module_hrm.entity.do.suite_do import HrmSuite, HrmSuiteDetail
+from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCaseSummary, TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
@@ -39,7 +39,7 @@ async def run_by_single(query_db: Session, index, env_obj, func_map=None) -> lis
 
 
 async def run_by_suite(query_db: Session, index, env, func_map=None):
-    case_ids = query_db.query(HrmSuiteDetail.case_id).filter(HrmSuiteDetail.suite_id == index).distinct()
+    case_ids = query_db.query(QtrSuiteDetail.case_id).filter(QtrSuiteDetail.suite_id == index).distinct()
     include_case = list(case_ids)
     result = []
     for val in include_case:
@@ -69,9 +69,9 @@ async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, ty
         for project_id, module_id in all_module_obj:
             project_cases[project_id].append(module_id)
     elif type == DataType.suite.value:
-        project_case_ids = (query_db.query(HrmSuite.project_id, HrmSuiteDetail.case_id).
-                            join(HrmSuiteDetail, HrmSuite.suite_id == HrmSuiteDetail.suite_id).
-                            filter(HrmSuite.id.in_(test_list)).all())
+        project_case_ids = (query_db.query(QtrSuite.project_id, QtrSuiteDetail.case_id).
+                            join(QtrSuiteDetail, QtrSuite.suite_id == QtrSuiteDetail.suite_id).
+                            filter(QtrSuite.id.in_(test_list)).all())
         for project_id, case_id in project_case_ids:
             project_cases[project_id].append(case_id)
     else:
