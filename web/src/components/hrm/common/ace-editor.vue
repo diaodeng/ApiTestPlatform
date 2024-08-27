@@ -1,8 +1,10 @@
 <script setup>
-import {Setting} from "@element-plus/icons-vue";
+import {ElMessage} from "element-plus";
+import {Setting, Search} from "@element-plus/icons-vue";
 import {Json} from "@/utils/tools.js";
 import {VAceEditor} from 'vue3-ace-editor';
 import "./aceConfig.js"
+import {search as jmespath} from '@metrichor/jmespath';
 
 onErrorCaptured((error) => {
   console.log(error);
@@ -10,6 +12,10 @@ onErrorCaptured((error) => {
 
 const props = defineProps({
   canSet: {
+    type: [Boolean, String],
+    default: false
+  },
+  canSearch: {
     type: [Boolean, String],
     default: false
   },
@@ -28,11 +34,16 @@ const props = defineProps({
   width: {
     type: [String, Number],
     default: "100%"
+  },
+  isFullscreen: {
+    type: [Boolean],
+    default: false
   }
 });
 const modelContent = defineModel("content");
 const languageValue = ref("json");
 const themesValue = ref("github");
+const jmespathRex = ref("");
 
 const language = ref([{
   "label": "json",
@@ -89,20 +100,20 @@ onBeforeUnmount(() => {
 })
 
 const editorContent = computed(() => {
-  if (typeof modelContent.value === "string") {
-    return modelContent.value
+  let data = modelContent.value;
+  if (typeof data === "string") {
+    return toRaw(data);
   } else {
     try {
-      return JSON.stringify(modelContent.value, null, 4);
+      return JSON.stringify(data, null, 4);
     } catch (e) {
-      // return modelContent.value.toString();
-      return toRaw(modelContent.value);
+      return toRaw(data);
     }
   }
 
 })
 
-function updataValue(newVal) {
+function updateValue(newVal) {
   modelContent.value = newVal;
 }
 
@@ -123,28 +134,70 @@ function jsonRemoveEscapeAndBeautiful(env) {
   modelContent.value = Json.beautifulJson(tmpData)
 }
 
+function jmespathSearch() {
+  let data = modelContent.value;
+  let dataObj = null;
+  const rex = jmespathRex.value;
+  if (!rex) {
+    ElMessage.warning("请输入jmespath表达式");
+    return;
+  }
+  if (!data) {
+    ElMessage.warning("没有可查询的数据");
+    return;
+  } else {
+    try {
+      dataObj = Json.parse(data)
+    } catch (e) {
+      ElMessage.error("被查询数据不是合法的json数据");
+      return;
+    }
+  }
+
+  try {
+    const result = jmespath(dataObj, jmespathRex.value);
+    console.log("搜索结果：" + result);
+    modelContent.value = result;
+  } catch (e) {
+    ElMessage.error("查询异常" + e);
+  }
+}
+
 </script>
 
 <template>
   <div>
 
-    <el-row>
+    <el-row align="middle">
       <div v-if="languageValue === 'json'">
-        <el-tooltip content="格式化JSON" placement="bottom-start" effect="light">
+        <el-tooltip content="格式化JSON" placement="top-start" effect="light">
           <el-button type="primary" size="small" circle @click="jsonFormat">B</el-button>
         </el-tooltip>
-        <el-tooltip content="压缩JSON" placement="bottom-start" effect="light">
+        <el-tooltip content="压缩JSON" placement="top-start" effect="light">
           <el-button type="success" size="small" circle @click="jsonCompress">C</el-button>
         </el-tooltip>
-        <el-tooltip content="移除转义符并格式化JSON" placement="bottom-start" effect="light">
+        <el-tooltip content="移除转义符并格式化JSON" placement="top-start" effect="light">
           <el-button type="info" size="small" circle @click="jsonRemoveEscapeAndBeautiful">RB</el-button>
         </el-tooltip>
-        <el-tooltip content="压缩并转义JSON" placement="bottom-start" effect="light">
+        <el-tooltip content="压缩并转义JSON" placement="top-start" effect="light">
           <el-button type="warning" size="small" circle @click="jsonCompressAndEscape">CE</el-button>
         </el-tooltip>
       </div>
 
-      <div class="flex-grow"></div>
+      <div class="flex-grow">
+        <el-input size="small"
+                  v-if="canSearch && languageValue === 'json'"
+                  v-model="jmespathRex"
+                  placeholder="jmespath表达式"
+                  style="padding-left: 5px;padding-right: 5px"
+        >
+          <template #append>
+            <el-tooltip content="使用jmespath搜索" placement="top-start" effect="light">
+              <el-button :icon="Search" @click="jmespathSearch"></el-button>
+            </el-tooltip>
+          </template>
+        </el-input>
+      </div>
 
       <el-popover v-if="canSet"
                   placement="top-start"
@@ -190,8 +243,9 @@ function jsonRemoveEscapeAndBeautiful(env) {
 
 
     <v-ace-editor
+        :class="{fullscreen:isFullscreen}"
         :value="editorContent"
-        @update:value="updataValue"
+        @update:value="updateValue"
         :lang="languageValue"
         :theme="themesValue"
         :style="{height: height, width: width}"
@@ -217,5 +271,9 @@ function jsonRemoveEscapeAndBeautiful(env) {
 <style scoped lang="scss">
 .flex-grow {
   flex-grow: 1;
+}
+
+.fullscreen {
+  height: calc(100vh - 100px) !important;
 }
 </style>

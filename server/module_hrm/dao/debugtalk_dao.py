@@ -33,15 +33,23 @@ class DebugTalkDao:
         :param db: orm对象
         :return: DebugTalk的信息对象
         """
-        debugtalk_list = (db.query(HrmDebugTalk).join(HrmProject, HrmDebugTalk.project_id == HrmProject.project_id).
-                          filter(HrmDebugTalk.del_flag == 0,
-                                 HrmDebugTalk.status == page_object.status if page_object.status else True,
-                                 HrmDebugTalk.project_id == page_object.project_id if page_object.project_id else True,
-                                 eval(data_scope_sql)).order_by(HrmDebugTalk.debugtalk_id).all())
-        debugtalk_list = [{"debugtalk_id": obj.debugtalk_id, "project_id": obj.project_id,
-                           "debugtalk": obj.debugtalk, "status": obj.status,
-                           "project_name": obj.project.project_name, "create_by": obj.create_by,
-                           "update_by": obj.update_by, "create_time": obj.create_time, "update_time": obj.update_time}
+        debugtalk_list = (
+            db.query(HrmDebugTalk).outerjoin(HrmProject, HrmDebugTalk.project_id == HrmProject.project_id).
+            filter(
+                or_(HrmDebugTalk.project_id == page_object.project_id if page_object.project_id else True, HrmDebugTalk.project_id == None)).
+            filter(HrmDebugTalk.del_flag == 0,
+                   HrmDebugTalk.status == page_object.status if page_object.status else True, eval(data_scope_sql)).
+
+            order_by(HrmDebugTalk.debugtalk_id).all())
+        debugtalk_list = [{"debugtalk_id": obj.debugtalk_id,
+                           "project_id": obj.project_id,
+                           "debugtalk": obj.debugtalk,
+                           "status": obj.status,
+                           "project_name": obj.project.project_name if obj.project else "全局",
+                           "create_by": obj.create_by,
+                           "update_by": obj.update_by,
+                           "create_time": obj.create_time,
+                           "update_time": obj.update_time}
                           for obj in debugtalk_list]
         return debugtalk_list
 

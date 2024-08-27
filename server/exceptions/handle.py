@@ -39,8 +39,12 @@ def handle_exception(app: FastAPI):
         :return:
         """
         x = exc.errors()
+        type_error = ""
+        for arg in exc.args:
+            for i in arg:
+                type_error += f"\n{'.'.join(i.get('loc', ['body'])[1:])}"
         return JSONResponse(
             status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"detail": jsonable_encoder(exc.errors()), "msg": "参数或数据异常"},
+            content={"detail": jsonable_encoder(exc.errors()), "msg": f"参数或数据异常:{type_error}"},
         )
 

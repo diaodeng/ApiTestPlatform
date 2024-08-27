@@ -26,7 +26,7 @@ class HrmDebugTalk(Base, BaseModel):
                           comment='DebugTalkID')
 
     # 外键字段，引用 Project 的 id
-    project_id = Column(BigInteger, ForeignKey('hrm_project.project_id'), nullable=False)
+    project_id = Column(BigInteger, ForeignKey('hrm_project.project_id'), nullable=True, default=None, comment='项目ID')
 
     # 引用 Project，表示 DebugTalk 属于哪个 Project
     project = relationship("HrmProject", back_populates="hrm_debugtalk")

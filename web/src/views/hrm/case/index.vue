@@ -249,7 +249,6 @@ provide('sys_normal_disable', sys_normal_disable);
 const caseList = ref([]);
 const projectOptions = ref([]);
 const moduleOptions = ref([]);
-const envOptions = ref([]);
 const open = ref(false);
 const loading = ref(true);
 const showSearch = ref(true);
@@ -396,14 +395,6 @@ function handleExport() {
   }, `Case_${new Date().getTime()}.xlsx`);
 }
 
-
-function envList() {
-  listEnv().then(response => {
-    envOptions.value = response.data;
-  });
-}
-
 getProjectSelect();
 getList();
-envList();
 </script>

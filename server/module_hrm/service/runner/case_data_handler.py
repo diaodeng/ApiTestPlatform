@@ -182,7 +182,7 @@ class CaseInfoToRun(object):
         return env
 
     def __include_handle(self) -> CaseModelForApi | None:
-        include_config_id = self.case_obj.request.config.include.configId
+        include_config_id = self.case_obj.request.config.include.config_id
         test_include = None
         if include_config_id:
             include_config = CaseDao.get_case_by_id(self.query_db, include_config_id)

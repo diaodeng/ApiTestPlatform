@@ -136,6 +136,17 @@ def dict2list(datas: dict, ignore_type=False):
     return new_data
 
 
+def list_dict2list(datas: list[dict]):
+    """
+    [{"key1": "value1"}，{"key2": "vlaue2"}] => [{"key": "key1", "value": "value1", "type": "sting"}，{"key": "key2", "value": "value2", "type": "int"}]
+    """
+    new_dict = {}
+    for data in datas:
+        new_dict.update(data)
+    new_data = dict2list(new_dict)
+    return new_data
+
+
 def update_or_extend_list(old_dict_list: list[dict], new_dict_list: list[dict], key: str = "key",
                           check_enable: bool = True):
     """

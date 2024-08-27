@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, BigInteger
 
 from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
+from module_hrm.enums.enums import DataType
 from utils.snowflake import snowIdWorker
 
 
@@ -14,7 +15,7 @@ class HrmCase(Base, BaseModel):
     __tablename__ = 'hrm_case'
 
     case_id = Column(BigInteger, unique=True, primary_key=True, nullable=False, default=snowIdWorker.get_id, comment='用例、配置ID')
-    type = Column(Integer, comment='3 case/4 config', default=3)
+    type = Column(Integer, comment='3 case/4 config', default=DataType.case, nullable=False)
     case_name = Column(String(120), nullable=False, comment='用例名称')
     project_id = Column(BigInteger, nullable=True, default=None,  comment='项目ID')
     module_id = Column(BigInteger, nullable=True, default=None, comment='模块ID')

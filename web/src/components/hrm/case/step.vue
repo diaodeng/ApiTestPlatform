@@ -20,7 +20,6 @@ const activeTestStepName = ref(0);
 // const {sys_request_method} = proxy.useDict("sys_request_method");
 
 const testStepsData = defineModel('testStepsData', {required: true});
-const responseData = defineModel('responseData');
 
 
 function editTabs(paneName, action, tapType) {
@@ -82,7 +81,10 @@ function editTabs(paneName, action, tapType) {
       <el-tabs type="" v-model="activeRequestName">
         <el-tab-pane label="request" name="stepRequest">
           <template v-if="step.step_type === CaseStepTypeEnum.http">
-            <StepRequest v-model:request-detail-data="step.request" v-model:response-data="step.result"></StepRequest>
+            <StepRequest v-model:request-detail-data="step.request"
+                         v-model:response-data="step.result"
+                         edit-height="calc(100vh - 420px)"
+            ></StepRequest>
           </template>
           <template v-if="step.step_type === CaseStepTypeEnum.websocket">
             <StepWebsocket v-model:request-detail-data="step.request"

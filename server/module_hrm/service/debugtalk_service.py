@@ -141,7 +141,7 @@ class DebugTalkService:
         head_source = "import logging \nlogger = logging.getLogger('QTestRunner')"
 
         common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.debugtalk_id == -1, HrmDebugTalk.debugtalk_id == None)).first()
+            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id == None)).first()
         common_debugtalk = head_source + "\n" + common_debugtalk.debugtalk if common_debugtalk else ""
 
         project_debugtalk = None
@@ -179,6 +179,8 @@ class DebugTalkHandler:
         module = importlib.util.module_from_spec(spec)
 
         # 将数据流中的代码加载到模块对象中
+        if debugtalk_source is None:
+            debugtalk_source = ""
         exec(debugtalk_source, module.__dict__)
 
         # 将模块对象添加到 sys.modules 中，以便后续导入

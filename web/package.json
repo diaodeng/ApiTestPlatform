@@ -19,6 +19,7 @@
     "@ant-design/icons-vue": "^7.0.1",
     "@antv/g2plot": "^2.4.31",
     "@element-plus/icons-vue": "2.3.1",
+    "@metrichor/jmespath": "^0.3.1",
     "@vueup/vue-quill": "1.2.0",
     "@vueuse/core": "10.9.0",
     "ant-design-vue": "^4.2.1",

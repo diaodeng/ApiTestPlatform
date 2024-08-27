@@ -35,7 +35,7 @@ export class Json {
                 try {
                     jsonObjTmp = JSON.parse(beautifulStr);
                 } catch (e2) {
-                    return beautifulStr;
+                    return jsonObj;
                 }
             }
             jsonObj = jsonObjTmp

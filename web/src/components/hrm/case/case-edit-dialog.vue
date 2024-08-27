@@ -4,6 +4,7 @@ import {getComparator} from "@/api/hrm/case.js"
 import {HrmDataTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
 import TestStep from "@/components/hrm/case/step.vue";
 import CaseConfig from "@/components/hrm/case/case-config.vue";
+import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {debugCase, addCase, updateCase, getCase} from "@/api/hrm/case.js";
 import {listEnv} from "@/api/hrm/env.js";
 import {listProject} from "@/api/hrm/project.js";
@@ -28,7 +29,6 @@ const openCaseEditDialog = defineModel("openCaseEditDialog");
 
 const formData = toRef(props.formDatas);
 const selectedEnv = ref("");
-const envOptions = ref([]);
 const projectOptions = ref([]);
 const activeCaseName = ref("caseConfig")
 const responseData = ref("");
@@ -101,11 +101,7 @@ function debugForm() {
   });
 }
 
-function envList() {
-  listEnv().then(response => {
-    envOptions.value = response.data;
-  });
-}
+
 
 /** 查询项目列表 */
 function getProjectSelect() {
@@ -137,14 +133,13 @@ function getComparatorFromNetwork() {
 
 reset();
 getProjectSelect();
-envList();
 </script>
 
 <template>
   <el-dialog fullscreen :title='title'
              v-model="openCaseEditDialog" append-to-body destroy-on-close>
     <el-form ref="postRef" :model="formData" :rules="formRules" label-width="100px" style="height: 100%">
-      <el-container style="height: 100%">
+      <el-container style="height: 100%; overflow-y: hidden">
         <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
           <el-button-group>
             <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']"
@@ -154,15 +149,7 @@ envList();
             <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']"
                        v-if="dataType !== HrmDataTypeEnum.config">调试
             </el-button>
-            <el-select placeholder="Select" v-model="selectedEnv" style="width: 115px"
-                       v-if="dataType !== HrmDataTypeEnum.config">
-              <el-option
-                  v-for="option in envOptions"
-                  :key="option.envId"
-                  :label="option.envName"
-                  :value="option.envId">
-              </el-option>
-            </el-select>
+            <EnvSelector v-model:selected-env="selectedEnv"></EnvSelector>
           </el-button-group>
 
         </el-header>
@@ -177,10 +164,9 @@ envList();
                           :data-type="dataType"></CaseConfig>
             </el-tab-pane>
             <el-tab-pane label="teststeps" name="caseSteps">
-              <el-container>
+              <el-container style="max-height: calc(100vh - 207px)">
                 <el-main>
-                  <TestStep v-model:test-steps-data="formData.request.teststeps"
-                            v-model:response-data="responseData"></TestStep>
+                  <TestStep v-model:test-steps-data="formData.request.teststeps"></TestStep>
                 </el-main>
               </el-container>
 
