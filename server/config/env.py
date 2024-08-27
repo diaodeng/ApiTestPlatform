@@ -11,7 +11,7 @@ class AppSettings(BaseSettings):
     应用配置
     """
     app_env: str = 'dev'
-    app_name: str = 'RuoYi-FasAPI'
+    app_name: str = 'QTestRunner'
     app_root_path: str = '/dev-api'
     app_host: str = '0.0.0.0'
     app_port: int = 9099
