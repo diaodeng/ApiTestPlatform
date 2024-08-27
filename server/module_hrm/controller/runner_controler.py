@@ -95,7 +95,7 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
     try:
         case_data = debug_info.case_data
         if not isinstance(case_data, dict):
-            case_data = case_data.dict()
+            case_data = case_data.model_dump(by_alias=True)
         page_query_result = CaseModelForApi(**case_data)
         data_for_run = CaseInfoHandle(query_db).from_page(case_data).toDebug(debug_info.env).run_data()
 

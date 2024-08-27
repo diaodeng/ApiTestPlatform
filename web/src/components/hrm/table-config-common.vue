@@ -7,6 +7,7 @@ import SelectDataType from "@/components/hrm/select-dataType.vue";
 import SelectComparator from '@/components/select/popover-select.vue'
 import {ElMessageBox} from 'element-plus';
 import {inject} from "vue";
+import {CirclePlusFilled} from "@element-plus/icons-vue";
 
 const props = defineProps(["cols"]);
 
@@ -90,14 +91,36 @@ function paste(event) {
   });
 }
 
+function changeSwitch(changeType) {
+  // 全开 open、全关 close、反选 invert
+  let newStatus = null;
+  selfData.value.forEach((item, index) => {
+    if (changeType === "open") {
+      newStatus = true;
+    } else if (changeType === "close") {
+      newStatus = false;
+    } else if (changeType === "invert") {
+      newStatus = !item.enable;
+    } else {
+      console.log("类型错误");
+      return;
+    }
+    item.enable = newStatus;
+  });
+
+}
+
 
 </script>
 
 <template>
-  <el-button size="small" @click="addRow">ADD</el-button>
-  <el-button size="small" @click="delRow">DEL</el-button>
-  <el-button size="small" @click="copy">COPY</el-button>
-  <el-button size="small" @click="paste">PASE</el-button>
+  <div style="display: flex; justify-content: left; align-items: center; padding-bottom: 5px">
+    <el-button size="small" @click="addRow" icon="CirclePlusFilled" type="success" circle></el-button>
+    <el-button size="small" @click="delRow" icon="RemoveFilled" type="danger" circle></el-button>
+    <el-button size="small" @click="copy" icon="CopyDocument" type="warning" circle></el-button>
+    <el-button size="small" @click="paste" icon="DocumentCopy" type="info" circle></el-button>
+    <slot name="tableHeader"></slot>
+  </div>
   <el-table
       table-layout="fixed"
       ref="multipleTable"
@@ -109,6 +132,19 @@ function paste(event) {
   >
     <el-table-column type="selection" width="30"></el-table-column>
     <el-table-column v-for="col in cols" :label="col.name" v-bind="colWith(col.width)">
+      <template #header>
+
+        <template v-if="col.type === 'switch'">
+          <el-popover trigger="click">
+            <template #reference>
+              {{ col.name }}
+            </template>
+            <el-button size="small" type="primary" circle @click="changeSwitch('open')">全开</el-button>
+            <el-button size="small" type="success" circle @click="changeSwitch('invert')">反选</el-button>
+            <el-button size="small" type="warning" circle @click="changeSwitch('close')">全关</el-button>
+          </el-popover>
+        </template>
+      </template>
 
       <template #default="{ row, $index }">
         <template v-if="col.type === 'select'">

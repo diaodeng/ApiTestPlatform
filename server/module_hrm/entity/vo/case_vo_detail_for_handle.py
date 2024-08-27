@@ -5,9 +5,10 @@
 from enum import Enum
 from typing import Any, Callable, Dict, List, Text, Union
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
-from module_hrm.enums.enums import CaseRunStatus
+from module_hrm.enums.enums import CaseRunStatus, DataType, TstepTypeEnum
+from utils.common_util import CamelCaseUtil
 
 Name = Text
 Url = Text
@@ -154,7 +155,7 @@ class ThinkTime(BaseModel):
 
 
 class Include(BaseModel):
-    configId: Text | int | None = None
+    config_id: Text | int | None = None
 
 
 class TConfig(BaseModel):
@@ -194,7 +195,7 @@ class TRequest(BaseModel):
 
 
 class TStepInclude(BaseModel):
-    config: Headers = {}  # {"id":1, "name": "configName"}
+    config_id: Headers = {}  # {"id":1, "name": "configName"}
 
 
 class TWebsocket(BaseModel):
@@ -213,10 +214,10 @@ class TWebsocket(BaseModel):
 
 class TStep(BaseModel):
     name: Name
-    step_type: int = 1  # 1 api, 2 webUI
+    step_type: int = TstepTypeEnum.http  # 1 api, 2 webUI
     step_id: Text = ""
     request: Union[TRequest, TWebsocket, None] = None
-    include: TStepInclude = {}
+    include: Union[Include, None] = Include()
     testcase: Union[Text, Callable, None] = None
     variables: List[VariablesMapping] | Text = []
     setup_hooks: Hooks = []
@@ -233,6 +234,24 @@ class TStep(BaseModel):
     sql_request: Union[TSqlRequest, None] = None
     think_time: ThinkTime = ThinkTime()
     result: Union[Result, None] = Result()
+
+    @model_validator(mode="before")
+    def convert_data(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        request_data = values.get('request')
+        s_type = values.get('step_type')
+        if s_type == TstepTypeEnum.http.value:
+            if isinstance(request_data, dict):
+                values["request"] = TRequest(**request_data)
+            else:
+                values["request"] = request_data
+        elif s_type == TstepTypeEnum.websocket.value:
+            if isinstance(request_data, dict):
+                values["request"] = TWebsocket(**request_data)
+            else:
+                values["request"] = request_data
+        else:
+            values["request"] = request_data
+        return values
 
 
 class TestCase(BaseModel):

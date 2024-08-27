@@ -27,11 +27,13 @@ urllib3.disable_warnings()
 
 
 class Response:
-    def __init__(self, response_data: ResponseData):
+    def __init__(self, response_data: ResponseData, request: TRequest = None):
         self.status_code = response_data.status_code
         self.headers = response_data.headers
         self.content = response_data.content
         self.cookies = response_data.cookies
+        self.request: TRequest = request
+        self.body = ""
 
     @property
     def text(self) -> str:
@@ -52,12 +54,12 @@ class Response:
         except:
             return json.loads(self.text)
 
-    @property
-    def body(self) -> dict | str:
-        try:
-            return self.json()
-        except:
-            return self.text
+    # @property
+    # def body(self) -> dict | str:
+    #     try:
+    #         return self.json()
+    #     except:
+    #         return self.text
 
 
 class CaseRunner(object):
@@ -180,7 +182,7 @@ class RequestRunner(object):
 
     def before_request(self, request_data: dict):
         # 请求前的回调
-        before_request = self.debugtalk_func_map.get("before_request", None)
+        before_request = self.debugtalk_func_map.get("before_teststep", None)
         if before_request:
             try:
                 request_data = before_request(request_data)
@@ -201,7 +203,7 @@ class RequestRunner(object):
         # 响应回调
         self.logger.info(f"{self.step_data.name} 开始执行响应回调")
         try:
-            after_request = self.debugtalk_func_map.get("after_request", None)
+            after_request = self.debugtalk_func_map.get("after_teststep", None)
             if after_request:
                 after_request(response)
             self.logger.info(f"{self.step_data.name} 响应回调执行完毕")
@@ -285,7 +287,7 @@ class RequestRunner(object):
             res_obj.headers = dict(res_response.headers)
             res_obj.cookies = dict(res_response.cookies)
             self.step_data.result.response = res_obj
-            self.response = Response(res_obj)
+            self.response = Response(res_obj, self.step_data.request)
         except Exception as e:
             logger.exception(e)
             self.logger.error(f'error:{json.dumps({"args": str(e.args), "msg": str(e)}, indent=4, ensure_ascii=False)}')
@@ -298,14 +300,15 @@ class RequestRunner(object):
 
         if self.after_request(self.response) == CaseRunStatus.failed.value:
             return self
+        self.step_data.result.response.body = self.response.body
 
         self.extract_data()
 
-        logger.info(f'request.headers: {json.dumps(dict(self.response.headers), indent=4, ensure_ascii=False)}')
+        logger.info(f'request.headers: {json.dumps(dict(self.response.request.headers), indent=4, ensure_ascii=False)}')
         self.logger.info(
-            f'request.headers: {json.dumps(dict(self.response.headers), indent=4, ensure_ascii=False)}')
-        logger.info(f'request.body: {self.response.body}')
-        self.logger.info(f'request.body: {ensure_str(self.response.body)}')
+            f'request.headers: {json.dumps(dict(self.response.request.headers), indent=4, ensure_ascii=False)}')
+        # logger.info(f'request.body: {self.response.request.body}')
+        # self.logger.info(f'request.body: {ensure_str(self.response.request.body)}')
 
         logger.info(f'{"<<<请求结果:" + self.step_data.name:=^100}')
         self.logger.info(f'{"<<<请求结果:" + self.step_data.name:=^100}')
@@ -315,7 +318,7 @@ class RequestRunner(object):
         self.logger.info(f'response.headers: {json.dumps(dict(self.response.headers), indent=4, ensure_ascii=False)}')
         logger.info(f'response.text: {self.response.text}')
         self.logger.info(
-            f'response.body: {self.response.body if hasattr(self.response, "body") else self.response.text}')
+            f'response.text: {self.response.text}')
         logger.info(f'{"请求:" + self.step_data.name + "<<<":=^100}')
         self.logger.info(f'{"请求:" + self.step_data.name + "<<<":=^100}')
 

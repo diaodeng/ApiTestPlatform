@@ -7,7 +7,7 @@ export const initRequestData = {
     dataType: "",
     method: "GET",
     url: "",
-    json: {},
+    json: "",
     headers: [],
     params: [],
     data: []
@@ -27,10 +27,7 @@ export const initStepData =
         name: "新增测试步骤",
         request: initRequestData,
         include: {
-            config: {
-                id: "",
-                name: ""
-            }
+            config_id: null
         },
         think_time: {
             strategy: "",
@@ -61,7 +58,7 @@ export const initCaseRequestData = {
         parameters: [],
         base_url: "",
         include: {
-            configId: null
+            config_id: null
         },
         result: {response: {}, logs: {}}
     },
@@ -83,6 +80,16 @@ export const initCaseFormData = {
   request: initCaseRequestData
 }
 
+
+export const initApiFormData = {
+    apiId: randomString(10),
+    name: "新增API",
+    path: "",
+    interface: "",
+    type: HrmDataTypeEnum.api,
+    requestInfo: initCaseRequestData
+}
+
 export const initDebugTalkFormData ={
     debugtalk: "def setup():" +
         "pass" +
@@ -96,5 +103,7 @@ export const initDebugTalkFormData ={
         "" +
         ""
 }
+
+
 
 

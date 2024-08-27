@@ -1,6 +1,6 @@
 <script setup>
 const props = defineProps({
-  "leftWidth": {type: [String, Number], default: "50%"},
+  "leftWidth": {type: [String, Number], default: "200px"},
   "windowWidth": {type: [String, Number], default: "100%"},
   "windowHeight": {type: [String, Number], default: "100%"}
 });
@@ -11,6 +11,7 @@ let resizeRef = ref(null);
 let rightRef = ref(null);
 let startX = ref(0);
 let leftStartWidth = ref(500);
+let selfLeftWidth = ref(toRaw(props.leftWidth));
 
 const dragging = ref(false);
 
@@ -20,7 +21,8 @@ const onMouseMove = (event) => {
     let endX = event.pageX;
     let leftW = leftStartWidth.value + (endX - startX.value); // （endx-startx）=移动的距离。resize[i].left+移动的距离=左边区域最后的宽度
     let rightW = boxRef.value.offsetWidth - resizeRef.value.offsetWidth - leftW; // 容器宽度 - 左边区域的宽度 = 右边区域的宽度
-    leftRef.value.style.width = leftW + 'px';
+    // leftRef.value.style.width = leftW + 'px';
+    selfLeftWidth.value = leftW + 'px';
     rightRef.value.style.width = rightW + 'px';
   }
 };
@@ -51,10 +53,11 @@ function resizeUp(e) {
 <template>
   <el-container>
     <div class="box" ref="boxRef" :style="{width: windowWidth, height: windowHeight}">
-      <div class="left" ref="leftRef" :style="{width: leftWidth}">
+<!--    <div class="box" ref="boxRef" >-->
+      <div class="left" ref="leftRef" :style="{width: selfLeftWidth}" style="height: 100%">
         <slot name="left"></slot>
       </div>
-      <div style="align-items: center; height: auto; display: flex; justify-content: center; position: relative;">
+      <div style="align-items: center; height: auto; display: flex; justify-content: center; position: relative; background-color: #f1f3f6; border-radius: 5px;">
         <div class="resize" ref="resizeRef" @mousedown="resizeDown" style="height: auto">⋮</div>
       </div>
 
@@ -82,7 +85,7 @@ function resizeUp(e) {
 
 /*左侧div样式*/
 .left {
-  width: calc(50% - 10px); /*左侧初始化宽度*/
+  width: calc(100%); /*左侧初始化宽度*/
   height: 100%;
   background: #FFFFFF;
   /*float: left;*/
