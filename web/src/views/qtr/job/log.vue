@@ -86,9 +86,9 @@
             >导出</el-button>
          </el-col>
          <el-col :span="1.5">
-            <el-button 
-               type="warning" 
-               plain 
+            <el-button
+               type="warning"
+               plain
                icon="Close"
                @click="handleClose"
             >关闭</el-button>
@@ -231,7 +231,7 @@ function jobExecutorFormat(row, column) {
 }
 // 返回按钮
 function handleClose() {
-  const obj = { path: "/qtr/job" };
+  const obj = { path: "/hrm/qtr/qtr/job" };
   proxy.$tab.closeOpenPage(obj);
 }
 /** 搜索按钮操作 */
