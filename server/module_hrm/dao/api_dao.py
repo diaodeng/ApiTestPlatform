@@ -51,7 +51,9 @@ class ApiOperation(object):
     @staticmethod
     def update(query_db: Session, api_info: ApiModelForApi):
         data_info = api_info.model_dump(exclude_unset=True)
-        new_data = query_db.query(ApiInfo).filter(ApiInfo.api_id == api_info.api_id).update(**data_info)
+        # data_info.pop("api_id")
+        # data_info.pop("type")
+        new_data = query_db.query(ApiInfo).filter(ApiInfo.api_id == api_info.api_id).update(data_info)
         query_db.commit()
         # return ApiInfo.objects.get(id=api_id)
         return {"id": api_info.api_id, **data_info}

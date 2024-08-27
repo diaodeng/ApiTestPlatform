@@ -58,9 +58,12 @@ async def api_add(request: Request,
 
 
 @hrmApiController.put("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:api:update'))])
-async def api_update(request: Request, page_query: ApiModelForApi, query_db: Session = Depends(get_db)):
+async def api_update(request: Request, page_query: ApiModel, query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
+        if isinstance(page_query, dict):
+            page_query = ApiModel(**CamelCaseUtil.transform_result(page_query))
+
         data = ApiOperation.update(query_db, page_query)
         return ResponseUtil.success(data=data)
     except Exception as e:

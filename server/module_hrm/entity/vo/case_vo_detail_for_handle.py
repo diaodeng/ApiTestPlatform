@@ -154,8 +154,14 @@ class ThinkTime(BaseModel):
     limit: int = 0
 
 
+class IncludeConfig(BaseModel):
+    id: Text | int | None = None
+    name: Text | None = None
+    allow_extend: bool = True
+
+
 class Include(BaseModel):
-    config_id: Text | int | None = None
+    config: IncludeConfig = IncludeConfig()
 
 
 class TConfig(BaseModel):

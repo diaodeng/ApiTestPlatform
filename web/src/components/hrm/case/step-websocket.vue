@@ -11,8 +11,7 @@ const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 
-const requestDetailData = defineModel("requestDetailData", {required:true});
-const responseData = defineModel("responseData");
+const stepDetailData = defineModel("stepDetailData", {required:true});
 
 const activeRequestDetailName = ref("requestHeader")
 </script>
@@ -22,7 +21,7 @@ const activeRequestDetailName = ref("requestHeader")
     <el-col :span="24">
       <div>
         <el-input
-            v-model="requestDetailData.url"
+            v-model="stepDetailData.request.url"
             placeholder="Please input"
         >
           <template #prepend>URL</template>
@@ -50,16 +49,19 @@ const activeRequestDetailName = ref("requestHeader")
       <SplitWindow>
         <template #left>
           <el-tab-pane label="header" name="requestHeader">header
-            <TableHeaders v-model="requestDetailData.headers"></TableHeaders>
+            <TableHeaders
+                v-model:self-data="stepDetailData.request.headers"
+                v-model:include="stepDetailData.include"
+            ></TableHeaders>
           </el-tab-pane>
           <el-tab-pane label="data" name="requestJson">
             <div style="width: 100%">
-              <AceEditor v-model:content="requestDetailData.data" can-set="true" height="calc(100vh - 410px)"></AceEditor>
+              <AceEditor v-model:content="stepDetailData.request.data" can-set="true" height="calc(100vh - 410px)"></AceEditor>
             </div>
           </el-tab-pane>
         </template>
         <template #right>
-          <AceEditor v-model:content="responseData" can-set="true" height="calc(100vh - 410px)"></AceEditor>
+          <AceEditor v-model:content="stepDetailData.result" can-set="true" height="calc(100vh - 410px)"></AceEditor>
         </template>
       </SplitWindow>
     </el-tabs>

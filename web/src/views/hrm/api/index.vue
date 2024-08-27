@@ -3,7 +3,9 @@ import {ElMessage} from "element-plus";
 import SplitWindow from "@/components/hrm/common/split-window.vue";
 import TreeView from "@/components/hrm/common/tree-view.vue";
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
-import {addApi, apiTree, getApi} from "@/api/hrm/api.js";
+import {addApi, apiTree, getApi, updateApi} from "@/api/hrm/api.js";
+import {list as configList} from "@/api/hrm/config.js";
+
 import {initApiFormData, initStepData} from "@/components/hrm/data-template.js";
 import {randomString} from "@/utils/tools.js";
 import {CaseStepTypeEnum, HrmDataTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
@@ -23,6 +25,7 @@ provide('sys_normal_disable', sys_normal_disable);
 
 const treeDataSource = ref([]);
 const hrm_comparator_dict = ref({});
+const hrm_config_list = ref({});
 
 const folderForm = ref({parentID: null, name: null})
 const apiTabsData = ref([initApiFormData]);
@@ -45,9 +48,14 @@ onMounted(() => {
   getComparator().then(response => {
     hrm_comparator_dict.value = response.data;
   });
+  configList().then(response => {
+    hrm_config_list.value = response.rows;
+    console.log(hrm_config_list.value)
+  });
 });
 
 provide("hrm_comparator_dict", hrm_comparator_dict);
+provide("hrm_config_list", hrm_config_list);
 
 
 function addApiStep() {
@@ -68,12 +76,24 @@ function saveApiInfo() {
   loading.value.saveApi = true;
   let data = toRaw(currentApiData);
   data.type = HrmDataTypeEnum.api
-  addApi(data).then(res => {
-    ElMessage({message: "API保存成功", type: "success"});
-  }).finally(() => {
-    loading.value.saveApi = false;
-    loading.value.preSaveDialog = false;
-  })
+  if (data.id && data.apiId) {
+    updateApi(data).then(res => {
+      ElMessage({message: "API保存成功", type: "success"});
+    }).catch(error => {
+      ElMessage({message: "API保存失败", type: "success"});
+    }).finally(() => {
+      loading.value.saveApi = false;
+      loading.value.preSaveDialog = false;
+    })
+  } else {
+    addApi(data).then(res => {
+      ElMessage({message: "API保存成功", type: "success"});
+    }).finally(() => {
+      loading.value.saveApi = false;
+      loading.value.preSaveDialog = false;
+    })
+  }
+
 }
 
 function saveFolderInfo() {
@@ -191,7 +211,7 @@ function debug() {
     // responseData.value = response.data.log
     // open.value = false;
     // getList();
-  }).finally(()=>{
+  }).finally(() => {
     loading.value.debugApi = false;
   });
 }
@@ -238,14 +258,12 @@ function debug() {
             </el-tabs>
             <div v-if="currentApiData" style="flex-grow: 1;display: flex;flex-direction: column;">
               <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.http">
-                <StepRequest v-model:request-detail-data="currentApiData.requestInfo.teststeps[0].request"
-                             v-model:response-data="currentApiData.requestInfo.teststeps[0].result"
+                <StepRequest v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"
                              edit-height="calc(100vh - 332px)"
                 ></StepRequest>
               </template>
               <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.websocket">
-                <StepWebsocket v-model:request-detail-data="currentApiData.requestInfo.teststeps[0].request"
-                               v-model:response-data="currentApiData.requestInfo.teststeps[0].result"></StepWebsocket>
+                <StepWebsocket v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"></StepWebsocket>
               </template>
             </div>
 

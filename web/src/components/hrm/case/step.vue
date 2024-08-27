@@ -81,14 +81,12 @@ function editTabs(paneName, action, tapType) {
       <el-tabs type="" v-model="activeRequestName">
         <el-tab-pane label="request" name="stepRequest">
           <template v-if="step.step_type === CaseStepTypeEnum.http">
-            <StepRequest v-model:request-detail-data="step.request"
-                         v-model:response-data="step.result"
+            <StepRequest v-model:step-detail-data="testStepsData[index]"
                          edit-height="calc(100vh - 420px)"
             ></StepRequest>
           </template>
           <template v-if="step.step_type === CaseStepTypeEnum.websocket">
-            <StepWebsocket v-model:request-detail-data="step.request"
-                           v-model:response-data="step.result"></StepWebsocket>
+            <StepWebsocket v-model:step-detail-data="testStepsData[index]"></StepWebsocket>
           </template>
 
         </el-tab-pane>
