@@ -10,6 +10,7 @@ import jmespath
 import requests
 import websockets
 
+from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep, TRequest, TWebsocket, ResponseData, \
     TestCaseSummary, StepResult, ReqRespData, SessionData, Result
 from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
@@ -19,6 +20,8 @@ from module_hrm.utils.CaseRunLogHandle import RunLogCaptureHandler, TestLog
 from module_hrm.utils.common import key_value_dict, update_or_extend_list, dict2list
 from module_hrm.utils.parser import parse_data
 from module_hrm.utils.util import replace_variables, get_func_map, ensure_str
+from module_hrm.dao.case_dao import CaseDao
+from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 import urllib3
 
@@ -180,32 +183,33 @@ class RequestRunner(object):
                                   self.debugtalk_func_map)
         return request_data
 
-    def before_request(self, request_data: dict):
+    def before_teststep_handler(self, request_data: dict):
         # 请求前的回调
-        before_request = self.debugtalk_func_map.get("before_teststep", None)
-        if before_request:
+        before_teststep = self.debugtalk_func_map.get("before_teststep", None)
+        if before_teststep:
             try:
-                request_data = before_request(request_data)
+                request_data = before_teststep(request_data)
                 request_data = parse_data(request_data,
                                           key_value_dict(self.case_runner.case_data.config.variables),
                                           self.debugtalk_func_map)
                 return request_data
             except Exception as e:
+                logger.exception(e)
                 self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
                 self.set_step_failed()
-                self.logger.error(f"before_request函数执行失败: {e}")
+                self.logger.error(f"before_teststep函数执行失败: {e}")
                 error_info = self.case_runner.handler.get_log()
                 self.step_data.result.logs.before_request += error_info
                 self.step_data.result.logs.error += error_info
                 return CaseRunStatus.failed.value
 
-    def after_request(self, response: requests.Response):
+    def after_teststep_handler(self, response: requests.Response):
         # 响应回调
         self.logger.info(f"{self.step_data.name} 开始执行响应回调")
         try:
-            after_request = self.debugtalk_func_map.get("after_teststep", None)
-            if after_request:
-                after_request(response)
+            after_teststep = self.debugtalk_func_map.get("after_teststep", None)
+            if after_teststep:
+                after_teststep(response)
             self.logger.info(f"{self.step_data.name} 响应回调执行完毕")
         except Exception as ef:
             self.step_data.result.logs.after_response += self.case_runner.handler.get_log()
@@ -252,14 +256,14 @@ class RequestRunner(object):
         # request_data['json'] = request_data.pop("req_json")
         request_data.pop("upload")
 
-        if self.before_request(request_data) == CaseRunStatus.failed.value:
-            return self
-
         self.step_data.request = TRequest(**request_data)
         request_data["data"] = key_value_dict(self.step_data.request.data)
         request_data["params"] = key_value_dict(self.step_data.request.params)
         request_data["headers"] = key_value_dict(self.step_data.request.headers)
         request_data["cookies"] = key_value_dict(self.step_data.request.cookies)
+
+        if self.before_teststep_handler(request_data) == CaseRunStatus.failed.value:
+            return self
 
         logger.info(f'{">>>请求:" + self.step_data.name:=^100}')
         self.logger.info(f'{">>>请求:" + self.step_data.name:=^100}')
@@ -298,15 +302,15 @@ class RequestRunner(object):
             self.step_data.result.logs.error += error_info
             return self
 
-        if self.after_request(self.response) == CaseRunStatus.failed.value:
+        if self.after_teststep_handler(self.response) == CaseRunStatus.failed.value:
             return self
         self.step_data.result.response.body = self.response.body
 
         self.extract_data()
 
-        logger.info(f'request.headers: {json.dumps(dict(self.response.request.headers), indent=4, ensure_ascii=False)}')
+        logger.info(f'request.headers: {json.dumps(self.response.request.headers, indent=4, ensure_ascii=False)}')
         self.logger.info(
-            f'request.headers: {json.dumps(dict(self.response.request.headers), indent=4, ensure_ascii=False)}')
+            f'request.headers: {json.dumps(self.response.request.headers, indent=4, ensure_ascii=False)}')
         # logger.info(f'request.body: {self.response.request.body}')
         # self.logger.info(f'request.body: {ensure_str(self.response.request.body)}')
 
@@ -453,7 +457,7 @@ class Websocket(RequestRunner):
         self.logger.info(f'{self.step_data.name} 开始执行')
         request_data = self.parse_request_data()
         self.step_data.request = TWebsocket(**request_data)
-        if self.before_request(self.step_data.request.model_dump(by_alias=True)) == CaseRunStatus.failed.value:
+        if self.before_teststep_handler(self.step_data.request.model_dump(by_alias=True)) == CaseRunStatus.failed.value:
             return self
 
         try:
@@ -492,7 +496,7 @@ class Websocket(RequestRunner):
             self.step_data.result.logs.error += error_info
             return self
 
-        if self.after_request(self.response) == CaseRunStatus.failed.value:
+        if self.after_teststep_handler(self.response) == CaseRunStatus.failed.value:
             return self
 
         self.extract_data()

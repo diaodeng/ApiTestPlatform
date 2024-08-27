@@ -27,7 +27,11 @@ export const initStepData =
         name: "新增测试步骤",
         request: initRequestData,
         include: {
-            config_id: null
+            config: {
+                id: null,
+                name: "",
+                allow_extend: true
+            }
         },
         think_time: {
             strategy: "",
@@ -58,7 +62,11 @@ export const initCaseRequestData = {
         parameters: [],
         base_url: "",
         include: {
-            config_id: null
+            config: {
+                id: null,
+                name: "",
+                allow_extend: true
+            }
         },
         result: {response: {}, logs: {}}
     },
