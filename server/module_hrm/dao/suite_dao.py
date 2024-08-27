@@ -19,7 +19,6 @@ class SuiteDao:
         """
         suite_info = db.query(QtrSuite) \
             .filter(QtrSuite.suite_id == suite_id,
-                    QtrSuite.status == 0,
                     QtrSuite.del_flag == 0) \
             .first()
 
