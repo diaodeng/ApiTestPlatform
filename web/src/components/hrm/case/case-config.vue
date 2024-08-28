@@ -108,7 +108,7 @@ onMounted(() => {
         </el-select>
       </el-form-item>
       <el-form-item label="可选配置" v-if="dataType === HrmDataTypeEnum.case">
-        <el-select v-model="formData.request.config.include.configId" placeholder="请选择" clearable>
+        <el-select v-model="formData.request.config.include.config.id" placeholder="请选择" clearable>
           <el-option
               v-for="option in selectConfigList"
               :key="option.caseId"
