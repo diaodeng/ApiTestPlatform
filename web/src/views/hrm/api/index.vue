@@ -50,12 +50,11 @@ onMounted(() => {
   });
   configList().then(response => {
     hrm_config_list.value = response.rows;
-    console.log(hrm_config_list.value)
   });
 });
 
 provide("hrm_comparator_dict", hrm_comparator_dict);
-provide("hrm_config_list", hrm_config_list);
+provide("hrm_case_config_list", hrm_config_list);
 
 
 function addApiStep() {

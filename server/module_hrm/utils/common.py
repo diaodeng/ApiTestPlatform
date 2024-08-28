@@ -117,6 +117,7 @@ def dict2list(datas: dict, ignore_type=False):
     {"key1": "value1", "key2": value2} => [{"key": "key1", "value": "value1", "type": "sting"}，{"key": "key2", "value": "value2", "type": "int"}]
     """
     new_data = []
+    if isinstance(datas, list):return datas
     for key, value in datas.items():
         if ignore_type:
             data_type = "any"

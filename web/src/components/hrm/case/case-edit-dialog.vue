@@ -9,6 +9,7 @@ import {debugCase, addCase, updateCase, getCase} from "@/api/hrm/case.js";
 import {listEnv} from "@/api/hrm/env.js";
 import {listProject} from "@/api/hrm/project.js";
 import {initCaseFormData} from "@/components/hrm/data-template.js";
+import {list as listConfig} from "@/api/hrm/config.js";
 
 
 const {proxy} = getCurrentInstance();
@@ -33,6 +34,7 @@ const projectOptions = ref([]);
 const activeCaseName = ref("caseConfig")
 const responseData = ref("");
 const hrm_comparator_dict = ref({});
+const selectConfigList = ref([]);
 
 const dataName = computed(() => {
   return props.dataType === HrmDataTypeEnum.case ? "用例" : "配置";
@@ -40,6 +42,7 @@ const dataName = computed(() => {
 
 
 provide("hrm_comparator_dict", hrm_comparator_dict);
+provide("hrm_case_config_list", selectConfigList);
 
 watch(() => props.formDatas, () => {
   formData.value = props.formDatas;
@@ -102,7 +105,6 @@ function debugForm() {
 }
 
 
-
 /** 查询项目列表 */
 function getProjectSelect() {
   listProject(null).then(response => {
@@ -131,8 +133,25 @@ function getComparatorFromNetwork() {
   });
 }
 
-reset();
-getProjectSelect();
+function getConfigSelect() {
+  if (props.dataType === HrmDataTypeEnum.case) {
+    let data = {
+      projectId: formData.value.projectId,
+      moduleId: formData.value.moduleId,
+      type: HrmDataTypeEnum.config
+    }
+    listConfig(data).then(response => {
+      selectConfigList.value = response.rows;
+    });
+  }
+}
+
+onMounted(() => {
+  reset();
+  getProjectSelect();
+  getConfigSelect();
+})
+
 </script>
 
 <template>
@@ -149,18 +168,23 @@ getProjectSelect();
             <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']"
                        v-if="dataType !== HrmDataTypeEnum.config">调试
             </el-button>
-            <EnvSelector v-model:selected-env="selectedEnv"></EnvSelector>
+            <EnvSelector v-model:selected-env="selectedEnv"
+                         v-if="dataType !== HrmDataTypeEnum.config"
+            ></EnvSelector>
           </el-button-group>
 
         </el-header>
         <el-main style="max-height: calc(100vh - 95px);">
-          <CaseConfig v-model:form-data="formData" :project-options="projectOptions"
+          <CaseConfig v-model:form-data="formData"
+                      :project-options="projectOptions"
                       v-if="dataType === HrmDataTypeEnum.config"
-                      :data-type="dataType" :data-name="dataName"></CaseConfig>
+                      :data-type="dataType"
+                      :data-name="dataName"></CaseConfig>
           <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;"
                    v-else-if="dataType !== HrmDataTypeEnum.config">
             <el-tab-pane label="config" name="caseConfig">
-              <CaseConfig v-model:form-data="formData" :project-options="projectOptions"
+              <CaseConfig v-model:form-data="formData"
+                          :project-options="projectOptions"
                           :data-type="dataType"></CaseConfig>
             </el-tab-pane>
             <el-tab-pane label="teststeps" name="caseSteps">

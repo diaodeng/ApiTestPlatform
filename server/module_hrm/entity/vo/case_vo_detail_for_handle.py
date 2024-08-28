@@ -155,7 +155,7 @@ class ThinkTime(BaseModel):
 
 
 class IncludeConfig(BaseModel):
-    id: Text | int | None = None
+    id: int | Text | None = None
     name: Text | None = None
     allow_extend: bool = True
 

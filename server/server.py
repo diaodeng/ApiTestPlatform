@@ -29,7 +29,7 @@ from module_hrm.controller.report_controler import reportController
 from module_hrm.controller.config_controller import hrmConfigController
 from module_hrm.controller.common_controller import hrmCommonController
 from module_hrm.controller.api_controler import hrmApiController
-from module_hrm.controller.loaddata_controller import hrmLoadController
+# from module_hrm.controller.loaddata_controller import hrmLoadController
 from module_hrm.controller.qtrJob_controller import qtrJobController
 from module_hrm.controller.suite_controller import suiteController
 
@@ -104,7 +104,7 @@ controller_list = [
     {'router': hrmConfigController, 'tags': ['HRM-配置管理']},
     {'router': hrmCommonController, 'tags': ['HRM-common']},
     {'router': hrmApiController, 'tags': ['HRM-接口管理']},
-    {'router': hrmLoadController, 'tags': ['HRM-迁移数据']},
+    # {'router': hrmLoadController, 'tags': ['HRM-迁移数据']},
     {'router': qtrJobController, 'tags': ['HRM-测试计划']},
     {'router': suiteController, 'tags': ['HRM-测试套件']},
 

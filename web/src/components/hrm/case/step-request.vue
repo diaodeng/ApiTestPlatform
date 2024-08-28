@@ -99,7 +99,7 @@ const calcErrorLogs = computed(() => {
           <el-tab-pane label="header" name="requestHeader">
             <TableHeaders v-model:self-data="stepDetailData.request.headers"
                           v-model:include="stepDetailData.include"
-                          show-include="true"></TableHeaders>
+                          :show-include="true"></TableHeaders>
           </el-tab-pane>
           <el-tab-pane label="json" name="requestJson">
             <AceEditor v-model:content="stepDetailData.request.json" can-set="true" :height="editHeight"></AceEditor>

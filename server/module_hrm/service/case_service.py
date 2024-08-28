@@ -47,6 +47,7 @@ class CaseService:
         else:
             try:
                 CaseDao.add_case_dao(query_db, add_case)
+                query_db.commit()
                 result = dict(is_success=True, message='新增成功')
             except Exception as e:
                 query_db.rollback()
