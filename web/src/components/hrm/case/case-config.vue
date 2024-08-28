@@ -42,14 +42,16 @@ function getModuleSelect() {
 }
 
 function getConfigSelect() {
-  let data = {
-    projectId: formData.value.projectId,
-    moduleId: formData.value.moduleId,
-    type: HrmDataTypeEnum.config
+  if (props.dataType === HrmDataTypeEnum.case) {
+    let data = {
+      projectId: formData.value.projectId,
+      moduleId: formData.value.moduleId,
+      type: HrmDataTypeEnum.config
+    }
+    listConfig(data).then(response => {
+      selectConfigList.value = response.rows;
+    });
   }
-  listConfig(data).then(response => {
-    selectConfigList.value = response.rows;
-  });
 }
 
 function resetModule() {
@@ -57,7 +59,7 @@ function resetModule() {
   formData.value.request.config.include.configId = null;
   getModuleSelect();
   let projectId = "";
-  if (formData.value && formData.value.projectId){
+  if (formData.value && formData.value.projectId) {
     projectId = formData.value.projectId;
   }
 
@@ -71,11 +73,11 @@ function resetConfig() {
   getConfigSelect();
 }
 
-getModuleSelect();
-
-if (props.dataType === HrmDataTypeEnum.case) {
+onMounted(() => {
+  getModuleSelect();
   getConfigSelect();
-}
+})
+
 
 </script>
 

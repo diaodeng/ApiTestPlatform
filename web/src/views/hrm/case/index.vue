@@ -111,37 +111,39 @@
     <el-table v-loading="loading" :data="caseList"
               @selection-change="handleSelectionChange"
               border
+              table-layout="fixed"
+              max-height="calc(100vh - 280px)"
     >
       <el-table-column type="selection" width="55" align="center"/>
-      <el-table-column :label="dataName+'ID'" align="center" prop="caseId"/>
-      <el-table-column :label="dataName+'名称'" align="center" prop="caseName"/>
-      <el-table-column label="所属项目" align="center" prop="projectName">
+      <el-table-column :label="dataName+'ID'" prop="caseId" width="150px"/>
+      <el-table-column :label="dataName+'名称'" prop="caseName" width="auto"/>
+      <el-table-column label="所属项目" prop="projectName">
         <template #default="scope">
           <span>{{ nameOrGlob(scope.row.projectName) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="所属模块" align="center" prop="moduleName">
+      <el-table-column label="所属模块" prop="moduleName">
         <template #default="scope">
           <span>{{ nameOrGlob(scope.row.moduleName) }}</span>
         </template>
       </el-table-column>
       <!--         <el-table-column label="用例排序" align="center" prop="sort" />-->
-      <el-table-column label="状态" align="center" prop="status">
+      <el-table-column label="状态" align="center" prop="status" width="70px">
         <template #default="scope">
           <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
         </template>
       </el-table-column>
-      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
         <template #default="scope">
           <span>{{ parseTime(scope.row.createTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="更新时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="更新时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
         <template #default="scope">
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200" align="center" class-name="small-padding fixed-width">
+      <el-table-column label="操作" width="150" align="center" class-name="small-padding fixed-width" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="Histogram" @click="showHistory(scope.row)"
                      v-hasPermi="['hrm:case:history']"

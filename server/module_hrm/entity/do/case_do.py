@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, BigInteger
-from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.mysql import LONGTEXT
 
 from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
@@ -21,7 +21,7 @@ class HrmCase(Base, BaseModel):
     project_id = Column(BigInteger, nullable=True, default=None,  comment='项目ID')
     module_id = Column(BigInteger, nullable=True, default=None, comment='模块ID')
     include = Column(String(1024), nullable=True, comment='前置config/test')
-    request = Column(Text, nullable=True, comment='请求信息')
+    request = Column(LONGTEXT, nullable=True, comment='请求信息')
     notes = Column(String(1024), nullable=True, comment='注释')
     desc2mind = Column(Text, nullable=True, comment='脑图')
     sort = Column(Integer, nullable=False, default=0, comment='显示顺序')

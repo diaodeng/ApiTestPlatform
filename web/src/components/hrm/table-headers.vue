@@ -26,7 +26,7 @@ const tableCols = [
     width: ""
   }]
 
-const hrmConfigList = inject("hrm_config_list");
+const hrmConfigList = inject("hrm_case_config_list");
 
 </script>
 

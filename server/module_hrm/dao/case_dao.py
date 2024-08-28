@@ -99,7 +99,8 @@ class CaseDao:
             case = CaseModel(**case.model_dump(exclude_unset=True))
         db_case = HrmCase(**case.model_dump(exclude_unset=True))
         db.add(db_case)
-        db.commit()
+        db.flush()
+        # db.commit()
 
         return db_case
 
