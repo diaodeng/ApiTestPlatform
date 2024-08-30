@@ -46,6 +46,9 @@ class ReportDao:
     @classmethod
     def get_list(cls, db: Session, query_object: ReportQueryModel):
         query = db.query(HrmReport)
+        if query_object.only_self:
+            query = query.filter(HrmReport.manager == query_object.manager)
+
         if query_object.report_name:
             query = query.filter(HrmReport.report_name.like(f"%{query_object.report_name}%"))
 

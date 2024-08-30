@@ -14,7 +14,10 @@ debugtalkController = APIRouter(prefix='/hrm/debugtalk', dependencies=[Depends(L
 
 
 @debugtalkController.get("/list", response_model=List[DebugTalkModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:debugtalk:list'))])
-async def get_hrm_debugtalk_list(request: Request, query: DebugTalkQueryModel = Depends(DebugTalkQueryModel.as_query), query_db: Session = Depends(get_db), data_scope_sql: str = Depends(GetDataScope('HrmDebugTalk'))):
+async def get_hrm_debugtalk_list(request: Request,
+                                 query: DebugTalkQueryModel = Depends(DebugTalkQueryModel.as_query),
+                                 query_db: Session = Depends(get_db),
+                                 data_scope_sql: str = Depends(GetDataScope('HrmDebugTalk'))):
     try:
         query_result = DebugTalkService.get_debugtalk_list_services(query_db, query, data_scope_sql)
         logger.info('获取成功')
@@ -26,8 +29,12 @@ async def get_hrm_debugtalk_list(request: Request, query: DebugTalkQueryModel = 
 
 @debugtalkController.post("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:debugtalk:add'))])
 @log_decorator(title='DebugTalk管理', business_type=1)
-async def add_hrm_debugtalk(request: Request, add_debugtalk: DebugTalkModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def add_hrm_debugtalk(request: Request,
+                            add_debugtalk: DebugTalkModel,
+                            query_db: Session = Depends(get_db),
+                            current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
+        add_debugtalk.manager = current_user.user.user_id
         add_debugtalk.create_by = current_user.user.user_name
         add_debugtalk.update_by = current_user.user.user_name
         add_debugtalk.debugtalk_id = snowIdWorker.get_id()
@@ -45,7 +52,10 @@ async def add_hrm_debugtalk(request: Request, add_debugtalk: DebugTalkModel, que
 
 @debugtalkController.put("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:debugtalk:edit'))])
 @log_decorator(title='DebugTalk管理', business_type=2)
-async def edit_hrm_debugtalk(request: Request, edit_debugtalk: DebugTalkModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def edit_hrm_debugtalk(request: Request,
+                             edit_debugtalk: DebugTalkModel,
+                             query_db: Session = Depends(get_db),
+                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_debugtalk.update_by = current_user.user.user_name
         edit_debugtalk.update_time = datetime.now()
@@ -63,7 +73,10 @@ async def edit_hrm_debugtalk(request: Request, edit_debugtalk: DebugTalkModel, q
 
 @debugtalkController.delete("/{debugtalk_ids}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:debugtalk:remove'))])
 @log_decorator(title='DebugTalk管理', business_type=3)
-async def delete_hrm_debugtalk(request: Request, project_ids: str, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def delete_hrm_debugtalk(request: Request,
+                               project_ids: str,
+                               query_db: Session = Depends(get_db),
+                               current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         delete_debugtalk = DeleteDebugTalkModel(projectIds=project_ids)
         delete_debugtalk.update_by = current_user.user.user_name
@@ -80,7 +93,9 @@ async def delete_hrm_debugtalk(request: Request, project_ids: str, query_db: Ses
         return ResponseUtil.error(msg=str(e))
 
 
-@debugtalkController.get("/{debugtalk_id}", response_model=DebugTalkModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:debugtalk:detail', "hrm:debugtalk:edit"], False))])
+@debugtalkController.get("/{debugtalk_id}",
+                         response_model=DebugTalkModel,
+                         dependencies=[Depends(CheckUserInterfaceAuth(['hrm:debugtalk:detail', "hrm:debugtalk:edit"], False))])
 async def query_detail_system_debugtalk(request: Request, debugtalk_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_debugtalk_result = DebugTalkService.debugtalk_detail_services(query_db, debugtalk_id)

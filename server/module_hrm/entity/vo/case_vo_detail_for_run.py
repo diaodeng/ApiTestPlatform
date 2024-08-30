@@ -19,7 +19,7 @@ class ResponseData(BaseModel):
     encoding: Union[Text, None] = None
     content_type: Text = ""
     body: Union[Text, bytes, List, Dict, None] = ""
-    content: Text | List = ""
+    content: bytes | Text | List = ""
     text: Union[Text, None] = ""
 
 
@@ -143,7 +143,7 @@ class StepResult(BaseModel):
     attachment: Text = ""  # teststep attachment
 
 
-StepResult.update_forward_refs()
+StepResult.model_rebuild()
 
 
 class IStep(object):

@@ -286,7 +286,7 @@ class RequestRunner(object):
 
             res_obj = ResponseData()
             res_obj.text = res_response.text
-            res_obj.content = res_response.content
+            res_obj.content = res_response.content.decode("utf8")
             res_obj.status_code = res_response.status_code
             res_obj.headers = dict(res_response.headers)
             res_obj.cookies = dict(res_response.cookies)
@@ -334,8 +334,8 @@ class RequestRunner(object):
         """
         self.logger.info(f"{self.step_data.name} 开始提取变量")
         try:
-            for item in self.step_data.extract:
-                val = self.__get_validate_key(self.step_data.extract[item['key']])
+            for index, item in enumerate(self.step_data.extract):
+                val = self.__get_validate_key(item["value"])
                 self.extract_variable[item["key"]] = val
             logger.info(f'{self.step_data.name} extract_variable: {self.extract_variable}')
             self.logger.info(f'{self.step_data.name} extract_variable: {json.dumps(self.extract_variable)}')

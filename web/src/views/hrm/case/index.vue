@@ -347,7 +347,7 @@ function resetQuery() {
 function handleSelectionChange(selection) {
   ids.value = selection.map(item => item.caseId);
   runIds.value = ids.value;
-  single.value = selection.length != 1;
+  single.value = selection.length !== 1;
   multiple.value = !selection.length;
 }
 
