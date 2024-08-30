@@ -47,17 +47,29 @@ function resizeUp(e) {
   // resizeRef.releaseCapture && resizeRef.releaseCapture(); //当你不在需要继续获得鼠标消息就要应该调用ReleaseCapture()释放掉
 }
 
+function boxResize(event) {
+  let leftW = leftRef.value.offsetWidth;
+  let rightW = boxRef.value.offsetWidth - resizeRef.value.offsetWidth - leftW; // 容器宽度 - 左边区域的宽度 = 右边区域的宽度
+
+  // selfLeftWidth.value = leftW + 'px';
+  if (rightW >= 20) {
+    rightRef.value.style.width = rightW + 'px';
+  }
+
+}
+
 
 </script>
 
 <template>
   <el-container>
-    <div class="box" ref="boxRef" :style="{width: windowWidth, height: windowHeight}">
-<!--    <div class="box" ref="boxRef" >-->
+    <div class="box" ref="boxRef" :style="{width: windowWidth, height: windowHeight}" @resize="boxResize">
+      <!--    <div class="box" ref="boxRef" >-->
       <div class="left" ref="leftRef" :style="{width: selfLeftWidth}" style="height: 100%">
         <slot name="left"></slot>
       </div>
-      <div style="align-items: center; height: auto; display: flex; justify-content: center; position: relative; background-color: #f1f3f6; border-radius: 5px;">
+      <div
+          style="align-items: center; height: auto; display: flex; justify-content: center; position: relative; background-color: #f1f3f6; border-radius: 5px;">
         <div class="resize" ref="resizeRef" @mousedown="resizeDown" style="height: auto">⋮</div>
       </div>
 

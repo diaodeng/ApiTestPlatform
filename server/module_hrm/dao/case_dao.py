@@ -60,11 +60,14 @@ class CaseDao:
                          HrmProject.project_name,
                          HrmModule.module_name
                          ).outerjoin(HrmProject,
-                                HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
-                                                                                  HrmCase.module_id == HrmModule.module_id)
+                                     HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
+                                                                                            HrmCase.module_id == HrmModule.module_id)
 
         if query_object.type:
             query = query.filter(HrmCase.type == query_object.type)
+
+        if query_object.only_self:
+            query = query.filter(HrmCase.manager == query_object.manager)
 
         # 根据module_id和project_id是否提供来查询
         if query_object.project_id:

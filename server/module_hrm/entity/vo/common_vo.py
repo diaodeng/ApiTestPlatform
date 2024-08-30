@@ -46,6 +46,7 @@ class QueryModel(BaseModel):
     end_time: Optional[Any] = None
     status: Optional[Any] = None
     id: Optional[Any] = None
+    only_self:bool = False
 
 
 class CommonDataModel(BaseModel):
@@ -58,3 +59,4 @@ class CommonDataModel(BaseModel):
     update_by: Optional[str | Any] = None
     create_time: Optional[str | Any] = None
     update_time: Optional[str | Any] = None
+    manager: Optional[int] = None

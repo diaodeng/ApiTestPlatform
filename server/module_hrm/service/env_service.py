@@ -22,7 +22,7 @@ class EnvService:
         return env_list_result
 
     @classmethod
-    def get_env_list_services(cls, query_db: Session, page_object: EnvModel, data_scope_sql: str):
+    def get_env_list_services(cls, query_db: Session, page_object: EnvQueryModel, data_scope_sql: str):
         """
         获取部门列表信息service
         :param query_db: orm对象

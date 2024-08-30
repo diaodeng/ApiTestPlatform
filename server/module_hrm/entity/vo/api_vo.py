@@ -7,10 +7,11 @@ from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
+from module_hrm.entity.vo.common_vo import CommonDataModel
 from utils.common_util import CamelCaseUtil
 
 
-class ApiModel(BaseModel):
+class ApiModel(CommonDataModel):
     """
     API接口信息表对应pydantic模型, 用于存数据库前转化数据
     """
@@ -28,10 +29,12 @@ class ApiModel(BaseModel):
     response_data_demo: Optional[str] = None
     desc: Optional[str] = None
     id: Optional[int] = None
-    create_by: Optional[str] = None
-    update_by: Optional[str] = None
-    create_time: Optional[datetime] = None
-    update_time: Optional[datetime] = None
+
+    # create_by: Optional[str] = None
+    # update_by: Optional[str] = None
+    # create_time: Optional[datetime] = None
+    # update_time: Optional[datetime] = None
+    # manager: Optional[int] = None
 
     @model_validator(mode="before")
     def convert_address(cls, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -85,6 +88,7 @@ class ApiPageQueryModel(ApiQueryModel):
 
     module_id: Optional[int] = None
     project_id: Optional[int] = None
+    only_self: Optional[bool] = False
 
 
 class DeleteApiModel(BaseModel):

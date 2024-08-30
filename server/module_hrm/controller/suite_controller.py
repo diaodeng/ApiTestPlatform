@@ -13,9 +13,16 @@ from utils.snowflake import snowIdWorker
 suiteController = APIRouter(prefix='/qtr/suite', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@suiteController.get("/list", response_model=List[SuiteModel], dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:list'))])
-async def get_qtr_suite_list(request: Request, suite_query: SuiteQueryModel = Depends(SuiteQueryModel.as_query), query_db: Session = Depends(get_db), data_scope_sql: str = Depends(GetDataScope('QtrSuite'))):
+@suiteController.get("/list", response_model=List[SuiteModel],
+                     dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:list'))])
+async def get_qtr_suite_list(request: Request,
+                             suite_query: SuiteQueryModel = Depends(SuiteQueryModel.as_query),
+                             query_db: Session = Depends(get_db),
+                             data_scope_sql: str = Depends(GetDataScope('QtrSuite')),
+                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                             ):
     try:
+        suite_query.manager = current_user.user.user_id
         suite_query_result = SuiteService.get_suite_list_services(query_db, suite_query, data_scope_sql)
         logger.info('获取成功')
         return ResponseUtil.success(data=suite_query_result)
@@ -26,8 +33,12 @@ async def get_qtr_suite_list(request: Request, suite_query: SuiteQueryModel = De
 
 @suiteController.post("", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:add'))])
 @log_decorator(title='测试套件', business_type=1)
-async def add_qtr_suite(request: Request, add_suite: SuiteModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def add_qtr_suite(request: Request,
+                        add_suite: SuiteModel,
+                        query_db: Session = Depends(get_db),
+                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
+        add_suite.manager = current_user.user.user_id
         add_suite.create_by = current_user.user.user_name
         add_suite.update_by = current_user.user.user_name
         add_suite.suite_id = snowIdWorker.get_id()
@@ -45,7 +56,10 @@ async def add_qtr_suite(request: Request, add_suite: SuiteModel, query_db: Sessi
 
 @suiteController.put("", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:edit'))])
 @log_decorator(title='测试套件', business_type=2)
-async def edit_qtr_suite(request: Request, edit_suite: SuiteModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def edit_qtr_suite(request: Request,
+                         edit_suite: SuiteModel,
+                         query_db: Session = Depends(get_db),
+                         current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_suite.update_by = current_user.user.user_name
         edit_suite.update_time = datetime.now()
@@ -63,7 +77,10 @@ async def edit_qtr_suite(request: Request, edit_suite: SuiteModel, query_db: Ses
 
 @suiteController.delete("/{suite_ids}", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:remove'))])
 @log_decorator(title='测试套件', business_type=3)
-async def delete_hrm_env(request: Request, suite_ids: str, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def delete_hrm_env(request: Request,
+                         suite_ids: str,
+                         query_db: Session = Depends(get_db),
+                         current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         delete_suite = DeleteSuiteModel(suiteIds=suite_ids)
         delete_suite_result = SuiteService.delete_suite_services(query_db, delete_suite)
@@ -78,7 +95,8 @@ async def delete_hrm_env(request: Request, suite_ids: str, query_db: Session = D
         return ResponseUtil.error(msg=str(e))
 
 
-@suiteController.get("/{suite_id}", response_model=SuiteModel, dependencies=[Depends(CheckUserInterfaceAuth(['qtr:suite:detail', "qtr:suite:edit"], False))])
+@suiteController.get("/{suite_id}", response_model=SuiteModel,
+                     dependencies=[Depends(CheckUserInterfaceAuth(['qtr:suite:detail', "qtr:suite:edit"], False))])
 async def query_detail_suite(request: Request, suite_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_suite_result = SuiteService.get_suite_services(query_db, suite_id)

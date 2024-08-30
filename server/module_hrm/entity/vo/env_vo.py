@@ -5,6 +5,7 @@ from pydantic.alias_generators import to_camel
 from typing import Union, Optional, List, Dict, Text, Any
 from datetime import datetime
 from module_admin.annotation.pydantic_annotation import as_query
+from module_hrm.entity.vo.common_vo import CommonDataModel
 from utils.common_util import CamelCaseUtil
 
 
@@ -15,7 +16,7 @@ class EnvConfig(BaseModel):
     variables: Optional[List[Dict[Text, List[Dict] | Text]]] = [{"key": "default", "value": [], "desc": ""}]
 
 
-class EnvModel(BaseModel):
+class EnvModel(CommonDataModel):
     """
     环境表对应pydantic模型
     """
@@ -29,10 +30,10 @@ class EnvModel(BaseModel):
     simple_desc: Optional[str] = None
     status: Optional[str] = None
     del_flag: Optional[str] = None
-    create_by: Optional[str] = None
-    create_time: Optional[datetime] = None
-    update_by: Optional[str] = None
-    update_time: Optional[datetime] = None
+    # create_by: Optional[str] = None
+    # create_time: Optional[datetime] = None
+    # update_by: Optional[str] = None
+    # update_time: Optional[datetime] = None
 
     @model_validator(mode="before")
     def convert_data(cls, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -76,6 +77,7 @@ class EnvQueryModel(EnvModel):
     """
     begin_time: Optional[str] = None
     end_time: Optional[str] = None
+    only_self: bool = False
 
 
 class DeleteEnvModel(BaseModel):
