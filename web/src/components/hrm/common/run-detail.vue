@@ -30,9 +30,13 @@
         </el-select>
       </el-form-item>
       <el-form-item>
+        <el-checkbox v-model="onlySelf">仅自己的数据</el-checkbox>
+      </el-form-item>
+      <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
         <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
-        <el-button type="danger" icon="Refresh" @click="handleDelete" v-hasPermi="['hrm:history:delete']">删除</el-button>
+        <el-button type="danger" icon="Refresh" @click="handleDelete" v-hasPermi="['hrm:history:delete']">删除
+        </el-button>
       </el-form-item>
     </el-form>
 
@@ -81,7 +85,8 @@
         @pagination="getList"
     />
 
-    <CaseEditDialog v-model:open-case-edit-dialog="showCaseEdit" :form-datas="caseDetailData" :data-type="HrmDataTypeEnum.run_detail"></CaseEditDialog>
+    <CaseEditDialog v-model:open-case-edit-dialog="showCaseEdit" :form-datas="caseDetailData"
+                    :data-type="HrmDataTypeEnum.run_detail"></CaseEditDialog>
   </div>
 </template>
 
@@ -114,21 +119,23 @@ const ids = ref([]);
 const single = ref(true);
 const multiple = ref(true);
 const total = ref(0);
+const onlySelf = ref(true);
 
 const showCaseEdit = ref(false);
 const caseDetailData = ref(JSON.parse(JSON.stringify(initCaseFormData)));
 
 
 const queryParams = ref({
-    pageNum: 1,
-    pageSize: 10,
-    runId: props.runId,
-    reportId: props.reportId,
-    runName: undefined,
-    projectId: undefined,
-    moduleId: undefined,
-    status: undefined
-  });
+  pageNum: 1,
+  pageSize: 10,
+  runId: props.runId,
+  reportId: props.reportId,
+  runName: undefined,
+  projectId: undefined,
+  moduleId: undefined,
+  status: undefined,
+  onlySelf: onlySelf
+});
 
 watch(() => props.runId, () => {
   queryParams.value.runId = props.runId;

@@ -14,6 +14,7 @@ import StepRequest from "@/components/hrm/case/step-request.vue";
 import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
 import FullScreen from "@/components/hrm/common/fullscreen.vue";
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
+import {Setting} from "@element-plus/icons-vue";
 
 
 const {proxy} = getCurrentInstance();
@@ -33,6 +34,7 @@ let currentApiData = apiTabsData.value[0];
 const selectedEnv = ref("");
 const currentTab = ref(0);
 const loadingApi = ref(false);
+const onlySelf = ref(true);
 const loading = ref({
   page: false,
   loadApiTree: false,
@@ -108,7 +110,7 @@ function saveFolderInfo() {
 
 function getApiTree() {
   loadingApi.value = true;
-  apiTree({private: false}).then(res => {
+  apiTree({onlySelf: onlySelf.value}).then(res => {
     treeDataSource.value = res.data;
   }).finally(() => {
     loadingApi.value = false;
@@ -219,20 +221,27 @@ function debug() {
 
 <template>
   <div class="app-container" v-loading="loadingApi">
-    <el-button size="small" @click="getApiTree" icon="RefreshRight"></el-button>
-    <el-button size="small" @click="loading.preSaveFolderDialog = true">新增文件夹</el-button>
-    <el-button size="small" @click="loading.preSaveDialog = true" v-loading="loading.saveApi">保存</el-button>
-    <el-button size="small" @click="debug" v-loading="loading.debugApi">调试</el-button>
-    <EnvSelector v-model:selected-env="selectedEnv" size="small"></EnvSelector>
+    <el-row>
+      <el-button size="small" @click="getApiTree" icon="RefreshRight"></el-button>
+      <el-button size="small" @click="loading.preSaveFolderDialog = true" type="info">新增文件夹</el-button>
+      <span style="flex-grow: 1"></span>
+      <el-button size="small" @click="loading.preSaveDialog = true" v-loading="loading.saveApi" type="success">保存
+      </el-button>
+      <el-button size="small" @click="debug" v-loading="loading.debugApi" type="warning">调试</el-button>
+      <EnvSelector v-model:selected-env="selectedEnv" size="small"></EnvSelector>
+    </el-row>
 
     <el-container>
       <split-window left-width="250px" window-height="calc(100vh - 156px)">
         <template v-slot:left>
+          <el-row>
+            <!--                <el-icon><setting></setting></el-icon>-->
+            <el-checkbox v-model="onlySelf">仅自己的数据</el-checkbox>
+          </el-row>
           <el-scrollbar>
-            <div style="display: flex;">
+            <div style="display: flex; flex-flow: column">
               <TreeView v-model="treeDataSource" @node-db-click="nodeDbClick"></TreeView>
             </div>
-
           </el-scrollbar>
 
         </template>
