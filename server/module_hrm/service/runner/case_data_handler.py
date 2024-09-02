@@ -204,6 +204,7 @@ class CaseInfoToRun(object):
                 step.request.headers = config_header
 
             config_headers = copy.deepcopy(self.case_obj.request.config.headers)
+            config_headers = config_headers if config_headers else []
             if step.include.config.allow_extend:
                 update_or_extend_list(config_headers, step.request.headers)
                 step.request.headers = config_headers
