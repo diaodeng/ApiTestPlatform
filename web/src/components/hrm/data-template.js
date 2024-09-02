@@ -95,7 +95,8 @@ export const initApiFormData = {
     path: "",
     interface: "",
     type: HrmDataTypeEnum.api,
-    requestInfo: initCaseRequestData
+    requestInfo: initCaseRequestData,
+    parentId: undefined,
 }
 
 export const initDebugTalkFormData ={

@@ -47,7 +47,7 @@ async def api_detail(request: Request, api_id: int, query_db: Session = Depends(
 
 @hrmApiController.post("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:api:add'))])
 async def api_add(request: Request,
-                  api_data: ApiModel,
+                  api_data: ApiModelForApi,
                   query_db: Session = Depends(get_db),
                   current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
@@ -65,7 +65,7 @@ async def api_add(request: Request,
 
 @hrmApiController.put("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:api:update'))])
 async def api_update(request: Request,
-                     page_query: ApiModel,
+                     page_query: ApiModelForApi,
                      query_db: Session = Depends(get_db),
                      current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
