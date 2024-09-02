@@ -242,7 +242,7 @@ class RequestRunner(object):
         re_cookies = request_data_obj.cookies
         if isinstance(re_data, str):
             request_data_obj.data = json.loads(re_data)
-        if isinstance(re_json, str):
+        if re_json and isinstance(re_json, str):
             request_data_obj.req_json = json.loads(re_json)
         if isinstance(re_param, str):
             request_data_obj.params = json.loads(re_param)

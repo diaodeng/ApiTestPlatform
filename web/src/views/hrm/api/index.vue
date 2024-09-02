@@ -28,7 +28,7 @@ const treeDataSource = ref([]);
 const hrm_comparator_dict = ref({});
 const hrm_config_list = ref({});
 
-const folderForm = ref({parentID: null, name: null})
+const folderForm = ref({parentId: null, name: null})
 const apiTabsData = ref([initApiFormData]);
 let currentApiData = apiTabsData.value[0];
 const selectedEnv = ref("");
@@ -44,6 +44,9 @@ const loading = ref({
   preSaveDialog: false,
   preSaveFolderDialog: false
 })
+
+const treeFilterText = ref("");
+const treeRef = ref(null);
 
 onMounted(() => {
   getApiTree();
@@ -76,10 +79,13 @@ function getApiInfo(apiId) {
 function saveApiInfo() {
   loading.value.saveApi = true;
   let data = toRaw(currentApiData);
+
   data.type = HrmDataTypeEnum.api
-  if (data.id && data.apiId) {
+
+  if (data.id && data.apiId && !data.isNew) {
     updateApi(data).then(res => {
       ElMessage({message: "API保存成功", type: "success"});
+      apiSaveSuccess(res, data.apiId);
     }).catch(error => {
       ElMessage({message: "API保存失败", type: "success"});
     }).finally(() => {
@@ -87,14 +93,29 @@ function saveApiInfo() {
       loading.value.preSaveDialog = false;
     })
   } else {
+    const oldApiId = data.apiId;
+    delete data.isNew;
+    delete data.apiId;
+    delete data.id;
     addApi(data).then(res => {
       ElMessage({message: "API保存成功", type: "success"});
+      apiSaveSuccess(res, oldApiId);
     }).finally(() => {
       loading.value.saveApi = false;
       loading.value.preSaveDialog = false;
     })
   }
 
+}
+
+function apiSaveSuccess(res, oldApiId) {
+  let response = res;
+  if (response) {
+    console.log(response.data.apiId);
+    let treeNode = treeRef.value.getNode(oldApiId);
+    treeNode.data.apiId = response.data.apiId;
+    treeNode.data.name = response.data.name;
+  }
 }
 
 function saveFolderInfo() {
@@ -121,14 +142,36 @@ function nodeDbClick(event, node, data) {
   if (node.data.isParent) {
     node.expanded = !node.expanded;
   } else {
-    const nodeId = node.data.api_id;
+    const nodeId = node.data.apiId;
     const nodeTabIndex = apiTabsData.value.findIndex(dict => dict.apiId === nodeId);
     if (nodeTabIndex !== -1) {
       currentTab.value = nodeId;
       currentApiData = apiTabsData.value[nodeTabIndex];
     } else {
       loadingApi.value = true;
-      getApi(node.data.api_id).then(res => {
+
+      if (node.data.isNew) {
+        const emptyData = JSON.parse(JSON.stringify(initApiFormData));
+        // currentApiData.value.apiId = nodeId;
+        emptyData.isNew = true;
+        emptyData.type = HrmDataTypeEnum.api;
+        emptyData.requestInfo.api_name = node.name;
+        emptyData.parentId = node.data.parentId;
+        emptyData.apiId = node.data.apiId;
+
+        apiTabsData.value.push(emptyData);
+        currentApiData = apiTabsData.value[apiTabsData.value.length - 1];
+        currentTab.value = emptyData.apiId;
+
+        if (apiTabsData.value[0].isEmpty) {
+          apiTabsData.value.splice(0, 1);
+        }
+
+        loadingApi.value = false
+        return;
+      }
+
+      getApi(node.data.apiId).then(res => {
         // const data = ref(res.data);
         apiTabsData.value.push(res.data);
         currentApiData = apiTabsData.value[apiTabsData.value.length - 1];
@@ -217,13 +260,17 @@ function debug() {
   });
 }
 
+function apiTreeFilter() {
+  treeRef.value.filter(treeFilterText.value);
+}
+
 </script>
 
 <template>
   <div class="app-container" v-loading="loadingApi">
     <el-row>
       <el-button size="small" @click="getApiTree" icon="RefreshRight"></el-button>
-      <el-button size="small" @click="loading.preSaveFolderDialog = true" type="info">新增文件夹</el-button>
+      <el-button size="small" @click="loading.preSaveFolderDialog = true" type="primary">新增文件夹</el-button>
       <span style="flex-grow: 1"></span>
       <el-button size="small" @click="loading.preSaveDialog = true" v-loading="loading.saveApi" type="success">保存
       </el-button>
@@ -238,9 +285,20 @@ function debug() {
             <!--                <el-icon><setting></setting></el-icon>-->
             <el-checkbox v-model="onlySelf">仅自己的数据</el-checkbox>
           </el-row>
-          <el-scrollbar>
-            <div style="display: flex; flex-flow: column">
-              <TreeView v-model="treeDataSource" @node-db-click="nodeDbClick"></TreeView>
+          <el-row>
+            <el-col style="display: flex;">
+              <el-input v-model="treeFilterText" style="flex-grow: 1;"></el-input>
+              <el-button icon="Search" type="success" @click="apiTreeFilter"></el-button>
+            </el-col>
+
+          </el-row>
+          <el-scrollbar height="calc(100% - 70px)">
+            <div style="display: flex">
+              <TreeView v-model:data-source="treeDataSource"
+                        @node-db-click="nodeDbClick"
+                        v-model:filter-text="treeFilterText"
+                        v-model:tree-ref="treeRef"
+              ></TreeView>
             </div>
           </el-scrollbar>
 

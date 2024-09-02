@@ -159,7 +159,10 @@
                      v-hasPermi="['hrm:case:edit']" title="编辑">
           </el-button>
           <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
-                     v-hasPermi="['hrm:case:run']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
+                     v-hasPermi="['hrm:case:test']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
+          </el-button>
+          <el-button link type="warning" icon="CopyDocument" v-loading="loading" @click="runTest(scope.row)"
+                     v-hasPermi="['hrm:case:copy']" title="复制">
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
                      v-hasPermi="['hrm:case:remove']" title="删除">

@@ -55,14 +55,14 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
     def node_handle(api_obj):
         node_data = {
             'edit': False,
-            "api_id": api_obj.api_id,
+            "apiId": api_obj.api_id,
             "name": f'{api_obj.name}',
             "title": api_obj.interface or api_obj.name,
             "isParent": True if api_obj.type == DataType.folder.value else False,
-            "parent_id": api_obj.parent_id,
+            "parentId": api_obj.parent_id,
             "data": {
                 "isParent": True if api_obj.type == DataType.folder.value else False,
-                "parent_id": api_obj.parent_id
+                "parentId": api_obj.parent_id
             }
         }
         return node_data
@@ -73,10 +73,10 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
             "name": f'{api_obj.name}',
             "title": api_obj.interface or api_obj.name,
             "isParent": True if api_obj.type == DataType.folder.value else False,
-            "parent_id": api_obj.parent_id,
+            "parentId": api_obj.parent_id,
             "data": {
                 "isParent": True if api_obj.type == DataType.folder.value else False,
-                "parent_id": api_obj.parent_id
+                "parentId": api_obj.parent_id
             }
         }
         return node_data
@@ -88,7 +88,7 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
             childrens = []
             new_not_root_nodes_data = []
             for nrd in not_root_nodes_data:
-                if nrd["parent_id"] == node["api_id"]:
+                if nrd["parentId"] == node["apiId"]:
                     childrens.append(nrd)
                 else:
                     new_not_root_nodes_data.append(nrd)
