@@ -261,7 +261,7 @@ class CaseInfoToRun(object):
 
         # 配置请求头处理
         case_header = self.case_obj.request.config.headers
-        include_header = include_config_obj.request.config.headers if include_config_obj else None
+        include_header = include_config_obj.request.config.headers if include_config_obj else []
         include_header = copy.deepcopy(include_header)
         update_or_extend_list(include_header, case_header)
         self.case_obj.request.config.headers = include_header

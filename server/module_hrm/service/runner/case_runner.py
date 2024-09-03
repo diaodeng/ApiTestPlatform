@@ -30,7 +30,7 @@ urllib3.disable_warnings()
 
 
 class Response:
-    def __init__(self, response_data: ResponseData, request: TRequest = None):
+    def __init__(self, response_data: ResponseData, request: TRequest | TWebsocket = None):
         self.status_code = response_data.status_code
         self.headers = response_data.headers
         self.content = response_data.content
@@ -203,13 +203,18 @@ class RequestRunner(object):
                 self.step_data.result.logs.error += error_info
                 return CaseRunStatus.failed.value
 
-    def after_teststep_handler(self, response: requests.Response):
+    def after_teststep_handler(self, response: Response):
         # 响应回调
         self.logger.info(f"{self.step_data.name} 开始执行响应回调")
         try:
             after_teststep = self.debugtalk_func_map.get("after_teststep", None)
             if after_teststep:
                 after_teststep(response)
+            self.step_data.result.response.body = response.body
+            self.step_data.result.response.text = response.text
+            self.step_data.result.response.content = response.content
+            self.step_data.result.response.headers = response.headers
+            self.step_data.result.response.cookies = response.cookies
             self.logger.info(f"{self.step_data.name} 响应回调执行完毕")
         except Exception as ef:
             self.step_data.result.logs.after_response += self.case_runner.handler.get_log()
@@ -217,7 +222,7 @@ class RequestRunner(object):
             logger.exception(ef)
             self.logger.info(f"response.text: {self.response.text}")
             self.logger.error(
-                f'回调after_request处理异常，error:{json.dumps({"args": str(ef.args), "msg": str(ef)}, indent=4, ensure_ascii=False)}')
+                f'回调after_teststep处理异常，error:{json.dumps({"args": str(ef.args), "msg": str(ef)}, indent=4, ensure_ascii=False)}')
             error_info = self.case_runner.handler.get_log()
             self.step_data.result.logs.after_response += error_info
             self.step_data.result.logs.error += error_info
@@ -475,12 +480,15 @@ class Websocket(RequestRunner):
                     res_data.append(response)
                 self.logger.info(f'{self.step_data.name} 接收数据成功')
                 self.logger.info(f'响应数据：{res_data}')
-                response_data = ResponseData(**{"headers": websocket.response_headers,
-                                                "body": res_data,
-                                                "content": res_data,
-                                                "status_code": 200})
+
+                response_data = ResponseData()
+                response_data.text = json.dumps(res_data, ensure_ascii=False)
+                response_data.content = res_data
+                response_data.status_code = 200
+                response_data.headers = dict(websocket.response_headers)
+
                 self.step_data.result.response = response_data
-                self.response = Response(response_data)
+                self.response = Response(response_data, self.step_data.request)
             end_time = time.time()
             self.format_time(start_time, end_time)
             if self.step_data.think_time.limit:

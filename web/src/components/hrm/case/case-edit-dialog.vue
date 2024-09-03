@@ -84,6 +84,11 @@ function debugForm() {
     if (valid) {
       const caseData = formData.value;
       caseData.request.config.name = caseData.caseName;
+      caseData.request.config.result = null;
+      for (let i = 0; i < caseData.request.teststeps.length; i++) {
+        caseData.request.teststeps[i].result = null;
+      }
+
       const req_data = {
         "env": selectedEnv.value,
         "runType": RunTypeEnum.case_debug,

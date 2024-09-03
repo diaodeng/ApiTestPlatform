@@ -161,7 +161,6 @@ function treeFilter(value, data, node) {
   if (!value) {
     return true
   }
-  debugger
   if (data.name.indexOf(value) !== -1 || data.title.indexOf(value) !== -1) {
     return true;
   } else {
@@ -194,7 +193,7 @@ function treeFilter(value, data, node) {
                                  v-model:show-edite="node.data.edit"></edit-label-text></span>
           <span v-if="node.data.edit">
 <!--            <el-icon color="blue"><edit></edit></el-icon>-->
-            <el-icon color="green" @click.stop="append(data)" v-if="data.isParent"><circle-plus-filled></circle-plus-filled></el-icon>
+            <el-icon color="green" @click.stop="append(data)"><circle-plus-filled></circle-plus-filled></el-icon>
             <el-icon color="red" @click.stop="remove(node, data)"><remove-filled></remove-filled></el-icon>
           </span>
         </span>

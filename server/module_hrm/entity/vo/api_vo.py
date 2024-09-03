@@ -62,7 +62,7 @@ class ApiModelForApi(ApiModel):
     """
     API和模块关联表对应pydantic模型
     """
-    request_info: TestCase = {}
+    request_info: TestCase | None = {}
 
     def request_data(self, request: Any):
         return request
