@@ -86,7 +86,8 @@ function editTabs(paneName, action, tapType) {
             ></StepRequest>
           </template>
           <template v-if="step.step_type === CaseStepTypeEnum.websocket">
-            <StepWebsocket v-model:step-detail-data="testStepsData[index]"></StepWebsocket>
+            <StepWebsocket v-model:step-detail-data="testStepsData[index]"
+                           edit-height="calc(100vh - 473px)"></StepWebsocket>
           </template>
 
         </el-tab-pane>

@@ -29,8 +29,8 @@ const hrm_comparator_dict = ref({});
 const hrm_config_list = ref({});
 
 const folderForm = ref({parentId: null, name: null})
-const apiTabsData = ref([initApiFormData]);
-let currentApiData = apiTabsData.value[0];
+const apiTabsData = ref([]);
+let currentApiData = apiTabsData.value[0] || null;
 const selectedEnv = ref("");
 const currentTab = ref(0);
 const loadingApi = ref(false);
@@ -42,7 +42,8 @@ const loading = ref({
   saveApi: false,
   debugApi: false,
   preSaveDialog: false,
-  preSaveFolderDialog: false
+  preSaveFolderDialog: false,
+  filter: false
 })
 
 const treeFilterText = ref("");
@@ -115,6 +116,7 @@ function apiSaveSuccess(res, oldApiId) {
     let treeNode = treeRef.value.getNode(oldApiId);
     treeNode.data.apiId = response.data.apiId;
     treeNode.data.name = response.data.name;
+    treeNode.data.isNew = false;
   }
 }
 
@@ -193,7 +195,7 @@ function nodeDbClick(event, node, data) {
 }
 
 
-currentApiData.isEmpty = true;
+// currentApiData.isEmpty = true;
 
 function delTab(event, tabId) {
   const currentTabIndex = apiTabsData.value.findIndex(dict => dict.apiId === tabId);
@@ -201,11 +203,13 @@ function delTab(event, tabId) {
     return;
   }
   if (apiTabsData.value.length === 1) {
-    apiTabsData.value.push(JSON.parse(JSON.stringify(initApiFormData)));
-    currentApiData = apiTabsData.value[1];
+    currentApiData = null;
 
-    currentTab.value = currentApiData.apiId;
-    // currentTab.value = 0;
+    // apiTabsData.value.push(JSON.parse(JSON.stringify(initApiFormData)));
+    // currentApiData = apiTabsData.value[1];
+    //
+    // currentTab.value = currentApiData.apiId;
+
   } else if (apiTabsData.value.length - 1 === currentTabIndex) {
     currentApiData = apiTabsData.value[currentTabIndex - 1];
     currentTab.value = currentApiData.apiId;
@@ -261,7 +265,9 @@ function debug() {
 }
 
 function apiTreeFilter() {
+  loading.value.filter = true;
   treeRef.value.filter(treeFilterText.value);
+  loading.value.filter = false;
 }
 
 </script>
@@ -272,10 +278,20 @@ function apiTreeFilter() {
       <el-button size="small" @click="getApiTree" icon="RefreshRight"></el-button>
       <el-button size="small" @click="loading.preSaveFolderDialog = true" type="primary">新增文件夹</el-button>
       <span style="flex-grow: 1"></span>
-      <el-button size="small" @click="loading.preSaveDialog = true" v-loading="loading.saveApi" type="success">保存
+      <el-dropdown size="small" split-button type="primary" @click="loading.preSaveDialog = true"
+                   v-loading="loading.saveApi" :disabled="loading.saveApi">
+        保存
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item @click="console.log('另存为用例')">另存为用例</el-dropdown-item>
+            <el-dropdown-item @click="console.log('复制API')">复制</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-button size="small" @click="debug" :loading="loading.debugApi" :disabled="loading.debugApi" type="warning">
+        调试
       </el-button>
-      <el-button size="small" @click="debug" v-loading="loading.debugApi" type="warning">调试</el-button>
-      <EnvSelector v-model:selected-env="selectedEnv" size="small"></EnvSelector>
+      <EnvSelector v-model:selected-env="selectedEnv" size="small" :disable="loading.debugApi"></EnvSelector>
     </el-row>
 
     <el-container>
@@ -286,9 +302,17 @@ function apiTreeFilter() {
             <el-checkbox v-model="onlySelf">仅自己的数据</el-checkbox>
           </el-row>
           <el-row>
-            <el-col style="display: flex;">
-              <el-input v-model="treeFilterText" style="flex-grow: 1;"></el-input>
-              <el-button icon="Search" type="success" @click="apiTreeFilter"></el-button>
+            <el-col :span="24">
+              <el-input v-model="treeFilterText" clearable placeholder="输入名称或者接口或者path">
+                <template #suffix>
+                  <el-button icon="Search"
+                             type="text"
+                             @click="apiTreeFilter"
+                             :loading="loading.filter"
+                             :disabled="loading.filter"></el-button>
+                  <!--                  <el-icon @click="apiTreeFilter"><search></search></el-icon>-->
+                </template>
+              </el-input>
             </el-col>
 
           </el-row>
@@ -305,7 +329,7 @@ function apiTreeFilter() {
         </template>
         <template v-slot:right>
           <el-container style="display:flex;flex-direction: column;height: 100%; padding-left: 5px;">
-            <el-tabs addable type="card"
+            <el-tabs type="card"
                      v-model="currentTab"
                      @tab-click="clickTab"
                      @tab-change="activeTabChange"
@@ -322,23 +346,30 @@ function apiTreeFilter() {
                 </template>
               </el-tab-pane>
             </el-tabs>
-            <div v-if="currentApiData" style="flex-grow: 1;display: flex;flex-direction: column;">
-              <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.http">
-                <StepRequest v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"
-                             edit-height="calc(100vh - 332px)"
-                ></StepRequest>
-              </template>
-              <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.websocket">
-                <StepWebsocket v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"></StepWebsocket>
-              </template>
-            </div>
+            <template v-if="currentApiData">
+              <div v-if="currentApiData" style="flex-grow: 1;display: flex;flex-direction: column;">
+                <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.http">
+                  <StepRequest v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"
+                               edit-height="calc(100vh - 332px)"
+                  ></StepRequest>
+                </template>
+                <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.websocket">
+                  <StepWebsocket v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"
+                                 edit-height="calc(100vh - 332px)"></StepWebsocket>
+                </template>
+              </div>
+            </template>
+            <template v-else>
+              <el-text type="warning" size="large">请选择api或者新增api</el-text>
+            </template>
+
 
           </el-container>
 
         </template>
       </split-window>
     </el-container>
-    <el-dialog :title="currentApiData.name" @close="loading.preSaveDialog = false" v-model="loading.preSaveDialog">
+    <el-dialog :title="currentApiData?.name" @close="loading.preSaveDialog = false" v-model="loading.preSaveDialog">
       <el-main>
         <el-input v-model="currentApiData.name" placeholder="请输入名称">
           <template #prepend>
@@ -347,7 +378,8 @@ function apiTreeFilter() {
         </el-input>
       </el-main>
       <el-button type="info" @click="loading.preSaveDialog = false">取消</el-button>
-      <el-button type="primary" @click="saveApiInfo" :disabled="loading.saveApi">保存</el-button>
+      <el-button type="primary" @click="saveApiInfo" :disabled="loading.saveApi" :loading="loading.saveApi">保存
+      </el-button>
     </el-dialog>
 
     <el-dialog :title="folderForm.name" @close="loading.preSaveFolderDialog = false"
