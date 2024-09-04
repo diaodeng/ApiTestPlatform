@@ -56,6 +56,7 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
         node_data = {
             'edit': False,
             "apiId": api_obj.api_id,
+            "type": api_obj.type,
             "name": f'{api_obj.name}',
             "title": api_obj.interface or api_obj.name,
             "isParent": True if api_obj.type == DataType.folder.value else False,
@@ -70,6 +71,7 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
     def node_handle2(api_obj):
         node_data = {
             "id": api_obj.id,
+            "type": api_obj.type,
             "name": f'{api_obj.name}',
             "title": api_obj.interface or api_obj.name,
             "isParent": True if api_obj.type == DataType.folder.value else False,
