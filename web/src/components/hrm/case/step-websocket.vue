@@ -1,6 +1,7 @@
 <script setup>
 
 import SplitWindow from "@/components/hrm/common/split-window.vue";
+import DebugResult from "@/components/hrm/common/debug_result.vue";
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
 import TableHeaders from "@/components/hrm/table-headers.vue";
 
@@ -12,8 +13,11 @@ const {hrm_data_type} = proxy.useDict("hrm_data_type");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 
 const stepDetailData = defineModel("stepDetailData", {required:true});
+const props = defineProps({editHeight: {default: "calc(100vh-160px)"}}); // 编辑器高度，默认是100vh - 160px
 
 const activeRequestDetailName = ref("requestHeader")
+const activeResultTab = ref("response")
+
 </script>
 
 <template>
@@ -44,9 +48,9 @@ const activeRequestDetailName = ref("requestHeader")
       </div>
     </el-col>
   </el-row>
-  <el-row type="flex" class="row-bg" justify="start">
+  <el-row type="flex" class="row-bg" justify="start" style="flex-grow: 1; ">
     <el-tabs v-model="activeRequestDetailName" style="width: 100%">
-      <SplitWindow>
+      <SplitWindow left-width="50%">
         <template #left>
           <el-tab-pane label="header" name="requestHeader">header
             <TableHeaders
@@ -61,7 +65,11 @@ const activeRequestDetailName = ref("requestHeader")
           </el-tab-pane>
         </template>
         <template #right>
-          <AceEditor v-model:content="stepDetailData.result" can-set="true" height="calc(100vh - 410px)"></AceEditor>
+<!--          <AceEditor v-model:content="stepDetailData.result" can-set="true" height="calc(100vh - 410px)"></AceEditor>-->
+          <DebugResult
+              v-model:active-tab="activeResultTab"
+              v-model:step-detail-data="stepDetailData"
+              :edit-height="editHeight"></DebugResult>
         </template>
       </SplitWindow>
     </el-tabs>
@@ -69,5 +77,10 @@ const activeRequestDetailName = ref("requestHeader")
 </template>
 
 <style scoped lang="scss">
-
+:deep(.el-tabs.request-detail .el-tabs__content) {
+  height: calc(100vh - 300px) !important;
+  //display: flex;
+  //flex-grow: 1;
+  overflow-y: auto;
+}
 </style>

@@ -3,15 +3,19 @@ import {CirclePlusFilled, Delete, Edit, Folder, Plus, RemoveFilled, Tickets} fro
 import EditLabelText from "@/components/hrm/common/edit-label-text.vue";
 import {ElMessageBox, ElMessage} from "element-plus";
 import {apiTree, addApi, updateApi, delApi, getApi} from "@/api/hrm/api.js";
+import {randomString} from "@/utils/tools.js";
 
 
-const dataSource = defineModel();
+const dataSource = defineModel("dataSource");
+const filterText = defineModel("filterText");
+const treeRef = defineModel("treeRef");
 
-const emit = defineEmits(["nodeDbClick", "delNode"]);
+const emit = defineEmits(["nodeDbClick", "delNode", "filter"]);
 
 interface Tree {
-  api_id: bigint,
-  name: string
+  apiId: bigint,
+  name: string,
+  parentId: bigint,
   children?: Tree[]
 }
 
@@ -99,17 +103,26 @@ const handleNodeClick = (data: Tree, node, treeNode, event) => {
 // ])
 
 const defaultProps = {
-  key: 'api_id',
+  key: 'apiId',
   children: 'children',
   label: 'name',
-  isLeaf: "isParent"
+  isLeaf: "isParent",
+  parentId: "parentId"
 }
 
 const append = (data: Tree) => {
   if (!data.isParent) {
     return;
   }
-  const newChild = {id: id++, name: 'testtest', children: []}
+  const newChild = {
+    id: null,
+    name: '新增API',
+    children: [],
+    isNew: true,
+    apiId: randomString(10),
+    isParent: false,
+    parentId: data.apiId
+  }
   if (!data.children) {
     data.children = []
   }
@@ -124,11 +137,11 @@ const remove = (node: Node, data: Tree) => {
     type: "warning"
   }).then(() => {
     console.log(data)
-    delApi(data.api_id).then(res => {
+    delApi(data.apiId).then(res => {
       // console.log(res)
       const parent = node.parent;
       const children: Tree[] = parent.data.children || parent.data;
-      const index = children.findIndex((d) => d.api_id === data.api_id);
+      const index = children.findIndex((d) => d.apiId === data.apiId);
       children.splice(index, 1);
       // dataSource.value = [...dataSource.value]
       ElMessage.success("删除成功");
@@ -141,15 +154,18 @@ const remove = (node: Node, data: Tree) => {
 
 const handleDbClick = (event, node: Node, data: Tree) => {
   emit('nodeDbClick', event, node, data);
-  // console.log(event)
-  // console.log(node)
-  // console.log(data)
-  // if (node.data.isParent) {
-  //   node.expanded = !node.expanded;
-  // } else {
-  //     console.log(node.data.name);
-  // }
+}
 
+
+function treeFilter(value, data, node) {
+  if (!value) {
+    return true
+  }
+  if (data.name.indexOf(value) !== -1 || data.title.indexOf(value) !== -1) {
+    return true;
+  } else {
+    return false;
+  }
 }
 
 </script>
@@ -159,8 +175,10 @@ const handleDbClick = (event, node: Node, data: Tree) => {
       style="max-width: 600px"
       :data="dataSource"
       :props="defaultProps"
-      node-key="api_id"
+      node-key="apiId"
       :expand-on-click-node="false"
+      ref="treeRef"
+      :filter-node-method="treeFilter"
 
   >
     <template #default="{ node, data }">
@@ -175,7 +193,7 @@ const handleDbClick = (event, node: Node, data: Tree) => {
                                  v-model:show-edite="node.data.edit"></edit-label-text></span>
           <span v-if="node.data.edit">
 <!--            <el-icon color="blue"><edit></edit></el-icon>-->
-            <el-icon color="green" @click.stop="append(data)" v-if="data.isParent"><circle-plus-filled></circle-plus-filled></el-icon>
+            <el-icon color="green" @click.stop="append(data)"><circle-plus-filled></circle-plus-filled></el-icon>
             <el-icon color="red" @click.stop="remove(node, data)"><remove-filled></remove-filled></el-icon>
           </span>
         </span>

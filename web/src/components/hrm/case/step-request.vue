@@ -2,6 +2,7 @@
 
 import SplitWindow from "@/components/hrm/common/split-window.vue";
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
+import DebugResult from "@/components/hrm/common/debug_result.vue";
 import TableHeaders from "@/components/hrm/table-headers.vue";
 import TableVariables from "@/components/hrm/table-variables.vue";
 import DictSelect from "@/components/select/dict_select.vue";
@@ -113,18 +114,21 @@ const calcErrorLogs = computed(() => {
         </el-tabs>
       </template>
       <template #right>
-        <el-tabs v-model="activeResultTab" class="request-detail">
-          <el-tab-pane label="响应" name="response">
-            <AceEditor v-model:content="calcResponse" can-set="true" can-search="true"
-                       :height="editHeight"></AceEditor>
-          </el-tab-pane>
-          <el-tab-pane label="日志" name="logs">
-            <AceEditor v-model:content="calcLogs" can-set="true" :height="editHeight"></AceEditor>
-          </el-tab-pane>
-          <el-tab-pane label="异常" name="errorLogs">
-            <AceEditor v-model:content="calcErrorLogs" can-set="true" :height="editHeight"></AceEditor>
-          </el-tab-pane>
-        </el-tabs>
+        <DebugResult v-model:active-tab="activeResultTab"
+                     v-model:step-detail-data="stepDetailData"
+                     :edit-height="editHeight"></DebugResult>
+<!--        <el-tabs v-model="activeResultTab" class="request-detail">-->
+<!--          <el-tab-pane label="响应" name="response">-->
+<!--            <AceEditor v-model:content="calcResponse" can-set="true" can-search="true"-->
+<!--                       :height="editHeight"></AceEditor>-->
+<!--          </el-tab-pane>-->
+<!--          <el-tab-pane label="日志" name="logs">-->
+<!--            <AceEditor v-model:content="calcLogs" can-set="true" :height="editHeight"></AceEditor>-->
+<!--          </el-tab-pane>-->
+<!--          <el-tab-pane label="异常" name="errorLogs">-->
+<!--            <AceEditor v-model:content="calcErrorLogs" can-set="true" :height="editHeight"></AceEditor>-->
+<!--          </el-tab-pane>-->
+<!--        </el-tabs>-->
       </template>
     </SplitWindow>
 

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from module_hrm.enums.enums import DataType
 from utils.log_util import logger
 from module_hrm.entity.do.api_do import ApiInfo
-from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiQueryModel
+from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiQueryModel, ApiModel
 
 
 class ApiOperation(object):
@@ -51,12 +51,14 @@ class ApiOperation(object):
     @staticmethod
     def update(query_db: Session, api_info: ApiModelForApi):
         data_info = api_info.model_dump(exclude_unset=True)
+        data_info = ApiModel(**data_info).model_dump(exclude_unset=True)
         # data_info.pop("api_id")
         # data_info.pop("type")
-        new_data = query_db.query(ApiInfo).filter(ApiInfo.api_id == api_info.api_id).update(data_info)
+        old_data = query_db.query(ApiInfo).filter(ApiInfo.api_id == api_info.api_id)
+        old_data.update(data_info)
         query_db.commit()
         # return ApiInfo.objects.get(id=api_id)
-        return {"id": api_info.api_id, **data_info}
+        return ApiModelForApi.from_orm(old_data.first()).model_dump(by_alias=True)
 
     @staticmethod
     def move_api(query_db: Session, parent_id, ids):
@@ -67,11 +69,12 @@ class ApiOperation(object):
     @staticmethod
     def add(query_db: Session, api_info: ApiModelForApi):
         data_info = api_info.model_dump(exclude_unset=True)
+        data_info = ApiModel(**data_info).model_dump(exclude_unset=True)
         new_api_obj = ApiInfo(**data_info)
         query_db.add(new_api_obj)
         query_db.commit()
 
-        return {"id": new_api_obj.api_id, **data_info}
+        return ApiModelForApi.from_orm(new_api_obj).model_dump(by_alias=True)
 
     @staticmethod
     def copy(query_db: Session, id, name=None, parent_id=None):

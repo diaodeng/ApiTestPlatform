@@ -40,7 +40,7 @@
 <!--         <el-table-column label="所属项目" width="260" :formatter="formatProject" align="center"></el-table-column>-->
          <el-table-column align="center" label="DebugTalk" width="260">
            <template #default="scope">
-             <el-button link type="primary" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:debugtalk:edit']">debugtalk.py</el-button>
+             <el-button link type="primary" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:debugtalk:edit', 'hrm:debugtalk:detail']">debugtalk.py</el-button>
            </template>
          </el-table-column>
          <el-table-column prop="status" label="状态" align="center" width="120">
