@@ -50,7 +50,7 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item><el-checkbox v-model="onlySelf">仅自己的数据</el-checkbox></el-form-item>
+      <el-form-item><el-checkbox v-model="onlySelf" @change="handleQuery">仅自己的数据</el-checkbox></el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
         <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
