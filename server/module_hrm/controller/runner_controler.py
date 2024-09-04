@@ -1,5 +1,4 @@
-import time
-from datetime import datetime, timezone, timedelta
+from datetime import timezone, timedelta
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
@@ -7,20 +6,16 @@ from fastapi import Depends
 from config.get_db import get_db
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.dao.env_dao import EnvDao
 from module_hrm.dao.report_dao import ReportDao
-from module_hrm.entity.vo.case_vo_detail_for_run import StepLogs
+from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.vo.report_vo import ReportCreatModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel, HrmRunDetailModel
-from module_hrm.dao.run_detail_dao import RunDetailDao
-from module_hrm.entity.vo.case_vo import *
-from module_hrm.entity.vo.env_vo import EnvModel
 from module_hrm.enums.enums import CaseRunStatus
 from module_hrm.service.case_service import *
+from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_batch
-from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
 from utils.log_util import *
 from utils.page_util import *
 from utils.response_util import *
@@ -28,7 +23,8 @@ from utils.response_util import *
 runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@runnerController.post("/test", response_model=CaseModel,
+@runnerController.post("/test",
+                       response_model=CaseModel,
                        dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:test'))])
 async def run_test(request: Request,
                    run_info: CaseRunModel,
@@ -50,6 +46,9 @@ async def run_test(request: Request,
             report_data = ReportCreatModel(**{"reportName": report_name,
                                               "status": CaseRunStatus.passed.value,
                                               })
+            report_data.update_by = current_user.user.user_name
+            report_data.create_by = current_user.user.user_name
+            report_data.manager = current_user.user.user_id
             report_info = ReportDao.create(query_db, report_data)
             report_info.start_at = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
                 timezone(timedelta(hours=8)))
@@ -58,17 +57,19 @@ async def run_test(request: Request,
             report_total = 0
             report_success = 0
             for case_data in run_result:
-                run_detail = RunDetailDao.create(query_db,
-                                                 case_data.case_id,
-                                                 report_info.report_id,
-                                                 RunType.case.value,
-                                                 case_data.config.name,
-                                                 datetime.fromtimestamp(case_data.config.result.start_time_stamp),
-                                                 datetime.fromtimestamp(case_data.config.result.end_time_stamp),
-                                                 case_data.config.result.duration,
-                                                 case_data.model_dump_json(by_alias=True),
-                                                 case_data.config.result.status,
-                                                 )
+                run_detail_obj = HrmRunDetailModel()
+                run_detail_obj.manager = current_user.user.user_id
+                run_detail_obj.run_id = case_data.case_id
+                run_detail_obj.report_id = report_info.report_id
+                run_detail_obj.run_type = RunType.case.value
+                run_detail_obj.run_name = case_data.config.name
+                run_detail_obj.run_start_time = datetime.fromtimestamp(case_data.config.result.start_time_stamp)
+                run_detail_obj.run_end_time = datetime.fromtimestamp(case_data.config.result.end_time_stamp)
+                run_detail_obj.run_duration = case_data.config.result.duration
+                run_detail_obj.run_detail = case_data.model_dump_json(by_alias=True)
+                run_detail_obj.status = case_data.config.result.status
+
+                run_detail = RunDetailDao.create(query_db, run_detail_obj)
                 report_total += 1
                 if case_data.config.result.status == CaseRunStatus.failed.value:
                     report_status = CaseRunStatus.failed.value
@@ -87,9 +88,12 @@ async def run_test(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@runnerController.post("/debug", response_model=PageResponseModel,
+@runnerController.post("/debug",
+                       response_model=PageResponseModel,
                        dependencies=[Depends(CheckUserInterfaceAuth(['hrm:api:debug', 'hrm:case:debug']))])
-async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Session = Depends(get_db),
+async def for_debug(request: Request,
+                    debug_info: CaseRunModel,
+                    query_db: Session = Depends(get_db),
                     current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     debugtalk_obj = None
     try:
@@ -101,7 +105,7 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
 
         # 读取项目debugtalk
         common_debugtalk_source, project_debugtalk_source = DebugTalkService.debugtalk_source(query_db,
-                                                                                                            project_id=page_query_result.project_id)
+                                                                                              project_id=page_query_result.project_id)
         debugtalk_obj = DebugTalkHandler(project_debugtalk_source, common_debugtalk_source)
         debugtalk_func_map = debugtalk_obj.func_map(user=current_user.user.user_id)
 
@@ -116,17 +120,19 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
                 steps_result[step.step_id] = step.result.model_dump(by_alias=True)
                 all_log.append(step.result.logs)
 
-            RunDetailDao.create(query_db,
-                                page_query_result.case_id,
-                                None,
-                                debug_info.run_type,
-                                case_result.case_data.config.name,
-                                datetime.fromtimestamp(case_run_data.config.result.start_time_stamp),
-                                datetime.fromtimestamp(case_run_data.config.result.end_time_stamp),
-                                case_run_data.config.result.duration,
-                                case_run_data.model_dump_json(by_alias=True),
-                                case_run_data.config.result.status,
-                                )
+            run_detail_obj = HrmRunDetailModel()
+            run_detail_obj.manager = current_user.user.user_id
+            run_detail_obj.run_id = page_query_result.case_id
+            run_detail_obj.report_id = None
+            run_detail_obj.run_type = debug_info.run_type
+            run_detail_obj.run_name = case_result.case_data.config.name
+            run_detail_obj.run_start_time = datetime.fromtimestamp(case_run_data.config.result.start_time_stamp)
+            run_detail_obj.run_end_time = datetime.fromtimestamp(case_run_data.config.result.end_time_stamp)
+            run_detail_obj.run_duration = case_run_data.config.result.duration
+            run_detail_obj.run_detail = case_run_data.model_dump_json(by_alias=True)
+            run_detail_obj.status = case_run_data.config.result.status
+
+            RunDetailDao.create(query_db, run_detail_obj)
 
             # all_log.append("\n".join(step_result.result.log.values()))
         data = ResponseUtil.success(data=steps_result)
@@ -139,26 +145,38 @@ async def for_debug(request: Request, debug_info: CaseRunModel, query_db: Sessio
             debugtalk_obj.del_import()
 
 
-@runnerController.get("/runHistory/{detail_id}", response_model=PageResponseModel,
+@runnerController.get("/runHistory/{detail_id}",
+                      response_model=PageResponseModel,
                       dependencies=[Depends(CheckUserInterfaceAuth(['hrm:history:detail']))])
-async def run_history_detail(request: Request, detail_id: int, query_db: Session = Depends(get_db)):
+async def run_history_detail(request: Request,
+                             detail_id: int,
+                             query_db: Session = Depends(get_db)):
     result = RunDetailDao.get_by_id(query_db, detail_id)
-    run_detail = CaseInfoHandle(query_db).from_db_run_detail(result.run_detail).toPage().asCase().model_dump(by_alias=True)
+    run_detail = CaseInfoHandle(query_db).from_db_run_detail(result.run_detail).toPage().asCase().model_dump(
+        by_alias=True)
     return ResponseUtil.success(
         data=run_detail)
 
 
-@runnerController.get("/runHistoryList", response_model=PageResponseModel,
+@runnerController.get("/runHistoryList",
+                      response_model=PageResponseModel,
                       dependencies=[
                           Depends(CheckUserInterfaceAuth(['hrm:history:list', 'hrm:case:history', 'hrm:api:history']))])
-async def run_history_list(request: Request, query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
-                           query_db: Session = Depends(get_db)):
+async def run_history_list(request: Request,
+                           query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
+                           query_db: Session = Depends(get_db),
+                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                           ):
+    query_info.manager = current_user.user.user_id
     result = RunDetailDao.list(query_db, query_info)
     return ResponseUtil.success(model_content=result)
 
 
-@runnerController.delete("/runHistory", response_model=PageResponseModel,
+@runnerController.delete("/runHistory",
+                         response_model=PageResponseModel,
                          dependencies=[Depends(CheckUserInterfaceAuth(['hrm:history:delete']))])
-async def run_history_del(request: Request, query_info: RunDetailDelModel, query_db: Session = Depends(get_db)):
+async def run_history_del(request: Request,
+                          query_info: RunDetailDelModel,
+                          query_db: Session = Depends(get_db)):
     result = RunDetailDao.delete(query_db, query_info.detail_ids)
     return ResponseUtil.success(dict_content={"msg": "删除成功"})

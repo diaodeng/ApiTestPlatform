@@ -34,6 +34,9 @@ class ConfigDao:
 
         query = query.filter(HrmCase.type == DataType.config.value)
 
+        if query_object.only_self:
+            query = query.filter(HrmCase.manager == query_object.manager)
+
         # 根据module_id和project_id是否提供来查询
         if query_object.project_id:
             query = query.filter(or_(HrmCase.project_id == query_object.project_id, HrmCase.project_id == None))

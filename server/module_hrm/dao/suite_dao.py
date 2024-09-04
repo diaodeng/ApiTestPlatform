@@ -24,9 +24,8 @@ class SuiteDao:
 
         return suite_info
 
-
     @classmethod
-    def get_suite_list(cls, db: Session, page_object: SuiteModel, data_scope_sql: str):
+    def get_suite_list(cls, db: Session, page_object: SuiteQueryModel, data_scope_sql: str):
         """
         根据查询参数获取套件列表信息
         :param db: orm对象
@@ -38,12 +37,13 @@ class SuiteDao:
             .filter(QtrSuite.del_flag == 0,
                     QtrSuite.status == page_object.status if page_object.status else True,
                     QtrSuite.suite_name.like(f'%{page_object.suite_name}%') if page_object.suite_name else True,
-                    eval(data_scope_sql)) \
-            .order_by(QtrSuite.order_num) \
+                    eval(data_scope_sql))
+        if page_object.only_self:
+            suite_result = suite_result.filter(QtrSuite.manager == page_object.manager)
+        suite_result = suite_result.order_by(QtrSuite.order_num) \
             .distinct().all()
 
         return suite_result
-
 
     @classmethod
     def get_suite_by_info(cls, db: Session, suite: SuiteModel):
@@ -93,7 +93,8 @@ class SuiteDao:
         :return:
         """
         (db.query(QtrSuite).filter(QtrSuite.suite_id == suite.suite_id)
-         .update({QtrSuite.del_flag: '2', QtrSuite.update_by: suite.update_by, QtrSuite.update_time: suite.update_time}))
+         .update(
+            {QtrSuite.del_flag: '2', QtrSuite.update_by: suite.update_by, QtrSuite.update_time: suite.update_time}))
 
     @classmethod
     def get_suite_detail_by_id(cls, db: Session, suite_id: int):

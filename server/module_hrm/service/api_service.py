@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from module_hrm.dao.api_dao import ApiOperation
 from module_hrm.entity.do.api_do import ApiInfo
-from module_hrm.entity.vo.api_vo import ApiQueryModel
+from module_hrm.entity.vo.api_vo import ApiQueryModel, ApiPageQueryModel
 from module_hrm.enums.enums import DataType
 
 
@@ -47,7 +47,7 @@ def api_dir_tree(request):
     return all_tree_data
 
 
-def api_tree(query_db: Session, query_info):
+def api_tree(query_db: Session, query_info: ApiPageQueryModel):
     """
     这个实现从根目录开始
     """
@@ -97,10 +97,16 @@ def api_tree(query_db: Session, query_info):
                 data_handle(node_data, childrens, new_not_root_nodes_data)
 
     root_node = {"children": []}
-    root_nodes = query_db.query(ApiInfo).filter(ApiInfo.parent_id == None).all()
+    root_nodes = query_db.query(ApiInfo).filter(ApiInfo.parent_id == None)
+    if query_info.only_self:
+        root_nodes = root_nodes.filter(ApiInfo.manager == query_info.manager)
+    root_nodes = root_nodes.all()
     root_nodes = [node_handle(root_node) for root_node in root_nodes]
 
-    not_root_nodes_obj = query_db.query(ApiInfo).filter(ApiInfo.parent_id != None).all()
+    not_root_nodes_obj = query_db.query(ApiInfo).filter(ApiInfo.parent_id != None)
+    if query_info.only_self:
+        not_root_nodes_obj = not_root_nodes_obj.filter(ApiInfo.manager == query_info.manager)
+    not_root_nodes_obj = not_root_nodes_obj.all()
     not_root_nodes_data = [node_handle(node) for node in not_root_nodes_obj]
 
     data_handle(root_node, root_nodes, not_root_nodes_data)

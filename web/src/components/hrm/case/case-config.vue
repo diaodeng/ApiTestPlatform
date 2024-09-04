@@ -42,14 +42,16 @@ function getModuleSelect() {
 }
 
 function getConfigSelect() {
-  let data = {
-    projectId: formData.value.projectId,
-    moduleId: formData.value.moduleId,
-    type: HrmDataTypeEnum.config
+  if (props.dataType === HrmDataTypeEnum.case) {
+    let data = {
+      projectId: formData.value.projectId,
+      moduleId: formData.value.moduleId,
+      type: HrmDataTypeEnum.config
+    }
+    listConfig(data).then(response => {
+      selectConfigList.value = response.rows;
+    });
   }
-  listConfig(data).then(response => {
-    selectConfigList.value = response.rows;
-  });
 }
 
 function resetModule() {
@@ -57,7 +59,7 @@ function resetModule() {
   formData.value.request.config.include.configId = null;
   getModuleSelect();
   let projectId = "";
-  if (formData.value && formData.value.projectId){
+  if (formData.value && formData.value.projectId) {
     projectId = formData.value.projectId;
   }
 
@@ -71,11 +73,11 @@ function resetConfig() {
   getConfigSelect();
 }
 
-getModuleSelect();
-
-if (props.dataType === HrmDataTypeEnum.case) {
+onMounted(() => {
+  getModuleSelect();
   getConfigSelect();
-}
+})
+
 
 </script>
 
@@ -106,7 +108,7 @@ if (props.dataType === HrmDataTypeEnum.case) {
         </el-select>
       </el-form-item>
       <el-form-item label="可选配置" v-if="dataType === HrmDataTypeEnum.case">
-        <el-select v-model="formData.request.config.include.configId" placeholder="请选择" clearable>
+        <el-select v-model="formData.request.config.include.config.id" placeholder="请选择" clearable>
           <el-option
               v-for="option in selectConfigList"
               :key="option.caseId"
