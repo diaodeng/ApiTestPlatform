@@ -50,7 +50,7 @@ class ApiOperation(object):
 
     @staticmethod
     def update(query_db: Session, api_info: ApiModelForApi):
-        data_info = api_info.model_dump(exclude_unset=True)
+        data_info = api_info.model_dump(exclude_unset=True, by_alias=True)
         data_info = ApiModel(**data_info).model_dump(exclude_unset=True)
         # data_info.pop("api_id")
         # data_info.pop("type")
@@ -68,7 +68,7 @@ class ApiOperation(object):
 
     @staticmethod
     def add(query_db: Session, api_info: ApiModelForApi):
-        data_info = api_info.model_dump(exclude_unset=True)
+        data_info = api_info.model_dump(exclude_unset=True, by_alias=True)
         data_info = ApiModel(**data_info).model_dump(exclude_unset=True)
         new_api_obj = ApiInfo(**data_info)
         query_db.add(new_api_obj)

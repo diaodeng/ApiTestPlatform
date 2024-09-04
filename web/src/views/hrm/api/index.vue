@@ -30,7 +30,7 @@ const hrm_config_list = ref({});
 
 const folderForm = ref({parentId: null, name: null})
 const apiTabsData = ref([]);
-let currentApiData = apiTabsData.value[0] || null;
+const currentApiData = ref(apiTabsData.value[0] || null);
 const selectedEnv = ref("");
 const currentTab = ref(0);
 const loadingApi = ref(false);
@@ -73,13 +73,13 @@ function getApiInfo(apiId) {
   getApi(apiId).then(res => {
     const data = ref(res.data);
     apiTabsData.value.push(data);
-    currentApiData = toRef(data);
+    currentApiData.value = toRef(data);
   })
 }
 
 function saveApiInfo() {
   loading.value.saveApi = true;
-  let data = toRaw(currentApiData);
+  let data = toRaw(currentApiData.value);
 
   data.type = HrmDataTypeEnum.api
 
@@ -148,7 +148,7 @@ function nodeDbClick(event, node, data) {
     const nodeTabIndex = apiTabsData.value.findIndex(dict => dict.apiId === nodeId);
     if (nodeTabIndex !== -1) {
       currentTab.value = nodeId;
-      currentApiData = apiTabsData.value[nodeTabIndex];
+      currentApiData.value = apiTabsData.value[nodeTabIndex];
     } else {
       loadingApi.value = true;
 
@@ -162,7 +162,7 @@ function nodeDbClick(event, node, data) {
         emptyData.apiId = node.data.apiId;
 
         apiTabsData.value.push(emptyData);
-        currentApiData = apiTabsData.value[apiTabsData.value.length - 1];
+        currentApiData.value = apiTabsData.value[apiTabsData.value.length - 1];
         currentTab.value = emptyData.apiId;
 
         if (apiTabsData.value[0].isEmpty) {
@@ -176,7 +176,7 @@ function nodeDbClick(event, node, data) {
       getApi(node.data.apiId).then(res => {
         // const data = ref(res.data);
         apiTabsData.value.push(res.data);
-        currentApiData = apiTabsData.value[apiTabsData.value.length - 1];
+        currentApiData.value = apiTabsData.value[apiTabsData.value.length - 1];
         currentTab.value = res.data.apiId;
 
         if (apiTabsData.value[0].isEmpty) {
@@ -203,7 +203,7 @@ function delTab(event, tabId) {
     return;
   }
   if (apiTabsData.value.length === 1) {
-    currentApiData = null;
+    currentApiData.value = false;
 
     // apiTabsData.value.push(JSON.parse(JSON.stringify(initApiFormData)));
     // currentApiData = apiTabsData.value[1];
@@ -211,10 +211,10 @@ function delTab(event, tabId) {
     // currentTab.value = currentApiData.apiId;
 
   } else if (apiTabsData.value.length - 1 === currentTabIndex) {
-    currentApiData = apiTabsData.value[currentTabIndex - 1];
+    currentApiData.value = apiTabsData.value[currentTabIndex - 1];
     currentTab.value = currentApiData.apiId;
   } else {
-    currentApiData = apiTabsData.value[currentTabIndex + 1];
+    currentApiData.value = apiTabsData.value[currentTabIndex + 1];
     currentTab.value = currentApiData.apiId;
   }
   apiTabsData.value.splice(currentTabIndex, 1);
@@ -224,7 +224,7 @@ function delTab(event, tabId) {
 
 function clickTab(tab, event) {
   const currentTabIndex = apiTabsData.value.findIndex(dict => dict.apiId === tab.paneName);
-  currentApiData = apiTabsData.value[currentTabIndex];
+  currentApiData.value = apiTabsData.value[currentTabIndex];
   currentTab.value = tab.paneName;
   console.log("点击了tab:" + tab.paneName + " " + "当前tab：" + currentTab.value)
 }
@@ -236,7 +236,7 @@ function activeTabChange(tabName) {
 
 function debug() {
   loading.value.debugApi = true;
-  const apiData = toRaw(currentApiData);
+  const apiData = toRaw(currentApiData.value);
   let caseData = {
     request: apiData.requestInfo,
     type: apiData.type,
@@ -253,7 +253,7 @@ function debug() {
   debugCase(req_data).then(response => {
     ElMessage.success(response.msg);
     for (const step_result_key in response.data) {
-      currentApiData.requestInfo.teststeps.find(dict => dict['step_id'] === step_result_key).result = response.data[step_result_key]
+      currentApiData.value.requestInfo.teststeps.find(dict => dict['step_id'] === step_result_key).result = response.data[step_result_key]
     }
 
     // responseData.value = response.data.log
@@ -300,21 +300,6 @@ function apiTreeFilter() {
           <el-row>
             <!--                <el-icon><setting></setting></el-icon>-->
             <el-checkbox v-model="onlySelf" @change="getApiTree">仅自己的数据</el-checkbox>
-          </el-row>
-          <el-row>
-            <el-col :span="24">
-              <el-input v-model="treeFilterText" clearable placeholder="输入名称或者接口或者path">
-                <template #suffix>
-                  <el-button icon="Search"
-                             type="text"
-                             @click="apiTreeFilter"
-                             :loading="loading.filter"
-                             :disabled="loading.filter"></el-button>
-                  <!--                  <el-icon @click="apiTreeFilter"><search></search></el-icon>-->
-                </template>
-              </el-input>
-            </el-col>
-
           </el-row>
           <el-row>
             <el-col :span="24">
