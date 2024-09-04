@@ -34,7 +34,9 @@ export const HrmDataTypeEnum = {
     folder: 11,
     suite_detail: 12,
     suite_case_list: 13,
-    run_detail:14
+    run_detail: 14,
+    api_http: 15,
+    api_websocket: 16,
 }
 
 export const CaseStepTypeEnum = {

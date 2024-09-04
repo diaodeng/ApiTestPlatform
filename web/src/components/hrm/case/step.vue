@@ -22,7 +22,7 @@ const activeTestStepName = ref(0);
 const testStepsData = defineModel('testStepsData', {required: true});
 
 
-function editTabs(paneName, action, tapType) {
+function editTabs(action, paneName, tapType, initTabData) {
   if (action === "remove") {
     const oldActiveStep = activeTestStepName.value;
 
@@ -46,23 +46,10 @@ function editTabs(paneName, action, tapType) {
     }
 
   } else if (action === "add") {
-    if (!tapType) {
-      ElMessageBox.alert("参数错误", "错误提示", {type: "error"});
-      return;
-    }
-    if (tapType !==CaseStepTypeEnum.http && tapType !== CaseStepTypeEnum.websocket){
-      ElMessageBox.alert("不支持的测试步骤类型", "错误提示", {type: "error"});
-      return;
-    }
-    let newTabName = paneName !== undefined ? paneName + 1 : activeTestStepName.value + 1;
-    let tapData = JSON.parse(JSON.stringify(initStepData));
-    if (tapType === CaseStepTypeEnum.websocket) {
-      tapData.request = JSON.parse(JSON.stringify(initWebsocketData));
-    }
-    tapData.step_id = randomString(10);
 
-    tapData.step_type = tapType;
-    testStepsData.value.splice(newTabName, 0, tapData)
+    let newTabName = paneName !== undefined ? paneName + 1 : activeTestStepName.value + 1;
+
+    testStepsData.value.splice(newTabName, 0, initTabData)
     activeTestStepName.value = newTabName
   } else {
     console.log("other")
