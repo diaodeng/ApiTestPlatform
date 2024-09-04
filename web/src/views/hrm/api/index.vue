@@ -316,21 +316,6 @@ function apiTreeFilter() {
             </el-col>
 
           </el-row>
-          <el-row>
-            <el-col :span="24">
-              <el-input v-model="treeFilterText" clearable placeholder="输入名称或者接口或者path">
-                <template #suffix>
-                  <el-button icon="Search"
-                             type="text"
-                             @click="apiTreeFilter"
-                             :loading="loading.filter"
-                             :disabled="loading.filter"></el-button>
-                  <!--                  <el-icon @click="apiTreeFilter"><search></search></el-icon>-->
-                </template>
-              </el-input>
-            </el-col>
-
-          </el-row>
           <el-scrollbar height="calc(100% - 70px)">
             <div style="display: flex">
               <TreeView v-model:data-source="treeDataSource"
