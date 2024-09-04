@@ -80,6 +80,7 @@ function getApiInfo(apiId) {
 function saveApiInfo() {
   loading.value.saveApi = true;
   let data = toRaw(currentApiData.value);
+  console.log(apiTabsData.value);
 
   data.type = HrmDataTypeEnum.api
 
@@ -112,11 +113,19 @@ function saveApiInfo() {
 function apiSaveSuccess(res, oldApiId) {
   let response = res;
   if (response) {
-    console.log(response.data.apiId);
     let treeNode = treeRef.value.getNode(oldApiId);
     treeNode.data.apiId = response.data.apiId;
     treeNode.data.name = response.data.name;
     treeNode.data.isNew = false;
+
+    treeNode.apiId = response.data.apiId;
+    treeNode.name = response.data.name;
+
+    apiTabsData.value.forEach(apiInfo => {
+      if (apiInfo.apiId === oldApiId) {
+        apiInfo.apiId = response.data.apiId;
+      }
+    })
   }
 }
 
@@ -141,6 +150,8 @@ function getApiTree() {
 }
 
 function nodeDbClick(event, node, data) {
+  console.log(node);
+  console.log(apiTabsData.value);
   if (node.data.isParent) {
     node.expanded = !node.expanded;
   } else {
@@ -153,15 +164,16 @@ function nodeDbClick(event, node, data) {
       loadingApi.value = true;
 
       if (node.data.isNew) {
-        const emptyData = JSON.parse(JSON.stringify(initApiFormData));
+        let emptyData = JSON.parse(JSON.stringify(initApiFormData));
         // currentApiData.value.apiId = nodeId;
         emptyData.isNew = true;
-        emptyData.type = HrmDataTypeEnum.api;
-        emptyData.requestInfo.api_name = node.name;
+        emptyData.type = node.type;
+        emptyData.requestInfo.name = node.name;
         emptyData.parentId = node.data.parentId;
         emptyData.apiId = node.data.apiId;
 
         apiTabsData.value.push(emptyData);
+
         currentApiData.value = apiTabsData.value[apiTabsData.value.length - 1];
         currentTab.value = emptyData.apiId;
 

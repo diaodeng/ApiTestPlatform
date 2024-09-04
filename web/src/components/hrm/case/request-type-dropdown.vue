@@ -1,38 +1,11 @@
 <script setup>
 
 import {CaseStepTypeEnum} from "@/components/hrm/enum.js";
-import {initStepData, initWebsocketData} from "@/components/hrm/data-template.js";
-import {ElMessageBox} from "element-plus";
-import {randomString} from "@/utils/tools.js";
+import {getStepDataByType} from "@/components/hrm/case/case-utils.js";
 
 defineEmits(["typeSelected"]);
 
 const props = defineProps(["indexKey"]);
-
-function getStepData(stepType) {
-  if (!stepType) {
-    ElMessageBox.alert("参数错误", "错误提示", {type: "error"});
-    return;
-  }
-  if (stepType !== CaseStepTypeEnum.http && stepType !== CaseStepTypeEnum.websocket) {
-    ElMessageBox.alert("不支持的测试步骤类型", "错误提示", {type: "error"});
-    return;
-  }
-  let tapData = initStepData;
-  if (stepType === CaseStepTypeEnum.http) {
-    tapData = JSON.parse(JSON.stringify(initStepData));
-  } else if (stepType === CaseStepTypeEnum.websocket) {
-    let stepData = JSON.parse(JSON.stringify(initStepData));
-    stepData.request = initWebsocketData;
-    tapData = stepData;
-  } else {
-    return {};
-  }
-  tapData.step_id = randomString(10);
-
-  tapData.step_type = stepType;
-  return tapData;
-}
 
 </script>
 
@@ -51,14 +24,14 @@ function getStepData(stepType) {
         <el-dropdown-item>
           <el-button size="small"
                      type="primary"
-                     @click.stop="$emit('typeSelected', indexKey, CaseStepTypeEnum.http, getStepData(CaseStepTypeEnum.http))">
+                     @click.stop="$emit('typeSelected', indexKey, CaseStepTypeEnum.http, getStepDataByType(CaseStepTypeEnum.http))">
             request
           </el-button>
         </el-dropdown-item>
         <el-dropdown-item>
           <el-button size="small"
                      type="warning"
-                     @click.stop="$emit('typeSelected', indexKey, CaseStepTypeEnum.websocket, getStepData(CaseStepTypeEnum.websocket))">
+                     @click.stop="$emit('typeSelected', indexKey, CaseStepTypeEnum.websocket, getStepDataByType(CaseStepTypeEnum.websocket))">
             websocket
           </el-button>
         </el-dropdown-item>
