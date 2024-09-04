@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import {CirclePlusFilled, Delete, Edit, Folder, Plus, RemoveFilled, Tickets} from "@element-plus/icons-vue";
 import EditLabelText from "@/components/hrm/common/edit-label-text.vue";
+import RequestTypeDropdown from "@/components/hrm/case/request-type-dropdown.vue"
 import {ElMessageBox, ElMessage} from "element-plus";
 import {apiTree, addApi, updateApi, delApi, getApi} from "@/api/hrm/api.js";
 import {randomString} from "@/utils/tools.js";
@@ -29,6 +30,18 @@ const handleNodeClick = (data: Tree, node, treeNode, event) => {
   if (event && event.target) {
     console.log(event.target)
   }
+}
+
+/*
+* 右键
+* */
+function handleNodeRightClick(event, data, node, nodeRef) {
+  console.log(event)
+  console.log(data)
+  console.log(node)
+  console.log(nodeRef.value)
+  // emit("nodeDbClick", event, data, node, nodeRef)
+
 }
 
 // const dataSource = ref<Tree[]>([
@@ -110,7 +123,7 @@ const defaultProps = {
   parentId: "parentId"
 }
 
-const append = (data: Tree) => {
+const append = (data: Tree, type, newStepData) => {
   if (!data.isParent) {
     return;
   }
@@ -179,6 +192,7 @@ function treeFilter(value, data, node) {
       :expand-on-click-node="false"
       ref="treeRef"
       :filter-node-method="treeFilter"
+      @node-contextmenu="handleNodeRightClick"
 
   >
     <template #default="{ node, data }">
@@ -193,7 +207,8 @@ function treeFilter(value, data, node) {
                                  v-model:show-edite="node.data.edit"></edit-label-text></span>
           <span v-if="node.data.edit">
 <!--            <el-icon color="blue"><edit></edit></el-icon>-->
-            <el-icon color="green" @click.stop="append(data)"><circle-plus-filled></circle-plus-filled></el-icon>
+                        <el-icon color="green" @click.stop="append(data)"><circle-plus-filled></circle-plus-filled></el-icon>
+            <!--            <RequestTypeDropdown @type-selected="append" :index-key="data"></RequestTypeDropdown>-->
             <el-icon color="red" @click.stop="remove(node, data)"><remove-filled></remove-filled></el-icon>
           </span>
         </span>
