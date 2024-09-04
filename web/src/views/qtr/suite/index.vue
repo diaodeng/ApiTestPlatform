@@ -76,7 +76,9 @@
           <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['qtr:suite:edit']">
             修改
           </el-button>
-          <!--               <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['qtr:suite:add']">新增</el-button>-->
+          <el-button link type="primary" icon="Tools" @click="handleConfigSuite(scope.row)" v-hasPermi="['qtr:suite:edit']">
+            配置
+          </el-button>
           <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:suite:remove']">
             删除
           </el-button>
@@ -85,7 +87,7 @@
     </el-table>
 
     <!-- 添加或修改套件对话框 -->
-    <el-dialog :title="title" v-model="open" width="70%" append-to-body>
+    <el-dialog :title="title" v-model="open" append-to-body>
       <el-form ref="suiteRef" :model="form" :rules="rules" label-width="80px">
         <el-row>
           <el-col :span="12">
@@ -127,6 +129,12 @@
 
     <!-- 运行用例对话框 -->
     <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.project" :run-ids="runIds"></RunDialog>
+
+    <!-- 配置套件详情对话框 -->
+    <SuiteDetailDialog :form-datas="form"
+                    v-model:open-suite-detail-dialog="open"
+                    :title = SuiteTitle>
+    </SuiteDetailDialog>
   </div>
 </template>
 
@@ -135,6 +143,8 @@ import {listSuite, getSuite, delSuite, addSuite, updateSuite} from "@/api/qtr/su
 import {ElMessageBox} from "element-plus";
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
 import RunDialog from "@/components/hrm/common/run_dialog.vue";
+import SuiteDetailDialog from "@/components/qtr/suite-detail-dialog.vue";
+
 
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
@@ -164,7 +174,9 @@ const data = reactive({
 
 const {queryParams, form, rules} = toRefs(data);
 
-
+const SuiteTitle = computed(() => {
+    return title.value
+});
 
 /** 查询套件列表 */
 function getList() {
@@ -214,6 +226,22 @@ function handleAdd(row) {
   reset();
   open.value = true;
   title.value = "添加套件";
+}
+
+/** 新增按钮操作 */
+function handleConfigSuite(row) {
+  const suiteId = row.suiteId;
+  alert(suiteId);
+  getSuite(suiteId).then(response => {
+    if (!response.data || Object.keys(response.data).length === 0) {
+      alert("未查到对应数据！");
+      return;
+    }
+    form.value = response.data;
+    alert(form.value.suiteName);
+    open.value = true;
+    title.value = "配置" + response.data['suiteName'];
+  });
 }
 
 /** 运行套件 */
