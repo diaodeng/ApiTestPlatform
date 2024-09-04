@@ -2,6 +2,9 @@ import {randomString} from "@/utils/tools.js";
 import {HrmDataTypeEnum, CaseStepTypeEnum} from "@/components/hrm/enum.js";
 
 
+/*
+* http请求模板
+* */
 export const initRequestData = {
 
     dataType: "",
@@ -14,12 +17,19 @@ export const initRequestData = {
 
 }
 
+/*
+* websocket请求模板
+* */
 export const initWebsocketData = {
     url: "",
     headers: [],
     data: ""
 }
 
+
+/*
+* 测试步骤数据模板，默认是http请求
+* */
 export const initStepData =
     {
         step_type: CaseStepTypeEnum.http,
@@ -46,9 +56,6 @@ export const initStepData =
     }
 
 
-    /*
-    * 用例表request字段对应的数据
-    * */
 export const initCaseRequestData = {
     config: {
         think_time: {
@@ -74,32 +81,40 @@ export const initCaseRequestData = {
 
 }
 
+/*
+* 用例表request字段对应的数据
+* */
 export const initCaseFormData = {
-  caseId: undefined,
-  moduleId: undefined,
-  projectId: undefined,
-  caseName: "新增测试用例",
-  notes: undefined,
-  sort: 0,
-  status: "0",
-  remark: undefined,
-  type: HrmDataTypeEnum.case,
-  include: {},
-  request: initCaseRequestData
+    caseId: undefined,
+    moduleId: undefined,
+    projectId: undefined,
+    caseName: "新增测试用例",
+    notes: undefined,
+    sort: 0,
+    status: "0",
+    remark: undefined,
+    type: HrmDataTypeEnum.case,
+    include: {},
+    request: initCaseRequestData
 }
 
 
+
+/*
+* API库表对应数据模板
+* */
 export const initApiFormData = {
     apiId: randomString(10),
     name: "新增API",
     path: "",
     interface: "",
-    type: HrmDataTypeEnum.api,
+    type: HrmDataTypeEnum.api_http,
     requestInfo: initCaseRequestData,
     parentId: undefined,
+    isNew: true,
 }
 
-export const initDebugTalkFormData ={
+export const initDebugTalkFormData = {
     debugtalk: "def setup():" +
         "pass" +
         "" +
