@@ -5,10 +5,11 @@ from pydantic.alias_generators import to_camel
 from typing import Union, Optional, List, Dict, Text, Any
 from datetime import datetime
 from module_admin.annotation.pydantic_annotation import as_query
+from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from utils.common_util import CamelCaseUtil
 
 
-class SuiteModel(BaseModel):
+class SuiteModel(CommonDataModel):
     """
     测试套件表对应pydantic模型
     """
@@ -20,14 +21,14 @@ class SuiteModel(BaseModel):
     simple_desc: Optional[str] = None
     status: Optional[str] = None
     del_flag: Optional[str] = None
-    create_by: Optional[str] = None
-    create_time: Optional[datetime] = None
-    update_by: Optional[str] = None
-    update_time: Optional[datetime] = None
+    # create_by: Optional[str] = None
+    # create_time: Optional[datetime] = None
+    # update_by: Optional[str] = None
+    # update_time: Optional[datetime] = None
 
 
 @as_query
-class SuiteQueryModel(SuiteModel):
+class SuiteQueryModel(SuiteModel, QueryModel):
     """
     测试套件管理不分页查询模型
     """
@@ -46,7 +47,7 @@ class DeleteSuiteModel(BaseModel):
     update_time: Optional[str] = None
 
 
-class SuiteDetailModel(BaseModel):
+class SuiteDetailModel(CommonDataModel):
     """
     测试套件详情表对应pydantic模型
     """
@@ -59,10 +60,10 @@ class SuiteDetailModel(BaseModel):
     simple_desc: Optional[str] = None
     status: Optional[str] = None
     del_flag: Optional[str] = None
-    create_by: Optional[str] = None
-    create_time: Optional[datetime] = None
-    update_by: Optional[str] = None
-    update_time: Optional[datetime] = None
+    # create_by: Optional[str] = None
+    # create_time: Optional[datetime] = None
+    # update_by: Optional[str] = None
+    # update_time: Optional[datetime] = None
 
 
 @as_query

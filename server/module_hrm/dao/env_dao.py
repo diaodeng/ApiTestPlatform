@@ -17,7 +17,7 @@ class EnvDao:
         :param env_id: 环境id
         :return: 在用环境信息对象
         """
-        env_info = db.query(HrmEnv)\
+        env_info = db.query(HrmEnv) \
             .filter(HrmEnv.env_id == env_id,
                     HrmEnv.status == 0,
                     HrmEnv.del_flag == 0) \
@@ -70,7 +70,7 @@ class EnvDao:
         return env_info
 
     @classmethod
-    def get_env_list(cls, db: Session, page_object: EnvModel, data_scope_sql: str):
+    def get_env_list(cls, db: Session, page_object: EnvQueryModel, data_scope_sql: str):
         """
         根据查询参数获取环境列表信息
         :param db: orm对象
@@ -82,8 +82,11 @@ class EnvDao:
             .filter(HrmEnv.del_flag == 0,
                     HrmEnv.status == page_object.status if page_object.status else True,
                     HrmEnv.env_name.like(f'%{page_object.env_name}%') if page_object.env_name else True,
-                    eval(data_scope_sql)) \
-            .order_by(HrmEnv.order_num) \
+                    eval(data_scope_sql))
+        if page_object.only_self:
+            env_result = env_result.filter(HrmEnv.manager == page_object.manager)
+
+        env_result = env_result.order_by(HrmEnv.order_num) \
             .distinct().all()
 
         return env_result

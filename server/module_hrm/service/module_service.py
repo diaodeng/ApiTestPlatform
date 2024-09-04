@@ -137,7 +137,7 @@ class ModuleService:
         return result
 
     @staticmethod
-    def export_module_list_services(module_list: List):
+    def export_module_list_services(module_list: list):
         """
         导出模块信息service
         :param module_list: 模块信息列表

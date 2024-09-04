@@ -15,7 +15,10 @@ projectController = APIRouter(prefix='/hrm/project', dependencies=[Depends(Login
 
 
 @projectController.get("/list", response_model=List[ProjectModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
-async def get_hrm_project_list(request: Request, query: ProjectQueryModel = Depends(ProjectQueryModel.as_query), query_db: Session = Depends(get_db), data_scope_sql: str = Depends(GetDataScope('HrmProject'))):
+async def get_hrm_project_list(request: Request,
+                               query: ProjectQueryModel = Depends(ProjectQueryModel.as_query),
+                               query_db: Session = Depends(get_db),
+                               data_scope_sql: str = Depends(GetDataScope('HrmProject'))):
     try:
         query_result = ProjectService.get_project_list_services(query_db, query, data_scope_sql)
         logger.info('获取成功')
@@ -27,8 +30,12 @@ async def get_hrm_project_list(request: Request, query: ProjectQueryModel = Depe
 
 @projectController.post("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:add'))])
 @log_decorator(title='项目管理', business_type=1)
-async def add_hrm_project(request: Request, add_project: ProjectModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def add_hrm_project(request: Request,
+                          add_project: ProjectModel,
+                          query_db: Session = Depends(get_db),
+                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
+        add_project.manager = current_user.user.user_id
         add_project.create_by = current_user.user.user_name
         add_project.update_by = current_user.user.user_name
         add_project.project_id =snowIdWorker.get_id()
@@ -46,7 +53,10 @@ async def add_hrm_project(request: Request, add_project: ProjectModel, query_db:
 
 @projectController.put("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:edit'))])
 @log_decorator(title='项目管理', business_type=2)
-async def edit_hrm_project(request: Request, edit_project: ProjectModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def edit_hrm_project(request: Request,
+                           edit_project: ProjectModel,
+                           query_db: Session = Depends(get_db),
+                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_project.update_by = current_user.user.user_name
         edit_project.update_time = datetime.now()

@@ -6,11 +6,12 @@ from typing import Union, Optional, List, Any, Text, Dict
 from datetime import datetime
 from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
+from module_hrm.entity.vo.common_vo import CommonDataModel
 from module_hrm.enums.enums import RunType, DataType
 from utils.common_util import CamelCaseUtil
 
 
-class CaseModel(BaseModel):
+class CaseModel(CommonDataModel):
     """
     主要用于输入入库前的序列化，其他的建议用CaseModelForApi
     用例信息表对应pydantic模型, 用于存数据库前转化数据
@@ -28,10 +29,10 @@ class CaseModel(BaseModel):
     desc2mind: Optional[str] = None
     sort: Optional[int] = None
     status: Optional[str] = None
-    create_by: Optional[str] = None
-    create_time: Optional[datetime] = None
-    update_by: Optional[str] = None
-    update_time: Optional[datetime] = None
+    # create_by: Optional[str] = None
+    # create_time: Optional[datetime] = None
+    # update_by: Optional[str] = None
+    # update_time: Optional[datetime] = None
     remark: Optional[str] = None
 
     @model_validator(mode="before")
@@ -119,6 +120,8 @@ class CasePageQueryModel(CaseQueryModel):
 
     module_id: Optional[int] = None
     project_id: Optional[int] = None
+
+    only_self: bool = False
 
 
 class AddCaseModel(CaseModel):

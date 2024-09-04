@@ -13,8 +13,7 @@ const {proxy} = getCurrentInstance();
 
 const {sys_request_method} = proxy.useDict("sys_request_method");
 
-const requestDetailData = defineModel("requestDetailData", {required: true});
-const responseData = defineModel("responseData");
+const stepDetailData = defineModel("stepDetailData", {required: true});
 const props = defineProps(["editHeight"]); // 编辑器高度，默认是100vh - 160px
 
 const activeRequestDetailName = ref("requestHeader")
@@ -22,8 +21,8 @@ const activeResultTab = ref("response")
 
 const calcResponse = computed({
   get() {
-    if (responseData.value && responseData.value.response) {
-      const data = responseData.value.response.body || responseData.value.response.text || "";
+    if (stepDetailData.value.result && stepDetailData.value.result.response) {
+      const data = stepDetailData.value.result.response.body || stepDetailData.value.result.response.text || "";
       try {
         return Json.beautifulJson(data);
       } catch (e) {
@@ -34,25 +33,25 @@ const calcResponse = computed({
     }
   },
   set(newValue) {
-    responseData.value.response.body = newValue
+    stepDetailData.value.result.response.body = newValue
   }
 })
 
 const calcLogs = computed(() => {
-  if (responseData.value && responseData.value.logs) {
-    return (responseData.value.logs.before_request || "")
+  if (stepDetailData.value.result && stepDetailData.value.result.logs) {
+    return (stepDetailData.value.result.logs.before_request || "")
         + "\n"
-        + (responseData.value.logs.after_response || "")
+        + (stepDetailData.value.result.logs.after_response || "")
         + "\n"
-        + (responseData.value.logs.error || "");
+        + (stepDetailData.value.result.logs.error || "");
   } else {
     return "";
   }
 })
 
 const calcErrorLogs = computed(() => {
-  if (responseData.value && responseData.value.logs) {
-    return responseData.value.logs.error || "";
+  if (stepDetailData.value.result && stepDetailData.value.result.logs) {
+    return stepDetailData.value.result.logs.error || "";
   } else {
     return "";
   }
@@ -63,12 +62,12 @@ const calcErrorLogs = computed(() => {
 <template>
   <el-row :gutter="10" type="flex" class="row-bg">
     <el-col style="display: flex">
-      <DictSelect :options-dict="sys_request_method" v-model="requestDetailData.method"
+      <DictSelect :options-dict="sys_request_method" v-model="stepDetailData.request.method"
                   style="width: 110px"></DictSelect>
 
       <div style="flex-grow: 1;padding-left: 5px">
         <el-input
-            v-model="requestDetailData.url"
+            v-model="stepDetailData.request.url"
             placeholder="Please input"
         >
           <template #prepend>URL</template>
@@ -98,16 +97,18 @@ const calcErrorLogs = computed(() => {
                  style="width: 100%;"
                  class="request-detail">
           <el-tab-pane label="header" name="requestHeader">
-            <TableHeaders v-model="requestDetailData.headers" show-include="true"></TableHeaders>
+            <TableHeaders v-model:self-data="stepDetailData.request.headers"
+                          v-model:include="stepDetailData.include"
+                          :show-include="true"></TableHeaders>
           </el-tab-pane>
           <el-tab-pane label="json" name="requestJson">
-            <AceEditor v-model:content="requestDetailData.json" can-set="true" :height="editHeight"></AceEditor>
+            <AceEditor v-model:content="stepDetailData.request.json" can-set="true" :height="editHeight"></AceEditor>
           </el-tab-pane>
           <el-tab-pane label="data" name="requestData">
-            <TableVariables v-model="requestDetailData.data"></TableVariables>
+            <TableVariables v-model="stepDetailData.request.data"></TableVariables>
           </el-tab-pane>
           <el-tab-pane label="param" name="requestParam">
-            <TableVariables v-model="requestDetailData.params"></TableVariables>
+            <TableVariables v-model="stepDetailData.request.params"></TableVariables>
           </el-tab-pane>
         </el-tabs>
       </template>

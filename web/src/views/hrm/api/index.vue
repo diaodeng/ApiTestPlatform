@@ -3,7 +3,9 @@ import {ElMessage} from "element-plus";
 import SplitWindow from "@/components/hrm/common/split-window.vue";
 import TreeView from "@/components/hrm/common/tree-view.vue";
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
-import {addApi, apiTree, getApi} from "@/api/hrm/api.js";
+import {addApi, apiTree, getApi, updateApi} from "@/api/hrm/api.js";
+import {list as configList} from "@/api/hrm/config.js";
+
 import {initApiFormData, initStepData} from "@/components/hrm/data-template.js";
 import {randomString} from "@/utils/tools.js";
 import {CaseStepTypeEnum, HrmDataTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
@@ -12,6 +14,7 @@ import StepRequest from "@/components/hrm/case/step-request.vue";
 import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
 import FullScreen from "@/components/hrm/common/fullscreen.vue";
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
+import {Setting} from "@element-plus/icons-vue";
 
 
 const {proxy} = getCurrentInstance();
@@ -23,6 +26,7 @@ provide('sys_normal_disable', sys_normal_disable);
 
 const treeDataSource = ref([]);
 const hrm_comparator_dict = ref({});
+const hrm_config_list = ref({});
 
 const folderForm = ref({parentID: null, name: null})
 const apiTabsData = ref([initApiFormData]);
@@ -30,6 +34,7 @@ let currentApiData = apiTabsData.value[0];
 const selectedEnv = ref("");
 const currentTab = ref(0);
 const loadingApi = ref(false);
+const onlySelf = ref(true);
 const loading = ref({
   page: false,
   loadApiTree: false,
@@ -45,9 +50,13 @@ onMounted(() => {
   getComparator().then(response => {
     hrm_comparator_dict.value = response.data;
   });
+  configList().then(response => {
+    hrm_config_list.value = response.rows;
+  });
 });
 
 provide("hrm_comparator_dict", hrm_comparator_dict);
+provide("hrm_case_config_list", hrm_config_list);
 
 
 function addApiStep() {
@@ -68,12 +77,24 @@ function saveApiInfo() {
   loading.value.saveApi = true;
   let data = toRaw(currentApiData);
   data.type = HrmDataTypeEnum.api
-  addApi(data).then(res => {
-    ElMessage({message: "API保存成功", type: "success"});
-  }).finally(() => {
-    loading.value.saveApi = false;
-    loading.value.preSaveDialog = false;
-  })
+  if (data.id && data.apiId) {
+    updateApi(data).then(res => {
+      ElMessage({message: "API保存成功", type: "success"});
+    }).catch(error => {
+      ElMessage({message: "API保存失败", type: "success"});
+    }).finally(() => {
+      loading.value.saveApi = false;
+      loading.value.preSaveDialog = false;
+    })
+  } else {
+    addApi(data).then(res => {
+      ElMessage({message: "API保存成功", type: "success"});
+    }).finally(() => {
+      loading.value.saveApi = false;
+      loading.value.preSaveDialog = false;
+    })
+  }
+
 }
 
 function saveFolderInfo() {
@@ -89,7 +110,7 @@ function saveFolderInfo() {
 
 function getApiTree() {
   loadingApi.value = true;
-  apiTree({private: false}).then(res => {
+  apiTree({onlySelf: onlySelf.value}).then(res => {
     treeDataSource.value = res.data;
   }).finally(() => {
     loadingApi.value = false;
@@ -191,7 +212,7 @@ function debug() {
     // responseData.value = response.data.log
     // open.value = false;
     // getList();
-  }).finally(()=>{
+  }).finally(() => {
     loading.value.debugApi = false;
   });
 }
@@ -200,20 +221,27 @@ function debug() {
 
 <template>
   <div class="app-container" v-loading="loadingApi">
-    <el-button size="small" @click="getApiTree" icon="RefreshRight"></el-button>
-    <el-button size="small" @click="loading.preSaveFolderDialog = true">新增文件夹</el-button>
-    <el-button size="small" @click="loading.preSaveDialog = true" v-loading="loading.saveApi">保存</el-button>
-    <el-button size="small" @click="debug" v-loading="loading.debugApi">调试</el-button>
-    <EnvSelector v-model:selected-env="selectedEnv" size="small"></EnvSelector>
+    <el-row>
+      <el-button size="small" @click="getApiTree" icon="RefreshRight"></el-button>
+      <el-button size="small" @click="loading.preSaveFolderDialog = true" type="info">新增文件夹</el-button>
+      <span style="flex-grow: 1"></span>
+      <el-button size="small" @click="loading.preSaveDialog = true" v-loading="loading.saveApi" type="success">保存
+      </el-button>
+      <el-button size="small" @click="debug" v-loading="loading.debugApi" type="warning">调试</el-button>
+      <EnvSelector v-model:selected-env="selectedEnv" size="small"></EnvSelector>
+    </el-row>
 
     <el-container>
       <split-window left-width="250px" window-height="calc(100vh - 156px)">
         <template v-slot:left>
+          <el-row>
+            <!--                <el-icon><setting></setting></el-icon>-->
+            <el-checkbox v-model="onlySelf">仅自己的数据</el-checkbox>
+          </el-row>
           <el-scrollbar>
-            <div style="display: flex;">
+            <div style="display: flex; flex-flow: column">
               <TreeView v-model="treeDataSource" @node-db-click="nodeDbClick"></TreeView>
             </div>
-
           </el-scrollbar>
 
         </template>
@@ -238,14 +266,12 @@ function debug() {
             </el-tabs>
             <div v-if="currentApiData" style="flex-grow: 1;display: flex;flex-direction: column;">
               <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.http">
-                <StepRequest v-model:request-detail-data="currentApiData.requestInfo.teststeps[0].request"
-                             v-model:response-data="currentApiData.requestInfo.teststeps[0].result"
+                <StepRequest v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"
                              edit-height="calc(100vh - 332px)"
                 ></StepRequest>
               </template>
               <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.websocket">
-                <StepWebsocket v-model:request-detail-data="currentApiData.requestInfo.teststeps[0].request"
-                               v-model:response-data="currentApiData.requestInfo.teststeps[0].result"></StepWebsocket>
+                <StepWebsocket v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"></StepWebsocket>
               </template>
             </div>
 

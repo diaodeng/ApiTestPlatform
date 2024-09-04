@@ -182,13 +182,23 @@ class CaseInfoToRun(object):
         return env
 
     def __include_handle(self) -> CaseModelForApi | None:
-        include_config_id = self.case_obj.request.config.include.config_id
+        include_config = self.case_obj.request.config.include.config
         test_include = None
-        if include_config_id:
-            include_config = CaseDao.get_case_by_id(self.query_db, include_config_id)
+        if include_config and hasattr(include_config, "id") and include_config.id and include_config.id != "":
+            include_config = CaseDao.get_case_by_id(self.query_db, include_config.id)
             if include_config:
                 test_include = CaseModelForApi(**CamelCaseUtil.transform_result(include_config))
         return test_include
+
+    def __step_include_handle(self):
+        """
+        目前只处理了测试步骤配置的请求头
+        """
+        for step in self.case_obj.request.teststeps:
+            if step.include.config and step.include.config.id and step.include.config.allow_extend:
+                config_info = CaseDao.get_case_by_id(self.query_db, step.include.config.id)
+                config_info = CaseModelForApi(**CamelCaseUtil.transform_result(config_info))
+                update_or_extend_list(step.request.headers, config_info.request.config.headers)
 
     def __data_covert(self, data_obj: CaseModelForApi) -> TestCase:
         """
@@ -238,6 +248,10 @@ class CaseInfoToRun(object):
             update_or_extend_list(env_varables, include_config_obj.request.config.variables)
 
         update_or_extend_list(env_varables, self.case_obj.request.config.variables)
+
+        # 请求头配置处理
+        self.__step_include_handle()
+
         self.case_obj.request.config.variables = env_varables
         self.case_obj.request.project_id = self.case_obj.project_id
         self.case_obj.request.module_id = self.case_obj.module_id

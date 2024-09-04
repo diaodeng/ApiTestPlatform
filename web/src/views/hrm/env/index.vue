@@ -20,6 +20,7 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item><el-checkbox >仅自己的数据</el-checkbox></el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -133,13 +134,15 @@
           <el-col v-for="(item, index) in form.envConfig.variables" :key="index" style="padding-bottom: 20px">
             <div style="padding-bottom: 10px">
               <el-text>分组名称：</el-text>
-              <EditLabelText v-model:="item.key"></EditLabelText>
+              <EditLabelText v-model:content="item.key"></EditLabelText>
+              
+              <el-tooltip content="删除环境变量分组"
+                          placement="top-start"
+              >
+                <el-button size="small" type="danger" icon="Delete" @click="delEnvGroup(index)"></el-button>
+              </el-tooltip>
             </div>
-            <el-tooltip content="删除环境变量分组"
-                        placement="top-start"
-            >
-              <el-button size="small" type="danger" icon="Delete" @click="delEnvGroup(index)"></el-button>
-            </el-tooltip>
+
             <TableVariables v-model="item.value"></TableVariables>
           </el-col>
 

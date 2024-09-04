@@ -3,9 +3,10 @@ from pydantic.alias_generators import to_camel
 from typing import Union, Optional, List
 from datetime import datetime
 from module_admin.annotation.pydantic_annotation import as_query, as_form
+from module_hrm.entity.vo.common_vo import CommonDataModel
 
 
-class JobModel(BaseModel):
+class JobModel(CommonDataModel):
     """
     定时任务调度表对应pydantic模型
     """
@@ -22,10 +23,10 @@ class JobModel(BaseModel):
     misfire_policy: Optional[str] = None
     concurrent: Optional[str] = None
     status: Optional[str] = None
-    create_by: Optional[str] = None
-    create_time: Optional[datetime] = None
-    update_by: Optional[str] = None
-    update_time: Optional[datetime] = None
+    # create_by: Optional[str] = None
+    # create_time: Optional[datetime] = None
+    # update_by: Optional[str] = None
+    # update_time: Optional[datetime] = None
     remark: Optional[str] = None
 
 

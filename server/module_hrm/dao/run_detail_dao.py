@@ -1,11 +1,8 @@
 from sqlalchemy.orm import Session
-from datetime import datetime
 
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
-from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunListModel, HrmRunDetailModel
 from utils.page_util import PageUtil
-from utils.snowflake import snowIdWorker
 
 
 class RunDetailDao:
@@ -37,25 +34,14 @@ class RunDetailDao:
             db.commit()
 
     @classmethod
-    def create(cls, db: Session, run_id, report_id, run_type, run_name, run_start_time: datetime,
-               run_end_time: datetime,
-               run_duration: float = 0, run_detail: str = "", status: int = 1):
+    def create(cls, db: Session, detail: HrmRunDetailModel):
         """
         创建报告
         """
-        duration = (run_end_time - run_start_time).microseconds / 1000000
-        run_detail = HrmRunDetail(
-            detail_id=snowIdWorker.get_id(),
-            run_id=run_id,
-            report_id=report_id,
-            run_type=run_type,
-            run_name=run_name,
-            run_start_time=run_start_time,
-            run_end_time=run_end_time,
-            run_duration=duration,
-            run_detail=run_detail,
-            status=status
-        )
+        duration = (detail.run_end_time - detail.run_start_time).microseconds / 1000000
+        detail.run_duration = duration
+        detail_dict = detail.model_dump(exclude_unset=True)
+        run_detail = HrmRunDetail(**detail_dict)
         db.add(run_detail)
         db.commit()
         db.refresh(run_detail)
@@ -64,6 +50,8 @@ class RunDetailDao:
     @classmethod
     def list(cls, db: Session, query_info: RunDetailQueryModel):
         query = db.query(HrmRunDetail)
+        if query_info.only_self:
+            query = query.filter(HrmRunDetail.manager == query_info.manager)
         if query_info.run_id:
             query = query.filter(HrmRunDetail.run_id == query_info.run_id)
         if query_info.run_type:

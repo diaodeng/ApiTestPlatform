@@ -26,16 +26,22 @@ const tableCols = [
     width: ""
   }]
 
+const hrmConfigList = inject("hrm_case_config_list");
+
 </script>
 
 <template>
   <CommonTable :cols="tableCols" v-model="selfData">
     <template #tableHeader v-if="showInclude">
       <el-select style="flex-grow: 1;padding-right: 5px;padding-left: 5px;"
-                 placeholder="请选择配置">
-        <el-option>jjj</el-option>
+                 placeholder="请选择配置" v-model="include.config.id">
+        <el-option v-for="item in hrmConfigList"
+                   :key="item.caseId"
+                   :label="item.caseName"
+                   :value="item.caseId"
+        ></el-option>
       </el-select>
-      <el-checkbox checked>允许扩展</el-checkbox>
+      <el-checkbox v-model="include.config.allow_extend">允许扩展</el-checkbox>
     </template>
   </CommonTable>
 </template>
