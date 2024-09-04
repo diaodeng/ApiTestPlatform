@@ -1,3 +1,4 @@
+import copy
 import json
 
 from module_hrm.dao.case_dao import CaseDao
@@ -195,10 +196,19 @@ class CaseInfoToRun(object):
         目前只处理了测试步骤配置的请求头
         """
         for step in self.case_obj.request.teststeps:
-            if step.include.config and step.include.config.id and step.include.config.allow_extend:
+            if step.include.config and step.include.config.id:
                 config_info = CaseDao.get_case_by_id(self.query_db, step.include.config.id)
                 config_info = CaseModelForApi(**CamelCaseUtil.transform_result(config_info))
-                update_or_extend_list(step.request.headers, config_info.request.config.headers)
+                config_header = copy.deepcopy(config_info.request.config.headers)
+                update_or_extend_list(config_header, step.request.headers)
+                step.request.headers = config_header
+
+            config_headers = copy.deepcopy(self.case_obj.request.config.headers)
+            config_headers = config_headers if config_headers else []
+            if step.include.config.allow_extend:
+                update_or_extend_list(config_headers, step.request.headers)
+                step.request.headers = config_headers
+
 
     def __data_covert(self, data_obj: CaseModelForApi) -> TestCase:
         """
@@ -249,7 +259,14 @@ class CaseInfoToRun(object):
 
         update_or_extend_list(env_varables, self.case_obj.request.config.variables)
 
-        # 请求头配置处理
+        # 配置请求头处理
+        case_header = self.case_obj.request.config.headers
+        include_header = include_config_obj.request.config.headers if include_config_obj else []
+        include_header = copy.deepcopy(include_header)
+        update_or_extend_list(include_header, case_header)
+        self.case_obj.request.config.headers = include_header
+
+        # 测试步骤请求头配置处理
         self.__step_include_handle()
 
         self.case_obj.request.config.variables = env_varables

@@ -68,14 +68,13 @@
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" align="center" class-name="small-padding fixed-width">
+      <el-table-column label="操作" align="center" class-name="small-padding fixed-width" width="110px">
         <template #default="scope">
-          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:env:edit']">
-            修改
+          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:env:edit', 'hrm:env:detail']">
           </el-button>
-          <!--               <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['hrm:env:add']">新增</el-button>-->
-          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['hrm:env:remove']">
-            删除
+          <el-button link type="warning" icon="CopyDocument" @click="handleCopy(scope.row)" v-hasPermi="['hrm:env:copy']">
+          </el-button>
+          <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['hrm:env:remove']">
           </el-button>
         </template>
       </el-table-column>
@@ -150,7 +149,7 @@
       </el-form>
       <template #footer>
         <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm">确 定</el-button>
+          <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:env:edit']">确 定</el-button>
           <el-button @click="cancel">取 消</el-button>
         </div>
       </template>
@@ -162,6 +161,7 @@
 import {listEnv, getEnv, delEnv, addEnv, updateEnv} from "@/api/hrm/env";
 import TableVariables from '../../../components/hrm/table-variables.vue';
 import EditLabelText from "@/components/hrm/common/edit-label-text.vue";
+import {ElMessage} from "element-plus";
 
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
@@ -310,6 +310,11 @@ function handleDelete(row) {
     proxy.$modal.msgSuccess("删除成功");
   }).catch(() => {
   });
+}
+
+/** 删除按钮操作 */
+function handleCopy(row) {
+  ElMessage.warning("暂未实现复制功能")
 }
 
 getList();

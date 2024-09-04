@@ -16,7 +16,7 @@ hrmConfigController = APIRouter(prefix='/hrm/config', dependencies=[Depends(Logi
 
 
 @hrmConfigController.get("/list", response_model=PageResponseModel,
-                         dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:list'))])
+                         dependencies=[Depends(CheckUserInterfaceAuth('hrm:config:list'))])
 async def get_hrm_case(request: Request, page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
                        query_db: Session = Depends(get_db),
                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)
