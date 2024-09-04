@@ -132,7 +132,7 @@
 
     <!-- 配置套件详情对话框 -->
     <SuiteDetailDialog :form-datas="form"
-                    v-model:open-suite-detail-dialog="open"
+                    v-model:open-suite-detail-dialog="openSuiteDetail"
                     :title = SuiteTitle>
     </SuiteDetailDialog>
   </div>
@@ -151,6 +151,7 @@ const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 
 const suiteList = ref([]);
 const open = ref(false);
+const openSuiteDetail = ref(false);
 const loading = ref(true);
 const showSearch = ref(true);
 const title = ref("");
@@ -228,18 +229,16 @@ function handleAdd(row) {
   title.value = "添加套件";
 }
 
-/** 新增按钮操作 */
+/** 配置按钮操作 */
 function handleConfigSuite(row) {
   const suiteId = row.suiteId;
-  alert(suiteId);
   getSuite(suiteId).then(response => {
     if (!response.data || Object.keys(response.data).length === 0) {
       alert("未查到对应数据！");
       return;
     }
     form.value = response.data;
-    alert(form.value.suiteName);
-    open.value = true;
+    openSuiteDetail.value = true;
     title.value = "配置" + response.data['suiteName'];
   });
 }
