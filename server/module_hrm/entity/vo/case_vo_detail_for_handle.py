@@ -18,7 +18,7 @@ FunctionsMapping = Dict[Text, Callable]
 Headers = Dict[Text, Text | bool]
 Cookies = Dict[Text, Text | bool]
 Verify = bool
-Hooks = List[Union[Text, Dict[Text, Text]]]
+Hooks = List[Union[Text, Dict[Text, Text | Any]]]
 Export = List[Text]
 Validators = List[Dict]
 
@@ -50,7 +50,6 @@ class Result(BaseModel):
     duration: float = 0
     response: ResponseData = ResponseData()
     logs: StepLogs = StepLogs()
-
 
 
 class MethodEnum(Text, Enum):
