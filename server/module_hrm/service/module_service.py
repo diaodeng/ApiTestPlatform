@@ -56,7 +56,7 @@ class ModuleService:
         :return: 新增模块校验结果
         """
         add_module = ModuleModel(**page_object.model_dump(by_alias=True))
-        module = ModuleDao.get_module_detail_by_info(query_db, ModuleQuery(moduleName=page_object.module_name))
+        module = ModuleDao.get_module_detail_by_info(query_db, ModuleQuery(moduleName=page_object.module_name, projectId=page_object.project_id))
         if module:
             result = dict(is_success=False, message='模块名称已存在')
         else:
