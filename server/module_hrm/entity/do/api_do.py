@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, BigInteger
 
 from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
-from module_hrm.enums.enums import DataType
+from module_hrm.enums.enums import DataType, TstepTypeEnum
 from utils.snowflake import snowIdWorker
 
 
@@ -12,8 +12,9 @@ class ApiInfo(Base, BaseModel):
 
     __tablename__ = 'hrm_api_info'
 
-    api_id = Column(BigInteger, comment='api_id', nullable=True, default=snowIdWorker.get_id, index=True)
+    api_id = Column(BigInteger, comment='api_id', nullable=False, unique=True, default=snowIdWorker.get_id, index=True)
     type = Column(Integer, nullable=False, comment='目录/API', default=DataType.api.value)
+    api_type = Column(Integer, nullable=True, comment='API的类型', default=None)  # TstepTypeEnum
     name = Column(String(200), comment='目录名/API名称', nullable=False)
     path = Column(String(500), comment='接口路劲(请求地址), 为空则是目录', nullable=True)
     interface = Column(String(500), comment='为空则是目录，具体接口用于搜索', nullable=True)

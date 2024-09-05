@@ -60,7 +60,7 @@ const activeResultTab = ref("response")
           </el-tab-pane>
           <el-tab-pane label="data" name="requestJson">
             <div style="width: 100%">
-              <AceEditor v-model:content="stepDetailData.request.data" can-set="true" height="calc(100vh - 410px)"></AceEditor>
+              <AceEditor v-model:content="stepDetailData.request.data" can-set="true" height="calc(100vh - 323px)"></AceEditor>
             </div>
           </el-tab-pane>
         </template>

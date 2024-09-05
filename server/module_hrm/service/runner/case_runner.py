@@ -178,8 +178,9 @@ class RequestRunner(object):
 
         request_data = self.step_data.request.model_dump(by_alias=True)
 
+        temp_all_val_dict = key_value_dict(temp_all_val)
         request_data = parse_data(request_data,
-                                  key_value_dict(temp_all_val),
+                                  temp_all_val_dict,
                                   self.debugtalk_func_map)
         return request_data
 

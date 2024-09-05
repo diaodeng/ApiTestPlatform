@@ -1,3 +1,4 @@
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from module_hrm.dao.api_dao import ApiOperation
 from module_hrm.entity.do.api_do import ApiInfo
@@ -56,6 +57,8 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
         node_data = {
             'edit': False,
             "apiId": api_obj.api_id,
+            "apiType": api_obj.api_type,
+            "type": api_obj.type,
             "name": f'{api_obj.name}',
             "title": api_obj.interface or api_obj.name,
             "isParent": True if api_obj.type == DataType.folder.value else False,
@@ -70,6 +73,8 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
     def node_handle2(api_obj):
         node_data = {
             "id": api_obj.id,
+            "type": api_obj.type,
+            "apiType": api_obj.api_type,
             "name": f'{api_obj.name}',
             "title": api_obj.interface or api_obj.name,
             "isParent": True if api_obj.type == DataType.folder.value else False,
@@ -100,13 +105,13 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
     root_nodes = query_db.query(ApiInfo).filter(ApiInfo.parent_id == None)
     if query_info.only_self:
         root_nodes = root_nodes.filter(ApiInfo.manager == query_info.manager)
-    root_nodes = root_nodes.all()
+    root_nodes = root_nodes.order_by(desc(ApiInfo.create_time)).all()
     root_nodes = [node_handle(root_node) for root_node in root_nodes]
 
     not_root_nodes_obj = query_db.query(ApiInfo).filter(ApiInfo.parent_id != None)
     if query_info.only_self:
         not_root_nodes_obj = not_root_nodes_obj.filter(ApiInfo.manager == query_info.manager)
-    not_root_nodes_obj = not_root_nodes_obj.all()
+    not_root_nodes_obj = not_root_nodes_obj.order_by(desc(ApiInfo.create_time)).all()
     not_root_nodes_data = [node_handle(node) for node in not_root_nodes_obj]
 
     data_handle(root_node, root_nodes, not_root_nodes_data)

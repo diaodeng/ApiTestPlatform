@@ -99,7 +99,7 @@ class CaseDao:
         :return:
         """
         if not isinstance(case, CaseModel):
-            case = CaseModel(**case.model_dump(exclude_unset=True))
+            case = CaseModel(**case.model_dump(exclude_unset=True, by_alias=True))
         db_case = HrmCase(**case.model_dump(exclude_unset=True))
         db.add(db_case)
         db.flush()
@@ -116,7 +116,7 @@ class CaseDao:
         :return:
         """
         if not isinstance(case, CaseModel):
-            case = CaseModel(**case.model_dump(exclude_unset=True))
+            case = CaseModel(**case.model_dump(exclude_unset=True, by_alias=True))
 
         case_data = case.model_dump(exclude_unset=True)
         db.query(HrmCase).filter(HrmCase.case_id == case.case_id).update(case_data)
