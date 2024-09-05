@@ -108,10 +108,11 @@ export const initApiFormData = {
     name: "新增API",
     path: "",
     interface: "",
-    type: HrmDataTypeEnum.api_http,
+    type: HrmDataTypeEnum.api,
     requestInfo: initCaseRequestData,
     parentId: undefined,
     isNew: true,
+    stepType: CaseStepTypeEnum.http,
 }
 
 export const initDebugTalkFormData = {

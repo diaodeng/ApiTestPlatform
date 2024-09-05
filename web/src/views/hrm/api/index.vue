@@ -15,6 +15,7 @@ import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
 import FullScreen from "@/components/hrm/common/fullscreen.vue";
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
 import {Setting} from "@element-plus/icons-vue";
+import {getApiFormDataByType} from "@/components/hrm/case/case-utils.js";
 
 
 const {proxy} = getCurrentInstance();
@@ -32,7 +33,7 @@ const folderForm = ref({parentId: null, name: null})
 const apiTabsData = ref([]);
 const currentApiData = ref(apiTabsData.value[0] || null);
 const selectedEnv = ref("");
-const currentTab = ref(0);
+const currentTab = ref(0);  // 当前选中的tab，是apiId
 const loadingApi = ref(false);
 const onlySelf = ref(true);
 const loading = ref({
@@ -80,8 +81,13 @@ function getApiInfo(apiId) {
 function saveApiInfo() {
   loading.value.saveApi = true;
   let data = toRaw(currentApiData.value);
+  data = structuredClone(data);
 
   data.type = HrmDataTypeEnum.api
+
+  data.requestInfo.teststeps.forEach((step) => {
+    step.result = null;
+  });
 
   if (data.id && data.apiId && !data.isNew) {
     updateApi(data).then(res => {
@@ -109,14 +115,26 @@ function saveApiInfo() {
 
 }
 
+/*
+* 保存成功后更新apiTabsData和treeDataSource、当前选中的tabid
+* */
 function apiSaveSuccess(res, oldApiId) {
   let response = res;
   if (response) {
-    console.log(response.data.apiId);
     let treeNode = treeRef.value.getNode(oldApiId);
     treeNode.data.apiId = response.data.apiId;
     treeNode.data.name = response.data.name;
     treeNode.data.isNew = false;
+
+    treeNode.apiId = response.data.apiId;
+    treeNode.name = response.data.name;
+
+    apiTabsData.value.forEach(apiInfo => {
+      if (apiInfo.apiId === oldApiId) {
+        apiInfo.apiId = response.data.apiId;
+        currentTab.value = response.data.apiId;
+      }
+    })
   }
 }
 
@@ -124,6 +142,7 @@ function saveFolderInfo() {
   loading.value.preSaveFolderDialog = true;
   let data = folderForm.value;
   data.type = HrmDataTypeEnum.folder
+  data.apiType = CaseStepTypeEnum.folder
   addApi(data).then(res => {
     ElMessage({message: "Folder保存成功", type: "success"});
   }).finally(() => {
@@ -141,6 +160,7 @@ function getApiTree() {
 }
 
 function nodeDbClick(event, node, data) {
+
   if (node.data.isParent) {
     node.expanded = !node.expanded;
   } else {
@@ -149,19 +169,22 @@ function nodeDbClick(event, node, data) {
     if (nodeTabIndex !== -1) {
       currentTab.value = nodeId;
       currentApiData.value = apiTabsData.value[nodeTabIndex];
+      loadingApi.value = false;
     } else {
       loadingApi.value = true;
 
       if (node.data.isNew) {
-        const emptyData = JSON.parse(JSON.stringify(initApiFormData));
+        let emptyData = getApiFormDataByType(node.data.apiType);
         // currentApiData.value.apiId = nodeId;
         emptyData.isNew = true;
-        emptyData.type = HrmDataTypeEnum.api;
-        emptyData.requestInfo.api_name = node.name;
+        emptyData.type = node.data.type;
+        emptyData.apiType = node.data.apiType;
+        emptyData.requestInfo.name = node.name;
         emptyData.parentId = node.data.parentId;
         emptyData.apiId = node.data.apiId;
 
         apiTabsData.value.push(emptyData);
+
         currentApiData.value = apiTabsData.value[apiTabsData.value.length - 1];
         currentTab.value = emptyData.apiId;
 
@@ -169,7 +192,7 @@ function nodeDbClick(event, node, data) {
           apiTabsData.value.splice(0, 1);
         }
 
-        loadingApi.value = false
+        loadingApi.value = false;
         return;
       }
 
@@ -194,6 +217,13 @@ function nodeDbClick(event, node, data) {
 
 }
 
+
+function delTreeNode(data) {
+  const dataIndex = apiTabsData.value.findIndex(dict => dict.apiId === data.apiId)
+  if (dataIndex !== -1){
+    apiTabsData.value.splice(dataIndex, 1);
+  }
+}
 
 // currentApiData.isEmpty = true;
 
@@ -306,10 +336,10 @@ function apiTreeFilter() {
               <el-input v-model="treeFilterText" clearable placeholder="输入名称或者接口或者path">
                 <template #suffix>
                   <el-button icon="Search"
-                             type="text"
+                             type="info"
                              @click="apiTreeFilter"
                              :loading="loading.filter"
-                             :disabled="loading.filter"></el-button>
+                             :disabled="loading.filter" link></el-button>
                   <!--                  <el-icon @click="apiTreeFilter"><search></search></el-icon>-->
                 </template>
               </el-input>
@@ -322,6 +352,7 @@ function apiTreeFilter() {
                         @node-db-click="nodeDbClick"
                         v-model:filter-text="treeFilterText"
                         v-model:tree-ref="treeRef"
+                        @del-node="delTreeNode"
               ></TreeView>
             </div>
           </el-scrollbar>
@@ -355,7 +386,7 @@ function apiTreeFilter() {
                 </template>
                 <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.websocket">
                   <StepWebsocket v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"
-                                 edit-height="calc(100vh - 332px)"></StepWebsocket>
+                                 edit-height="calc(100vh - 385px)"></StepWebsocket>
                 </template>
               </div>
             </template>
