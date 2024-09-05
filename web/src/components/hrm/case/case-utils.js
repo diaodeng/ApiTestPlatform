@@ -1,6 +1,6 @@
 import {ElMessageBox} from "element-plus";
-import {CaseStepTypeEnum} from "@/components/hrm/enum.js";
-import {initStepData, initWebsocketData} from "@/components/hrm/data-template.js";
+import {CaseStepTypeEnum, HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {initStepData, initWebsocketData, initApiFormData} from "@/components/hrm/data-template.js";
 import {randomString} from "@/utils/tools.js";
 
 
@@ -27,4 +27,16 @@ export function getStepDataByType(stepType) {
 
     tapData.step_type = stepType;
     return tapData;
+}
+
+
+export function getApiFormDataByType(apiType) {
+
+    let apiFormData = initApiFormData;
+    apiFormData = JSON.parse(JSON.stringify(initApiFormData));
+    apiFormData.requestInfo.teststeps[0].request = getStepDataByType(apiType);
+    apiFormData.requestInfo.teststeps[0].step_type = apiType;
+    apiFormData.type = HrmDataTypeEnum.api;
+    apiFormData.apiType = apiType;
+    return apiFormData;
 }

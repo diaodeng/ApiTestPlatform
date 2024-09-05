@@ -6,6 +6,7 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.entity.vo.case_vo import *
+from module_hrm.enums.enums import TstepTypeEnum
 from module_hrm.service.case_service import *
 from utils.common_util import bytes2file_response
 from utils.log_util import *

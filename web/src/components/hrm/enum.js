@@ -42,5 +42,6 @@ export const HrmDataTypeEnum = {
 export const CaseStepTypeEnum = {
     http: 1,
     websocket: 2,
-    webui: 3
+    webui: 3,
+    folder: 4,
 }

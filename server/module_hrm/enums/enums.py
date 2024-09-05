@@ -42,6 +42,7 @@ class TstepTypeEnum(Enum):
     http = 1
     websocket = 2
     webui = 3
+    folder = 4
 
 
 class RunType(Enum):
