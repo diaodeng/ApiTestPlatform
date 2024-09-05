@@ -1,6 +1,6 @@
 <script setup>
 
-import {CaseStepTypeEnum} from "@/components/hrm/enum.js";
+import vClickOutside from "@/components/hrm/common/click-outside.js";
 
 const props = defineProps({
   x: {type: Number, default: 0},
@@ -12,19 +12,23 @@ const visible = defineModel("visible", {type: Boolean, default: false});
 
 const emits = defineEmits(["select"]);
 
+function hide() {
+    visible.value = false;
+}
+
 </script>
 
 <template>
   <div v-show="visible"
        :style="{left: x + 'px',top: y + 'px',display: visible ? 'block' : 'none'}"
        class="context-menu"
+       v-click-outside="hide"
   >
     <div
         v-for="(item, i) in menus"
         :key="i"
         class="menu-item"
         @click="visible = false;$emit('select', item)"
-        :disabled="item.disabled"
         style="display: flex;flex-direction: column;"
     >
       {{ item.title }}

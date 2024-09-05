@@ -19,6 +19,7 @@ class ApiModel(CommonDataModel):
 
     api_id: Optional[int] = None
     type: Optional[int] = None
+    api_type: Optional[int] = None
     name: Optional[str] = None
     path: Optional[str] = None
     interface: Optional[str] = None

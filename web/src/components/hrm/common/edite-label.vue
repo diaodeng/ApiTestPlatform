@@ -20,8 +20,8 @@ function selectedType(indexKey, type, stepData) {
     <el-space wrap :size="3">
 <!--      <el-icon :size="15" v-if="type === 1" color="green">RQ-</el-icon>-->
       <!--      <el-icon :size="15" v-else-if="type === 2" color="blue">WS-</el-icon>-->
-      <el-button v-if="type === 1" type="text" style="color: green">RQ</el-button>
-      <el-button v-else-if="type === 2" type="text" color="blue">WS</el-button>
+      <el-button v-if="type === CaseStepTypeEnum.http" type="success" link>RQ</el-button>
+      <el-button v-else-if="type === CaseStepTypeEnum.websocket" type="primary" link>WS</el-button>
 
       <span v-show="!edit">{{ labelName }}</span>
       <el-input style="width: 80px" v-show="edit" v-model="labelName"></el-input>

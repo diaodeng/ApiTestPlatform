@@ -1,13 +1,11 @@
 <script lang="ts" setup>
-import {CirclePlusFilled, Delete, Edit, Folder, Plus, RemoveFilled, Tickets} from "@element-plus/icons-vue";
+import {CirclePlusFilled, Folder, RemoveFilled, Tickets} from "@element-plus/icons-vue";
 import EditLabelText from "@/components/hrm/common/edit-label-text.vue";
 import ContextMenu from "@/components/hrm/common/context-menu.vue";
-import {HrmDataTypeEnum} from "@/components/hrm/enum";
-import RequestTypeDropdown from "@/components/hrm/case/request-type-dropdown.vue"
-import {ElMessageBox, ElMessage} from "element-plus";
-import {apiTree, addApi, updateApi, delApi, getApi} from "@/api/hrm/api.js";
+import {HrmDataTypeEnum, CaseStepTypeEnum} from "@/components/hrm/enum";
+import {ElMessage, ElMessageBox} from "element-plus";
+import {delApi} from "@/api/hrm/api.js";
 import {randomString} from "@/utils/tools.js";
-import {getStepDataByType} from "@/components/hrm/case/case-utils.js";
 
 
 const dataSource = defineModel("dataSource");
@@ -21,40 +19,38 @@ const contextMenu = reactive({
   data: [
     {
       title: '新增文件夹',
-      type: HrmDataTypeEnum.folder,
+      apiType: CaseStepTypeEnum.folder,
       icon: 'Menu'
     },
     {
       title: '新增http请求',
-      type: HrmDataTypeEnum.api_http,
+      apiType: CaseStepTypeEnum.http,
       icon: 'Menu',
       divided: true
     },
     {
       title: '新增websocket请求',
-      type: HrmDataTypeEnum.api_websocket,
+      apiType: CaseStepTypeEnum.websocket,
       icon: 'Menu',
       divided: true
     },
-    {
-      title: '1-3 菜单',
-      icon: 'https://element-plus.org/images/element-plus-logo.svg',
-      children: [
-        {title: '1-3-1 菜单', remark: 'Ctrl+A'},
-        {title: '1-3-2 菜单', disabled: true},
-        {
-          title: '1-3-3 菜单',
-          className: 'custom-red-menu-item'
-        }
-      ],
-      disabled: true
-    }
+    // {
+    //   title: '1-3 菜单',
+    //   icon: 'https://element-plus.org/images/element-plus-logo.svg',
+    //   children: [
+    //     {title: '1-3-1 菜单', remark: 'Ctrl+A'},
+    //     {title: '1-3-2 菜单', disabled: true},
+    //     {
+    //       title: '1-3-3 菜单',
+    //       className: 'custom-red-menu-item'
+    //     }
+    //   ],
+    //   disabled: true
+    // }
   ],
   onSelect: (item: any) => {
-    append(contextMenuSelectNode.value.data, item.type);
-    // console.log(contextMenuSelectNode.value);
-    // console.log(item)
-    ElMessage.success('选中了' + item.title)
+    append(contextMenuSelectNode.value.data, item.apiType);
+    // ElMessage.success('选中了' + item.title)
   }
 })
 
@@ -63,6 +59,7 @@ const emit = defineEmits(["nodeDbClick", "delNode", "filter", "addNode"]);
 interface Tree {
   apiId: bigint,
   type: number,
+  apiType: number,
   name: string,
   parentId: bigint,
   children?: Tree[]
@@ -184,6 +181,7 @@ const append = (data: Tree, type) => {
   if (!data.isParent) {
     return;
   }
+
   const newStepId = randomString(10);
   const newStepName = "新增API";
   const newChild = {
@@ -192,9 +190,10 @@ const append = (data: Tree, type) => {
     children: [],
     isNew: true,
     apiId: newStepId,
-    isParent: false,
+    isParent: type === CaseStepTypeEnum.folder,
     parentId: data.apiId,
-    type: type
+    type: type !== CaseStepTypeEnum.folder?HrmDataTypeEnum.api: HrmDataTypeEnum.folder,
+    apiType: type
   }
   if (!data.children) {
     data.children = []
@@ -270,13 +269,15 @@ function treeFilter(value, data, node) {
             @mouseenter="(event)=>{node.data.edit=true}"
             @mouseleave="(event)=>{node.data.edit=false}"
       >
-          <el-icon v-if="data.isParent"><folder/></el-icon>
-          <el-icon v-else><tickets/></el-icon>
+          <el-icon v-if="data.apiType===CaseStepTypeEnum.folder && data.isParent"><folder/></el-icon>
+          <el-button v-else-if="data.apiType===CaseStepTypeEnum.http" type="text" style="color: green">RQ</el-button>
+          <el-button v-else-if="data.apiType===CaseStepTypeEnum.websocket" type="text" color="blue">WS</el-button>
+          <el-button v-else-if="data.apiType===CaseStepTypeEnum.webui" type="text" style="color: yellow">WB</el-button>
           <span><edit-label-text v-model:content="data.name"
                                  v-model:show-edite="node.data.edit"></edit-label-text></span>
           <span v-if="node.data.edit">
 <!--            <el-icon color="blue"><edit></edit></el-icon>-->
-          <el-icon color="green" @click.stop="append(data)"><circle-plus-filled></circle-plus-filled></el-icon>
+          <el-icon color="green" @click.stop="append(data, CaseStepTypeEnum.http)"><circle-plus-filled></circle-plus-filled></el-icon>
             <!--            <RequestTypeDropdown @type-selected="append" :index-key="data"></RequestTypeDropdown>-->
             <el-icon color="red" @click.stop="remove(node, data)"><remove-filled></remove-filled></el-icon>
           </span>
