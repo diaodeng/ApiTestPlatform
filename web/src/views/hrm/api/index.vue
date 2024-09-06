@@ -182,7 +182,6 @@ function nodeDbClick(event, node, data) {
         emptyData.requestInfo.name = node.name;
         emptyData.parentId = node.data.parentId;
         emptyData.apiId = node.data.apiId;
-
         apiTabsData.value.push(emptyData);
 
         currentApiData.value = apiTabsData.value[apiTabsData.value.length - 1];
