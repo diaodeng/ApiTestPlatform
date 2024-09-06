@@ -32,6 +32,7 @@
     "jsencrypt": "3.3.2",
     "monaco-editor": "^0.48.0",
     "nprogress": "0.2.0",
+    "pako": "^2.1.0",
     "pinia": "2.1.7",
     "vue": "3.4.27",
     "vue-cropper": "1.1.1",

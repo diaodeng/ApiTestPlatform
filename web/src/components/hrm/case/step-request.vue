@@ -6,8 +6,6 @@ import DebugResult from "@/components/hrm/common/debug_result.vue";
 import TableHeaders from "@/components/hrm/table-headers.vue";
 import TableVariables from "@/components/hrm/table-variables.vue";
 import DictSelect from "@/components/select/dict_select.vue";
-import Fullscreen from "@/components/hrm/common/fullscreen.vue";
-import {Json} from "@/utils/tools.js";
 
 
 const {proxy} = getCurrentInstance();
@@ -19,44 +17,6 @@ const props = defineProps(["editHeight"]); // 编辑器高度，默认是100vh -
 
 const activeRequestDetailName = ref("requestHeader")
 const activeResultTab = ref("response")
-
-const calcResponse = computed({
-  get() {
-    if (stepDetailData.value.result && stepDetailData.value.result.response) {
-      const data = stepDetailData.value.result.response.body || stepDetailData.value.result.response.text || "";
-      try {
-        return Json.beautifulJson(data);
-      } catch (e) {
-        return data;
-      }
-    } else {
-      return "";
-    }
-  },
-  set(newValue) {
-    stepDetailData.value.result.response.body = newValue
-  }
-})
-
-const calcLogs = computed(() => {
-  if (stepDetailData.value.result && stepDetailData.value.result.logs) {
-    return (stepDetailData.value.result.logs.before_request || "")
-        + "\n"
-        + (stepDetailData.value.result.logs.after_response || "")
-        + "\n"
-        + (stepDetailData.value.result.logs.error || "");
-  } else {
-    return "";
-  }
-})
-
-const calcErrorLogs = computed(() => {
-  if (stepDetailData.value.result && stepDetailData.value.result.logs) {
-    return stepDetailData.value.result.logs.error || "";
-  } else {
-    return "";
-  }
-})
 
 </script>
 

@@ -1,7 +1,7 @@
 <script setup>
 
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
-import {Json} from "@/utils/tools.js";
+import {Json, decompressText} from "@/utils/tools.js";
 
 
 const activeTab = defineModel("activeTab", {required: true, default: "response"})
@@ -11,7 +11,11 @@ const props = defineProps({editHeight: {default: 'calc(100vh - 160px)'}})
 const calcResponse = computed({
   get() {
     if (stepDetailData.value.result && stepDetailData.value.result.response) {
-      const data = stepDetailData.value.result.response.body || stepDetailData.value.result.response.text || "";
+      let response = stepDetailData.value.result.response;
+      if (typeof response === "string") {
+        response = Json.parse(decompressText(response));
+      }
+      const data = response.body || response.text || "";
       try {
         return Json.beautifulJson(data);
       } catch (e) {
@@ -28,11 +32,15 @@ const calcResponse = computed({
 
 const calcLogs = computed(() => {
   if (stepDetailData.value.result && stepDetailData.value.result.logs) {
-    return (stepDetailData.value.result.logs.before_request || "")
+    let logs = stepDetailData.value.result.logs;
+    if (typeof logs === "string") {
+      logs = Json.parse(decompressText(logs));
+    }
+    return (logs.before_request || "")
         + "\n"
-        + (stepDetailData.value.result.logs.after_response || "")
+        + (logs.after_response || "")
         + "\n"
-        + (stepDetailData.value.result.logs.error || "");
+        + (logs.error || "");
   } else {
     return "";
   }
@@ -40,7 +48,11 @@ const calcLogs = computed(() => {
 
 const calcErrorLogs = computed(() => {
   if (stepDetailData.value.result && stepDetailData.value.result.logs) {
-    return stepDetailData.value.result.logs.error || "";
+    let logs = stepDetailData.value.result.logs;
+    if (typeof logs === "string") {
+      logs = Json.parse(decompressText(logs));
+    }
+    return logs.error || "";
   } else {
     return "";
   }
