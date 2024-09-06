@@ -27,6 +27,15 @@ export function addCase(data) {
   })
 }
 
+// 复制用例
+export function copyCase(data) {
+  return request({
+    url: '/hrm/case/copy',
+    method: 'post',
+    data: data
+  })
+}
+
 // 修改用例
 export function updateCase(data) {
   return request({

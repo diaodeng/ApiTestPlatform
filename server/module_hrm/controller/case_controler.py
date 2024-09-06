@@ -61,6 +61,28 @@ async def add_hrm_case(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
+@caseController.post("/copy", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:copy'))])
+@log_decorator(title='用例复制', business_type=1)
+async def add_hrm_case(request: Request,
+                       add_case: AddCaseModel,
+                       query_db: Session = Depends(get_db),
+                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    try:
+        add_case.manager = current_user.user.user_id
+        add_case.create_by = current_user.user.user_name
+        add_case.update_by = current_user.user.user_name
+        add_module_result = CaseService.copy_case_services(query_db, add_case)
+        if add_module_result.is_success:
+            logger.info(add_module_result.message)
+            return ResponseUtil.success(msg=add_module_result.message)
+        else:
+            logger.warning(add_module_result.message)
+            return ResponseUtil.failure(msg=add_module_result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @caseController.put("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:edit'))])
 @log_decorator(title='用例管理', business_type=2)
 async def edit_hrm_case(request: Request,

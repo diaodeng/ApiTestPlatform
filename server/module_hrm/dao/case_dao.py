@@ -27,7 +27,7 @@ class CaseDao:
         return info
 
     @classmethod
-    def get_case_detail_by_info(cls, db: Session, case: CaseQuery):
+    def get_case_detail_by_info(cls, db: Session, case: CaseQuery) -> HrmCase:
         """
         根据用例参数获取用例信息
         :param db: orm对象
