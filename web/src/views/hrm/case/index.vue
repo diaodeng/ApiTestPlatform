@@ -60,6 +60,16 @@
     <el-row :gutter="10" class="mb8">
       <el-col :span="1.5">
         <el-button
+            type="info"
+            plain
+            icon="CaretRight"
+            @click="runTest"
+            v-hasPermi="['hrm:case:test']"
+        >运行
+        </el-button>
+      </el-col>
+      <el-col :span="1.5">
+        <el-button
             type="primary"
             plain
             icon="Plus"
@@ -134,6 +144,7 @@
           <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
         </template>
       </el-table-column>
+      <el-table-column label="创建人" align="center" prop="createBy"></el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
         <template #default="scope">
           <span>{{ parseTime(scope.row.createTime) }}</span>
@@ -144,7 +155,7 @@
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" align="center" class-name="small-padding fixed-width" fixed="right">
+      <el-table-column label="操作" width="170" align="center" class-name="small-padding fixed-width" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="Histogram" @click="showHistory(scope.row)"
                      v-hasPermi="['hrm:case:history']"
@@ -309,6 +320,9 @@ function nameOrGlob(val) {
 }
 
 
+/*
+* 行执行用例
+* **/
 function runTest(row) {
   if (row && "caseId" in row && row.caseId){
     runIds.value = [row.caseId];
@@ -317,10 +331,10 @@ function runTest(row) {
     ElMessageBox.alert('请选择要运行的用例', "提示！", {type: "warning"});
       return;
   }
-
   runDialogShow.value = true;
 
 }
+
 
 /*
 * 换起用例复制弹窗
