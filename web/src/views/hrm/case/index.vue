@@ -161,7 +161,7 @@
           <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
                      v-hasPermi="['hrm:case:test']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
           </el-button>
-          <el-button link type="warning" icon="CopyDocument" v-loading="loading" @click="runTest(scope.row)"
+          <el-button link type="warning" icon="CopyDocument" v-loading="loading" @click="showCopyDialog(scope.row)"
                      v-hasPermi="['hrm:case:copy']" title="复制">
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
@@ -200,6 +200,21 @@
       </el-container>
     </el-dialog>
 
+
+    <el-dialog :title="copyCaseInfo?.caseName" v-model="copyDialog" append-to-body destroy-on-close>
+      <el-container style="height: 100%">
+        <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
+        <!--          </el-header>-->
+        <el-main style="max-height: calc(100vh - 95px);">
+          <el-input placeholder="请输入用例名称" v-model="copyCaseInfo.caseName">
+            <template #suffix>
+              <el-button @click="copyCaseHandle">保存</el-button>
+            </template>
+          </el-input>
+        </el-main>
+      </el-container>
+    </el-dialog>
+
       <!-- 运行用例对话框 -->
     <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.case" :run-ids="runIds"></RunDialog>
 
@@ -207,7 +222,7 @@
 </template>
 
 <script setup name="Case">
-import {delCase, getCase, getComparator, listCase} from "@/api/hrm/case";
+import {delCase, getCase, getComparator, listCase, copyCase} from "@/api/hrm/case";
 import {selectModulList} from "@/api/hrm/module";
 import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
@@ -216,7 +231,7 @@ import {initCaseFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run-detail.vue';
 import RunDialog from '@/components/hrm/common/run_dialog.vue';
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
-import {ElMessageBox} from "element-plus";
+import {ElMessageBox, ElMessage} from "element-plus";
 // import JsonEditorVue from "json-editor-vue3";
 
 
@@ -271,6 +286,9 @@ const runIds = ref([]);
 const history = ref(false);
 const currentRunId = ref();
 
+const copyDialog = ref(false);
+const copyCaseInfo = ref(initCaseFormData);
+
 const queryParams = toRef({
   pageNum: 1,
   pageSize: 10,
@@ -304,6 +322,32 @@ function runTest(row) {
 
 }
 
+/*
+* 换起用例复制弹窗
+* */
+function showCopyDialog(data) {
+  copyDialog.value = true;
+  console.log(isRef(data))
+  copyCaseInfo.value = structuredClone(toValue(toRaw(data)));
+}
+
+
+/*
+* 复制用例
+* */
+function copyCaseHandle() {
+  copyDialog.value = true;
+  let data = {
+    caseId: copyCaseInfo.value.caseId,
+    caseName: copyCaseInfo.value.caseName,
+  }
+  copyCase(data).then(response => {
+    ElMessage.success("复制成功");
+  }).finally(()=>{
+    copyDialog.value = false;
+  });
+}
+
 
 /** 查询用例列表 */
 function getList() {
@@ -311,6 +355,7 @@ function getList() {
   listCase(queryParams.value).then(response => {
     caseList.value = response.rows;
     total.value = response.total;
+  }).finally(()=>{
     loading.value = false;
   });
 }

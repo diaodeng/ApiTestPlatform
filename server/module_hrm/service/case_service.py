@@ -1,8 +1,11 @@
+import copy
+
 from module_hrm.dao.case_dao import *
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseDetailForHandle
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
 from utils.page_util import PageResponseModel
+from utils.snowflake import snowIdWorker
 
 
 class CaseService:
@@ -49,6 +52,40 @@ class CaseService:
                 CaseDao.add_case_dao(query_db, add_case)
                 query_db.commit()
                 result = dict(is_success=True, message='新增成功')
+            except Exception as e:
+                query_db.rollback()
+                raise e
+
+        return CrudResponseModel(**result)
+
+    @classmethod
+    def copy_case_services(cls, query_db: Session, page_object: AddCaseModel):
+        """
+        新增用例信息service
+        :param query_db: orm对象
+        :param page_object: 新增用例对象
+        :return: 新增用例校验结果
+        """
+        case = CaseDao.get_case_detail_by_info(query_db, CaseQuery(caseId=page_object.case_id))
+        if not case:
+            result = dict(is_success=False, message='原用例不存在')
+        else:
+            try:
+                new_data = case.__dict__.copy()
+                new_data["case_name"] = page_object.case_name
+                new_data["manager"] = page_object.manager
+                new_data["create_by"] = page_object.create_by
+                new_data["update_by"] = page_object.update_by
+                new_data.pop("id", None)
+                new_data.pop("case_id", None)
+                new_data.pop("create_time", None)
+                new_data.pop("update_time", None)
+                new_data.pop("_sa_instance_state", None)
+
+                new_case = HrmCase(**new_data)
+                query_db.add(new_case)
+                query_db.commit()
+                result = dict(is_success=True, message='复制成功')
             except Exception as e:
                 query_db.rollback()
                 raise e
