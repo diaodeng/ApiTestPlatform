@@ -52,7 +52,6 @@ function handleRun(env) {
 
     dialogTestLoading.value = true;
     testRun(form.value).then(response => {
-      console.log(response);
       ElMessage.success({
         message: response.msg,
         type: "success"
@@ -142,7 +141,7 @@ envListLoad();
       <div class="dialog-footer">
         <el-button @click="handleClose">取消</el-button>
         <el-button
-            :disabled="canRun"
+            :disabled="disableCanRun"
             type="primary"
             @click="handleRun">
           执行

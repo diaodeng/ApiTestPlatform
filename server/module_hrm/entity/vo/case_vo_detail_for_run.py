@@ -12,33 +12,16 @@ from module_hrm.enums.enums import TstepTypeEnum, CaseRunStatus
 from utils.utils import get_platform
 
 
-class ResponseData(BaseModel):
-    status_code: int = 200
-    headers: Dict = {}
-    cookies: caseVoHandle.Cookies = {}
-    encoding: Union[Text, None] = None
-    content_type: Text = ""
-    body: Union[Text, bytes, List, Dict, None] = ""
-    content: bytes | Text | List = ""
-    text: Union[Text, None] = ""
+class ResponseData(caseVoHandle.ResponseData):
+    pass
 
 
-class StepLogs(BaseModel):
-    before_request: Text = ""
-    after_response: Text = ""
-    error: Text = ""
+class StepLogs(caseVoHandle.StepLogs):
+    pass
 
 
-class Result(BaseModel):
-    success: bool = True
-    status: int = CaseRunStatus.passed.value
-    start_time_stamp: float = 0
-    start_time_iso: str = ""
-    end_time_iso: str = ""
-    end_time_stamp: float = 0
-    duration: float = 0
-    response: ResponseData = ResponseData()
-    logs: StepLogs = StepLogs()
+class Result(caseVoHandle.Result):
+    pass
 
 
 class TConfig(caseVoHandle.TConfig):
@@ -76,11 +59,7 @@ class TStep(caseVoHandle.TStep):
 
 
 class TestCase(caseVoHandle.TestCase):
-    module_id: Union[int, None] = None
-    project_id: Union[int, None] = None
-    case_id: Any = None
-    config: TConfig
-    teststeps: List[TStep]
+    pass
 
 
 class TestCaseTime(BaseModel):

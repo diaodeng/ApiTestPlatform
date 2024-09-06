@@ -7,8 +7,7 @@ from typing import Any, Callable, Dict, List, Text, Union
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
-from module_hrm.enums.enums import CaseRunStatus, DataType, TstepTypeEnum
-from utils.common_util import CamelCaseUtil
+from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
 
 Name = Text
 Url = Text
@@ -48,9 +47,8 @@ class Result(BaseModel):
     end_time_iso: str = ""
     end_time_stamp: float = 0
     duration: float = 0
-    response: ResponseData = ResponseData()
-    logs: StepLogs = StepLogs()
-
+    response: ResponseData | Text = ResponseData()  # text是用gzip压缩过的数据需要解压
+    logs: StepLogs | Text = StepLogs()  # text是用gzip压缩过的数据需要解压
 
 
 class MethodEnum(Text, Enum):
