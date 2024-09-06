@@ -34,8 +34,7 @@ export function getApiFormDataByType(apiType) {
 
     let apiFormData = initApiFormData;
     apiFormData = JSON.parse(JSON.stringify(initApiFormData));
-    apiFormData.requestInfo.teststeps[0].request = getStepDataByType(apiType);
-    apiFormData.requestInfo.teststeps[0].step_type = apiType;
+    apiFormData.requestInfo.teststeps[0] = getStepDataByType(apiType);
     apiFormData.type = HrmDataTypeEnum.api;
     apiFormData.apiType = apiType;
     return apiFormData;
