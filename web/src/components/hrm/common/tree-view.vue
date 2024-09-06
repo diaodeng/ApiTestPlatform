@@ -71,10 +71,11 @@ const handleNodeClick = (data: Tree, node, treeNode, event) => {
   // console.log(data)
   // console.log(node)
   // console.log(treeNode)
-  console.log(event)
-  if (event && event.target) {
-    console.log(event.target)
-  }
+  // console.log(event)
+  // if (event && event.target) {
+  //
+  //   console.log(event.target)
+  // }
 }
 
 /*
@@ -92,7 +93,6 @@ function handleNodeRightClick(event, data, node, nodeRef) {
   contextMenu.show = true;
   contextMenu.x = event.clientX
   contextMenu.y = event.clientY
-  console.log(event.clientX, event.clientY)
   event.preventDefault();
   // emit("nodeDbClick", event, data, node, nodeRef)
 
@@ -270,9 +270,9 @@ function treeFilter(value, data, node) {
             @mouseleave="(event)=>{node.data.edit=false}"
       >
           <el-icon v-if="data.apiType===CaseStepTypeEnum.folder && data.isParent"><folder/></el-icon>
-          <el-button v-else-if="data.apiType===CaseStepTypeEnum.http" type="text" style="color: green">RQ</el-button>
-          <el-button v-else-if="data.apiType===CaseStepTypeEnum.websocket" type="text" color="blue">WS</el-button>
-          <el-button v-else-if="data.apiType===CaseStepTypeEnum.webui" type="text" style="color: yellow">WB</el-button>
+          <el-button v-else-if="data.apiType===CaseStepTypeEnum.http" type="success" link>RQ</el-button>
+          <el-button v-else-if="data.apiType===CaseStepTypeEnum.websocket" type="primary" link>WS</el-button>
+          <el-button v-else-if="data.apiType===CaseStepTypeEnum.webui" type="warning" link>WB</el-button>
           <span><edit-label-text v-model:content="data.name"
                                  v-model:show-edite="node.data.edit"></edit-label-text></span>
           <span v-if="node.data.edit">
