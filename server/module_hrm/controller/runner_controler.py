@@ -25,7 +25,7 @@ runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginSe
 
 @runnerController.post("/test",
                        response_model=CaseModel,
-                       dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:test'))])
+                       dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:run'))])
 async def run_test(request: Request,
                    run_info: CaseRunModel,
                    query_db: Session = Depends(get_db),

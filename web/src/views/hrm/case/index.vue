@@ -60,16 +60,6 @@
     <el-row :gutter="10" class="mb8">
       <el-col :span="1.5">
         <el-button
-            type="info"
-            plain
-            icon="CaretRight"
-            @click="runTest"
-            v-hasPermi="['hrm:case:test']"
-        >运行
-        </el-button>
-      </el-col>
-      <el-col :span="1.5">
-        <el-button
             type="primary"
             plain
             icon="Plus"
@@ -170,7 +160,7 @@
                      v-hasPermi="['hrm:case:edit']" title="编辑">
           </el-button>
           <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
-                     v-hasPermi="['hrm:case:test']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
+                     v-hasPermi="['hrm:case:run']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
           </el-button>
           <el-button link type="warning" icon="CopyDocument" v-loading="loading" @click="showCopyDialog(scope.row)"
                      v-hasPermi="['hrm:case:copy']" title="复制">
