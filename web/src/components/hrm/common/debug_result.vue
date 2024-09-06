@@ -14,6 +14,7 @@ const calcResponse = computed({
       let response = stepDetailData.value.result.response;
       if (typeof response === "string") {
         response = Json.parse(decompressText(response));
+        stepDetailData.value.result.response = response;
       }
       const data = response.body || response.text || "";
       try {
