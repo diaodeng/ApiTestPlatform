@@ -2,15 +2,22 @@ import asyncio
 import json
 
 import websockets
+from loguru import logger
+
 
 class PromoDataHandle:
     def __init__(self, **kwargs):
-        self.url = kwargs.get('url')
-        self.venderId = kwargs.get('venderId')
-        self.data = kwargs.get('ws_data')
+        self.uri = kwargs.get('uri', None)
+        self.venderId = kwargs.get('venderId', [])
+        self.data = kwargs.get('ws_data', None)
+        self.data2 = kwargs.get('ws_data2', None)
+
     async def websocket_get_pro_ids(self):
-        async with websockets.connect(self.url) as websocket:
-            await websocket.send(json.dumps(self.data))
+        async with websockets.connect(self.uri) as websocket:
+            venderIds = ','.join(str(n) for n in self.venderId)
+            self.data = json.dumps(self.data).replace('venderId', venderIds)
+            logger.info(f'ws请求数据：{self.data}')
+            await websocket.send(self.data)
             res_data = []
             for i in range(3):
                 response = await websocket.recv()
@@ -29,56 +36,21 @@ class PromoDataHandle:
                         else:
                             user_pro_info[u_key] = [u_value]
                         pro_ids.append(u_value)
+            logger.info(f'查询到的促销单：{pro_ids}')
+            logger.info(f'用户对应的促销单：{user_pro_info}')
             return pro_ids, user_pro_info
 
-
-    async def websocket_stop_pro_ids(token, vender_id, pro_ids):
-        url = f"ws://test-idms-api.rta-os.com/websocket/sql_execute?token={token}"
-        sql = f"update `promo_instance` set `pro_status` = 7 where `vender_id` = {vender_id} and `pro_id` in {pro_ids};"
-        # data = {"data": {"database": "rta_promotion", "instance_id": 25263, "explain": False,
-        #                  "sql": sql}, "type": "execute"}
-        # async with websockets.connect(url) as websocket:
-        #     await websocket.send(json.dumps(data))
-        #     res_data = []
-        #     for i in range(3):
-        #         response = await websocket.recv()
-        #         res_data.append(response)
-        #     result = json.loads(res_data[2]).get('data', None)
-        #     pro_ids = []
-        #     if result:
-        #         res_data = result.get('result', None)
-        #         if res_data:
-        #             for pro_info in res_data:
-        #                 pro_ids.append(pro_info.get('C_1'))
-        #     return pro_ids
-        print(sql)
+    async def websocket_stop_pro_ids(self, proIds):
+        async with websockets.connect(self.uri) as websocket:
+            venderIds = ','.join(str(n) for n in self.venderId)
+            self.data2 = json.dumps(self.data2).replace('venderId', venderIds)
+            proIds = ','.join(proId for proId in proIds)
+            self.data2 = self.data2.replace('proIds', proIds)
+            logger.info(f'ws请求数据：{self.data2}')
+            await websocket.send(self.data2)
+            response = await websocket.recv()
+            logger.info(f'停止促销信息：{response}')
 
 
 if __name__ == '__main__':
-
-    data = {
-        "url": "ws://test-idms-api.rta-os.com/websocket/sql_execute?token=e7b0bf9b062dee8f816a887d6cf16f7610387034",
-        "venderId": 11,
-        "ws_data": {
-            "data": {
-                "database": "rta_promotion",
-                "instance_id": 25263,
-                "explain": False,
-                "sql": "SELECT a.`pro_id`, a.`vender_id`, a.`pro_status`, a.`pro_creater_name`, a.`pro_creater_id`, b.`store_join_type` FROM `promo_instance` a left join `promo_join_executor` b on a.`pro_id` = b.`pro_id` left join `promo_apply` c on a.`pro_id` = c.`pro_id` where a.`pro_status` = 4 and a.`vender_id` = 11 and (a.`pro_creater_name` = 'Sync Admin' or (b.`store_join_type` = 1 and a.`bar_code` IS NULL and a.`pro_id` not in (select d.`pro_id` from `promo_apply` d group by d.`pro_id` having count(case when d.`apply_type` =11 then 1 end)>0))) group by a.`pro_id` limit 10",
-            },
-            "type": "execute"
-        }
-    }
-    handle = PromoDataHandle(**data)
-    pro_ids, user_pro_info = asyncio.run(handle.websocket_get_pro_ids())
-    from utils.feishu import Feishu
-
-    vender_id = 11
-    limit = 5
-    content = f"即将强制结束商家：{vender_id}, 以下用户创建的促销单，原因是包含了全部门店，且未设置资格码"
-    for k, v in user_pro_info.items():
-        content = content + '\r\n用户名：' + k + ' 促销单：' + str(v)
-    content = content + f'\r\n本次任务共处理数据：{len(pro_ids)}条'
-    # Feishu().sendTextmessage(content)
-    # asyncio.run(websocket_stop_pro_ids(token, 11, tuple(pro_ids)))
-    print(content)
+    pass

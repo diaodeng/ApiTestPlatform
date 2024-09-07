@@ -8,19 +8,16 @@ import hmac
 
 # 飞书通知机器人
 FeishuTalk_Robots = {
-    "test": {
-        "url": 'https://open.feishu.cn/open-apis/bot/v2/hook/ce6b8640-6dcf-4504-8f2c-52dd5029b2ce',     # 机器人地址
-        "keywords": ["", ""],   # 关键词
-        "secret": "KYhVSfKWqNu9qpdA89pbGh",  # 签名
-        "at_user_id": []  # @用户id，不配置默认all【ou_0ae76af6579fbe3acf25f8e672caffcf】
-    }
+    "url": 'xxx',     # 机器人地址
+    "keywords": ["", ""],   # 关键词
+    "secret": "xxx",  # 签名
+    "at_user_id": []  # @用户id，不配置默认all
 }
 
 
 class Feishu:
-    def __init__(self):
-        robot_config = FeishuTalk_Robots.get('test')
-        self.robot = robot_config
+    def __init__(self, kwargs):
+        self.robot = kwargs
         self.headers = {"Content-Type": "application/json; charset=utf8"}
         self.secret = self.robot.get('secret', None)
         self.user_ids = self.robot.get('at_user_id', ["all"])
