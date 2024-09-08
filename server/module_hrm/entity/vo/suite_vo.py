@@ -21,10 +21,6 @@ class SuiteModel(CommonDataModel):
     simple_desc: Optional[str] = None
     status: Optional[str] = None
     del_flag: Optional[str] = None
-    # create_by: Optional[str] = None
-    # create_time: Optional[datetime] = None
-    # update_by: Optional[str] = None
-    # update_time: Optional[datetime] = None
 
 
 @as_query
@@ -56,14 +52,14 @@ class SuiteDetailModel(CommonDataModel):
     suite_detail_id: Optional[int] = None
     suite_id: Optional[int] = None
     suite_name: Optional[str] = None
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
+    case_id: Optional[int] = None
+    case_name: Optional[str] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
     status: Optional[str] = None
     del_flag: Optional[str] = None
-    # create_by: Optional[str] = None
-    # create_time: Optional[datetime] = None
-    # update_by: Optional[str] = None
-    # update_time: Optional[datetime] = None
 
 
 @as_query
