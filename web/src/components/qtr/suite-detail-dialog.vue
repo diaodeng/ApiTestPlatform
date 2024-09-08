@@ -1,100 +1,198 @@
 <template>
-  <el-dialog fullscreen :title='title'
-             v-model="openSuiteDetailDialog" append-to-body destroy-on-close>
-<!--    <el-form ref="postRef" :model="formData" :rules="formRules" label-width="100px" style="height: 100%">-->
-<!--      <el-container style="height: 100%; overflow-y: hidden">-->
-<!--        <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
-<!--          <el-button-group>-->
-<!--            <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']"-->
-<!--                       v-if="dataType !== HrmDataTypeEnum.run_detail"-->
-<!--            >保存-->
-<!--            </el-button>-->
-<!--            <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']"-->
-<!--                       v-if="dataType !== HrmDataTypeEnum.config">调试-->
-<!--            </el-button>-->
-<!--            <EnvSelector v-model:selected-env="selectedEnv"></EnvSelector>-->
-<!--          </el-button-group>-->
+  <el-dialog fullscreen :title='title' v-model="openSuiteDetailDialog" append-to-body destroy-on-close>
+    <div class="app-container">
+      <el-form :model="queryParams" ref="queryRef_detail" :inline="true" v-show="showSearch">
+        <el-form-item label="套件名称" prop="suiteName">
+          <el-input
+              v-model="queryParams.suiteName"
+              placeholder="请输入套件名称"
+              clearable
+              style="width: 200px"
+              @keyup.enter="handleQuery"
+          />
+        </el-form-item>
+        <el-form-item label="用例ID" prop="caseId">
+          <el-input
+              v-model="queryParams.caseId"
+              placeholder="请输入用例ID"
+              clearable
+              style="width: 200px"
+              @keyup.enter="handleQuery"
+          />
+        </el-form-item>
+        <el-form-item label="用例名称" prop="caseName">
+          <el-input
+              v-model="queryParams.caseName"
+              placeholder="请输入用例名称"
+              clearable
+              style="width: 200px"
+              @keyup.enter="handleQuery"
+          />
+        </el-form-item>
+        <el-form-item label="用例状态" prop="status">
+          <el-select v-model="queryParams.status" placeholder="用例状态" clearable style="width: 200px">
+            <el-option
+                v-for="dict in sys_normal_disable"
+                :key="dict.value"
+                :label="dict.label"
+                :value="dict.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
+          <el-button icon="Refresh" @click="resetQuery">重置</el-button>
+        </el-form-item>
+      </el-form>
 
-<!--        </el-header>-->
-<!--        <el-main style="max-height: calc(100vh - 95px);">-->
-<!--          <CaseConfig v-model:form-data="formData" :project-options="projectOptions"-->
-<!--                      v-if="dataType === HrmDataTypeEnum.config"-->
-<!--                      :data-type="dataType" :data-name="dataName"></CaseConfig>-->
-<!--          <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;"-->
-<!--                   v-else-if="dataType !== HrmDataTypeEnum.config">-->
-<!--            <el-tab-pane label="config" name="caseConfig">-->
-<!--              <CaseConfig v-model:form-data="formData" :project-options="projectOptions"-->
-<!--                          :data-type="dataType"></CaseConfig>-->
-<!--            </el-tab-pane>-->
-<!--            <el-tab-pane label="teststeps" name="caseSteps">-->
-<!--              <el-container style="max-height: calc(100vh - 207px)">-->
-<!--                <el-main>-->
-<!--                  <TestStep v-model:test-steps-data="formData.request.teststeps"></TestStep>-->
-<!--                </el-main>-->
-<!--              </el-container>-->
+      <!--    <el-row :gutter="10" class="mb8">-->
+      <!--      <el-col :span="1.5">-->
+      <!--        <el-button-->
+      <!--            type="primary"-->
+      <!--            plain-->
+      <!--            icon="Plus"-->
+      <!--            @click="handleAdd"-->
+      <!--            v-hasPermi="['qtr:suite:add']"-->
+      <!--        >新增-->
+      <!--        </el-button>-->
+      <!--        <el-button type="warning" icon="CaretRight" @click="runTest"-->
+      <!--                   v-hasPermi="['hrm:case:run']" title="运行">执行-->
+      <!--        </el-button>-->
+      <!--      </el-col>-->
+      <!--      <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>-->
+      <!--    </el-row>-->
 
-<!--            </el-tab-pane>-->
-<!--          </el-tabs>-->
-<!--        </el-main>-->
-<!--      </el-container>-->
-
-
-<!--    </el-form>-->
+      <!--    <el-table-->
+      <!--        border-->
+      <!--        v-if="refreshTable"-->
+      <!--        v-loading="loading"-->
+      <!--        :data="suiteList"-->
+      <!--        row-key="suiteId"-->
+      <!--        :default-expand-all="isExpandAll"-->
+      <!--        @selection-change="handleSelectionChange"-->
+      <!--    >-->
+      <!--      <el-table-column type="selection" width="55" align="center"/>-->
+      <!--      <el-table-column prop="suiteId" label="ID" width="160"></el-table-column>-->
+      <!--      <el-table-column prop="suiteName" label="套件名称" width="200"></el-table-column>\-->
+      <!--      <el-table-column prop="orderNum" label="排序" width="200"></el-table-column>-->
+      <!--      <el-table-column prop="status" label="状态" width="100">-->
+      <!--        <template #default="scope">-->
+      <!--          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>-->
+      <!--        </template>-->
+      <!--      </el-table-column>-->
+      <!--      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">-->
+      <!--        <template #default="scope">-->
+      <!--          <span>{{ parseTime(scope.row.createTime) }}</span>-->
+      <!--        </template>-->
+      <!--      </el-table-column>-->
+      <!--      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">-->
+      <!--        <template #default="scope">-->
+      <!--          <span>{{ parseTime(scope.row.updateTime) }}</span>-->
+      <!--        </template>-->
+      <!--      </el-table-column>-->
+      <!--      <el-table-column label="操作" align="center" class-name="small-padding fixed-width">-->
+      <!--        <template #default="scope">-->
+      <!--          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['qtr:suite:edit']">-->
+      <!--            修改-->
+      <!--          </el-button>-->
+      <!--          <el-button link type="primary" icon="Tools" @click="handleConfigSuite(scope.row)" v-hasPermi="['qtr:suite:edit']">-->
+      <!--            配置-->
+      <!--          </el-button>-->
+      <!--          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:suite:remove']">-->
+      <!--            删除-->
+      <!--          </el-button>-->
+      <!--        </template>-->
+      <!--      </el-table-column>-->
+      <!--    </el-table>-->
+    </div>
   </el-dialog>
 </template>
 
-<!--<script setup>-->
-<!--import {HrmDataTypeEnum} from "@/components/hrm/enum.js";-->
-<!--import {initCaseFormData} from "@/components/hrm/data-template.js";-->
-<!--import EnvSelector from "@/components/hrm/common/env-selector.vue";-->
-<!--import CaseConfig from "@/components/hrm/case/case-config.vue";-->
-<!--import TestStep from "@/components/hrm/case/step.vue";-->
+<script setup>
 
-<!--const props = defineProps({-->
-<!--  dataType: {type: Number, default: HrmDataTypeEnum.case},-->
-<!--  formRules: {-->
-<!--    type: Object,-->
-<!--    default: {}-->
-<!--  },-->
-<!--  formDatas: {type: Object, default: initCaseFormData},-->
-<!--  openCaseEditDialog: {type: Boolean, default: false},-->
-<!--  title: {type: String, default: "编辑页面"}-->
-<!--});-->
+const {proxy} = getCurrentInstance();
+const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const showSearch = ref(true);
+
+const data = reactive({
+  form: {},
+  queryParams: {
+    suiteName: undefined,
+    projectId: undefined,
+    projectName: undefined,
+    caseId: undefined,
+    caseName: undefined,
+    status: undefined
+  },
+  rules: {
+    suiteName: [{required: true, message: "套件名称不能为空", trigger: "blur"}],
+    orderNum: [{required: true, message: "显示排序不能为空", trigger: "blur"}]
+  },
+});
+
+const openSuiteDetailDialog = defineModel("openSuiteDetailDialog");
+const {queryParams, form, rules} = toRefs(data);
+
+/** 表单重置 */
+function reset() {
+  form.value = {
+    suiteId: undefined,
+    suiteName: undefined,
+    orderNum: 0,
+    simpleDesc: undefined,
+    status: "0"
+  };
+  proxy.resetForm("suiteRef");
+}
+
+/** 搜索按钮操作 */
+function handleQuery() {
+  getList();
+}
+
+/** 重置按钮操作 */
+function resetQuery() {
+  proxy.resetForm("queryRef_detail");
+  handleQuery();
+}
+
+/** 新增按钮操作 */
+function handleAdd(row) {
+  reset();
+  open.value = true;
+  title.value = "添加套件";
+}
+
+/** 提交按钮 */
+// function submitForm() {
+//   proxy.$refs["postRef"].validate(valid => {
+//     if (valid) {
+//       const caseData = formData.value
+//       caseData.request.config.name = caseData.caseName;
+//       caseData.request.config.result = {}
+//       for (let step of caseData.request.teststeps) {
+//         step.result = {}
+//       }
+//
+//       if (caseData.caseId !== undefined) {
+//         updateCase(caseData).then(response => {
+//           proxy.$modal.msgSuccess("修改成功");
+//           openCaseEditDialog.value = false;
+//           // getList();
+//         });
+//       } else {
+//         addCase(caseData).then(response => {
+//           proxy.$modal.msgSuccess("新增成功");
+//           openCaseEditDialog.value = false;
+//           // getList();
+//         });
+//       }
+//     }
+//   });
+// }
 
 
-<!--const openSuiteDetailDialog = defineModel("openSuiteDetailDialog");-->
-
-
-<!--/** 提交按钮 */-->
-<!--function submitForm() {-->
-<!--  proxy.$refs["postRef"].validate(valid => {-->
-<!--    if (valid) {-->
-<!--      const caseData = formData.value-->
-<!--      caseData.request.config.name = caseData.caseName;-->
-<!--      caseData.request.config.result = {}-->
-<!--      for (let step of caseData.request.teststeps) {-->
-<!--        step.result = {}-->
-<!--      }-->
-
-<!--      if (caseData.caseId !== undefined) {-->
-<!--        updateCase(caseData).then(response => {-->
-<!--          proxy.$modal.msgSuccess("修改成功");-->
-<!--          openCaseEditDialog.value = false;-->
-<!--          // getList();-->
-<!--        });-->
-<!--      } else {-->
-<!--        addCase(caseData).then(response => {-->
-<!--          proxy.$modal.msgSuccess("新增成功");-->
-<!--          openCaseEditDialog.value = false;-->
-<!--          // getList();-->
-<!--        });-->
-<!--      }-->
-<!--    }-->
-<!--  });-->
-<!--}-->
-
-
-<!--</script>-->
+</script>
 
 <style scoped lang="scss">
 

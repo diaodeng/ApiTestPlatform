@@ -239,7 +239,7 @@ function handleConfigSuite(row) {
     }
     form.value = response.data;
     openSuiteDetail.value = true;
-    title.value = "配置" + response.data['suiteName'];
+    title.value = "配置套件" + "【"+ response.data['suiteName'] +"】";
   });
 }
 

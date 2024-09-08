@@ -27,9 +27,11 @@ def job_stop_promo(*args, **kwargs):
     content = content + f'\r\n本次任务共处理数据：{len(pro_ids)}条, 其中同步数据：{sync_count}条'
     robot_info = kwargs.get('feishu_robot', None)
     if robot_info:
+        logger.info(content)
         feishu = Feishu(robot_info)
         feishu.sendTextmessage(content)
     else:
-        logger.info("未配置飞书通知")
         logger.info(content)
+        logger.info("未配置飞书通知")
+
 
