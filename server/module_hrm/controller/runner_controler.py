@@ -25,7 +25,7 @@ runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginSe
 
 @runnerController.post("/test",
                        response_model=CaseModel,
-                       dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:test'))])
+                       dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:run'))])
 async def run_test(request: Request,
                    run_info: CaseRunModel,
                    query_db: Session = Depends(get_db),
@@ -131,8 +131,11 @@ async def for_debug(request: Request,
             run_detail_obj.run_duration = case_run_data.config.result.duration
             run_detail_obj.run_detail = case_run_data.model_dump_json(by_alias=True)
             run_detail_obj.status = case_run_data.config.result.status
-
-            RunDetailDao.create(query_db, run_detail_obj)
+            try:
+                RunDetailDao.create(query_db, run_detail_obj)
+            except Exception as e:
+                logger.error("保存执行详情失败")
+                logger.exception(e)
 
             # all_log.append("\n".join(step_result.result.log.values()))
         data = ResponseUtil.success(data=steps_result)

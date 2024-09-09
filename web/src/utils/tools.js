@@ -1,4 +1,4 @@
-
+import pako from 'pako';
 
 export function randomString(length) {
     var text = "";
@@ -183,7 +183,7 @@ export function decompressText(compressedText) {
 /*
 * 压缩数据glib
 * */
-export function zipData(data) {
+export function compressData(data) {
     if (!data) return data
     // 判断数据是否需要转为JSON
     const dataJson = typeof data !== 'string' && typeof data !== 'number' ? JSON.stringify(data) : data

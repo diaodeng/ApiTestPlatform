@@ -20,7 +20,7 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item><el-checkbox >仅自己的数据</el-checkbox></el-form-item>
+      <el-form-item><el-checkbox v-model="onlySelf" @change="getList">仅自己的数据</el-checkbox></el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
         <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
@@ -38,10 +38,12 @@
       <el-table-column label="success" align="center" prop="success"/>
       <el-table-column label="total" align="center" prop="total"/>
       <el-table-column label="status" align="center" prop="status">
+
         <template #default="scope">
           <dict-tag :options="hrm_run_status" :value="scope.row.status"/>
         </template>
       </el-table-column>
+      <el-table-column label="创建人" align="center" prop="createBy"/>
       <el-table-column label="执行开始时间" align="center" prop="createTime" class-name="small-padding fixed-width">
         <template #default="scope">
           <span>{{ parseTime(scope.row.startAt) }}</span>
@@ -111,6 +113,7 @@ const multiple = ref(true);
 const total = ref(0);
 const showReportDetail = ref(false);
 const currentReportId = ref(null);
+const onlySelf = ref(true);
 
 const data = reactive({
   // form: {},
@@ -121,7 +124,8 @@ const data = reactive({
     reportName: undefined,
     projectId: undefined,
     moduleId: undefined,
-    status: undefined
+    status: undefined,
+    onlySelf: onlySelf,
   }
 });
 
