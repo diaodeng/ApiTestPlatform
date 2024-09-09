@@ -134,6 +134,7 @@
           <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
         </template>
       </el-table-column>
+      <el-table-column label="创建人" align="center" prop="createBy"></el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
         <template #default="scope">
           <span>{{ parseTime(scope.row.createTime) }}</span>
@@ -144,7 +145,7 @@
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" align="center" class-name="small-padding fixed-width" fixed="right">
+      <el-table-column label="操作" width="170" align="center" class-name="small-padding fixed-width" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="Histogram" @click="showHistory(scope.row)"
                      v-hasPermi="['hrm:case:history']"
@@ -159,7 +160,7 @@
                      v-hasPermi="['hrm:case:edit']" title="编辑">
           </el-button>
           <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
-                     v-hasPermi="['hrm:case:test']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
+                     v-hasPermi="['hrm:case:run']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
           </el-button>
           <el-button link type="warning" icon="CopyDocument" v-loading="loading" @click="showCopyDialog(scope.row)"
                      v-hasPermi="['hrm:case:copy']" title="复制">
@@ -309,6 +310,9 @@ function nameOrGlob(val) {
 }
 
 
+/*
+* 行执行用例
+* **/
 function runTest(row) {
   if (row && "caseId" in row && row.caseId){
     runIds.value = [row.caseId];
@@ -317,10 +321,10 @@ function runTest(row) {
     ElMessageBox.alert('请选择要运行的用例', "提示！", {type: "warning"});
       return;
   }
-
   runDialogShow.value = true;
 
 }
+
 
 /*
 * 换起用例复制弹窗

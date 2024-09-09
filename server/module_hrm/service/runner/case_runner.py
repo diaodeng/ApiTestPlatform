@@ -19,7 +19,7 @@ from module_hrm.utils import debugtalk_common, comparators
 from module_hrm.utils.CaseRunLogHandle import RunLogCaptureHandler, TestLog
 from module_hrm.utils.common import key_value_dict, update_or_extend_list, dict2list
 from module_hrm.utils.parser import parse_data
-from module_hrm.utils.util import replace_variables, get_func_map, ensure_str
+from module_hrm.utils.util import replace_variables, get_func_map, ensure_str, compress_text
 from module_hrm.dao.case_dao import CaseDao
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -116,6 +116,9 @@ class CaseRunner(object):
 
             log_content = self.handler.get_log()
             step_obj.step_data.result.logs.after_response += log_content
+
+            step_obj.step_data.result.logs = compress_text(step_obj.step_data.result.logs.model_dump_json())
+            step_obj.step_data.result.response = compress_text(step_obj.step_data.result.response.model_dump_json())
 
             update_or_extend_list(self.case_data.config.variables, dict2list(step_obj.extract_variable))
 

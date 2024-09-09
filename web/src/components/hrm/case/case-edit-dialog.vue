@@ -58,6 +58,7 @@ function submitForm() {
       const caseData = formData.value
       caseData.request.config.name = caseData.caseName;
       caseData.request.config.result = {}
+      caseData.type = props.dataType;
       for (let step of caseData.request.teststeps) {
         step.result = {}
       }
