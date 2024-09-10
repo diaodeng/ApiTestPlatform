@@ -105,3 +105,21 @@ async def query_detail_suite(request: Request, suite_id: int, query_db: Session 
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+@suiteController.get("/detail_list", response_model=List[SuiteDetailModel],
+                     dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:list'))])
+async def get_qtr_suite_detail_list(request: Request,
+                             suite_detail_query: SuiteDetailPageQueryModel = Depends(SuiteDetailPageQueryModel.as_query),
+                             query_db: Session = Depends(get_db),
+                             data_scope_sql: str = Depends(GetDataScope('QtrSuiteDetail')),
+                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                             ):
+    try:
+        suite_detail_query.manager = current_user.user.user_id
+        suite_detail_query_result = SuiteDetailService.get_suite_detail_list_services(query_db, suite_detail_query, data_scope_sql, is_page=True)
+        logger.info('获取成功')
+        return ResponseUtil.success(model_content=suite_detail_query_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))

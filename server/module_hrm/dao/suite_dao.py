@@ -2,7 +2,6 @@ from sqlalchemy.orm import Session
 from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
 from module_hrm.entity.vo.suite_vo import *
 from utils.page_util import PageUtil
-from utils.time_format_util import list_format_datetime
 
 
 class SuiteDao:
@@ -96,11 +95,39 @@ class SuiteDao:
         :return:
         """
         (db.query(QtrSuite).filter(QtrSuite.suite_id == suite.suite_id)
-         .update(
+        .update(
             {QtrSuite.del_flag: '2', QtrSuite.update_by: suite.update_by, QtrSuite.update_time: suite.update_time}))
 
+
+class SuiteDetailDao:
+    """
+    测试套件详情模块数据库操作层
+    """
+
+    def get_suite_detail_list(cls, db: Session, page_object: SuiteDetailPageQueryModel, data_scope_sql: str,
+                              is_page: bool = False):
+        """
+        根据套件id获取套件详细信息
+        :param db: orm对象
+        :param page_object: 分页查询参数对象
+        :param data_scope_sql: 数据权限对应的查询sql语句
+        :param is_page: 是否开启分页
+        :return: 套件想想信息对象列表
+        """
+        suite_detail = db.query(QtrSuiteDetail) \
+            .filter(QtrSuiteDetail.del_flag == 0,
+                    QtrSuiteDetail.status == page_object.status if page_object.status else True,
+                    eval(data_scope_sql))
+        if page_object.only_self:
+            suite_detail_result = suite_detail.filter(QtrSuiteDetail.manager == page_object.manager)
+        suite_detail_result = suite_detail_result.order_by(QtrSuiteDetail.order_num) \
+            .distinct()
+        suite_detail_list = PageUtil.paginate(suite_detail_result, page_object.page_num, page_object.page_size, is_page)
+
+        return suite_detail_list
+
     @classmethod
-    def get_suite_detail_by_id(cls, db: Session, suite_id: int):
+    def get_suite_detail_by_id(cls, db: Session, suite_detail_id: int):
         """
         根据套件id获取套件详细信息
         :param db: orm对象
@@ -108,7 +135,7 @@ class SuiteDao:
         :return: 套件详情对象
         """
         suite_details = db.query(QtrSuiteDetail) \
-            .filter(QtrSuiteDetail.suite_id == suite_id,
+            .filter(QtrSuiteDetail.suite_detail_id == suite_detail_id,
                     QtrSuiteDetail.del_flag == 0).first()
 
         return suite_details
