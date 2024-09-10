@@ -22,7 +22,7 @@ class SuiteService:
         return result
 
     @classmethod
-    def get_suite_list_services(cls, query_db: Session, page_object: SuiteQueryModel, data_scope_sql: str):
+    def get_suite_list_services(cls, query_db: Session, page_object: SuitePageQueryModel, data_scope_sql: str, is_page: bool = False):
         """
         获取测试套件列表信息service
         :param query_db: orm对象
@@ -30,9 +30,9 @@ class SuiteService:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: 测试套件列表信息对象
         """
-        suite_list_result = SuiteDao.get_suite_list(query_db, page_object, data_scope_sql)
+        suite_list_result = SuiteDao.get_suite_list(query_db, page_object, data_scope_sql, is_page)
 
-        return CamelCaseUtil.transform_result(suite_list_result)
+        return suite_list_result
 
     @classmethod
     def add_suite_services(cls, query_db: Session, page_object: SuiteModel):

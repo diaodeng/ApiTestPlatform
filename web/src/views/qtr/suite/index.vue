@@ -85,7 +85,13 @@
         </template>
       </el-table-column>
     </el-table>
-
+    <pagination
+        v-show="total > 0"
+        :total="total"
+        v-model:page="queryParams.pageNum"
+        v-model:limit="queryParams.pageSize"
+        @pagination="getList"
+    />
     <!-- 添加或修改套件对话框 -->
     <el-dialog :title="title" v-model="open" append-to-body>
       <el-form ref="suiteRef" :model="form" :rules="rules" label-width="80px">
@@ -157,13 +163,15 @@ const showSearch = ref(true);
 const title = ref("");
 const isExpandAll = ref(true);
 const refreshTable = ref(true);
-
+const total = ref(0);
 const runDialogShow = ref(false);
 const runIds = ref([]);
 
 const data = reactive({
   form: {},
   queryParams: {
+    pageNum: 1,
+    pageSize: 10,
     suiteName: undefined,
     status: undefined
   },
@@ -183,7 +191,8 @@ const SuiteTitle = computed(() => {
 function getList() {
   loading.value = true;
   listSuite(queryParams.value).then(response => {
-    suiteList.value = proxy.handleTree(response.data, "suiteId");
+    suiteList.value = response.rows;
+    total.value = response.total;
     loading.value = false;
   });
 }

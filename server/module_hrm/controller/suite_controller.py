@@ -16,16 +16,16 @@ suiteController = APIRouter(prefix='/qtr/suite', dependencies=[Depends(LoginServ
 @suiteController.get("/list", response_model=List[SuiteModel],
                      dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:list'))])
 async def get_qtr_suite_list(request: Request,
-                             suite_query: SuiteQueryModel = Depends(SuiteQueryModel.as_query),
+                             suite_query: SuitePageQueryModel = Depends(SuitePageQueryModel.as_query),
                              query_db: Session = Depends(get_db),
                              data_scope_sql: str = Depends(GetDataScope('QtrSuite')),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                              ):
     try:
         suite_query.manager = current_user.user.user_id
-        suite_query_result = SuiteService.get_suite_list_services(query_db, suite_query, data_scope_sql)
+        suite_query_result = SuiteService.get_suite_list_services(query_db, suite_query, data_scope_sql, is_page=True)
         logger.info('获取成功')
-        return ResponseUtil.success(data=suite_query_result)
+        return ResponseUtil.success(model_content=suite_query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

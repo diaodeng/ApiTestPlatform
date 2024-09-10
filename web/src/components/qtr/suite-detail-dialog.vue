@@ -2,9 +2,9 @@
   <el-dialog fullscreen :title='title' v-model="openSuiteDetailDialog" append-to-body destroy-on-close>
     <div class="app-container">
       <el-form :model="queryParams" ref="queryRef_detail" :inline="true" v-show="showSearch">
-        <el-form-item label="套件名称" prop="suiteName">
+        <el-form-item label="项目名称" prop="projectName">
           <el-input
-              v-model="queryParams.suiteName"
+              v-model="queryParams.projectName"
               placeholder="请输入套件名称"
               clearable
               style="width: 200px"
@@ -41,78 +41,31 @@
         </el-form-item>
         <el-form-item>
           <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
-          <el-button icon="Refresh" @click="resetQuery">重置</el-button>
+          <el-button type="success" icon="Refresh" @click="resetQuery">重置</el-button>
+          <el-button type="warning" icon="Plus" @click="handleSelectCase">选择用例</el-button>
         </el-form-item>
       </el-form>
 
-      <!--    <el-row :gutter="10" class="mb8">-->
-      <!--      <el-col :span="1.5">-->
-      <!--        <el-button-->
-      <!--            type="primary"-->
-      <!--            plain-->
-      <!--            icon="Plus"-->
-      <!--            @click="handleAdd"-->
-      <!--            v-hasPermi="['qtr:suite:add']"-->
-      <!--        >新增-->
-      <!--        </el-button>-->
-      <!--        <el-button type="warning" icon="CaretRight" @click="runTest"-->
-      <!--                   v-hasPermi="['hrm:case:run']" title="运行">执行-->
-      <!--        </el-button>-->
-      <!--      </el-col>-->
-      <!--      <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>-->
-      <!--    </el-row>-->
-
-      <!--    <el-table-->
-      <!--        border-->
-      <!--        v-if="refreshTable"-->
-      <!--        v-loading="loading"-->
-      <!--        :data="suiteList"-->
-      <!--        row-key="suiteId"-->
-      <!--        :default-expand-all="isExpandAll"-->
-      <!--        @selection-change="handleSelectionChange"-->
-      <!--    >-->
-      <!--      <el-table-column type="selection" width="55" align="center"/>-->
-      <!--      <el-table-column prop="suiteId" label="ID" width="160"></el-table-column>-->
-      <!--      <el-table-column prop="suiteName" label="套件名称" width="200"></el-table-column>\-->
-      <!--      <el-table-column prop="orderNum" label="排序" width="200"></el-table-column>-->
-      <!--      <el-table-column prop="status" label="状态" width="100">-->
-      <!--        <template #default="scope">-->
-      <!--          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>-->
-      <!--        </template>-->
-      <!--      </el-table-column>-->
-      <!--      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">-->
-      <!--        <template #default="scope">-->
-      <!--          <span>{{ parseTime(scope.row.createTime) }}</span>-->
-      <!--        </template>-->
-      <!--      </el-table-column>-->
-      <!--      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">-->
-      <!--        <template #default="scope">-->
-      <!--          <span>{{ parseTime(scope.row.updateTime) }}</span>-->
-      <!--        </template>-->
-      <!--      </el-table-column>-->
-      <!--      <el-table-column label="操作" align="center" class-name="small-padding fixed-width">-->
-      <!--        <template #default="scope">-->
-      <!--          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['qtr:suite:edit']">-->
-      <!--            修改-->
-      <!--          </el-button>-->
-      <!--          <el-button link type="primary" icon="Tools" @click="handleConfigSuite(scope.row)" v-hasPermi="['qtr:suite:edit']">-->
-      <!--            配置-->
-      <!--          </el-button>-->
-      <!--          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:suite:remove']">-->
-      <!--            删除-->
-      <!--          </el-button>-->
-      <!--        </template>-->
-      <!--      </el-table-column>-->
-      <!--    </el-table>-->
     </div>
+    <ProjectCaseDialog
+        :form-datas="form"
+        v-model:open-project-case-dialog="openProjectCaseDialog">
+    </ProjectCaseDialog>
   </el-dialog>
+
 </template>
 
 <script setup>
+import ProjectCaseDialog from "@/components/qtr/project-case-dialog.vue";
+import {listSuite} from "@/api/qtr/suite.js";
+import {listProject} from "@/api/hrm/project.js";
 
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const showSearch = ref(true);
+const openProjectCaseDialog = ref(false);
+const suiteDetailList = ref([]);
+const projectOptions = ref([]);
 
 const data = reactive({
   form: {},
@@ -156,6 +109,11 @@ function resetQuery() {
   handleQuery();
 }
 
+/** 选择用例按钮操作 */
+function handleSelectCase() {
+  openProjectCaseDialog.value = true;
+}
+
 /** 新增按钮操作 */
 function handleAdd(row) {
   reset();
@@ -163,34 +121,26 @@ function handleAdd(row) {
   title.value = "添加套件";
 }
 
-/** 提交按钮 */
-// function submitForm() {
-//   proxy.$refs["postRef"].validate(valid => {
-//     if (valid) {
-//       const caseData = formData.value
-//       caseData.request.config.name = caseData.caseName;
-//       caseData.request.config.result = {}
-//       for (let step of caseData.request.teststeps) {
-//         step.result = {}
-//       }
-//
-//       if (caseData.caseId !== undefined) {
-//         updateCase(caseData).then(response => {
-//           proxy.$modal.msgSuccess("修改成功");
-//           openCaseEditDialog.value = false;
-//           // getList();
-//         });
-//       } else {
-//         addCase(caseData).then(response => {
-//           proxy.$modal.msgSuccess("新增成功");
-//           openCaseEditDialog.value = false;
-//           // getList();
-//         });
-//       }
-//     }
-//   });
-// }
+/** 查询项目列表 */
+function getProjectSelect() {
+  listProject(null).then(response => {
+    projectOptions.value = response.data;
+  });
+}
 
+/** 查询套件详情列表 */
+function getList() {
+  loading.value = true;
+  listSuite(queryParams.value).then(response => {
+    suiteDetailList.value = response.rows;
+    total.value = response.total;
+  }).finally(()=>{
+    loading.value = false;
+  });
+}
+
+// getProjectSelect();
+// getList();
 
 </script>
 
