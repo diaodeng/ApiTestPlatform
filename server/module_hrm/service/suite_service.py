@@ -106,3 +106,22 @@ class SuiteService:
             result = dict(is_success=False, message='传入测试套件id为空')
         return CrudResponseModel(**result)
 
+
+class SuiteDetailService:
+    """
+    测试套件详情模块服务层
+    """
+
+    @classmethod
+    def get_suite_detail_list_services(cls, query_db: Session, page_object: SuiteDetailPageQueryModel, data_scope_sql: str,
+                                is_page: bool = False):
+        """
+        获取测试套件列表信息service
+        :param query_db: orm对象
+        :param page_object: 分页查询参数对象
+        :param data_scope_sql: 数据权限对应的查询sql语句
+        :return: 测试套件详细列表信息对象
+        """
+        suite_detail_list_result = SuiteDetailDao.get_suite_detail_list(query_db, page_object, data_scope_sql, is_page)
+
+        return suite_detail_list_result

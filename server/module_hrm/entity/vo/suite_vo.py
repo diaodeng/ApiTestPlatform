@@ -75,12 +75,24 @@ class SuiteDetailModel(CommonDataModel):
 
 
 @as_query
-class SuiteDetailQueryModel(SuiteModel):
+class SuiteDetailQueryModel(SuiteDetailModel, QueryModel):
     """
     测试套件详情不分页查询模型
     """
     begin_time: Optional[str] = None
     end_time: Optional[str] = None
+
+
+@as_query
+@as_form
+class SuiteDetailPageQueryModel(SuiteDetailQueryModel):
+    """
+    测试套件详情分页查询模型
+    """
+    page_num: int = 1
+    page_size: int = 10
+
+    only_self: bool = False
 
 
 class DeleteDetailSuiteModel(BaseModel):
