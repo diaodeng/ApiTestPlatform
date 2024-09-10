@@ -12,17 +12,17 @@
                 :value="option.projectId">
             </el-option>
           </el-select>
-      </el-form-item>
-      <el-form-item label="所属模块" prop="moduleId">
-        <el-select v-model="queryParams.moduleId" placeholder="请选择" clearable style="width: 150px">
-          <el-option
-              v-for="option in moduleOptions"
-              :key="option.moduleId"
-              :label="option.moduleName"
-              :value="option.moduleId">
-          </el-option>
-        </el-select>
-      </el-form-item>
+        </el-form-item>
+        <el-form-item label="所属模块" prop="moduleId">
+          <el-select v-model="queryParams.moduleId" placeholder="请选择" clearable style="width: 150px">
+            <el-option
+                v-for="option in moduleOptions"
+                :key="option.moduleId"
+                :label="option.moduleName"
+                :value="option.moduleId">
+            </el-option>
+          </el-select>
+        </el-form-item>、
         <el-form-item label="用例ID" prop="caseId">
           <el-input
               v-model="queryParams.caseId"
