@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
 from module_hrm.entity.vo.suite_vo import *
+from utils.page_util import PageUtil
 from utils.time_format_util import list_format_datetime
 
 
@@ -25,12 +26,13 @@ class SuiteDao:
         return suite_info
 
     @classmethod
-    def get_suite_list(cls, db: Session, page_object: SuiteQueryModel, data_scope_sql: str):
+    def get_suite_list(cls, db: Session, page_object: SuitePageQueryModel, data_scope_sql: str, is_page: bool = False):
         """
         根据查询参数获取套件列表信息
         :param db: orm对象
-        :param page_object: 不分页查询参数对象
+        :param page_object: 分页查询参数对象
         :param data_scope_sql: 数据权限对应的查询sql语句
+        :param is_page: 是否开启分页
         :return: 套件列表信息对象
         """
         suite_result = db.query(QtrSuite) \
@@ -41,9 +43,10 @@ class SuiteDao:
         if page_object.only_self:
             suite_result = suite_result.filter(QtrSuite.manager == page_object.manager)
         suite_result = suite_result.order_by(QtrSuite.order_num) \
-            .distinct().all()
+            .distinct()
+        suite_list = PageUtil.paginate(suite_result, page_object.page_num, page_object.page_size, is_page)
 
-        return suite_result
+        return suite_list
 
     @classmethod
     def get_suite_by_info(cls, db: Session, suite: SuiteModel):

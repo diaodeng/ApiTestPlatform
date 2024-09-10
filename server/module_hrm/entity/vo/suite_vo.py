@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 from typing import Union, Optional, List, Dict, Text, Any
 from datetime import datetime
-from module_admin.annotation.pydantic_annotation import as_query
+from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from utils.common_util import CamelCaseUtil
 
@@ -41,6 +41,18 @@ class DeleteSuiteModel(BaseModel):
     suite_ids: str
     update_by: Optional[str] = None
     update_time: Optional[str] = None
+
+
+@as_query
+@as_form
+class SuitePageQueryModel(SuiteQueryModel):
+    """
+    测试套件分页查询模型
+    """
+    page_num: int = 1
+    page_size: int = 10
+
+    only_self: bool = False
 
 
 class SuiteDetailModel(CommonDataModel):
