@@ -3,6 +3,7 @@
       v-model="openProjectCaseDialog"
       width="950"
       title="用例选择"
+      :suiteId=configSuiteId
       append-to-body
       destroy-on-close
       draggable
@@ -34,7 +35,7 @@
       <el-form-item :label="dataName+'ID'" prop="caseId">
         <el-input
             v-model="queryParams.caseId"
-            :placeholder="'请输入'+dataName+'名称'"
+            :placeholder="'请输入'+dataName+'ID'"
             clearable
             style="width: 200px"
             @keyup.enter="handleQuery"
@@ -113,8 +114,8 @@
     <template #footer>
       <div class="dialog-footer">
         <el-button @click="openProjectCaseDialog = false">取消</el-button>
-        <el-button type="primary" @click="openProjectCaseDialog = false">
-          确认
+        <el-button type="primary" @click="saveConfigSuite">
+          保存
         </el-button>
       </div>
     </template>
@@ -133,7 +134,7 @@ const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
-
+const configSuiteId = defineModel("suiteId");
 
 const props = defineProps({
   dataType: {type: Number, default: HrmDataTypeEnum.case},
@@ -149,10 +150,6 @@ const props = defineProps({
 
 const dataName = computed(() => {
   return props.dataType === HrmDataTypeEnum.case ? "用例" : "配置";
-});
-
-const caseEditDialogTitle = computed(() => {
-    return title.value + '【' + form.value.caseId + ' - ' + form.value.caseName +'】'
 });
 
 
@@ -173,7 +170,7 @@ const total = ref(0);
 const title = ref("");
 const onlySelf = ref(true);
 
-const runIds = ref([]);
+const caseIds = ref([]);
 
 const history = ref(false);
 
@@ -244,7 +241,7 @@ function resetQuery() {
 /** 多选框选中数据 */
 function handleSelectionChange(selection) {
   ids.value = selection.map(item => item.caseId);
-  runIds.value = ids.value;
+  caseIds.value = ids.value;
   single.value = selection.length !== 1;
   multiple.value = !selection.length;
 }
@@ -268,6 +265,19 @@ function handleUpdate(row) {
     open.value = true;
     title.value = "修改" + dataName.value;
   });
+}
+
+/** 保存套件配置 **/
+function saveConfigSuite(row) {
+  if (row && "caseId" in row && row.caseId){
+    caseIds.value = [row.caseId];
+  }
+  if (!caseIds.value || caseIds.value.length === 0) {
+    ElMessageBox.alert('请选择用例', "提示！", {type: "warning"});
+      return;
+  }
+  alert(configSuiteId.value);
+  alert(caseIds.value);
 }
 
 /** 删除按钮操作 */

@@ -139,7 +139,9 @@
     <!-- 配置套件详情对话框 -->
     <SuiteDetailDialog :form-datas="form"
                     v-model:open-suite-detail-dialog="openSuiteDetail"
-                    :title = SuiteTitle>
+                    :title="SuiteTitle"
+                    :suiteId="configSuiteId"
+    >
     </SuiteDetailDialog>
   </div>
 </template>
@@ -161,6 +163,7 @@ const openSuiteDetail = ref(false);
 const loading = ref(true);
 const showSearch = ref(true);
 const title = ref("");
+const configSuiteId = ref(0);
 const isExpandAll = ref(true);
 const refreshTable = ref(true);
 const total = ref(0);
@@ -248,6 +251,7 @@ function handleConfigSuite(row) {
     }
     form.value = response.data;
     openSuiteDetail.value = true;
+    configSuiteId.value = row.suiteId;
     title.value = "配置套件" + "【"+ response.data['suiteName'] +"】";
   });
 }
