@@ -1,7 +1,7 @@
 <script setup>
 import ContextMenu from "@/components/hrm/common/context-menu.vue";
 import {CaseStepTypeEnum, EditTableContextMenuEnum} from "@/components/hrm/enum.js";
-import {decompressText, compressData} from "@/utils/tools.js"
+import {decompressText, compressData, Json} from "@/utils/tools.js"
 
 const ColumnTypeEnum = {
   switch: 1,
@@ -150,6 +150,7 @@ const newDataInfo = reactive({
 })
 const editeHeader = ref(false);
 const editeHeaderData = ref({desc: null, key: null, oldKey: null});
+const selectedIndex = ref([]);
 
 // watch([() => props.tableHeaders, () => props.tableData], ([newHeader, newData]) => {
 //   debugger
@@ -332,6 +333,31 @@ function replaceColumnKey() {
 
 }
 
+function selectionChangeHandel(newSelection) {
+  let data = []
+  newSelection.forEach((item) => {
+    const index = tableDatasRef.value.indexOf(item);
+    data.push(index)
+  })
+  data.sort((a, b) => b - a);
+  selectedIndex.value = data;
+  console.log(data)
+}
+
+function delRows(evt) {
+  selectedIndex.value.forEach(index => {
+    tableDatasRef.value.splice(index, 1);
+  })
+}
+
+function copyRows(evt) {
+  selectedIndex.value.forEach(index => {
+    let oldRow = Json.parse(JSON.stringify(toValue(toRaw(tableDatasRef.value[index]))));
+    tableDatasRef.value.splice(index + 1, 0, oldRow);
+
+  })
+}
+
 </script>
 
 <template>
@@ -353,8 +379,10 @@ function replaceColumnKey() {
       </el-row>
 
     </el-popover>
-    <el-button @click="addRowAndColumnHandle(1);">新增列</el-button>
-    <el-button @click="addRowAndColumnHandle(undefined, 1);">新增行</el-button>
+    <el-button @click="addRowAndColumnHandle(1);" type="success">新增列</el-button>
+    <el-button @click="addRowAndColumnHandle(undefined, 1);" type="info">新增行</el-button>
+    <el-button @click="copyRows" type="warning">复制选中行</el-button>
+    <el-button @click="delRows" type="danger">删除选中行</el-button>
     <span style="flex-grow: 1"></span>
     <el-button type="primary" @click="$emit('submit', columnsRef, tableDatasRef)">保存</el-button>
   </el-row>
@@ -365,6 +393,7 @@ function replaceColumnKey() {
             @header-contextmenu="handleHeaderRightClick"
             @row-contextmenu="handleRowRightClick"
             @cell-contextmenu="handleCellRightClick"
+            @selection-change="selectionChangeHandel"
             max-height="calc(100vh - 172px)"
   >
     <el-table-column type="selection"></el-table-column>
