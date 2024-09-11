@@ -174,8 +174,6 @@ class SuiteDetailService:
         """
         edit_suite_detail = suite_detail_object.model_dump(exclude_unset=True)
         suite_info = cls.get_suite_detail_services(query_db, edit_suite_detail.get('suite_detail_id'))
-        print(suite_info.suite_id)
-        print('#####################')
         if suite_info:
             try:
                 SuiteDetailDao.edit_suite_detail_status_by_id(query_db, edit_suite_detail)
