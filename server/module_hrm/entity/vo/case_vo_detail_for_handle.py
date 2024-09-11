@@ -7,7 +7,8 @@ from typing import Any, Callable, Dict, List, Text, Union
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
-from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
+from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum, ParameterTypeEnum
+from utils.common_util import CamelCaseUtil
 
 Name = Text
 Url = Text
@@ -17,7 +18,7 @@ FunctionsMapping = Dict[Text, Callable]
 Headers = Dict[Text, Text | bool]
 Cookies = Dict[Text, Text | bool]
 Verify = bool
-Hooks = List[Union[Text, Dict[Text, Text]]]
+Hooks = List[Union[Text, Dict[Text, Any]]]
 Export = List[Text]
 Validators = List[Dict]
 
@@ -162,13 +163,18 @@ class Include(BaseModel):
     config: IncludeConfig = IncludeConfig()
 
 
+class ParameterModel(BaseModel):
+    type: int = ParameterTypeEnum.local_table.value
+    value: Text = ""
+
+
 class TConfig(BaseModel):
     name: Name = ""
     verify: Verify = False
     base_url: BaseUrl = ""
     # Text: prepare variables in debugtalk.py, ${gen_variables()}
-    variables: List[VariablesMapping] | Text = []
-    parameters: List[VariablesMapping] | Text = []
+    variables: List[VariablesMapping] | Text = {}
+    parameters: ParameterModel | List[VariablesMapping] | None = None
     headers: List[Headers] = []
     setup_hooks: Hooks = []
     teardown_hooks: Hooks = []
@@ -180,6 +186,14 @@ class TConfig(BaseModel):
     think_time: ThinkTime = ThinkTime()
     include: Union[Include, None] = Include()
     result: Union[Result, None] = Result()
+
+    @model_validator(mode='before')
+    def convert_values(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        # values = CamelCaseUtil.transform_result(values)
+        parameters_data = values.get('parameters', None)
+        if isinstance(parameters_data, list):
+            values["parameters"] = ParameterModel()
+        return values
 
 
 class TRequest(BaseModel):

@@ -45,3 +45,16 @@ export const CaseStepTypeEnum = {
     webui: 3,
     folder: 4,
 }
+
+export const EditTableContextMenuEnum = {
+    InsertRowBefore: 1,
+    InsertRowAfter: 2,
+    edit: 3,
+    InsertColumnBefore: 4,
+    InsertColumnAfter: 5,
+    DeleteRow: 6,
+    DeleteColumn: 7,
+    HideColumn: 8,
+    editHeader: 9,
+    editCell: 10,
+}

@@ -148,7 +148,9 @@ def list_dict2list(datas: list[dict]):
     return new_data
 
 
-def update_or_extend_list(old_dict_list: list[dict], new_dict_list: list[dict], key: str = "key",
+def update_or_extend_list(old_dict_list: list[dict],
+                          new_dict_list: list[dict],
+                          key: str = "key",
                           check_enable: bool = True):
     """
     更新列表中的字典
