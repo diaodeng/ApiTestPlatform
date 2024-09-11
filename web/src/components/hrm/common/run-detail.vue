@@ -45,27 +45,27 @@
               border
     >
       <el-table-column type="selection" width="55" align="center"/>
-      <el-table-column label="ID" align="center" prop="detailId"/>
-      <el-table-column label="执行ID" align="center" prop="runId"/>
-      <el-table-column label="名称" align="center" prop="runName"/>
+      <el-table-column label="ID" align="center" prop="detailId" width="150px"/>
+      <el-table-column label="执行ID" align="center" prop="runId" width="150px"/>
+      <el-table-column label="名称" align="left" prop="runName"/>
       <!--      <el-table-column label="所属项目" align="center" prop="projectName"/>-->
       <!--      <el-table-column label="所属模块" align="center" prop="moduleName"/>-->
-      <el-table-column label="状态" align="center" prop="status">
+      <el-table-column label="状态" align="center" prop="status" width="70px">
         <template #default="scope">
           <dict-tag :options="hrm_run_status" :value="scope.row.status"/>
         </template>
       </el-table-column>
-      <el-table-column label="执行开始时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="执行开始时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
         <template #default="scope">
           <span>{{ parseTime(scope.row.runStartTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="执行时长(S)" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="执行时长(S)" align="center" prop="createTime" class-name="small-padding fixed-width" width="80px">
         <template #default="scope">
           <span>{{ scope.row.runDuration }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200" align="center" class-name="small-padding fixed-width">
+      <el-table-column label="操作" width="80" align="center" class-name="small-padding fixed-width">
         <template #default="scope">
           <el-button link type="primary" icon="View" @click="handleView(scope.row)" v-hasPermi="['hrm:history:detail']"
                      title="查看">
