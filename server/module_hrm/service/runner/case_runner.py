@@ -591,7 +591,8 @@ class ParametersHandler(object):
 
             for data in datas:
                 # 只使用可用的数据
-                if not data.get("__enable", True):
+                enable = data.get("__enable", True)
+                if not enable or not enable["content"]:
                     continue
                 param = []
                 for item in data:
@@ -654,15 +655,18 @@ class TestRunner(object):
             params = ParametersHandler(self.parameters).get_parameters()
 
             all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
-            for param in params:
+            for index, param in enumerate(params):
                 tmp_case_data = copy.deepcopy(self.case_data)
                 old_variables: list[dict] = tmp_case_data.config.variables
                 update_or_extend_list(old_variables, param)
+                tmp_param = key_value_dict(param)
                 # old_variables.update(param)
                 tmp_case_data.config.variables = old_variables
                 name = tmp_case_data.config.name
-                if "case_name" in param:
-                    tmp_case_data.config.name = f"{name}[{param['case_name']}]"
+                if "case_name" in tmp_param:
+                    tmp_case_data.config.name = f"{name}[{tmp_param['case_name']}]"
+                else:
+                    tmp_case_data.config.name = f"{name}[{index+1}]"
                 runner = CaseRunner(tmp_case_data, self.debugtalk_func_map, self.logger.logger)
                 await runner.run()
                 data = runner.close_handler()
