@@ -1,5 +1,5 @@
 <template>
-  <el-dialog fullscreen :title='title' v-model="openSuiteDetailDialog" append-to-body destroy-on-close>
+  <el-dialog fullscreen :title=title :suiteId=suiteId v-model="openSuiteDetailDialog" append-to-body destroy-on-close>
     <div class="app-container">
       <el-form :model="queryParams" ref="queryRef_detail" :inline="true" v-show="showSearch">
         <el-form-item label="所属项目" prop="projectId">
@@ -90,19 +90,6 @@
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
       </el-table-column>
-<!--      <el-table-column label="操作" align="center" class-name="small-padding fixed-width">-->
-<!--        <template #default="scope">-->
-<!--          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['qtr:suite:edit']">-->
-<!--            修改-->
-<!--          </el-button>-->
-<!--          <el-button link type="primary" icon="Tools" @click="handleConfigSuite(scope.row)" v-hasPermi="['qtr:suite:edit']">-->
-<!--            配置-->
-<!--          </el-button>-->
-<!--          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:suite:remove']">-->
-<!--            删除-->
-<!--          </el-button>-->
-<!--        </template>-->
-<!--      </el-table-column>-->
     </el-table>
     <pagination
         v-show="total > 0"
@@ -113,6 +100,7 @@
     />
     <ProjectCaseDialog
         :form-datas="form"
+        :suiteId="configSuiteId"
         v-model:open-project-case-dialog="openProjectCaseDialog">
     </ProjectCaseDialog>
   </el-dialog>
@@ -131,11 +119,13 @@ const showSearch = ref(true);
 const openProjectCaseDialog = ref(false);
 const loading = ref(true);
 const total = ref(0);
+const configSuiteId = ref(0);
 const suiteDetailList = ref([]);
 const projectOptions = ref([]);
 const moduleOptions = ref([]);
 const refreshTable = ref(true);
 const isExpandAll = ref(true);
+const suiteDetailIds = ref([])
 
 const data = reactive({
   form: {},
@@ -159,6 +149,7 @@ const data = reactive({
 });
 
 const openSuiteDetailDialog = defineModel("openSuiteDetailDialog");
+const suiteId = defineModel("suiteId")
 const {queryParams, form, rules} = toRefs(data);
 
 /** 展开/折叠操作 */
@@ -171,14 +162,15 @@ function toggleExpandAll() {
 }
 
 function handleSelectionChange(selection) {
-  runIds.value = selection.map(item => item.suiteDetailId);
+  suiteDetailIds.value = selection.map(item => item.suiteDetailId);
 }
 
 /** 表单重置 */
 function reset() {
   form.value = {
-    suiteDetailId: undefined,
+    suiteDetailId: 0,
     suiteName: undefined,
+    suiteId: 0,
     orderNum: 0,
     simpleDesc: undefined,
     status: "0"
@@ -199,6 +191,7 @@ function resetQuery() {
 
 /** 选择用例按钮操作 */
 function handleSelectCase() {
+  configSuiteId.value = suiteId.value;
   openProjectCaseDialog.value = true;
 }
 
@@ -232,7 +225,6 @@ function resetModule() {
 /** 查询套件详情列表 */
 function getList() {
   loading.value = true;
-  console.log(queryParams.value);
   listDetailSuite(queryParams.value).then(response => {
     suiteDetailList.value = response.rows;
     total.value = response.total;

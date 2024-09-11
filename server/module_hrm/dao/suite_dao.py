@@ -104,8 +104,8 @@ class SuiteDetailDao:
     测试套件详情模块数据库操作层
     """
 
-    def get_suite_detail_list(cls, db: Session, page_object: SuiteDetailPageQueryModel, data_scope_sql: str,
-                              is_page: bool = False):
+    @classmethod
+    def get_suite_detail_list(cls, db: Session, page_object: SuiteDetailPageQueryModel, data_scope_sql: str, is_page: bool = False):
         """
         根据套件id获取套件详细信息
         :param db: orm对象
@@ -119,8 +119,8 @@ class SuiteDetailDao:
                     QtrSuiteDetail.status == page_object.status if page_object.status else True,
                     eval(data_scope_sql))
         if page_object.only_self:
-            suite_detail_result = suite_detail.filter(QtrSuiteDetail.manager == page_object.manager)
-        suite_detail_result = suite_detail_result.order_by(QtrSuiteDetail.order_num) \
+            suite_detail = suite_detail.filter(QtrSuiteDetail.manager == page_object.manager)
+        suite_detail_result = suite_detail.order_by(QtrSuiteDetail.order_num) \
             .distinct()
         suite_detail_list = PageUtil.paginate(suite_detail_result, page_object.page_num, page_object.page_size, is_page)
 

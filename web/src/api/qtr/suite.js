@@ -47,7 +47,7 @@ export function delSuite(suiteId) {
 //查询测试套件详细列表
 export function listDetailSuite(query){
   return request({
-    url: '/qtr/suite/detail_list',
+    url: '/qtr/suite/detailList',
     method: 'get',
     params: query
   })
