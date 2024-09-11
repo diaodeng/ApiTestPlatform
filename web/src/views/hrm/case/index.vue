@@ -218,7 +218,6 @@
 
       <!-- 运行用例对话框 -->
     <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.case" :run-ids="runIds"></RunDialog>
-
   </div>
 </template>
 
@@ -231,6 +230,7 @@ import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import {initCaseFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run-detail.vue';
 import RunDialog from '@/components/hrm/common/run_dialog.vue';
+import ParamsDalog from "@/components/hrm/common/edite-table.vue"
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
 import {ElMessageBox, ElMessage} from "element-plus";
 // import JsonEditorVue from "json-editor-vue3";

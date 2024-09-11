@@ -57,3 +57,10 @@ class RunModeEnum(Enum):
     model = 2
     suite = 3
     project = 4
+
+
+class ParameterTypeEnum(Enum):
+    file = 1
+    sql = 2
+    local_table = 3
+    local_source = 4

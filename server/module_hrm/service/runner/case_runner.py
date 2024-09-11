@@ -11,15 +11,16 @@ import requests
 import websockets
 
 from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_vo_detail_for_handle import ParameterModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep, TRequest, TWebsocket, ResponseData, \
     TestCaseSummary, StepResult, ReqRespData, SessionData, Result
-from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
+from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum, ParameterTypeEnum
 from module_hrm.exceptions import TestFailError
 from module_hrm.utils import debugtalk_common, comparators
 from module_hrm.utils.CaseRunLogHandle import RunLogCaptureHandler, TestLog
 from module_hrm.utils.common import key_value_dict, update_or_extend_list, dict2list
 from module_hrm.utils.parser import parse_data
-from module_hrm.utils.util import replace_variables, get_func_map, ensure_str, compress_text
+from module_hrm.utils.util import replace_variables, get_func_map, ensure_str, compress_text, decompress_text
 from module_hrm.dao.case_dao import CaseDao
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -99,12 +100,17 @@ class CaseRunner(object):
 
         for step in self.case_data.teststeps:
 
-            # step.variables = parse_data(step.variables,
-            #                             key_value_dict(self.case_data.config.variables),
-            #                             self.debugtalk_func_map
-            #                             )
+            if step.setup_hooks:
+                try:
+                    for setup_hook in step.setup_hooks:
+                        hook = setup_hook.get("key", None)
+                        if not hook: continue
+                        var = key_value_dict(self.case_data.config.variables)
+                        data = parse_data(hook, var, self.debugtalk_func_map)
+                except Exception as setupre:
+                    logger.error(f"setup_hook：{setupre}")
+                    logger.exception(setupre)
 
-            # 发起请求
             if step.step_type == TstepTypeEnum.http.value:
                 step_obj = RequestRunner(self, step).request().validate()
             elif step.step_type == TstepTypeEnum.websocket.value:
@@ -121,6 +127,17 @@ class CaseRunner(object):
             step_obj.step_data.result.response = compress_text(step_obj.step_data.result.response.model_dump_json())
 
             update_or_extend_list(self.case_data.config.variables, dict2list(step_obj.extract_variable))
+
+            if step.teardown_hooks:
+                try:
+                    for teardown_hook in step.teardown_hooks:
+                        hook = teardown_hook.get("key", None)
+                        if not hook: continue
+                        var = key_value_dict(self.case_data.config.variables)
+                        parse_data(hook, var, self.debugtalk_func_map)
+                except Exception as setupre:
+                    logger.error(f"teardown_hook：{setupre}")
+                    logger.exception(setupre)
 
             # del step_obj.debugtalk_func_map
         end_info = f"{'执行结束用例：' + self.case_data.config.name + '<<<':<^100}"
@@ -557,13 +574,48 @@ class WebSocketClient:
         await self.connection.close()
 
 
+class ParametersHandler(object):
+    """
+    参数处理器，用于处理参数化的情况
+    """
+    def __init__(self, parameters):
+        self.parameters: ParameterModel = parameters
+
+    def get_parameters(self):
+        parameters = []
+        if self.parameters.type == ParameterTypeEnum.local_table.value:
+            parameter_source = decompress_text(self.parameters.value)
+            parameter_obj = json.loads(parameter_source)
+            headers = parameter_obj.get("tableHeaders", [])
+            datas = parameter_obj.get("tableDatas", [])
+
+            for data in datas:
+                # 只使用可用的数据
+                if not data.get("__enable", True):
+                    continue
+                param = []
+                for item in data:
+                    # 排除状态字段
+                    if item == "__enable":
+                        continue
+                    param.append({
+                        "key":item,
+                        "value": data[item]["content"],
+                        "enable": True,
+                        "type": "string"
+                    })
+                    # param[item] = data[item]["content"]
+                parameters.append(param)
+        return parameters
+
+
 class TestRunner(object):
     """
     单个用例执行入口，但是执行结果可能是多个用例，例如使用的参数化的情况
     """
 
     def __init__(self, case_data: TestCase, debugtalk_func_map={}):
-        self.parameters = case_data.config.parameters
+        self.parameters: ParameterModel = case_data.config.parameters
         self.case_data = case_data
         self.debugtalk_func_map = debugtalk_func_map
         self.logger = TestLog()
@@ -582,27 +634,36 @@ class TestRunner(object):
                     logger.exception(e)
                     raise TestFailError(f"before_test处理失败")
 
-            if not self.parameters:
+            if self.case_data.config.setup_hooks:
+                try:
+                    for setup_hook in self.case_data.config.setup_hooks:
+                        hook = setup_hook.get("key", None)
+                        if not hook: continue
+                        var = key_value_dict(self.case_data.config.variables)
+                        parse_data(hook, var, self.debugtalk_func_map)
+                except Exception as setupre:
+                    logger.error(f"setup_hooks处理失败：{setupre}")
+                    logger.exception(setupre)
+
+            if not self.parameters.value:
                 runner = CaseRunner(self.case_data, self.debugtalk_func_map, self.logger.logger)
                 await runner.run()
                 data = runner.close_handler()
                 return [data]
 
-            params = self.parameters["caseParamters"]
-            params = params[1:]
+            params = ParametersHandler(self.parameters).get_parameters()
 
             all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
             for param in params:
                 tmp_case_data = copy.deepcopy(self.case_data)
-                tmp_debugtalk_func_map = copy.deepcopy(self.debugtalk_func_map)
-                old_variables: dict = tmp_case_data.config.variables
-                old_variables.update(param)
-                tmp_debugtalk_func_map.update(param)
+                old_variables: list[dict] = tmp_case_data.config.variables
+                update_or_extend_list(old_variables, param)
+                # old_variables.update(param)
                 tmp_case_data.config.variables = old_variables
                 name = tmp_case_data.config.name
                 if "case_name" in param:
                     tmp_case_data.config.name = f"{name}[{param['case_name']}]"
-                runner = CaseRunner(tmp_case_data, tmp_debugtalk_func_map, self.logger.logger)
+                runner = CaseRunner(tmp_case_data, self.debugtalk_func_map, self.logger.logger)
                 await runner.run()
                 data = runner.close_handler()
                 all_data.append(data)
@@ -612,6 +673,17 @@ class TestRunner(object):
             logger.error(f"测试用例执行失败：{e}")
             logger.exception(e)
             raise TestFailError(f"测试用例执行失败: {e}")
+        finally:
+            if self.case_data.config.teardown_hooks:
+                try:
+                    for teardown_hook in self.case_data.config.teardown_hooks:
+                        hook = teardown_hook.get("key", None)
+                        if not hook: continue
+                        var = key_value_dict(self.case_data.config.variables)
+                        parse_data(hook, var, self.debugtalk_func_map)
+                except Exception as setupre:
+                    logger.error(f"teardown_hook处理失败：{setupre}")
+                    logger.exception(setupre)
 
 
 def formate_response_body(response: requests.Response | None) -> dict | str:
