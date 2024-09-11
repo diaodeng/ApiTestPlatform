@@ -63,11 +63,8 @@ class SuiteDetailModel(CommonDataModel):
 
     suite_detail_id: Optional[int] = None
     suite_id: Optional[int] = None
-    suite_name: Optional[str] = None
-    project_id: Optional[int] = None
-    project_name: Optional[str] = None
-    case_id: Optional[int] = None
-    case_name: Optional[str] = None
+    data_id: Optional[int] = None
+    data_type: Optional[int] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
     status: Optional[str] = None

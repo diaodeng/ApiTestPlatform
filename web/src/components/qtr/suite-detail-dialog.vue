@@ -1,5 +1,14 @@
 <template>
-  <el-dialog fullscreen :title=title :suiteId=suiteId v-model="openSuiteDetailDialog" append-to-body destroy-on-close>
+  <el-dialog
+      fullscreen
+      :title=title
+      :suiteId=suiteId
+      v-model="openSuiteDetailDialog"
+      append-to-body
+      destroy-on-close
+      @close="clearData"
+      @open="getList"
+  >
     <div class="app-container">
       <el-form :model="queryParams" ref="queryRef_detail" :inline="true" v-show="showSearch">
         <el-form-item label="所属项目" prop="projectId">
@@ -70,10 +79,9 @@
       <el-table-column type="selection" width="55" align="center"/>
       <el-table-column prop="suiteDetailId" label="ID" width="160"></el-table-column>
       <el-table-column prop="suiteId" label="套件ID" width="160"></el-table-column>
-      <el-table-column prop="projectId" label="项目ID" width="160"></el-table-column>
-      <el-table-column prop="projectName" label="项目名称" width="160"></el-table-column>
-      <el-table-column prop="caseId" label="用例ID" width="160"></el-table-column>
-      <el-table-column prop="caseName" label="用例名称" width="200"></el-table-column>
+      <el-table-column prop="dataId" label="数据ID" width="160"></el-table-column>
+      <el-table-column prop="dataType" label="数据类型" width="160"></el-table-column>
+      <el-table-column prop="dataName" label="数据名称" width="200"></el-table-column>
       <el-table-column prop="orderNum" label="排序" width="200"></el-table-column>
       <el-table-column prop="status" label="状态" width="100">
         <template #default="scope">
@@ -88,6 +96,19 @@
       <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">
         <template #default="scope">
           <span>{{ parseTime(scope.row.updateTime) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="170" align="center" class-name="small-padding fixed-width" fixed="right">
+        <template #default="scope">
+          <el-switch
+            v-model="scope.row.status"
+            active-value="0"
+            active-text="开启"
+            inactive-value="1"
+            inactive-text="关闭"
+            @change="handleStatusChange(scope.row)"
+          ></el-switch>
+          <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:suite:remove']" title="删除"/>
         </template>
       </el-table-column>
     </el-table>
@@ -109,10 +130,11 @@
 
 <script setup name="SuiteDetail">
 import ProjectCaseDialog from "@/components/qtr/project-case-dialog.vue";
-import {listDetailSuite} from "@/api/qtr/suite.js";
+import {getSuiteDetail, listDetailSuite, updateSuiteDetail} from "@/api/qtr/suite.js";
 import {listProject} from "@/api/hrm/project.js";
 import {selectModulList} from "@/api/hrm/module.js";
 
+const suiteId = defineModel("suiteId")
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const showSearch = ref(true);
@@ -134,7 +156,7 @@ const data = reactive({
     projectId: undefined,
     projectName: undefined,
     suiteDetailId: undefined,
-    suiteId: undefined,
+    suiteId: suiteId,
     caseId: undefined,
     caseName: undefined,
     moduleId: undefined,
@@ -149,7 +171,6 @@ const data = reactive({
 });
 
 const openSuiteDetailDialog = defineModel("openSuiteDetailDialog");
-const suiteId = defineModel("suiteId")
 const {queryParams, form, rules} = toRefs(data);
 
 /** 展开/折叠操作 */
@@ -230,6 +251,27 @@ function getList() {
     total.value = response.total;
   }).finally(()=>{
     loading.value = false;
+  });
+}
+
+// 关闭dialog时清空列表数据
+function clearData(){
+  suiteDetailList.value = []
+}
+
+// 启用或停用套件中的数据
+function handleStatusChange(row){
+
+  getSuiteDetail(row.suiteDetailId).then(response => {
+    if (!response.data || Object.keys(response.data).length === 0) {
+      alert("未查到对应数据！");
+      return;
+    }
+    response.data.status = row.status
+    updateSuiteDetail(response.data).then(response => {
+      proxy.$modal.msgSuccess("修改成功");
+      openProjectCaseDialog.value = false;
+    });
   });
 }
 

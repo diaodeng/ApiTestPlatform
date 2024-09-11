@@ -129,6 +129,7 @@ import {copyCase, delCase, getCase, listCase} from "@/api/hrm/case.js";
 import {listProject} from "@/api/hrm/project.js";
 import {selectModulList} from "@/api/hrm/module.js";
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {addSuiteDatil} from "@/api/qtr/suite.js";
 
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
@@ -276,8 +277,15 @@ function saveConfigSuite(row) {
     ElMessageBox.alert('请选择用例', "提示！", {type: "warning"});
       return;
   }
-  alert(configSuiteId.value);
-  alert(caseIds.value);
+  const data = {
+    "suiteId": configSuiteId.value,
+    "dataIds": caseIds.value,
+    "dataType": 3
+  }
+  addSuiteDatil(data).then(response => {
+    proxy.$modal.msgSuccess("新增成功");
+    openProjectCaseDialog.value = false;
+  });
 }
 
 /** 删除按钮操作 */

@@ -27,10 +27,8 @@ class QtrSuiteDetail(Base, BaseModel):
 
     suite_detail_id = Column(BigInteger, primary_key=True, nullable=False, default=snowIdWorker.get_id, comment='测试套件详情Id')
     suite_id = Column(BigInteger, nullable=False, comment='测试套件Id')
-    project_id = Column(BigInteger, nullable=False, comment='项目Id')
-    project_name = Column(String(120), nullable=False, comment='项目名称')
-    case_id = Column(BigInteger, nullable=False, comment='用例Id')
-    case_name = Column(String(120), nullable=False, comment='用例名称')
+    data_id = Column(BigInteger, nullable=False, comment='数据Id')
+    data_type = Column(BigInteger, nullable=False, comment='数据类型')
     order_num = Column(Integer, default=0, comment='显示顺序')
     status = Column(String(1), nullable=True, default=0, comment='环境状态（0正常 1停用）')
     del_flag = Column(String(1), nullable=True, default=0, comment='删除标志（0代表存在 2代表删除）')
