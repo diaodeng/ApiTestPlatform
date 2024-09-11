@@ -1,6 +1,7 @@
 <script setup>
 
 import {inject} from "vue";
+import {decompressText, compressData, Json} from "@/utils/tools.js"
 import TableHeaders from "@/components/hrm/table-headers.vue";
 import TableHooks from "@/components/hrm/table-hooks.vue";
 import TableVariables from "@/components/hrm/table-variables.vue";
@@ -8,6 +9,7 @@ import {selectModulList} from "@/api/hrm/module.js";
 import {list as listConfig} from "@/api/hrm/config.js";
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
 import {getComparator} from "@/api/hrm/case.js";
+import ParamsDalog from "@/components/hrm/common/edite-table.vue";
 
 const sys_normal_disable = inject("sys_normal_disable");
 
@@ -33,6 +35,9 @@ const activeTabName = ref("caseMessages");
 const moduleOptions = ref([]);
 
 const hrm_comparator_dict = inject("hrm_comparator_dict");
+
+const parameterDialogShow = ref(false);
+const parameterInfo = ref({tableHeaders: [], tableDatas: []});
 
 
 function getModuleSelect() {
@@ -71,6 +76,24 @@ function resetModule() {
 function resetConfig() {
   formData.value.request.config.include.configId = null;
   getConfigSelect();
+}
+
+function startParameterDialog() {
+  let parameterData = formData.value.request.config.parameters.value;
+  let parameterDataObj = parameterData?Json.parse(decompressText(parameterData)):{};
+  parameterInfo.value.tableHeaders = parameterDataObj.tableHeaders || [];
+  parameterInfo.value.tableDatas = parameterDataObj.tableDatas || [];
+  parameterDialogShow.value = true;
+}
+
+function saveParameters(header, data) {
+  let parameterData = {
+    tableHeaders: parameterInfo.value.tableHeaders,
+    tableDatas: parameterInfo.value.tableDatas
+  }
+  formData.value.request.config.parameters.value = compressData(JSON.stringify(parameterData));
+  parameterDialogShow.value = false;
+
 }
 
 onMounted(() => {
@@ -144,7 +167,24 @@ onMounted(() => {
       variables
       <TableVariables v-model="formData.request.config.variables"></TableVariables>
       parameters
-      <TableVariables v-model="formData.request.config.parameters"></TableVariables>
+      <el-row>
+        <el-select placeholder="请选择" style="width: 120px;" v-model="formData.request.config.parameters.type">
+          <el-option :value="3" :key="3" label="本地表格"></el-option>
+          <el-option :value="4" :key="4" label="本地数据" disabled></el-option>
+          <el-option :value="1" :key="1" label="文件" disabled></el-option>
+          <el-option :value="2" :key="2" label="数据库" disabled></el-option>
+        </el-select>
+        <el-button @click="startParameterDialog" style="padding-left: 5px">设置</el-button>
+      </el-row>
+      <el-row style="padding-bottom: 10px">
+        <template v-if="formData.request.config.parameters">
+          <el-text>点击设置数据</el-text>
+        </template>
+        <template v-else>
+          <el-text>暂无数据</el-text>
+        </template>
+      </el-row>
+      <!--      <TableVariables v-model="formData.request.config.parameters"></TableVariables>-->
       setup_hooks
       <TableHooks v-model="formData.request.config.setup_hooks"></TableHooks>
       teardown_hooks
@@ -162,6 +202,16 @@ onMounted(() => {
       </div>
     </el-tab-pane>
   </el-tabs>
+  <el-dialog fullscreen :title="'参数化配置' + '【' +formData.caseName + '】'" v-model="parameterDialogShow" append-to-body destroy-on-close>
+    <el-container style="height: 100%">
+      <el-main style="max-height: calc(100vh - 95px);">
+        <ParamsDalog v-model:columns-ref="parameterInfo.tableHeaders"
+                     v-model:table-datas-ref="parameterInfo.tableDatas"
+                     @submit="saveParameters"
+        ></ParamsDalog>
+      </el-main>
+    </el-container>
+  </el-dialog>
 </template>
 
 <style scoped lang="scss">

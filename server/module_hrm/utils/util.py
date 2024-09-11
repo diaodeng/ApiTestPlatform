@@ -11,6 +11,7 @@ import platform
 import re
 import socket
 import sys
+import zlib
 from itertools import combinations
 
 from module_hrm import exceptions
@@ -157,7 +158,13 @@ def decompress_text(encoded_data: str) -> str:
     """
 
     decode_data = base64.b64decode(encoded_data.encode("utf-8"))
-    decompress_text = gzip.decompress(decode_data).decode("utf-8")
+    if decode_data.startswith(b'x\x9c'):
+        decompress_text = zlib.decompress(decode_data).decode("utf8")
+    elif decode_data.startswith(b'x\x1f') or decode_data.startswith(b'\x1f\x8b'):
+        decompress_text = gzip.decompress(decode_data).decode("utf-8")
+    else:
+        raise TypeError("解压失败")
+    # decompress_text = gzip.decompress(decode_data).decode("utf-8")
     return decompress_text
 
 
