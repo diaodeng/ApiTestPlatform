@@ -52,3 +52,29 @@ export function listDetailSuite(query){
     params: query
   })
 }
+
+// 新增测试套件详细
+export function addSuiteDatil(data) {
+  return request({
+    url: '/qtr/suite/addSuiteDetail',
+    method: 'post',
+    data: data
+  })
+}
+
+// 修改测试套件详细
+export function updateSuiteDetail(data) {
+  return request({
+    url: '/qtr/suite/editSuiteDetail',
+    method: 'put',
+    data: data
+  })
+}
+
+// 查询测试套件详细
+export function getSuiteDetail(suiteDetailId) {
+  return request({
+    url: '/qtr/suite/getSuiteDetail/' + suiteDetailId,
+    method: 'get'
+  })
+}

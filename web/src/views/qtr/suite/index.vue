@@ -138,9 +138,11 @@
 
     <!-- 配置套件详情对话框 -->
     <SuiteDetailDialog :form-datas="form"
-                    v-model:open-suite-detail-dialog="openSuiteDetail"
-                    :title="SuiteTitle"
-                    :suiteId="configSuiteId"
+                       v-model:open-suite-detail-dialog="openSuiteDetail"
+                       :title="SuiteTitle"
+                       :suiteId="configSuiteId"
+                       show-close
+                       destroy-on-close="true"
     >
     </SuiteDetailDialog>
   </div>
