@@ -5,6 +5,7 @@ from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.vo.suite_vo import *
 from utils.page_util import PageUtil
+from module_hrm.enums.enums import DataType
 
 
 class SuiteDao:
@@ -144,11 +145,18 @@ class SuiteDetailDao:
 
         query = db.query(QtrSuiteDetail,
                          HrmCase.case_id,
-                         HrmCase.case_name
-                         ).outerjoin(HrmCase,
-                                     QtrSuiteDetail.data_id == HrmCase.case_id)
-        if QtrSuiteDetail.data_type == 3:
-            query = query.filter(QtrSuiteDetail.data_id == HrmCase.case_id)
+                         HrmCase.case_name,
+                         HrmProject.project_id,
+                         HrmProject.project_name,
+                         HrmModule.module_id,
+                         HrmModule.module_name
+                         ).join(HrmCase,(QtrSuiteDetail.data_id == HrmCase.case_id)&(QtrSuiteDetail.data_type == DataType.case.value), isouter=True
+                                ).join(HrmProject, (QtrSuiteDetail.data_id == HrmProject.project_id)&(QtrSuiteDetail.data_type == DataType.project.value), isouter=True
+                                       ).join(HrmModule, (QtrSuiteDetail.data_id == HrmModule.module_id)&(QtrSuiteDetail.data_type == DataType.module.value), isouter=True)
+
+        query = query.filter(QtrSuiteDetail.del_flag == 0, QtrSuiteDetail.suite_id == query_object.suite_id,
+                    QtrSuiteDetail.status == query_object.status if query_object.status else True,
+                    eval(data_scope_sql))
 
         if query_object.only_self:
             query = query.filter(QtrSuiteDetail.manager == query_object.manager)
@@ -156,7 +164,7 @@ class SuiteDetailDao:
         query = query.order_by(QtrSuiteDetail.create_time.desc()).order_by(QtrSuiteDetail.order_num).distinct()
 
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
-
+        print(post_list)
         return post_list
 
     @classmethod
