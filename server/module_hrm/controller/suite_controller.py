@@ -9,6 +9,7 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.annotation.log_annotation import log_decorator
 from utils.snowflake import snowIdWorker
+from module_hrm.enums.enums import DataType
 
 
 suiteController = APIRouter(prefix='/qtr/suite', dependencies=[Depends(LoginService.get_current_user)])
@@ -105,6 +106,41 @@ async def add_qtr_suite_detail(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
+@suiteController.post("/addSuiteDetail", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:add'))])
+@log_decorator(title='测试套件详情', business_type=1)
+async def add_qtr_suite_detail(request: Request,
+                        data: dict,
+                        query_db: Session = Depends(get_db),
+                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    try:
+        obj_list = []
+        suiteId = data.get('suiteId')
+        dataType = data.get('dataType')
+        dataIds = data.get('dataIds')
+        for dataId in dataIds:
+            add_suite_detail = SuiteDetailModel()
+            add_suite_detail.manager = current_user.user.user_id
+            add_suite_detail.create_by = current_user.user.user_name
+            add_suite_detail.update_by = current_user.user.user_name
+            add_suite_detail.suite_detail_id = snowIdWorker.get_id()
+            add_suite_detail.suite_id = suiteId
+            add_suite_detail.data_id = dataId
+            add_suite_detail.data_type = dataType
+            obj_list.append(add_suite_detail)
+
+        add_suite_detail_result = SuiteDetailService.add_suite_detail_services(query_db, obj_list)
+        if add_suite_detail_result.is_success:
+            logger.info(add_suite_detail_result.message)
+            return ResponseUtil.success(data=add_suite_detail_result)
+        else:
+            logger.warning(add_suite_detail_result.message)
+            return ResponseUtil.failure(msg=add_suite_detail_result.message)
+        pass
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @suiteController.put("", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:edit'))])
 @log_decorator(title='测试套件', business_type=2)
 async def edit_qtr_suite(request: Request,
@@ -160,14 +196,14 @@ async def query_detail_suite(request: Request, suiteDetailId: int, query_db: Ses
 
 
 
-@suiteController.delete("/{suite_ids}", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:remove'))])
+@suiteController.delete("/{suiteIds}", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:remove'))])
 @log_decorator(title='测试套件', business_type=3)
-async def delete_hrm_env(request: Request,
-                         suite_ids: str,
+async def delete_qtr_suite(request: Request,
+                         suiteIds: str,
                          query_db: Session = Depends(get_db),
                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        delete_suite = DeleteSuiteModel(suiteIds=suite_ids)
+        delete_suite = DeleteSuiteModel(suiteIds=suiteIds)
         delete_suite_result = SuiteService.delete_suite_services(query_db, delete_suite)
         if delete_suite_result.is_success:
             logger.info(delete_suite_result.message)
@@ -180,12 +216,12 @@ async def delete_hrm_env(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@suiteController.get("/{suite_id}", response_model=SuiteModel,
+@suiteController.get("/{suiteId}", response_model=SuiteModel,
                      dependencies=[Depends(CheckUserInterfaceAuth(['qtr:suite:detail', "qtr:suite:edit"], False))])
-async def query_detail_suite(request: Request, suite_id: int, query_db: Session = Depends(get_db)):
+async def query_detail_suite(request: Request, suiteId: int, query_db: Session = Depends(get_db)):
     try:
-        detail_suite_result = SuiteService.get_suite_services(query_db, suite_id)
-        logger.info(f'获取suite_id为{suite_id}的信息成功')
+        detail_suite_result = SuiteService.get_suite_services(query_db, suiteId)
+        logger.info(f'获取suite_id为{suiteId}的信息成功')
         return ResponseUtil.success(data=detail_suite_result)
     except Exception as e:
         logger.exception(e)

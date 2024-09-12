@@ -17,7 +17,7 @@ class SuiteDao:
         """
         根据套件id获取套件信息
         :param db: orm对象
-        :param suite_id: 套件id
+        :param suite_detail_id: 套件详情id
         :return: 套件信息对象
         """
         suite_info = db.query(QtrSuite) \
@@ -172,6 +172,21 @@ class SuiteDetailDao:
                     QtrSuiteDetail.del_flag == 0).first()
 
         return suite_details
+
+    @classmethod
+    def add_suite_detail_dao(cls, db: Session, suite_details: list[SuiteDetailModel]):
+        """
+        新增测试套件数据库操作
+        :param db: orm对象
+        :param suite_details: 套件详情对象列表
+        :return: 新增校验结果
+        """
+        db_suite_details = [QtrSuiteDetail(**suite_detail.model_dump()) for suite_detail in suite_details]
+        db.bulk_save_objects(db_suite_details)
+        # db.add(db_suite_detail)
+        db.flush()
+
+        return db_suite_details
 
     @classmethod
     def edit_suite_detail_status_by_id(cls, db: Session, suite_detail: dict):
