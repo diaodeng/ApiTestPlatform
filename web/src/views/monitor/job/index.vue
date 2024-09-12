@@ -197,7 +197,8 @@
                </el-col>
                <el-col :span="24">
                   <el-form-item label="关键字参数" prop="jobKwargs">
-                  <el-input v-model="form.jobKwargs" placeholder="请输入关键字参数" />
+<!--                    <el-input v-model="form.jobKwargs" placeholder="请输入关键字参数" />-->
+                    <AceEditor v-model:content="form.jobKwargs" lang="json" themes="monokai" height="300px" width="670px" placeholder="请输入关键字参数"></AceEditor>
                   </el-form-item>
                </el-col>
                <el-col :span="24">
@@ -318,6 +319,7 @@
 <script setup name="Job">
 import { listJob, getJob, delJob, addJob, updateJob, runJob, changeJobStatus } from "@/api/monitor/job";
 import Crontab from '@/components/Crontab'
+import AceEditor from "@/components/hrm/common/ace-editor.vue";
 const router = useRouter();
 const { proxy } = getCurrentInstance();
 const { sys_job_group, sys_job_status, sys_job_executor } = proxy.useDict("sys_job_group", "sys_job_status", "sys_job_executor");

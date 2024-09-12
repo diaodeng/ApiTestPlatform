@@ -22,7 +22,7 @@ class SuiteService:
         return result
 
     @classmethod
-    def get_suite_list_services(cls, query_db: Session, page_object: SuiteQueryModel, data_scope_sql: str):
+    def get_suite_list_services(cls, query_db: Session, page_object: SuitePageQueryModel, data_scope_sql: str, is_page: bool = False):
         """
         获取测试套件列表信息service
         :param query_db: orm对象
@@ -30,9 +30,9 @@ class SuiteService:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: 测试套件列表信息对象
         """
-        suite_list_result = SuiteDao.get_suite_list(query_db, page_object, data_scope_sql)
+        suite_list_result = SuiteDao.get_suite_list(query_db, page_object, data_scope_sql, is_page)
 
-        return CamelCaseUtil.transform_result(suite_list_result)
+        return suite_list_result
 
     @classmethod
     def add_suite_services(cls, query_db: Session, page_object: SuiteModel):
@@ -106,3 +106,83 @@ class SuiteService:
             result = dict(is_success=False, message='传入测试套件id为空')
         return CrudResponseModel(**result)
 
+
+class SuiteDetailService:
+    """
+    测试套件详情模块服务层
+    """
+
+    @classmethod
+    def get_suite_detail_services(cls, query_db: Session, suite_detail_id: int):
+        """
+        获取测试套件信息service
+        :param query_db: orm对象
+        :param page_object: 查询参数对象
+        :param data_scope_sql: 数据权限对应的查询sql语句
+        :return: 测试套件信息对象
+        """
+        suite_result = SuiteDetailDao.get_suite_detail_by_id(query_db, suite_detail_id)
+        result = SuiteDetailModel(**CamelCaseUtil.transform_result(suite_result))
+        return result
+
+
+    @classmethod
+    def get_suite_detail_list_services(cls, query_db: Session, page_object: SuiteDetailPageQueryModel, data_scope_sql: str,
+                                is_page: bool = False):
+        """
+        获取测试套件列表信息service
+        :param query_db: orm对象
+        :param page_object: 分页查询参数对象
+        :param data_scope_sql: 数据权限对应的查询sql语句
+        :return: 测试套件详细列表信息对象
+        """
+        # suite_detail_list_result = SuiteDetailDao.get_suite_detail_list(query_db, page_object, data_scope_sql, is_page)
+        suite_detail_list_result = SuiteDetailDao.get_suite_detail_list_1(query_db, page_object, data_scope_sql, is_page)
+
+        return suite_detail_list_result
+
+    @classmethod
+    def add_suite_detail_services(cls, query_db: Session, page_objects: List[SuiteDetailModel]):
+        """
+        新增测试套件详细信息service
+        :param query_db: orm对象
+        :param page_objects: 新增测试套件详细对象列表
+        :return: 新增测试套件校验结果
+        """
+        # TODO 根据data_id + data_type去重
+        # suite = SuiteDao.get_suite_by_info(query_db, SuiteModel(suiteName=page_object.suite_name))
+        # if suite:
+        #     result = dict(is_success=False, message='套件名称已存在')
+        # else:
+        try:
+            SuiteDetailDao.add_suite_detail_dao(query_db, page_objects)
+            query_db.commit()
+            result = dict(is_success=True, message='新增成功')
+        except Exception as e:
+            query_db.rollback()
+            raise e
+
+        return CrudResponseModel(**result)
+
+    @classmethod
+    def edit_suite_detail_services(cls, query_db: Session, suite_detail_object: SuiteDetailModel):
+        """
+        编辑测试套件详细信息service
+        :param query_db: orm对象
+        :param suite_object: 编辑测试套件详细对象
+        :return: 编辑测试套件详细校验结果
+        """
+        edit_suite_detail = suite_detail_object.model_dump(exclude_unset=True)
+        suite_info = cls.get_suite_detail_services(query_db, edit_suite_detail.get('suite_detail_id'))
+        if suite_info:
+            try:
+                SuiteDetailDao.edit_suite_detail_status_by_id(query_db, edit_suite_detail)
+                query_db.commit()
+                result = dict(is_success=True, message='更新成功')
+            except Exception as e:
+                query_db.rollback()
+                raise e
+        else:
+            result = dict(is_success=False, message='数据不存在')
+
+        return CrudResponseModel(**result)

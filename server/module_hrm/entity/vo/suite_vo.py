@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 from typing import Union, Optional, List, Dict, Text, Any
 from datetime import datetime
-from module_admin.annotation.pydantic_annotation import as_query
+from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from utils.common_util import CamelCaseUtil
 
@@ -21,10 +21,6 @@ class SuiteModel(CommonDataModel):
     simple_desc: Optional[str] = None
     status: Optional[str] = None
     del_flag: Optional[str] = None
-    # create_by: Optional[str] = None
-    # create_time: Optional[datetime] = None
-    # update_by: Optional[str] = None
-    # update_time: Optional[datetime] = None
 
 
 @as_query
@@ -47,6 +43,18 @@ class DeleteSuiteModel(BaseModel):
     update_time: Optional[str] = None
 
 
+@as_query
+@as_form
+class SuitePageQueryModel(SuiteQueryModel):
+    """
+    测试套件分页查询模型
+    """
+    page_num: int = 1
+    page_size: int = 10
+
+    only_self: bool = False
+
+
 class SuiteDetailModel(CommonDataModel):
     """
     测试套件详情表对应pydantic模型
@@ -55,24 +63,33 @@ class SuiteDetailModel(CommonDataModel):
 
     suite_detail_id: Optional[int] = None
     suite_id: Optional[int] = None
-    suite_name: Optional[str] = None
+    data_id: Optional[int] = None
+    data_type: Optional[int] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
     status: Optional[str] = None
     del_flag: Optional[str] = None
-    # create_by: Optional[str] = None
-    # create_time: Optional[datetime] = None
-    # update_by: Optional[str] = None
-    # update_time: Optional[datetime] = None
 
 
 @as_query
-class SuiteDetailQueryModel(SuiteModel):
+class SuiteDetailQueryModel(SuiteDetailModel, QueryModel):
     """
     测试套件详情不分页查询模型
     """
     begin_time: Optional[str] = None
     end_time: Optional[str] = None
+
+
+@as_query
+@as_form
+class SuiteDetailPageQueryModel(SuiteDetailQueryModel):
+    """
+    测试套件详情分页查询模型
+    """
+    page_num: int = 1
+    page_size: int = 10
+
+    only_self: bool = False
 
 
 class DeleteDetailSuiteModel(BaseModel):
