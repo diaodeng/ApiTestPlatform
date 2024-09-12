@@ -129,7 +129,7 @@ import {copyCase, delCase, getCase, listCase} from "@/api/hrm/case.js";
 import {listProject} from "@/api/hrm/project.js";
 import {selectModulList} from "@/api/hrm/module.js";
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
-import {addSuiteDatil} from "@/api/qtr/suite.js";
+import {addSuiteDetail} from "@/api/qtr/suite.js";
 
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
@@ -282,7 +282,7 @@ function saveConfigSuite(row) {
     "dataIds": caseIds.value,
     "dataType": 3
   }
-  addSuiteDatil(data).then(response => {
+  addSuiteDetail(data).then(response => {
     proxy.$modal.msgSuccess("新增成功");
     openProjectCaseDialog.value = false;
   });
