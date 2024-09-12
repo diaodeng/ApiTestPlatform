@@ -1,7 +1,7 @@
 <script setup>
 import ContextMenu from "@/components/hrm/common/context-menu.vue";
-import {CaseStepTypeEnum, EditTableContextMenuEnum} from "@/components/hrm/enum.js";
-import {decompressText, compressData, Json} from "@/utils/tools.js"
+import {EditTableContextMenuEnum} from "@/components/hrm/enum.js";
+import {Json} from "@/utils/tools.js"
 
 const ColumnTypeEnum = {
   switch: 1,
