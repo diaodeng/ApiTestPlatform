@@ -3,18 +3,15 @@ import {ElMessage} from "element-plus";
 import SplitWindow from "@/components/hrm/common/split-window.vue";
 import TreeView from "@/components/hrm/common/tree-view.vue";
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
-import {addApi, apiTree, getApi, updateApi, copyApiAsCase} from "@/api/hrm/api.js";
+import {addApi, apiTree, copyApiAsCase, getApi, updateApi} from "@/api/hrm/api.js";
 import {list as configList} from "@/api/hrm/config.js";
 
-import {initApiFormData, initStepData} from "@/components/hrm/data-template.js";
+import {initStepData} from "@/components/hrm/data-template.js";
 import {randomString} from "@/utils/tools.js";
 import {CaseStepTypeEnum, HrmDataTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
 import {debugCase, getComparator} from "@/api/hrm/case.js";
 import StepRequest from "@/components/hrm/case/step-request.vue";
 import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
-import FullScreen from "@/components/hrm/common/fullscreen.vue";
-import AceEditor from "@/components/hrm/common/ace-editor.vue";
-import {Setting} from "@element-plus/icons-vue";
 import {getApiFormDataByType} from "@/components/hrm/case/case-utils.js";
 
 
@@ -93,9 +90,9 @@ function saveApiInfo(type) {
   if (data.id && data.apiId && !data.isNew) {
     if (type === 'copy2case') {
       copyApiAsCase(data).then(res => {
-          ElMessage({message: "API复制成功", type: "success"});
+        ElMessage({message: "API复制成功", type: "success"});
       }).catch(error => {
-          ElMessage.error("API复制失败");
+        ElMessage.error("API复制失败");
       }).finally(() => {
         loading.value.saveApi = false;
         loading.value.preSaveDialog = false;
