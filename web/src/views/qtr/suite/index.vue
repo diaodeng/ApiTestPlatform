@@ -85,7 +85,13 @@
         </template>
       </el-table-column>
     </el-table>
-
+    <pagination
+        v-show="total > 0"
+        :total="total"
+        v-model:page="queryParams.pageNum"
+        v-model:limit="queryParams.pageSize"
+        @pagination="getList"
+    />
     <!-- 添加或修改套件对话框 -->
     <el-dialog :title="title" v-model="open" append-to-body>
       <el-form ref="suiteRef" :model="form" :rules="rules" label-width="80px">
@@ -132,8 +138,11 @@
 
     <!-- 配置套件详情对话框 -->
     <SuiteDetailDialog :form-datas="form"
-                    v-model:open-suite-detail-dialog="open"
-                    :title = SuiteTitle>
+                       v-model:open-suite-detail-dialog="openSuiteDetail"
+                       :title="SuiteTitle"
+                       :suiteId="configSuiteId"
+                       show-close
+                       :destroy-on-close="true">
     </SuiteDetailDialog>
   </div>
 </template>
@@ -151,18 +160,22 @@ const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 
 const suiteList = ref([]);
 const open = ref(false);
+const openSuiteDetail = ref(false);
 const loading = ref(true);
 const showSearch = ref(true);
 const title = ref("");
+const configSuiteId = ref(0);
 const isExpandAll = ref(true);
 const refreshTable = ref(true);
-
+const total = ref(0);
 const runDialogShow = ref(false);
 const runIds = ref([]);
 
 const data = reactive({
   form: {},
   queryParams: {
+    pageNum: 1,
+    pageSize: 10,
     suiteName: undefined,
     status: undefined
   },
@@ -182,7 +195,8 @@ const SuiteTitle = computed(() => {
 function getList() {
   loading.value = true;
   listSuite(queryParams.value).then(response => {
-    suiteList.value = proxy.handleTree(response.data, "suiteId");
+    suiteList.value = response.rows;
+    total.value = response.total;
     loading.value = false;
   });
 }
@@ -228,19 +242,18 @@ function handleAdd(row) {
   title.value = "添加套件";
 }
 
-/** 新增按钮操作 */
+/** 配置按钮操作 */
 function handleConfigSuite(row) {
   const suiteId = row.suiteId;
-  alert(suiteId);
   getSuite(suiteId).then(response => {
     if (!response.data || Object.keys(response.data).length === 0) {
       alert("未查到对应数据！");
       return;
     }
     form.value = response.data;
-    alert(form.value.suiteName);
-    open.value = true;
-    title.value = "配置" + response.data['suiteName'];
+    openSuiteDetail.value = true;
+    configSuiteId.value = row.suiteId;
+    title.value = "配置套件" + "【"+ response.data['suiteName'] +"】";
   });
 }
 

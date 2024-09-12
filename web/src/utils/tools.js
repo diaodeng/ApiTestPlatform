@@ -198,3 +198,15 @@ export function compressData(data) {
     })
     return btoa(s)
 }
+
+export function getKeyByValue(enum_obj, value){
+    // 遍历枚举对象
+    for (const key in enum_obj){
+        if (enum_obj[key] === value){
+            return key;
+        }
+    }
+
+    // 如果没找到对应的key，返回null
+    return null;
+}
