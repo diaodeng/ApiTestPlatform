@@ -43,3 +43,13 @@ export function delApi(apiId) {
         method: 'delete'
     })
 }
+
+
+// 复制API为用例
+export function copyApiAsCase(data) {
+    return request({
+        url: '/hrm/api/copyAsCase',
+        method: 'post',
+        data: data
+    })
+}

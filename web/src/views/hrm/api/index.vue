@@ -3,7 +3,7 @@ import {ElMessage} from "element-plus";
 import SplitWindow from "@/components/hrm/common/split-window.vue";
 import TreeView from "@/components/hrm/common/tree-view.vue";
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
-import {addApi, apiTree, getApi, updateApi} from "@/api/hrm/api.js";
+import {addApi, apiTree, getApi, updateApi, copyApiAsCase} from "@/api/hrm/api.js";
 import {list as configList} from "@/api/hrm/config.js";
 
 import {initApiFormData, initStepData} from "@/components/hrm/data-template.js";
@@ -78,7 +78,8 @@ function getApiInfo(apiId) {
   })
 }
 
-function saveApiInfo() {
+function saveApiInfo(type) {
+
   loading.value.saveApi = true;
   let data = toRaw(currentApiData.value);
   data = structuredClone(data);
@@ -90,15 +91,27 @@ function saveApiInfo() {
   });
 
   if (data.id && data.apiId && !data.isNew) {
-    updateApi(data).then(res => {
-      ElMessage({message: "API保存成功", type: "success"});
-      apiSaveSuccess(res, data.apiId);
-    }).catch(error => {
-      ElMessage({message: "API保存失败", type: "success"});
-    }).finally(() => {
-      loading.value.saveApi = false;
-      loading.value.preSaveDialog = false;
-    })
+    if (type === 'copy2case') {
+      copyApiAsCase(data).then(res => {
+          ElMessage({message: "API复制成功", type: "success"});
+      }).catch(error => {
+          ElMessage.error("API复制失败");
+      }).finally(() => {
+        loading.value.saveApi = false;
+        loading.value.preSaveDialog = false;
+      })
+    } else {
+      updateApi(data).then(res => {
+        ElMessage({message: "API保存成功", type: "success"});
+        apiSaveSuccess(res, data.apiId);
+      }).catch(error => {
+        ElMessage({message: "API保存失败", type: "success"});
+      }).finally(() => {
+        loading.value.saveApi = false;
+        loading.value.preSaveDialog = false;
+      })
+    }
+
   } else {
     const oldApiId = data.apiId;
     delete data.isNew;
@@ -139,11 +152,27 @@ function apiSaveSuccess(res, oldApiId) {
 }
 
 function saveFolderInfo() {
+  debugger
+  let selectedNodes = treeRef.value.getCurrentNode();
+  let parentId = null;
+  if (selectedNodes) {
+    parentId = selectedNodes.apiId;
+    parentId = treeRef.value.getNode(parentId) ? parentId : null
+  }
   loading.value.preSaveFolderDialog = true;
   let data = folderForm.value;
   data.type = HrmDataTypeEnum.folder
   data.apiType = CaseStepTypeEnum.folder
+  data.parentId = parentId;
   addApi(data).then(res => {
+    debugger
+    if (!parentId) {
+      treeDataSource.value.splice(0, 0, res.data);
+    } else {
+      let parentNode = treeRef.value.getNode(parentId);
+      parentNode.data.children.splice(0, 0, res.data);
+    }
+
     ElMessage({message: "Folder保存成功", type: "success"});
   }).finally(() => {
     loading.value.preSaveFolderDialog = false;
@@ -219,7 +248,7 @@ function nodeDbClick(event, node, data) {
 
 function delTreeNode(data) {
   const dataIndex = apiTabsData.value.findIndex(dict => dict.apiId === data.apiId)
-  if (dataIndex !== -1){
+  if (dataIndex !== -1) {
     apiTabsData.value.splice(dataIndex, 1);
   }
 }
@@ -299,6 +328,39 @@ function apiTreeFilter() {
   loading.value.filter = false;
 }
 
+const handelMoveNode = (parentId, nodeId, index) => {
+  updateApi({parentId: parentId, apiId: nodeId}).then(res => {
+    ElMessage.success("移动节点成功");
+  }).catch(err => {
+  })
+}
+
+const handleEditNode = (evt, data, node) => {
+  updateApi({name: data.name, apiId: data.apiId}).then(res => {
+    ElMessage.success("修改成功");
+  }).catch(err => {
+  })
+}
+
+const handleAddNode = (type, newData, parentNodeData) => {
+  if (type !== CaseStepTypeEnum.folder) {
+    return;
+  }
+  let dataType = type === CaseStepTypeEnum.folder ? HrmDataTypeEnum.folder : HrmDataTypeEnum.api;
+  addApi({type: dataType, apiType: type, name: newData.name, parentId: parentNodeData.apiId}).then(res => {
+    ElMessage.success("文件夹【" + newData.name + "】新增成功");
+  }).catch(err => {
+  })
+
+}
+
+const copyAsCase = () => {
+  copyApi({apiId: data.apiId}).then(res => {
+    ElMessage.success("复制成功");
+  }).catch(err => {
+  })
+}
+
 </script>
 
 <template>
@@ -312,7 +374,7 @@ function apiTreeFilter() {
         保存
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item @click="console.log('另存为用例')">另存为用例</el-dropdown-item>
+            <el-dropdown-item @click="saveApiInfo('copy2case');">另存为用例</el-dropdown-item>
             <el-dropdown-item @click="console.log('复制API')">复制</el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -352,6 +414,9 @@ function apiTreeFilter() {
                         v-model:filter-text="treeFilterText"
                         v-model:tree-ref="treeRef"
                         @del-node="delTreeNode"
+                        @move-node="handelMoveNode"
+                        @edit-node="handleEditNode"
+                        @add-node="handleAddNode"
               ></TreeView>
             </div>
           </el-scrollbar>

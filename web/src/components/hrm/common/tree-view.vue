@@ -1,4 +1,10 @@
 <script lang="ts" setup>
+import type Node from 'element-plus/es/components/tree/src/model/node'
+import type {DragEvents} from 'element-plus/es/components/tree/src/model/useDragNode'
+import type {
+  AllowDropType,
+  NodeDropType,
+} from 'element-plus/es/components/tree/src/tree.type'
 import {CirclePlusFilled, Folder, RemoveFilled, Tickets} from "@element-plus/icons-vue";
 import EditLabelText from "@/components/hrm/common/edit-label-text.vue";
 import ContextMenu from "@/components/hrm/common/context-menu.vue";
@@ -54,7 +60,7 @@ const contextMenu = reactive({
   }
 })
 
-const emit = defineEmits(["nodeDbClick", "delNode", "filter", "addNode"]);
+const emit = defineEmits(["nodeDbClick", "delNode", "filter", "addNode", "moveNode", "editNode"]);
 
 interface Tree {
   apiId: bigint,
@@ -86,14 +92,15 @@ function handleNodeRightClick(event, data, node, nodeRef) {
   // console.log(data)
   // console.log(node)
   // console.log(nodeRef.value)
+  event.preventDefault();
   contextMenuSelectNode.value.e = event;
   contextMenuSelectNode.value.data = data;
   contextMenuSelectNode.value.node = node;
   contextMenuSelectNode.value.nodeRef = nodeRef;
-  contextMenu.show = true;
   contextMenu.x = event.clientX
   contextMenu.y = event.clientY
-  event.preventDefault();
+  contextMenu.show = true;
+
   // emit("nodeDbClick", event, data, node, nodeRef)
 
 }
@@ -178,6 +185,7 @@ const defaultProps = {
 }
 
 const append = (data: Tree, type) => {
+  debugger
   if (!data.isParent) {
     return;
   }
@@ -192,18 +200,19 @@ const append = (data: Tree, type) => {
     apiId: newStepId,
     isParent: type === CaseStepTypeEnum.folder,
     parentId: data.apiId,
-    type: type !== CaseStepTypeEnum.folder?HrmDataTypeEnum.api: HrmDataTypeEnum.folder,
-    apiType: type
+    type: type !== CaseStepTypeEnum.folder ? HrmDataTypeEnum.api : HrmDataTypeEnum.folder,
+    apiType: type,
+    edit: false
   }
   if (!data.children) {
     data.children = []
   }
-  data.children.push(newChild)
-  emit('addNode', type, newChild);
+  data.children.splice(0, 0, newChild)
+  emit('addNode', type, newChild, data);
   // dataSource.value = [...dataSource.value]
 }
 
-const remove = (node: Node, data: Tree) => {
+const remove = (event, node: Node, data: Tree) => {
   ElMessageBox.confirm("确定删除吗？\n对应目录下的所有内容都将被删除", "提示", {
     confirmButtonText: "确定",
     cancelButtonText: "取消",
@@ -242,6 +251,75 @@ function treeFilter(value, data, node) {
   }
 }
 
+
+const handleDragStart = (node: Node, ev: DragEvents) => {
+  // console.log('drag start', node)
+}
+const handleDragEnter = (
+    draggingNode: Node,
+    dropNode: Node,
+    ev: DragEvents
+) => {
+  // console.log('tree drag enter:', dropNode.label)
+}
+const handleDragLeave = (
+    draggingNode: Node,
+    dropNode: Node,
+    ev: DragEvents
+) => {
+  // console.log('tree drag leave:', dropNode.label)
+}
+const handleDragOver = (draggingNode: Node, dropNode: Node, ev: DragEvents) => {
+  console.log('tree drag over:', dropNode.label)
+}
+const handleDragEnd = (
+    draggingNode: Node,
+    dropNode: Node,
+    dropType: NodeDropType,
+    ev: DragEvents
+) => {
+  if (dropType === "none") {
+    return false;
+  }
+  // console.log('tree drag end:', dropNode && dropNode.label, dropType)
+}
+const handleDrop = (
+    draggingNode: Node,
+    dropNode: Node,
+    dropType: NodeDropType,
+    ev: DragEvents
+) => {
+  let parentId = null;
+  let nodeId = draggingNode.data.apiId;
+  let index = 0;
+  if (dropType === 'inner') {
+    parentId = dropNode.data.apiId;
+  } else if (dropType === 'after') {
+    parentId = dropNode.parent.data.apiId;
+  } else if (dropType === 'before') {
+    parentId = dropNode.parent.data.apiId;
+  }
+  if (parentId === nodeId) {
+    return
+  }
+  emit('moveNode', parentId, nodeId, index);
+}
+
+const allowDrop = (draggingNode: Node, dropNode: Node, type: AllowDropType) => {
+  if ((!dropNode.data.isParent && type === 'inner') || (dropNode.data.apiId === draggingNode.data.apiId)) {
+    return false;
+  } else {
+    return true;
+  }
+}
+const allowDrag = (draggingNode: Node) => {
+  return !draggingNode.data.label.includes('Level three 3-1-1')
+}
+
+const handleEditNodeName = (evt, data, node) => {
+  emit('editNode', evt, data, node);
+}
+
 </script>
 
 <template>
@@ -261,6 +339,14 @@ function treeFilter(value, data, node) {
       ref="treeRef"
       :filter-node-method="treeFilter"
       @node-contextmenu="handleNodeRightClick"
+      draggable
+      :allow-drop="allowDrop"
+      @node-drag-start="handleDragStart"
+      @node-drag-enter="handleDragEnter"
+      @node-drag-leave="handleDragLeave"
+      @node-drag-over="handleDragOver"
+      @node-drag-end="handleDragEnd"
+      @node-drop="handleDrop"
 
   >
     <template #default="{ node, data }">
@@ -269,17 +355,21 @@ function treeFilter(value, data, node) {
             @mouseenter="(event)=>{node.data.edit=true}"
             @mouseleave="(event)=>{node.data.edit=false}"
       >
-          <el-icon v-if="data.apiType===CaseStepTypeEnum.folder && data.isParent"><folder/></el-icon>
+          <el-icon v-if="data.apiType===CaseStepTypeEnum.folder"><folder/></el-icon>
           <el-button v-else-if="data.apiType===CaseStepTypeEnum.http" type="success" link>RQ</el-button>
           <el-button v-else-if="data.apiType===CaseStepTypeEnum.websocket" type="primary" link>WS</el-button>
           <el-button v-else-if="data.apiType===CaseStepTypeEnum.webui" type="warning" link>WB</el-button>
           <span><edit-label-text v-model:content="data.name"
-                                 v-model:show-edite="node.data.edit"></edit-label-text></span>
+                                 v-model:show-edite="node.data.edit"
+                                 @edite="handleEditNodeName($event, data, node);"
+          ></edit-label-text></span>
           <span v-if="node.data.edit">
 <!--            <el-icon color="blue"><edit></edit></el-icon>-->
-          <el-icon color="green" @click.stop="append(data, CaseStepTypeEnum.http)"><circle-plus-filled></circle-plus-filled></el-icon>
+          <el-icon color="green" @click.stop="handleNodeRightClick($event, data, node);" v-if="data.apiType===CaseStepTypeEnum.folder">
+            <circle-plus-filled></circle-plus-filled>
+          </el-icon>
             <!--            <RequestTypeDropdown @type-selected="append" :index-key="data"></RequestTypeDropdown>-->
-            <el-icon color="red" @click.stop="remove(node, data)"><remove-filled></remove-filled></el-icon>
+            <el-icon color="red" @click.stop="remove($event, node, data)"><remove-filled></remove-filled></el-icon>
           </span>
         </span>
 

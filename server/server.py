@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from sub_applications.handle import handle_sub_applications
 from middlewares.handle import handle_middleware
@@ -67,6 +68,7 @@ app = FastAPI(
     version=AppConfig.app_version,
     lifespan=lifespan
 )
+app.mount('/static', StaticFiles(directory="../web/dist"), name='static')
 
 # 挂载子应用
 handle_sub_applications(app)
