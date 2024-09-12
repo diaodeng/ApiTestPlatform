@@ -3,7 +3,7 @@ import {ElMessage} from "element-plus";
 import SplitWindow from "@/components/hrm/common/split-window.vue";
 import TreeView from "@/components/hrm/common/tree-view.vue";
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
-import {addApi, apiTree, getApi, updateApi} from "@/api/hrm/api.js";
+import {addApi, apiTree, getApi, updateApi, copyApiAsCase} from "@/api/hrm/api.js";
 import {list as configList} from "@/api/hrm/config.js";
 
 import {initApiFormData, initStepData} from "@/components/hrm/data-template.js";
@@ -78,7 +78,8 @@ function getApiInfo(apiId) {
   })
 }
 
-function saveApiInfo() {
+function saveApiInfo(type) {
+
   loading.value.saveApi = true;
   let data = toRaw(currentApiData.value);
   data = structuredClone(data);
@@ -90,15 +91,27 @@ function saveApiInfo() {
   });
 
   if (data.id && data.apiId && !data.isNew) {
-    updateApi(data).then(res => {
-      ElMessage({message: "API保存成功", type: "success"});
-      apiSaveSuccess(res, data.apiId);
-    }).catch(error => {
-      ElMessage({message: "API保存失败", type: "success"});
-    }).finally(() => {
-      loading.value.saveApi = false;
-      loading.value.preSaveDialog = false;
-    })
+    if (type === 'copy2case') {
+      copyApiAsCase(data).then(res => {
+          ElMessage({message: "API复制成功", type: "success"});
+      }).catch(error => {
+          ElMessage.error("API复制失败");
+      }).finally(() => {
+        loading.value.saveApi = false;
+        loading.value.preSaveDialog = false;
+      })
+    } else {
+      updateApi(data).then(res => {
+        ElMessage({message: "API保存成功", type: "success"});
+        apiSaveSuccess(res, data.apiId);
+      }).catch(error => {
+        ElMessage({message: "API保存失败", type: "success"});
+      }).finally(() => {
+        loading.value.saveApi = false;
+        loading.value.preSaveDialog = false;
+      })
+    }
+
   } else {
     const oldApiId = data.apiId;
     delete data.isNew;
@@ -144,7 +157,7 @@ function saveFolderInfo() {
   let parentId = null;
   if (selectedNodes) {
     parentId = selectedNodes.apiId;
-    parentId = treeRef.value.getNode(parentId)? parentId:null
+    parentId = treeRef.value.getNode(parentId) ? parentId : null
   }
   loading.value.preSaveFolderDialog = true;
   let data = folderForm.value;
@@ -153,11 +166,11 @@ function saveFolderInfo() {
   data.parentId = parentId;
   addApi(data).then(res => {
     debugger
-    if(!parentId){
+    if (!parentId) {
       treeDataSource.value.splice(0, 0, res.data);
-    }else {
-        let parentNode = treeRef.value.getNode(parentId);
-        parentNode.data.children.splice(0, 0, res.data);
+    } else {
+      let parentNode = treeRef.value.getNode(parentId);
+      parentNode.data.children.splice(0, 0, res.data);
     }
 
     ElMessage({message: "Folder保存成功", type: "success"});
@@ -341,6 +354,13 @@ const handleAddNode = (type, newData, parentNodeData) => {
 
 }
 
+const copyAsCase = () => {
+  copyApi({apiId: data.apiId}).then(res => {
+    ElMessage.success("复制成功");
+  }).catch(err => {
+  })
+}
+
 </script>
 
 <template>
@@ -354,7 +374,7 @@ const handleAddNode = (type, newData, parentNodeData) => {
         保存
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item @click="console.log('另存为用例')">另存为用例</el-dropdown-item>
+            <el-dropdown-item @click="saveApiInfo('copy2case');">另存为用例</el-dropdown-item>
             <el-dropdown-item @click="console.log('复制API')">复制</el-dropdown-item>
           </el-dropdown-menu>
         </template>
