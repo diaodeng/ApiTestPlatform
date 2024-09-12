@@ -39,6 +39,10 @@ export const HrmDataTypeEnum = {
     api_websocket: 16,
 }
 
+
+/*
+* 测试步骤的type与api的type一样（一个api只能有一个步骤）
+* */
 export const CaseStepTypeEnum = {
     http: 1,
     websocket: 2,

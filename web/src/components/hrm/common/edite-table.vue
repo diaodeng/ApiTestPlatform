@@ -341,7 +341,6 @@ function selectionChangeHandel(newSelection) {
   })
   data.sort((a, b) => b - a);
   selectedIndex.value = data;
-  console.log(data)
 }
 
 function delRows(evt) {
@@ -408,12 +407,13 @@ function copyRows(evt) {
             <el-switch v-model="row[col.prop].content"></el-switch>
           </template>
           <template v-else>
-            <p v-show="!row[col.prop].edit" style="width: 100%">{{ row[col.prop].content }}</p>
+            <p v-show="!row[col.prop].edit" style="width: 100%;white-space: nowrap">{{ row[col.prop].content }}</p>
             <el-input v-show="row[col.prop].edit"
                       type="textarea" size="small"
                       v-model="row[col.prop].content"
                       @blur="row[col.prop].edit = false"
                       :autofocus="true"
+                      style="flex-grow: 1"
             ></el-input>
           </template>
 

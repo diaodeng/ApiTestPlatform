@@ -8,8 +8,10 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.api_dao import ApiOperation
 from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiQueryModel, ApiModel, ApiPageQueryModel
+from module_hrm.entity.vo.case_vo import AddCaseModel
 from module_hrm.enums.enums import DataType, TstepTypeEnum
 from module_hrm.service.api_service import api_tree
+from module_hrm.service.case_service import CaseService
 from utils.log_util import *
 from utils.page_util import *
 from utils.response_util import *
@@ -29,6 +31,27 @@ async def api_tree_handle(request: Request,
         tree_data = api_tree(query_db, page_query)
         data = ResponseUtil.success(data=tree_data)
         return data
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@hrmApiController.post("/copyAsCase", dependencies=[Depends(CheckUserInterfaceAuth('hrm:api:add'))])
+async def api_copy_as_case(request: Request,
+                           api_data: ApiModelForApi,
+                           query_db: Session = Depends(get_db),
+                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    try:
+        # 获取分页数据
+        caseMode = AddCaseModel()
+        caseMode.manager = current_user.user.user_id
+        caseMode.create_by = current_user.user.user_name
+        caseMode.update_by = current_user.user.user_name
+
+        caseMode.case_name = api_data.name
+        caseMode.request = api_data.request_info
+        data = CaseService.add_case_services(query_db,caseMode)
+        return ResponseUtil.success(data=data)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -91,3 +114,6 @@ async def api_del(request: Request, api_id, query_db: Session = Depends(get_db))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+
