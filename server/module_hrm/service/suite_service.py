@@ -136,8 +136,8 @@ class SuiteDetailService:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: 测试套件详细列表信息对象
         """
-        suite_detail_list_result = SuiteDetailDao.get_suite_detail_list(query_db, page_object, data_scope_sql, is_page)
-        # suite_detail_list_result = SuiteDetailDao.get_suite_detail_list_1(query_db, page_object, data_scope_sql, is_page)
+        # suite_detail_list_result = SuiteDetailDao.get_suite_detail_list(query_db, page_object, data_scope_sql, is_page)
+        suite_detail_list_result = SuiteDetailDao.get_suite_detail_list_1(query_db, page_object, data_scope_sql, is_page)
 
         return suite_detail_list_result
 

@@ -142,8 +142,7 @@
                        :title="SuiteTitle"
                        :suiteId="configSuiteId"
                        show-close
-                       destroy-on-close="true"
-    >
+                       :destroy-on-close="true">
     </SuiteDetailDialog>
   </div>
 </template>

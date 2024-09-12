@@ -1,13 +1,13 @@
 <template>
   <el-dialog
       fullscreen
-      :title=title
       :suiteId=suiteId
       v-model="openSuiteDetailDialog"
       append-to-body
       destroy-on-close
       @close="clearData"
       @open="getList"
+
   >
     <div class="app-container">
       <el-form :model="queryParams" ref="queryRef_detail" :inline="true" v-show="showSearch">
@@ -32,26 +32,26 @@
             </el-option>
           </el-select>
         </el-form-item>、
-        <el-form-item label="用例ID" prop="caseId">
+        <el-form-item label="数据ID" prop="dataId">
           <el-input
-              v-model="queryParams.caseId"
-              placeholder="请输入用例ID"
+              v-model="queryParams.dataId"
+              placeholder="请输入数据ID"
               clearable
               style="width: 200px"
               @keyup.enter="handleQuery"
           />
         </el-form-item>
-        <el-form-item label="用例名称" prop="caseName">
+        <el-form-item label="数据名称" prop="dataName">
           <el-input
-              v-model="queryParams.caseName"
-              placeholder="请输入用例名称"
+              v-model="queryParams.dataName"
+              placeholder="请输入数据名称"
               clearable
               style="width: 200px"
               @keyup.enter="handleQuery"
           />
         </el-form-item>
-        <el-form-item label="用例状态" prop="status">
-          <el-select v-model="queryParams.status" placeholder="用例状态" clearable style="width: 200px">
+        <el-form-item label="数据状态" prop="status">
+          <el-select v-model="queryParams.status" placeholder="数据状态" clearable style="width: 200px">
             <el-option
                 v-for="dict in sys_normal_disable"
                 :key="dict.value"
@@ -63,37 +63,41 @@
         <el-form-item>
           <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
           <el-button type="success" icon="Refresh" @click="resetQuery">重置</el-button>
-          <el-button type="warning" icon="Plus" @click="handleSelectCase">选择用例</el-button>
         </el-form-item>
       </el-form>
+      <el-row :gutter="10" class="mb8">
+      <el-col :span="1.5">
+        <el-button type="warning" icon="Plus" @click="handleSelectCase">选择数据</el-button>
+      </el-col>
+      <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
+    </el-row>
     </div>
     <el-table
         border
         v-if="refreshTable"
         v-loading="loading"
-        :data="suiteDetailList"
+        :data="suiteDetailListData"
         row-key="suiteDetailId"
         :default-expand-all="isExpandAll"
         @selection-change="handleSelectionChange"
     >
       <el-table-column type="selection" width="55" align="center"/>
-      <el-table-column prop="suiteDetailId" label="ID" width="160"></el-table-column>
-      <el-table-column prop="suiteId" label="套件ID" width="160"></el-table-column>
-      <el-table-column prop="dataId" label="数据ID" width="160"></el-table-column>
-      <el-table-column prop="dataType" label="数据类型" width="160"></el-table-column>
-      <el-table-column prop="dataName" label="数据名称" width="200"></el-table-column>
-      <el-table-column prop="orderNum" label="排序" width="200"></el-table-column>
-      <el-table-column prop="status" label="状态" width="100">
+      <el-table-column prop="suiteDetailId" label="ID" width="160" align="center"></el-table-column>
+      <el-table-column prop="suiteId" label="套件ID" width="160" align="center"></el-table-column>
+      <el-table-column prop="dataId" label="数据ID" width="160" align="center"></el-table-column>
+      <el-table-column prop="dataType" label="数据类型" width="100" align="center"></el-table-column>
+      <el-table-column prop="dataName" label="数据名称" ></el-table-column>
+      <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="scope">
           <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
         </template>
       </el-table-column>
-      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="创建时间" align="center" prop="createTime" width="160" class-name="small-padding fixed-width">
         <template #default="scope">
           <span>{{ parseTime(scope.row.createTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">
+      <el-table-column label="更新时间" align="center" prop="updateTime" width="160" class-name="small-padding fixed-width">
         <template #default="scope">
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
@@ -103,10 +107,11 @@
           <el-switch
             v-model="scope.row.status"
             active-value="0"
-            active-text="开启"
+            active-text="启用"
             inactive-value="1"
-            inactive-text="关闭"
+            inactive-text="停用"
             @change="handleStatusChange(scope.row)"
+            :loading="loadingSwitch"
           ></el-switch>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:suite:remove']" title="删除"/>
         </template>
@@ -119,30 +124,37 @@
         v-model:limit="queryParams.pageSize"
         @pagination="getList"
     />
-    <ProjectCaseDialog
+
+    <!--  配置套件数据  -->
+    <ConfigSuiteDataDialog
         :form-datas="form"
         :suiteId="configSuiteId"
-        v-model:open-project-case-dialog="openProjectCaseDialog">
-    </ProjectCaseDialog>
+        @closeDialog="getList"
+        v-model:open-config-suite-data-dialog= "openConfigSuiteDataDialog">
+    </ConfigSuiteDataDialog>
   </el-dialog>
 
 </template>
 
 <script setup name="SuiteDetail">
-import ProjectCaseDialog from "@/components/qtr/project-case-dialog.vue";
 import {getSuiteDetail, listDetailSuite, updateSuiteDetail} from "@/api/qtr/suite.js";
 import {listProject} from "@/api/hrm/project.js";
 import {selectModulList} from "@/api/hrm/module.js";
+import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {getKeyByValue} from "@/utils/tools.js";
+import ConfigSuiteDataDialog from "@/components/qtr/config-suite-data-dialog.vue";
 
 const suiteId = defineModel("suiteId")
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const showSearch = ref(true);
-const openProjectCaseDialog = ref(false);
-const loading = ref(true);
+const openConfigSuiteDataDialog = ref(false);
+const loading = ref(false);
+const loadingSwitch = ref(false);
 const total = ref(0);
 const configSuiteId = ref(0);
 const suiteDetailList = ref([]);
+const suiteDetailListData = ref([]);
 const projectOptions = ref([]);
 const moduleOptions = ref([]);
 const refreshTable = ref(true);
@@ -152,26 +164,20 @@ const suiteDetailIds = ref([])
 const data = reactive({
   form: {},
   queryParams: {
-    suiteName: undefined,
+    dataName: undefined,
     projectId: undefined,
-    projectName: undefined,
     suiteDetailId: undefined,
     suiteId: suiteId,
-    caseId: undefined,
-    caseName: undefined,
+    dataId: undefined,
     moduleId: undefined,
     pageNum: 1,
     pageSize: 10,
     status: undefined
-  },
-  rules: {
-    suiteName: [{required: true, message: "套件名称不能为空", trigger: "blur"}],
-    orderNum: [{required: true, message: "显示排序不能为空", trigger: "blur"}]
-  },
+  }
 });
 
 const openSuiteDetailDialog = defineModel("openSuiteDetailDialog");
-const {queryParams, form, rules} = toRefs(data);
+const {queryParams, form} = toRefs(data);
 
 /** 展开/折叠操作 */
 function toggleExpandAll() {
@@ -213,14 +219,8 @@ function resetQuery() {
 /** 选择用例按钮操作 */
 function handleSelectCase() {
   configSuiteId.value = suiteId.value;
-  openProjectCaseDialog.value = true;
-}
-
-/** 新增按钮操作 */
-function handleAdd(row) {
-  reset();
-  open.value = true;
-  title.value = "添加套件";
+  // openProjectCaseDialog.value = true;
+  openConfigSuiteDataDialog.value = true;
 }
 
 /** 查询项目列表 */
@@ -248,6 +248,33 @@ function getList() {
   loading.value = true;
   listDetailSuite(queryParams.value).then(response => {
     suiteDetailList.value = response.rows;
+    suiteDetailListData.value = response.rows.map(group =>{
+      let data_type = group.find(obj => obj.dataType !== undefined).dataType;
+      let dataType = getKeyByValue(HrmDataTypeEnum, data_type);
+      let projectObj = group.find(obj => obj.projectName !== undefined)
+      let moduleObj = group.find(obj => obj.moduleName !== undefined)
+      let caseObj = group.find(obj => obj.caseName !== undefined)
+      let dataName = undefined;
+      if (projectObj.projectName !== null){
+        dataName = projectObj.projectName;
+      } else if (moduleObj.moduleName !== null) {
+        dataName = moduleObj.moduleName;
+      } else if (caseObj.caseName !== null) {
+        dataName = caseObj.caseName;
+      }
+      let newObject = {
+        suiteDetailId: group.find(obj => obj.suiteDetailId !== undefined).suiteDetailId,
+        suiteId: group.find(obj => obj.suiteId !== undefined).suiteId,
+        dataId: group.find(obj => obj.dataId !== undefined).dataId,
+        dataType: dataType,
+        dataName: dataName,
+        status: group.find(obj => obj.status !== undefined).status,
+        createTime: group.find(obj => obj.createTime !== undefined).createTime,
+        updateTime: group.find(obj => obj.updateTime !== undefined).updateTime,
+        total: response.total
+      }
+      return newObject;
+    });
     total.value = response.total;
   }).finally(()=>{
     loading.value = false;
@@ -261,7 +288,7 @@ function clearData(){
 
 // 启用或停用套件中的数据
 function handleStatusChange(row){
-
+  loadingSwitch.value = true;
   getSuiteDetail(row.suiteDetailId).then(response => {
     if (!response.data || Object.keys(response.data).length === 0) {
       alert("未查到对应数据！");
@@ -270,9 +297,12 @@ function handleStatusChange(row){
     response.data.status = row.status
     updateSuiteDetail(response.data).then(response => {
       proxy.$modal.msgSuccess("修改成功");
-      openProjectCaseDialog.value = false;
+
     });
+  }).finally(()=> {
+    loadingSwitch.value = false;
   });
+
 }
 
 getProjectSelect();
