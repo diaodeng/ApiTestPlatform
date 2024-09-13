@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="app-container">
   <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
     <el-form-item label="所属项目" prop="projectId">
       <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable
@@ -62,11 +62,13 @@
     </el-col>
     <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
   </el-row>
-  <el-table v-loading="loading" :data="caseList"
+  <el-table v-loading="loading"
+            :data="caseList"
+            style="width: 100%"
+            height="350"
             @selection-change="handleSelectionChange"
             border
             table-layout="fixed"
-            max-height="calc(100vh - 280px)"
   >
     <el-table-column type="selection" width="55" align="center"/>
     <el-table-column :label="dataName+'ID'" prop="caseId" width="150px"/>
