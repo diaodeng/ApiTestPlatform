@@ -136,8 +136,7 @@ class SuiteDetailService:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: 测试套件详细列表信息对象
         """
-        # suite_detail_list_result = SuiteDetailDao.get_suite_detail_list(query_db, page_object, data_scope_sql, is_page)
-        suite_detail_list_result = SuiteDetailDao.get_suite_detail_list_1(query_db, page_object, data_scope_sql, is_page)
+        suite_detail_list_result = SuiteDetailDao.get_suite_detail_list_dao(query_db, page_object, data_scope_sql, is_page)
 
         return suite_detail_list_result
 
@@ -186,3 +185,15 @@ class SuiteDetailService:
             result = dict(is_success=False, message='数据不存在')
 
         return CrudResponseModel(**result)
+
+    @classmethod
+    def get_suite_detail_list_by_suite_id_services(cls, query_db: Session, query_obj: dict):
+        """
+        获取套件数据ID列表service
+        :param query_db: orm对象
+        :param query_obj: 查询条件
+        :return: 套件数据ID列表
+        """
+        suite_detail_list_result = SuiteDetailDao.get_suite_detail_list_by_suite_id_dao(query_db, query_obj)
+
+        return suite_detail_list_result
