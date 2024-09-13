@@ -269,10 +269,10 @@ function delTab(event, tabId) {
 
   } else if (apiTabsData.value.length - 1 === currentTabIndex) {
     currentApiData.value = apiTabsData.value[currentTabIndex - 1];
-    currentTab.value = currentApiData.apiId;
+    currentTab.value = currentApiData.value.apiId;
   } else {
     currentApiData.value = apiTabsData.value[currentTabIndex + 1];
-    currentTab.value = currentApiData.apiId;
+    currentTab.value = currentApiData.value.apiId;
   }
   apiTabsData.value.splice(currentTabIndex, 1);
   // apiTabsData.value.splice(tabId, 1);
