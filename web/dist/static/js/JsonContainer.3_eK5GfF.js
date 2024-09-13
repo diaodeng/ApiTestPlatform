@@ -1,0 +1,1 @@
+import{_ as n,r as a,d as t,o as r,l as c,f as p,m as l,z as _}from"./index.CHnR_MAu.js";const f={__name:"JsonContainer",props:{json:Object},setup(o){const s=a(JSON.stringify(o.json,null,2));return(d,u)=>{const e=t("el-card");return r(),c(e,{class:"json-container"},{default:p(()=>[l("pre",null,_(s.value),1)]),_:1})}}},j=n(f,[["__scopeId","data-v-2f82fbbc"]]);export{j as default};

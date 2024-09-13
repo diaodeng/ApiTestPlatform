@@ -1,0 +1,1 @@
+import{r as e,o,c as t,m as r}from"./index.CHnR_MAu.js";const s=r("div",null,"我是数据监控",-1),a=[s],i={__name:"index",setup(n){return e("/prod-api/druid/login.html"),(c,_)=>(o(),t("div",null,a))}};export{i as default};
