@@ -68,7 +68,6 @@ app = FastAPI(
     version=AppConfig.app_version,
     lifespan=lifespan
 )
-app.mount('/static', StaticFiles(directory="../web/dist"), name='static')
 
 # 挂载子应用
 handle_sub_applications(app)

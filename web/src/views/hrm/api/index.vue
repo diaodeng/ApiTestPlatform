@@ -364,7 +364,6 @@ const copyAsCase = () => {
 }
 
 function showRunHistory() {
-  debugger
   if (!currentApiData.value){
     ElMessage.warning("请先选择一个接口");
     return;
