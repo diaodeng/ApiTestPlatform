@@ -43,7 +43,13 @@
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
     </el-row>
 
-    <el-table border v-loading="loading" :data="moduleList" @selection-change="handleSelectionChange">
+    <el-table
+        border
+        v-loading="loading"
+        :data="moduleList"
+        style="width: 100%"
+        height="350"
+        @selection-change="handleSelectionChange">
       <el-table-column type="selection" width="55" align="center"/>
       <el-table-column label="模块ID" align="center" prop="moduleId"/>
       <el-table-column label="模块名称" align="center" prop="moduleName"/>
@@ -84,63 +90,6 @@
         v-model:limit="queryParams.pageSize"
         @pagination="getList"
     />
-
-    <!-- 添加或修改模块对话框 -->
-    <el-dialog :title="title" v-model="open" width="600px" append-to-body>
-      <el-form ref="postRef" :model="form" :rules="rules" label-width="100px">
-        <el-form-item label="模块名称" prop="moduleName">
-          <el-input v-model="form.moduleName" placeholder="请输入模块名称"/>
-        </el-form-item>
-        <el-form-item label="所属项目" prop="projectId">
-          <el-select v-model="form.projectId" placeholder="请选择">
-            <el-option
-                v-for="option in projectOptions"
-                :key="option.projectId"
-                :label="option.projectName"
-                :value="option.projectId">
-            </el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="测试负责人" prop="testUser">
-          <el-input v-model="form.testUser" placeholder="请输入测试负责人"/>
-        </el-form-item>
-        <el-form-item label="模块顺序" prop="sort">
-          <el-input-number v-model="form.sort" controls-position="right" :min="0"/>
-        </el-form-item>
-        <el-form-item label="模块状态" prop="status">
-          <el-radio-group v-model="form.status">
-            <el-radio
-                v-for="dict in sys_normal_disable"
-                :key="dict.value"
-                :label="dict.value"
-            >{{ dict.label }}
-            </el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item label="简要描述" prop="simpleDesc">
-          <el-input type="textarea" :rows="4" v-model="form.simpleDesc" placeholder="简要描述" maxlength="100"/>
-        </el-form-item>
-
-
-        <el-form-item label="其他信息" prop="otherDesc">
-          <el-input type="textarea" :rows="4" v-model="form.otherDesc" placeholder="其他信息" maxlength="100"/>
-        </el-form-item>
-
-        <el-form-item label="备注" prop="remark">
-          <el-input v-model="form.remark" type="textarea" placeholder="请输入内容"/>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm">确 定</el-button>
-          <el-button @click="cancel">取 消</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <!-- 运行用例对话框 -->
-    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.module" :run-ids="runIds"></RunDialog>
   </div>
 </template>
 

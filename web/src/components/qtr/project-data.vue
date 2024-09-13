@@ -37,6 +37,8 @@
         v-if="refreshTable"
         v-loading="loading"
         :data="projectList"
+        style="width: 100%"
+        height="350"
         row-key="projectId"
         :default-expand-all="isExpandAll"
         @selection-change="handleSelectionChange"
@@ -64,73 +66,6 @@
         </template>
       </el-table-column>
     </el-table>
-
-    <!-- 添加或修改项目对话框 -->
-    <el-dialog :title="title" v-model="open" width="800px" append-to-body>
-      <el-form ref="projectRef" :model="form" :rules="rules" label-width="90px">
-        <el-row>
-          <el-col :span="12">
-            <el-form-item label="项目名称" prop="projectName">
-              <el-input v-model="form.projectName" placeholder="请输入项目名称"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="显示排序" prop="orderNum">
-              <el-input-number v-model="form.orderNum" controls-position="right" :min="0"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="项目负责人" prop="responsibleName">
-              <el-input v-model="form.responsibleName" placeholder="请输入负责人" maxlength="20"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="测试负责人" prop="testUser">
-              <el-input v-model="form.testUser" placeholder="请输入测试负责人" maxlength="25"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="开发负责人" prop="devUser">
-              <el-input v-model="form.devUser" placeholder="请输入开发负责人" maxlength="20"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="发布应用" prop="publishApp">
-              <el-input v-model="form.publishApp" placeholder="请输入发布应用" maxlength="20"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="简要描述" prop="simpleDesc">
-              <el-input type="textarea" :rows="4" v-model="form.simpleDesc" placeholder="简要描述" maxlength="100"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="其他信息" prop="otherDesc">
-              <el-input type="textarea" :rows="4" v-model="form.otherDesc" placeholder="其他信息" maxlength="100"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="项目状态">
-              <el-radio-group v-model="form.status">
-                <el-radio
-                    v-for="dict in sys_normal_disable"
-                    :key="dict.value"
-                    :label="dict.value"
-                >{{ dict.label }}
-                </el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm">确 定</el-button>
-          <el-button @click="cancel">取 消</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
   </div>
 </template>
 
