@@ -5,6 +5,7 @@ from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import *
+from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.enums.enums import DataType
 from utils.page_util import PageUtil
 
@@ -62,6 +63,15 @@ class CaseDao:
                          ).outerjoin(HrmProject,
                                      HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
                                                                                             HrmCase.module_id == HrmModule.module_id)
+        if query_object.suite_id:
+            # 查询条件中增加需要排除部分caseId
+            query_obj = {"suite_id": query_object.suite_id, "data_type": query_object.data_type}
+            caseIds = SuiteDetailDao.get_suite_detail_list_by_suite_id_dao(db, query_obj)
+            caseId_list = []
+            if len(caseIds) > 0:
+                for caseId in caseIds:
+                    caseId_list.append(caseId[0])
+            query = query.filter(~HrmCase.case_id.in_(caseId_list))
 
         if query_object.type:
             query = query.filter(HrmCase.type == query_object.type)
