@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
-      <el-form-item label="ID" prop="runId" v-if="viewType === runDetailViewTypeEnum.report">
+      <el-form-item label="执行ID" prop="runId" v-if="viewType === runDetailViewTypeEnum.report">
         <el-input
             v-model="queryParams.runId"
             placeholder="请输入用例ID"
@@ -18,6 +18,16 @@
             style="width: 200px"
             @keyup.enter="handleQuery"
         />
+      </el-form-item>
+      <el-form-item label="执行方式" prop="runType" v-if="viewType === runDetailViewTypeEnum.case">
+        <el-select v-model="queryParams.runType" placeholder="执行方式" clearable style="width: 100px">
+          <el-option
+              v-for="dict in hrm_run_way"
+              :key="dict.value"
+              :label="dict.label"
+              :value="dict.value"
+          />
+        </el-select>
       </el-form-item>
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="用例状态" clearable style="width: 100px">
@@ -53,6 +63,10 @@
       <el-table-column label="状态" align="center" prop="status" width="70px">
         <template #default="scope">
           <dict-tag :options="hrm_run_status" :value="scope.row.status"/>
+        </template>
+      </el-table-column><el-table-column label="执行方式" align="center" prop="runType" width="110px">
+        <template #default="scope">
+          <dict-tag :options="hrm_run_way" :value="scope.row.runType"/>
         </template>
       </el-table-column>
       <el-table-column label="执行开始时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
@@ -103,6 +117,7 @@ import {initCaseFormData} from "@/components/hrm/data-template.js";
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {hrm_run_status} = proxy.useDict("hrm_run_status");
+const {hrm_run_way} = proxy.useDict("hrm_run_way");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
 const props = defineProps(["runId", "viewType", "reportId"]);
@@ -134,7 +149,8 @@ const queryParams = ref({
   projectId: undefined,
   moduleId: undefined,
   status: undefined,
-  onlySelf: onlySelf
+  onlySelf: onlySelf,
+  runType: null
 });
 
 watch(() => props.runId, () => {
