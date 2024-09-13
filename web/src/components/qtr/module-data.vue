@@ -127,6 +127,8 @@ const data = reactive({
   queryParams: {
     pageNum: 1,
     pageSize: 10,
+    suiteId: configSuiteId,
+    dataType: 2,
     projectId: undefined,
     moduleName: undefined,
     status: undefined
