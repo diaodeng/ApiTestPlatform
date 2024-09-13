@@ -50,9 +50,13 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item><el-checkbox v-model="onlySelf" @change="handleQuery">仅自己的数据</el-checkbox></el-form-item>
       <el-form-item>
-        <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
+        <el-checkbox v-model="onlySelf" @change="handleQuery">仅自己的数据</el-checkbox>
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" icon="Search" @click="handleQuery" :loading="loading.page" :disabled="loading.page">
+          搜索
+        </el-button>
         <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
       </el-form-item>
     </el-form>
@@ -101,15 +105,21 @@
         </el-button>
       </el-col>
       <el-col :span="1.5">
-        <el-button type="warning" icon="CaretRight" @click="runTest"
-                     v-hasPermi="['hrm:case:run']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
+        <el-button type="warning"
+                   icon="CaretRight"
+                   @click="runTest"
+                   v-hasPermi="['hrm:case:run']"
+                   title="运行"
+                   v-if="dataType === HrmDataTypeEnum.case"
+                   :disabled="multiple"
+        >
           执行
-          </el-button>
+        </el-button>
       </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
     </el-row>
 
-    <el-table v-loading="loading" :data="caseList"
+    <el-table v-loading="loading.page" :data="caseList"
               @selection-change="handleSelectionChange"
               border
               table-layout="fixed"
@@ -135,12 +145,14 @@
         </template>
       </el-table-column>
       <el-table-column label="创建人" align="center" prop="createBy"></el-table-column>
-      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
+      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width"
+                       width="150px">
         <template #default="scope">
           <span>{{ parseTime(scope.row.createTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="更新时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
+      <el-table-column label="更新时间" align="center" prop="createTime" class-name="small-padding fixed-width"
+                       width="150px">
         <template #default="scope">
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
@@ -156,13 +168,13 @@
           <!--                     title="查看">-->
 
           <!--          </el-button>-->
-          <el-button link type="warning" icon="Edit" v-loading="loading" @click="handleUpdate(scope.row)"
+          <el-button link type="warning" icon="Edit" :loading="loading.edite" @click="handleUpdate(scope.row)"
                      v-hasPermi="['hrm:case:edit']" title="编辑">
           </el-button>
-          <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
+          <el-button link type="warning" icon="CaretRight" :loading="loading.run" @click="runTest(scope.row)"
                      v-hasPermi="['hrm:case:run']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
           </el-button>
-          <el-button link type="warning" icon="CopyDocument" v-loading="loading" @click="showCopyDialog(scope.row)"
+          <el-button link type="warning" icon="CopyDocument" :loading="loading.copy" @click="showCopyDialog(scope.row)"
                      v-hasPermi="['hrm:case:copy']" title="复制">
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
@@ -185,7 +197,7 @@
                     :data-type="dataType"
                     :form-rules="formRules"
                     v-model:open-case-edit-dialog="open"
-                    :title = caseEditDialogTitle
+                    :title=caseEditDialogTitle
 
     ></CaseEditDialog>
 
@@ -217,7 +229,7 @@
       </el-container>
     </el-dialog>
 
-      <!-- 运行用例对话框 -->
+    <!-- 运行用例对话框 -->
     <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.case" :run-ids="runIds"></RunDialog>
   </div>
 </template>
@@ -260,9 +272,8 @@ const dataName = computed(() => {
 });
 
 const caseEditDialogTitle = computed(() => {
-    return title.value + '【' + form.value.caseId + ' - ' + form.value.caseName +'】'
+  return title.value + '【' + form.value.caseId + ' - ' + form.value.caseName + '】'
 });
-
 
 
 provide("hrm_data_type", hrm_data_type);
@@ -273,7 +284,7 @@ const caseList = ref([]);
 const projectOptions = ref([]);
 const moduleOptions = ref([]);
 const open = ref(false);
-const loading = ref(true);
+// const loading = ref(true);
 const showSearch = ref(true);
 const ids = ref([]);
 const single = ref(true);
@@ -305,6 +316,12 @@ const queryParams = toRef({
 });
 
 const form = ref(initCaseFormData);
+const loading = ref({
+  page: false,
+  edite: false,
+  run: false,
+  copy: false
+})
 
 function nameOrGlob(val) {
   return val ? val : "全局";
@@ -316,12 +333,12 @@ function nameOrGlob(val) {
 * 行执行用例
 * **/
 function runTest(row) {
-  if (row && "caseId" in row && row.caseId){
+  if (row && "caseId" in row && row.caseId) {
     runIds.value = [row.caseId];
   }
   if (!runIds.value || runIds.value.length === 0) {
     ElMessageBox.alert('请选择要运行的用例', "提示！", {type: "warning"});
-      return;
+    return;
   }
   runDialogShow.value = true;
 
@@ -349,7 +366,7 @@ function copyCaseHandle() {
   }
   copyCase(data).then(response => {
     ElMessage.success("复制成功");
-  }).finally(()=>{
+  }).finally(() => {
     copyDialog.value = false;
   });
 }
@@ -357,12 +374,12 @@ function copyCaseHandle() {
 
 /** 查询用例列表 */
 function getList() {
-  loading.value = true;
+  loading.value.page = true;
   listCase(queryParams.value).then(response => {
     caseList.value = response.rows;
     total.value = response.total;
-  }).finally(()=>{
-    loading.value = false;
+  }).finally(() => {
+    loading.value.page = false;
   });
 }
 
@@ -417,6 +434,7 @@ function handleAdd() {
 
 /** 修改按钮操作 */
 function handleUpdate(row) {
+  loading.value.edite = true;
   const caseId = row.caseId || ids.value;
   getCase(caseId).then(response => {
     if (!response.data || Object.keys(response.data).length === 0) {
@@ -426,6 +444,8 @@ function handleUpdate(row) {
     form.value = response.data;
     open.value = true;
     title.value = "修改" + dataName.value;
+  }).finally(() => {
+    loading.value.edite = false;
   });
 }
 
@@ -455,6 +475,9 @@ function handleExport() {
   }, `Case_${new Date().getTime()}.xlsx`);
 }
 
-getProjectSelect();
-getList();
+onMounted(() => {
+  getProjectSelect();
+  getList();
+})
+
 </script>
