@@ -1,18 +1,22 @@
 from fastapi import APIRouter, Request
 from fastapi import Depends
+import datetime
 
 from config.get_db import get_db
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.debugtalk_dao import DebugTalkDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
+from module_hrm.entity.do.run_detail_do import HrmRunDetail
+from module_hrm.entity.do.suite_do import QtrSuite
 from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportQueryModel, ReportDelModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel
-from module_hrm.service.case_service import *
+from module_hrm.enums.enums import CaseRunStatus
+from module_hrm.service.case_service import Session, HrmCase, HrmProject, HrmModule, RunType, DataType
 from module_hrm.utils import comparators, debugtalk_common, util
 from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
 from utils.page_util import *
-from utils.response_util import *
+from utils.response_util import ResponseUtil
 
 hrmCommonController = APIRouter(prefix='/hrm/common', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -49,3 +53,53 @@ async def report_del(request: Request, case_id: int | None = None, query_db: Ses
         filter=lambda func: not func.startswith("assert_"))
     debugtalk_handler.del_import()
     return ResponseUtil.success(data=debugtalk_comparator_map)
+
+
+@hrmCommonController.get("/countInfo")
+async def count_info(request: Request, query_db: Session = Depends(get_db)):
+    project_count = query_db.query(HrmProject).count()
+    module_count = query_db.query(HrmModule).count()
+    suite_count = query_db.query(QtrSuite).count()
+    case_count = query_db.query(HrmCase).filter(HrmCase.type == DataType.case.value).count()
+
+    def get_total_values():
+        total = {
+            'pass': [],
+            'fail': [],
+            'percent': []
+        }
+        today = datetime.date.today()
+        for i in range(-11, 1):
+            begin = today + datetime.timedelta(days=i)
+            end = begin + datetime.timedelta(days=1)
+
+            total_run = query_db.query(HrmRunDetail).filter(HrmRunDetail.create_time.between(begin, end),
+                                                            HrmRunDetail.run_type==RunType.case.value).count()
+            total_success = query_db.query(HrmRunDetail).filter(HrmRunDetail.create_time.between(begin, end),
+                                                                HrmRunDetail.status==CaseRunStatus.passed.value,
+                                                                HrmRunDetail.run_type==RunType.case.value).count()
+
+            if not total_run:
+                total_run = 0
+            if not total_success:
+                total_success = 0
+
+            total_percent = round(total_success / total_run * 100, 2) if total_run != 0 else 0.00
+            total['pass'].append(total_success)
+            total['fail'].append(total_run - total_success)
+            total['percent'].append(total_percent)
+
+        return total
+
+    total = get_total_values()
+
+
+    data = {
+        'projectCount': project_count,
+        'moduleCount': module_count,
+        'caseCount': case_count,
+        'suiteCount': suite_count,
+        # 'account': request.session.get("now_account", 'test'),
+        'total': total
+    }
+    return ResponseUtil.success(data=data)

@@ -24,3 +24,10 @@ export function detail(detailId) {
     method: 'GET'
   })
 }
+
+export function countInfo(days) {
+  return request({
+    url: `/hrm/common/countInfo`,
+    method: 'GET'
+  })
+}
