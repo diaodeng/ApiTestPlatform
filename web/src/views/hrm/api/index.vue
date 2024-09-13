@@ -282,15 +282,15 @@ function delTab(event, tabId) {
 }
 
 function clickTab(tab, event) {
-  const currentTabIndex = apiTabsData.value.findIndex(dict => dict.apiId === tab.paneName);
-  currentApiData.value = apiTabsData.value[currentTabIndex];
-  currentTab.value = tab.paneName;
-  console.log("点击了tab:" + tab.paneName + " " + "当前tab：" + currentTab.value)
+  // console.log("点击了tab:" + tab.paneName + " " + "当前tab：" + currentTab.value)
 }
 
 function activeTabChange(tabName) {
-  console.log("tab切换了:" + tabName + "  " + "当前tab：" + currentTab.value)
-  // currentApiData = apiTabsData.value[tabName];
+  const currentTabIndex = apiTabsData.value.findIndex(dict => dict.apiId === tabName);
+  currentApiData.value = apiTabsData.value[currentTabIndex];
+  currentTab.value = tabName;
+  treeRef.value.setCurrentKey(tabName);
+  // console.log("tab切换了:" + tabName + "  " + "当前tab：" + currentTab.value)
 }
 
 function debug() {
@@ -371,6 +371,15 @@ function showRunHistory() {
   viewShow.value.runHistoryDialog = true;
 }
 
+function handleNodeChange(nodeData, node) {
+  if(nodeData.type === HrmDataTypeEnum.folder){return;}
+  const currentIndex = apiTabsData.value.findIndex(dict => dict.apiId === nodeData.apiId)
+  if(currentIndex === -1){return;}
+  currentTab.value = nodeData.apiId;
+  activeTabChange(nodeData.apiId);
+
+}
+
 </script>
 
 <template>
@@ -428,6 +437,7 @@ function showRunHistory() {
                         @move-node="handelMoveNode"
                         @edit-node="handleEditNode"
                         @add-node="handleAddNode"
+                        @current-node-change="handleNodeChange"
               ></TreeView>
             </div>
           </el-scrollbar>
@@ -445,7 +455,7 @@ function showRunHistory() {
                 <template #label size="small">
                   <el-badge is-dot :hidden="!apiData.modify">
                     <span style="margin: 0px; padding: 0px">
-                      <span>{{ apiData.name }}</span>
+                      <span @dblclick="activeTabChange(apiData.apiId);">{{ apiData.name }}</span>
                       <el-button @click.stop="(event) => {delTab(event, apiData.apiId)}" icon="Close" link></el-button>
                     </span>
                   </el-badge>
