@@ -166,8 +166,6 @@ watch(() => props.reportId, () => {
 /** 查询用例列表 */
 function getList() {
   loading.value = true;
-  queryParams.value.runId = props.runId;
-  queryParams.value.reportId = props.reportId;
   ApiRunDetail.list(queryParams.value).then(response => {
     runDetailList.value = response.rows;
     total.value = response.total;
