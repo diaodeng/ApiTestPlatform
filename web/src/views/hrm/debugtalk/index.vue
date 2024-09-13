@@ -1,5 +1,32 @@
 <template>
    <div class="app-container">
+     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
+      <el-form-item label="所属项目" prop="projectId">
+        <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable
+                   style="width: 150px">
+          <el-option
+              v-for="option in projectOptions"
+              :key="option.projectId"
+              :label="option.projectName"
+              :value="option.projectId">
+          </el-option>
+        </el-select>
+      </el-form-item>
+      <el-form-item label="状态" prop="status">
+        <el-select v-model="queryParams.status" placeholder="状态" clearable style="width: 100px">
+          <el-option
+              v-for="dict in sys_normal_disable"
+              :key="dict.value"
+              :label="dict.label"
+              :value="dict.value"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
+        <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
+      </el-form-item>
+    </el-form>
       <el-table
           border
          v-if="refreshTable"
@@ -7,12 +34,13 @@
          :data="debugtalkList"
          row-key="debugtalkId"
          :default-expand-all="isExpandAll">
-         <el-table-column prop="debugtalkId" label="ID" width="120"></el-table-column>
-         <el-table-column label="项目ID" width="140" prop="projectId" align="center"></el-table-column>
-         <el-table-column label="所属项目" width="260" :formatter="formatProject" align="center"></el-table-column>
+         <el-table-column prop="debugtalkId" label="ID" width="150"></el-table-column>
+         <el-table-column label="项目ID" width="150" prop="projectId" align="center"></el-table-column>
+         <el-table-column label="所属项目" width="260" prop="projectName" align="center"></el-table-column>
+<!--         <el-table-column label="所属项目" width="260" :formatter="formatProject" align="center"></el-table-column>-->
          <el-table-column align="center" label="DebugTalk" width="260">
            <template #default="scope">
-             <el-button link type="primary" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:debugtalk:edit']">debugtalk.py</el-button>
+             <el-button link type="primary" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:debugtalk:edit', 'hrm:debugtalk:detail']">debugtalk.py</el-button>
            </template>
          </el-table-column>
          <el-table-column prop="status" label="状态" align="center" width="120">
@@ -32,53 +60,40 @@
          </el-table-column>
       </el-table>
 
-      <!-- 添加或修改项目对话框 -->
-      <el-dialog :title="title" v-model="open" width="800px" append-to-body>
-         <el-form ref="debugtalkRef" :model="form" :rules="rules" label-width="5px">
-           <el-form-item>
+      <!-- 修改debugtalk对话框 -->
+    <el-dialog fullscreen :title="title" v-model="open" append-to-body>
+      <el-form ref="debugtalkRef" :model="form" :rules="rules" label-width="100px" style="height: 100%">
+        <el-container style="height: 100%">
+          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
+            <el-button-group>
+              <el-button type="primary" icon="Save" @click="submitForm" v-hasPermi="['hrm:debugtalk:edit']">保存</el-button>
+              <el-button type="primary" icon="Cancel" @click="cancel" >取消</el-button>
+            </el-button-group>
+          </el-header>
 
-                <MonacoEditor v-model="debugtalk" language="javascript" />
+          <el-main style="max-height: calc(100vh - 95px);">
 
-            </el-form-item>
-         </el-form>
-         <template #footer>
-            <div class="dialog-footer">
-               <el-button type="primary" @click="submitForm">确 定</el-button>
-               <el-button @click="cancel">取 消</el-button>
-            </div>
-         </template>
-      </el-dialog>
+            <AceEditor v-model:content="form.debugtalk" can-set="true" lang="python" themes="monokai"></AceEditor>
+
+          </el-main>
+        </el-container>
+      </el-form>
+
+    </el-dialog>
    </div>
-<!--  <div><el-button @click="dialogVisible = true">打开对话框</el-button>-->
-<!--      <el-dialog-->
-<!--        :visible.sync="dialogVisible"-->
-<!--        :fullscreen="isFullscreen"-->
-<!--        @fullscreenchange="handleFullscreenChange"-->
-<!--        custom-class="my-custom-dialog"-->
-<!--      >-->
-<!--        <div slot="title" class="dialog-header">-->
-<!--          <span>对话框标题</span>-->
-<!--          <el-button icon="el-icon-full-screen" @click="toggleFullscreen" class="fullscreen-btn"></el-button>-->
-<!--        </div>-->
-<!--        <div>-->
-<!--          <p>对话框内容...</p>-->
-<!--        </div>-->
-<!--        <span slot="footer" class="dialog-footer">-->
-<!--          <el-button @click="dialogVisible = false">取消</el-button>-->
-<!--          <el-button type="primary" @click="dialogVisible = false">确定</el-button>-->
-<!--        </span>-->
-<!--      </el-dialog></div>-->
 </template>
 
 <script setup name="debugtalk">
-import { listDebugTalk, getDebugTalk, delDebugTalk, addDebugTalk, updateDebugTalk } from "@/api/hrm/debugtalk.js";
+import AceEditor from "@/components/hrm/common/ace-editor.vue";
+import { listDebugTalk, getDebugTalk, addDebugTalk, updateDebugTalk } from "@/api/hrm/debugtalk.js";
 import { listProject } from "@/api/hrm/project.js";
-import MonacoEditor from './MonacoEditor.vue';
+import {initDebugTalkFormData} from "@/components/hrm/data-template.js";
 
 const { proxy } = getCurrentInstance();
 const { sys_normal_disable } = proxy.useDict("sys_normal_disable");
 
 const debugtalkList = ref([]);
+const projectOptions = ref([]);
 const projectList = ref([]);
 const open = ref(false);
 const loading = ref(true);
@@ -89,30 +104,23 @@ const refreshTable = ref(true);
 const projectId = ref();
 const debugtalk = ref();
 
-const dialogVisible = false;
-const isFullscreen = false;
 
 const data = reactive({
-  form: {
-    debugtalk: ''
-  },
   queryParams: {
     debugtalkId: undefined,
+    projectId: undefined,
     status: undefined
   },
   rules: {
     orderNum: [{ required: true, message: "显示排序不能为空", trigger: "blur" }]
   },
+
 });
+const form = ref({
+  debugtalk: JSON.parse(JSON.stringify(initDebugTalkFormData))
+});
+const { queryParams, rules } = toRefs(data);
 
-const { queryParams, form, rules } = toRefs(data);
-
-function toggleFullscreen() {
-  this.isFullscreen = !this.isFullscreen;
-}
-function handleFullscreenChange(isFullscreen) {
-  this.isFullscreen = isFullscreen;
-}
 
 getProjectList();
 
@@ -148,30 +156,18 @@ function resetQuery() {
   proxy.resetForm("queryRef");
   handleQuery();
 }
-/** 新增按钮操作 */
-function handleAdd(row) {
-  reset();
-  listDebugTalk().then(response => {
-    debugtalkOptions.value = proxy.handleTree(response.data, "debugtalkId");
-  });
-  open.value = true;
-  title.value = "添加项目";
-}
-/** 展开/折叠操作 */
-function toggleExpandAll() {
-  refreshTable.value = false;
-  isExpandAll.value = !isExpandAll.value;
-  nextTick(() => {
-    refreshTable.value = true;
-  });
-}
+
 /** 修改按钮操作 */
 function handleUpdate(row) {
   reset();
   getDebugTalk(row.debugtalkId).then(response => {
+    if (!response.data || Object.keys(response.data).length === 0) {
+      alert("未查到对应数据！");
+      return;
+    }
     form.value = response.data;
     open.value = true;
-    title.value = "DebugTalk";
+    title.value = "编辑DebugTalk";
   });
 }
 
@@ -229,17 +225,15 @@ function getProjectList() {
   });
 }
 
+/** 查询项目列表 */
+function getProjectSelect() {
+  listProject(null).then(response => {
+    projectOptions.value = response.data;
+  });
+}
+
+getProjectSelect();
 getList();
 </script>
 <style scoped>
-.my-custom-dialog .el-dialog__header {
-  padding-right: 40px; /* 留出空间给全屏按钮 */
-}
-
-.fullscreen-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 1;
-}
 </style>

@@ -4,6 +4,10 @@ __pycache__/
 *$py.class
 
 .idea
+server/.env.dev
+server/.env.prod
+server/alembic
+server/alembic.ini
 
 # C extensions
 *.so
@@ -137,3 +141,4 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+

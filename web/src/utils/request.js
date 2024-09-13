@@ -17,7 +17,7 @@ const service = axios.create({
   // axios中请求配置有baseURL选项，表示请求URL公共部分
   baseURL: import.meta.env.VITE_APP_BASE_API,
   // 超时
-  timeout: 10000
+  timeout: 10*60*1000
 })
 
 // request拦截器
@@ -115,7 +115,13 @@ service.interceptors.response.use(res => {
     } else if (message.includes("timeout")) {
       message = "系统接口请求超时";
     } else if (message.includes("Request failed with status code")) {
-      message = "系统接口" + message.substr(message.length - 3) + "异常";
+      if (!error.response){
+        message = "系统接口" + message.substr(message.length - 3) + "异常";
+      } else if (error.response.status == 422) {
+          message = error.response.data.msg;
+      } else {
+          message = "系统接口" + error.response.status + "异常";}
+
     }
     ElMessage({ message: message, type: 'error', duration: 5 * 1000 })
     return Promise.reject(error)
