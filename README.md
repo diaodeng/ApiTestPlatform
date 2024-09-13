@@ -1,7 +1,7 @@
 <p align="center">
 	<img alt="logo" src="https://oscimg.oschina.net/oscnet/up-d3d0a9303e11d522a06cd263f3079027715.png">
 </p>
-<h1 align="center" style="margin: 30px 0 30px; font-weight: bold;">ApiTestPlatform</h1>
+<h1 align="center" style="margin: 30px 0 30px; font-weight: bold;">QTestRunner</h1>
 <h4 align="center">基于RuoYi-Vue3+FastAPI前后端分离的快速开发框架</h4>
 <p align="center">
 	<a href="https://gitee.com/insistence2022/RuoYi-Vue3-FastAPI/stargazers"><img src="https://gitee.com/insistence2022/RuoYi-Vue3-FastAPI/badge/star.svg?theme=dark"></a>

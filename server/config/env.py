@@ -11,7 +11,7 @@ class AppSettings(BaseSettings):
     应用配置
     """
     app_env: str = 'dev'
-    app_name: str = 'RuoYi-FasAPI'
+    app_name: str = 'QTestRunner'
     app_root_path: str = '/dev-api'
     app_host: str = '0.0.0.0'
     app_port: int = 9099
@@ -27,8 +27,8 @@ class JwtSettings(BaseSettings):
     """
     jwt_secret_key: str = 'b01c66dc2c58dc6a0aabfe2144256be36226de378bf87f72c0c795dda67f4d55'
     jwt_algorithm: str = 'HS256'
-    jwt_expire_minutes: int = 1440
-    jwt_redis_expire_minutes: int = 30
+    jwt_expire_minutes: int = 7 * 24 * 60
+    jwt_redis_expire_minutes: int = 7 * 24 * 60
 
 
 class DataBaseSettings(BaseSettings):
@@ -179,7 +179,10 @@ class GetConfig:
         if run_env != '':
             env_file = f'.env.{run_env}'
         # 加载配置
-        load_dotenv(env_file)
+
+        if os.path.exists(env_file):
+            load_dotenv(env_file)
+        load_dotenv(".env.base")
 
 
 # 实例化获取配置类

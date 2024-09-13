@@ -1,7 +1,11 @@
+import copy
+
 from module_hrm.dao.case_dao import *
+from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseDetailForHandle
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
 from utils.page_util import PageResponseModel
+from utils.snowflake import snowIdWorker
 
 
 class CaseService:
@@ -45,12 +49,43 @@ class CaseService:
             result = dict(is_success=False, message='用例名称已存在')
         else:
             try:
-                if page_object.module_id and page_object.project_id:
-                    add_result = CaseDao.add_case_dao(query_db, add_case)
-                    case_id = add_result.case_id
-                    CaseDao.add_case_module_project_dao(query_db, CaseModuleProjectModel(caseId=case_id, moduleId=page_object.module_id, projectId=page_object.project_id))
+                CaseDao.add_case_dao(query_db, add_case)
                 query_db.commit()
                 result = dict(is_success=True, message='新增成功')
+            except Exception as e:
+                query_db.rollback()
+                raise e
+
+        return CrudResponseModel(**result)
+
+    @classmethod
+    def copy_case_services(cls, query_db: Session, page_object: AddCaseModel):
+        """
+        新增用例信息service
+        :param query_db: orm对象
+        :param page_object: 新增用例对象
+        :return: 新增用例校验结果
+        """
+        case = CaseDao.get_case_detail_by_info(query_db, CaseQuery(caseId=page_object.case_id))
+        if not case:
+            result = dict(is_success=False, message='原用例不存在')
+        else:
+            try:
+                new_data = case.__dict__.copy()
+                new_data["case_name"] = page_object.case_name
+                new_data["manager"] = page_object.manager
+                new_data["create_by"] = page_object.create_by
+                new_data["update_by"] = page_object.update_by
+                new_data.pop("id", None)
+                new_data.pop("case_id", None)
+                new_data.pop("create_time", None)
+                new_data.pop("update_time", None)
+                new_data.pop("_sa_instance_state", None)
+
+                new_case = HrmCase(**new_data)
+                query_db.add(new_case)
+                query_db.commit()
+                result = dict(is_success=True, message='复制成功')
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -65,8 +100,8 @@ class CaseService:
         :param page_object: 编辑用例对象
         :return: 编辑用例校验结果
         """
-        edit = page_object.model_dump(exclude_unset=True)
-        info = cls.case_detail_services(query_db, edit.get('case_id'))
+        # edit = page_object.model_dump(exclude_unset=True)
+        info = cls.case_detail_services(query_db, page_object.case_id)
         if info:
             if info.case_name != page_object.case_name:
                 case = CaseDao.get_case_detail_by_info(query_db, CaseModel(caseName=page_object.case_name))
@@ -74,7 +109,7 @@ class CaseService:
                     result = dict(is_success=False, message='用例名称已存在')
                     return CrudResponseModel(**result)
             try:
-                CaseDao.edit_case_dao(query_db, edit)
+                CaseDao.edit_case_dao(query_db, page_object)
                 query_db.commit()
                 result = dict(is_success=True, message='更新成功')
             except Exception as e:
@@ -108,7 +143,7 @@ class CaseService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def case_detail_services(cls, query_db: Session, case_id: int):
+    def case_detail_services(cls, query_db: Session, case_id: int) -> CaseModelForApi:
         """
         获取用例详细信息service
         :param query_db: orm对象
@@ -118,7 +153,11 @@ class CaseService:
         case = CaseDao.get_case_by_id(query_db, case_id=case_id)
         if not case:
             return {}
-        result = CaseModel(**CamelCaseUtil.transform_result(case))
+        result = CaseModelForApi(**CamelCaseUtil.transform_result(case))
+        if result.include is not None:
+            result.include = json.loads(result.include)
+        # new_request = TestCase(**result.request).model_dump(by_alias=True)
+        # result.request = new_request
 
         return result
 

@@ -1,7 +1,7 @@
 <template>
   <div class="register">
     <el-form ref="registerRef" :model="registerForm" :rules="registerRules" class="register-form">
-      <h3 class="title">自动化测试平台</h3>
+      <h3 class="title">QTestRunner</h3>
       <el-form-item prop="username">
         <el-input 
           v-model="registerForm.username" 

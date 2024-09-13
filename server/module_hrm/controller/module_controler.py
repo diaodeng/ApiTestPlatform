@@ -17,7 +17,9 @@ moduleController = APIRouter(prefix='/hrm/module', dependencies=[Depends(LoginSe
 
 
 @moduleController.get("/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:module:list'))])
-async def get_hrm_module_list(request: Request, page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_query), query_db: Session = Depends(get_db)):
+async def get_hrm_module_list(request: Request,
+                              page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_query),
+                              query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
         page_query_result = ModuleService.get_module_list_services(query_db, page_query, is_page=True)
@@ -29,7 +31,9 @@ async def get_hrm_module_list(request: Request, page_query: ModulePageQueryModel
 
 
 @moduleController.get("/selectModuleList", response_model=List[ModuleModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
-async def get_hrm_module_list_all(request: Request, query: ModuleQueryModel = Depends(ModuleQueryModel), query_db: Session = Depends(get_db)):
+async def get_hrm_module_list_all(request: Request,
+                                  query: ModuleQueryModel = Depends(ModuleQueryModel),
+                                  query_db: Session = Depends(get_db)):
     try:
         query_result = ModuleService.get_module_list_services_all(query_db, query)
         logger.info('获取成功')
@@ -40,7 +44,9 @@ async def get_hrm_module_list_all(request: Request, query: ModuleQueryModel = De
 
 
 @moduleController.get("/showModuleList", response_model=List[ModuleModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
-async def get_hrm_module_list_show(request: Request, query: ModuleQueryModel = Depends(ModuleQueryModel), query_db: Session = Depends(get_db)):
+async def get_hrm_module_list_show(request: Request,
+                                   query: ModuleQueryModel = Depends(ModuleQueryModel),
+                                   query_db: Session = Depends(get_db)):
     try:
         query_result = ModuleService.get_module_list_services_show(query_db, query)
         logger.info('获取成功')
@@ -52,8 +58,12 @@ async def get_hrm_module_list_show(request: Request, query: ModuleQueryModel = D
 
 @moduleController.post("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:module:add'))])
 @log_decorator(title='模块管理', business_type=1)
-async def add_hrm_module(request: Request, add_module: AddModuleModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def add_hrm_module(request: Request,
+                         add_module: AddModuleModel,
+                         query_db: Session = Depends(get_db),
+                         current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
+        add_module.manager = current_user.user.user_id
         add_module.create_by = current_user.user.user_name
         add_module.update_by = current_user.user.user_name
         add_module.module_id = snowIdWorker.get_id()
@@ -71,7 +81,10 @@ async def add_hrm_module(request: Request, add_module: AddModuleModel, query_db:
 
 @moduleController.put("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:module:edit'))])
 @log_decorator(title='模块管理', business_type=2)
-async def edit_hrm_module(request: Request, edit_module: ModuleModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def edit_hrm_module(request: Request,
+                          edit_module: ModuleModel,
+                          query_db: Session = Depends(get_db),
+                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_module.update_by = current_user.user.user_name
         edit_module.update_time = datetime.now()
@@ -104,7 +117,9 @@ async def delete_hrm_module(request: Request, module_ids: str, query_db: Session
         return ResponseUtil.error(msg=str(e))
 
 
-@moduleController.get("/{module_id}", response_model=ModuleModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:module:detail', 'hrm:module:edit'], False))])
+@moduleController.get("/{module_id}",
+                      response_model=ModuleModel,
+                      dependencies=[Depends(CheckUserInterfaceAuth(['hrm:module:detail', 'hrm:module:edit'], False))])
 async def query_detail_hrm_module(request: Request, module_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_result = ModuleService.module_detail_services(query_db, module_id)
@@ -117,7 +132,9 @@ async def query_detail_hrm_module(request: Request, module_id: int, query_db: Se
 
 @moduleController.post("/export", dependencies=[Depends(CheckUserInterfaceAuth('hrm:module:export'))])
 @log_decorator(title='模块管理', business_type=5)
-async def export_hrm_module_list(request: Request, page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_form), query_db: Session = Depends(get_db)):
+async def export_hrm_module_list(request: Request,
+                                 page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_form),
+                                 query_db: Session = Depends(get_db)):
     try:
         # 获取全量数据
         query_result = ModuleService.get_module_list_services(query_db, page_query, is_page=False)
