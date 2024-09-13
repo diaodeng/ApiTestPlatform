@@ -123,6 +123,9 @@ class CasePageQueryModel(CaseQueryModel):
 
     only_self: bool = False
 
+    suite_id: Optional[int] = None
+    data_type: Optional[int] = None
+
 
 class AddCaseModel(CaseModel):
     """

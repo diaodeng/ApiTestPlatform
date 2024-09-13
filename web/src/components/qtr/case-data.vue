@@ -172,6 +172,8 @@ const queryParams = toRef({
   pageSize: 10,
   type: props.dataType,
   caseId: undefined,
+  suiteId: configSuiteId,
+  dataType: 3,
   caseName: undefined,
   projectId: undefined,
   moduleId: undefined,
