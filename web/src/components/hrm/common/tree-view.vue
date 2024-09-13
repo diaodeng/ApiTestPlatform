@@ -60,7 +60,7 @@ const contextMenu = reactive({
   }
 })
 
-const emit = defineEmits(["nodeDbClick", "delNode", "filter", "addNode", "moveNode", "editNode"]);
+const emit = defineEmits(["nodeDbClick", "delNode", "filter", "addNode", "moveNode", "editNode", "currentNodeChange"]);
 
 interface Tree {
   apiId: bigint,
@@ -320,6 +320,10 @@ const handleEditNodeName = (evt, data, node) => {
   emit('editNode', evt, data, node);
 }
 
+const handleCurrentNodeChange = (nodeData, node) => {
+  emit('currentNodeChange', nodeData, node);
+}
+
 </script>
 
 <template>
@@ -333,6 +337,7 @@ const handleEditNodeName = (evt, data, node) => {
   <el-tree
       style="max-width: 600px"
       :data="dataSource"
+      highlight-current
       :props="defaultProps"
       node-key="apiId"
       :expand-on-click-node="false"
@@ -347,6 +352,7 @@ const handleEditNodeName = (evt, data, node) => {
       @node-drag-over="handleDragOver"
       @node-drag-end="handleDragEnd"
       @node-drop="handleDrop"
+      @current-change="handleCurrentNodeChange"
 
   >
     <template #default="{ node, data }">
