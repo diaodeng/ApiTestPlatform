@@ -59,26 +59,42 @@ async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, ty
     :return: list
     """
 
-    project_cases = defaultdict(list)
+    project_cases = defaultdict(set)
     if type == DataType.project.value:
         for project_id in test_list:
-            project_cases[project_id].append(project_id)
+            project_cases[project_id].add(project_id)
     elif type == DataType.module.value:
         all_module_obj = query_db.query(HrmModule.project_id, HrmModule.module_id).filter(
             HrmModule.module_id.in_(test_list)).all()
         for project_id, module_id in all_module_obj:
-            project_cases[project_id].append(module_id)
+            project_cases[project_id].add(module_id)
     elif type == DataType.suite.value:
-        project_case_ids = (query_db.query(QtrSuite.project_id, QtrSuiteDetail.case_id).
-                            join(QtrSuiteDetail, QtrSuite.suite_id == QtrSuiteDetail.suite_id).
-                            filter(QtrSuite.id.in_(test_list)).all())
-        for project_id, case_id in project_case_ids:
-            project_cases[project_id].append(case_id)
+        project_case_ids = (query_db.query(QtrSuiteDetail.data_id, QtrSuiteDetail.data_type).
+                            filter(QtrSuiteDetail.suite_id.in_(test_list)).all())
+        datas = defaultdict(set)
+        for data_id, data_type in project_case_ids:
+            datas[data_type].add(data_id)
+
+        tmp_all_case = []
+        for test_type in datas:
+            if test_type == DataType.project.value:
+                tmp_project_case = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(HrmCase.project_id.in_(datas[test_type])).all()
+                tmp_all_case.extend(tmp_project_case)
+            elif test_type == DataType.module.value:
+                module_obj = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(
+                    HrmCase.module_id.in_(datas[test_type])).all()
+                tmp_all_case.extend(module_obj)
+            elif test_type == DataType.case.value:
+                case_obj = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(
+                    HrmCase.case_id.in_(datas[test_type])).all()
+                tmp_all_case.extend(case_obj)
+            for project_id, case_id in tmp_all_case:
+                project_cases[project_id].add(case_id)
     else:
         project_case_ids = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(
             HrmCase.case_id.in_(test_list)).all()
         for project_id, case_id in project_case_ids:
-            project_cases[project_id].append(case_id)
+            project_cases[project_id].add(case_id)
 
     # project_ids = project_cases.keys()
 
@@ -103,8 +119,8 @@ async def run_by_batch(query_db: Session, test_list: list[int | str], env_id, ty
                         res_data = await run_by_project(query_db, value, env_obj, debugtalk_func_map)
                     elif type == DataType.module.value:
                         res_data = await run_by_module(query_db, value, env_obj, debugtalk_func_map)
-                    # elif type == DataType.suite:
-                    #     res_data = await run_by_suite(query_db, value, env_obj, debugtalk_func_map)
+                    elif type == DataType.suite:
+                        res_data = await run_by_single(query_db, value, env_obj, debugtalk_func_map)
                     else:
                         res_data = await run_by_single(query_db, value, env_obj, debugtalk_func_map)
                     result.extend(res_data)

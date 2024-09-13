@@ -134,7 +134,7 @@
     </el-dialog>
 
     <!-- 运行用例对话框 -->
-    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.project" :run-ids="runIds"></RunDialog>
+    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.suite" :run-ids="runIds"></RunDialog>
 
     <!-- 配置套件详情对话框 -->
     <SuiteDetailDialog :form-datas="form"
