@@ -8,11 +8,12 @@ import {list as configList} from "@/api/hrm/config.js";
 
 import {initStepData} from "@/components/hrm/data-template.js";
 import {randomString} from "@/utils/tools.js";
-import {CaseStepTypeEnum, HrmDataTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
+import {CaseStepTypeEnum, HrmDataTypeEnum, runDetailViewTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
 import {debugCase, getComparator} from "@/api/hrm/case.js";
 import StepRequest from "@/components/hrm/case/step-request.vue";
 import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
 import {getApiFormDataByType} from "@/components/hrm/case/case-utils.js";
+import RunDetail from "@/components/hrm/common/run-detail.vue";
 
 
 const {proxy} = getCurrentInstance();
@@ -31,6 +32,9 @@ const apiTabsData = ref([]);
 const currentApiData = ref(apiTabsData.value[0] || null);
 const selectedEnv = ref("");
 const currentTab = ref(0);  // 当前选中的tab，是apiId
+const viewShow = ref({
+  runHistoryDialog: false
+});
 const loadingApi = ref(false);
 const onlySelf = ref(true);
 const loading = ref({
@@ -295,7 +299,8 @@ function debug() {
   let caseData = {
     request: apiData.requestInfo,
     type: apiData.type,
-    name: apiData.name
+    name: apiData.name,
+    caseId: apiData.apiId,
   }
   delete caseData.request.config.result;
   delete caseData.request.teststeps[0].result;
@@ -303,7 +308,7 @@ function debug() {
   const req_data = {
     "env": selectedEnv.value,
     "runType": RunTypeEnum.api,
-    "caseData": caseData
+    "caseData": caseData,
   }
   debugCase(req_data).then(response => {
     ElMessage.success(response.msg);
@@ -358,6 +363,15 @@ const copyAsCase = () => {
   })
 }
 
+function showRunHistory() {
+  debugger
+  if (!currentApiData.value){
+    ElMessage.warning("请先选择一个接口");
+    return;
+  }
+  viewShow.value.runHistoryDialog = true;
+}
+
 </script>
 
 <template>
@@ -373,6 +387,7 @@ const copyAsCase = () => {
           <el-dropdown-menu>
             <el-dropdown-item @click="saveApiInfo('copy2case');">另存为用例</el-dropdown-item>
             <el-dropdown-item @click="console.log('复制API')">复制</el-dropdown-item>
+            <el-dropdown-item @click="showRunHistory">执行历史</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -485,6 +500,17 @@ const copyAsCase = () => {
       </el-main>
       <el-button type="info" @click="loading.preSaveFolderDialog = false">取消</el-button>
       <el-button type="primary" @click="saveFolderInfo" :disabled="loading.saveApi">保存</el-button>
+    </el-dialog>
+
+    <el-dialog fullscreen :title="'【' + currentApiData?.apiId + '】' + currentApiData?.name"
+               v-model="viewShow.runHistoryDialog" append-to-body destroy-on-close>
+      <el-container style="height: 100%">
+        <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
+        <!--          </el-header>-->
+        <el-main style="max-height: calc(100vh - 95px);">
+          <RunDetail :run-id="currentApiData.apiId" :view-type="runDetailViewTypeEnum.api"></RunDetail>
+        </el-main>
+      </el-container>
     </el-dialog>
   </div>
 

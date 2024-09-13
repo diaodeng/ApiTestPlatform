@@ -197,7 +197,7 @@
         <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
         <!--          </el-header>-->
         <el-main style="max-height: calc(100vh - 95px);">
-          <RunDetail :run-id="currentRunId"></RunDetail>
+          <RunDetail :run-id="currentRunId" :view-type="runDetailViewTypeEnum.case"></RunDetail>
         </el-main>
       </el-container>
     </el-dialog>
@@ -232,7 +232,7 @@ import {initCaseFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run-detail.vue';
 import RunDialog from '@/components/hrm/common/run_dialog.vue';
 import ParamsDalog from "@/components/hrm/common/edite-table.vue"
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {HrmDataTypeEnum, runDetailViewTypeEnum} from "@/components/hrm/enum.js";
 import {ElMessageBox, ElMessage} from "element-plus";
 // import JsonEditorVue from "json-editor-vue3";
 
