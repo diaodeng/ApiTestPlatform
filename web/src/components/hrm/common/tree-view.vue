@@ -185,7 +185,6 @@ const defaultProps = {
 }
 
 const append = (data: Tree, type) => {
-  debugger
   if (!data.isParent) {
     return;
   }
