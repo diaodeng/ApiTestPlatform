@@ -153,7 +153,6 @@ function apiSaveSuccess(res, oldApiId) {
 }
 
 function saveFolderInfo() {
-  debugger
   let selectedNodes = treeRef.value.getCurrentNode();
   let parentId = null;
   if (selectedNodes) {
@@ -166,7 +165,6 @@ function saveFolderInfo() {
   data.apiType = CaseStepTypeEnum.folder
   data.parentId = parentId;
   addApi(data).then(res => {
-    debugger
     if (!parentId) {
       treeDataSource.value.splice(0, 0, res.data);
     } else {
