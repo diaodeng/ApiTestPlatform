@@ -11,7 +11,6 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.annotation.log_annotation import log_decorator
 from utils.snowflake import snowIdWorker
-from module_hrm.enums.enums import DataType
 
 
 suiteController = APIRouter(prefix='/qtr/suite', dependencies=[Depends(LoginService.get_current_user)])
