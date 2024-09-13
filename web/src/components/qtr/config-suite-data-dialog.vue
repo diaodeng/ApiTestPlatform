@@ -44,7 +44,7 @@
 import ProjectData from "@/components/qtr/project-data.vue";
 
 const openConfigSuiteDataDialog = defineModel("openConfigSuiteDataDialog");
-import { ref, defineEmits } from 'vue'
+import { ref } from 'vue'
 import type { TabsPaneContext } from 'element-plus'
 import CaseData from "@/components/qtr/case-data.vue";
 import ModuleData from "@/components/qtr/module-data.vue";
