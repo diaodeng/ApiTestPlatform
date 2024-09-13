@@ -1,6 +1,3 @@
-<p align="center">
-	<img alt="logo" src="https://oscimg.oschina.net/oscnet/up-d3d0a9303e11d522a06cd263f3079027715.png">
-</p>
 <h1 align="center" style="margin: 30px 0 30px; font-weight: bold;">QTestRunner</h1>
 <h4 align="center">基于RuoYi-Vue3+FastAPI前后端分离的快速开发框架</h4>
 <p align="center">
@@ -51,55 +48,6 @@ RuoYi-Vue3-FastAPI是一套全部开源的快速开发平台，毫无保留给�
 13. 服务监控：监视当前系统CPU、内存、磁盘、堆栈等相关信息。
 14. 缓存监控：对系统的缓存信息查询，命令统计等。
 15. 系统接口：根据业务代码自动生成相关的api接口文档。
-
-## 演示图
-
-<table>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/login.png"/></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/dashboard.png"/></td>
-    </tr>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/user.png"/></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/role.png"/></td>
-    </tr>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/menu.png"/></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/dept.png"/></td>
-    </tr>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/post.png"/></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/dict.png"/></td>
-    </tr>	 
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/config.png"/></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/notice.png"/></td>
-    </tr>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/operLog.png"/></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/loginLog.png"/></td>
-    </tr>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/online.png"/></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/job.png"/></td>
-    </tr>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/server.png"/></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/cache.png"/></td>
-    </tr>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/cacheList.png"></td>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/api.png"></td>
-    </tr>
-    <tr>
-        <td><img src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/profile.png"/></td>
-    </tr>
-</table>
-
-## 在线体验
-- *账号：admin*
-- *密码：admin123*
-- 演示地址：<a href="https://vfadmin.insistence.tech">vfadmin管理系统<a>
 
 ## 项目开发及发布相关
 
@@ -176,15 +124,3 @@ npm run build:prod 或 yarn build:prod
 # 运行后端
 python3 app.py --env=prod
 ```
-
-## 交流与赞助
-如果有对本项目及FastAPI感兴趣的朋友，欢迎加入知识星球一起交流学习，让我们一起变得更强。如果你觉得这个项目帮助到了你，你可以请作者喝杯咖啡表示鼓励☕。扫描下面微信二维码添加微信备注VF-Admin即可进群。
-<table>
-    <tr>
-        <td><img alt="zsxq" src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/zsxq.jpg"></td>
-        <td><img alt="zanzhu" src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/zanzhu.jpg"></td>
-    </tr>
-    <tr>
-        <td><img alt="wxcode" src="https://gitee.com/insistence2022/RuoYi-Vue-FastAPI/raw/master/demo-pictures/wxcode.jpg"></td>
-    </tr>
-</table>

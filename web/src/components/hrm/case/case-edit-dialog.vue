@@ -35,6 +35,10 @@ const activeCaseName = ref("caseConfig")
 const responseData = ref("");
 const hrm_comparator_dict = ref({});
 const selectConfigList = ref([]);
+const loading = ref({
+  save: false,
+  debug: false
+})
 
 const dataName = computed(() => {
   return props.dataType === HrmDataTypeEnum.case ? "用例" : "配置";
@@ -53,8 +57,10 @@ watch(() => props.formDatas, () => {
 
 /** 提交按钮 */
 function submitForm() {
+
   proxy.$refs["postRef"].validate(valid => {
     if (valid) {
+      loading.value.save = true;
       const caseData = formData.value
       caseData.request.config.name = caseData.caseName;
       caseData.request.config.result = {}
@@ -68,12 +74,16 @@ function submitForm() {
           proxy.$modal.msgSuccess("修改成功");
           openCaseEditDialog.value = false;
           // getList();
+        }).finally(() => {
+            loading.value.save = false;
         });
       } else {
         addCase(caseData).then(response => {
           proxy.$modal.msgSuccess("新增成功");
           openCaseEditDialog.value = false;
           // getList();
+        }).finally(()=>{
+          loading.value.save = false;
         });
       }
     }
@@ -83,6 +93,7 @@ function submitForm() {
 function debugForm() {
   proxy.$refs["postRef"].validate(valid => {
     if (valid) {
+      loading.value.debug = true;
       const caseData = formData.value;
       caseData.request.config.name = caseData.caseName;
       caseData.request.config.result = null;
@@ -104,6 +115,8 @@ function debugForm() {
         // responseData.value = response.data.log
         // open.value = false;
         // getList();
+      }).finally(()=>{
+        loading.value.debug = false;
       });
 
     }
@@ -167,12 +180,19 @@ onMounted(() => {
       <el-container style="height: 100%; overflow-y: hidden">
         <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
           <el-button-group>
-            <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:case:edit']"
+            <el-button type="primary"
+                       @click="submitForm"
+                       v-hasPermi="['hrm:case:edit']"
                        v-if="dataType !== HrmDataTypeEnum.run_detail"
+                       :loading="loading.save"
             >保存
             </el-button>
-            <el-button type="primary" @click="debugForm" v-hasPermi="['hrm:case:debug']"
-                       v-if="dataType !== HrmDataTypeEnum.config">调试
+            <el-button type="primary"
+                       @click="debugForm"
+                       v-hasPermi="['hrm:case:debug']"
+                       v-if="dataType !== HrmDataTypeEnum.config"
+                       :loading="loading.debug"
+            >调试
             </el-button>
             <EnvSelector v-model:selected-env="selectedEnv"
                          v-if="dataType !== HrmDataTypeEnum.config"

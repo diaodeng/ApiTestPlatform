@@ -8,6 +8,7 @@ server/.env.dev
 server/.env.prod
 server/alembic
 server/alembic.ini
+server/build
 
 # C extensions
 *.so
@@ -15,7 +16,7 @@ server/alembic.ini
 # Distribution / packaging
 .Python
 develop-eggs/
-dist/
+server/dist/
 downloads/
 eggs/
 .eggs/
