@@ -190,8 +190,9 @@
     ></CaseEditDialog>
 
 
-    <el-dialog fullscreen :title="'【' + form.caseId + '】' + form.caseName" v-model="history" append-to-body
-               v-if="dataType==HrmDataTypeEnum.case" destroy-on-close>
+    <el-dialog fullscreen :title="'【' + currentCaseInfo?.caseId + '】' + currentCaseInfo?.caseName"
+               v-model="showHistoryDialog" append-to-body
+               v-if="dataType===HrmDataTypeEnum.case" destroy-on-close>
       <el-container style="height: 100%">
         <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
         <!--          </el-header>-->
@@ -284,7 +285,8 @@ const onlySelf = ref(true);
 const runDialogShow = ref(false);
 const runIds = ref([]);
 
-const history = ref(false);
+const showHistoryDialog = ref(false);
+const currentCaseInfo = ref(null);
 const currentRunId = ref();
 
 const copyDialog = ref(false);
@@ -429,8 +431,9 @@ function handleUpdate(row) {
 
 function showHistory(row) {
   const caseId = row.caseId || ids.value;
+  currentCaseInfo.value = row;
   currentRunId.value = caseId;
-  history.value = true;
+  showHistoryDialog.value = true;
 }
 
 /** 删除按钮操作 */
