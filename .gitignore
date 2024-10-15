@@ -6,6 +6,7 @@ __pycache__/
 .idea
 server/.env.dev
 server/.env.prod
+server/.env.test
 server/alembic
 server/alembic.ini
 server/build
