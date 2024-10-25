@@ -3,6 +3,7 @@ from config.env import RedisInitKeyConfig
 from module_admin.dao.config_dao import *
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
+from utils.redis_util import scan_keys
 
 
 class ConfigService:
@@ -32,7 +33,7 @@ class ConfigService:
         :return:
         """
         # 获取以sys_config:开头的键列表
-        keys = await redis.keys(f"{RedisInitKeyConfig.SYS_CONFIG.get('key')}:*")
+        keys = await scan_keys(redis, f"{RedisInitKeyConfig.SYS_CONFIG.get('key')}:*")
         # 删除匹配的键
         if keys:
             await redis.delete(*keys)

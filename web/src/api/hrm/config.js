@@ -9,6 +9,15 @@ export function list(query) {
   })
 }
 
+// 根据条件查询所有配置
+export function allConfig(query) {
+  return request({
+    url: '/hrm/config/all',
+    method: 'get',
+    params: query
+  })
+}
+
 
 export function del(data) {
   return request({

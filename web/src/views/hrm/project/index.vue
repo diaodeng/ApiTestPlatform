@@ -13,7 +13,7 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="项目状态" clearable style="width: 200px">
           <el-option
-              v-for="dict in sys_normal_disable"
+              v-for="dict in qtr_data_status"
               :key="dict.value"
               :label="dict.label"
               :value="dict.value"
@@ -52,32 +52,34 @@
         v-loading="loading"
         :data="projectList"
         row-key="projectId"
+        table-layout="fixed"
         :default-expand-all="isExpandAll"
         @selection-change="handleSelectionChange"
+        max-height="calc(100vh - 280px)"
     >
       <el-table-column type="selection" width="55" align="center"/>
       <el-table-column prop="projectId" label="ID" width="150"></el-table-column>
-      <el-table-column prop="projectName" align="center" label="项目名称" width="200"></el-table-column>
-      <el-table-column prop="responsibleName" align="center" label="负责人" width="120"></el-table-column>
-      <el-table-column prop="testUser" label="测试负责人" align="center" width="120"></el-table-column>
-      <el-table-column prop="devUser" label="开发负责人" align="center" width="120"></el-table-column>
-      <el-table-column prop="orderNum" label="排序" align="center" width="100"></el-table-column>
-      <el-table-column prop="status" label="状态" align="center" width="100">
+      <el-table-column prop="projectName" align="left" label="项目名称" min-width="200"></el-table-column>
+      <el-table-column prop="responsibleName" align="center" label="负责人" width="100"></el-table-column>
+      <el-table-column prop="testUser" label="测试负责人" align="center" width="100"></el-table-column>
+      <el-table-column prop="devUser" label="开发负责人" align="center" width="100"></el-table-column>
+      <el-table-column prop="orderNum" label="排序" align="center" width="70"></el-table-column>
+      <el-table-column prop="status" label="状态" align="center" width="70">
         <template #default="scope">
-          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
+          <dict-tag :options="qtr_data_status" :value="scope.row.status"/>
         </template>
       </el-table-column>
-      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150">
         <template #default="scope">
           <span>{{ parseTime(scope.row.createTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">
+      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width" width="150">
         <template #default="scope">
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" align="center" class-name="small-padding fixed-width">
+      <el-table-column label="操作" align="center" class-name="small-padding fixed-width" fixed="right" width="120">
         <template #default="scope">
           <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:project:edit']" title="修改">
           </el-button>
@@ -91,6 +93,14 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <pagination
+        v-show="total > 0"
+        :total="total"
+        v-model:page="queryParams.pageNum"
+        v-model:limit="queryParams.pageSize"
+        @pagination="getList"
+    />
 
     <!-- 添加或修改项目对话框 -->
     <el-dialog :title="title" v-model="open" width="800px" append-to-body>
@@ -140,7 +150,7 @@
             <el-form-item label="项目状态">
               <el-radio-group v-model="form.status">
                 <el-radio
-                    v-for="dict in sys_normal_disable"
+                    v-for="dict in qtr_data_status"
                     :key="dict.value"
                     :label="dict.value"
                 >{{ dict.label }}
@@ -159,20 +169,21 @@
     </el-dialog>
 
     <!-- 运行用例对话框 -->
-    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.project" :run-ids="runIds"></RunDialog>
+    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="RunTypeEnum.project" :run-ids="runIds"></RunDialog>
   </div>
 </template>
 
 <script setup name="project">
 import {ElMessageBox} from "element-plus";
 import {listProject, getProject, delProject, addProject, updateProject} from "@/api/hrm/project.js";
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {HrmDataTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
 import RunDialog from "@/components/hrm/common/run_dialog.vue";
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
 
 const projectList = ref([]);
+const total = ref(0);
 const open = ref(false);
 const loading = ref(true);
 const showSearch = ref(true);
@@ -187,7 +198,9 @@ const data = reactive({
   form: {},
   queryParams: {
     projectName: undefined,
-    status: undefined
+    status: undefined,
+    pageNum: 1,
+    pageSize: 10
   },
   rules: {
     projectName: [{required: true, message: "项目名称不能为空", trigger: "blur"}],
@@ -201,7 +214,8 @@ const {queryParams, form, rules} = toRefs(data);
 function getList() {
   loading.value = true;
   listProject(queryParams.value).then(response => {
-    projectList.value = response.data;
+    projectList.value = response.rows;
+    total.value = response.total;
     loading.value = false;
   });
 }

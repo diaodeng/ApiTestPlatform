@@ -27,7 +27,6 @@ class ReportQueryModel(QueryModel, ReportListModel):
     报告查询模型
     """
     report_name: Text | None = None
-    only_self: bool = False
 
 
 class ReportCreatModel(ReportListModel):

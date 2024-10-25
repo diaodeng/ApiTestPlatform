@@ -1,9 +1,10 @@
+import argparse
 import os
 import sys
-import argparse
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
 
 
 class AppSettings(BaseSettings):
@@ -19,6 +20,8 @@ class AppSettings(BaseSettings):
     app_reload: bool = True
     app_ip_location_query: bool = True
     app_same_time_login: bool = True
+    worker_num: int = 1
+    app_origins: str = '[]'
 
 
 class JwtSettings(BaseSettings):
@@ -56,6 +59,15 @@ class RedisSettings(BaseSettings):
     redis_username: str = ''
     redis_password: str = ''
     redis_database: int = 2
+
+
+class MessageFeishuBotSettings(BaseSettings):
+    """
+    飞书消息通知相关配置
+    """
+    feishu_bot_token: str = ''
+    feishu_bot_key: str = ''
+    feishu_bot_push: bool = False
 
 
 class UploadSettings:
@@ -155,6 +167,14 @@ class GetConfig:
         # 实例上传配置
         return UploadSettings()
 
+    @lru_cache()
+    def get_feishu_config(self):
+        """
+        获取数据库配置
+        """
+        # 实例上传配置
+        return MessageFeishuBotSettings()
+
     @staticmethod
     def parse_cli_args():
         """
@@ -189,6 +209,7 @@ class GetConfig:
 get_config = GetConfig()
 # 应用配置
 AppConfig = get_config.get_app_config()
+
 # Jwt配置
 JwtConfig = get_config.get_jwt_config()
 # 数据库配置
@@ -197,3 +218,5 @@ DataBaseConfig = get_config.get_database_config()
 RedisConfig = get_config.get_redis_config()
 # 上传配置
 UploadConfig = get_config.get_upload_config()
+
+FeishuBotConfig = get_config.get_feishu_config()

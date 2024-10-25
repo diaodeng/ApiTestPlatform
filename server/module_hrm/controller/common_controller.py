@@ -1,37 +1,33 @@
-from fastapi import APIRouter, Request
-from fastapi import Depends
 import datetime
 
+from fastapi import APIRouter, Request
+from fastapi import Depends
+
 from config.get_db import get_db
-from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService
-from module_hrm.dao.debugtalk_dao import DebugTalkDao
-from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.do.suite_do import QtrSuite
-from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportQueryModel, ReportDelModel
-from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel
+from module_hrm.entity.vo.report_vo import ReportQueryModel
 from module_hrm.enums.enums import CaseRunStatus
-from module_hrm.service.case_service import Session, HrmCase, HrmProject, HrmModule, RunType, DataType
-from module_hrm.utils import comparators, debugtalk_common, util
+from module_hrm.service.case_service import Session, HrmCase, HrmProject, HrmModule, RunTypeEnum, DataType
 from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
-from utils.page_util import *
+from module_hrm.utils import comparators, util
 from utils.response_util import ResponseUtil
 
 hrmCommonController = APIRouter(prefix='/hrm/common', dependencies=[Depends(LoginService.get_current_user)])
 
 
 @hrmCommonController.get("/configDataType")
-async def report_list(request: Request, query_info: ReportQueryModel = Depends(ReportQueryModel.as_query),
-                      query_db: Session = Depends(get_db)):
+async def config_data_type(request: Request, query_info: ReportQueryModel = Depends(ReportQueryModel.as_query),
+                           query_db: Session = Depends(get_db)):
     return ResponseUtil.success(data="未实现")
 
 
 @hrmCommonController.get("/comparator")
-async def report_detail(request: Request,
-                        case_id: int | None = None,
-                        project_id: int | None = None,
-                        query_db: Session = Depends(get_db)):
+async def comparators_dict(request: Request,
+                           case_id: int | None = None,
+                           project_id: int | None = None,
+                           query_db: Session = Depends(get_db)):
     comparator_map = util.get_func_doc_map(comparators)
 
     common_debugtalk, project_debugtalk = DebugTalkService.debugtalk_source(query_db,
@@ -46,7 +42,7 @@ async def report_detail(request: Request,
 
 
 @hrmCommonController.get("/functions")
-async def report_del(request: Request, case_id: int | None = None, query_db: Session = Depends(get_db)):
+async def functions_dict(request: Request, case_id: int | None = None, query_db: Session = Depends(get_db)):
     common_debugtalk, project_debugtalk = DebugTalkService.debugtalk_source(query_db, case_id=case_id)
     debugtalk_handler = DebugTalkHandler(project_debugtalk, common_debugtalk)
     debugtalk_comparator_map = debugtalk_handler.func_doc_map(
@@ -74,10 +70,18 @@ async def count_info(request: Request, query_db: Session = Depends(get_db)):
             end = begin + datetime.timedelta(days=1)
 
             total_run = query_db.query(HrmRunDetail).filter(HrmRunDetail.create_time.between(begin, end),
-                                                            HrmRunDetail.run_type==RunType.case.value).count()
+                                                            HrmRunDetail.run_type.in_([RunTypeEnum.case.value,
+                                                                                       RunTypeEnum.model.value,
+                                                                                       RunTypeEnum.suite.value,
+                                                                                       RunTypeEnum.project.value,
+                                                                                       ])).count()
             total_success = query_db.query(HrmRunDetail).filter(HrmRunDetail.create_time.between(begin, end),
-                                                                HrmRunDetail.status==CaseRunStatus.passed.value,
-                                                                HrmRunDetail.run_type==RunType.case.value).count()
+                                                                HrmRunDetail.status == CaseRunStatus.passed.value,
+                                                                HrmRunDetail.run_type.in_([RunTypeEnum.case.value,
+                                                                                           RunTypeEnum.model.value,
+                                                                                           RunTypeEnum.suite.value,
+                                                                                           RunTypeEnum.project.value,
+                                                                                           ])).count()
 
             if not total_run:
                 total_run = 0
@@ -92,7 +96,6 @@ async def count_info(request: Request, query_db: Session = Depends(get_db)):
         return total
 
     total = get_total_values()
-
 
     data = {
         'projectCount': project_count,

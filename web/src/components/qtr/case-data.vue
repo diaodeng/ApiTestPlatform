@@ -44,9 +44,9 @@
       <el-select v-model="queryParams.status" :placeholder="dataName+'状态'" clearable style="width: 100px">
         <el-option
             v-for="dict in sys_normal_disable"
-            :key="dict.value"
+            :key="dict.value * 1"
             :label="dict.label"
-            :value="dict.value"
+            :value="dict.value * 1"
         />
       </el-select>
     </el-form-item>
@@ -86,7 +86,7 @@
     <!--         <el-table-column label="用例排序" align="center" prop="sort" />-->
     <el-table-column label="状态" align="center" prop="status" width="70px">
       <template #default="scope">
-        <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
+        <dict-tag :options="sys_normal_disable" :value="scope.row.status + ''"/>
       </template>
     </el-table-column>
     <el-table-column label="创建人" align="center" prop="createBy"></el-table-column>
@@ -122,6 +122,7 @@ import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
 import {addSuiteDetail} from "@/api/qtr/suite.js";
 
 const {proxy} = getCurrentInstance();
+const {qtr_case_status} = proxy.useDict("qtr_case_status");
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");

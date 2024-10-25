@@ -186,6 +186,7 @@ const defaultProps = {
 
 const append = (data: Tree, type) => {
   if (!data.isParent) {
+    ElMessage.warning("只能在文件夹中新增节点");
     return;
   }
 

@@ -1,1 +1,0 @@
-import{af as t}from"./index.CHnR_MAu.js";function e(r){return t({url:"/hrm/runner/runHistoryList",method:"get",params:r})}function u(r){return t({url:"/hrm/runner/runHistory",method:"DELETE",data:r})}function a(r){return t({url:`/hrm/runner/runHistory/${r}`,method:"GET"})}function o(r){return t({url:"/hrm/runner/test",method:"POST",data:r})}export{a,u as d,e as l,o as t};

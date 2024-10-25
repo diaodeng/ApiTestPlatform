@@ -1,22 +1,23 @@
 from fastapi import APIRouter, Request
 from fastapi import Depends
+
 from config.get_db import get_db
-from module_admin.aspect.data_scope import GetDataScope
+from module_admin.annotation.log_annotation import log_decorator
+from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.service.module_service import *
 from module_hrm.entity.vo.module_vo import *
-from utils.response_util import *
+from module_hrm.service.module_service import *
+from utils.common_util import bytes2file_response
 from utils.log_util import *
 from utils.page_util import *
-from utils.common_util import bytes2file_response
-from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.annotation.log_annotation import log_decorator
+from utils.response_util import *
 from utils.snowflake import snowIdWorker
 
 moduleController = APIRouter(prefix='/hrm/module', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@moduleController.get("/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:module:list'))])
+@moduleController.get("/list", response_model=PageResponseModel,
+                      dependencies=[Depends(CheckUserInterfaceAuth('hrm:module:list'))])
 async def get_hrm_module_list(request: Request,
                               page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_query),
                               query_db: Session = Depends(get_db)):
@@ -30,7 +31,8 @@ async def get_hrm_module_list(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@moduleController.get("/selectModuleList", response_model=List[ModuleModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
+@moduleController.get("/selectModuleList", response_model=List[ModuleModel],
+                      dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
 async def get_hrm_module_list_all(request: Request,
                                   query: ModuleQueryModel = Depends(ModuleQueryModel),
                                   query_db: Session = Depends(get_db)):
@@ -43,7 +45,8 @@ async def get_hrm_module_list_all(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@moduleController.get("/showModuleList", response_model=List[ModuleModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
+@moduleController.get("/showModuleList", response_model=List[ModuleModel],
+                      dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
 async def get_hrm_module_list_show(request: Request,
                                    query: ModuleQueryModel = Depends(ModuleQueryModel),
                                    query_db: Session = Depends(get_db)):

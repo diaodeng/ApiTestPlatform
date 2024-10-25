@@ -3,6 +3,7 @@ from fastapi import Depends
 from config.get_db import get_db
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.service.debugtalk_service import *
+from utils.page_util import PageResponseModel
 from utils.response_util import *
 from utils.log_util import *
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
@@ -13,15 +14,18 @@ from utils.snowflake import snowIdWorker
 debugtalkController = APIRouter(prefix='/hrm/debugtalk', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@debugtalkController.get("/list", response_model=List[DebugTalkModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:debugtalk:list'))])
+@debugtalkController.get("/list", response_model=List[DebugTalkModel] | PageResponseModel,
+                         dependencies=[Depends(CheckUserInterfaceAuth('hrm:debugtalk:list'))])
 async def get_hrm_debugtalk_list(request: Request,
                                  query: DebugTalkQueryModel = Depends(DebugTalkQueryModel.as_query),
                                  query_db: Session = Depends(get_db),
                                  data_scope_sql: str = Depends(GetDataScope('HrmDebugTalk'))):
     try:
         query_result = DebugTalkService.get_debugtalk_list_services(query_db, query, data_scope_sql)
-        logger.info('获取成功')
-        return ResponseUtil.success(data=query_result)
+        if query.is_page:
+            return ResponseUtil.success(model_content=query_result)
+        else:
+            return ResponseUtil.success(data=query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -95,7 +99,8 @@ async def delete_hrm_debugtalk(request: Request,
 
 @debugtalkController.get("/{debugtalk_id}",
                          response_model=DebugTalkModel,
-                         dependencies=[Depends(CheckUserInterfaceAuth(['hrm:debugtalk:detail', "hrm:debugtalk:edit"], False))])
+                         dependencies=[
+                             Depends(CheckUserInterfaceAuth(['hrm:debugtalk:detail', "hrm:debugtalk:edit"], False))])
 async def query_detail_system_debugtalk(request: Request, debugtalk_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_debugtalk_result = DebugTalkService.debugtalk_detail_services(query_db, debugtalk_id)

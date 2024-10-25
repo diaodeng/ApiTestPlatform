@@ -1,0 +1,1 @@
+import{_ as n,r as a,d as t,o as r,m as c,f as p,i as _,y as l}from"./index.D1UU-JKR.js";const i={__name:"JsonContainer",props:{json:Object},setup(o){const s=a(JSON.stringify(o.json,null,2));return(d,u)=>{const e=t("el-card");return r(),c(e,{class:"json-container"},{default:p(()=>[_("pre",null,l(s.value),1)]),_:1})}}},j=n(i,[["__scopeId","data-v-2f82fbbc"]]);export{j as default};

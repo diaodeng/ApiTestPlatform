@@ -80,7 +80,8 @@ class JobDao:
         :param job: 定时任务对象
         :return:
         """
-        db_job = QtrJob(**job.model_dump())
+        model_data = job.model_dump(exclude_unset=True)
+        db_job = QtrJob(**model_data)
         db.add(db_job)
         db.flush()
 

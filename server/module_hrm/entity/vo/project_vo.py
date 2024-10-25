@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
-from module_hrm.entity.vo.common_vo import CommonDataModel
+from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 
 
 class ProjectModel(CommonDataModel):
@@ -22,7 +22,7 @@ class ProjectModel(CommonDataModel):
     simple_desc: Optional[str] = None
     other_desc: Optional[str] = None
     order_num: Optional[int] = None
-    status: Optional[str] = None
+    status: Optional[int] = None
     del_flag: Optional[str] = None
     # create_by: Optional[str] = None
     # create_time: Optional[datetime] = None
@@ -31,12 +31,11 @@ class ProjectModel(CommonDataModel):
 
 
 @as_query
-class ProjectQueryModel(ProjectModel):
+class ProjectQueryModel(QueryModel, ProjectModel):
     """
     项目管理不分页查询模型
     """
-    begin_time: Optional[str] = None
-    end_time: Optional[str] = None
+    pass
 
 
 class DeleteProjectModel(BaseModel):

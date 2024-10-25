@@ -5,18 +5,13 @@ export const runDetailViewTypeEnum = {
 }
 
 
-export const runModelEnum = {
-    case: 1,
-    model: 2,
-    suite: 3,
-    project: 4
-}
-
 export const RunTypeEnum = {
     case: 1,
-    api: 2,
-    case_debug: 3,
-    api_debug: 4
+    model: 2,
+    suite: 4,
+    project: 8,
+    api: 16,
+    case_debug: 32,
 }
 
 

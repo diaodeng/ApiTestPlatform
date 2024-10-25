@@ -1,7 +1,6 @@
-from sqlalchemy import Column, String, Text, ForeignKey, BigInteger
-from sqlalchemy.orm import relationship
+from sqlalchemy import String, Text, ForeignKey, BigInteger
 
-from config.database import Base
+from config.database import Base, mapped_column, Mapped
 from module_hrm.entity.do.common_do import BaseModel
 from utils.snowflake import snowIdWorker
 
@@ -27,19 +26,21 @@ class HrmDebugTalk(Base, BaseModel):
 
     __tablename__ = 'hrm_debugtalk'
 
-    debugtalk_id = Column(BigInteger, primary_key=True, unique=True, nullable=False, default=snowIdWorker.get_id,
-                          comment='DebugTalkID')
+    debugtalk_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, unique=True, nullable=False, default=snowIdWorker.get_id,
+                                 comment='DebugTalkID')
 
     # 外键字段，引用 Project 的 id
-    project_id = Column(BigInteger, ForeignKey('hrm_project.project_id'), nullable=True, default=None, comment='项目ID')
+    project_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('hrm_project.project_id'), nullable=True, default=None,
+                               comment='项目ID')
 
     # 引用 Project，表示 DebugTalk 属于哪个 Project
-    project = relationship("HrmProject", back_populates="hrm_debugtalk")
+    # project = relationship("HrmProject", back_populates="hrm_debugtalk")
 
-    debugtalk = Column(Text(collation='utf8_general_ci'), nullable=True, default=_set_default_debugtalk(),
-                       comment='#debugtalk.py')
-    status = Column(String(1, collation='utf8_general_ci'), default='0', comment='状态（0正常 1停用）')
-    del_flag = Column(String(1, collation='utf8_general_ci'), default='0', comment='删除标志（0代表存在 2代表删除）')
+    debugtalk: Mapped[str] = mapped_column(Text(collation='utf8_general_ci'), nullable=True, default=_set_default_debugtalk(),
+                              comment='#debugtalk.py')
+    status: Mapped[str] = mapped_column(String(1, collation='utf8_general_ci'), default='0', comment='状态（0正常 1停用）')
+    del_flag: Mapped[str] = mapped_column(String(1, collation='utf8_general_ci'), default='0',
+                             comment='删除标志（0代表存在 2代表删除）')
 
     def __repr__(self):
-        return f"<{self.project.project_name})>"
+        return f"<{self.debugtalk_id} -- {self.project_id})>"

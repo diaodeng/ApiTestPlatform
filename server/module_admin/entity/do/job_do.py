@@ -22,10 +22,11 @@ class SysJob(Base):
     misfire_policy = Column(String(20, collation='utf8_general_ci'), nullable=True, default='3', comment='计划执行错误策略（1立即执行 2执行一次 3放弃执行）')
     concurrent = Column(String(1, collation='utf8_general_ci'), nullable=True, default='1', comment='是否并发执行（0允许 1禁止）')
     status = Column(String(1, collation='utf8_general_ci'), nullable=True, default='0', comment='状态（0正常 1暂停）')
+    run_status = Column(Integer, nullable=True, default=6, comment='任务执行状态，TaskStatusEnum')
     create_by = Column(String(64, collation='utf8_general_ci'), nullable=True, default='', comment='创建者')
-    create_time = Column(DateTime, nullable=True, default=datetime.now(), comment='创建时间')
+    create_time = Column(DateTime, nullable=True, default=datetime.now, comment='创建时间')
     update_by = Column(String(64, collation='utf8_general_ci'), nullable=True, default='', comment='更新者')
-    update_time = Column(DateTime, nullable=True, default=datetime.now(), comment='更新时间')
+    update_time = Column(DateTime, nullable=True, default=datetime.now, comment='更新时间')
     remark = Column(String(500, collation='utf8_general_ci'), nullable=True, default='', comment='备注信息')
 
 
@@ -46,4 +47,4 @@ class SysJobLog(Base):
     job_message = Column(String(500, collation='utf8_general_ci'), nullable=True, default='', comment='日志信息')
     status = Column(String(1, collation='utf8_general_ci'), nullable=True, default='0', comment='执行状态（0正常 1失败）')
     exception_info = Column(LONGTEXT(collation='utf8_general_ci'), nullable=True, default='', comment='异常信息')
-    create_time = Column(DateTime, nullable=True, default=datetime.now(), comment='创建时间')
+    create_time = Column(DateTime, nullable=True, default=datetime.now, comment='创建时间')

@@ -3,6 +3,7 @@ from fastapi import Depends
 from config.get_db import get_db
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.service.env_service import *
+from utils.page_util import PageResponseModel
 from utils.response_util import *
 from utils.log_util import *
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
@@ -13,7 +14,7 @@ from utils.snowflake import snowIdWorker
 envController = APIRouter(prefix='/hrm/env', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@envController.get("/list", response_model=List[EnvModel],
+@envController.get("/list", response_model=PageResponseModel,
                    dependencies=[Depends(CheckUserInterfaceAuth('hrm:env:list'))])
 async def get_hrm_env_list(request: Request,
                            env_query: EnvQueryModel = Depends(EnvQueryModel.as_query),
@@ -23,8 +24,26 @@ async def get_hrm_env_list(request: Request,
                            ):
     try:
         env_query.manager = current_user.user.user_id
+        evn_query_result = EnvService.get_env_list_services(query_db, env_query, data_scope_sql, is_page=True)
+        return ResponseUtil.success(model_content=evn_query_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@envController.get("/all", response_model=List[EnvModel],
+                   dependencies=[Depends(CheckUserInterfaceAuth('hrm:env:list'))])
+async def get_hrm_env_all(request: Request,
+                           env_query: EnvQueryModel = Depends(EnvQueryModel.as_query),
+                           query_db: Session = Depends(get_db),
+                           data_scope_sql: str = Depends(GetDataScope('HrmEnv')),
+                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                           ):
+    try:
+        env_query.manager = current_user.user.user_id
         evn_query_result = EnvService.get_env_list_services(query_db, env_query, data_scope_sql)
-        logger.info('获取成功')
+        for page_info in evn_query_result:
+            page_info["isSelf"] = True if page_info["manager"] == env_query.manager else False
         return ResponseUtil.success(data=evn_query_result)
     except Exception as e:
         logger.exception(e)

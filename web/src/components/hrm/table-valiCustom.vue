@@ -1,19 +1,21 @@
 <script setup>
+import { useI18n } from "vue-i18n";
 import CommonTable from './table-config-common.vue';
 
+const { t } = useI18n();
 const selfData = defineModel();
 const tableCols = [{
-      name: "Comparator",
+      name: t('message.configTable.header.comparator'),
       prop: "key",
       width: 300
     },
       {
-        name: "Check",
+        name: t('message.configTable.header.check'),
         prop: "value",
         width: 100
       }, {
-        name: "Expected",
-        prop: "desc"
+        name: t('message.configTable.header.desc'),
+        prop: "Expected"
       }]
 </script>
 

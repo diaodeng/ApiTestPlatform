@@ -47,6 +47,15 @@ export const initStepData =
             strategy: "",
             limit: 0
         },
+        time_out: {
+            enable: false,
+            limit: 0
+        },
+        retry: {
+            enable: false,
+            limit: 0,
+            delay: 0
+        },
         validate: [],
         extract: [],
         variables: [],
@@ -61,6 +70,15 @@ export const initCaseRequestData = {
         think_time: {
             strategy: "",
             limit: 0
+        },
+        time_out: {
+          enable: false,
+          limit: 0
+        },
+        retry: {
+            enable: false,
+            limit: 0,
+            delay: 0
         },
         setup_hooks: [],
         teardown_hooks: [],
@@ -91,7 +109,7 @@ export const initCaseFormData = {
     caseName: "新增测试用例",
     notes: undefined,
     sort: 0,
-    status: "0",
+    status: 2,
     remark: undefined,
     type: HrmDataTypeEnum.case,
     include: {},

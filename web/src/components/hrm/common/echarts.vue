@@ -5,6 +5,7 @@ import {Pear} from "@element-plus/icons-vue";
 
 const echartsRef = ref(null);
 let echartInstance = null;
+const loading = ref(false);
 
 const options = ref({
   tooltip: {
@@ -129,6 +130,7 @@ function doHandleMonth(month) {
 }
 
 onMounted(async () => {
+  loading.value = true;
   countInfo().then((res) => {
 
     let data = res.data;
@@ -155,6 +157,8 @@ onMounted(async () => {
     // await nextTick();
     echartInstance = echarts.init(echartsRef.value);
     echartInstance.setOption(options.value, true);
+  }).finally(() => {
+    loading.value = false;
   });
 
 
@@ -176,31 +180,117 @@ onUnmounted(() => {
 
 <template>
   <!--  <div>{{options}}</div>-->
-  <div style="width: 100%;height: 100%;display: flex;flex-direction: column;align-items: center">
-    <el-row>
-      <el-card style="width: 20%" shadow="always">
-        <el-icon size="100" color="#2BE5BFFF" style="color:#efd110;">
-          <UserFilled></UserFilled>
-        </el-icon>
-        项目:{{ responseData.projectCount }}
+  <div style="width: 100%;height: 100%;display: flex;flex-direction: column;align-items: stretch;padding-top: 10px"
+       v-loading="loading">
+    <el-row justify="space-evenly">
+      <el-card style="width: 20%" shadow="hover">
+        <div style="display: flex;flex-direction: row">
+          <div>
+            <el-icon size="50" color="#2BE5BFFF" style="color:#efd110;">
+              <UserFilled></UserFilled>
+            </el-icon>
+          </div>
+          <div>
+            <el-statistic :value="responseData.projectCount">
+              <template #title>
+                <div style="display: inline-flex; align-items: center">
+                  项目
+                  <el-tooltip
+                      effect="dark"
+                      content="项目总数"
+                      placement="top"
+                  >
+                    <el-icon style="margin-left: 4px" :size="12">
+                      <Warning/>
+                    </el-icon>
+                  </el-tooltip>
+                </div>
+              </template>
+            </el-statistic>
+          </div>
+        </div>
       </el-card>
       <el-card style="width: 20%" shadow="hover">
-        <el-icon size="100" color="#EA5959FF">
-          <HelpFilled></HelpFilled>
-        </el-icon>
-        模块:{{ responseData.moduleCount }}
+        <div style="display: flex">
+          <div>
+            <el-icon size="50" color="#EA5959FF">
+              <HelpFilled></HelpFilled>
+            </el-icon>
+          </div>
+          <div>
+            <el-statistic :value="responseData.moduleCount">
+              <template #title>
+                <div style="display: inline-flex; align-items: center">
+                  模块
+                  <el-tooltip
+                      effect="dark"
+                      content="模块总数"
+                      placement="top"
+                  >
+                    <el-icon style="margin-left: 4px" :size="12">
+                      <Warning/>
+                    </el-icon>
+                  </el-tooltip>
+                </div>
+              </template>
+            </el-statistic>
+          </div>
+        </div>
       </el-card>
-      <el-card style="width: 20%" shadow="never">
-        <el-icon size="100" color="#19C6EFFF">
-          <Histogram></Histogram>
-        </el-icon>
-        用例:{{ responseData.caseCount }}
+      <el-card style="width: 20%" shadow="hover">
+        <div style="display:flex;">
+          <div>
+            <el-icon size="50" color="#19C6EFFF">
+              <Histogram></Histogram>
+            </el-icon>
+          </div>
+          <div>
+            <el-statistic :value="responseData.caseCount">
+              <template #title>
+                <div style="display: inline-flex; align-items: center">
+                  用例
+                  <el-tooltip
+                      effect="dark"
+                      content="用例总数"
+                      placement="top"
+                  >
+                    <el-icon style="margin-left: 4px" :size="12">
+                      <Warning/>
+                    </el-icon>
+                  </el-tooltip>
+                </div>
+              </template>
+            </el-statistic>
+          </div>
+        </div>
+
       </el-card>
-      <el-card style="width: 20%" shadow="never">
-        <el-icon size="100" color="#EFD110FF">
-          <Operation></Operation>
-        </el-icon>
-        套件:{{ responseData.suiteCount }}
+      <el-card style="width: 20%" shadow="hover">
+        <div style="display: flex">
+          <div>
+            <el-icon size="50" color="#EFD110FF">
+              <Operation></Operation>
+            </el-icon>
+          </div>
+          <div>
+            <el-statistic :value="responseData.suiteCount">
+              <template #title>
+                <div style="display: inline-flex; align-items: center">
+                  套件
+                  <el-tooltip
+                      effect="dark"
+                      content="套件总数"
+                      placement="top"
+                  >
+                    <el-icon style="margin-left: 4px" :size="12">
+                      <Warning/>
+                    </el-icon>
+                  </el-tooltip>
+                </div>
+              </template>
+            </el-statistic>
+          </div>
+        </div>
       </el-card>
     </el-row>
     <div class="echarts" ref="echartsRef" style="width: 100%;flex-grow: 1">

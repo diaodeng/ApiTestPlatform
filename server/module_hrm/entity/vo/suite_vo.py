@@ -19,7 +19,7 @@ class SuiteModel(CommonDataModel):
     suite_name: Optional[str] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[int] = None
     del_flag: Optional[str] = None
 
 
@@ -67,7 +67,7 @@ class SuiteDetailModel(CommonDataModel):
     data_type: Optional[int] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[int] = None
     del_flag: Optional[str] = None
 
 

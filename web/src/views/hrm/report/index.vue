@@ -28,33 +28,36 @@
       </el-form-item>
     </el-form>
 
-    <el-table v-loading="loading" :data="reportList"
+    <el-table v-loading="loading"
+              :data="reportList"
               @selection-change="handleSelectionChange"
               border
+              table-layout="fixed"
+              max-height="calc(100vh - 240px)"
     >
       <el-table-column type="selection" width="55" align="center"/>
-      <el-table-column label="ID" align="center" prop="reportId"/>
-      <el-table-column label="报告名" align="center" prop="reportName"/>
-      <el-table-column label="success" align="center" prop="success"/>
-      <el-table-column label="total" align="center" prop="total"/>
-      <el-table-column label="status" align="center" prop="status">
+      <el-table-column label="ID" align="center" prop="reportId" width="150"/>
+      <el-table-column label="报告名" align="left" prop="reportName" min-width="200"/>
+      <el-table-column label="success" align="center" prop="success" width="80"/>
+      <el-table-column label="total" align="center" prop="total" width="70"/>
+      <el-table-column label="status" align="center" prop="status" width="80">
 
         <template #default="scope">
           <dict-tag :options="hrm_run_status" :value="scope.row.status"/>
         </template>
-      </el-table-column>
-      <el-table-column label="创建人" align="center" prop="createBy"/>
-      <el-table-column label="执行开始时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      </el-table-column  >
+      <el-table-column label="创建人" align="center" prop="createBy" width="70"/>
+      <el-table-column label="执行开始时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150">
         <template #default="scope">
           <span>{{ parseTime(scope.row.startAt) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="执行时长(S)" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="执行时长(S)" align="center" prop="createTime" class-name="small-padding fixed-width" width="100">
         <template #default="scope">
           <span>{{ scope.row.testDuration }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200" align="center" class-name="small-padding fixed-width">
+      <el-table-column label="操作" width="80" align="center" class-name="small-padding fixed-width" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="View" @click="handleView(scope.row)" v-hasPermi="['hrm:report:detail']"
                      title="查看">
@@ -63,7 +66,7 @@
                      v-hasPermi="['hrm:report:delete']" title="删除">
           </el-button>
         </template>
-      </el-table-column>
+      </el-table-column  >
     </el-table>
 
     <pagination
@@ -74,7 +77,10 @@
         @pagination="getList"
     />
 
-    <el-dialog fullscreen v-model="showReportDetail" append-to-body destroy-on-close>
+    <el-dialog fullscreen
+               v-model="showReportDetail"
+               :title="'报告详情【'+currentReport.reportId+'>>'+currentReport.reportName+'】'"
+               append-to-body destroy-on-close>
       <el-container style="height: 100%">
         <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
         <!--          </el-header>-->
@@ -98,9 +104,11 @@ const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {hrm_run_status} = proxy.useDict("hrm_run_status");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
+const {qtr_case_status} = proxy.useDict("qtr_case_status");
 
 
 provide("hrm_data_type", hrm_data_type);
+provide("qtr_case_status", qtr_case_status);
 
 const reportList = ref([]);
 const projectOptions = ref([]);
@@ -113,6 +121,7 @@ const multiple = ref(true);
 const total = ref(0);
 const showReportDetail = ref(false);
 const currentReportId = ref(null);
+const currentReport = ref({});
 const onlySelf = ref(true);
 
 const data = reactive({
@@ -181,6 +190,8 @@ function handleDelete(row) {
 
 function handleView(row) {
   let detailIds = row.reportId;
+  currentReport.value = {}
+  currentReport.value = row;
   currentReportId.value = detailIds;
   showReportDetail.value = true;
   // ReportApi.detail(detailIds).then(response => {

@@ -6,7 +6,15 @@ export function listJob(query) {
     url: '/qtr/job/list',
     method: 'get',
     params: query
-  })
+  });
+}
+
+export function listSchdulerJob(query) {
+  return request({
+    url: '/qtr/job/schedulerList',
+    method: 'get',
+    params: query
+  });
 }
 
 // 查询定时任务调度详细
@@ -21,6 +29,16 @@ export function getJob(jobId) {
 export function addJob(data) {
   return request({
     url: '/qtr/job',
+    method: 'post',
+    data: data
+  })
+}
+
+
+// 停止进行中的任务
+export function stopJob(data) {
+  return request({
+    url: '/qtr/job/stop',
     method: 'post',
     data: data
   })

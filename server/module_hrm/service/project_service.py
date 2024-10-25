@@ -11,20 +11,10 @@ class ProjectService:
     """
 
     @classmethod
-    def get_project_services(cls, query_db: Session, page_object: ProjectModel, data_scope_sql: str):
-        """
-        获取项目信息service
-        :param query_db: orm对象
-        :param page_object: 查询参数对象
-        :param data_scope_sql: 数据权限对应的查询sql语句
-        :return: 项目信息对象
-        """
-        project_list_result = ProjectDao.get_project_list(query_db, page_object, data_scope_sql)
-
-        return project_list_result
-
-    @classmethod
-    def get_project_list_services(cls, query_db: Session, page_object: ProjectModel, data_scope_sql: str):
+    def get_project_list_services(cls,
+                                  query_db: Session,
+                                  page_object: ProjectQueryModel,
+                                  data_scope_sql: str):
         """
         获取部项目列表信息service
         :param query_db: orm对象
@@ -34,7 +24,7 @@ class ProjectService:
         """
         project_list_result = ProjectDao.get_project_list(query_db, page_object, data_scope_sql)
 
-        return CamelCaseUtil.transform_result(project_list_result)
+        return project_list_result
 
     @classmethod
     def add_project_services(cls, query_db: Session, page_object: ProjectModel):
@@ -78,7 +68,8 @@ class ProjectService:
         project_info = cls.project_detail_services(query_db, edit_project.get('project_id'))
         if project_info:
             if project_info.project_name != project_object.project_name:
-                project = ProjectDao.get_project_detail_by_info(query_db, ProjectModel(project_name=project_object.project_name))
+                project = ProjectDao.get_project_detail_by_info(query_db,
+                                                                ProjectModel(project_name=project_object.project_name))
                 if project:
                     result = dict(is_success=False, message='项目名称不能重复')
                     return CrudResponseModel(**result)
@@ -107,7 +98,9 @@ class ProjectService:
             project_id_list = page_object.project_ids.split(',')
             try:
                 for project_id in project_id_list:
-                    ProjectDao.delete_project_dao(query_db, ProjectModel(projectId=project_id, updateTime=page_object.update_time, updateBy=page_object.update_by))
+                    ProjectDao.delete_project_dao(query_db,
+                                                  ProjectModel(projectId=project_id, updateTime=page_object.update_time,
+                                                               updateBy=page_object.update_by))
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
             except Exception as e:

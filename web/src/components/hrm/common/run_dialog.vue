@@ -1,15 +1,15 @@
 <script setup>
-import {ElDialog, ElLoading, ElMessage, ElMessageBox} from "element-plus";
+import {ElDialog, ElMessage} from "element-plus";
+import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {testRun} from "@/api/hrm/run_detail.js";
-import {listEnv} from "@/api/hrm/env";
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {RunTypeEnum} from "@/components/hrm/enum.js";
 
 
 const dialogVisible = defineModel("dialogVisible");
 const runIds = defineModel("runIds");
 
 const props = defineProps({
-  runType: {type: Number, default: HrmDataTypeEnum.case},
+  runType: {type: Number, default: RunTypeEnum.case},
   // runIds: {type: Array, default: []},
   showDialog: {type: Boolean, default: false}
 })
@@ -17,7 +17,6 @@ const props = defineProps({
 // const dialogVisible = props.showDialog;
 const dialogTestLoading = ref(false);
 const dialogCanClose = ref(true);
-const envList = ref([]);
 const disableCanRun = ref(false);
 
 const form = ref({
@@ -25,8 +24,10 @@ const form = ref({
   runType: props.runType,
   env: null,
   reportName: null,
-  isAsync: "1",
-  repeatNum: 1
+  isAsync: false,
+  repeatNum: 1,
+  concurrent: 1,
+  push: false
 })
 
 
@@ -91,14 +92,6 @@ function beforeClose(done) {
   }
 }
 
-function envListLoad() {
-  listEnv().then(response => {
-    envList.value = response.data;
-  });
-}
-
-envListLoad();
-
 </script>
 
 <template>
@@ -114,15 +107,7 @@ envListLoad();
   >
     <el-form :model="form" v-loading.fullscreen.lock="dialogTestLoading">
       <el-form-item label="测试环境：">
-        <el-select v-model="form.env" placeholder="请选择测试环境">
-          <el-option
-              v-for="option in envList"
-              :key="option.envId"
-              :label="option.envName"
-              :value="option.envId">
-          </el-option>
-        </el-select>
-
+        <EnvSelector v-model:selected-env="form.env" selector-width="100%"></EnvSelector>
       </el-form-item>
       <el-form-item label="报告名称：">
         <el-input v-model="form.reportName" autocomplete="off" placeholder="报告名称，默认为执行时间"/>
@@ -131,10 +116,18 @@ envListLoad();
         <el-input-number :min="1" controls-position="right" v-model="form.repeatNum"/>
       </el-form-item>
       <el-form-item label="同步执行：">
-        <el-select v-model="form.isAsync" placeholder="Please select a zone">
-          <el-option label="同步" value="1"/>
-          <el-option label="异步" value="2"/>
+        <el-select v-model="form.isAsync" placeholder="选择本次执行方式">
+          <el-option label="同步" :value="false"/>
+          <el-option label="异步" :value="true"/>
         </el-select>
+      </el-form-item>
+      <el-form-item label="并发数量：">
+        <el-input-number :min="1" controls-position="right" v-model="form.concurrent"
+                         placeholder="输入并发执行的用例数量"></el-input-number>
+      </el-form-item>
+      <el-form-item label="结果通知：">
+<!--        <el-input v-model="form.push" type="checkbox"></el-input>-->
+        <el-checkbox v-model="form.push"></el-checkbox>
       </el-form-item>
     </el-form>
     <template #footer>

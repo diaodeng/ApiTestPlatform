@@ -4,7 +4,7 @@ import SplitWindow from "@/components/hrm/common/split-window.vue";
 import TreeView from "@/components/hrm/common/tree-view.vue";
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {addApi, apiTree, copyApiAsCase, getApi, updateApi} from "@/api/hrm/api.js";
-import {list as configList} from "@/api/hrm/config.js";
+import {list as configList, allConfig} from "@/api/hrm/config.js";
 
 import {initStepData} from "@/components/hrm/data-template.js";
 import {randomString} from "@/utils/tools.js";
@@ -50,14 +50,15 @@ const loading = ref({
 
 const treeFilterText = ref("");
 const treeRef = ref(null);
+const currentSelectParentNode = ref();  // 当前可以使用的父节点
 
 onMounted(() => {
   getApiTree();
   getComparator().then(response => {
     hrm_comparator_dict.value = response.data;
   });
-  configList().then(response => {
-    hrm_config_list.value = response.rows;
+  allConfig().then(response => {
+    hrm_config_list.value = response.data;
   });
 });
 
@@ -153,10 +154,9 @@ function apiSaveSuccess(res, oldApiId) {
 }
 
 function saveFolderInfo() {
-  let selectedNodes = treeRef.value.getCurrentNode();
   let parentId = null;
-  if (selectedNodes) {
-    parentId = selectedNodes.apiId;
+  if (currentSelectParentNode.value) {
+    parentId = currentSelectParentNode.apiId;
     parentId = treeRef.value.getNode(parentId) ? parentId : null
   }
   loading.value.preSaveFolderDialog = true;
@@ -179,6 +179,7 @@ function saveFolderInfo() {
 }
 
 function getApiTree() {
+  treeRef.value.setCurrentKey(null, false);
   loadingApi.value = true;
   apiTree({onlySelf: onlySelf.value}).then(res => {
     treeDataSource.value = res.data;
@@ -370,7 +371,8 @@ function showRunHistory() {
 }
 
 function handleNodeChange(nodeData, node) {
-  if(nodeData.type === HrmDataTypeEnum.folder){return;}
+  if(!nodeData){return;}
+  if(nodeData && nodeData.type === HrmDataTypeEnum.folder){return;}
   const currentIndex = apiTabsData.value.findIndex(dict => dict.apiId === nodeData.apiId)
   if(currentIndex === -1){return;}
   currentTab.value = nodeData.apiId;
@@ -378,13 +380,26 @@ function handleNodeChange(nodeData, node) {
 
 }
 
+function showFolderDialog() {
+  loading.value.preSaveFolderDialog = true;
+  let currentNodeObj = treeRef.value.getCurrentNode();
+  if (currentNodeObj && !currentNodeObj.isParent){currentNodeObj = treeRef.value.getNode(currentNodeObj.patentId)}
+  if (currentNodeObj) {
+      currentSelectParentNode.value = currentNodeObj;
+  }else {
+    currentSelectParentNode.value = null;
+  }
+
+}
+
+
 </script>
 
 <template>
-  <div class="app-container" v-loading="loadingApi">
+  <div class="app-container" v-loading="loadingApi" style="height: 100%">
     <el-row>
       <el-button size="small" @click="getApiTree" icon="RefreshRight"></el-button>
-      <el-button size="small" @click="loading.preSaveFolderDialog = true" type="primary">新增文件夹</el-button>
+      <el-button size="small" @click="showFolderDialog" type="primary">新增文件夹</el-button>
       <span style="flex-grow: 1"></span>
       <el-dropdown size="small" split-button type="primary" @click="loading.preSaveDialog = true"
                    v-loading="loading.saveApi" :disabled="loading.saveApi">
@@ -464,12 +479,12 @@ function handleNodeChange(nodeData, node) {
               <div v-if="currentApiData" style="flex-grow: 1;display: flex;flex-direction: column;">
                 <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.http">
                   <StepRequest v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"
-                               edit-height="calc(100vh - 332px)"
+                               request-container-height="calc(100vh - 165px)"
                   ></StepRequest>
                 </template>
                 <template v-if="currentApiData.requestInfo.teststeps[0].step_type === CaseStepTypeEnum.websocket">
                   <StepWebsocket v-model:step-detail-data="currentApiData.requestInfo.teststeps[0]"
-                                 edit-height="calc(100vh - 385px)"></StepWebsocket>
+                                 step-container-height="calc(100vh - 245px)"></StepWebsocket>
                 </template>
               </div>
             </template>
@@ -499,7 +514,12 @@ function handleNodeChange(nodeData, node) {
     <el-dialog :title="folderForm.name" @close="loading.preSaveFolderDialog = false"
                v-model="loading.preSaveFolderDialog">
       <el-main>
-        <el-input v-model="folderForm.name" placeholder="请输入文件夹名称">
+        <el-input :model-value="currentSelectParentNode?currentSelectParentNode.name:'根目录'" placeholder="请输入文件夹名称" disabled>
+          <template #prepend>
+            <el-text>父级目录:</el-text>
+          </template>
+        </el-input>
+        <el-input v-model="folderForm.name" placeholder="请输入文件夹名称" style="padding-top: 5px">
           <template #prepend>
             <el-text>文件夹名称:</el-text>
           </template>

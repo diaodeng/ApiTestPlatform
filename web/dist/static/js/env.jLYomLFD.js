@@ -1,1 +1,0 @@
-import{af as e}from"./index.CHnR_MAu.js";function r(t){return e({url:"/hrm/env/list",method:"get",params:t})}function u(t){return e({url:"/hrm/env/"+t,method:"get"})}function a(t){return e({url:"/hrm/env",method:"post",data:t})}function o(t){return e({url:"/hrm/env",method:"put",data:t})}function d(t){return e({url:"/hrm/env/"+t,method:"delete"})}export{a,d,u as g,r as l,o as u};

@@ -5,10 +5,11 @@
 import datetime
 from typing import Any, Dict, List, Text, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from module_hrm.entity.vo import case_vo_detail_for_handle as caseVoHandle
 from module_hrm.enums.enums import TstepTypeEnum, CaseRunStatus
+from module_hrm.utils.common import key_value_dict
 from utils.utils import get_platform
 
 
@@ -34,28 +35,51 @@ class TConfig(caseVoHandle.TConfig):
 class TRequest(caseVoHandle.TRequest):
     """requests.Request model"""
 
-    # params: Dict[Text, Text | int | float | bool | None] = {}
-    # headers: caseVoHandle.Headers = {}
-    # data: Union[Text, Dict[Text, Any], None] = None
-    # cookies: caseVoHandle.Cookies = {}
-    pass
+    params: Dict[Text, Text | int | float | bool | None] = {}
+    headers: caseVoHandle.Headers = {}
+    data: Union[Text, Dict[Text, Any], None] = None
+    cookies: caseVoHandle.Cookies = {}
+
+    @model_validator(mode="before")
+    def convert_data(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        request_data = values.get('params', {})
+        tmp_headers = values.get('headers', {})
+        tmp_data = values.get('data', {})
+        tmp_cookies = values.get('cookies', {})
+        values['params'] = key_value_dict(request_data)
+        values['headers'] = key_value_dict(tmp_headers)
+        values['data'] = key_value_dict(tmp_data)
+        values['cookies'] = key_value_dict(tmp_cookies)
+        return values
 
 
 class TWebsocket(caseVoHandle.TWebsocket):
     """TWebsocket"""
     # params: caseVoHandle.VariablesMapping = {}
     # headers: caseVoHandle.Headers = {}
+    params: Dict[Text, Text | int | float | bool | None] = {}
+    headers: caseVoHandle.Headers = {}
+    data: Union[Text, Dict[Text, Any], None] = None
+    cookies: caseVoHandle.Cookies = {}
     result: Union[Result, None] = Result()
     # cookies: caseVoHandle.Cookies = {}
     recv_num: int = 1  # 消息接受条数，1表示只接受一条
 
+    @model_validator(mode="before")
+    def convert_data(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        request_data = values.get('params', {})
+        tmp_headers = values.get('headers', {})
+        tmp_cookies = values.get('cookies', {})
+        values['params'] = key_value_dict(request_data)
+        values['headers'] = key_value_dict(tmp_headers)
+        values['cookies'] = key_value_dict(tmp_cookies)
+        return values
+
 
 class TStep(caseVoHandle.TStep):
     result: Union[Result, None] = Result()
-    # variables: caseVoHandle.VariablesMapping = {}
-    # extract: caseVoHandle.VariablesMapping = {}
-    # request: Union[TRequest, TWebsocket, None] = None
-    # used to export session variables from referenced testcase
+    request: Union[TRequest, TWebsocket, None] = None
+
 
 
 class TestCase(caseVoHandle.TestCase):

@@ -1,16 +1,19 @@
 import copy
 import json
 
-from module_hrm.dao.case_dao import CaseDao
-from module_hrm.dao.env_dao import EnvDao
-from module_hrm.entity.dto.case_dto import CaseModelForApi
-from module_hrm.entity.vo.case_vo import CaseModel
-from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
-from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseForHandle
-from module_hrm.entity.vo.env_vo import EnvModel, EnvModelForApi
-from module_hrm.utils.common import key_value_dict, dict2list, update_or_extend_list
 from sqlalchemy.orm import Session
 
+from module_hrm.dao.case_dao import CaseDao
+from module_hrm.dao.env_dao import EnvDao
+from module_hrm.entity.do.case_do import HrmCase
+from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_vo import CaseModel
+from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseForHandle
+from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
+from module_hrm.entity.vo.env_vo import EnvModel, EnvModelForApi
+from module_hrm.enums.enums import ParameterTypeEnum
+from module_hrm.utils.common import key_value_dict, dict2list, update_or_extend_list
+from module_hrm.utils.util import decompress_text
 from utils.common_util import CamelCaseUtil
 
 
@@ -34,6 +37,8 @@ class CaseInfoHandle():
         elif isinstance(case_obj, (int, str)):
             case_orm = CaseDao.get_case_by_id(self.query_db, case_obj)
             case_obj = CaseModelForApi(**CamelCaseUtil.transform_result(case_orm))
+        elif isinstance(case_obj, HrmCase):
+            case_obj = CaseModelForApi(**CamelCaseUtil.transform_result(case_obj))
         elif not isinstance(case_obj, CaseModelForApi):
             case_obj = CaseModelForApi(**case_obj.dict())
         return case_obj
@@ -46,14 +51,14 @@ class CaseInfoHandle():
         self.case_obj = self.__ensure_obj(case_obj)
         return InToOut(self.query_db, self.case_obj)
 
-    def from_db_run_detail(self, case_obj: TestCase|str):
+    def from_db_run_detail(self, case_obj: TestCase | str):
         if isinstance(case_obj, str):
             case_obj = TestCase(**json.loads(case_obj))
         self.case_obj = CaseModelForApi()
         self.case_obj.case_id = case_obj.case_id
         self.case_obj.module_id = case_obj.module_id
         self.case_obj.project_id = case_obj.project_id
-        self.case_obj.case_name = case_obj.case_name
+        self.case_obj.case_name = case_obj.config.name
         self.case_obj.request = case_obj
         return InToOut(self.query_db, self.case_obj)
 
@@ -183,6 +188,9 @@ class CaseInfoToRun(object):
         return env
 
     def __include_handle(self) -> CaseModelForApi | None:
+        """
+        用例配置的include处理
+        """
         include_config = self.case_obj.request.config.include.config
         test_include = None
         if include_config and hasattr(include_config, "id") and include_config.id and include_config.id != "":
@@ -208,7 +216,6 @@ class CaseInfoToRun(object):
             if step.include.config.allow_extend:
                 update_or_extend_list(config_headers, step.request.headers)
                 step.request.headers = config_headers
-
 
     def __data_covert(self, data_obj: CaseModelForApi) -> TestCase:
         """
@@ -257,6 +264,15 @@ class CaseInfoToRun(object):
         if include_config_obj:
             update_or_extend_list(env_varables, include_config_obj.request.config.variables)
 
+            # 用例其他配置处理：等待时间、请求超时时间
+            if not self.case_obj.request.config.think_time.enable:
+                if include_config_obj.request.config.think_time.enable:
+                    self.case_obj.request.config.think_time = include_config_obj.request.config.think_time
+
+            if not self.case_obj.request.config.time_out.enable:
+                if include_config_obj.request.config.time_out.enable:
+                    self.case_obj.request.config.time_out = include_config_obj.request.config.time_out
+
         update_or_extend_list(env_varables, self.case_obj.request.config.variables)
 
         # 配置请求头处理
@@ -274,6 +290,7 @@ class CaseInfoToRun(object):
         self.case_obj.request.module_id = self.case_obj.module_id
         self.case_obj.request.case_id = self.case_obj.case_id
         self.case_obj.request.case_name = self.case_obj.case_name
+        self.case_obj.request.status = self.case_obj.status
 
         return self.case_obj.request
 
@@ -288,3 +305,76 @@ class CaseInfoToRun(object):
         这里只是处理数据，不会处理文件目录
         """
         return self.run_data()
+
+
+class ParametersHandler(object):
+    """
+    参数处理器，用于处理参数化的情况
+    """
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def get_parameters(cls, param_data):
+        param_tmp_data = param_data
+        parameters = []
+        if param_tmp_data.type == ParameterTypeEnum.local_table.value:
+            parameter_source = decompress_text(param_tmp_data.value)
+            parameter_obj = json.loads(parameter_source)
+            # headers = parameter_obj.get("tableHeaders", [])
+            datas = parameter_obj.get("tableDatas", [])
+
+            for data in datas:
+                # 只使用可用的数据
+                enable = data.get("__enable", True)
+                if not enable or not enable["content"]:
+                    continue
+                param = []
+                for item in data:
+                    # 排除状态字段
+                    if item in ("__enable", "__row_key"):
+                        continue
+                    param.append({
+                        "key": item,
+                        "value": data[item].get("content", ""),
+                        "enable": True,
+                        "type": "string"
+                    })
+                parameters.append(param)
+        return parameters
+
+    @classmethod
+    def get_parameters_case(cls, case_datas: list[TestCase]) -> list[TestCase]:
+        """
+        获取参数化之后的用例
+        """
+        all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
+        for test_case in case_datas:
+            # test_case = CaseInfoHandle(query_db).from_db(case_id).toRun(env_obj).run_data()
+            parameters = test_case.config.parameters
+            if not parameters or not parameters.value:
+                all_data.append(test_case)
+                continue
+
+            params = cls.get_parameters(test_case.config.parameters)
+
+            for index, param in enumerate(params):
+                tmp_case_data = copy.deepcopy(test_case)
+                old_variables: list[dict] = tmp_case_data.config.variables
+                update_or_extend_list(old_variables, param)
+                tmp_param = key_value_dict(param)
+                # old_variables.update(param)
+                tmp_case_data.config.variables = old_variables
+                name = tmp_case_data.config.name
+                if "case_name" in tmp_param:
+                    tmp_case_data.config.name = f"{name}[{tmp_param['case_name']}]"
+                    tmp_case_data.case_name = f"{name}[{tmp_param['case_name']}]"
+                elif "caseName" in tmp_param:
+                    tmp_case_data.config.name = f"{name}[{tmp_param['caseName']}]"
+                    tmp_case_data.case_name = f"{name}[{tmp_param['caseName']}]"
+                else:
+                    tmp_case_data.config.name = f"{name}[{index + 1}]"
+                    tmp_case_data.case_name = f"{name}[{index + 1}]"
+                all_data.append(tmp_case_data)
+        return all_data

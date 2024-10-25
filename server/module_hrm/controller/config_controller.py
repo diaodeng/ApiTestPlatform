@@ -17,7 +17,7 @@ hrmConfigController = APIRouter(prefix='/hrm/config', dependencies=[Depends(Logi
 
 @hrmConfigController.get("/list", response_model=PageResponseModel,
                          dependencies=[Depends(CheckUserInterfaceAuth('hrm:config:list'))])
-async def get_hrm_case(request: Request, page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
+async def get_config_list(request: Request, page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
                        query_db: Session = Depends(get_db),
                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                        ):
@@ -25,9 +25,32 @@ async def get_hrm_case(request: Request, page_query: CasePageQueryModel = Depend
         # 获取分页数据
         page_query.manager = current_user.user.user_id
         page_query.type = DataType.config.value
+        page_query.page_size = 10000
         page_query_result = ConfigService.get_config_select(query_db, page_query, is_page=True)
-        logger.info('获取成功')
         data = ResponseUtil.success(model_content=page_query_result)
+        return data
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@hrmConfigController.get("/all", response_model=PageResponseModel,
+                         dependencies=[Depends(CheckUserInterfaceAuth('hrm:config:list'))])
+async def get_config_all(request: Request, page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
+                       query_db: Session = Depends(get_db),
+                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                       ):
+    try:
+        # 获取分页数据
+        page_query.manager = current_user.user.user_id
+        page_query.type = DataType.config.value
+        page_query.page_size = 10000
+        page_query_result = ConfigService.get_config_select(query_db, page_query, is_page=False)
+        for page_info in page_query_result:
+            page_info["global"] = False if page_info["projectId"] and page_info["moduleId"] else True
+            page_info["isSelf"] = True if page_info["manager"] == page_query.manager else False
+
+        data = ResponseUtil.success(data=page_query_result)
         return data
     except Exception as e:
         logger.exception(e)

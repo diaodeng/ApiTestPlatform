@@ -10,7 +10,7 @@ export function randomString(length) {
 }
 
 export function randomNumber(length) {
-    return Math.floor(Math.random() * 10**length);
+    return Math.floor(Math.random() * 10 ** length);
 }
 
 
@@ -23,21 +23,27 @@ export class Json {
         let jsonObj = jsonStr;
         if (typeof jsonStr == "string") {
             let jsonObjTmp = "";
+
             try {
-                // let tttt = jsonStr.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2": ');
-                let tttt = jsonStr.replace(/([{,]\s*)([0-9]+)(\s*:)/g, '$1"$2"$3');
-                jsonObjTmp = JSON5.parse(tttt);
-                // jsonObjTmp = jsonlint.parse(jsonStr);
-                // jsonObjTmp = JSON.parse(jsonStr);
-            } catch (e1) {
-                let beautifulStr = this.beautifulJsonAuto(jsonStr);
-                // let beautifulStr = this.parseJsonWithRegex(jsonStr);
+                jsonObjTmp = JSON.parse(jsonStr);
+            } catch (e) {
                 try {
-                    jsonObjTmp = JSON.parse(beautifulStr);
-                } catch (e2) {
-                    return jsonObj;
+                    // let tttt = jsonStr.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2": ');
+                    let tttt = jsonStr.replace(/([{,]\s*)([0-9]+)(\s*:)/g, '$1"$2"$3');
+                    jsonObjTmp = JSON5.parse(tttt);
+                    // jsonObjTmp = jsonlint.parse(jsonStr);
+                    // jsonObjTmp = JSON.parse(jsonStr);
+                } catch (e1) {
+                    let beautifulStr = this.beautifulJsonAuto(jsonStr);
+                    // let beautifulStr = this.parseJsonWithRegex(jsonStr);
+                    try {
+                        jsonObjTmp = JSON.parse(beautifulStr);
+                    } catch (e2) {
+                        return jsonObj;
+                    }
                 }
             }
+
             jsonObj = jsonObjTmp
         }
         return JSON.stringify(jsonObj, null, 4);
@@ -173,7 +179,9 @@ export class Json {
 * */
 export function decompressText(compressedText) {
     let strData = atob(compressedText);
-    let charData = strData.split('').map(function (x) {return x.charCodeAt(0);});
+    let charData = strData.split('').map(function (x) {
+        return x.charCodeAt(0);
+    });
     let binData = new Uint8Array(charData);
     let data = pako.inflate(binData, {"to": "string"});
     return data;
@@ -194,19 +202,131 @@ export function compressData(data) {
     let arr = Array.from(binaryString);
     let s = "";
     arr.forEach((item, index) => {
-    s += String.fromCharCode(item)
+        s += String.fromCharCode(item)
     })
     return btoa(s)
 }
 
-export function getKeyByValue(enum_obj, value){
+export function getKeyByValue(enum_obj, value) {
     // 遍历枚举对象
-    for (const key in enum_obj){
-        if (enum_obj[key] === value){
+    for (const key in enum_obj) {
+        if (enum_obj[key] === value) {
             return key;
         }
     }
 
     // 如果没找到对应的key，返回null
     return null;
+}
+
+
+/*
+* 根据输入值的不同形式返回有效合法的html高度值
+* */
+export function parseHeightValue(height) {
+    if (typeof height === 'number') {
+        return `${height}px`; // 直接返回像素值
+    }
+
+    if (typeof height === 'string') {
+        // 检查是否是百分比
+        const percentRegex = /^\d+(\.\d+)?%$/;
+        if (percentRegex.test(height)) {
+            return height; // 返回原始百分比
+        }
+
+        // 检查是否是 calc() 表达式
+        const calcRegex = /^calc\(.+\)$/;
+        if (calcRegex.test(height)) {
+            return height; // 返回原始 calc 表达式
+        }
+
+        // 处理其他可能的单位（如 em, rem 等）
+        const unitRegex = /^\d+(\.\d+)?(px|em|rem|vh|vw)$/;
+        if (unitRegex.test(height)) {
+            return height; // 返回原始单位
+        }
+    }
+
+    // 如果没有匹配的类型，返回 null 或默认值
+    return null; // 或者返回 'auto' 等默认值
+}
+
+
+/*
+* 解析浏览器复制出来的头，按行分割，然后每行以第一次出现的英文冒号分割key:value
+* */
+export function parseHeader(text) {
+    let dataList = [];
+    if (typeof text === "object") {
+        text = JSON.parse(JSON.stringify(text))
+        if (!Array.isArray(text)) {
+            for (const eKey in text) {
+                dataList.push({"key": eKey, "value": text[eKey], "type": "string", "enable": true})
+            }
+        } else {
+            dataList = text;
+        }
+        return dataList;
+    }
+
+    try {
+        let data = {};
+        data = Json.parse(text);
+        if (!Array.isArray(data)) {
+            for (const eKey in data) {
+                dataList.push({"key": eKey, "value": data[eKey], "type": "string", "enable": true})
+            }
+        } else {
+            dataList = data;
+        }
+        return dataList;
+    } catch (e) {
+
+        // let editor_element = document.querySelector(elementLocator);
+        // let editor_obj = ace.edit(editor_element).getSession();
+        // let elementText = editor_obj.getValue();
+        // let jsonStr = Json.removeEscape(elementText);
+        // editor_obj.setValue(jsonStr);
+
+        // 你的字符串
+        //示例： "第一行:内容1\n第二行:内容2\n\n第四行:内容4\n第五行:内容5";
+
+        // 按行分割字符串
+        let lines = text.split('\n');
+
+        // 过滤掉空行
+        let nonEmptyLines = lines.filter(function (line) {
+            return line.trim() !== '';
+        });
+
+        // 按第一次出现的英文冒号分割每一行
+        return nonEmptyLines.map(function (line) {
+            let colonIndex = line.indexOf(':');
+            if (colonIndex !== -1) {
+                let key = line.substring(0, colonIndex).trim();
+                let value = line.substring(colonIndex + 1).trim();
+                return {key: key, value: value, type: "string"};
+            } else {
+                // 如果一行中没有冒号，则忽略
+                console.log("数据解析错误: " + line);
+
+                // return { value: line.trim() };
+            }
+        });
+    }
+
+}
+
+
+/*
+* 查找数组中重复的值
+* */
+export function findDuplicates(arr) {
+    const counts = arr.reduce((acc, val) => {
+        acc[val] = (acc[val] || 0) + 1;
+        return acc;
+    }, {});
+
+    return arr.filter(val => counts[val] > 1);
 }

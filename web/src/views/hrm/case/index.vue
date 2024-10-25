@@ -2,7 +2,7 @@
   <div class="app-container">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
       <el-form-item label="所属项目" prop="projectId">
-        <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable
+        <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable filterable
                    style="width: 150px">
           <el-option
               v-for="option in projectOptions"
@@ -13,7 +13,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="所属模块" prop="moduleId">
-        <el-select v-model="queryParams.moduleId" placeholder="请选择" clearable style="width: 150px">
+        <el-select v-model="queryParams.moduleId" placeholder="请选择" clearable filterable style="width: 150px">
           <el-option
               v-for="option in moduleOptions"
               :key="option.moduleId"
@@ -43,7 +43,7 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" :placeholder="dataName+'状态'" clearable style="width: 100px">
           <el-option
-              v-for="dict in sys_normal_disable"
+              v-for="dict in qtr_case_status"
               :key="dict.value"
               :label="dict.label"
               :value="dict.value"
@@ -127,7 +127,7 @@
     >
       <el-table-column type="selection" width="55" align="center"/>
       <el-table-column :label="dataName+'ID'" prop="caseId" width="150px"/>
-      <el-table-column :label="dataName+'名称'" prop="caseName" width="auto"/>
+      <el-table-column :label="dataName+'名称'" prop="caseName" width="auto" min-width="200px"/>
       <el-table-column label="所属项目" prop="projectName">
         <template #default="scope">
           <span>{{ nameOrGlob(scope.row.projectName) }}</span>
@@ -139,12 +139,24 @@
         </template>
       </el-table-column>
       <!--         <el-table-column label="用例排序" align="center" prop="sort" />-->
-      <el-table-column label="状态" align="center" prop="status" width="70px">
+      <el-table-column label="状态" align="center" prop="status" width="120px">
         <template #default="scope">
-          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
+          <TagSelector v-model:selected-value="scope.row.status"
+                       :options="qtr_case_status"
+                       selector-width="90px"
+                       :source-data="scope.row"
+                       @selectChanged="lineStatusChange"
+          ></TagSelector>
+          <!--          <el-select v-model="scope.row.status" @change="changeStatus(scope.row)">-->
+          <!--            <el-option v-for="item in qtr_case_status"-->
+          <!--                       :key="item.value * 1"-->
+          <!--                       :value="item.value * 1"-->
+          <!--                       :label="item.label"></el-option>-->
+          <!--          </el-select>-->
+          <!--                    <dict-tag :options="qtr_case_status" :value="scope.row.status"/>-->
         </template>
       </el-table-column>
-      <el-table-column label="创建人" align="center" prop="createBy"></el-table-column>
+      <el-table-column label="创建人" align="center" prop="createBy" width="80px"></el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width"
                        width="150px">
         <template #default="scope">
@@ -230,29 +242,31 @@
     </el-dialog>
 
     <!-- 运行用例对话框 -->
-    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.case" :run-ids="runIds"></RunDialog>
+    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="RunTypeEnum.case" :run-ids="runIds"></RunDialog>
   </div>
 </template>
 
 <script setup name="Case">
-import {delCase, getCase, getComparator, listCase, copyCase} from "@/api/hrm/case";
+import {changeCaseStatus, copyCase, delCase, getCase, listCase} from "@/api/hrm/case";
 import {selectModulList} from "@/api/hrm/module";
-import {listEnv} from "@/api/hrm/env";
 import {listProject} from "@/api/hrm/project";
+import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import {initCaseFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run-detail.vue';
 import RunDialog from '@/components/hrm/common/run_dialog.vue';
-import ParamsDalog from "@/components/hrm/common/edite-table.vue"
-import {HrmDataTypeEnum, runDetailViewTypeEnum} from "@/components/hrm/enum.js";
-import {ElMessageBox, ElMessage} from "element-plus";
+import {HrmDataTypeEnum, runDetailViewTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
+import {ElMessage, ElMessageBox} from "element-plus";
 // import JsonEditorVue from "json-editor-vue3";
 
+const showTestDIalog = ref(false);
+const testDialogContent = ref("久啊联发科打了飞机啊漏打卡飞机啦电极法立卡登记说法法兰对接法拉克束带结发法拉第会计法垃圾");
 
 const {proxy} = getCurrentInstance();
 const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
+const {qtr_case_status} = proxy.useDict("qtr_case_status");
 
 
 const props = defineProps({
@@ -278,6 +292,7 @@ const caseEditDialogTitle = computed(() => {
 
 provide("hrm_data_type", hrm_data_type);
 provide('sys_normal_disable', sys_normal_disable);
+provide('qtr_case_status', qtr_case_status);
 
 
 const caseList = ref([]);
@@ -325,7 +340,15 @@ const loading = ref({
 
 function nameOrGlob(val) {
   return val ? val : "全局";
+}
 
+
+function lineStatusChange(selectValue, dataSource) {
+  changeCaseStatus({caseId: dataSource.caseId, status: selectValue}).then((response) => {
+    ElMessage.success("修改成功");
+  }).catch(() => {
+    ElMessage.error("修改失败");
+  });
 }
 
 
@@ -385,7 +408,7 @@ function getList() {
 
 /** 查询项目列表 */
 function getProjectSelect() {
-  listProject(null).then(response => {
+  listProject({isPage: false}).then(response => {
     projectOptions.value = response.data;
   });
 }
@@ -427,9 +450,10 @@ function handleSelectionChange(selection) {
 
 /** 新增按钮操作 */
 function handleAdd() {
-  open.value = true;
+
   title.value = "添加" + dataName.value;
   form.value = JSON.parse(JSON.stringify(initCaseFormData));
+  open.value = true;
 }
 
 /** 修改按钮操作 */
@@ -438,14 +462,27 @@ function handleUpdate(row) {
   const caseId = row.caseId || ids.value;
   getCase(caseId).then(response => {
     if (!response.data || Object.keys(response.data).length === 0) {
-      alert("未查到对应数据！");
+      ElMessage.warning("未查到对应数据！");
       return;
     }
     form.value = response.data;
-    open.value = true;
+
     title.value = "修改" + dataName.value;
+    open.value = true;
   }).finally(() => {
     loading.value.edite = false;
+  });
+}
+
+/*
+* 更新用例状态
+* */
+function changeStatus(row) {
+
+  changeCaseStatus({caseId: row.caseId, status: row.status}).then((response) => {
+    ElMessage.success("修改成功");
+  }).catch(() => {
+    ElMessage.error("修改失败");
   });
 }
 

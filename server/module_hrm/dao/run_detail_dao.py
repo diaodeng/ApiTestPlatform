@@ -38,8 +38,8 @@ class RunDetailDao:
         """
         创建报告
         """
-        duration = (detail.run_end_time - detail.run_start_time).microseconds / 1000000
-        detail.run_duration = duration
+        # duration = (detail.run_end_time - detail.run_start_time).microseconds / 1000000
+        # detail.run_duration = duration
         detail_dict = detail.model_dump(exclude_unset=True)
         run_detail = HrmRunDetail(**detail_dict)
         db.add(run_detail)
@@ -66,7 +66,7 @@ class RunDetailDao:
         if query_info.run_name:
             query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
 
-        query = query.order_by(HrmRunDetail.create_time.desc())
+        query = query.order_by(HrmRunDetail.run_start_time.desc())
 
         result = PageUtil.paginate(query, query_info.page_num, query_info.page_size, True)
         rows = []

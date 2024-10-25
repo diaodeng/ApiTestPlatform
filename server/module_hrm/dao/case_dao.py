@@ -1,12 +1,13 @@
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseModuleProject
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import *
-from module_hrm.dao.suite_dao import SuiteDetailDao
-from module_hrm.enums.enums import DataType
+from module_hrm.utils.util import PermissionHandler
 from utils.page_util import PageUtil
 
 
@@ -28,6 +29,18 @@ class CaseDao:
         return info
 
     @classmethod
+    def get_case_by_ids(cls, db: Session, case_ids: list[int]) -> list[HrmCase]:
+        """
+        根据用例id获取在用用例详细信息
+        :param db: orm对象
+        :param case_ids: 用例id
+        :return: 在用用例信息对象
+        """
+        info = db.query(HrmCase).filter(HrmCase.case_id.in_(case_ids)).all()
+
+        return info
+
+    @classmethod
     def get_case_detail_by_info(cls, db: Session, case: CaseQuery) -> HrmCase:
         """
         根据用例参数获取用例信息
@@ -35,15 +48,19 @@ class CaseDao:
         :param case: 用例参数对象
         :return: 用例信息对象
         """
-        info = db.query(HrmCase) \
-            .filter(HrmCase.case_id == case.case_id if case.case_id else True,
-                    HrmCase.case_name == case.case_name if case.case_name else True,
-                    HrmCase.case_id.in_(db.query(HrmCaseModuleProject.case_id).filter(
-                        HrmCaseModuleProject.module_id == case.module_id)) if case.module_id else True,
-                    HrmCase.case_id.in_(db.query(HrmCaseModuleProject.case_id).filter(
-                        HrmCaseModuleProject.project_id == case.project_id)) if case.project_id else True,
-                    HrmCase.sort == case.sort if case.sort else True) \
-            .first()
+        info = db.query(HrmCase)
+        if case.case_id:
+            info = info.filter(HrmCase.case_id == case.case_id)
+        if case.case_name:
+            info = info.filter(HrmCase.case_name == case.case_name)
+        if case.module_id:
+            info = info.filter(HrmCase.module_id == case.module_id)
+        if case.project_id:
+            info = info.filter(HrmCase.project_id == case.project_id)
+        if case.sort:
+            info = info.filter(HrmCase.sort == case.sort)
+
+        info = info.first()
 
         return info
 
@@ -110,7 +127,8 @@ class CaseDao:
         """
         if not isinstance(case, CaseModel):
             case = CaseModel(**case.model_dump(exclude_unset=True, by_alias=True))
-        db_case = HrmCase(**case.model_dump(exclude_unset=True))
+        data_dict = case.model_dump(exclude_unset=True)
+        db_case = HrmCase(**data_dict)
         db.add(db_case)
         db.flush()
         # db.commit()
@@ -118,7 +136,7 @@ class CaseDao:
         return db_case
 
     @classmethod
-    def edit_case_dao(cls, db: Session, case: CaseModel | CaseModelForApi):
+    def edit_case_dao(cls, db: Session, case: CaseModel | CaseModelForApi, user: CurrentUserModel = None):
         """
         编辑用例数据库操作
         :param db: orm对象
@@ -129,6 +147,8 @@ class CaseDao:
             case = CaseModel(**case.model_dump(exclude_unset=True, by_alias=True))
 
         case_data = case.model_dump(exclude_unset=True)
+        PermissionHandler.check_is_self(user, db.query(HrmCase).filter(HrmCase.case_id == case.case_id).first())
+
         db.query(HrmCase).filter(HrmCase.case_id == case.case_id).update(case_data)
         case_module_project = {
             'module_id': case.module_id,
@@ -139,13 +159,14 @@ class CaseDao:
             case_module_project)
 
     @classmethod
-    def delete_case_dao(cls, db: Session, case: CaseModel):
+    def delete_case_dao(cls, db: Session, case: CaseModel, user: CurrentUserModel = None):
         """
         删除用例数据库操作
         :param db: orm对象
         :param case: 用例对象
         :return:
         """
+        PermissionHandler.check_is_self(user, db.query(HrmCase).filter(HrmCase.case_id == case.case_id).first())
         db.query(HrmCase).filter(HrmCase.case_id == case.case_id).delete()
         # 删除用例、模块、项目关系
         db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).delete()

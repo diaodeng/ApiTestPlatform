@@ -14,6 +14,7 @@ import sys
 import zlib
 from itertools import combinations
 
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm import exceptions
 from utils.log_util import logger
 
@@ -392,3 +393,15 @@ def get_local_ip():
     except (Exception) as e:
         print("get_local_ip found exception : %s" % e)
     return local_ip if ("" != local_ip and None != local_ip) else socket.gethostbyname(socket.gethostname())
+
+
+class PermissionHandler(object):
+    """
+    权限处理器
+    """
+    @classmethod
+    def check_is_self(cls, user: CurrentUserModel, data):
+        manager = getattr(data, "manager", None)
+
+        if user and user.user.user_id and (not user.user.admin) and manager and user.user.user_id != manager:
+            raise PermissionError("只能处理自己的数据")

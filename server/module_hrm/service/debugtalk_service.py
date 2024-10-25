@@ -9,6 +9,7 @@ from module_hrm.utils import debugtalk_common
 from module_hrm.utils.util import find_source_repeat, get_func_map, get_func_doc_map
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
+from utils.page_util import PageResponseModel
 from utils.snowflake import snowIdWorker
 from sqlalchemy import or_
 
@@ -19,20 +20,7 @@ class DebugTalkService:
     """
 
     @classmethod
-    def get_debugtalk_services(cls, query_db: Session, page_object: DebugTalkModel, data_scope_sql: str):
-        """
-        获取DebugTalk信息service
-        :param query_db: orm对象
-        :param page_object: 查询参数对象
-        :param data_scope_sql: 数据权限对应的查询sql语句
-        :return: DebugTalk信息对象
-        """
-        debugtalk_list_result = DebugTalkDao.get_debugtalk_list(query_db)
-
-        return debugtalk_list_result
-
-    @classmethod
-    def get_debugtalk_list_services(cls, query_db: Session, page_object: DebugTalkModel, data_scope_sql: str):
+    def get_debugtalk_list_services(cls, query_db: Session, page_object: DebugTalkQueryModel, data_scope_sql: str):
         """
         获取debugtalk列表信息service
         :param query_db: orm对象
@@ -41,7 +29,18 @@ class DebugTalkService:
         :return: DebugTalk列表信息对象
         """
         debugtalk_list_result = DebugTalkDao.get_debugtalk_list(query_db, page_object, data_scope_sql)
-        return CamelCaseUtil.transform_result(debugtalk_list_result)
+        if page_object.is_page:
+            case_list_result = PageResponseModel(
+                **{
+                    **debugtalk_list_result.model_dump(by_alias=True),
+                    'rows': [{**row[0], **row[1]} for row in debugtalk_list_result.rows]
+                }
+            )
+        else:
+            case_list_result = []
+            if debugtalk_list_result:
+                case_list_result = [{**row[0], **row[1]} for row in debugtalk_list_result]
+        return case_list_result
 
     @classmethod
     def add_debugtalk_services(cls, query_db: Session, page_object: DebugTalkModel):

@@ -46,7 +46,8 @@ class QueryModel(BaseModel):
     end_time: Optional[Any] = None
     status: Optional[Any] = None
     id: Optional[Any] = None
-    only_self:bool = False
+    only_self: bool = False
+    is_page: bool = True
 
 
 class CommonDataModel(BaseModel):

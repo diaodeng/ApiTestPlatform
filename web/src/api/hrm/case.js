@@ -36,6 +36,15 @@ export function copyCase(data) {
   })
 }
 
+// 修改用例状态
+export function changeCaseStatus(data) {
+  return request({
+    url: '/hrm/case/status',
+    method: 'post',
+    data: data
+  })
+}
+
 // 修改用例
 export function updateCase(data) {
   return request({
