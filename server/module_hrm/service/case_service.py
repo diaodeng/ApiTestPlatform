@@ -1,5 +1,6 @@
 import copy
 
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.case_dao import *
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseDetailForHandle
 from module_hrm.entity.vo.common_vo import CrudResponseModel
@@ -12,6 +13,7 @@ class CaseService:
     """
     用例管理服务层
     """
+
     @classmethod
     def get_case_list_services(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False):
         """
@@ -93,7 +95,7 @@ class CaseService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def edit_case_services(cls, query_db: Session, page_object: CaseModel):
+    def edit_case_services(cls, query_db: Session, page_object: CaseModel, user: CurrentUserModel = None):
         """
         编辑用例信息service
         :param query_db: orm对象
@@ -103,13 +105,13 @@ class CaseService:
         # edit = page_object.model_dump(exclude_unset=True)
         info = cls.case_detail_services(query_db, page_object.case_id)
         if info:
-            if info.case_name != page_object.case_name:
+            if page_object.case_name and info.case_name != page_object.case_name:
                 case = CaseDao.get_case_detail_by_info(query_db, CaseModel(caseName=page_object.case_name))
                 if case:
                     result = dict(is_success=False, message='用例名称已存在')
                     return CrudResponseModel(**result)
             try:
-                CaseDao.edit_case_dao(query_db, page_object)
+                CaseDao.edit_case_dao(query_db, page_object, user)
                 query_db.commit()
                 result = dict(is_success=True, message='更新成功')
             except Exception as e:
@@ -121,7 +123,7 @@ class CaseService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def delete_case_services(cls, query_db: Session, page_object: DeleteCaseModel):
+    def delete_case_services(cls, query_db: Session, page_object: DeleteCaseModel, user: CurrentUserModel = None):
         """
         删除用例信息service
         :param query_db: orm对象
@@ -132,7 +134,8 @@ class CaseService:
             id_list = page_object.case_ids.split(',')
             try:
                 for case_id in id_list:
-                    CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id))
+                    CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id), user)
+                    SuiteDetailDao.del_suite_detail_by_id(query_db, case_id)
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
             except Exception as e:
@@ -153,7 +156,9 @@ class CaseService:
         case = CaseDao.get_case_by_id(query_db, case_id=case_id)
         if not case:
             return {}
-        result = CaseModelForApi(**CamelCaseUtil.transform_result(case))
+
+        data = CamelCaseUtil.transform_result(case)
+        result = CaseModelForApi(**data)
         if result.include is not None:
             result.include = json.loads(result.include)
         # new_request = TestCase(**result.request).model_dump(by_alias=True)
@@ -195,7 +200,8 @@ class CaseService:
                 item['status'] = '正常'
             else:
                 item['status'] = '停用'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in data]
+        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
+                    data]
         binary_data = export_list2excel(new_data)
 
         return binary_data

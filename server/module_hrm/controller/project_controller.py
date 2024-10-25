@@ -4,6 +4,7 @@ from config.get_db import get_db
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.service.project_service import *
 from module_hrm.service.debugtalk_service import *
+from utils.page_util import PageResponseModel
 from utils.response_util import *
 from utils.log_util import *
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
@@ -14,15 +15,17 @@ from utils.snowflake import snowIdWorker
 projectController = APIRouter(prefix='/hrm/project', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@projectController.get("/list", response_model=List[ProjectModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
+@projectController.get("/list", response_model=List[ProjectModel]|PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
 async def get_hrm_project_list(request: Request,
                                query: ProjectQueryModel = Depends(ProjectQueryModel.as_query),
                                query_db: Session = Depends(get_db),
                                data_scope_sql: str = Depends(GetDataScope('HrmProject'))):
     try:
         query_result = ProjectService.get_project_list_services(query_db, query, data_scope_sql)
-        logger.info('获取成功')
-        return ResponseUtil.success(data=query_result)
+        if query.is_page:
+            return ResponseUtil.success(model_content=query_result)
+        else:
+            return ResponseUtil.success(data=query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

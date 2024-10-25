@@ -4,6 +4,7 @@ from config.env import JwtConfig, RedisInitKeyConfig
 from module_admin.entity.vo.online_vo import *
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import CamelCaseUtil
+from utils.redis_util import scan_keys
 
 
 class OnlineService:
@@ -19,7 +20,7 @@ class OnlineService:
         :param query_object: 查询参数对象
         :return: 在线用户列表信息
         """
-        access_token_keys = await request.app.state.redis.keys(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}*")
+        access_token_keys = await scan_keys(request.app.state.redis, f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}*")
         if not access_token_keys:
             access_token_keys = []
         access_token_values_list = [await request.app.state.redis.get(key) for key in access_token_keys]

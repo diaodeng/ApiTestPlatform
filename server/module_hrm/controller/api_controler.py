@@ -98,7 +98,7 @@ async def api_update(request: Request,
             page_query = ApiModel(**CamelCaseUtil.transform_result(page_query))
         page_query.update_by = current_user.user.user_name
         page_query.update_time = datetime.now()
-        data = ApiOperation.update(query_db, page_query)
+        data = ApiOperation.update(query_db, page_query, current_user)
         return ResponseUtil.success(data=data)
     except Exception as e:
         logger.exception(e)
@@ -106,10 +106,12 @@ async def api_update(request: Request,
 
 
 @hrmApiController.delete("/{api_id}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:api:delete'))])
-async def api_del(request: Request, api_id, query_db: Session = Depends(get_db)):
+async def api_del(request: Request,
+                  api_id, query_db: Session = Depends(get_db),
+                  current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         # 获取分页数据
-        data = ApiOperation.delete_recursion(query_db, [api_id])
+        data = ApiOperation.delete_recursion(query_db, [api_id], current_user)
         return ResponseUtil.success(data="删除成功")
     except Exception as e:
         logger.exception(e)

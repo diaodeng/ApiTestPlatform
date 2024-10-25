@@ -205,7 +205,7 @@ async def delete_qtr_suite(request: Request,
                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         delete_suite = DeleteSuiteModel(suiteIds=suiteIds)
-        delete_suite_result = SuiteService.delete_suite_services(query_db, delete_suite)
+        delete_suite_result = SuiteService.delete_suite_services(query_db, delete_suite, current_user)
         if delete_suite_result.is_success:
             logger.info(delete_suite_result.message)
             return ResponseUtil.success(msg=delete_suite_result.message)

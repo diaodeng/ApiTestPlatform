@@ -137,6 +137,10 @@ def export_list2excel(list_data: List):
     return binary_data
 
 
+def load_excel2data():
+    pass
+
+
 def get_excel_template(header_list: List, selector_header_list: List, option_list: List[dict]):
     """
     工具方法：将需要导出的list数据转化为对应excel的二进制数据

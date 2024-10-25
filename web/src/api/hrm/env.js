@@ -9,6 +9,17 @@ export function listEnv(query) {
   })
 }
 
+/*
+* 查询所有环境
+* */
+export function allEnv(query) {
+  return request({
+    url: '/hrm/env/all',
+    method: 'get',
+    params: query
+  })
+}
+
 // 查询环境详细
 export function getEnv(envId) {
   return request({

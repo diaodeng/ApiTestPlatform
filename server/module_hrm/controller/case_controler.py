@@ -48,6 +48,8 @@ async def add_hrm_case(request: Request,
     try:
         if not add_case.type:
             raise ValueError("参数错误")
+        if not add_case.case_name:
+            raise ValueError("用例名不能为空")
         add_case.manager = current_user.user.user_id
         add_case.create_by = current_user.user.user_name
         add_case.update_by = current_user.user.user_name
@@ -65,10 +67,10 @@ async def add_hrm_case(request: Request,
 
 @caseController.post("/copy", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:copy'))])
 @log_decorator(title='用例复制', business_type=1)
-async def add_hrm_case(request: Request,
-                       add_case: AddCaseModel,
-                       query_db: Session = Depends(get_db),
-                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def copy_hrm_case(request: Request,
+                        add_case: AddCaseModel,
+                        query_db: Session = Depends(get_db),
+                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         add_case.manager = current_user.user.user_id
         add_case.create_by = current_user.user.user_name
@@ -92,9 +94,36 @@ async def edit_hrm_case(request: Request,
                         query_db: Session = Depends(get_db),
                         current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
+        if not edit_module.case_name:
+            raise ValueError("用例名不能为空")
         edit_module.update_by = current_user.user.user_name
         edit_module.update_time = datetime.now()
-        edit_module_result = CaseService.edit_case_services(query_db, edit_module)
+        edit_module_result = CaseService.edit_case_services(query_db, edit_module, current_user)
+        if edit_module_result.is_success:
+            logger.info(edit_module_result.message)
+            return ResponseUtil.success(msg=edit_module_result.message)
+        else:
+            logger.warning(edit_module_result.message)
+            return ResponseUtil.failure(msg=edit_module_result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@caseController.post("/status", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:edit'))])
+@log_decorator(title='用例管理', business_type=2)
+async def change_status(request: Request,
+                        edit_module: CaseModel,
+                        query_db: Session = Depends(get_db),
+                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    try:
+
+        new_case_model = CaseModel()
+        new_case_model.status = edit_module.status
+        new_case_model.case_id = edit_module.case_id
+        new_case_model.update_by = current_user.user.user_name
+        new_case_model.update_time = datetime.now()
+        edit_module_result = CaseService.edit_case_services(query_db, new_case_model, current_user)
         if edit_module_result.is_success:
             logger.info(edit_module_result.message)
             return ResponseUtil.success(msg=edit_module_result.message)
@@ -108,10 +137,14 @@ async def edit_hrm_case(request: Request,
 
 @caseController.delete("/{case_ids}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:remove'))])
 @log_decorator(title='用例管理', business_type=3)
-async def delete_hrm_case(request: Request, case_ids: str, query_db: Session = Depends(get_db)):
+async def delete_hrm_case(request: Request,
+                          case_ids: str,
+                          query_db: Session = Depends(get_db),
+                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                          ):
     try:
         delete_module = DeleteCaseModel(caseIds=case_ids)
-        delete_module_result = CaseService.delete_case_services(query_db, delete_module)
+        delete_module_result = CaseService.delete_case_services(query_db, delete_module, current_user)
         if delete_module_result.is_success:
             logger.info(delete_module_result.message)
             return ResponseUtil.success(msg=delete_module_result.message)

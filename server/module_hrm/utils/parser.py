@@ -220,7 +220,7 @@ def parse_function_params(params: Text) -> Dict:
 
 
 def get_mapping_variable(
-    variable_name: Text, variables_mapping: VariablesMapping
+        variable_name: Text, variables_mapping: VariablesMapping
 ) -> Any:
     """get variable from variables_mapping.
 
@@ -245,7 +245,7 @@ def get_mapping_variable(
 
 
 def get_mapping_function(
-    function_name: Text, functions_mapping: FunctionsMapping
+        function_name: Text, functions_mapping: FunctionsMapping
 ) -> Callable:
     """get function from functions_mapping,
         if not found, then try to check if builtin function.
@@ -292,9 +292,9 @@ def get_mapping_function(
 
 
 def parse_string(
-    raw_string: Text,
-    variables_mapping: VariablesMapping,
-    functions_mapping: FunctionsMapping,
+        raw_string: Text,
+        variables_mapping: VariablesMapping,
+        functions_mapping: FunctionsMapping,
 ) -> Any:
     """parse string content with variables and functions mapping.
 
@@ -398,10 +398,48 @@ def parse_string(
     return parsed_string
 
 
+def parse_function_set_default_params(
+        raw_string: Any,
+        variables_mapping: VariablesMapping,
+        functions_mapping: FunctionsMapping,
+        default_params: List|tuple = (),
+) -> Any:
+    """
+    主要给setup、teardown使用，用于解析函数参数，默认参数优先级高于函数参数。
+    """
+    # search function like ${func($a, $b)}
+    raw_string = raw_string.strip()
+    func_match = function_regex_compile.match(raw_string, 0)
+    if func_match:
+        func_name = func_match.group(1)
+        func = get_mapping_function(func_name, functions_mapping)
+
+        func_params_str = func_match.group(2)
+        function_meta = parse_function_params(func_params_str)
+        args = function_meta["args"]
+        kwargs = function_meta["kwargs"]
+        parsed_args = parse_data(args, variables_mapping, functions_mapping)
+        parsed_kwargs = parse_data(kwargs, variables_mapping, functions_mapping)
+
+        try:
+            func_eval_value = func(*default_params, *parsed_args, **parsed_kwargs)
+        except Exception as ex:
+            logger.error(
+                f"call function error:\n"
+                f"func_name: {func_name}\n"
+                f"args: {parsed_args}\n"
+                f"kwargs: {parsed_kwargs}\n"
+                f"{type(ex).__name__}: {ex}"
+            )
+            raise
+        return func_eval_value
+        # func_raw_str = "${" + func_name + f"({func_params_str})" + "}"
+
+
 def parse_data(
-    raw_data: Any,
-    variables_mapping: VariablesMapping = None,
-    functions_mapping: FunctionsMapping = None,
+        raw_data: Any,
+        variables_mapping: VariablesMapping = None,
+        functions_mapping: FunctionsMapping = None,
 ) -> Any:
     """parse raw data with evaluated variables mapping.
     Notice: variables_mapping should not contain any variable or function.
@@ -434,9 +472,8 @@ def parse_data(
 
 
 def parse_variables_mapping(
-    variables_mapping: VariablesMapping, functions_mapping: FunctionsMapping = None
+        variables_mapping: VariablesMapping, functions_mapping: FunctionsMapping = None
 ) -> VariablesMapping:
-
     parsed_variables: VariablesMapping = {}
 
     while len(parsed_variables) != len(variables_mapping):
@@ -477,7 +514,7 @@ def parse_variables_mapping(
 
 
 def parse_parameters(
-    parameters: Dict,
+        parameters: Dict,
 ) -> List[Dict]:
     """parse parameters and generate cartesian product.
 
@@ -591,7 +628,7 @@ class Parser(object):
         self.functions_mapping = functions_mapping
 
     def parse_string(
-        self, raw_string: Text, variables_mapping: VariablesMapping
+            self, raw_string: Text, variables_mapping: VariablesMapping
     ) -> Any:
         return parse_string(raw_string, variables_mapping, self.functions_mapping)
 
@@ -599,9 +636,13 @@ class Parser(object):
         return parse_variables_mapping(variables_mapping, self.functions_mapping)
 
     def parse_data(
-        self, raw_data: Any, variables_mapping: VariablesMapping = None
+            self, raw_data: Any, variables_mapping: VariablesMapping = None
     ) -> Any:
         return parse_data(raw_data, variables_mapping, self.functions_mapping)
 
     def get_mapping_function(self, func_name: Text) -> Callable:
         return get_mapping_function(func_name, self.functions_mapping)
+
+
+if __name__ == "__main__":
+    print(regex_findall_functions("${fadfadsf($13,$567)}"))

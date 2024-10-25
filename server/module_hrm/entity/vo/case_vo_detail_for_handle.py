@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Text, Union
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum, ParameterTypeEnum
+from module_hrm.utils.common import dict2list
 from utils.common_util import CamelCaseUtil
 
 Name = Text
@@ -15,8 +16,8 @@ Url = Text
 BaseUrl = Union[HttpUrl, Text]
 VariablesMapping = Dict[Text, Any]
 FunctionsMapping = Dict[Text, Callable]
-Headers = Dict[Text, Text | bool]
-Cookies = Dict[Text, Text | bool]
+Headers = Dict[Text, Text | bool | int | float]
+Cookies = Dict[Text, Text | bool | int | float]
 Verify = bool
 Hooks = List[Union[Text, Dict[Text, Any]]]
 Export = List[Text]
@@ -29,9 +30,9 @@ class ResponseData(BaseModel):
     cookies: Cookies = {}
     encoding: Union[Text, None] = None
     content_type: Text = ""
-    body: Union[Text, bytes, List, Dict, None] = ""
-    content: Text | List = ""
-    text: Union[Text, None] = ""
+    body: Union[Text, bytes, List, Dict, None] = ""  # 默认不会有值，用于在回调中设置自己转换后的内容
+    content: Text | List = ""  # 响应内容为原始数据
+    text: Union[Text, None] = ""  # 响应的原始数据转成text的结果
 
 
 class StepLogs(BaseModel):
@@ -149,8 +150,20 @@ class TSqlRequest(BaseModel):
 
 
 class ThinkTime(BaseModel):
+    enable: bool = False
     strategy: Text | None = ""
+    limit: int | float = 0
+
+
+class TimeOut(BaseModel):
+    enable: bool = False
+    limit: int | float = 0
+
+
+class Retry(BaseModel):
+    enable: bool = False
     limit: int = 0
+    delay: int = 0
 
 
 class IncludeConfig(BaseModel):
@@ -173,7 +186,7 @@ class TConfig(BaseModel):
     verify: Verify = False
     base_url: BaseUrl = ""
     # Text: prepare variables in debugtalk.py, ${gen_variables()}
-    variables: List[VariablesMapping] | Text = {}
+    variables: List[VariablesMapping] | Text = []
     parameters: ParameterModel | List[VariablesMapping] | None = None
     headers: List[Headers] = []
     setup_hooks: Hooks = []
@@ -184,6 +197,8 @@ class TConfig(BaseModel):
     # thrift: TConfigThrift|None = None
     db: TConfigDB = TConfigDB()
     think_time: ThinkTime = ThinkTime()
+    time_out: TimeOut = TimeOut()
+    retry: Retry = Retry()
     include: Union[Include, None] = Include()
     result: Union[Result, None] = Result()
 
@@ -206,10 +221,22 @@ class TRequest(BaseModel):
     req_json: Union[Dict, List, Text, None] = Field(None, alias="json")
     data: List[VariablesMapping] | Text | None = []
     cookies: List[Cookies] = []
-    timeout: float = 120
+    timeout: float | None = 120
     allow_redirects: bool = False
     verify: Verify = False
     upload: Dict = {}  # used for upload files
+
+    @model_validator(mode="before")
+    def convert_data(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        request_data = values.get('params', {})
+        tmp_headers = values.get('headers', {})
+        tmp_data = values.get('data', {})
+        tmp_cookies = values.get('cookies', {})
+        values['params'] = dict2list(request_data)
+        values['headers'] = dict2list(tmp_headers)
+        values['data'] = dict2list(tmp_data)
+        values['cookies'] = dict2list(tmp_cookies)
+        return values
 
 
 class TStepInclude(BaseModel):
@@ -223,16 +250,26 @@ class TWebsocket(BaseModel):
     headers: List[Headers] = []
     data: Text | None = ""
     cookies: List[Cookies] = []
-    timeout: float = 120
+    timeout: float | None = 120
     allow_redirects: bool = False
     verify: Verify = False
     recv_num: int = 0  # 消息接受条数，0表示不显示，1表示只接受一条
     result: Union[Result, None] = Result()
 
+    @model_validator(mode="before")
+    def convert_data(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        request_data = values.get('params', {})
+        tmp_headers = values.get('headers', {})
+        tmp_cookies = values.get('cookies', {})
+        values['params'] = dict2list(request_data)
+        values['headers'] = dict2list(tmp_headers)
+        values['cookies'] = dict2list(tmp_cookies)
+        return values
+
 
 class TStep(BaseModel):
     name: Name
-    step_type: int = TstepTypeEnum.http  # 1 api, 2 webUI
+    step_type: int = TstepTypeEnum.http.value  # 1 api, 2 webUI
     step_id: Text = ""
     request: Union[TRequest, TWebsocket, None] = None
     include: Union[Include, None] = Include()
@@ -251,6 +288,8 @@ class TStep(BaseModel):
     thrift_request: Union[TThriftRequest, None] = None
     sql_request: Union[TSqlRequest, None] = None
     think_time: ThinkTime = ThinkTime()
+    time_out: TimeOut = TimeOut()
+    retry: Retry = Retry()
     result: Union[Result, None] = Result()
 
     @model_validator(mode="before")
@@ -259,12 +298,12 @@ class TStep(BaseModel):
         s_type = values.get('step_type')
         if s_type == TstepTypeEnum.http.value:
             if isinstance(request_data, dict):
-                values["request"] = TRequest(**request_data)
+                values["request"] = TRequest(**request_data).model_dump(by_alias=True)
             else:
                 values["request"] = request_data
         elif s_type == TstepTypeEnum.websocket.value:
             if isinstance(request_data, dict):
-                values["request"] = TWebsocket(**request_data)
+                values["request"] = TWebsocket(**request_data).model_dump(by_alias=True)
             else:
                 values["request"] = request_data
         else:
@@ -276,6 +315,7 @@ class TestCase(BaseModel):
     case_name: Union[Text, None] = None
     module_id: Union[int, None] = None
     project_id: Union[int, None] = None
+    status: Union[int, None] = None
     case_id: Any = None
     config: TConfig
     teststeps: List[TStep]

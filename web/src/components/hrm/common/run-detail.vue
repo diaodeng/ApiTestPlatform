@@ -50,9 +50,12 @@
       </el-form-item>
     </el-form>
 
-    <el-table v-loading="loading" :data="runDetailList"
+    <el-table v-loading="loading.page"
+              :data="runDetailList"
               @selection-change="handleSelectionChange"
               border
+              table-layout="fixed"
+              max-height="calc(100vh - 290px)"
     >
       <el-table-column type="selection" width="55" align="center"/>
       <el-table-column label="ID" align="center" prop="detailId" width="150px"/>
@@ -69,9 +72,19 @@
           <dict-tag :options="hrm_run_way" :value="scope.row.runType"/>
         </template>
       </el-table-column>
+      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
+        <template #default="scope">
+          <span>{{ parseTime(scope.row.createTime) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="执行开始时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
         <template #default="scope">
           <span>{{ parseTime(scope.row.runStartTime) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="执行结束时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150px">
+        <template #default="scope">
+          <span>{{ parseTime(scope.row.runEndTime) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="执行时长(S)" align="center" prop="createTime" class-name="small-padding fixed-width" width="80px">
@@ -79,10 +92,16 @@
           <span>{{ scope.row.runDuration }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="80" align="center" class-name="small-padding fixed-width">
+      <el-table-column label="操作" width="80" align="center" class-name="small-padding fixed-width" fixed="right">
         <template #default="scope">
-          <el-button link type="primary" icon="View" @click="handleView(scope.row)" v-hasPermi="['hrm:history:detail']"
-                     title="查看">
+          <el-button link
+                     type="primary"
+                     icon="View"
+                     @click="handleView(scope.row)"
+                     v-hasPermi="['hrm:history:detail']"
+                     title="查看"
+                     :loading="loading.runDetail"
+          >
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
                      v-hasPermi="['hrm:history:delete']" title="删除">
@@ -99,8 +118,11 @@
         @pagination="getList"
     />
 
-    <CaseEditDialog v-model:open-case-edit-dialog="showCaseEdit" :form-datas="caseDetailData"
-                    :data-type="HrmDataTypeEnum.run_detail"></CaseEditDialog>
+    <CaseEditDialog v-model:open-case-edit-dialog="showCaseEdit"
+                    :form-datas="caseDetailData"
+                    :data-type="HrmDataTypeEnum.run_detail"
+                    :title="'执行详情【'+caseDetailData.caseId + '>>' + caseDetailData.caseName +'】'"
+    ></CaseEditDialog>
   </div>
 </template>
 
@@ -128,7 +150,10 @@ provide("hrm_data_type", hrm_data_type);
 const runDetailList = ref([]);
 const projectOptions = ref([]);
 const open = ref(false);
-const loading = ref(true);
+const loading = ref({
+  page:false,
+  runDetail: false
+});
 const showSearch = ref(true);
 const ids = ref([]);
 const single = ref(true);
@@ -165,17 +190,17 @@ watch(() => props.reportId, () => {
 
 /** 查询用例列表 */
 function getList() {
-  loading.value = true;
+  loading.value.page = true;
   ApiRunDetail.list(queryParams.value).then(response => {
     runDetailList.value = response.rows;
     total.value = response.total;
-    loading.value = false;
+    loading.value.page = false;
   });
 }
 
 /** 查询项目列表 */
 function getProjectSelect() {
-  listProject(null).then(response => {
+  listProject({isPage: false}).then(response => {
     projectOptions.value = response.data;
   });
 }
@@ -218,6 +243,7 @@ function handleDelete(row) {
 }
 
 function handleView(row) {
+  loading.value.runDetail = true;
   let detailIds = row.detailId;
   ApiRunDetail.detail(detailIds).then(response => {
     console.log(response)
@@ -231,12 +257,14 @@ function handleView(row) {
     // caseDetailData.value.request.teststeps = response.data;
     showCaseEdit.value = true;
     // alert(JSON.stringify(response, null, 4));
+  }).finally(()=>{
+    loading.value.runDetail = false;
   });
 }
 
 
-getProjectSelect();
+// getProjectSelect();
 // getModuleShow();
 handleQuery();
-getList();
+// getList();
 </script>

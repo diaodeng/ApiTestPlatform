@@ -13,10 +13,10 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="套件状态" clearable style="width: 200px">
           <el-option
-              v-for="dict in sys_normal_disable"
-              :key="dict.value"
+              v-for="dict in qtr_data_status"
+              :key="dict.value * 1"
               :label="dict.label"
-              :value="dict.value"
+              :value="dict.value * 1"
           />
         </el-select>
       </el-form-item>
@@ -54,11 +54,12 @@
     >
       <el-table-column type="selection" width="55" align="center"/>
       <el-table-column prop="suiteId" label="ID" width="160"></el-table-column>
-      <el-table-column prop="suiteName" label="套件名称" width="200"></el-table-column>\
+      <el-table-column prop="suiteName" label="套件名称" width="200"></el-table-column>
+      \
       <el-table-column prop="orderNum" label="排序" width="200"></el-table-column>
       <el-table-column prop="status" label="状态" width="100">
         <template #default="scope">
-          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
+          <dict-tag :options="qtr_data_status" :value="scope.row.status + ''"/>
         </template>
       </el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
@@ -76,10 +77,12 @@
           <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['qtr:suite:edit']">
             修改
           </el-button>
-          <el-button link type="primary" icon="Tools" @click="handleConfigSuite(scope.row)" v-hasPermi="['qtr:suite:edit']">
+          <el-button link type="primary" icon="Tools" @click="handleConfigSuite(scope.row)"
+                     v-hasPermi="['qtr:suite:edit']">
             配置
           </el-button>
-          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:suite:remove']">
+          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
+                     v-hasPermi="['qtr:suite:remove']">
             删除
           </el-button>
         </template>
@@ -115,9 +118,9 @@
             <el-form-item label="套件状态">
               <el-radio-group v-model="form.status">
                 <el-radio
-                    v-for="dict in sys_normal_disable"
-                    :key="dict.value"
-                    :value="dict.value"
+                    v-for="dict in qtr_data_status"
+                    :key="dict.value * 1"
+                    :value="dict.value * 1"
                 >{{ dict.label }}
                 </el-radio>
               </el-radio-group>
@@ -134,7 +137,7 @@
     </el-dialog>
 
     <!-- 运行用例对话框 -->
-    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.suite" :run-ids="runIds"></RunDialog>
+    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="RunTypeEnum.suite" :run-ids="runIds"></RunDialog>
 
     <!-- 配置套件详情对话框 -->
     <SuiteDetailDialog :form-datas="form"
@@ -148,15 +151,15 @@
 </template>
 
 <script setup name="Suite">
-import {listSuite, getSuite, delSuite, addSuite, updateSuite} from "@/api/qtr/suite";
+import {addSuite, delSuite, getSuite, listSuite, updateSuite} from "@/api/qtr/suite";
 import {ElMessageBox} from "element-plus";
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {RunTypeEnum} from "@/components/hrm/enum.js";
 import RunDialog from "@/components/hrm/common/run_dialog.vue";
 import SuiteDetailDialog from "@/components/qtr/suite-detail-dialog.vue";
 
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
 
 const suiteList = ref([]);
 const open = ref(false);
@@ -188,7 +191,7 @@ const data = reactive({
 const {queryParams, form, rules} = toRefs(data);
 
 const SuiteTitle = computed(() => {
-    return title.value
+  return title.value
 });
 
 /** 查询套件列表 */
@@ -253,7 +256,7 @@ function handleConfigSuite(row) {
     form.value = response.data;
     openSuiteDetail.value = true;
     configSuiteId.value = row.suiteId;
-    title.value = "配置套件" + "【"+ response.data['suiteName'] +"】";
+    title.value = "配置套件" + "【" + response.data['suiteName'] + "】";
   });
 }
 

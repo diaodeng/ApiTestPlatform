@@ -115,9 +115,11 @@ def key_value_dict(cover_list: list[dict] | dict, ignore_type=False, checkEnable
 def dict2list(datas: dict, ignore_type=False):
     """
     {"key1": "value1", "key2": value2} => [{"key": "key1", "value": "value1", "type": "sting"}，{"key": "key2", "value": "value2", "type": "int"}]
+    只处理字典，其余数据直接返回
     """
     new_data = []
-    if isinstance(datas, list):return datas
+    # if isinstance(datas, list):return datas
+    if not isinstance(datas, dict):return datas
     for key, value in datas.items():
         if ignore_type:
             data_type = "any"

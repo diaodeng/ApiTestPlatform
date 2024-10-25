@@ -23,6 +23,7 @@ class JobModel(CommonDataModel):
     misfire_policy: Optional[str] = None
     concurrent: Optional[str] = None
     status: Optional[str] = None
+    run_status: Optional[int] = None
     # create_by: Optional[str] = None
     # create_time: Optional[datetime] = None
     # update_by: Optional[str] = None
@@ -30,7 +31,7 @@ class JobModel(CommonDataModel):
     remark: Optional[str] = None
 
 
-class JobLogModel(BaseModel):
+class JobLogModel(CommonDataModel):
     """
     定时任务调度日志表对应pydantic模型
     """
@@ -72,7 +73,7 @@ class EditJobModel(JobModel):
     """
     编辑定时任务模型
     """
-    type: Optional[str] = None
+    pass
 
 
 class DeleteJobModel(BaseModel):

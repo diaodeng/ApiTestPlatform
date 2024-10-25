@@ -5,7 +5,7 @@ from pydantic.alias_generators import to_camel
 from typing import Union, Optional, List, Dict, Text, Any
 from datetime import datetime
 from module_admin.annotation.pydantic_annotation import as_query
-from module_hrm.entity.vo.common_vo import CommonDataModel
+from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from utils.common_util import CamelCaseUtil
 
 
@@ -71,13 +71,11 @@ class EnvModelForApi(EnvModel):
 
 
 @as_query
-class EnvQueryModel(EnvModel):
+class EnvQueryModel(QueryModel, EnvModel):
     """
     环境管理不分页查询模型
     """
-    begin_time: Optional[str] = None
-    end_time: Optional[str] = None
-    only_self: bool = False
+    pass
 
 
 class DeleteEnvModel(BaseModel):

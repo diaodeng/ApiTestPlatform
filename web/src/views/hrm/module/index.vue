@@ -23,10 +23,10 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="模块状态" clearable style="width: 200px">
           <el-option
-              v-for="dict in sys_normal_disable"
-              :key="dict.value"
+              v-for="dict in qtr_data_status"
+              :key="dict.value * 1"
               :label="dict.label"
-              :value="dict.value"
+              :value="dict.value * 1"
           />
         </el-select>
       </el-form-item>
@@ -88,35 +88,41 @@
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
     </el-row>
 
-    <el-table border v-loading="loading" :data="moduleList" @selection-change="handleSelectionChange">
+    <el-table border v-loading="loading"
+              :data="moduleList"
+              @selection-change="handleSelectionChange"
+              table-layout="fixed"
+              max-height="calc(100vh - 280px)"
+    >
       <el-table-column type="selection" width="55" align="center"/>
-      <el-table-column label="模块ID" align="center" prop="moduleId"/>
+      <el-table-column label="模块ID" align="center" prop="moduleId" width="150"/>
       <el-table-column label="模块名称" align="center" prop="moduleName"/>
       <el-table-column label="所属项目" align="center" :formatter="formatProject"/>
-      <el-table-column label="测试人员" align="center" prop="testUser"/>
-      <el-table-column label="模块排序" align="center" prop="sort"/>
-      <el-table-column label="状态" align="center" prop="status">
+      <el-table-column label="测试人员" align="center" prop="testUser" width="80"/>
+      <el-table-column label="模块排序" align="center" prop="sort" width="80"/>
+      <el-table-column label="状态" align="center" prop="status" width="70">
         <template #default="scope">
-          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
+          <dict-tag :options="qtr_data_status" :value="scope.row.status + ''"/>
         </template>
       </el-table-column>
-      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width"
+                       width="150">
         <template #default="scope">
           <span>{{ parseTime(scope.row.createTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="更新时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="更新时间" align="center" prop="createTime" class-name="small-padding fixed-width"
+                       width="150">
         <template #default="scope">
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="180" align="center" class-name="small-padding fixed-width">
+      <el-table-column label="操作" width="80" align="center" class-name="small-padding fixed-width" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:module:edit']">
-            修改
           </el-button>
           <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
-                     v-hasPermi="['hrm:module:remove']">删除
+                     v-hasPermi="['hrm:module:remove']">
           </el-button>
         </template>
       </el-table-column>
@@ -155,9 +161,9 @@
         <el-form-item label="模块状态" prop="status">
           <el-radio-group v-model="form.status">
             <el-radio
-                v-for="dict in sys_normal_disable"
-                :key="dict.value"
-                :label="dict.value"
+                v-for="dict in qtr_data_status"
+                :key="dict.value * 1"
+                :label="dict.value * 1"
             >{{ dict.label }}
             </el-radio>
           </el-radio-group>
@@ -185,19 +191,19 @@
     </el-dialog>
 
     <!-- 运行用例对话框 -->
-    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.module" :run-ids="runIds"></RunDialog>
+    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="RunTypeEnum.module" :run-ids="runIds"></RunDialog>
   </div>
 </template>
 
 <script setup name="Module">
-import {listModule, addModule, delModule, getModule, updateModule} from "@/api/hrm/module";
+import {addModule, delModule, getModule, listModule, updateModule} from "@/api/hrm/module";
 import {listProject} from "@/api/hrm/project";
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {RunTypeEnum} from "@/components/hrm/enum.js";
 import RunDialog from "@/components/hrm/common/run_dialog.vue";
 import {ElMessageBox} from "element-plus";
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
 
 const moduleList = ref([]);
 const projectOptions = ref([]);
@@ -246,7 +252,7 @@ function getList() {
 
 /** 查询项目列表 */
 function getProjectSelect() {
-  listProject(null).then(response => {
+  listProject({isPage: false}).then(response => {
     projectOptions.value = response.data;
   });
 }
@@ -367,12 +373,12 @@ function handleExport() {
 
 /** 运行用例 */
 function runTest(row) {
-  if (row && "moduleId" in row && row.moduleId){
+  if (row && "moduleId" in row && row.moduleId) {
     runIds.value = [row.moduleId];
   }
   if (!runIds.value || runIds.value.length === 0) {
     ElMessageBox.alert('请选择要运行的模块', "提示！", {type: 'warning'});
-      return;
+    return;
   }
 
   runDialogShow.value = true;

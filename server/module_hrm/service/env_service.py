@@ -22,7 +22,7 @@ class EnvService:
         return env_list_result
 
     @classmethod
-    def get_env_list_services(cls, query_db: Session, page_object: EnvQueryModel, data_scope_sql: str):
+    def get_env_list_services(cls, query_db: Session, page_object: EnvQueryModel, data_scope_sql: str, is_page=False):
         """
         获取部门列表信息service
         :param query_db: orm对象
@@ -30,9 +30,9 @@ class EnvService:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: 环境列表信息对象
         """
-        env_list_result = EnvDao.get_env_list(query_db, page_object, data_scope_sql)
+        env_list_result = EnvDao.get_env_list(query_db, page_object, data_scope_sql, is_page=is_page)
 
-        return CamelCaseUtil.transform_result(env_list_result)
+        return env_list_result
 
     @classmethod
     def add_env_services(cls, query_db: Session, page_object: EnvModel):
