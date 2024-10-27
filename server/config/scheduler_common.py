@@ -23,7 +23,6 @@ from config.env import RedisConfig
 from loguru import logger
 import module_task
 from module_hrm.enums.enums import TaskStatusEnum
-from server import app
 
 
 # 重写Cron定时
@@ -166,7 +165,7 @@ class SchedulerUtil:
     @classmethod
     def acquire_redis_lock(cls, lock_name, acquire_timeout=10):
         end_time = time.time() + acquire_timeout
-        r = app.state.redis
+        r = redis
         while time.time() < end_time:
             if r.sernx(lock_name, 1):
                 r.expire(lock_name, 10)
@@ -178,7 +177,7 @@ class SchedulerUtil:
 
     @classmethod
     def release_redis_lock(cls, lock_name):
-        r = app.state.redis
+        r = redis
         r.delete(lock_name)
 
     def add_event(self):
