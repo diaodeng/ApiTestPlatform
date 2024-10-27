@@ -14,6 +14,7 @@
         <!--        </el-tooltip>-->
 
         <el-tooltip content="文档地址" effect="dark" placement="bottom">
+<!--          <router-link to="/about">文档</router-link>-->
           <QtrDocsBack id="qtr-doc" class="right-menu-item hover-effect"></QtrDocsBack>
         </el-tooltip>
 
