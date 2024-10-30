@@ -19,7 +19,7 @@ class CaseModel(CommonDataModel):
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
-    case_id: int|str|None = None
+    case_id: int | str | None = None
     type: Optional[int] = None
     case_name: Optional[str] = None
     project_id: Optional[int] = None
@@ -76,6 +76,11 @@ class FeishuRobotModel(BaseModel):
     push: bool = False
 
 
+class ForwardConfig(BaseModel):
+    agentId: int = None,
+    forwardRules: list[int] = None,
+
+
 class CaseRunModel(BaseModel):
     """
     用于用例运行前的序列化
@@ -88,11 +93,14 @@ class CaseRunModel(BaseModel):
     report_name: Optional[str] = None  # 测试报告名称
     report_id: Optional[int] = None  # 测试报告名称
     is_async: Optional[bool] = False  # 本次执行同步或异步
-    repeat_num: Optional[int] = 1  # 用例重复执行次数
+    repeat_num: int = 1  # 用例重复执行次数
     env: int  # 环境id
     concurrent: int = 1  # 并发数(同时执行的用例数)
     case_data: Optional[CaseModel | dict | None] = None  # 用例数据
     runner: Any = None
+
+    forward: bool = False
+    forwardConfig: Optional[ForwardConfig] = None
 
     push: bool = False
     feishu_robot: Optional[FeishuRobotModel] = FeishuRobotModel()

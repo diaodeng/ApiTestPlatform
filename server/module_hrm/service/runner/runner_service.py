@@ -90,8 +90,8 @@ async def run_by_single(query_db: Session,
             step.result.logs.before_request = f"用例状态为[{status.name}]不执行"
         case_res_datas = [test_case]
     else:
-        runner = TestRunner(test_case, func_map)
-        case_res_datas = await runner.start(run_info.repeat_num or 1)
+        runner = TestRunner(test_case, func_map, run_info)
+        case_res_datas = await runner.start()
 
     all_result = []
     for case_res_data in case_res_datas:
@@ -244,7 +244,8 @@ async def run_by_project(query_db: Session, id, env_obj, func_map=None, run_info
     return result
 
 
-async def run_by_concurrent(query_db: Session, case_ids: list, env_obj, func_map=None, run_info: CaseRunModel = None):
+async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, func_map=None,
+                            run_info: CaseRunModel = None):
     """
     并发执行多个用例
     """

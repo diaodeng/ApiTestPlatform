@@ -27,8 +27,17 @@ const form = ref({
   isAsync: false,
   repeatNum: 1,
   concurrent: 1,
-  push: false
-})
+  push: false,
+  forward: false,
+  forwardConfig: {
+    agentId: null,
+    forwardRules: null,
+  }
+});
+
+const canForward = computed(()=>{
+  return form.value.forward ? "forwardConfig" : null;
+});
 
 
 function handleRun(env) {
@@ -128,6 +137,17 @@ function beforeClose(done) {
       <el-form-item label="结果通知：">
 <!--        <el-input v-model="form.push" type="checkbox"></el-input>-->
         <el-checkbox v-model="form.push"></el-checkbox>
+      </el-form-item>
+      <el-form-item>
+        <el-checkbox v-model="form.forward"></el-checkbox>
+      </el-form-item>
+      <el-form-item>
+        <el-collapse v-model="canForward">
+          <el-collapse-item title="转发配置" name="forwardConfig">
+            <el-select></el-select>
+            <el-select multiple></el-select>
+          </el-collapse-item>
+        </el-collapse>
       </el-form-item>
     </el-form>
     <template #footer>
