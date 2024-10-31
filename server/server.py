@@ -33,7 +33,7 @@ from module_hrm.controller.api_controler import hrmApiController
 from module_hrm.controller.qtrJob_controller import qtrJobController
 from module_hrm.controller.suite_controller import suiteController
 from module_hrm.controller.checkStatus_controler import qtrServiceStatusController
-from module_qtr.controller.agent_controller import agentController
+from module_qtr.controller.agent_controller import agentController, startup_handler
 
 from config.env import AppConfig
 from config.get_redis import RedisUtil
@@ -42,7 +42,6 @@ from config.get_scheduler import sys_scheduler_util as SysSchedulerUtil
 from config.get_qtr_scheduler import qtr_scheduler_util as QtrSchedulerUtil
 from utils.log_util import logger
 from utils.common_util import worship
-
 
 # 生命周期事件
 @asynccontextmanager
@@ -55,6 +54,7 @@ async def lifespan(app: FastAPI):
     await RedisUtil.init_sys_config(app.state.redis)
     await SysSchedulerUtil.init_system_scheduler()
     await QtrSchedulerUtil.init_qtr_scheduler()
+    await startup_handler()
     logger.info(f"{AppConfig.app_name}启动成功")
     yield
     await SysSchedulerUtil.close_scheduler()

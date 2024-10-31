@@ -95,11 +95,12 @@ async def edit_qtr_job(request: Request, edit_job: EditJobModel, query_db: Sessi
 async def change_status_qtr_job(request: Request, edit_job: EditJobModel, query_db: Session = Depends(get_db),
                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        edit_job.update_by = current_user.user.user_name
-        edit_job.update_time = datetime.now()
+
         job_info = EditJobModel()
         job_info.status = edit_job.status
         job_info.job_id = edit_job.job_id
+        job_info.update_by = current_user.user.user_name
+        job_info.update_time = datetime.now()
         edit_job_result = JobService.edit_job_services(query_db, job_info)
         if edit_job_result.is_success:
             logger.info(edit_job_result.message)

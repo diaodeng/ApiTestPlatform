@@ -27,7 +27,17 @@ const form = ref({
   isAsync: false,
   repeatNum: 1,
   concurrent: 1,
-  push: false
+  push: false,
+  forwardConfig: {
+    forward: false,
+    agentId: null,
+    forwardRuleIds: null,
+  },
+  runBySort: false
+});
+
+const canForward = computed(() => {
+  return form.value.forwardConfig.forward ? "forwardConfig" : null;
 });
 
 
@@ -125,8 +135,32 @@ function beforeClose(done) {
         <el-input-number :min="1" controls-position="right" v-model="form.concurrent"
                          placeholder="输入并发执行的用例数量"></el-input-number>
       </el-form-item>
+
+      <el-form-item label="转发配置：">
+        <div style="display: flex;flex-direction: row;flex-grow: 1">
+          <el-checkbox v-model="form.forwardConfig.forward" style="margin-right: 20px"></el-checkbox>
+          <el-row style="flex-grow: 1" :gutter="10">
+            <el-col :span="12">
+              <el-select placeholder="请选择客户机"
+                         v-model="form.forwardConfig.agentId"
+              ></el-select>
+            </el-col>
+            <el-col :span="12">
+              <el-select multiple
+                         placeholder="请选择转发规则"
+                         v-model="form.forwardConfig.forwardRuleIds"
+              ></el-select>
+            </el-col>
+          </el-row>
+        </div>
+      </el-form-item>
+
+      <el-form-item label="顺序执行：">
+        <!--        <el-input v-model="form.push" type="checkbox"></el-input>-->
+        <el-checkbox v-model="form.runBySort"></el-checkbox>
+      </el-form-item>
       <el-form-item label="结果通知：">
-<!--        <el-input v-model="form.push" type="checkbox"></el-input>-->
+        <!--        <el-input v-model="form.push" type="checkbox"></el-input>-->
         <el-checkbox v-model="form.push"></el-checkbox>
       </el-form-item>
     </el-form>

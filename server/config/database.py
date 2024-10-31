@@ -1,6 +1,6 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, DeclarativeBase, mapped_column, Mapped
+from sqlalchemy import create_engine, MetaData
+# from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, DeclarativeBase, mapped_column, Mapped, declarative_base
 from urllib.parse import quote_plus
 from config.env import DataBaseConfig
 
@@ -18,5 +18,9 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Base = declarative_base()
 
+
+my_metadata = MetaData()
+
+
 class Base(DeclarativeBase):
-    pass
+    metadata = my_metadata
