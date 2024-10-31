@@ -14,6 +14,7 @@ import requests
 import urllib3
 import websockets
 
+from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.case_vo_detail_for_handle import ParameterModel, TStep as TStepForHandle
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep as TStepForRun, TRequest as TRequestForRun, \
     TWebsocket, ResponseData, \
@@ -74,8 +75,10 @@ class Response:
 
 
 class CaseRunner(object):
-    def __init__(self, case_data: TestCase, debugtalk_func_map={}, logger: CustomStackLevelLogger = None):
+    def __init__(self, case_data: TestCase, debugtalk_func_map={}, logger: CustomStackLevelLogger = None,
+                 run_info: CaseRunModel = None):
         self.case_data = case_data
+        self.run_info = run_info
         self.logger = logger
         self.handler = RunLogCaptureHandler()
         self.logger.addHandler(self.handler)
@@ -358,7 +361,8 @@ class RequestRunner(object):
                     var = key_value_dict(self.case_runner.case_data.config.variables)
                     data = parse_function_set_default_params(hook, var, self.debugtalk_func_map, (self.step_data,))
                     logger.info(f"自定义teststep_setup回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
-                    self.logger.info(f"自定义teststep_setup回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
+                    self.logger.info(
+                        f"自定义teststep_setup回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
             except Exception as setupre:
                 error_info = self.case_runner.handler.get_log()
                 self.step_data.result.logs.before_request += error_info
@@ -381,7 +385,8 @@ class RequestRunner(object):
                     if not hook: continue
                     var = key_value_dict(self.case_runner.case_data.config.variables)
                     parse_function_set_default_params(hook, var, self.debugtalk_func_map, (self.step_data,))
-                    logger.info(f"自定义teststep_tearndown回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
+                    logger.info(
+                        f"自定义teststep_tearndown回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
                     self.logger.info(
                         f"自定义teststep_tearndown回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
             except Exception as setupre:
@@ -749,13 +754,18 @@ class TestRunner(object):
     单个用例执行入口，但是执行结果可能是多个用例，例如使用的参数化的情况
     """
 
-    def __init__(self, case_data: TestCase, debugtalk_func_map={}):
+    def __init__(self, case_data: TestCase, debugtalk_func_map: dict = None,
+                 run_info: CaseRunModel = None):
+        if debugtalk_func_map is None:
+            debugtalk_func_map = {}
+
+        self.run_info = run_info
         self.parameters: ParameterModel = case_data.config.parameters
         self.case_data = case_data
         self.debugtalk_func_map = debugtalk_func_map
         self.logger = TestLog()
 
-    async def _run_for_repeat(self, case_data, repeat_num=1) -> list[TestCase]:
+    async def _run_for_repeat(self, case_data) -> list[TestCase]:
         all_data = []
         # if not case_data.status == CaseStatusEnum.normal.value:
         #     status = CaseRunStatus.xfailed.value
@@ -775,19 +785,19 @@ class TestRunner(object):
         #     all_data.append(case_data)
         #     return all_data
         logger.info(f"当前协程ID：{asyncio.current_task().get_name()}")
-        for i in range(repeat_num):
+        for i in range(self.run_info.repeat_num):
             tem_case_data = copy.deepcopy(case_data)
-            if repeat_num > 1:
+            if self.run_info.repeat_num > 1:
                 tem_case_data.config.name = f"{tem_case_data.config.name}-{i + 1}"
                 tem_case_data.case_name = f"{tem_case_data.case_name}-{i + 1}"
-            runner = CaseRunner(tem_case_data, self.debugtalk_func_map, self.logger.logger)
+            runner = CaseRunner(tem_case_data, self.debugtalk_func_map, self.logger.logger, run_info=self.run_info)
             await runner.run()
             all_data.append(runner.case_data)
         return all_data
 
-    async def start(self, repeat_num=1) -> list[TestCase]:
+    async def start(self) -> list[TestCase]:
         try:
-            return await self._run_for_repeat(self.case_data, repeat_num)
+            return await self._run_for_repeat(self.case_data)
             # if not self.parameters or not self.parameters.value:
             #     return await self._run_for_repeat(self.case_data, repeat_num)
             #

@@ -9,7 +9,8 @@ server/.env.prod
 server/.env.test
 server/alembic
 server/alembic.ini
-server/build
+
+web/vite.config.js.timestamp*.mjs
 
 # C extensions
 *.so

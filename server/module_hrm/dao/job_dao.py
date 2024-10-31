@@ -67,7 +67,7 @@ class JobDao:
         :return: 定时任务列表信息对象
         """
         job_list = db.query(QtrJob) \
-            .filter(QtrJob.status == 0) \
+            .filter(QtrJob.status == '0') \
             .distinct().all()
 
         return job_list

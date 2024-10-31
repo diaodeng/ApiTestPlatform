@@ -1,12 +1,7 @@
-import copy
-
-from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.case_dao import *
-from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseDetailForHandle
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
 from utils.page_util import PageResponseModel
-from utils.snowflake import snowIdWorker
 
 
 class CaseService:

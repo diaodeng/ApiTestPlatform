@@ -91,3 +91,12 @@ class TaskStatusEnum(Enum):
     missed = 5  # 错过执行时间
     stop = 6  # 停止状态，未开始执行
 
+
+class ForwardRulesEnum(Enum):
+    disabled = 1
+    normal = 2
+
+
+class DelFlagEnum(Enum):
+    delete = 2
+    normal = 1

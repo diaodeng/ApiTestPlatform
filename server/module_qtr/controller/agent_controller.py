@@ -1,11 +1,14 @@
 import base64
 import gzip
+import zlib
 
 from fastapi import APIRouter, WebSocket
 from fastapi.responses import JSONResponse
 import asyncio
 import json
 import uuid
+from module_hrm.entity.vo.agent_vo import AgentModel
+
 
 agentController = APIRouter(prefix='/qtr/agent')
 
@@ -14,6 +17,25 @@ agents = {}
 response_futures = {}
 MAX_MESSAGE_SIZE = 1024
 
+# 这是您的检查函数，它应该是异步的
+async def check_dictionary():
+    print("Checking dictionary...")
+    # 这里执行您的检查逻辑
+    print(agents)
+    # ...
+    print("Dictionary check completed.")
+
+# 这是一个后台任务，它会定期调用检查函数
+async def background_task():
+    while True:
+        await check_dictionary()
+        await asyncio.sleep(10)  # 等待5秒钟后再次调用检查函数
+
+# 应用启动事件处理器
+async def startup_handler():
+    # 在启动时创建一个后台任务
+    asyncio.create_task(background_task())
+    print("Background task started.")
 
 @agentController.websocket("/ws/{agent_id}")
 async def websocket_endpoint(websocket: WebSocket, agent_id: str):
@@ -23,6 +45,7 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
     # 当有新的WebSocket连接时，初始化一个空的字典来存储该agent的待处理Future对象
     if agent_id not in response_futures:
         response_futures[agent_id] = {}
+
 
     try:
         while True:
@@ -99,6 +122,7 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
 
 @agentController.post("/send/{agent_id}")
 async def send_message(agent_id: str, message: dict, request_id: str = None):
+    print(f'agents==========>>>{agents}')
     # 如果没有提供request_id，则生成一个唯一的标识符
     if not request_id:
         request_id = str(uuid.uuid4())

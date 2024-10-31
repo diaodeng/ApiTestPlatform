@@ -71,7 +71,7 @@ async def for_debug(request: Request,
         debugtalk_obj = DebugTalkHandler(project_debugtalk_source, common_debugtalk_source)
         debugtalk_func_map = debugtalk_obj.func_map(user=current_user.user.user_id)
 
-        test_runner = TestRunner(case_objs[0], debugtalk_func_map)
+        test_runner = TestRunner(case_objs[0], debugtalk_func_map, debug_info)
         all_case_res = await test_runner.start()
         logger.info('执行成功')
         all_log = []
