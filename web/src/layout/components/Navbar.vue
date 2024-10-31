@@ -14,8 +14,11 @@
         <!--        </el-tooltip>-->
 
         <el-tooltip content="文档地址" effect="dark" placement="bottom">
-<!--          <router-link to="/about">文档</router-link>-->
-          <QtrDocsBack id="qtr-doc" class="right-menu-item hover-effect"></QtrDocsBack>
+          <div id="qtr-doc" class="right-menu-item hover-effect">
+            <svg-icon icon-class="question" @click="openNewPage('/about')"/>
+          </div>
+          <!--          <router-link to="/about">文档</router-link>-->
+          <!--          <QtrDocsBack id="qtr-doc" class="right-menu-item hover-effect"></QtrDocsBack>-->
         </el-tooltip>
 
         <div style="align-self: center" v-show="false">
@@ -68,13 +71,15 @@ import Hamburger from '@/components/Hamburger'
 import Screenfull from '@/components/Screenfull'
 import SizeSelect from '@/components/SizeSelect'
 import HeaderSearch from '@/components/HeaderSearch'
-import RuoYiGit from '@/components/RuoYi/Git'
-import RuoYiDoc from '@/components/RuoYi/Doc'
-import QtrDocs from "@/components/hrm/common/qtr-docs.vue";
-import QtrDocsBack from "@/components/hrm/common/qtr-docs-back.vue";
+// import RuoYiGit from '@/components/RuoYi/Git'
+// import RuoYiDoc from '@/components/RuoYi/Doc'
+// import QtrDocs from "@/components/hrm/common/qtr-docs.vue";
 import useAppStore from '@/store/modules/app'
 import useUserStore from '@/store/modules/user'
 import useSettingsStore from '@/store/modules/settings'
+import {useRouter} from "vue-router";
+
+const router = useRouter();
 
 const {locale} = useI18n();
 const currentLanguage = ref("zh");
@@ -116,6 +121,15 @@ function logout() {
     })
   }).catch(() => {
   });
+}
+
+function openNewPage(routeName) {
+  const  routeUrl = {
+    name: "/about",
+    params: {}
+  };
+  // const fullUrl = router.resolve(routeUrl).href;
+  window.open("/#/about", "_blank")
 }
 
 const emits = defineEmits(['setLayout'])

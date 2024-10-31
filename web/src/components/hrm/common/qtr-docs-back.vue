@@ -3,34 +3,33 @@ import {marked} from 'marked';
 import hljs from 'highlight.js';
 
 import MarkdownItHighlightjs from 'markdown-it-highlightjs'
-import MarkdownItContainer from 'markdown-it-container'
-import MarkdownItDeflist from 'markdown-it-deflist'
-import MarkdownItIns from 'markdown-it-ins'
-
-import MarkdownItAbbr from 'markdown-it-abbr'
-import MarkdownItAnchor from 'markdown-it-anchor'
-import MarkdownItFootnote from 'markdown-it-footnote'
-import MarkdownItSub from 'markdown-it-sub'
-import MarkdownItSup from 'markdown-it-sup'
-import MarkdownItTasklists from 'markdown-it-task-lists'
-import MarkdownItTOCDR from 'markdown-it-toc-done-right'
+// import MarkdownItContainer from 'markdown-it-container'
+// import MarkdownItDeflist from 'markdown-it-deflist'
+// import MarkdownItIns from 'markdown-it-ins'
+//
+// import MarkdownItAbbr from 'markdown-it-abbr'
+// import MarkdownItAnchor from 'markdown-it-anchor'
+// import MarkdownItFootnote from 'markdown-it-footnote'
+// import MarkdownItSub from 'markdown-it-sub'
+// import MarkdownItSup from 'markdown-it-sup'
+// import MarkdownItTasklists from 'markdown-it-task-lists'
+// import MarkdownItTOCDR from 'markdown-it-toc-done-right'
 
 import 'highlight.js/styles/default.css'
 
 
 import {useTemplateRef, compile, render} from 'vue';
 import markdownit from 'markdown-it'
-import Hooks from "../../../docs/hooks.md?raw"
-import caseConfig from "../../../docs/case_config.md?raw"
-import {useRouter} from "vue-router";
+import {useRouter, useRoute} from "vue-router";
 
+const markdownSource = defineModel('markdownSource')
 
-const dialogShow = ref(false);
 const markdownContainer = ref();
 const markdownContainerRef = useTemplateRef("markdownContainer");
 const markdownContent = ref("");
 
 const router = useRouter();
+const route = useRoute();
 
 
 const md = markdownit({
@@ -53,13 +52,13 @@ const md = markdownit({
   }
 })
     .use(MarkdownItHighlightjs)
-    .use(MarkdownItContainer)
-    .use(MarkdownItDeflist)
-    .use(MarkdownItIns)
-    .use(MarkdownItAbbr)
-    .use(MarkdownItAnchor)
-    .use(MarkdownItFootnote)
-    .use(MarkdownItSub).use(MarkdownItSup).use(MarkdownItTasklists).use(MarkdownItTOCDR)
+// .use(MarkdownItContainer)
+// .use(MarkdownItDeflist)
+// .use(MarkdownItIns)
+// .use(MarkdownItAbbr)
+// .use(MarkdownItAnchor)
+// .use(MarkdownItFootnote)
+// .use(MarkdownItSub).use(MarkdownItSup).use(MarkdownItTasklists).use(MarkdownItTOCDR)
 
 
 // 自定义规则，使链接在新页签中打开
@@ -85,22 +84,29 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
 // markdownContainer.innerHTML = content; // 清空之前的内容
 // markdownContainer.appendChild(app.el); // 挂载编译后的组件
 
-
-markdownContent.value = md.render(Hooks);
+watch(markdownSource, (newData, oldData) => {
+  markdownContent.value = md.render(newData);
+});
 
 
 function handleLinkClick(event) {
   const target = event.target.closest('a');
 
   if (target && target.classList.contains('internal-link')) {
-    debugger
     event.preventDefault();
     const href = target.getAttribute('href');
     if (href && href.startsWith('#')) {
-      window.location.hash = href.replace('#', '');
+      const el = document.querySelector(href)
+      if (el) {
+        el.scrollIntoView()
+      }
+      // console.log("route.hash: " + route.hash);
+      // console.log("window.location.hash: " + window.location.hash);
+      // let oldRoute = window.location.hash;
+      // window.location.hash = oldRoute.startsWith('#/about')?"#/about#" + href.replace('#', ''):href.replace('#', '');
       // 使用 Vue Router 进行导航
       router.push(href);
-    }else {
+    } else {
       const baseUrl = window.location.origin; // 获取当前网站根URL
       const fullUrl = baseUrl + href; // 拼接完整的URL
       window.open(fullUrl, '_blank'); // 在新标签页中打开
@@ -151,19 +157,12 @@ onBeforeUnmount(() => {
 
 // const markdownContent = ref(marked(Hooks, {renderer}));
 
-function showDocs() {
-  dialogShow.value = true;
-}
-
 </script>
 
 <template>
   <div>
-    <svg-icon icon-class="question" @click="showDocs"/>
-    <el-dialog v-model="dialogShow">
-      <div ref="markdownContainer" v-html="markdownContent" class="docsContainer"></div>
-      <!--      <div v-html="markdownContent"></div>-->
-    </el-dialog>
+    <div ref="markdownContainer" v-html="markdownContent" class="docsContainer"></div>
+    <!--      <div v-html="markdownContent"></div>-->
   </div>
 
 

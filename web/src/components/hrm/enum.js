@@ -7,7 +7,7 @@ export const runDetailViewTypeEnum = {
 
 export const RunTypeEnum = {
     case: 1,
-    model: 2,
+    module: 2,
     suite: 4,
     project: 8,
     api: 16,

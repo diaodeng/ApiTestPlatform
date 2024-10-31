@@ -12,6 +12,7 @@ const en = {
                 message: "messages",
                 headers: "headers",
                 vph: "variables/parameters/hooks",
+                vphc: "variables",  // 配置页面使用的
                 other: "other",
                 request: "request",
                 ev: "extract/validate",
@@ -84,6 +85,7 @@ const zh = {
                 message: "基本信息",
                 headers: "请求头",
                 vph: "变量/参数化/回调",
+                vphc: "变量",
                 other: "其他",
                 request: "请求",
                 ev: "抽取/断言",

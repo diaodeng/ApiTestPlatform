@@ -18,6 +18,8 @@ from apscheduler.events import EVENT_ALL, EVENT_SCHEDULER_STARTED, EVENT_SCHEDUL
     EVENT_JOB_MISSED, EVENT_JOB_SUBMITTED, EVENT_JOB_MAX_INSTANCES
 import json
 from datetime import datetime, timedelta
+
+
 from config.database import engine, SQLALCHEMY_DATABASE_URL
 from config.env import RedisConfig
 from loguru import logger
@@ -74,12 +76,12 @@ class MyCronTrigger(CronTrigger):
                 else:
                     diff += 1
 
-    def get_next_fire_time(self, previous_fire_time, now):
-        if SchedulerUtil.acquire_lock():
-            return super().get_next_fire_time(previous_fire_time, now)
-        else:
-            logger.info("已被其他进程触发")
-            return None
+    # def get_next_fire_time(self, previous_fire_time, now):
+    #     if SchedulerUtil.acquire_lock():
+    #         return super().get_next_fire_time(previous_fire_time, now)
+    #     else:
+    #         logger.info("已被其他进程触发")
+    #         return None
 
 
 class SchedulerUtil:
@@ -111,10 +113,12 @@ class SchedulerUtil:
         }
         self.scheduler = BackgroundScheduler()
         self.scheduler.configure(jobstores=job_stores, executors=executors, job_defaults=job_defaults)
-        if self.acquire_lock():
-            self.scheduler.start()
-            logger.info("scheduler启动了")
-            self.add_event()
+
+        # if self.acquire_lock():
+        self.scheduler.start()
+        logger.info("scheduler启动了")
+
+        self.add_event()
 
     @classmethod
     def event_status(cls, event):
@@ -163,7 +167,7 @@ class SchedulerUtil:
                 return False
 
     @classmethod
-    def acquire_redis_lock(cls, lock_name, acquire_timeout=10):
+    def acquire_redis_lock(cls, redis, lock_name, acquire_timeout=10):
         end_time = time.time() + acquire_timeout
         r = redis
         while time.time() < end_time:
@@ -176,7 +180,7 @@ class SchedulerUtil:
             return False
 
     @classmethod
-    def release_redis_lock(cls, lock_name):
+    def release_redis_lock(cls, redis, lock_name):
         r = redis
         r.delete(lock_name)
 
@@ -252,6 +256,7 @@ class SchedulerUtil:
         :param job_info: 任务对象信息
         :return:
         """
+        # if not self.acquire_lock():return
         try:
             self.scheduler.add_job(
                 func=eval(job_info.invoke_target),
