@@ -774,7 +774,7 @@ class TestRunner(object):
         #
         #     all_data.append(case_data)
         #     return all_data
-
+        logger.info(f"当前协程ID：{asyncio.current_task().get_name()}")
         for i in range(repeat_num):
             tem_case_data = copy.deepcopy(case_data)
             if repeat_num > 1:

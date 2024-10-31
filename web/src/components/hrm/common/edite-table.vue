@@ -467,7 +467,9 @@ function handleFileUpload(file) {
 
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+      let jsonData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+      jsonData = jsonData.filter(item => item.length > 0);  // 过滤空数据行
+
       if (!jsonData || jsonData.length <= 2) {
         ElMessage.warning("请检查文件内容，至少有一条数据可上传(注意:文件头是两行)");
         return;
@@ -502,8 +504,9 @@ function handleFileUpload(file) {
 
       }
 
-
+      console.log(jsonData)
       let tableData = jsonData.splice(2).map((row, index) => {
+
         let rowData = {};
         // row.forEach((col, index) => {
         //   rowData[jsonData[1][index]] = {"content": col, "edit": false}
@@ -515,7 +518,9 @@ function handleFileUpload(file) {
 
         rowData["__row_key"] = randomString(10);
         return rowData;
+
       });
+      console.log(tableData)
       tableDatasRef.value = loadMode.value === 2 ? tableData : tableDatasRef.value.concat(tableData);
     };
     reader.readAsArrayBuffer(file.raw); // 注意这里使用 file.raw 来获取 File 对象

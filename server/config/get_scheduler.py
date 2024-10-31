@@ -34,10 +34,9 @@ class SysSchedulerUtil(SchedulerUtil):
                 self.remove_scheduler_job(job_id=str(item.job_id))
             self.add_scheduler_job(item)
         query_db.close()
-        self.scheduler.add_listener(self.scheduler_event_listener, EVENT_ALL)
         logger.info("系统初始定时任务加载成功")
 
-    def scheduler_event_listener(self, event):
+    def event_listener_all(self, event):
         try:
             # 获取事件类型和任务ID
             event_type = event.__class__.__name__
@@ -60,9 +59,13 @@ class SysSchedulerUtil(SchedulerUtil):
 
             status = '0'
             exception_info = f"【{message}】"
-            if event.code in (EVENT_JOB_ERROR, EVENT_JOB_MISSED, EVENT_JOB_MAX_INSTANCES):
+            if event.code in (EVENT_JOB_ERROR, EVENT_JOB_MISSED):
                 status = '1'
                 exception_info += f"{str(event.exception if event.exception else '')}"
+            if event.code == EVENT_JOB_MAX_INSTANCES:
+                status = '1'
+                exception_info += '有相同任务正在运行'
+
             job_id = event.job_id
             query_job = self.get_scheduler_job(job_id=job_id)
             if query_job:

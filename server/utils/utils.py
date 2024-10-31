@@ -6,6 +6,7 @@ import time
 import uuid
 from loguru import logger
 from redlock import RedLock, RedLockError
+from config.env import RedisConfig
 
 
 def get_platform() -> dict:
@@ -33,6 +34,7 @@ def modify_key_value(data, key_to_find, new_value=None):
             data[i] = modify_key_value(data[i], key_to_find, new_value)
     return data
 
+
 def get_time_stamp(mark=13, time_str=None):
     """
     获取时间戳
@@ -58,12 +60,18 @@ def get_time_stamp(mark=13, time_str=None):
     return time_stamp
 
 
-def lock(key):
+def red_lock(key):
     """
     redis分布式锁，基于redlock
     :param key: 唯一key，确保所有任务一致，但不与其他任务冲突
     :return:
     """
+    connect = [{
+        'host': RedisConfig.redis_host,
+        'port': RedisConfig.redis_port,
+        'db': RedisConfig.redis_database,
+        'password': RedisConfig.redis_password
+    }]
 
     def decorator(func):
         if asyncio.iscoroutinefunction(func):
@@ -74,7 +82,7 @@ def lock(key):
                 try:
                     with RedLock(
                             f"distributed_lock:{func.__name__}:{key}:{str(args)}",
-                            connection_details=settings.REDIS_NODES,
+                            connection_details=connect,
                             ttl=30000,  # 锁释放时间为30s
                     ):
                         return await func(*args, **kwargs)
@@ -93,7 +101,7 @@ def lock(key):
                     logger.info(f"Trying to acquire lock for key: {lock_key}")
                     with RedLock(
                             f"distributed_lock:{func.__name__}:{key}:{str(args)}",
-                            connection_details=settings.REDIS_NODES,
+                            connection_details=connect,
                             ttl=30000,  # 锁释放时间为30s
                     ):
                         logger.info(f"Lock acquired for key: {lock_key}")

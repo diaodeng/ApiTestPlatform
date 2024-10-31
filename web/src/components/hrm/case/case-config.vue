@@ -12,6 +12,9 @@ import {getComparator} from "@/api/hrm/case.js";
 import ParamsDalog from "@/components/hrm/common/edite-table.vue";
 import {ElMessageBox} from "element-plus";
 import {useResizeObserver} from "@vueuse/core";
+import {useI18n} from "vue-i18n";
+
+const {t} = useI18n();
 
 const qtr_case_status = inject("qtr_case_status");
 
@@ -60,6 +63,10 @@ function getModuleSelect() {
     moduleOptions.value = response.data;
   });
 }
+
+const getVariableTabName = computed(() => {
+  return props.dataType === HrmDataTypeEnum.config ? t('message.caseDetail.tabNames.vphc') : t('message.caseDetail.tabNames.vph');
+})
 
 function getConfigSelect() {
   if (props.dataType === HrmDataTypeEnum.case) {
@@ -246,34 +253,40 @@ const calcConfigContainerHeight = computed(() => {
         </el-scrollbar>
 
       </el-tab-pane>
-      <el-tab-pane :label="$t('message.caseDetail.tabNames.vph')" name="caseVph">
+      <el-tab-pane :label="getVariableTabName" name="caseVph">
         <el-scrollbar :height="configContainerCurrentHeight - 55">
           <TableVariables v-model="formData.request.config.variables"
                           :tableTitle="$t('message.configTable.header.variables')"></TableVariables>
-          {{ $t('message.configTable.header.parameters') }}
-          <el-row v-if="formData.request.config.parameters" v-loading="loading.initParameter">
-            <el-select placeholder="请选择" style="width: 120px;" v-model="formData.request.config.parameters.type">
-              <el-option :value="3" :key="3" label="本地表格"></el-option>
-              <el-option :value="4" :key="4" label="本地数据" disabled></el-option>
-              <el-option :value="1" :key="1" label="文件" disabled></el-option>
-              <el-option :value="2" :key="2" label="数据库" disabled></el-option>
-            </el-select>
-            <el-button @click="startParameterDialog" style="padding-left: 5px" type="primary">设置</el-button>
-          </el-row>
-          <el-row style="padding-bottom: 10px" v-if="formData.request.config.parameters">
-            <template v-if="formData.request.config.parameters.value">
-              <el-text type="success">点击“设置”修改数据</el-text>
-            </template>
-            <template v-else>
-              <el-text type="warning">暂无数据</el-text>
-            </template>
-          </el-row>
+
+          <template v-if="dataType !== HrmDataTypeEnum.config">
+            {{ $t('message.configTable.header.parameters') }}
+            <el-row v-if="formData.request.config.parameters" v-loading="loading.initParameter">
+              <el-select placeholder="请选择" style="width: 120px;" v-model="formData.request.config.parameters.type">
+                <el-option :value="3" :key="3" label="本地表格"></el-option>
+                <el-option :value="4" :key="4" label="本地数据" disabled></el-option>
+                <el-option :value="1" :key="1" label="文件" disabled></el-option>
+                <el-option :value="2" :key="2" label="数据库" disabled></el-option>
+              </el-select>
+              <el-button @click="startParameterDialog" style="padding-left: 5px" type="primary">设置</el-button>
+            </el-row>
+            <el-row style="padding-bottom: 10px" v-if="formData.request.config.parameters">
+              <template v-if="formData.request.config.parameters.value">
+                <el-text type="success">点击“设置”修改数据</el-text>
+              </template>
+              <template v-else>
+                <el-text type="warning">暂无数据</el-text>
+              </template>
+            </el-row>
+          </template>
+
           <!--      <TableVariables v-model="formData.request.config.parameters"></TableVariables>-->
 
           <TableHooks v-model="formData.request.config.setup_hooks"
+                      v-if="dataType !== HrmDataTypeEnum.config"
                       :table-title="$t('message.configTable.header.setup_hooks')"></TableHooks>
 
           <TableHooks v-model="formData.request.config.teardown_hooks"
+                      v-if="dataType !== HrmDataTypeEnum.config"
                       :table-title="$t('message.configTable.header.teardown_hooks')"></TableHooks>
         </el-scrollbar>
 

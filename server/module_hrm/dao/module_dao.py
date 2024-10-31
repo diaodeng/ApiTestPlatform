@@ -65,8 +65,7 @@ class ModuleDao:
         :return: 模块列表信息对象
         """
         query = db.query(HrmModule) \
-            .filter(HrmModule.module_id.in_(db.query(HrmModuleProject.module_id).filter(
-            HrmModuleProject.project_id == query_object.project_id)) if query_object.project_id else True,
+            .filter(HrmModule.project_id ==query_object.project_id if query_object.project_id else True,
                     HrmModule.module_name.like(f'%{query_object.module_name}%') if query_object.module_name else True,
                     HrmModule.status == query_object.status if query_object.status else True
                     ) \

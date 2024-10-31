@@ -9,10 +9,10 @@ const dialogVisible = defineModel("dialogVisible");
 const runIds = defineModel("runIds");
 
 const props = defineProps({
-  runType: {type: Number, default: RunTypeEnum.case},
+  runType: Number,
   // runIds: {type: Array, default: []},
   showDialog: {type: Boolean, default: false}
-})
+});
 
 // const dialogVisible = props.showDialog;
 const dialogTestLoading = ref(false);
@@ -28,7 +28,7 @@ const form = ref({
   repeatNum: 1,
   concurrent: 1,
   push: false
-})
+});
 
 
 function handleRun(env) {

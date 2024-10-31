@@ -4,28 +4,6 @@
 > 默认回调：测试执行到对应位置时自动去debugtalk中寻找固定的方法（固定的方法名称）并调用，没找到则不调用且继续测试任务  
 > 自定义回调： 自定义方法，并将方法配置到对应位置的hooks设置中
 
-```python
-import loguru
-@caseController.get("/list", response_model=PageResponseModel,
-                    dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:list'))])
-async def get_hrm_case(request: Request,
-                       page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
-                       query_db: Session = Depends(get_db),
-                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)
-                       ):
-    try:
-        # 获取分页数据
-        if not page_query.type:
-            raise ValueError("参数错误")
-        page_query.manager = current_user.user.user_id
-        page_query_result = CaseService.get_case_list_services(query_db, page_query, is_page=True)
-        logger.info('获取成功')
-        data = ResponseUtil.success(model_content=page_query_result)
-        return data
-    except Exception as e:
-        logger.exception(e)
-        return ResponseUtil.error(msg=str(e))
-```
 
 ## 回调的执行顺序及参数
 

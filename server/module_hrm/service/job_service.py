@@ -85,7 +85,7 @@ class JobService:
         :param page_object: 定时任务对象
         :return: 执行一次定时任务结果
         """
-        once_job_id = f"{page_object.job_id}_once"
+        once_job_id = f"{page_object.job_id}1"
         query_job = QtrSchedulerUtil.get_scheduler_job(job_id=once_job_id)
         if query_job:
             QtrSchedulerUtil.remove_scheduler_job(job_id=once_job_id)
