@@ -1,21 +1,54 @@
-from typing import Optional
+import json
+from typing import Optional, Dict, Any
+
+from fastapi.openapi.models import Schema
+from pydantic import model_validator, field_serializer, ConfigDict
+from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query, as_form
-from module_hrm.entity.vo.common_vo import CommonDataModel
+from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
+from utils.common_util import CamelCaseUtil
 
 
-@as_query
-@as_form
 class ForwardRulesModel(CommonDataModel):
     """
 
     """
 
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
     rule_id: Optional[int] = None
     rule_name: Optional[str] = None
-    origin_url: Optional[str] = None
+    origin_url: list | str | None = None
     target_url: Optional[str] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
     status: Optional[int] = None
     del_flag: Optional[int] = None
+
+    @model_validator(mode="before")
+    def convert_data(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        values = CamelCaseUtil.transform_result(values)
+        origin_url_data = values.get('originUrl')
+        if not origin_url_data:
+            values["originUrl"] = []
+        elif not isinstance(origin_url_data, list):
+            values["originUrl"] = json.loads(origin_url_data)
+
+        return values
+
+    @field_serializer('origin_url')
+    def origin_url_handel(self, origin_url_data: Any):
+        if isinstance(origin_url_data, str):
+            return origin_url_data
+        else:
+            return json.dumps(origin_url_data, ensure_ascii=False)
+
+
+@as_query
+@as_form
+class ForwardRulesQueryModel(QueryModel, ForwardRulesModel):
+    pass
+
+
+class ForwardRulesDeleteModel(ForwardRulesModel):
+    rule_id: list = []

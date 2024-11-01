@@ -2,7 +2,8 @@ from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.do.forward_rules_do import QtrForwardRules
-from module_hrm.entity.vo.forward_rules_vo import ForwardRulesModel
+from module_hrm.entity.dto.forward_rules_dto import ForwardRulesModelForApi
+from module_hrm.entity.vo.forward_rules_vo import ForwardRulesModel, ForwardRulesQueryModel, ForwardRulesDeleteModel
 from module_hrm.utils.util import PermissionHandler
 from utils.common_util import CamelCaseUtil
 from utils.page_util import PageUtil
@@ -14,7 +15,7 @@ class ForwardRulesDao:
     """
 
     @classmethod
-    def get_by_id(cls, db: Session, rule_id: int):
+    def get_by_id(cls, db: Session, rule_id: int) -> QtrForwardRules:
         """
         根据规则id获取规则详情
 
@@ -24,8 +25,11 @@ class ForwardRulesDao:
         return info
 
     @classmethod
-    def get_list_by_page(cls, db: Session, query_object: ForwardRulesModel, is_page=True):
+    def get_list_by_page(cls, db: Session, query_object: ForwardRulesQueryModel, is_page=True):
         query = db.query(QtrForwardRules)
+
+        if query_object.only_self:
+            query = query.filter(QtrForwardRules.manager == query_object.manager)
 
         if query_object.rule_id:
             query = query.filter(QtrForwardRules.rule_id == query_object.rule_id)
@@ -59,7 +63,7 @@ class ForwardRulesDao:
 
     @classmethod
     def create(cls, db: Session, data: ForwardRulesModel):
-        if not isinstance(data, ForwardRulesModel):
+        if isinstance(data, ForwardRulesModelForApi):
             data = ForwardRulesModel(**data.model_dump(exclude_unset=True, by_alias=True))
         data_dict = data.model_dump(exclude_unset=True)
         db_case = QtrForwardRules(**data_dict)
@@ -78,7 +82,8 @@ class ForwardRulesDao:
         db.query(QtrForwardRules).filter(QtrForwardRules.rule_id == data.rule_id).update(data)
 
     @classmethod
-    def delete(cls, db: Session, data: ForwardRulesModel, user: CurrentUserModel = None):
-        PermissionHandler.check_is_self(user, db.query(QtrForwardRules).filter(
-            QtrForwardRules.rule_id == data.rule_id).first())
-        db.query(QtrForwardRules).filter(QtrForwardRules.rule_id == data.case_id).delete()
+    def delete(cls, db: Session, data: ForwardRulesDeleteModel, user: CurrentUserModel = None):
+        for rid in data.rule_id:
+            PermissionHandler.check_is_self(user, db.query(QtrForwardRules).filter(
+                QtrForwardRules.rule_id == rid).first())
+            db.query(QtrForwardRules).filter(QtrForwardRules.rule_id == rid).delete()

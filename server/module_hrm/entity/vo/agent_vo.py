@@ -19,8 +19,8 @@ class AgentModel(CommonDataModel):
     offline_time: Optional[datetime] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
-    status: Optional[str] = None
-    del_flag: Optional[str] = None
+    status: Optional[int] = None
+    del_flag: Optional[int] = None
 
 @as_query
 class AgentQueryModel(QueryModel,AgentModel):

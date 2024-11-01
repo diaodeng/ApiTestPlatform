@@ -133,6 +133,22 @@ export const initApiFormData = {
     stepType: CaseStepTypeEnum.http,
 }
 
+
+/*
+* 转发规则对应字段
+* */
+export const initForwardRulesFormData = {
+    ruleId: undefined,
+    ruleName: "新增转发规则",
+    originUrl: [""],
+    targetUrl: undefined,
+    orderNum: 0,
+    status: 2,
+    simpleDesc: undefined,
+    delFlag: 1,
+}
+
+
 export const initDebugTalkFormData = {
     debugtalk: "def setup():" +
         "pass" +

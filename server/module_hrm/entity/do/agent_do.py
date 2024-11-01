@@ -23,6 +23,6 @@ class QtrAgent(Base, BaseModel):
     offline_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment='下线时间')
     order_num: Mapped[int] = mapped_column(Integer, default=0, comment='显示顺序')
     simple_desc: Mapped[str] = mapped_column(Text, nullable=True, comment='备注')
-    status: Mapped[str] = mapped_column(String(1), nullable=True, default=0, comment='Agent状态（0在线 1离线）')
-    del_flag: Mapped[str] = mapped_column(String(1), nullable=True, default=0, comment='删除标志（0代表存在 2代表删除）')
+    status: Mapped[int] = mapped_column(Integer, nullable=True, default=0, comment='Agent状态（0在线 1离线）')
+    del_flag: Mapped[int] = mapped_column(Integer, nullable=True, default=0, comment='删除标志（0代表存在 2代表删除）')
 
