@@ -19,11 +19,11 @@ MAX_MESSAGE_SIZE = 1024
 
 # 这是您的检查函数，它应该是异步的
 async def check_dictionary():
-    print("Checking dictionary...")
+    # print("Checking dictionary...")
     # 这里执行您的检查逻辑
-    print(agents)
+    pass
     # ...
-    print("Dictionary check completed.")
+    # print("Dictionary check completed.")
 
 # 这是一个后台任务，它会定期调用检查函数
 async def background_task():

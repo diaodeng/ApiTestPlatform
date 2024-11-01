@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, MetaData
-# from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, DeclarativeBase, mapped_column, Mapped, declarative_base
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, DeclarativeBase, mapped_column, Mapped
 from urllib.parse import quote_plus
 from config.env import DataBaseConfig
 
