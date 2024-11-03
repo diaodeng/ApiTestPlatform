@@ -7,7 +7,7 @@ from module_hrm.dao.case_dao import CaseDao
 from module_hrm.dao.env_dao import EnvDao
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.dto.case_dto import CaseModelForApi
-from module_hrm.entity.vo.case_vo import CaseModel
+from module_hrm.entity.vo.case_vo import CaseModel, CaseRunModel
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseForHandle
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
 from module_hrm.entity.vo.env_vo import EnvModel, EnvModelForApi
@@ -15,6 +15,8 @@ from module_hrm.enums.enums import ParameterTypeEnum
 from module_hrm.utils.common import key_value_dict, dict2list, update_or_extend_list
 from module_hrm.utils.util import decompress_text
 from utils.common_util import CamelCaseUtil
+from module_hrm.service.agent_service import AgentService
+from module_hrm.service.forward_rules_service import ForwardRulesService
 
 
 class CaseInfoHandle():
@@ -378,3 +380,12 @@ class ParametersHandler(object):
                     tmp_case_data.case_name = f"{name}[{index + 1}]"
                 all_data.append(tmp_case_data)
         return all_data
+
+
+class ForwardRulesHandler(object):
+    @classmethod
+    def transform(cls, db, run_info: CaseRunModel):
+        if run_info.forward_config.agent_id:
+            run_info.forward_config.agent_code = AgentService.agent_detail_services(db, run_info.forward_config.agent_id).agent_code
+        if run_info.forward_config.forward_rule_ids:
+            run_info.forward_config.forward_rules = ForwardRulesService.get_forward_rules_for_run(db, run_info.forward_config.forward_rule_ids)

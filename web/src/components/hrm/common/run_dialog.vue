@@ -2,11 +2,13 @@
 import {ElDialog, ElMessage} from "element-plus";
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {testRun} from "@/api/hrm/run_detail.js";
+import {all as getAllForwardRules} from "@/api/hrm/forward";
 import {RunTypeEnum} from "@/components/hrm/enum.js";
 
 
 const dialogVisible = defineModel("dialogVisible");
 const runIds = defineModel("runIds");
+const allForwardRules = ref([]);
 
 const props = defineProps({
   runType: Number,
@@ -30,14 +32,10 @@ const form = ref({
   push: false,
   forwardConfig: {
     forward: false,
-    agentId: null,
-    forwardRuleIds: null,
+    agentId: undefined,
+    forwardRuleIds: undefined,
   },
   runBySort: false
-});
-
-const canForward = computed(() => {
-  return form.value.forwardConfig.forward ? "forwardConfig" : null;
 });
 
 
@@ -87,6 +85,14 @@ function handleRun(env) {
 
 }
 
+
+function getForwardRule() {
+  getAllForwardRules().then(response => {
+    allForwardRules.value = response.data;
+  });
+}
+
+
 function handleClose() {
   dialogCanClose.value = true;
   dialogVisible.value = false;
@@ -101,6 +107,10 @@ function beforeClose(done) {
     dialogVisible.value = true;
   }
 }
+
+onMounted(() => {
+  getForwardRule();
+});
 
 </script>
 
@@ -143,13 +153,27 @@ function beforeClose(done) {
             <el-col :span="12">
               <el-select placeholder="请选择客户机"
                          v-model="form.forwardConfig.agentId"
-              ></el-select>
+              >
+                <el-option
+                    v-for="item in allForwardRules"
+                    :key="item.ruleId"
+                    :label="item.ruleName"
+                    :value="item.ruleId"
+                />
+              </el-select>
             </el-col>
             <el-col :span="12">
               <el-select multiple
                          placeholder="请选择转发规则"
                          v-model="form.forwardConfig.forwardRuleIds"
-              ></el-select>
+              >
+                <el-option
+                    v-for="item in allForwardRules"
+                    :key="item.ruleId"
+                    :label="item.ruleName"
+                    :value="item.ruleId"
+                />
+              </el-select>
             </el-col>
           </el-row>
         </div>

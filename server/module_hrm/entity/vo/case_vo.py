@@ -76,9 +76,13 @@ class FeishuRobotModel(BaseModel):
     push: bool = False
 
 
-class ForwardConfig(BaseModel):
-    agentId: int = None,
-    forwardRules: list[int] = None,
+class ForwardConfigModel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    forward_rule_ids: Optional[list] = []
+    agent_code: Optional[str] = None
+    forward_rules: Optional[dict] = None
+    agent_id: Optional[int] = None
+    forward: bool = False
 
 
 class CaseRunModel(BaseModel):
@@ -99,8 +103,7 @@ class CaseRunModel(BaseModel):
     case_data: Optional[CaseModel | dict | None] = None  # 用例数据
     runner: Any = None
 
-    forward: bool = False
-    forwardConfig: Optional[ForwardConfig] = None
+    forward_config: Optional[ForwardConfigModel] = ForwardConfigModel()
 
     push: bool = False
     feishu_robot: Optional[FeishuRobotModel] = FeishuRobotModel()

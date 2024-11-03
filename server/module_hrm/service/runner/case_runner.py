@@ -479,8 +479,16 @@ class RequestRunner(object):
             start_request_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
             logger.debug(
                 f"发起请求，请求时间:{start_request_time} >> {self.case_runner.case_data.config.name}")
-            async with httpx.AsyncClient() as client:
-                res_response = await client.request(**request_data)
+            if self.case_runner.run_info.forward_config.forward:
+                old_rules = self.case_runner.run_info.forward_config.forward_rules
+                old_rules_str = json.dumps(old_rules, ensure_ascii=False)
+                parsed_rules_str = parse_data(old_rules_str, key_value_dict(self.step_data.variables), self.debugtalk_func_map)
+                parsed_rules_dict = json.loads(parsed_rules_str)
+                logger.info(f"需要转发， 转发规则：{parsed_rules_dict}")
+
+            else:
+                async with httpx.AsyncClient() as client:
+                    res_response = await client.request(**request_data)
             logger.debug(
                 f"请求完成，完成时间:{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')} >> {self.case_runner.case_data.config.name}")
             end_time = time.time()

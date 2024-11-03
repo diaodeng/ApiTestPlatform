@@ -3,7 +3,7 @@ import request from '@/utils/request'
 // 查询所有转发规则
 export function all() {
   return request({
-    url: '/qtr/forwardRules/all',
+    url: '/qtr/forwardRules/detail/all',
     method: 'get'
   })
 }
@@ -11,7 +11,7 @@ export function all() {
 // 查询转发规则列表
 export function list(query) {
   return request({
-    url: '/qtr/forwardRules/list',
+    url: '/qtr/forwardRules/detail/list',
     method: 'get',
     params: query
   })
@@ -21,7 +21,7 @@ export function list(query) {
 // 查询转发规则详细
 export function getDetail(dataId) {
   return request({
-    url: '/qtr/forwardRules/' + dataId,
+    url: '/qtr/forwardRules/detail/' + dataId,
     method: 'get'
   })
 }
@@ -29,7 +29,7 @@ export function getDetail(dataId) {
 // 新增转发规则
 export function addRules(data) {
   return request({
-    url: '/qtr/forwardRules',
+    url: '/qtr/forwardRules/detail',
     method: 'post',
     data: data
   })
@@ -38,7 +38,7 @@ export function addRules(data) {
 // 复制转发规则
 export function copyRules(data) {
   return request({
-    url: '/qtr/forwardRules/copy',
+    url: '/qtr/forwardRules/detail/copy',
     method: 'post',
     data: data
   })
@@ -47,7 +47,7 @@ export function copyRules(data) {
 // 修改转发规则状态
 export function changeRulesStatus(data) {
   return request({
-    url: '/qtr/forwardRules/changeStatus/',
+    url: '/qtr/forwardRules/detail/changeStatus',
     method: 'post',
     data: data
   })
@@ -56,7 +56,7 @@ export function changeRulesStatus(data) {
 // 修改转发规则
 export function updateRules(data) {
   return request({
-    url: '/qtr/forwardRules/update',
+    url: '/qtr/forwardRules/detail/update',
     method: 'put',
     data: data
   })
@@ -65,7 +65,7 @@ export function updateRules(data) {
 // 删除转发规则
 export function delRules(deleteData) {
   return request({
-    url: '/qtr/forwardRules',
+    url: '/qtr/forwardRules/detail',
     method: 'delete',
     data:deleteData
   })

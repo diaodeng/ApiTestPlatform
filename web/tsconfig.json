@@ -1,6 +1,13 @@
 {
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": {"@/*": ["src/*"]}
+    "paths": {"@/*": ["src/*"]},
+    "lib": [
+      "decorators",
+      "dom",
+      "es5",
+      "scripthost",
+      "dom"
+    ]
   }
 }

@@ -52,3 +52,32 @@ class ForwardRulesQueryModel(QueryModel, ForwardRulesModel):
 
 class ForwardRulesDeleteModel(ForwardRulesModel):
     rule_id: list = []
+
+
+class ForwardRulesDetailModel(CommonDataModel):
+    """
+
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    rule_id: Optional[int] = None
+    rule_detail_id: Optional[int] = None
+    match_type: Optional[int] = None  # module_hrm.enums.enums.ForwardRuleMatchTypeEnum
+    rule_detail_name: Optional[str] = None
+    origin_url: str | None = None
+    target_url: Optional[str] = None
+    order_num: Optional[int] = None
+    simple_desc: Optional[str] = None
+    status: Optional[int] = None
+    del_flag: Optional[int] = None
+
+
+@as_query
+@as_form
+class ForwardRulesDetailQueryModel(QueryModel, ForwardRulesDetailModel):
+    pass
+
+
+class ForwardRulesDetailDeleteModel(ForwardRulesDetailModel):
+    rule_id: list = []
+    rule_detail_id: list = []
