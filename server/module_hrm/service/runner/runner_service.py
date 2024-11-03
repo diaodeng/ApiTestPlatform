@@ -268,13 +268,13 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
         return result
 
 
-async def run_by_async(run_info: CaseRunModel,
+async def run_by_async(query_db: Session, run_info: CaseRunModel,
                        current_user: CurrentUserModel,
                        ):
     """
     异步执行用例
     """
-    query_db = SessionLocal()
+    # query_db = SessionLocal()
     try:
         test_start_time = time.time()
         report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -321,7 +321,8 @@ async def run_by_async(run_info: CaseRunModel,
                 f"\n报告：【{report_info.report_id}】{report_info.report_name}")
         return f"执行成功，执行了{run_info.repeat_num}次，请前往报告查看"
     finally:
-        query_db.close()
+        pass
+        # query_db.close()
 
 
 def get_report_content(report_path):

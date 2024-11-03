@@ -100,3 +100,15 @@ class ForwardRulesEnum(Enum):
 class DelFlagEnum(Enum):
     delete = 2
     normal = 1
+
+
+class ForwardRuleMatchTypeEnum(Enum):
+    url_equal = 1
+    url_not_equal = 2
+    url_contain = 4
+    host_equal = 8
+    host_not_equal = 16
+    host_contain = 32
+    path_equal = 64
+    path_not_equal = 128
+    path_contain = 256

@@ -6,6 +6,7 @@ from datetime import datetime
 
 from loguru import logger
 
+from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel, UserInfoModel
 from module_hrm.entity.vo.case_vo import CaseRunModel, FeishuRobotModel
 from module_hrm.service.runner.runner_service import run_by_async
@@ -88,10 +89,11 @@ def job_run_test(*args, **kwargs):
         logger.info(f"准备执行测试：{data.model_dump_json()}")
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
-        task = asyncio.ensure_future(run_by_async(data, user_module))
-        new_loop.run_until_complete(task)
-        new_loop.stop()
-        new_loop.close()
+        with SessionLocal() as db_session:
+            task = asyncio.ensure_future(run_by_async(db_session, data, user_module))
+            new_loop.run_until_complete(task)
+            new_loop.stop()
+            new_loop.close()
     except Exception as e:
         logger.exception(e)
     finally:

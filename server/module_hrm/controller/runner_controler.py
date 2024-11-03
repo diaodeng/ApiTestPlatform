@@ -10,7 +10,7 @@ from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel, HrmRunDetailModel
 from module_hrm.service.case_service import *
 from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
-from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler
+from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler, ForwardRulesHandler
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_async, save_run_detail
 from utils.log_util import *
@@ -26,16 +26,18 @@ runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginSe
                        dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:run'))])
 async def run_test(request: Request,
                    run_info: CaseRunModel,
+                   query_db: Session = Depends(get_db),
                    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
                    ):
     try:
+        ForwardRulesHandler.transform(query_db, run_info)
         run_info.runner = current_user.user.user_id
         run_info.feishu_robot.push = run_info.push
         if run_info.is_async:
-            asyncio.create_task(run_by_async(run_info, current_user))
+            asyncio.create_task(run_by_async(query_db, run_info, current_user))
             data = "请耐心等待运行结果"
         else:
-            data = await run_by_async(run_info, current_user)
+            data = await run_by_async(query_db, run_info, current_user)
 
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
@@ -55,6 +57,7 @@ async def for_debug(request: Request,
                     current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     debugtalk_obj = None
     try:
+        ForwardRulesHandler.transform(query_db, debug_info)
         debug_info.runner = current_user.user.user_id
         case_data = debug_info.case_data
         if not isinstance(case_data, dict):

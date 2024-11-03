@@ -139,8 +139,23 @@ export const initApiFormData = {
 * */
 export const initForwardRulesFormData = {
     ruleId: undefined,
-    ruleName: "新增转发规则",
-    originUrl: [""],
+    ruleName: "新增转发规则组",
+    originUrl: undefined,
+    targetUrl: undefined,
+    orderNum: 0,
+    status: 2,
+    simpleDesc: undefined,
+    delFlag: 1,
+}
+
+/*
+* 转发规则对应字段
+* */
+export const initForwardRulesDetailFormData = {
+    ruleId: undefined,
+    ruleDetailId: undefined,
+    ruleDetailName: "新增转发规则详情记录",
+    originUrl: undefined,
     targetUrl: undefined,
     orderNum: 0,
     status: 2,
@@ -162,6 +177,8 @@ export const initDebugTalkFormData = {
         "" +
         ""
 }
+
+
 
 
 

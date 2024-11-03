@@ -57,3 +57,27 @@ export const EditTableContextMenuEnum = {
     editHeader: 9,
     editCell: 10,
 }
+
+
+export const ForwardRuleMatchTypeEnum = {
+    urlEqual: {name: "URL相等", value:1},
+    urlNotEqual: {name: "Url不相等", value:2},
+    urlContain: {name: "Url包含", value:4},
+    hostEqual: {name: "HOST相等", value:8},
+    hostNotEqual: {name: "HOST不相等", value:16},
+    hostContain: {name: "HOST包含", value:32},
+    pathEqual: {name: "PATH相等", value:64},
+    pathNotEqual: {name: "PATH不相等", value:128},
+    pathContain: {name: "PATH包含", value:256}
+}
+
+
+export const DelFlagNewEnum = {
+    normal :{name: "normal", value:1},
+    delete: {name: "delete", value:2},
+}
+
+export const StatusNewEnum = {
+    disabled :{name: "disabled", value:1},
+    normal: {name: "normal", value:2},
+}

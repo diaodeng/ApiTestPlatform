@@ -36,7 +36,9 @@ const en = {
                 type: "type",
                 expected: "expected",
                 msg: "msg",
-                enable: "enable"
+                enable: "enable",
+                originUrl: "OriginUrl",
+                targetUrl: "TargetUrl",
 
             }
         },
@@ -109,7 +111,9 @@ const zh = {
                 type: "类型",
                 expected: "期望值",
                 msg: "备注",
-                enable: "启用"
+                enable: "启用",
+                originUrl: "源地址",
+                targetUrl: "目标地址",
 
             }
         },
