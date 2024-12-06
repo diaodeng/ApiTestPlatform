@@ -1,21 +1,25 @@
 from fastapi import APIRouter
+
+from module_admin.entity.vo.user_vo import EditUserModel
 from module_admin.service.login_service import *
 from module_admin.entity.vo.login_vo import *
 from module_admin.dao.login_dao import *
 from module_admin.annotation.log_annotation import log_decorator
 from config.env import JwtConfig, RedisInitKeyConfig
 from utils.response_util import ResponseUtil
-from utils.log_util import *
+from utils.log_util import logger
+from datetime import datetime
 from datetime import timedelta
-
 
 loginController = APIRouter()
 
 
 @loginController.post("/login", response_model=Token)
 @log_decorator(title='用户登录', business_type=0, log_type='login')
-async def login(request: Request, form_data: CustomOAuth2PasswordRequestForm = Depends(), query_db: Session = Depends(get_db)):
-    captcha_enabled = True if await request.app.state.redis.get(f"{RedisInitKeyConfig.SYS_CONFIG.get('key')}:sys.account.captchaEnabled") == 'true' else False
+async def login(request: Request, form_data: CustomOAuth2PasswordRequestForm = Depends(),
+                query_db: Session = Depends(get_db)):
+    captcha_enabled = True if await request.app.state.redis.get(
+        f"{RedisInitKeyConfig.SYS_CONFIG.get('key')}:sys.account.captchaEnabled") == 'true' else False
     user = UserLogin(
         userName=form_data.username,
         password=form_data.password,
@@ -42,17 +46,22 @@ async def login(request: Request, form_data: CustomOAuth2PasswordRequestForm = D
             expires_delta=access_token_expires
         )
         if AppConfig.app_same_time_login:
-            await request.app.state.redis.set(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}", access_token,
+            await request.app.state.redis.set(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}",
+                                              access_token,
                                               ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes))
         else:
             # 此方法可实现同一账号同一时间只能登录一次
-            await request.app.state.redis.set(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{result[0].user_id}", access_token,
+            await request.app.state.redis.set(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{result[0].user_id}",
+                                              access_token,
                                               ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes))
-        UserService.edit_user_services(query_db, EditUserModel(userId=result[0].user_id, loginDate=datetime.now(), type='status'))
+        UserService.edit_user_services(query_db,
+                                       EditUserModel(userId=result[0].user_id, loginDate=datetime.now(), type='status'))
         logger.info('登录成功')
         # 判断请求是否来自于api文档，如果是返回指定格式的结果，用于修复api文档认证成功后token显示undefined的bug
-        request_from_swagger = request.headers.get('referer').endswith('docs') if request.headers.get('referer') else False
-        request_from_redoc = request.headers.get('referer').endswith('redoc') if request.headers.get('referer') else False
+        request_from_swagger = request.headers.get('referer').endswith('docs') if request.headers.get(
+            'referer') else False
+        request_from_redoc = request.headers.get('referer').endswith('redoc') if request.headers.get(
+            'referer') else False
         if request_from_swagger or request_from_redoc:
             return {'access_token': access_token, 'token_type': 'Bearer'}
         return ResponseUtil.success(
@@ -65,7 +74,8 @@ async def login(request: Request, form_data: CustomOAuth2PasswordRequestForm = D
 
 
 @loginController.get("/getInfo", response_model=CurrentUserModel)
-async def get_login_user_info(request: Request, current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def get_login_user_info(request: Request,
+                              current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         logger.info('获取成功')
         return ResponseUtil.success(model_content=current_user)
@@ -75,7 +85,9 @@ async def get_login_user_info(request: Request, current_user: CurrentUserModel =
 
 
 @loginController.get("/getRouters")
-async def get_login_user_routers(request: Request, current_user: CurrentUserModel = Depends(LoginService.get_current_user), query_db: Session = Depends(get_db)):
+async def get_login_user_routers(request: Request,
+                                 current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                                 query_db: Session = Depends(get_db)):
     try:
         logger.info('获取成功')
         user_routers = await LoginService.get_current_user_routers(current_user.user.user_id, query_db)
@@ -133,7 +145,8 @@ async def register_user(request: Request, user_register: UserRegister, query_db:
 @loginController.post("/logout")
 async def logout(request: Request, token: Optional[str] = Depends(oauth2_scheme)):
     try:
-        payload = jwt.decode(token, JwtConfig.jwt_secret_key, algorithms=[JwtConfig.jwt_algorithm], options={'verify_exp': False})
+        payload = jwt.decode(token, JwtConfig.jwt_secret_key, algorithms=[JwtConfig.jwt_algorithm],
+                             options={'verify_exp': False})
         session_id: str = payload.get("session_id")
         await LoginService.logout_services(request, session_id)
         logger.info('退出成功')

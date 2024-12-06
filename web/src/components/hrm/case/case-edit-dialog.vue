@@ -1,17 +1,15 @@
 <script setup>
 
 import {ElMessageBox} from "element-plus";
-import {getComparator} from "@/api/hrm/case.js"
+import {addCase, getComparator, updateCase} from "@/api/hrm/case.js"
 import {HrmDataTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
 import TestStep from "@/components/hrm/case/step.vue";
 import CaseConfig from "@/components/hrm/case/case-config.vue";
-import EnvSelector from "@/components/hrm/common/env-selector.vue";
-import {debugCase, addCase, updateCase, getCase} from "@/api/hrm/case.js";
-import {listEnv} from "@/api/hrm/env.js";
 import {listProject} from "@/api/hrm/project.js";
 import {initCaseFormData} from "@/components/hrm/data-template.js";
-import {list as listConfig, allConfig} from "@/api/hrm/config.js";
+import {allConfig} from "@/api/hrm/config.js";
 import {useResizeObserver} from "@vueuse/core";
+import DebugComponent from "@/components/hrm/common/debug_component.vue";
 
 
 const {proxy} = getCurrentInstance();
@@ -28,20 +26,18 @@ const props = defineProps({
 
 
 const dataChange = ref(false);
-// const formData = defineModel("formData");
 const openCaseEditDialog = defineModel("openCaseEditDialog");
 
 const formData = toRef(props.formDatas);
-const selectedEnv = ref("");
 const projectOptions = ref([]);
 const activeCaseName = ref("caseConfig")
-const responseData = ref("");
 const hrm_comparator_dict = ref({});
 const selectConfigList = ref([]);
 const loading = ref({
   save: false,
-  debug: false
-})
+  debug: false,
+  init: false
+});
 
 const caseMainRef = ref();
 const caseMainHeight = ref(0);
@@ -57,14 +53,14 @@ provide("hrm_case_config_list", selectConfigList);
 watch(() => props.formDatas, () => {
   formData.value = props.formDatas;
   activeCaseName.value = "caseConfig"
-  getComparatorFromNetwork();
-})
+  // getComparatorFromNetwork();
+});
 
-watch(() => props.openCaseEditDialog, () => {
-  if (props.openCaseEditDialog === true) {
-    getConfigSelect();
-  }
-})
+// watch(() => props.openCaseEditDialog, () => {
+//   if (props.openCaseEditDialog === true) {
+//     getConfigSelect();
+//   }
+// })
 
 
 /** 提交按钮 */
@@ -73,7 +69,8 @@ function submitForm(closeDialog) {
   proxy.$refs["postRef"].validate(valid => {
     if (valid) {
       loading.value.save = true;
-      const caseData = formData.value
+      let caseData = toRaw(formData.value);
+      caseData = JSON.parse(JSON.stringify(caseData));
       caseData.request.config.name = caseData.caseName;
       caseData.request.config.result = {}
       caseData.type = props.dataType;
@@ -92,6 +89,7 @@ function submitForm(closeDialog) {
       } else {
         addCase(caseData).then(response => {
           proxy.$modal.msgSuccess("新增成功");
+          formData.value.caseId = response.data.caseId;
           openCaseEditDialog.value = closeDialog;
           dataChange.value = false;
           // getList();
@@ -103,43 +101,17 @@ function submitForm(closeDialog) {
   });
 }
 
-function debugForm() {
-  proxy.$refs["postRef"].validate(valid => {
-    if (valid) {
-      loading.value.debug = true;
-      const caseData = formData.value;
-      caseData.request.config.name = caseData.caseName;
-      caseData.request.config.result = null;
-      for (let i = 0; i < caseData.request.teststeps.length; i++) {
-        caseData.request.teststeps[i].result = null;
-      }
+function debugToRun(response) {
 
-      const req_data = {
-        "env": selectedEnv.value,
-        "runType": RunTypeEnum.case_debug,
-        "caseData": caseData
-      }
-      debugCase(req_data).then(response => {
-        proxy.$modal.msgSuccess(response.msg);
-        for (const step_result_key in response.data) {
-          formData.value.request.teststeps.find(dict => dict['step_id'] === step_result_key).result = response.data[step_result_key]
-        }
-
-        // responseData.value = response.data.log
-        // open.value = false;
-        // getList();
-      }).finally(() => {
-        loading.value.debug = false;
-      });
-
-    }
-  });
+  for (const step_result_key in response.data) {
+    formData.value.request.teststeps.find(dict => dict['step_id'] === step_result_key).result = response.data[step_result_key];
+  }
 }
 
 
 /** 查询项目列表 */
-function getProjectSelect() {
-  listProject({isPage: false}).then(response => {
+async function getProjectSelect() {
+  await listProject({isPage: false}).then(response => {
     projectOptions.value = response.data;
   });
 }
@@ -155,43 +127,47 @@ function reset() {
   proxy.resetForm("postRef");
 }
 
-function getComparatorFromNetwork() {
+async function getComparatorFromNetwork() {
   let data = "";
   if (formData.value && formData.value.caseId) {
     data = formData.value.caseId;
   }
-  getComparator({caseId: data}).then(response => {
+  await getComparator({caseId: data}).then(response => {
     hrm_comparator_dict.value = response.data;
   });
 }
 
-function getConfigSelect() {
+async function getConfigSelect() {
   if (props.dataType === HrmDataTypeEnum.case) {
     let data = {
       projectId: formData.value.projectId,
       moduleId: formData.value.moduleId,
       type: HrmDataTypeEnum.config
     }
-    allConfig(data).then(response => {
+    await allConfig(data).then(response => {
       selectConfigList.value = response.data;
     });
   }
 }
 
-onMounted(() => {
+
+onMounted(async () => {
+  loading.value.init = true;
   reset();
-  getProjectSelect();
-  // getConfigSelect();
+  await getProjectSelect();
+  await getConfigSelect();
+  await getComparatorFromNetwork();
 
   watch(() => formData.value, () => {
     dataChange.value = true;
   }, {deep: true});
+  dataChange.value = false;
 
-  nextTick(() => {
-    dataChange.value = false;
-  });
-
-})
+  // nextTick(() => {
+  //   dataChange.value = false;
+  // });
+  loading.value.init = false;
+});
 
 function beforeCloseDialog(done) {
   if (props.dataType === HrmDataTypeEnum.run_detail || !dataChange.value) {
@@ -206,7 +182,7 @@ function beforeCloseDialog(done) {
   }).then(() => {
     done();
   }).catch(() => {
-  })
+  });
 }
 
 useResizeObserver(caseMainRef, (entries) => {
@@ -214,9 +190,9 @@ useResizeObserver(caseMainRef, (entries) => {
   const {width, height} = entry.contentRect;
   nextTick(() => {
     caseMainHeight.value = height;
-  })
+  });
 
-})
+});
 
 </script>
 
@@ -225,38 +201,36 @@ useResizeObserver(caseMainRef, (entries) => {
              v-model="openCaseEditDialog"
              :before-close="beforeCloseDialog"
              append-to-body destroy-on-close>
-    <el-form ref="postRef" :model="formData" :rules="formRules" label-width="100px" style="height: 100%">
+    <el-form ref="postRef" :model="formData" :rules="formRules" label-width="100px" style="height: 100%" v-loading="loading.init">
       <el-container style="height: 100%; overflow-y: hidden">
         <el-header height="40px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
-          <el-button type="success"
-                     @click="submitForm(true)"
-                     v-hasPermi="['hrm:case:edit']"
-                     v-if="dataType !== HrmDataTypeEnum.run_detail"
-                     :loading="loading.save"
-          >保存
-          </el-button>
-          <el-button type="primary"
-                     @click="submitForm(false)"
-                     v-hasPermi="['hrm:case:edit']"
-                     v-if="dataType !== HrmDataTypeEnum.run_detail"
-                     :loading="loading.save"
-          >保存并返回
-          </el-button>
-          <el-button-group style="padding-left: 10px">
-            <el-button type="warning"
-                       @click="debugForm"
-                       v-hasPermi="['hrm:case:debug']"
-                       v-if="dataType !== HrmDataTypeEnum.config"
-                       :loading="loading.debug"
-            >调试
-            </el-button>
-            <EnvSelector v-model:selected-env="selectedEnv"
-                         v-if="dataType !== HrmDataTypeEnum.config"
-            ></EnvSelector>
+          <el-button-group>
+            <div style="display: flex;flex-direction: row">
+              <el-button type="success"
+                         @click="submitForm(true)"
+                         v-hasPermi="['hrm:case:edit']"
+                         v-if="dataType !== HrmDataTypeEnum.run_detail"
+                         :loading="loading.save"
+              >保存
+              </el-button>
+              <el-button type="primary"
+                         @click="submitForm(false)"
+                         v-hasPermi="['hrm:case:edit']"
+                         v-if="dataType !== HrmDataTypeEnum.run_detail"
+                         :loading="loading.save"
+              >保存并返回
+              </el-button>
+              <DebugComponent :case-data="formData"
+                              :run-type="RunTypeEnum.case_debug"
+                              @debug-run="debugToRun"
+                              v-show="dataType !== HrmDataTypeEnum.config"
+              ></DebugComponent>
+            </div>
           </el-button-group>
 
+
         </el-header>
-        <el-main style="height: calc(100vh - 112px);" ref="caseMainRef">
+        <el-main style="height: calc(100vh - 112px); padding-top: 0;padding-bottom: 0" ref="caseMainRef">
           <CaseConfig v-model:form-data="formData"
                       :project-options="projectOptions"
                       v-if="dataType === HrmDataTypeEnum.config"

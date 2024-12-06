@@ -1,6 +1,7 @@
 from sqlalchemy import Integer, String, Text, BigInteger
+from sqlalchemy.orm import mapped_column, Mapped
 
-from config.database import Base, mapped_column, Mapped
+from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
 from utils.snowflake import snowIdWorker
 
@@ -15,8 +16,9 @@ class HrmEnv(Base, BaseModel):
 
     __tablename__ = 'hrm_env'
 
-    env_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, unique=True, nullable=False, default=snowIdWorker.get_id,
-                           comment='环境id')
+    env_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, unique=True, nullable=False,
+                                        default=snowIdWorker.get_id,
+                                        comment='环境id')
     env_name: Mapped[str] = mapped_column(String(30), nullable=True, default='', comment='环境名称')
     env_url: Mapped[str] = mapped_column(String(120), nullable=True, default=None, comment='环境地址')
     env_config: Mapped[str] = mapped_column(Text, nullable=True, default=None, comment='环境配置')

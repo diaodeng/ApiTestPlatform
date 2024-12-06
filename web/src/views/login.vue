@@ -3,7 +3,7 @@
     <el-form ref="loginRef" :model="loginForm" :rules="loginRules" class="login-form">
       <div class="title-container">
         <img src="../assets/images/login-logo.png" alt="" style="width: 210px; margin-bottom: 10px">
-        <h3 class="title">QTestRunner</h3>
+        <h3 class="title">T-Runner 自动化测试平台</h3>
       </div>
       <el-form-item prop="username">
         <el-input
@@ -71,7 +71,7 @@
     </el-form>
     <!--  底部  -->
     <div class="el-login-footer">
-      <span>Copyright © 2024 insistence.tech All Rights Reserved.</span>
+<!--      <span>Copyright © 2024 insistence.tech All Rights Reserved.</span>-->
     </div>
   </div>
 </template>

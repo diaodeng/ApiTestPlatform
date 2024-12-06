@@ -1,27 +1,26 @@
 <script setup>
-import {ElMessageBox} from "element-plus";
-import TableExtract from "@/components/hrm/table-extract.vue";
 import EditLabel from "@/components/hrm/common/edite-label.vue";
-import TableHooks from "@/components/hrm/table-hooks.vue";
-import TableValidate from "@/components/hrm/table-validate.vue";
-import TableVariables from "@/components/hrm/table-variables.vue";
-import StepRequest from "@/components/hrm/case/step-request.vue";
-import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
+import StepDetail from "@/components/hrm/case/step-detail.vue";
 import {randomString} from "@/utils/tools.js";
-import {initStepData, initWebsocketData} from "@/components/hrm/data-template.js";
-import {CaseStepTypeEnum} from "@/components/hrm/enum.js";
+import {initStepData} from "@/components/hrm/data-template.js";
+import {CaseRunStatusEnum} from "@/components/hrm/enum.js";
 import {useResizeObserver} from "@vueuse/core";
-
+import Sortable from "sortablejs";
+import SplitWindow from "@/components/hrm/common/split-window.vue";
 
 const testStepsData = defineModel('testStepsData', {required: true});
 const props = defineProps(["stepsHeight"]);
 
-
+const loading = ref({
+  switchStep: false
+});
 // const {proxy} = getCurrentInstance();
-const activeRequestName = ref("stepRequest");
 const activeTestStepName = ref(0);
 const tabsHeight = ref(0);
+const tabsScrollRef = ref();
+const extendStepTabLabel = ref(true);
 const tabsRef = ref();
+const currentStepDataRef = ref(JSON.parse(JSON.stringify(initStepData)));
 
 // const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 // const {hrm_data_type} = proxy.useDict("hrm_data_type");
@@ -57,115 +56,153 @@ function editTabs(action, paneName, tapType, initTabData) {
 
     testStepsData.value.splice(newTabName, 0, initTabData)
     activeTestStepName.value = newTabName
+  } else if (action === "copy") {
+    const currentTabIndex = paneName !== undefined ? paneName : activeTestStepName.value;
+    const currentTabData = JSON.parse(JSON.stringify(toRaw(testStepsData.value[currentTabIndex])));
+    currentTabData.step_id = randomString(10);
+    currentTabData.name = currentTabData.name + "-副本";
+
+    const newTabName = currentTabIndex + 1;
+
+    testStepsData.value.splice(newTabName, 0, currentTabData)
+    activeTestStepName.value = newTabName
+  } else if (action === "statuChange") {
+    const currentTabIndex = paneName !== undefined ? paneName : activeTestStepName.value;
+    console.log(currentTabIndex);
+    console.log(testStepsData.value[currentTabIndex].enable)
+    console.log(!testStepsData.value[currentTabIndex].enable)
+    testStepsData.value[currentTabIndex].enable = !testStepsData.value[currentTabIndex].enable;
+    console.log(testStepsData.value[currentTabIndex].enable)
   } else {
     console.log("other")
   }
 }
 
 
-useResizeObserver(tabsRef, (entries) => {
+useResizeObserver(tabsScrollRef, (entries) => {
   const entry = entries[0]
   const {width, height} = entry.contentRect;
   nextTick(() => {
     tabsHeight.value = height;
-  })
+  });
 
-})
+});
+
+function setpTabsSortAble() {//行拖拽
+  const tabsNav = tabsRef.value;
+  new Sortable(tabsNav, {
+    animation: 150,
+    handle: ".step-tab-label .step-type-icon",
+    sort: true,
+    onEnd: (evt) => {
+
+      const stepLength = testStepsData.value.length;
+      let oldIndex = evt.oldIndex;
+      if (oldIndex < 0) {
+        oldIndex = 0;
+      } else if (oldIndex > stepLength) {
+        oldIndex = stepLength;
+      }
+      let newIndex = evt.newIndex;
+
+      if (newIndex < 0) {
+        newIndex = 0;
+      } else if (newIndex > stepLength) {
+        newIndex = stepLength;
+      }
+      // console.log("步骤数量：" + testStepsData.value.length + " 当前位置： " + oldIndex + " 新位置：" + newIndex);
+      if (oldIndex === newIndex) {
+        return;
+      }
+
+      const oldItem = testStepsData.value[oldIndex];
+      testStepsData.value.splice(oldIndex, 1);
+      testStepsData.value.splice(newIndex, 0, oldItem);
+    },
+  });
+}
+
+function clickStep(stepIndex, event) {
+  let currentElement = undefined;
+  if (event && event.nodeType === 1){
+    currentElement = event;
+  }else {
+    currentElement = event.currentTarget;
+  }
+  if (!currentElement){return}
+  loading.value.switchStep = true;
+  for (const child of currentElement.parentElement.children) {
+    child.classList.remove("selected-list");
+  }
+  currentElement.classList.add("selected-list");
+
+  currentStepDataRef.value = testStepsData.value[stepIndex];
+  loading.value.switchStep = false;
+
+}
+
+onMounted(() => {
+  setpTabsSortAble();
+  clickStep(0, tabsRef?.value.children[0]);
+});
 
 </script>
 
 <template>
-  <el-scrollbar :height="stepsHeight" ref="tabsRef">
-    <el-tabs tab-position="left" class="demo-tabs"
-             v-model="activeTestStepName">
-      <el-tab-pane v-for="(step, index) in testStepsData" :key="step.step_id" :name="index"
-                   :style="{height: tabsHeight + 'px'}">
-        <template #label>
-          <EditLabel v-model="step.name" :index-key="index" :type="step.step_type" @edit-element="editTabs"></EditLabel>
+  <el-scrollbar :height="stepsHeight" ref="tabsScrollRef">
+    <div :style="{height: tabsHeight + 'px'}">
+      <split-window>
+        <template #left>
+          <ul ref="tabsRef"
+              :disabled="loading.switchStep"
+              :style="{
+              height: stepsHeight + 'px',
+              listStyle: 'none',
+              paddingLeft: 0 +'px',
+              marginLeft: 0 + 'px',
+              marginTop: 0+ 'px',
+              marginBottom: 0+ 'px',
+              overflowY: 'auto'}"
+              v-loading="loading.switchStep">
+            <li v-for="(step, index) in testStepsData" @click="clickStep(index, $event)"
+                :key="step.step_id"
+                style="white-space: nowrap">
+              <el-link :underline="false">
+                <el-button style="margin: 0;padding: 0;" type="primary" circle size="small">{{index +1}}</el-button>
+                <EditLabel v-model:name-text="step.name"
+                           :notify="step.result && step.result.status !== CaseRunStatusEnum.passed.value"
+                           v-model:enable="testStepsData[index].enable"
+                           :index-key="index"
+                           :type="step.step_type"
+                           :is-show="extendStepTabLabel"
+                           @edit-element="editTabs"
+                           class="step-tab-label"></EditLabel>
+              </el-link>
+
+            </li>
+          </ul>
         </template>
-        <el-tabs type="" v-model="activeRequestName">
-          <el-tab-pane :label="$t('message.caseDetail.tabNames.request')" name="stepRequest">
-            <template v-if="step.step_type === CaseStepTypeEnum.http">
-              <StepRequest v-model:step-detail-data="testStepsData[index]"
-                           :request-container-height="tabsHeight - 5"
-              ></StepRequest>
-            </template>
-            <template v-if="step.step_type === CaseStepTypeEnum.websocket">
-              <StepWebsocket v-model:step-detail-data="testStepsData[index]"
-                             :step-container-height="tabsHeight - 5"></StepWebsocket>
-            </template>
+        <template #right>
+          <div style="margin-left: 5px">
+            <Suspense>
+              <StepDetail v-model:step-data="currentStepDataRef"
+                          :tabs-height="stepsHeight"
+                          v-model:loading="loading.switchStep"
+              ></StepDetail>
+              <template #fallback>加载中。。。</template>
+            </Suspense>
 
-          </el-tab-pane>
-          <el-tab-pane :label="$t('message.caseDetail.tabNames.ev')" name="stepEv">
-            <el-scrollbar :max-height="tabsHeight-55">
-              <TableExtract v-model="step.extract" :table-title="$t('message.configTable.header.extract')"></TableExtract>
-              <TableValidate v-model="step.validate" :table-title="$t('message.configTable.header.validate')"></TableValidate>
-            </el-scrollbar>
-          </el-tab-pane>
-          <el-tab-pane :label="$t('message.caseDetail.tabNames.vh')" name="stepVh" :class="['step-variables-hooks-stepVh' + step.step_id]">
-            <el-scrollbar :max-height="tabsHeight-55">
-              <TableVariables v-model="step.variables"
-                              :table-title="$t('message.configTable.header.variables')"
-              ></TableVariables>
-
-              <TableHooks v-model="step.setup_hooks" :table-title="$t('message.configTable.header.setup_hooks')"></TableHooks>
-
-              <TableHooks v-model="step.teardown_hooks" :table-title="$t('message.configTable.header.teardown_hooks')"></TableHooks>
-            </el-scrollbar>
-          </el-tab-pane>
-          <el-tab-pane :label="$t('message.caseDetail.tabNames.other')" name="stepThinktime">
-            <el-row>
-              <el-input
-                  v-model="step.think_time.limit"
-                  style="max-width: 600px"
-                  placeholder="Please input"
-              >
-                <template #prepend>
-                  <el-switch v-model="step.think_time.enable"
-                             size="small"
-                  ></el-switch>
-                  {{ $t('message.other.thinktime') }}
-                </template>
-              </el-input>
-            </el-row>
-            <el-row style="margin-top: 5px">
-
-              <el-input
-                  v-model="step.time_out.limit"
-                  style="max-width: 600px"
-                  placeholder="Please input"
-              >
-                <template #prepend>
-                  <el-switch v-model="step.time_out.enable"
-                             size="small"
-                  ></el-switch>
-                  {{ $t('message.other.timeout') }}
-                </template>
-              </el-input>
-            </el-row>
-            <el-row style="margin-top: 5px">
-
-              <el-input
-                  v-model="step.retry.limit"
-                  style="max-width: 600px"
-                  placeholder="Please input"
-              >
-                <template #prepend>
-                  <el-switch v-model="step.retry.enable"
-                             size="small"
-                  ></el-switch>
-                  {{ $t('message.other.retry') }}
-                </template>
-              </el-input>
-            </el-row>
-          </el-tab-pane>
-        </el-tabs>
-      </el-tab-pane>
-    </el-tabs>
+          </div>
+        </template>
+      </split-window>
+    </div>
   </el-scrollbar>
 
 </template>
 
 <style scoped lang="scss">
-
+.selected-list {
+  background-color: rgba(12, 174, 141, 0.2);
+  border-radius: 10px;
+}
 </style>

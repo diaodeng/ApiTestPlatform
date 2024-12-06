@@ -1,5 +1,5 @@
 import asyncio
-from loguru import logger
+from utils.log_util import logger
 from datetime import datetime
 from common.PromoDataHandle import PromoDataHandle
 from utils.feishu import Feishu

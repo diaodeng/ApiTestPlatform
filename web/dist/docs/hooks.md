@@ -1,27 +1,28 @@
 # 关于回调
 > 回调不需要返回值，直接修改对应的数据  
-> 回调分为默认回调和自定义回调  
+> 回调分为默认回调和自定义回调，如果默认回调  
 > 默认回调：测试执行到对应位置时自动去debugtalk中寻找固定的方法（固定的方法名称）并调用，没找到则不调用且继续测试任务  
 > 自定义回调： 自定义方法，并将方法配置到对应位置的hooks设置中
 
 
 ## 回调的执行顺序及参数
 
-| 序号  | 回调实现  | 回调执行位置  | 回调方法                                        |
-|-----|-------|---------|---------------------------------------------|
-| 1.  | 默认回调  | 开始测试前   | before_test()**[未实现]**                      |
-| 2.  | 自定义回调 | 模块执行前   | func()**[未实现]**                             |
-| 3.  | 默认回调  | 用例开始执行前 | before_test_case([TestCase](#class-testcasebasemodel))             |
+| 序号  | 回调实现  | 回调执行位置  | 回调方法                                                          |
+|-----|-------|---------|---------------------------------------------------------------|
+| 1.  | 默认回调  | 开始测试前   | before_test()**[未实现]**                                        |
+| 2.  | 自定义回调 | 模块执行前   | func()**[未实现]**                                               |
+| 3.  | 默认回调  | 用例开始执行前 | before_test_case([TestCase](#class-testcasebasemodel))        |
 | 4.  | 自定义回调 | 用例执行前   | func([TestCase](#class-testcasebasemodel), **args, ***kwargs) |
-| 5.  | 默认回调  | 步骤开始执行前 | before_test_step([TStep](#class-tstepbasemodel))           |
-| 6.  | 自定义回调 | 步骤执行前   | func([TStep](#class-tstepbasemodel), **args, ***kwargs)    |
-| 7.  | 默认回调  | 校验前的回调  | before_request_validate(List[Dict])         |
-| 8.  | 默认回调  | 步骤执行后   | after_test_step([TStep](#class-tstepbasemodel))            |
-| 9.  | 自定义回调 | 步骤执行后   | func([TStep](#class-tstepbasemodel), **args, ***kwargs)    |
-| 10. | 默认回调  | 用例执行后   | after_test_case([TestCase](#class-testcasebasemodel))      |
-| 11. | 自定义回调 | 用例执行后   | func([TestCase](#class-testcasebasemodel), **args, ***kwargs) |
-| 12. | 自定义回调 | 模块执行后   | func()**[未实现]**                             |
-| 13. | 默认回调  | 测试执行后   | after_test()**[未实现]**                       |
+| 5.  | 默认回调  | 步骤开始执行前 | before_test_step([TStep](#class-tstepbasemodel))              |
+| 6.  | 自定义回调 | 步骤执行前   | func([TStep](#class-tstepbasemodel), **args, ***kwargs)       |
+| 7.  | 执行请求  | 执行请求    | 执行步骤中配置的请求                                                    |
+| 8.  | 默认回调  | 校验前的回调  | before_request_validate(List[Dict])                           |
+| 9.  | 默认回调  | 步骤执行后   | after_test_step([TStep](#class-tstepbasemodel))               |
+| 10. | 自定义回调 | 步骤执行后   | func([TStep](#class-tstepbasemodel), **args, ***kwargs)       |
+| 11. | 默认回调  | 用例执行后   | after_test_case([TestCase](#class-testcasebasemodel))         |
+| 12. | 自定义回调 | 用例执行后   | func([TestCase](#class-testcasebasemodel), **args, ***kwargs) |
+| 13. | 自定义回调 | 模块执行后   | func()**[未实现]**                                               |
+| 14. | 默认回调  | 测试执行后   | after_test()**[未实现]**                                         |
 
 
 ### 自定义回调的使用示例：  

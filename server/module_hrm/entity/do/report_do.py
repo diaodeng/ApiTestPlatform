@@ -1,8 +1,9 @@
 from datetime import datetime
 
 from sqlalchemy import String, Text, BigInteger, DateTime, Float, Integer
+from sqlalchemy.orm import mapped_column, Mapped
 
-from config.database import Base, mapped_column, Mapped
+from config.database import Base
 from utils.snowflake import snowIdWorker
 from .common_do import BaseModel
 
@@ -13,8 +14,9 @@ class HrmReport(Base, BaseModel):
 
     __tablename__ = 'hrm_report'
 
-    report_id: Mapped[int] = mapped_column(BigInteger, unique=True, primary_key=True, nullable=False, default=snowIdWorker.get_id,
-                              comment='报告ID')
+    report_id: Mapped[int] = mapped_column(BigInteger, unique=True, primary_key=True, nullable=False,
+                                           default=snowIdWorker.get_id,
+                                           comment='报告ID')
     report_name: Mapped[str] = mapped_column(String(500), nullable=False, comment='报告名')
     start_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment='用例执行时间')
     test_duration: Mapped[float] = mapped_column(Float, nullable=False, default=0, comment='用例执行时长')

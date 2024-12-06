@@ -239,8 +239,9 @@ def get_mapping_variable(
     try:
         return variables_mapping[variable_name]
     except KeyError:
+        logger.error(f"{variable_name} not found in {variables_mapping}")
         raise exceptions.VariableNotFound(
-            f"{variable_name} not found in {variables_mapping}"
+            f"variable [{variable_name}] not found."
         )
 
 
@@ -402,7 +403,7 @@ def parse_function_set_default_params(
         raw_string: Any,
         variables_mapping: VariablesMapping,
         functions_mapping: FunctionsMapping,
-        default_params: List|tuple = (),
+        default_params: List | tuple = (),
 ) -> Any:
     """
     主要给setup、teardown使用，用于解析函数参数，默认参数优先级高于函数参数。
@@ -427,6 +428,7 @@ def parse_function_set_default_params(
             logger.error(
                 f"call function error:\n"
                 f"func_name: {func_name}\n"
+                f"default_params: {default_params}\n"
                 f"args: {parsed_args}\n"
                 f"kwargs: {parsed_kwargs}\n"
                 f"{type(ex).__name__}: {ex}"

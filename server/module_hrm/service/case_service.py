@@ -1,4 +1,14 @@
-from module_hrm.dao.case_dao import *
+import json
+
+from sqlalchemy.orm import Session
+
+from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_hrm.dao.case_dao import CaseDao
+from module_hrm.dao.suite_dao import SuiteDetailDao
+from module_hrm.entity.do.case_do import HrmCase
+from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_vo import CasePageQueryModel, CaseModel, CaseQuery, \
+    DeleteCaseModel, AddCaseModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
 from utils.page_util import PageResponseModel
@@ -46,9 +56,11 @@ class CaseService:
             result = dict(is_success=False, message='用例名称已存在')
         else:
             try:
-                CaseDao.add_case_dao(query_db, add_case)
+                case_dao = CaseDao.add_case_dao(query_db, add_case)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = dict(is_success=True,
+                              message='新增成功',
+                              result=CaseModelForApi.model_validate(case_dao).model_dump(by_alias=True))
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -162,7 +174,7 @@ class CaseService:
         return result
 
     @staticmethod
-    def export_case_list_services(case_list: List):
+    def export_case_list_services(case_list: list):
         """
         导出用例信息service
         :param case_list: 用例信息列表

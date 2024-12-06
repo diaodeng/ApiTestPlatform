@@ -1,4 +1,4 @@
-from loguru import logger
+from utils.log_util import logger
 from datetime import datetime
 
 

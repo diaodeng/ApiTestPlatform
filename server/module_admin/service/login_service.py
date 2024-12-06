@@ -1,21 +1,27 @@
-from fastapi import Request, Form
-from fastapi import Depends
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
 import random
 import uuid
-from datetime import timedelta
-from module_admin.service.user_service import *
-from module_admin.entity.vo.login_vo import *
-from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.dao.login_dao import *
-from exceptions.exception import LoginException, AuthException
+from datetime import timedelta, datetime
+from typing import Optional, Union
+
+from fastapi import Depends
+from fastapi import Request, Form
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from sqlalchemy.orm import Session
+
 from config.env import AppConfig, JwtConfig, RedisInitKeyConfig
 from config.get_db import get_db
+from exceptions.exception import LoginException, AuthException
+from module_admin.dao.login_dao import login_by_account
+from module_admin.dao.user_dao import UserDao
+from module_admin.entity.vo.common_vo import CrudResponseModel
+from module_admin.entity.vo.login_vo import UserLogin, UserRegister, SmsCode
+from module_admin.entity.vo.user_vo import TokenData, CurrentUserModel, UserInfoModel, AddUserModel, ResetUserModel
+from module_admin.service.user_service import UserService
 from utils.common_util import CamelCaseUtil
-from utils.pwd_util import *
-from utils.response_util import *
-from utils.message_util import *
+from utils.log_util import logger
+from utils.message_util import message_service
+from utils.pwd_util import PwdUtil
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
@@ -24,6 +30,7 @@ class CustomOAuth2PasswordRequestForm(OAuth2PasswordRequestForm):
     """
     自定义OAuth2PasswordRequestForm类，增加验证码及会话编号参数
     """
+
     def __init__(
             self,
             grant_type: str = Form(default=None, regex="password"),
@@ -34,7 +41,7 @@ class CustomOAuth2PasswordRequestForm(OAuth2PasswordRequestForm):
             client_secret: Optional[str] = Form(default=None),
             code: Optional[str] = Form(default=""),
             uuid: Optional[str] = Form(default=""),
-            login_info: Optional[Dict[str, str]] = Form(default=None)
+            login_info: Optional[dict[str, str]] = Form(default=None)
     ):
         super().__init__(grant_type=grant_type, username=username, password=password,
                          scope=scope, client_id=client_id, client_secret=client_secret)
@@ -47,6 +54,7 @@ class LoginService:
     """
     登录模块服务层
     """
+
     @classmethod
     async def authenticate_user(cls, request: Request, query_db: Session, login_user: UserLogin):
         """
@@ -63,10 +71,13 @@ class LoginService:
             logger.warning("账号已锁定，请稍后再试")
             raise LoginException(data="", message="账号已锁定，请稍后再试")
         # 判断请求是否来自于api文档，如果是返回指定格式的结果，用于修复api文档认证成功后token显示undefined的bug
-        request_from_swagger = request.headers.get('referer').endswith('docs') if request.headers.get('referer') else False
-        request_from_redoc = request.headers.get('referer').endswith('redoc') if request.headers.get('referer') else False
+        request_from_swagger = request.headers.get('referer').endswith('docs') if request.headers.get(
+            'referer') else False
+        request_from_redoc = request.headers.get('referer').endswith('redoc') if request.headers.get(
+            'referer') else False
         # 判断是否开启验证码，开启则验证，否则不验证（dev模式下来自API文档的登录请求不检验）
-        if not login_user.captcha_enabled or ((request_from_swagger or request_from_redoc) and AppConfig.app_env == 'dev'):
+        if not login_user.captcha_enabled or (
+                (request_from_swagger or request_from_redoc) and AppConfig.app_env == 'dev'):
             pass
         else:
             await cls.__check_login_captcha(request, login_user)
@@ -183,17 +194,22 @@ class LoginService:
             logger.warning("用户token不合法")
             raise AuthException(data="", message="用户token不合法")
         if AppConfig.app_same_time_login:
-            redis_token = await request.app.state.redis.get(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}")
+            redis_token = await request.app.state.redis.get(
+                f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}")
         else:
             # 此方法可实现同一账号同一时间只能登录一次
-            redis_token = await request.app.state.redis.get(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{query_user.get('user_basic_info').user_id}")
+            redis_token = await request.app.state.redis.get(
+                f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{query_user.get('user_basic_info').user_id}")
         if token == redis_token:
             if AppConfig.app_same_time_login:
-                await request.app.state.redis.set(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}", redis_token,
+                await request.app.state.redis.set(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}",
+                                                  redis_token,
                                                   ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes))
             else:
-                await request.app.state.redis.set(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{query_user.get('user_basic_info').user_id}", redis_token,
-                                                  ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes))
+                await request.app.state.redis.set(
+                    f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{query_user.get('user_basic_info').user_id}",
+                    redis_token,
+                    ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes))
 
             role_id_list = [item.role_id for item in query_user.get('user_role_info')]
             if 1 in role_id_list:
@@ -229,7 +245,8 @@ class LoginService:
         :return: 当前用户路由信息对象
         """
         query_user = UserDao.get_user_by_id(query_db, user_id=user_id)
-        user_router_menu = sorted([row for row in query_user.get('user_menu_info') if row.menu_type in ['M', 'C']], key=lambda x: x.order_num)
+        user_router_menu = sorted([row for row in query_user.get('user_menu_info') if row.menu_type in ['M', 'C']],
+                                  key=lambda x: x.order_num)
         user_router = cls.__generate_user_router_menu(0, user_router_menu)
         return user_router
 

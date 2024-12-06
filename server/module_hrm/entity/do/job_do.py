@@ -2,9 +2,9 @@ from datetime import datetime
 
 from sqlalchemy import Integer, String, DateTime, BigInteger
 from sqlalchemy.dialects.mysql import LONGTEXT
-from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import Mapped, mapped_column
 
-from config.database import Base, mapped_column
+from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
 from utils.snowflake import snowIdWorker
 
@@ -40,7 +40,7 @@ class QtrJob(Base, BaseModel):
     status: Mapped[str] = mapped_column(String(1, collation='utf8_general_ci'), nullable=True, default='0',
                                         comment='状态（0正常 1暂停）')
     run_status: Mapped[int] = mapped_column(Integer, nullable=True, default=6,
-                                        comment='任务最后一次执行状态，TaskStatusEnum')
+                                            comment='任务最后一次执行状态，TaskStatusEnum')
     create_by: Mapped[str] = mapped_column(String(64, collation='utf8_general_ci'), nullable=True, default='',
                                            comment='创建者')
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=datetime.now, comment='创建时间')

@@ -12,12 +12,11 @@ from module_hrm.dao.env_dao import EnvDao
 from module_hrm.dao.module_dao import ModuleDao
 from module_hrm.dao.project_dao import ProjectDao
 from module_hrm.entity.do.case_do import HrmCase
-from module_hrm.entity.vo.case_vo import CaseModel
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
 from module_hrm.enums.enums import TstepTypeEnum
 from module_hrm.service.load_data_service import OldDatabase, CoverData
-from utils.log_util import *
-from utils.response_util import *
+from utils.log_util import logger
+from utils.response_util import ResponseUtil
 
 hrmLoadController = APIRouter(prefix='/hrm/load')
 
@@ -123,11 +122,10 @@ async def case_load(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-
 @hrmLoadController.get("/updateCase")
 async def update_case(request: Request,
-                        query_db: Session = Depends(get_db)
-                        ):
+                      query_db: Session = Depends(get_db)
+                      ):
     try:
         all_case_orm = query_db.query(HrmCase).all()
         for case in all_case_orm:
@@ -137,7 +135,8 @@ async def update_case(request: Request,
                     step["step_type"] = TstepTypeEnum.http
                 elif step["step_type"] == 2:
                     step["step_type"] = TstepTypeEnum.websocket
-            query_db.query(HrmCase).filter(HrmCase.case_id == case.case_id).update({"request": case_request.model_dump(exclude_unset=True)})
+            query_db.query(HrmCase).filter(HrmCase.case_id == case.case_id).update(
+                {"request": case_request.model_dump(exclude_unset=True)})
             logger.info(f"case_id:{case.case_id}更新成功")
         query_db.commit()
         return ResponseUtil.success(msg="处理成功")

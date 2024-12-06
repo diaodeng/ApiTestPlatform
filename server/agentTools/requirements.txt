@@ -1,0 +1,6 @@
+requests
+ttkbootstrap
+websockets
+pystray
+pyinstaller
+httpx

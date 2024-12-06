@@ -1,18 +1,9 @@
-import importlib.util
-import sys
+from sqlalchemy.orm import Session
 
 from module_hrm.dao.agent_dao import AgentDao
-from module_hrm.dao.debugtalk_dao import *
-from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.vo.agent_vo import AgentQueryModel, AgentModel, DeleteAgentModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.utils import debugtalk_common
-from module_hrm.utils.util import get_func_map, get_func_doc_map
 from utils.common_util import CamelCaseUtil
-from utils.log_util import logger
-from utils.page_util import PageResponseModel
-from utils.snowflake import snowIdWorker
-from sqlalchemy import or_
 
 
 class AgentService:
@@ -30,18 +21,8 @@ class AgentService:
         :return: Agent列表信息对象
         """
         agent_list_result = AgentDao.get_agent_list(query_db, page_object, data_scope_sql)
-        if page_object.is_page:
-            agent_list = PageResponseModel(
-                **{
-                    **agent_list_result.model_dump(by_alias=True),
-                    'rows': [{**row[0], **row[1]} for row in agent_list_result.rows]
-                }
-            )
-        else:
-            agent_list = []
-            if agent_list_result:
-                agent_list = [{**row[0], **row[1]} for row in agent_list_result]
-        return agent_list
+
+        return agent_list_result
 
     @classmethod
     def add_agent_services(cls, query_db: Session, page_object: AgentModel):
@@ -53,10 +34,13 @@ class AgentService:
         """
 
         try:
-            page_object.agent_id = snowIdWorker.get_id()
-            AgentDao.add_agent_dao(query_db, page_object)
-            query_db.commit()
-            result = dict(is_success=True, message='新增成功')
+            agent_info = AgentDao.get_agent_by_code(query_db, page_object.agent_code)
+            if agent_info:
+                result = dict(is_success=False, message='agent已存在')
+            else:
+                AgentDao.add_agent_dao(query_db, page_object)
+                query_db.commit()
+                result = dict(is_success=True, message='新增成功')
         except Exception as e:
             query_db.rollback()
             raise e
@@ -99,8 +83,8 @@ class AgentService:
             try:
                 for agent_id in agent_id_list:
                     AgentDao.delete_agent_dao(query_db, AgentModel(agentId=agent_id,
-                                                                               updateTime=page_object.update_time,
-                                                                               updateBy=page_object.update_by))
+                                                                   updateTime=page_object.update_time,
+                                                                   updateBy=page_object.update_by))
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
             except Exception as e:
@@ -111,7 +95,7 @@ class AgentService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def agent_detail_services(cls, query_db: Session, id: int):
+    def agent_detail_services(cls, query_db: Session, id: int) -> AgentModel:
         """
         获取Agent详细信息service
         :param query_db: orm对象
@@ -123,3 +107,15 @@ class AgentService:
 
         return result
 
+    @classmethod
+    def get_agent_detail_services(cls, query_db: Session, agent_code: str) -> AgentModel:
+        """
+        获取Agent详细信息service
+        :param query_db: orm对象
+        :param agent_code: AgentCode
+        :return: AgentCode对应的信息
+        """
+        agent = AgentDao.get_agent_by_code(query_db, agent_code=agent_code)
+        result = AgentModel(**CamelCaseUtil.transform_result(agent))
+
+        return result

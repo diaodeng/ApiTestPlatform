@@ -9,11 +9,13 @@ from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import CaseModel, CaseRunModel
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseForHandle
-from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
+from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep
 from module_hrm.entity.vo.env_vo import EnvModel, EnvModelForApi
 from module_hrm.enums.enums import ParameterTypeEnum
 from module_hrm.utils.common import key_value_dict, dict2list, update_or_extend_list
+from module_hrm.utils.parser import parse_data
 from module_hrm.utils.util import decompress_text
+from utils.log_util import logger
 from utils.common_util import CamelCaseUtil
 from module_hrm.service.agent_service import AgentService
 from module_hrm.service.forward_rules_service import ForwardRulesService
@@ -255,6 +257,7 @@ class CaseInfoToRun(object):
         # self._ensure_case_dir()
 
         env_varables = []
+        # 获取环境变量
         for env_group in self.env_obj.env_config.variables:
             update_or_extend_list(env_varables, env_group.get("value", []))
 
@@ -264,6 +267,7 @@ class CaseInfoToRun(object):
 
         # 处理变量， 优先级： 环境变量 < include < case
         if include_config_obj:
+            # 引用的配置中的变量
             update_or_extend_list(env_varables, include_config_obj.request.config.variables)
 
             # 用例其他配置处理：等待时间、请求超时时间
@@ -274,7 +278,7 @@ class CaseInfoToRun(object):
             if not self.case_obj.request.config.time_out.enable:
                 if include_config_obj.request.config.time_out.enable:
                     self.case_obj.request.config.time_out = include_config_obj.request.config.time_out
-
+        # 用例配置中的变量
         update_or_extend_list(env_varables, self.case_obj.request.config.variables)
 
         # 配置请求头处理
@@ -368,7 +372,7 @@ class ParametersHandler(object):
                 tmp_param = key_value_dict(param)
                 # old_variables.update(param)
                 tmp_case_data.config.variables = old_variables
-                name = tmp_case_data.config.name
+                name = tmp_case_data.config.name or tmp_case_data.case_name
                 if "case_name" in tmp_param:
                     tmp_case_data.config.name = f"{name}[{tmp_param['case_name']}]"
                     tmp_case_data.case_name = f"{name}[{tmp_param['case_name']}]"
@@ -386,6 +390,75 @@ class ForwardRulesHandler(object):
     @classmethod
     def transform(cls, db, run_info: CaseRunModel):
         if run_info.forward_config.agent_id:
-            run_info.forward_config.agent_code = AgentService.agent_detail_services(db, run_info.forward_config.agent_id).agent_code
+            run_info.forward_config.agent_code = AgentService.agent_detail_services(db,
+                                                                                    run_info.forward_config.agent_id).agent_code
         if run_info.forward_config.forward_rule_ids:
-            run_info.forward_config.forward_rules = ForwardRulesService.get_forward_rules_for_run(db, run_info.forward_config.forward_rule_ids)
+            run_info.forward_config.forward_rules = ForwardRulesService.get_forward_rules_for_run(db,
+                                                                                                  run_info.forward_config.forward_rule_ids)
+
+
+class ConfigHandle:
+    @classmethod
+    def update_old_config_list(cls, old_config, new_config):
+        if not isinstance(new_config, list):
+            new_config = dict2list(new_config)
+        update_or_extend_list(old_config, new_config)
+        return old_config
+
+    @classmethod
+    def update_config_use_new_list(cls, new_config, old_config):
+        if not isinstance(new_config, list):
+            new_config = dict2list(new_config)
+        update_or_extend_list(new_config, old_config)
+        old_config = new_config
+        return old_config
+
+    @classmethod
+    def parse_data_for_run(cls, data: str | dict, debug_talk_map: dict = None, globals_var: dict | list = None, *args):
+        if globals_var is None:
+            globals_var = []
+        if debug_talk_map is None:
+            debug_talk_map = {}
+        var_groups = args or []
+
+        temp_all_val = copy.deepcopy(globals_var)
+        if not isinstance(temp_all_val, list):
+            temp_all_val = dict2list(temp_all_val)
+        for var_group in var_groups:
+            ConfigHandle.update_old_config_list(temp_all_val, var_group)
+
+        temp_all_val_dict = key_value_dict(temp_all_val)
+        new_data = parse_data(data,
+                              temp_all_val_dict,
+                              debug_talk_map)
+        return new_data
+
+
+    @classmethod
+    def can_run(cls, step_obj: TStep):
+        can_run = True
+        source_data = step_obj.run_condition.is_run_info.condition_source
+        if step_obj.run_condition.is_run_info.enable and source_data:
+            try:
+                can_run = eval(source_data)
+            except SyntaxError as se:
+                can_run = False
+                logger.error(f"步骤执行条件语法错误: {source_data}")
+                # raise se
+            except Exception as e:
+                logger.error(f"步骤执行条件执行异常，判断条件: {source_data}，错误信息： {e}")
+                can_run = False
+
+        return can_run
+
+    @classmethod
+    def get_loop_info(cls, step_obj: TStep) -> tuple[str, list]:
+        """
+        获取测试步骤的循环条件信息
+        """
+        loop_num = 1
+        if step_obj.run_condition.loop_run_info.enable:
+            loop_num = step_obj.run_condition.loop_run_info.condition_source or 1
+
+        loop_var = step_obj.run_condition.loop_run_info.loop_var or None
+        return loop_var, [i for i in range(int(loop_num))]

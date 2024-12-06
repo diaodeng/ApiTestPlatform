@@ -1,5 +1,8 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from fastapi import Depends
+from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
@@ -10,16 +13,15 @@ from module_hrm.entity.vo.forward_rules_vo import ForwardRulesQueryModel, Forwar
     ForwardRulesDetailModel, ForwardRulesDetailQueryModel, ForwardRulesDetailDeleteModel
 from module_hrm.enums.enums import DelFlagEnum
 from module_hrm.service.forward_rules_service import ForwardRulesService, ForwardRulesDetailService
-from sqlalchemy.orm import Session
 from utils.log_util import logger
-from utils.page_util import *
-from utils.response_util import *
+from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
 
 forwardRulesController = APIRouter(prefix='/qtr/forwardRules', dependencies=[Depends(LoginService.get_current_user)])
 
 
 @forwardRulesController.get("/all", response_model=PageResponseModel,
-                            dependencies=[Depends(CheckUserInterfaceAuth('qtr:forwardRules:all'))])
+                            dependencies=[Depends(CheckUserInterfaceAuth('qtr:forwardRules:list'))])
 async def get_all_rules(request: Request,
                         query_db: Session = Depends(get_db),
                         ):

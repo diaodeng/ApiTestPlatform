@@ -54,7 +54,7 @@ class JobDao:
                     QtrJob.job_group == query_object.job_group if query_object.job_group else True,
                     QtrJob.status == query_object.status if query_object.status else True
                     ) \
-            .distinct()
+            .order_by(QtrJob.create_time.desc(), QtrJob.update_time.desc()).distinct()
         job_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
 
         return job_list

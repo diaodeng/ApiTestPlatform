@@ -1,5 +1,5 @@
 import {randomString} from "@/utils/tools.js";
-import {HrmDataTypeEnum, CaseStepTypeEnum} from "@/components/hrm/enum.js";
+import {HrmDataTypeEnum, CaseStepTypeEnum, CodeTypeEnum, CaseRunStatusEnum} from "@/components/hrm/enum.js";
 
 
 /*
@@ -34,6 +34,21 @@ export const initStepData =
     {
         step_type: CaseStepTypeEnum.http,
         step_id: `${randomString(10)}`,
+        enable: true,
+        run_condition: {
+            isRunInfo: {
+                enable: false,
+                conditionSource: "",
+                loopVar: "",
+                sourceType: ""
+            },
+            loopRunInfo: {
+                enable: false,
+                conditionSource: 1,
+                loopVar: "",
+                sourceType: ""
+            },
+        },
         name: "新增测试步骤",
         request: initRequestData,
         include: {
@@ -59,9 +74,9 @@ export const initStepData =
         validate: [],
         extract: [],
         variables: [],
-        setup_hooks: [],
-        teardown_hooks: [],
-        result: {response: {}, logs: {}},
+        setup_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent:""}},
+        teardown_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent:""}},
+        result: {response: {}, logs: {}, status: CaseRunStatusEnum.passed.value},
     }
 
 
@@ -72,16 +87,16 @@ export const initCaseRequestData = {
             limit: 0
         },
         time_out: {
-          enable: false,
-          limit: 0
+            enable: false,
+            limit: 0
         },
         retry: {
             enable: false,
             limit: 0,
             delay: 0
         },
-        setup_hooks: [],
-        teardown_hooks: [],
+        setup_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent:""}},
+        teardown_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent:""}},
         variables: [],
         headers: [],
         parameters: [],
@@ -117,7 +132,6 @@ export const initCaseFormData = {
 }
 
 
-
 /*
 * API库表对应数据模板
 * */
@@ -135,7 +149,7 @@ export const initApiFormData = {
 
 
 /*
-* 转发规则对应字段
+* 转发规则组对应字段
 * */
 export const initForwardRulesFormData = {
     ruleId: undefined,
@@ -157,6 +171,22 @@ export const initForwardRulesDetailFormData = {
     ruleDetailName: "新增转发规则详情记录",
     originUrl: undefined,
     targetUrl: undefined,
+    orderNum: 0,
+    status: 2,
+    simpleDesc: undefined,
+    delFlag: 1,
+    matchType: 1
+}
+
+/*
+* 转发规则对应字段
+* */
+export const initAgentFormData = {
+    agentId: undefined,
+    agentName: "新增转发规则组",
+    agentCode: undefined,
+    onlineTime: undefined,
+    offlineTime: undefined,
     orderNum: 0,
     status: 2,
     simpleDesc: undefined,

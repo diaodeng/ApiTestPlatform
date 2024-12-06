@@ -1,7 +1,8 @@
 from sqlalchemy import Integer, String, Text, BigInteger
 from sqlalchemy.dialects.mysql import LONGTEXT
+from sqlalchemy.orm import mapped_column, Mapped
 
-from config.database import Base, mapped_column, Mapped
+from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
 from module_hrm.enums.enums import DataType
 from utils.snowflake import snowIdWorker
@@ -19,7 +20,8 @@ class HrmCase(Base, BaseModel):
 
     case_id: Mapped[BigInteger] = mapped_column(BigInteger, unique=True, primary_key=True, nullable=False,
                                                 default=snowIdWorker.get_id, comment='用例、配置ID')
-    type: Mapped[Integer] = mapped_column(Integer, comment='3 case/4 config', default=DataType.case, nullable=False)
+    type: Mapped[Integer] = mapped_column(Integer, comment='3 case/4 config', default=DataType.case.value,
+                                          nullable=False)
     case_name: Mapped[String] = mapped_column(String(500), nullable=False, comment='用例名称')
     project_id: Mapped[BigInteger] = mapped_column(BigInteger, nullable=True, default=None, comment='项目ID')
     module_id: Mapped[BigInteger] = mapped_column(BigInteger, nullable=True, default=None, comment='模块ID')

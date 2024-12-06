@@ -87,7 +87,7 @@ class EnvDao:
         if page_object.only_self:
             env_result = env_result.filter(HrmEnv.manager == page_object.manager)
 
-        env_result = env_result.order_by(HrmEnv.order_num) \
+        env_result = env_result.order_by(HrmEnv.order_num, HrmEnv.create_time.desc(), HrmEnv.update_time.desc()) \
             .distinct()
 
         post_list = PageUtil.paginate(env_result, page_object.page_num, page_object.page_size, is_page)
@@ -96,6 +96,20 @@ class EnvDao:
 
     @classmethod
     def add_env_dao(cls, db: Session, env: EnvModel):
+        """
+        新增部门数据库操作
+        :param db: orm对象
+        :param env: 环境对象
+        :return: 新增校验结果
+        """
+        db_env = HrmEnv(**env.model_dump(exclude_unset=True))
+        db.add(db_env)
+        db.flush()
+
+        return db_env
+
+    @classmethod
+    def copy_env_dao(cls, db: Session, env: EnvModel):
         """
         新增部门数据库操作
         :param db: orm对象

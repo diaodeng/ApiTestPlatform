@@ -1,7 +1,9 @@
 from sqlalchemy import Integer, String, Text, BigInteger
+from sqlalchemy.orm import mapped_column, Mapped
 
-from config.database import Base, mapped_column, Mapped
+from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
+from module_hrm.enums.enums import QtrDataStatusEnum
 from utils.snowflake import snowIdWorker
 
 
@@ -16,8 +18,8 @@ class HrmModule(Base, BaseModel):
     __tablename__ = 'hrm_module'
 
     module_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, nullable=False, unique=True,
-                                          default=snowIdWorker.get_id,
-                                          comment='模块ID')
+                                           default=snowIdWorker.get_id,
+                                           comment='模块ID')
     project_id: Mapped[int] = mapped_column(BigInteger, nullable=True, comment='项目ID')
     module_name: Mapped[str] = mapped_column(String(50), nullable=False, comment='模块名称')
     test_user: Mapped[str] = mapped_column(String(50), nullable=True, comment='测试负责人')
@@ -25,7 +27,7 @@ class HrmModule(Base, BaseModel):
     other_desc: Mapped[str] = mapped_column(String(200), nullable=True, comment='其他信息')
     desc2mind = mapped_column(Text, nullable=True, comment='脑图')
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment='显示顺序')
-    status: Mapped[int] = mapped_column(Integer, nullable=False, default=2, comment='状态（2正常 1停用）')
+    status: Mapped[int] = mapped_column(Integer, nullable=False, default=QtrDataStatusEnum.normal.value, comment='状态（2正常 1停用）')
     remark: Mapped[str] = mapped_column(String(500), nullable=True, default='', comment='备注')
 
 

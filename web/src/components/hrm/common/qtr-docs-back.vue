@@ -1,5 +1,4 @@
 <script setup>
-import {marked} from 'marked';
 import hljs from 'highlight.js';
 
 import MarkdownItHighlightjs from 'markdown-it-highlightjs'
@@ -21,6 +20,7 @@ import 'highlight.js/styles/default.css'
 import {useTemplateRef, compile, render} from 'vue';
 import markdownit from 'markdown-it'
 import {useRouter, useRoute} from "vue-router";
+import {isFullUrl} from "@/utils/tools.js";
 
 const markdownSource = defineModel('markdownSource')
 
@@ -60,6 +60,16 @@ const md = markdownit({
 // .use(MarkdownItFootnote)
 // .use(MarkdownItSub).use(MarkdownItSup).use(MarkdownItTasklists).use(MarkdownItTOCDR)
 
+md.renderer.rules.image = function (tokens, idx, options, env, self) {
+  const aIndex = tokens[idx].attrIndex('src');
+  if (aIndex !== -1) {
+    const src_str = tokens[idx].attrs[aIndex][1];
+    // tokens[idx].attrs[aIndex][1] = "docs/" + src_str;
+    tokens[idx].attrSet('src', "docs/" + src_str);
+    tokens[idx].attrPush(['style', "width: 100%"]);
+  }
+  return self.renderToken(tokens, idx, options);
+}
 
 // 自定义规则，使链接在新页签中打开
 md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
@@ -73,7 +83,11 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
   // 添加 target="_blank" 属性
   tokens[idx].attrPush(['target', '_blank']);
   tokens[idx].attrPush(['rel', 'noopener noreferrer']);
-  tokens[idx].attrPush(['class', 'internal-link']);
+
+  const href_url = tokens[idx].attrGet('href');
+  if (!isFullUrl(href_url)){
+    tokens[idx].attrPush(['class', 'internal-link']);
+  }
 
   // 渲染标签
   return self.renderToken(tokens, idx, options);

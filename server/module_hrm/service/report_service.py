@@ -1,5 +1,3 @@
-from sqlalchemy.orm import Session
-
 from module_hrm.entity.do.report_do import HrmReport
 
 
@@ -24,4 +22,3 @@ class ReportService:
 
     def create_report(self, report_name: str, **kwargs) -> HrmReport:
         report = HrmReport(report_name=report_name, **kwargs)
-

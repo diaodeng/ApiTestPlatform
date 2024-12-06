@@ -19,14 +19,13 @@ class AgentDao:
         """
         agent_info = db.query(QtrAgent) \
             .filter(QtrAgent.agent_id == agent_id,
-                    QtrAgent.status == 0,
-                    QtrAgent.del_flag == 0) \
+                    QtrAgent.del_flag == 1) \
             .first()
 
         return agent_info
 
     @classmethod
-    def get_agent_by_code(cls, db: Session, agent_code: int):
+    def get_agent_by_code(cls, db: Session, agent_code: str):
         """
         根据agent_code获取在用Agent信息
         :param db: orm对象
@@ -35,8 +34,7 @@ class AgentDao:
         """
         agent_info = db.query(QtrAgent) \
             .filter(QtrAgent.agent_code == agent_code,
-                    QtrAgent.status == 0,
-                    QtrAgent.del_flag == 0) \
+                    QtrAgent.del_flag == 1) \
             .first()
 
         return agent_info
@@ -48,9 +46,9 @@ class AgentDao:
         :param db: orm对象
         :return: Agent的信息对象
         """
-        agent_list = db.query(QtrAgent).filter(QtrAgent.del_flag == 0,
-                                               QtrAgent.agent_code == page_object.agent_code if page_object.agent_code else None,
-                                               QtrAgent.agent_name == page_object.agent_name if page_object.agent_name else None,
+        agent_list = db.query(QtrAgent).filter(QtrAgent.del_flag == 1,
+                                               QtrAgent.agent_code == page_object.agent_code if page_object.agent_code else True,
+                                               QtrAgent.agent_name == page_object.agent_name if page_object.agent_name else True,
                                                QtrAgent.status == page_object.status if page_object.status else True,
                                                eval(data_scope_sql)).order_by(QtrAgent.agent_id)
 

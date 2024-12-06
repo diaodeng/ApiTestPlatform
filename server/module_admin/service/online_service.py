@@ -1,8 +1,9 @@
 from fastapi import Request
 from jose import jwt
+
 from config.env import JwtConfig, RedisInitKeyConfig
-from module_admin.entity.vo.online_vo import *
 from module_admin.entity.vo.common_vo import CrudResponseModel
+from module_admin.entity.vo.online_vo import OnlineQueryModel, DeleteOnlineModel
 from utils.common_util import CamelCaseUtil
 from utils.redis_util import scan_keys
 
@@ -46,7 +47,8 @@ class OnlineService:
                     online_info_list = [online_dict]
                     break
             elif query_object.user_name and query_object.ipaddr:
-                if query_object.user_name == payload.get('user_name') and query_object.ipaddr == payload.get('login_info').get('ipaddr'):
+                if query_object.user_name == payload.get('user_name') and query_object.ipaddr == payload.get(
+                        'login_info').get('ipaddr'):
                     online_info_list = [online_dict]
                     break
             else:

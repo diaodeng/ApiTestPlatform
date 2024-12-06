@@ -6,7 +6,7 @@ const props = defineProps({
   options: {type: Object},
   disable: {type: Boolean, default: false},
   selectorWidth: {default: "200px"},
-  sourceData: {type: Object}
+  sourceData: {type: Object, default: undefined}
 });
 const emit = defineEmits(["selectChanged"]);
 

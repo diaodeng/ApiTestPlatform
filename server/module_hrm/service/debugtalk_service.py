@@ -1,17 +1,24 @@
 import importlib.util
+import importlib.util
 import sys
+from datetime import datetime
 
-from module_hrm.dao.debugtalk_dao import *
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from module_hrm.dao.debugtalk_dao import DebugTalkDao
 from module_hrm.entity.do.case_do import HrmCase
+from module_hrm.entity.do.debugtalk_do import HrmDebugTalk
+from module_hrm.entity.vo.case_vo import CaseRunModel, ProjectDebugtalkInfoModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.exceptions import DebugtalkRepeatedError
+from module_hrm.entity.vo.debugtalk_vo import DebugTalkQueryModel, DeleteDebugTalkModel, DebugTalkModel
+from module_hrm.exceptions import DebugtalkError
 from module_hrm.utils import debugtalk_common
-from module_hrm.utils.util import find_source_repeat, get_func_map, get_func_doc_map
+from module_hrm.utils.util import get_func_map, get_func_doc_map
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
 from utils.snowflake import snowIdWorker
-from sqlalchemy import or_
 
 
 class DebugTalkService:
@@ -137,38 +144,73 @@ class DebugTalkService:
         :return: tuple(common_debugtalk, project_debugtalk),其中project_debugtalk可能为None
         """
 
-        head_source = "import logging \nlogger = logging.getLogger('QTestRunner')"
+        common_debugtalk = cls.commondebugtalk_source(query_db=query_db)
 
-        common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id == None)).first()
-        common_debugtalk = head_source + "\n" + common_debugtalk.debugtalk if common_debugtalk else ""
-
-        project_debugtalk = None
-        if not project_id and case_id:
-            project_id = query_db.query(HrmCase).filter(HrmCase.case_id == case_id).first().project_id
-        if project_id:
-            project_debugtalk = query_db.query(HrmDebugTalk).filter(
-                HrmDebugTalk.project_id == project_id).first()
-            project_debugtalk = head_source + "\n" + project_debugtalk.debugtalk if project_debugtalk else ""
+        project_debugtalk = cls.project_debugtalk_source(query_db=query_db, project_id=project_id, case_id=case_id)
 
         return common_debugtalk, project_debugtalk
 
+    @classmethod
+    def commondebugtalk_source(cls, query_db: Session) -> str:
+
+        common_debugtalk = query_db.query(HrmDebugTalk).filter(
+            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id == None)).first()
+        common_debugtalk = common_debugtalk.debugtalk if common_debugtalk else ""
+        return common_debugtalk
+
+    @classmethod
+    def project_debugtalk_source(cls, query_db: Session, project_id: int, case_id=None) -> str:
+        project_debugtalk = ""
+        if not project_id and case_id:
+            project_info = query_db.query(HrmCase).filter(HrmCase.case_id == case_id).first()
+            project_id = project_info.project_id if project_info else None
+        if project_id:
+            project_debugtalk = query_db.query(HrmDebugTalk).filter(
+                HrmDebugTalk.project_id == project_id).first()
+            project_debugtalk = project_debugtalk.debugtalk if project_debugtalk else ""
+
+        return project_debugtalk
+
+    @classmethod
+    def project_debugtalk_map(cls, query_db: Session, project_id: int = None, case_id: int = None,
+                              run_info: CaseRunModel = None) -> ProjectDebugtalkInfoModel:
+        project_debugtalk_set = run_info.project_debugtalk_set.get(project_id, None)
+        if project_debugtalk_set:
+            return project_debugtalk_set
+        else:
+            try:
+                common_debugtalk_source = cls.commondebugtalk_source(query_db)
+                project_debugtalk_source = cls.project_debugtalk_source(query_db, project_id, case_id)
+                debugtalk_obj = DebugTalkHandler(project_debugtalk_source, common_debugtalk_source,
+                                                 project_id or case_id)
+                pdm = ProjectDebugtalkInfoModel()
+                pdm.func_map = debugtalk_obj.func_map(run_info.runner)
+                pdm.module_instance = debugtalk_obj.mudule_instances
+                pdm.module_names = debugtalk_obj.module_names
+                run_info.project_debugtalk_set[project_id] = pdm
+                return pdm
+            except Exception as e:
+                logger.error(f"debugtalk加载异常:{e}")
+                raise DebugtalkError(f"debugtalk加载异常:{e}")
+
 
 class DebugTalkHandler:
-    def __init__(self, debugtalk_source: str, common_debugtalk_source: str = None):
+    def __init__(self, debugtalk_source: str, common_debugtalk_source: str = None, project_id: int = ""):
         """
         :param debugtalk_source:
         :param common_debugtalk_source:
         """
         self.common_debugtalk_source: str = common_debugtalk_source
         self.debugtalks_data: str = debugtalk_source
+        self.project_id: int = project_id
         self.module_names = []
+        self.mudule_instances = []
 
     def source(self):
         return self.debugtalks_data
 
     def _import_debugtalk(self, debugtalk_source, user=None):
-        module_name = f'Debugtalk{user or ""}{int(datetime.now().timestamp() * 100000)}'
+        module_name = f'Debugtalk_{user or ""}_{self.project_id}_{int(datetime.now().timestamp() * 100000)}'
         self.module_names.append(module_name)
         logger.info(f"开始载入模块 {module_name}")
         # 创建模块规范对象
@@ -176,11 +218,13 @@ class DebugTalkHandler:
 
         # 创建模块对象
         module = importlib.util.module_from_spec(spec)
+        self.mudule_instances.append(module)
 
         # 将数据流中的代码加载到模块对象中
         if debugtalk_source is None:
             debugtalk_source = ""
         exec(debugtalk_source, module.__dict__)
+        setattr(module, "logger", logger)
 
         # 将模块对象添加到 sys.modules 中，以便后续导入
         sys.modules[module_name] = module
@@ -217,6 +261,10 @@ class DebugTalkHandler:
 
     def del_import(self):
         for module_name in self.module_names:
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-                logger.info(f"成功卸载模块 {module_name}")
+            self.del_module(module_name)
+
+    @classmethod
+    def del_module(cls, module_name):
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+            logger.info(f"成功卸载模块 {module_name}")

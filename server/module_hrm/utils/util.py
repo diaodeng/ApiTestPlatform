@@ -12,7 +12,10 @@ import re
 import socket
 import sys
 import zlib
+from datetime import datetime
 from itertools import combinations
+
+import psutil
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm import exceptions
@@ -405,3 +408,22 @@ class PermissionHandler(object):
 
         if user and user.user.user_id and (not user.user.admin) and manager and user.user.user_id != manager:
             raise PermissionError("只能处理自己的数据")
+
+
+def get_system_stats():
+    cpu_percent = psutil.cpu_percent(interval=1)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+
+    stats = {
+        "cpu_percent": cpu_percent,
+        "memory_percent": memory.percent,
+        "memory_used": memory.used / (1024 ** 2),  # MB
+        "memory_total": memory.total / (1024 ** 2),  # MB
+        "disk_percent": disk.percent,
+        "disk_used": disk.used / (1024 ** 3),  # GB
+        "disk_total": disk.total / (1024 ** 3),  # GB
+        "timestamp": datetime.now().isoformat(),
+    }
+    logger.info(f"系统状态信息: {stats}")
+    return stats

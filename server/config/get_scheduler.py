@@ -6,7 +6,7 @@ from config.database import SessionLocal
 from module_admin.entity.vo.job_vo import EditJobModel
 from module_admin.service.job_log_service import JobLogService, JobLogModel
 from module_admin.dao.job_dao import Session, JobDao
-from loguru import logger
+from utils.log_util import logger
 from config.scheduler_common import SchedulerUtil
 import module_task
 from module_hrm.enums.enums import TaskStatusEnum

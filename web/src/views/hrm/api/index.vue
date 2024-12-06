@@ -2,18 +2,17 @@
 import {ElMessage} from "element-plus";
 import SplitWindow from "@/components/hrm/common/split-window.vue";
 import TreeView from "@/components/hrm/common/tree-view.vue";
-import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {addApi, apiTree, copyApiAsCase, getApi, updateApi} from "@/api/hrm/api.js";
-import {list as configList, allConfig} from "@/api/hrm/config.js";
+import {allConfig} from "@/api/hrm/config.js";
 
 import {initStepData} from "@/components/hrm/data-template.js";
 import {randomString} from "@/utils/tools.js";
 import {CaseStepTypeEnum, HrmDataTypeEnum, runDetailViewTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
-import {debugCase, getComparator} from "@/api/hrm/case.js";
 import StepRequest from "@/components/hrm/case/step-request.vue";
 import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
 import {getApiFormDataByType} from "@/components/hrm/case/case-utils.js";
 import RunDetail from "@/components/hrm/common/run-detail.vue";
+import DebugComponent from "@/components/hrm/common/debug_component.vue";
 
 
 const {proxy} = getCurrentInstance();
@@ -24,13 +23,11 @@ provide("hrm_data_type", hrm_data_type);
 provide('sys_normal_disable', sys_normal_disable);
 
 const treeDataSource = ref([]);
-const hrm_comparator_dict = ref({});
 const hrm_config_list = ref({});
 
 const folderForm = ref({parentId: null, name: null})
 const apiTabsData = ref([]);
 const currentApiData = ref(apiTabsData.value[0] || null);
-const selectedEnv = ref("");
 const currentTab = ref(0);  // 当前选中的tab，是apiId
 const viewShow = ref({
   runHistoryDialog: false
@@ -46,23 +43,32 @@ const loading = ref({
   preSaveDialog: false,
   preSaveFolderDialog: false,
   filter: false
-})
+});
 
 const treeFilterText = ref("");
 const treeRef = ref(null);
 const currentSelectParentNode = ref();  // 当前可以使用的父节点
 
+
 onMounted(() => {
   getApiTree();
-  getComparator().then(response => {
-    hrm_comparator_dict.value = response.data;
-  });
   allConfig().then(response => {
     hrm_config_list.value = response.data;
   });
 });
 
-provide("hrm_comparator_dict", hrm_comparator_dict);
+const debugFromCaseData = computed(() => {
+  const apiData = toRaw(currentApiData.value);
+
+  const data = apiData ? {
+    request: apiData.requestInfo,
+    type: apiData.type,
+    name: apiData.name,
+    caseId: apiData.apiId,
+  } : {};
+  return data;
+})
+
 provide("hrm_case_config_list", hrm_config_list);
 
 
@@ -292,35 +298,11 @@ function activeTabChange(tabName) {
   // console.log("tab切换了:" + tabName + "  " + "当前tab：" + currentTab.value)
 }
 
-function debug() {
-  loading.value.debugApi = true;
-  const apiData = toRaw(currentApiData.value);
-  let caseData = {
-    request: apiData.requestInfo,
-    type: apiData.type,
-    name: apiData.name,
-    caseId: apiData.apiId,
+function debug(response) {
+  for (const step_result_key in response.data) {
+    currentApiData.value.requestInfo.teststeps.find(dict => dict['step_id'] === step_result_key).result = response.data[step_result_key]
   }
-  delete caseData.request.config.result;
-  delete caseData.request.teststeps[0].result;
-  caseData.request.config.name = caseData.name;
-  const req_data = {
-    "env": selectedEnv.value,
-    "runType": RunTypeEnum.api,
-    "caseData": caseData,
-  }
-  debugCase(req_data).then(response => {
-    ElMessage.success(response.msg);
-    for (const step_result_key in response.data) {
-      currentApiData.value.requestInfo.teststeps.find(dict => dict['step_id'] === step_result_key).result = response.data[step_result_key]
-    }
 
-    // responseData.value = response.data.log
-    // open.value = false;
-    // getList();
-  }).finally(() => {
-    loading.value.debugApi = false;
-  });
 }
 
 function apiTreeFilter() {
@@ -363,7 +345,7 @@ const copyAsCase = () => {
 }
 
 function showRunHistory() {
-  if (!currentApiData.value){
+  if (!currentApiData.value) {
     ElMessage.warning("请先选择一个接口");
     return;
   }
@@ -371,10 +353,16 @@ function showRunHistory() {
 }
 
 function handleNodeChange(nodeData, node) {
-  if(!nodeData){return;}
-  if(nodeData && nodeData.type === HrmDataTypeEnum.folder){return;}
+  if (!nodeData) {
+    return;
+  }
+  if (nodeData && nodeData.type === HrmDataTypeEnum.folder) {
+    return;
+  }
   const currentIndex = apiTabsData.value.findIndex(dict => dict.apiId === nodeData.apiId)
-  if(currentIndex === -1){return;}
+  if (currentIndex === -1) {
+    return;
+  }
   currentTab.value = nodeData.apiId;
   activeTabChange(nodeData.apiId);
 
@@ -383,10 +371,12 @@ function handleNodeChange(nodeData, node) {
 function showFolderDialog() {
   loading.value.preSaveFolderDialog = true;
   let currentNodeObj = treeRef.value.getCurrentNode();
-  if (currentNodeObj && !currentNodeObj.isParent){currentNodeObj = treeRef.value.getNode(currentNodeObj.patentId)}
+  if (currentNodeObj && !currentNodeObj.isParent) {
+    currentNodeObj = treeRef.value.getNode(currentNodeObj.patentId)
+  }
   if (currentNodeObj) {
-      currentSelectParentNode.value = currentNodeObj;
-  }else {
+    currentSelectParentNode.value = currentNodeObj;
+  } else {
     currentSelectParentNode.value = null;
   }
 
@@ -397,11 +387,11 @@ function showFolderDialog() {
 
 <template>
   <div class="app-container" v-loading="loadingApi" style="height: 100%">
-    <el-row>
-      <el-button size="small" @click="getApiTree" icon="RefreshRight"></el-button>
-      <el-button size="small" @click="showFolderDialog" type="primary">新增文件夹</el-button>
+    <el-row :gutter="10">
+      <el-button @click="getApiTree" icon="RefreshRight"></el-button>
+      <el-button @click="showFolderDialog" type="primary">新增文件夹</el-button>
       <span style="flex-grow: 1"></span>
-      <el-dropdown size="small" split-button type="primary" @click="loading.preSaveDialog = true"
+      <el-dropdown split-button type="primary" @click="loading.preSaveDialog = true"
                    v-loading="loading.saveApi" :disabled="loading.saveApi">
         保存
         <template #dropdown>
@@ -412,10 +402,12 @@ function showFolderDialog() {
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <el-button size="small" @click="debug" :loading="loading.debugApi" :disabled="loading.debugApi" type="warning">
-        调试
-      </el-button>
-      <EnvSelector v-model:selected-env="selectedEnv" size="small" :disable="loading.debugApi"></EnvSelector>
+
+      <DebugComponent :run-type="RunTypeEnum.api"
+                      :case-data="debugFromCaseData"
+                      @debug-run="debug"
+      ></DebugComponent>
+
     </el-row>
 
     <el-container>
@@ -514,7 +506,8 @@ function showFolderDialog() {
     <el-dialog :title="folderForm.name" @close="loading.preSaveFolderDialog = false"
                v-model="loading.preSaveFolderDialog">
       <el-main>
-        <el-input :model-value="currentSelectParentNode?currentSelectParentNode.name:'根目录'" placeholder="请输入文件夹名称" disabled>
+        <el-input :model-value="currentSelectParentNode?currentSelectParentNode.name:'根目录'"
+                  placeholder="请输入文件夹名称" disabled>
           <template #prepend>
             <el-text>父级目录:</el-text>
           </template>

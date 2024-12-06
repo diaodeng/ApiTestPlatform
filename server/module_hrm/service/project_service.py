@@ -1,7 +1,10 @@
-from module_hrm.dao.project_dao import *
+from sqlalchemy.orm import Session
+
 from module_hrm.dao.debugtalk_dao import DebugTalkModel
-from module_hrm.service.debugtalk_service import DebugTalkService
+from module_hrm.dao.project_dao import ProjectDao
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.entity.vo.project_vo import ProjectQueryModel, ProjectModel, DeleteProjectModel
+from module_hrm.service.debugtalk_service import DebugTalkService
 from utils.common_util import CamelCaseUtil
 
 

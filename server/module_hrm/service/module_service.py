@@ -1,5 +1,8 @@
-from module_hrm.dao.module_dao import *
+from sqlalchemy.orm import Session
+from module_hrm.dao.module_dao import ModuleDao
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.entity.vo.module_vo import ModulePageQueryModel, ModuleModel, AddModuleModel, DeleteModuleModel, \
+    ModuleProjectModel, ModuleQuery
 from utils.common_util import export_list2excel, CamelCaseUtil
 
 
@@ -7,6 +10,7 @@ class ModuleService:
     """
     模块管理模块服务层
     """
+
     @classmethod
     def get_module_list_services(cls, query_db: Session, query_object: ModulePageQueryModel, is_page: bool = False):
         """
@@ -19,7 +23,6 @@ class ModuleService:
         list_result = ModuleDao.get_module_list(query_db, query_object, is_page)
 
         return list_result
-
 
     @classmethod
     def get_module_list_services_all(cls, query_db: Session, page_object: ModuleModel):
@@ -56,7 +59,8 @@ class ModuleService:
         :return: 新增模块校验结果
         """
         add_module = ModuleModel(**page_object.model_dump(by_alias=True))
-        module = ModuleDao.get_module_detail_by_info(query_db, ModuleQuery(moduleName=page_object.module_name, projectId=page_object.project_id))
+        module = ModuleDao.get_module_detail_by_info(query_db, ModuleQuery(moduleName=page_object.module_name,
+                                                                           projectId=page_object.project_id))
         if module:
             result = dict(is_success=False, message='模块名称已存在')
         else:
@@ -64,7 +68,8 @@ class ModuleService:
                 add_result = ModuleDao.add_module_dao(query_db, add_module)
                 module_id = add_result.module_id
                 if page_object.project_id:
-                    ModuleDao.add_module_project_dao(query_db, ModuleProjectModel(moduleId=module_id, projectId=page_object.project_id))
+                    ModuleDao.add_module_project_dao(query_db, ModuleProjectModel(moduleId=module_id,
+                                                                                  projectId=page_object.project_id))
                 query_db.commit()
                 result = dict(is_success=True, message='新增成功')
             except Exception as e:
@@ -166,7 +171,8 @@ class ModuleService:
                 item['status'] = '正常'
             else:
                 item['status'] = '停用'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in data]
+        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
+                    data]
         binary_data = export_list2excel(new_data)
 
         return binary_data

@@ -6,6 +6,7 @@ from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
+from module_hrm.enums.enums import QtrDataStatusEnum
 
 
 class ModuleModel(CommonDataModel):
@@ -22,7 +23,7 @@ class ModuleModel(CommonDataModel):
     other_desc: Optional[str] = None
     desc2mind: Optional[str] = None
     sort: Optional[int] = None
-    status: Optional[int] = None
+    status: Optional[int] = QtrDataStatusEnum.normal.value
     # create_by: Optional[str] = None
     # create_time: Optional[datetime] = None
     # update_by: Optional[str] = None

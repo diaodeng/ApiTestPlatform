@@ -10,6 +10,7 @@ const value = defineModel()
       :key="dict.value"
       :label="dict.label"
       :value="dict.value"
+      :disabled="dict.disabled"
   />
 </el-select>
 </template>

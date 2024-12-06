@@ -8,9 +8,9 @@ from module_admin.service.login_service import LoginService
 from module_hrm.entity.vo.case_vo import CasePageQueryModel
 from module_hrm.enums.enums import DataType
 from module_hrm.service.config_service import ConfigService, Session
-from utils.log_util import *
-from utils.page_util import *
-from utils.response_util import *
+from utils.log_util import logger
+from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
 
 hrmConfigController = APIRouter(prefix='/hrm/config', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -18,9 +18,9 @@ hrmConfigController = APIRouter(prefix='/hrm/config', dependencies=[Depends(Logi
 @hrmConfigController.get("/list", response_model=PageResponseModel,
                          dependencies=[Depends(CheckUserInterfaceAuth('hrm:config:list'))])
 async def get_config_list(request: Request, page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
-                       query_db: Session = Depends(get_db),
-                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)
-                       ):
+                          query_db: Session = Depends(get_db),
+                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                          ):
     try:
         # 获取分页数据
         page_query.manager = current_user.user.user_id
@@ -37,9 +37,9 @@ async def get_config_list(request: Request, page_query: CasePageQueryModel = Dep
 @hrmConfigController.get("/all", response_model=PageResponseModel,
                          dependencies=[Depends(CheckUserInterfaceAuth('hrm:config:list'))])
 async def get_config_all(request: Request, page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
-                       query_db: Session = Depends(get_db),
-                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)
-                       ):
+                         query_db: Session = Depends(get_db),
+                         current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                         ):
     try:
         # 获取分页数据
         page_query.manager = current_user.user.user_id

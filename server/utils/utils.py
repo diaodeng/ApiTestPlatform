@@ -4,7 +4,7 @@ import os
 import platform
 import time
 import uuid
-from loguru import logger
+from utils.log_util import logger
 from redlock import RedLock, RedLockError
 from config.env import RedisConfig
 

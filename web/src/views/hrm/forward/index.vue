@@ -19,16 +19,6 @@
             @keyup.enter="handleQuery"
         />
       </el-form-item>
-      <el-form-item label="状态" prop="status">
-        <el-select v-model="queryParams.status" placeholder="转发规则状态" clearable style="width: 100px">
-          <el-option
-              v-for="dict in qtr_rule_status"
-              :key="dict.value"
-              :label="dict.label"
-              :value="dict.value"
-          />
-        </el-select>
-      </el-form-item>
       <el-form-item>
         <el-checkbox v-model="queryParams.onlySelf" @change="handleQuery">仅自己的数据</el-checkbox>
       </el-form-item>
@@ -168,7 +158,6 @@
 
 <script setup name="Rules">
 import * as forwardApi from "@/api/hrm/forward";
-import TableKeyValue from "@/components/hrm/table-key-value.vue";
 import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import {initForwardRulesFormData} from "@/components/hrm/data-template";
 import {ElMessage, ElMessageBox} from "element-plus";

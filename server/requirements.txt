@@ -17,3 +17,7 @@ user-agents==2.2.0
 redlock
 jmespath
 httpx
+PyExecJS==1.5.1
+autopep8
+pydantic
+jsonpath

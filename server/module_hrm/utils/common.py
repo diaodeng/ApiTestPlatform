@@ -10,19 +10,22 @@ def type_change(type, value):
     :return: ok or error
     """
     try:
-        if type == 'float':
+        if type == 'any':
+            value = value
+        elif type == 'float':
             value = float(value)
         elif type == 'int':
             value = int(value)
         elif type == "json":
-            value = json.loads(value)
+            if isinstance(value, str):
+                value = json.loads(value)
         elif type == 'boolean':
-            if value == 'False':
+            if value in ('False', 'false'):
                 value = False
-            elif value == 'True':
+            elif value in ('True', 'true'):
                 value = True
             else:
-                raise TypeError(f"类型【{type}】不支持")
+                raise TypeError(f"类型【{type}】不支持【{value}】，只能是'True'、'true'或者'False'、'false'")
     except ValueError:
         raise TypeError('{value}转换{type}失败'.format(value=value, type=type))
 
@@ -162,7 +165,7 @@ def update_or_extend_list(old_dict_list: list[dict],
     list1_dict = {d[key]: d for d in old_dict_list if d.get("key", None)}
 
     for item in new_dict_list:
-        if check_enable and not item.get("enable", False): continue
+        if check_enable and not item.get("enable", True): continue
         # 如果list2中的key在list1中存在，则更新list1中的字典
         if item[key] in list1_dict:
             list1_dict[item[key]].update(item)

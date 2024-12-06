@@ -176,7 +176,7 @@
 </template>
 
 <script setup name="Env">
-import {listEnv, getEnv, delEnv, addEnv, updateEnv} from "@/api/hrm/env";
+import {listEnv, getEnv, delEnv, addEnv, updateEnv, copyEnv} from "@/api/hrm/env";
 import TableVariables from '../../../components/hrm/table-variables.vue';
 import EditLabelText from "@/components/hrm/common/edit-label-text.vue";
 import {ElMessage} from "element-plus";
@@ -336,7 +336,11 @@ function handleDelete(row) {
 
 /** 删除按钮操作 */
 function handleCopy(row) {
-  ElMessage.warning("暂未实现复制功能")
+  copyEnv({envId: row.envId}).then(()=>{
+    ElMessage.success("复制成功");
+  }).catch((e)=>{
+    ElMessage.error("复制异常");
+  });
 }
 
 getList();

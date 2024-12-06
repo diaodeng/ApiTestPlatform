@@ -65,11 +65,11 @@ class ModuleDao:
         :return: 模块列表信息对象
         """
         query = db.query(HrmModule) \
-            .filter(HrmModule.project_id ==query_object.project_id if query_object.project_id else True,
+            .filter(HrmModule.project_id == query_object.project_id if query_object.project_id else True,
                     HrmModule.module_name.like(f'%{query_object.module_name}%') if query_object.module_name else True,
                     HrmModule.status == query_object.status if query_object.status else True
                     ) \
-            .order_by(HrmModule.create_time.desc()).order_by(HrmModule.sort) \
+            .order_by(HrmModule.sort, HrmModule.create_time.desc(), HrmModule.update_time.desc()) \
             .distinct()
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
 
@@ -85,7 +85,9 @@ class ModuleDao:
         :return: 模块列表信息对象
         """
         result = db.query(HrmModule) \
-            .filter(HrmModule.project_id == page_object.project_id) \
+            .filter(HrmModule.project_id == page_object.project_id).order_by(HrmModule.sort,
+                                                                             HrmModule.create_time.desc(),
+                                                                             HrmModule.update_time.desc()) \
             .distinct().all()
 
         return result
@@ -102,7 +104,6 @@ class ModuleDao:
         result = (db.query(HrmModule).distinct().all())
 
         return result
-
 
     @classmethod
     def add_module_dao(cls, db: Session, module: ModuleModel):

@@ -136,7 +136,7 @@ class JobService:
         return result
 
     @staticmethod
-    async def export_job_list_services(request: Request, job_list: List):
+    async def export_job_list_services(request: Request, job_list: list):
         """
         导出定时任务信息service
         :param request: Request对象

@@ -3,9 +3,9 @@ from fastapi import Depends
 from config.get_db import get_db
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_admin.service.notice_service import *
-from utils.response_util import *
-from utils.log_util import *
-from utils.page_util import *
+from utils.response_util import ResponseUtil
+from utils.log_util import logger
+from utils.page_util import PageResponseModel
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.annotation.log_annotation import log_decorator
 

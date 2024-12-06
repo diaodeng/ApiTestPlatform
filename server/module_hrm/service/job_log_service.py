@@ -1,4 +1,5 @@
-from module_hrm.dao.job_log_dao import *
+from module_hrm.dao.job_log_dao import JobLogDao, JobLogPageQueryModel, JobLogModel, DeleteJobLogModel
+from sqlalchemy.orm import Session
 from module_admin.service.dict_service import Request, DictDataService
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel
@@ -80,7 +81,7 @@ class JobLogService:
         return CrudResponseModel(**result)
 
     @staticmethod
-    async def export_job_log_list_services(request: Request, job_log_list: List):
+    async def export_job_log_list_services(request: Request, job_log_list: list):
         """
         导出定时任务日志信息service
         :param request: Request对象

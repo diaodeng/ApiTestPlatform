@@ -4,13 +4,17 @@ import sys
 import time
 from datetime import datetime
 
-from loguru import logger
+from module_hrm.utils.util import get_system_stats
+from utils.log_util import logger
 
 from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel, UserInfoModel
 from module_hrm.entity.vo.case_vo import CaseRunModel, FeishuRobotModel
 from module_hrm.service.runner.runner_service import run_by_async
 
+
+def job_sys_info(*args, **kwargs):
+    get_system_stats()
 
 def job(*args, **kwargs):
     # logger.info(args)
@@ -65,7 +69,7 @@ def job_run_test(*args, **kwargs):
     try:
         logger.info("测试任务执行开始")
         in_data = kwargs
-
+        new_data_format = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         user_info_module = UserInfoModel()
         user_info_module.user_name = in_data["userName"]
         user_info_module.user_id = in_data["userId"]
@@ -75,7 +79,7 @@ def job_run_test(*args, **kwargs):
         data = CaseRunModel(env=1)
         data.ids = in_data.get("ids", [])
         data.run_type = in_data.get("runType", 1)
-        data.report_name = in_data.get("reportName", datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"))
+        data.report_name = f'{in_data.get("reportName", "")}{new_data_format}'
         data.repeat_num = in_data.get("repeatNum", 1)
         data.env = in_data["env"]
         data.concurrent = in_data.get("concurrent", 1)

@@ -78,3 +78,13 @@ export function getSuiteDetail(suiteDetailId) {
     method: 'get'
   })
 }
+
+
+// 修改套件内数据的顺序
+export function changeContentOrder(data) {
+  return request({
+    url: '/qtr/suite/changeOrder',
+    method: 'post',
+    data: data
+  })
+}
