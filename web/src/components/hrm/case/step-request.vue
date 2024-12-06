@@ -61,21 +61,6 @@ const calcRequestContainerHeight = computed(()=>{
               placeholder="Please input"
           >
             <template #prepend>URL</template>
-            <template #append>
-              <el-dropdown>
-              <span class="el-dropdown-link">
-                <el-icon class="el-icon--right">
-                  <arrow-down/>
-                </el-icon>
-              </span>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item disabled>111</el-dropdown-item>
-                    <el-dropdown-item disabled>222</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </template>
           </el-input>
         </div>
       </el-col>

@@ -71,29 +71,6 @@ class AgentService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def edit_agent_services_controller(cls, query_db, agent_object: AgentModel):
-        """
-        编辑Agent信息service
-        :param query_db: orm对象
-        :param agent_object: 编辑Agent对象
-        :return: 编辑Agent校验结果
-        """
-        edit_agent = agent_object.model_dump(exclude_unset=True)
-        info = cls.agent_detail_services_controller(query_db, edit_agent.get('agent_id'))
-        if info:
-            try:
-                AgentDao.edit_agent_dao_controller(query_db, edit_agent)
-                query_db.commit()
-                result = dict(is_success=True, message='更新成功')
-            except Exception as e:
-                query_db.rollback()
-                raise e
-        else:
-            result = dict(is_success=False, message='Agent不存在')
-
-        return CrudResponseModel(**result)
-
-    @classmethod
     def delete_agent_services(cls, query_db: Session, page_object: DeleteAgentModel):
         """
         删除Agent信息service
@@ -131,19 +108,6 @@ class AgentService:
         return result
 
     @classmethod
-    def agent_detail_services_controller(cls, query_db, id: int) -> AgentModel:
-        """
-        获取Agent详细信息service
-        :param query_db: orm对象
-        :param agent_id: AgentId
-        :return: AgentId对应的信息
-        """
-        agent = AgentDao.get_agent_by_id_controller(query_db, agent_id=id)
-        result = AgentModel(**CamelCaseUtil.transform_result(agent))
-
-        return result
-
-    @classmethod
     def get_agent_detail_services(cls, query_db: Session, agent_code: str) -> AgentModel:
         """
         获取Agent详细信息service
@@ -152,19 +116,6 @@ class AgentService:
         :return: AgentCode对应的信息
         """
         agent = AgentDao.get_agent_by_code(query_db, agent_code=agent_code)
-        result = AgentModel(**CamelCaseUtil.transform_result(agent))
-
-        return result
-
-    @classmethod
-    def get_agent_detail_services_controller(cls, query_db, agent_code: str) -> AgentModel:
-        """
-        获取Agent详细信息service
-        :param query_db: orm对象
-        :param agent_code: AgentCode
-        :return: AgentCode对应的信息
-        """
-        agent = AgentDao.get_agent_by_code_controller(query_db, agent_code=agent_code)
         result = AgentModel(**CamelCaseUtil.transform_result(agent))
 
         return result

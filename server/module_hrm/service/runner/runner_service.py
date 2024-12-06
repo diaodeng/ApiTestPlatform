@@ -38,30 +38,31 @@ if "WSL" in str(platform.platform()):
 
 
 async def save_run_detail(query_db, case_data, run_info):
-    case_data.config.variables = []
-    case_data.config.headers = []
-    case_data.config.parameters = None
+    if case_data.case_id and isinstance(case_data.case_id, int):  # 没有ID的请求信息不记录
+        case_data.config.variables = []
+        case_data.config.headers = []
+        case_data.config.parameters = None
 
-    for step in case_data.teststeps:
-        step.variables = []
+        for step in case_data.teststeps:
+            step.variables = []
 
-    run_detail_obj = HrmRunDetailModel()
-    run_detail_obj.manager = run_info.runner
-    run_detail_obj.run_id = case_data.case_id
-    run_detail_obj.report_id = run_info.report_id
-    run_detail_obj.run_type = run_info.run_type
-    run_detail_obj.run_name = case_data.config.name
-    run_detail_obj.run_start_time = datetime.fromtimestamp(case_data.config.result.start_time_stamp)
-    run_detail_obj.run_end_time = datetime.fromtimestamp(case_data.config.result.end_time_stamp)
-    logger.debug(f"用例{case_data.config.name}执行完成时间，stamp：{case_data.config.result.end_time_stamp}")
-    logger.debug(f"用例{case_data.config.name}执行完成时间，format：{case_data.config.result.end_time_iso}")
-    logger.debug(f"用例{case_data.config.name}执行完成时间，case 耗时：{case_data.config.result.duration}")
-    run_detail_obj.run_duration = case_data.config.result.duration
-    run_detail_obj.run_detail = case_data.model_dump_json(by_alias=True)
-    run_detail_obj.status = case_data.config.result.status
+        run_detail_obj = HrmRunDetailModel()
+        run_detail_obj.manager = run_info.runner
+        run_detail_obj.run_id = case_data.case_id
+        run_detail_obj.report_id = run_info.report_id
+        run_detail_obj.run_type = run_info.run_type
+        run_detail_obj.run_name = case_data.config.name
+        run_detail_obj.run_start_time = datetime.fromtimestamp(case_data.config.result.start_time_stamp)
+        run_detail_obj.run_end_time = datetime.fromtimestamp(case_data.config.result.end_time_stamp)
+        logger.debug(f"用例{case_data.config.name}执行完成时间，stamp：{case_data.config.result.end_time_stamp}")
+        logger.debug(f"用例{case_data.config.name}执行完成时间，format：{case_data.config.result.end_time_iso}")
+        logger.debug(f"用例{case_data.config.name}执行完成时间，case 耗时：{case_data.config.result.duration}")
+        run_detail_obj.run_duration = case_data.config.result.duration
+        run_detail_obj.run_detail = case_data.model_dump_json(by_alias=True)
+        run_detail_obj.status = case_data.config.result.status
 
-    run_detail = RunDetailDao.create(query_db, run_detail_obj)
-    return run_detail
+        run_detail = RunDetailDao.create(query_db, run_detail_obj)
+        return run_detail
 
 
 async def run_by_single(query_db: Session,

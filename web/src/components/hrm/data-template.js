@@ -1,4 +1,4 @@
-import {randomString} from "@/utils/tools.js";
+import {randomNumber, randomString} from "@/utils/tools.js";
 import {HrmDataTypeEnum, CaseStepTypeEnum, CodeTypeEnum, CaseRunStatusEnum} from "@/components/hrm/enum.js";
 
 
@@ -136,7 +136,7 @@ export const initCaseFormData = {
 * API库表对应数据模板
 * */
 export const initApiFormData = {
-    apiId: randomString(10),
+    apiId: randomNumber(10),
     name: "新增API",
     path: "",
     interface: "",

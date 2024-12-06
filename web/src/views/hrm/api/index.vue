@@ -57,8 +57,10 @@ onMounted(() => {
   });
 });
 
-const debugFromCaseData = computed(() => {
-  const apiData = toRaw(currentApiData.value);
+const debugFromCaseData = ref(null);
+
+watch(() => currentApiData.value, (newData) => {
+  const apiData = toRaw(newData);
 
   const data = apiData ? {
     request: apiData.requestInfo,
@@ -66,8 +68,8 @@ const debugFromCaseData = computed(() => {
     name: apiData.name,
     caseId: apiData.apiId,
   } : {};
-  return data;
-})
+  debugFromCaseData.value = data;
+});
 
 provide("hrm_case_config_list", hrm_config_list);
 
@@ -140,6 +142,9 @@ function saveApiInfo(type) {
 * 保存成功后更新apiTabsData和treeDataSource、当前选中的tabid
 * */
 function apiSaveSuccess(res, oldApiId) {
+  if (res && res.data && res.data.apiId) {
+    currentApiData.value.apiId = res.data.apiId;
+  }
   let response = res;
   if (response) {
     let treeNode = treeRef.value.getNode(oldApiId);
@@ -333,7 +338,7 @@ const handleAddNode = (type, newData, parentNodeData) => {
   addApi({type: dataType, apiType: type, name: newData.name, parentId: parentNodeData.apiId}).then(res => {
     ElMessage.success("文件夹【" + newData.name + "】新增成功");
   }).catch(err => {
-  })
+  });
 
 }
 
@@ -341,7 +346,7 @@ const copyAsCase = () => {
   copyApi({apiId: data.apiId}).then(res => {
     ElMessage.success("复制成功");
   }).catch(err => {
-  })
+  });
 }
 
 function showRunHistory() {

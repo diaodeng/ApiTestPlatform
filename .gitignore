@@ -10,6 +10,15 @@ server/.env.test
 server/alembic
 server/alembic.ini
 server/node_modules
+*.zip
+package.json
+package-lock.json
+test_file.py
+logs/
+build
+dist
+node_modules
+
 
 web/vite.config.js.timestamp*.mjs
 

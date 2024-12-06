@@ -25,37 +25,7 @@ class AgentDao:
         return agent_info
 
     @classmethod
-    def get_agent_by_id_controller(cls, db, agent_id: int):
-        """
-        根据agent_id获取在用Agent信息
-        :param db: orm对象
-        :param agent_id: AgentId
-        :return: 在用Agent信息对象
-        """
-        agent_info = db.query(QtrAgent) \
-            .filter(QtrAgent.agent_id == agent_id,
-                    QtrAgent.del_flag == 1) \
-            .first()
-
-        return agent_info
-
-    @classmethod
     def get_agent_by_code(cls, db: Session, agent_code: str):
-        """
-        根据agent_code获取在用Agent信息
-        :param db: orm对象
-        :param agent_code: AgentCode
-        :return: 在用Agent信息对象
-        """
-        agent_info = db.query(QtrAgent) \
-            .filter(QtrAgent.agent_code == agent_code,
-                    QtrAgent.del_flag == 1) \
-            .first()
-
-        return agent_info
-
-    @classmethod
-    def get_agent_by_code_controller(cls, db, agent_code: str):
         """
         根据agent_code获取在用Agent信息
         :param db: orm对象
@@ -105,19 +75,7 @@ class AgentDao:
     @classmethod
     def edit_agent_dao(cls, db: Session, agent: dict):
         """
-        编辑Agent数据库操作
-        :param db: orm对象
-        :param agent: 需要更新的Agent字典
-        :return: 编辑校验结果
-        """
-        db.query(QtrAgent) \
-            .filter(QtrAgent.agent_id == agent.get('agent_id')) \
-            .update(agent)
-
-    @classmethod
-    def edit_agent_dao_controller(cls, db, agent: dict):
-        """
-        编辑Agent数据库操作
+        编辑DebugTalk数据库操作
         :param db: orm对象
         :param agent: 需要更新的Agent字典
         :return: 编辑校验结果

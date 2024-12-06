@@ -35,7 +35,6 @@ class WebSocketClient:
                 # msg = json.loads(message)
                 if 'ok' and "200" in message:
                     self.status = True
-                    await self.send_heart()
                     # logger.info(msg.get('message'))
                 else:
                     # 处理接收到的数据，并获取响应
@@ -123,8 +122,9 @@ class WebSocketClient:
         """向服务端发送心跳"""
         try:
             # 发送心跳
-            await self.websocket.send(json.dumps({"code": 200, "status": "ok", "message": f"client {self.agent_code} is alive"}))
-            # await asyncio.sleep(HEARTBEAT_INTERVAL)
+            await self.websocket.send(
+                json.dumps({"code": 200, "status": "ok", "message": f"client {self.agent_code} is alive"}))
+            await asyncio.sleep(HEARTBEAT_INTERVAL)
             self.status = True
         except Exception as e:
-            logger.error(f'客户端向服务端发送心跳发送异常：{e}')
+            pass

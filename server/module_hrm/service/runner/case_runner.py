@@ -112,8 +112,7 @@ class CaseRunner(object):
         """
         执行测试步骤中的自定义回调脚本
         """
-        if hooks_info.code_info.code_type != CodeTypeEnum.js.value:
-            hooks_info.code_info.code_content = self.__parse_in_case(hooks_info.code_info.code_content)
+        hooks_info.code_info.code_content = self.__parse_in_case(hooks_info.code_info.code_content)
         case_run_utils.exec_hook_script(hooks_info,
                                         self.logger,
                                         self.handler,
@@ -394,8 +393,7 @@ class RequestRunner(object):
                     parse_function_set_default_params(hook, var, self.debugtalk_func_map, (self.step_data,))
                     self.logger.info(
                         f"自定义{hook_name}回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
-            if hooks_info.code_info.code_type != CodeTypeEnum.js.value:
-                hooks_info.code_info.code_content = self.parse_data_in_step(hooks_info.code_info.code_content)
+            hooks_info.code_info.code_content = self.parse_data_in_step(hooks_info.code_info.code_content)
             self.exec_hook_script(hooks_info, is_before=not is_after_step)
         except Exception as setupre:
             if is_after_step:
@@ -836,7 +834,6 @@ class Websocket(RequestRunner):
             else:
                 async with websockets.connect(request_data["url"]) as websocket:
                     self.logger.info(f'{self.step_data.name} 连接成功')
-                    res_headers = dict(websocket.response_headers) if hasattr(websocket, "response_headers") else {}
                     await websocket.send(request_data["data"])
                     self.logger.info(f'{self.step_data.name} 发送数据成功')
 
@@ -846,7 +843,7 @@ class Websocket(RequestRunner):
                         response = await websocket.recv()
                         res_content.append(response)
 
-
+                    res_headers = dict(websocket.response_headers)
 
             self.logger.info(f'{self.step_data.name} 接收数据成功')
             self.logger.info(f'响应数据：{res_content}')
