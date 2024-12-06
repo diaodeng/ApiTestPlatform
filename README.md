@@ -1,35 +1,29 @@
 <h1 align="center" style="margin: 30px 0 30px; font-weight: bold;">QTestRunner</h1>
 <h4 align="center">基于RuoYi-Vue3+FastAPI前后端分离的快速开发框架</h4>
-<p align="center">
-	<a href="https://gitee.com/insistence2022/RuoYi-Vue3-FastAPI/stargazers"><img src="https://gitee.com/insistence2022/RuoYi-Vue3-FastAPI/badge/star.svg?theme=dark"></a>
-    <a href="https://github.com/insistence/RuoYi-Vue3-FastAPI"><img src="https://img.shields.io/github/stars/insistence/RuoYi-Vue3-FastAPI?style=social"></a>
-	<a href="https://gitee.com/insistence2022/RuoYi-Vue3-FastAPI"><img src="https://img.shields.io/badge/RuoYiVue3FastAPI-v1.1.2-brightgreen.svg"></a>
-	<a href="https://gitee.com/insistence2022/RuoYi-Vue3-FastAPI/blob/master/LICENSE"><img src="https://img.shields.io/github/license/mashape/apistatus.svg"></a>
-    <img src="https://img.shields.io/badge/python-≥3.8-blue">
-    <img src="https://img.shields.io/badge/MySQL-≥5.7-blue">
-</p>
 
 
-
-
-
+[本项目gitee地址](https://gitee.com/zywstart/api-test-platform.git)
+[本项目github地址](https://github.com/diaodeng/ApiTestPlatform.git)
 
 
 ## 平台简介
 
 RuoYi-Vue3-FastAPI是一套全部开源的快速开发平台，毫无保留给个人及企业免费使用。
 
-* 前端采用Vue、Element Plus，基于<u>[RuoYi-Vue3](https://github.com/yangzongzhuan/RuoYi-Vue3)</u>前端项目修改。
-* 后端采用FastAPI、sqlalchemy、MySQL、Redis、OAuth2 & Jwt。
-* 权限认证使用OAuth2 & Jwt，支持多终端认证系统。
-* 支持加载动态权限菜单，多方式轻松权限控制。
-* Vue2版本：
-  - Gitte仓库地址：https://gitee.com/insistence2022/RuoYi-Vue-FastAPI
-  - GitHub仓库地址：https://github.com/insistence/RuoYi-Vue-FastAPI
-* 纯Python版本：
-  - Gitte仓库地址：https://gitee.com/insistence2022/dash-fastapi-admin
-  - GitHub仓库地址：https://github.com/insistence/Dash-FastAPI-Admin
 * 特别鸣谢：<u>[RuoYi-Vue3](https://github.com/yangzongzhuan/RuoYi-Vue3)</u>
+
+## 测试相关功能
+1. 项目管理
+2. 模块管理
+3. 配置管理
+4. 用例管理
+5. 测试套件
+6. 定时任务
+7. 报告管理
+8. 环境管理
+9. 客户端管理: 可以将用例执行转发到对应的客户机执行，客户机启动时会自动注册到服务端
+10. 转发规则管理： 转发规则，比如将固定开头的URL换成其他URL来请求
+11. 接口管理
 
 ## 内置功能
 
