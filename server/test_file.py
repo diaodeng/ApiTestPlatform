@@ -757,6 +757,87 @@ api_data = {
 
 
 if __name__ == "__main__":
-    # print(json.dumps(gen_map(), indent=4, ensure_ascii=False))
-    # print(json.dumps(current_map, indent=4, ensure_ascii=False))
-    print(len("29300650371938|5120209|PHILADELPHIA CREAM CHEESE 226G|PHILADELPHIA|30104|3010401|1 EA|EA|1.000| |Y|||||0|660||||||||||||||MO||0|NORMAL".split("|")))
+    data = """
+INSERT INTO sys_menu VALUES (1061,"测试管理",0,1,"hrm",null,null,1,0,"M","0","0",null,"component","admin","2024-05-06 10:07:50","admin","2024-11-06 15:27:10","");
+INSERT INTO sys_menu VALUES (1062,"项目管理",1061,1,"project","hrm/project/index",null,1,0,"M","0","0","hrm:project:list","clipboard","admin","2024-05-06 10:07:50","admin","2024-05-06 10:24:34","");
+INSERT INTO sys_menu VALUES (1063,"项目列表",1062,1,"project","hrm/project/index",null,1,0,"C","0","0","hrm:project:list","clipboard","admin","2024-05-06 10:07:50","admin","2024-05-06 10:07:50","");
+INSERT INTO sys_menu VALUES (1064,"DebugTalk.py",1062,2,"debugtalk","hrm/debugtalk/index",null,1,0,"C","0","0","hrm:debugtalk:list","code","admin","2024-05-06 10:07:50","admin","2024-09-02 10:59:27","");
+INSERT INTO sys_menu VALUES (1065,"模块管理",1061,2,"module","hrm/module/index",null,1,0,"C","0","0","hrm:module:list","example","admin","2024-05-06 10:07:50","admin","2024-05-06 10:07:50","");
+INSERT INTO sys_menu VALUES (1066,"用例管理",1061,4,"case","hrm/case/index",null,1,0,"C","0","0","hrm:case:list","size","admin","2024-05-06 10:07:50","admin","2024-10-10 19:41:13","");
+INSERT INTO sys_menu VALUES (1067,"配置管理",1061,3,"config","hrm/config/index",null,1,0,"C","0","0","hrm:config:list","system","admin","2024-05-06 10:07:50","admin","2024-10-10 19:41:19","");
+INSERT INTO sys_menu VALUES (1068,"测试计划",1061,5,"qtr","",null,1,0,"M","0","0","","skill","admin","2024-05-06 10:07:50","admin","2024-08-25 13:33:19","");
+INSERT INTO sys_menu VALUES (1069,"报告管理",1061,6,"report","hrm/report/index",null,1,0,"C","0","0","hrm:report:list","redis-list","admin","2024-05-06 10:07:50","admin","2024-05-06 10:07:50","");
+INSERT INTO sys_menu VALUES (1070,"环境管理",1153,1,"env","hrm/env/index",null,1,0,"C","0","0","hrm:env:list","textarea","admin","2024-05-06 10:07:50","admin","2024-10-24 19:45:10","");
+INSERT INTO sys_menu VALUES (1071,"新增",1066,0,"",null,null,1,0,"F","0","0","hrm:case:add","#","admin","2024-05-09 10:06:11","admin","2024-05-09 10:06:11","");
+INSERT INTO sys_menu VALUES (1072,"修改-确定",1066,1,"",null,null,1,0,"F","0","0","hrm:case:edit","#","admin","2024-05-09 10:16:59","admin","2024-05-09 12:53:52","");
+INSERT INTO sys_menu VALUES (1073,"删除",1066,2,"",null,null,1,0,"F","0","0","hrm:case:remove","#","admin","2024-05-09 10:16:59","admin","2024-05-09 10:16:59","");
+INSERT INTO sys_menu VALUES (1074,"导出",1066,3,"",null,null,1,0,"F","0","0","hrm:case:export","#","admin","2024-05-09 10:16:59","admin","2024-05-09 10:16:59","");
+INSERT INTO sys_menu VALUES (1075,"修改-查看详情",1066,4,"",null,null,1,0,"F","0","0","hrm:case:detail","#","admin","2024-05-09 12:53:32","admin","2024-05-09 12:53:32","");
+INSERT INTO sys_menu VALUES (1076,"修改",1065,0,"",null,null,1,0,"F","0","0","hrm:module:edit","#","admin","2024-05-09 12:53:32","admin","2024-05-09 12:53:32","");
+INSERT INTO sys_menu VALUES (1077,"删除",1065,1,"",null,null,1,0,"F","0","0","hrm:module:remove","#","admin","2024-05-09 12:53:32","admin","2024-05-09 12:53:32","");
+INSERT INTO sys_menu VALUES (1078,"导出",1065,2,"",null,null,1,0,"F","0","0","hrm:module:export","#","admin","2024-05-09 12:53:32","admin","2024-05-09 12:53:32","");
+INSERT INTO sys_menu VALUES (1079,"新增",1065,3,"",null,null,1,0,"F","0","0","hrm:module:add","#","admin","2024-05-09 12:53:32","admin","2024-05-09 12:53:32","");
+INSERT INTO sys_menu VALUES (1080,"查看详情",1065,4,"",null,null,1,0,"F","0","0","hrm:module:detail","#","admin","2024-05-09 12:53:32","admin","2024-05-09 12:53:32","");
+INSERT INTO sys_menu VALUES (1081,"接口管理",1061,8,"api","hrm/api/index",null,1,0,"C","0","0","hrm:api:tree","icon","admin","2024-06-13 14:24:42","admin","2024-09-18 15:45:38","");
+INSERT INTO sys_menu VALUES (1083,"用例调试",1066,5,"",null,null,1,0,"F","0","0","hrm:case:debug","#","admin","2024-07-20 17:54:39","admin","2024-07-22 09:23:32","");
+INSERT INTO sys_menu VALUES (1084,"测试套件",1068,1,"suite","qtr/suite/index",null,1,0,"C","0","0","qtr:suite:list","swagger","admin","2024-08-19 21:58:20","admin","2024-08-25 13:31:32","");
+INSERT INTO sys_menu VALUES (1085,"执行计划",1068,2,"/qtr/job","qtr/job/index",null,1,0,"C","0","0","qtr:job:list","skill","admin","2024-08-19 21:58:20","admin","2024-08-25 14:55:23","");
+INSERT INTO sys_menu VALUES (1086,"执行用例",1066,6,"",null,null,1,0,"F","0","0","hrm:case:test","#","admin","2024-08-30 14:09:56","admin","2024-08-30 14:09:56","");
+INSERT INTO sys_menu VALUES (1088,"api详情",1081,1,"",null,null,1,0,"F","0","0","hrm:api:get","#","admin","2024-08-30 14:09:56","admin","2024-08-30 14:09:56","");
+INSERT INTO sys_menu VALUES (1089,"新增api",1081,2,"",null,null,1,0,"F","0","0","hrm:api:add","#","admin","2024-08-30 14:09:56","admin","2024-08-30 14:09:56","");
+INSERT INTO sys_menu VALUES (1090,"修改api",1081,3,"",null,null,1,0,"F","0","0","hrm:api:update","#","admin","2024-08-30 14:09:56","admin","2024-08-30 14:09:56","");
+INSERT INTO sys_menu VALUES (1091,"删除api",1081,4,"",null,null,1,0,"F","0","0","hrm:api:delete","#","admin","2024-08-30 14:09:56","admin","2024-08-30 14:09:56","");
+INSERT INTO sys_menu VALUES (1092,"执行api",1081,5,"",null,null,1,0,"F","0","0","hrm:api:debug","#","admin","2024-08-30 14:09:56","admin","2024-08-30 14:09:56","");
+INSERT INTO sys_menu VALUES (1093,"api执行历史",1081,6,"",null,null,1,0,"F","0","0","hrm:api:history","#","admin","2024-08-30 14:09:56","admin","2024-08-30 14:09:56","");
+INSERT INTO sys_menu VALUES (1094,"用例执行历史",1066,7,"",null,null,1,0,"F","0","0","hrm:case:history","#","admin","2024-08-30 14:09:56","admin","2024-08-30 14:09:56","");
+INSERT INTO sys_menu VALUES (1095,"增加",1064,1,"",null,null,1,0,"F","0","0","hrm:debugtalk:add","#","admin","2024-09-02 10:39:04","admin","2024-09-02 10:39:04","");
+INSERT INTO sys_menu VALUES (1096,"编辑",1064,2,"",null,null,1,0,"F","0","0","hrm:debugtalk:edit","#","admin","2024-09-02 10:39:04","admin","2024-09-02 10:39:04","");
+INSERT INTO sys_menu VALUES (1097,"删除",1064,3,"",null,null,1,0,"F","0","0","hrm:debugtalk:remove","#","admin","2024-09-02 10:39:04","admin","2024-09-02 10:39:04","");
+INSERT INTO sys_menu VALUES (1098,"详情",1064,4,"",null,null,1,0,"F","0","0","hrm:debugtalk:detail","#","admin","2024-09-02 10:39:04","admin","2024-09-02 10:39:04","");
+INSERT INTO sys_menu VALUES (1099,"新增",1070,1,"",null,null,1,0,"F","0","0","hrm:env:add","#","admin","2024-09-02 10:39:04","admin","2024-09-02 10:39:04","");
+INSERT INTO sys_menu VALUES (1100,"编辑",1070,2,"",null,null,1,0,"F","0","0","hrm:env:edit","#","admin","2024-09-02 10:39:04","admin","2024-09-02 10:39:04","");
+INSERT INTO sys_menu VALUES (1101,"删除",1070,3,"",null,null,1,0,"F","0","0","hrm:env:remove","#","admin","2024-09-02 10:39:04","admin","2024-09-02 10:39:04","");
+INSERT INTO sys_menu VALUES (1102,"复制",1070,4,"",null,null,1,0,"F","0","0","hrm:env:copy","#","admin","2024-09-02 10:39:04","admin","2024-09-02 11:14:47","");
+INSERT INTO sys_menu VALUES (1103,"详情",1070,5,"",null,null,1,0,"F","0","0","hrm:env:detail","#","admin","2024-09-02 10:39:04","admin","2024-09-02 11:20:08","");
+INSERT INTO sys_menu VALUES (1104,"详情",1069,1,"",null,null,1,0,"F","0","0","hrm:report:detail","#","admin","2024-09-02 11:19:37","admin","2024-09-02 11:19:37","");
+INSERT INTO sys_menu VALUES (1105,"删除",1069,2,"",null,null,1,0,"F","0","0","hrm:report:delete","#","admin","2024-09-02 11:19:37","admin","2024-09-02 11:19:37","");
+INSERT INTO sys_menu VALUES (1106,"复制",1066,8,"",null,null,1,0,"F","0","0","hrm:case:copy","#","admin","2024-09-02 11:19:37","admin","2024-09-02 11:19:37","");
+INSERT INTO sys_menu VALUES (1107,"增加",1063,1,"",null,null,1,0,"F","0","0","hrm:project:add","#","admin","2024-09-02 11:19:37","admin","2024-09-02 11:19:37","");
+INSERT INTO sys_menu VALUES (1108,"编辑",1063,2,"",null,null,1,0,"F","0","0","hrm:project:edit","#","admin","2024-09-02 11:19:37","admin","2024-09-02 11:19:37","");
+INSERT INTO sys_menu VALUES (1109,"删除",1063,3,"",null,null,1,0,"F","0","0","hrm:project:remove","#","admin","2024-09-02 11:19:37","admin","2024-09-02 11:19:37","");
+INSERT INTO sys_menu VALUES (1110,"查看执行历史详情",1066,9,"",null,null,1,0,"F","0","0","hrm:history:detail","#","admin","2024-09-03 19:06:37","admin","2024-09-03 19:06:37","");
+INSERT INTO sys_menu VALUES (1111,"删除执行历史",1066,10,"",null,null,1,0,"F","0","0","hrm:history:delete","#","admin","2024-09-03 19:06:37","admin","2024-09-03 19:06:37","");
+INSERT INTO sys_menu VALUES (1112,"查看执行历史详情",1081,7,"",null,null,1,0,"F","0","0","hrm:history:detail","#","admin","2024-09-03 19:06:37","admin","2024-09-03 19:06:37","");
+INSERT INTO sys_menu VALUES (1113,"删除执行历史",1081,9,"",null,null,1,0,"F","0","0","hrm:history:delete","#","admin","2024-09-03 19:06:37","admin","2024-09-03 19:06:37","");
+INSERT INTO sys_menu VALUES (1114,"用例执行",1063,4,"",null,null,1,0,"F","0","0","hrm:case:run","#","admin","2024-09-06 11:53:33","admin","2024-09-06 11:53:33","");
+INSERT INTO sys_menu VALUES (1115,"新增",1084,1,"",null,null,1,0,"F","0","0","qtr:suite:add","#","admin","2024-09-10 17:42:52","admin","2024-09-10 17:42:52","");
+INSERT INTO sys_menu VALUES (1116,"运行",1084,2,"",null,null,1,0,"F","0","0","hrm:case:run","#","admin","2024-09-10 17:42:52","admin","2024-09-10 17:42:52","");
+INSERT INTO sys_menu VALUES (1117,"修改",1084,3,"",null,null,1,0,"F","0","0","qtr:suite:edit","#","admin","2024-09-10 17:42:52","admin","2024-09-10 17:42:52","");
+INSERT INTO sys_menu VALUES (1118,"配置",1084,4,"",null,null,1,0,"F","0","0","qtr:suite:edit","#","admin","2024-09-10 17:42:52","admin","2024-09-10 17:42:52","");
+INSERT INTO sys_menu VALUES (1119,"删除",1084,5,"",null,null,1,0,"F","0","0","qtr:suite:remove","#","admin","2024-09-10 17:42:52","admin","2024-09-10 17:42:52","");
+INSERT INTO sys_menu VALUES (1123,"新增",1085,1,"",null,null,1,0,"F","0","0","qtr:job:add","#","admin","2024-09-25 17:28:28","admin","2024-09-25 17:28:28","");
+INSERT INTO sys_menu VALUES (1128,"编辑",1085,2,"",null,null,1,0,"F","0","0","qtr:job:edit","#","admin","2024-09-25 17:28:28","admin","2024-09-25 17:28:28","");
+INSERT INTO sys_menu VALUES (1133,"删除",1085,3,"",null,null,1,0,"F","0","0","qtr:job:remove","#","admin","2024-09-25 17:28:28","admin","2024-09-25 17:28:28","");
+INSERT INTO sys_menu VALUES (1138,"导出",1085,4,"",null,null,1,0,"F","0","0","qtr:job:export","#","admin","2024-09-25 17:28:28","admin","2024-09-25 17:28:28","");
+INSERT INTO sys_menu VALUES (1143,"日志",1085,5,"",null,null,1,0,"F","0","0","qtr:job:query","#","admin","2024-09-25 17:28:28","admin","2024-09-25 17:28:28","");
+INSERT INTO sys_menu VALUES (1148,"执行",1085,6,"",null,null,1,0,"F","0","0","qtr:job:changeStatus","#","admin","2024-09-25 17:28:28","admin","2024-09-25 17:28:28","");
+INSERT INTO sys_menu VALUES (1153,"环境管理",1061,7,"hrm",null,null,1,0,"M","0","0",null,"size","admin","2024-10-23 14:55:13","admin","2024-10-24 19:30:33","");
+INSERT INTO sys_menu VALUES (1158,"Agent管理",1153,2,"agent","hrm/agent/index",null,1,0,"C","0","0","qtr:agent:list","druid","admin","2024-10-23 14:55:13","admin","2024-11-04 19:27:46","");
+INSERT INTO sys_menu VALUES (1163,"转发管理",1153,3,"forwarding","hrm/forward/index",null,1,0,"C","0","0","qtr:forwardRules:list","code","admin","2024-10-23 14:55:13","admin","2024-11-04 20:02:28","");
+INSERT INTO sys_menu VALUES (1168,"编辑",1158,1,"",null,null,1,0,"F","0","0","qtr:agent:edit","#","admin","2024-11-04 19:24:03","admin","2024-11-04 19:24:03","");
+INSERT INTO sys_menu VALUES (1173,"删除",1158,2,"",null,null,1,0,"F","0","0","qtr:agent:remove","#","admin","2024-11-04 19:24:03","admin","2024-11-04 19:24:03","");
+INSERT INTO sys_menu VALUES (1178,"新增",1163,1,"",null,null,1,0,"F","0","0","qtr:forwardRules:add","#","admin","2024-11-04 19:24:03","admin","2024-11-04 20:03:09","");
+INSERT INTO sys_menu VALUES (1183,"编辑",1163,2,"",null,null,1,0,"F","0","0","qtr:forwardRules:edit","#","admin","2024-11-04 19:24:03","admin","2024-11-04 20:03:15","");
+INSERT INTO sys_menu VALUES (1188,"删除",1163,3,"",null,null,1,0,"F","0","0","qtr:forwardRules:remove","#","admin","2024-11-04 19:24:03","admin","2024-11-04 20:03:21","");
+INSERT INTO sys_menu VALUES (1193,"复制",1163,4,"",null,null,1,0,"F","0","0","qtr:forwardRules:copy","#","admin","2024-11-04 19:24:03","admin","2024-11-04 20:03:26","");
+INSERT INTO sys_menu VALUES (1198,"详情",1163,5,"",null,null,1,0,"F","0","0","qtr:forwardRules:detail","#","admin","2024-11-04 20:37:09","admin","2024-11-04 20:37:09","");
+"""
+    new_lines = []
+    for line in data.split('\n'):
+        if line.strip() != '':
+            line_split = line.split(",")
+            line_split[-2] = "null"
+            line_split[-4] = "sysdate()"
+            line = ",".join(line_split)
+            new_lines.append(line)
+    print("\n".join(new_lines))
