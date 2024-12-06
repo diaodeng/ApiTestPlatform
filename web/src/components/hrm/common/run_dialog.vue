@@ -3,12 +3,14 @@ import {ElDialog, ElMessage} from "element-plus";
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {testRun} from "@/api/hrm/run_detail.js";
 import {all as getAllForwardRules} from "@/api/hrm/forward";
+import {all as getAllAgent} from "@/api/hrm/agent.js";
 import {RunTypeEnum} from "@/components/hrm/enum.js";
 
 
 const dialogVisible = defineModel("dialogVisible");
 const runIds = defineModel("runIds");
 const allForwardRules = ref([]);
+const allAgent = ref([]);
 
 const props = defineProps({
   runType: Number,
@@ -92,6 +94,12 @@ function getForwardRule() {
   });
 }
 
+function getAgent() {
+  getAllAgent().then(response => {
+    allAgent.value = response.rows;
+  });
+}
+
 
 function handleClose() {
   dialogCanClose.value = true;
@@ -108,8 +116,15 @@ function beforeClose(done) {
   }
 }
 
+watch(()=>form.value.runBySort, (newValue)=>{
+  if (form.value.runBySort){
+    form.value.concurrent = 1;
+  }
+})
+
 onMounted(() => {
   getForwardRule();
+  getAgent();
 });
 
 </script>
@@ -143,7 +158,7 @@ onMounted(() => {
       </el-form-item>
       <el-form-item label="并发数量：">
         <el-input-number :min="1" controls-position="right" v-model="form.concurrent"
-                         placeholder="输入并发执行的用例数量"></el-input-number>
+                         placeholder="输入并发执行的用例数量" :disabled="form.runBySort"></el-input-number>
       </el-form-item>
 
       <el-form-item label="转发配置：">
@@ -155,10 +170,10 @@ onMounted(() => {
                          v-model="form.forwardConfig.agentId"
               >
                 <el-option
-                    v-for="item in allForwardRules"
-                    :key="item.ruleId"
-                    :label="item.ruleName"
-                    :value="item.ruleId"
+                    v-for="item in allAgent"
+                    :key="item.agentId"
+                    :label="item.agentName"
+                    :value="item.agentId"
                 />
               </el-select>
             </el-col>

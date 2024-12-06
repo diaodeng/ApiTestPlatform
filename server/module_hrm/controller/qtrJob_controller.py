@@ -1,16 +1,23 @@
+from datetime import datetime
+
 from fastapi import APIRouter
 from fastapi import Depends
+from fastapi.requests import Request
+from sqlalchemy.orm import Session
+
 from config.get_db import get_db
-from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.service.job_service import *
-from module_hrm.service.job_log_service import *
-from utils.response_util import *
-from utils.log_util import *
-from utils.page_util import *
-from utils.common_util import bytes2file_response
-from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.annotation.log_annotation import log_decorator
 from config.get_qtr_scheduler import qtr_scheduler_util
+from module_admin.annotation.log_annotation import log_decorator
+from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
+from module_admin.service.login_service import LoginService, CurrentUserModel
+from module_hrm.entity.vo.job_vo import JobModel, JobPageQueryModel, EditJobModel, DeleteJobModel, JobLogPageQueryModel, \
+    DeleteJobLogModel
+from module_hrm.service.job_log_service import JobLogService
+from module_hrm.service.job_service import JobService
+from utils.common_util import bytes2file_response
+from utils.log_util import logger
+from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
 
 qtrJobController = APIRouter(prefix='/qtr', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -18,7 +25,7 @@ qtrJobController = APIRouter(prefix='/qtr', dependencies=[Depends(LoginService.g
 @qtrJobController.get("/job/list", response_model=PageResponseModel,
                       dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:list'))])
 async def get_qtr_job_list(request: Request, job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_query),
-                              query_db: Session = Depends(get_db)):
+                           query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
         notice_page_query_result = JobService.get_job_list_services(query_db, job_page_query, is_page=True)
@@ -55,7 +62,7 @@ async def get_scheduler_job_list(request: Request,
 @qtrJobController.post("/job", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:add'))])
 @log_decorator(title='定时任务管理', business_type=1)
 async def add_qtr_job(request: Request, add_job: JobModel, query_db: Session = Depends(get_db),
-                         current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+                      current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         add_job.create_by = current_user.user.user_name
         add_job.update_by = current_user.user.user_name
@@ -74,7 +81,7 @@ async def add_qtr_job(request: Request, add_job: JobModel, query_db: Session = D
 @qtrJobController.put("/job", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:edit'))])
 @log_decorator(title='定时任务管理', business_type=2)
 async def edit_qtr_job(request: Request, edit_job: EditJobModel, query_db: Session = Depends(get_db),
-                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_job.update_by = current_user.user.user_name
         edit_job.update_time = datetime.now()
@@ -93,7 +100,7 @@ async def edit_qtr_job(request: Request, edit_job: EditJobModel, query_db: Sessi
 @qtrJobController.put("/job/changeStatus", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:changeStatus'))])
 @log_decorator(title='定时任务管理', business_type=2)
 async def change_status_qtr_job(request: Request, edit_job: EditJobModel, query_db: Session = Depends(get_db),
-                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+                                current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
 
         job_info = EditJobModel()
@@ -176,8 +183,8 @@ async def query_detail_qtr_job(request: Request, job_id: int, query_db: Session 
 @qtrJobController.post("/job/export", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:export'))])
 @log_decorator(title='定时任务管理', business_type=5)
 async def export_qtr_job_list(request: Request,
-                                 job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_form),
-                                 query_db: Session = Depends(get_db)):
+                              job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_form),
+                              query_db: Session = Depends(get_db)):
     try:
         # 获取全量数据
         job_query_result = JobService.get_job_list_services(query_db, job_page_query, is_page=False)
@@ -192,8 +199,8 @@ async def export_qtr_job_list(request: Request,
 @qtrJobController.get("/jobLog/list", response_model=PageResponseModel,
                       dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:list'))])
 async def get_qtr_job_log_list(request: Request,
-                                  job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_query),
-                                  query_db: Session = Depends(get_db)):
+                               job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_query),
+                               query_db: Session = Depends(get_db)):
     try:
         # 获取分页数据
         job_log_page_query_result = JobLogService.get_job_log_list_services(query_db, job_log_page_query, is_page=True)
@@ -240,8 +247,8 @@ async def clear_qtr_job_log(request: Request, query_db: Session = Depends(get_db
 @qtrJobController.post("/jobLog/export", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:export'))])
 @log_decorator(title='定时任务日志管理', business_type=5)
 async def export_qtr_job_log_list(request: Request,
-                                     job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_form),
-                                     query_db: Session = Depends(get_db)):
+                                  job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_form),
+                                  query_db: Session = Depends(get_db)):
     try:
         # 获取全量数据
         job_log_query_result = JobLogService.get_job_log_list_services(query_db, job_log_page_query, is_page=False)

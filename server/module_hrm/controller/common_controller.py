@@ -5,11 +5,13 @@ from fastapi import Depends
 
 from config.get_db import get_db
 from module_admin.service.login_service import LoginService
+from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.do.suite_do import QtrSuite
 from module_hrm.entity.vo.report_vo import ReportQueryModel
-from module_hrm.enums.enums import CaseRunStatus
-from module_hrm.service.case_service import Session, HrmCase, HrmProject, HrmModule, RunTypeEnum, DataType
+from module_hrm.enums.enums import CaseRunStatus, DataType, RunTypeEnum
+from module_hrm.service.case_service import Session, HrmCase
 from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
 from module_hrm.utils import comparators, util
 from utils.response_util import ResponseUtil

@@ -82,7 +82,7 @@ class ProjectDao:
                     HrmProject.status == page_object.status if page_object.status else True,
                     HrmProject.project_name.like(f'%{page_object.project_name}%') if page_object.project_name else True,
                     eval(data_scope_sql)) \
-            .order_by(HrmProject.order_num) \
+            .order_by(HrmProject.order_num, HrmProject.create_time.desc(), HrmProject.update_time.desc()) \
             .distinct()
 
         post_list = PageUtil.paginate(project_result, page_object.page_num, page_object.page_size, page_object.is_page)

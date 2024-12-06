@@ -5,7 +5,7 @@
 import datetime
 from typing import Any, Dict, List, Text, Union
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, Field
 
 from module_hrm.entity.vo import case_vo_detail_for_handle as caseVoHandle
 from module_hrm.enums.enums import TstepTypeEnum, CaseRunStatus
@@ -26,19 +26,19 @@ class Result(caseVoHandle.Result):
 
 
 class TConfig(caseVoHandle.TConfig):
-    # variables: Union[caseVoHandle.VariablesMapping, Text] = {}
-    # parameters: Union[caseVoHandle.VariablesMapping, Text] = {}
-    # headers: caseVoHandle.Headers = {}
+    # variables: Union[caseVoHandle.VariablesMapping, Text] = Field(default_factory=lambda: {})
+    # parameters: Union[caseVoHandle.VariablesMapping, Text] = Field(default_factory=lambda: {})
+    # headers: caseVoHandle.Headers = Field(default_factory=lambda: {})
     result: Union[Result, None] = Result()
 
 
 class TRequest(caseVoHandle.TRequest):
     """requests.Request model"""
 
-    params: Dict[Text, Text | int | float | bool | None] = {}
-    headers: caseVoHandle.Headers = {}
+    params: Dict[Text, Text | int | float | bool | None] = Field(default_factory=lambda: {})
+    headers: caseVoHandle.Headers = Field(default_factory=lambda: {})
     data: Union[Text, Dict[Text, Any], None] = None
-    cookies: caseVoHandle.Cookies = {}
+    cookies: caseVoHandle.Cookies = Field(default_factory=lambda: {})
 
     @model_validator(mode="before")
     def convert_data(cls, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -55,14 +55,14 @@ class TRequest(caseVoHandle.TRequest):
 
 class TWebsocket(caseVoHandle.TWebsocket):
     """TWebsocket"""
-    # params: caseVoHandle.VariablesMapping = {}
-    # headers: caseVoHandle.Headers = {}
-    params: Dict[Text, Text | int | float | bool | None] = {}
-    headers: caseVoHandle.Headers = {}
+    # params: caseVoHandle.VariablesMapping = Field(default_factory=lambda: {})
+    # headers: caseVoHandle.Headers = Field(default_factory=lambda: {})
+    params: Dict[Text, Text | int | float | bool | None] = Field(default_factory=lambda: {})
+    headers: caseVoHandle.Headers = Field(default_factory=lambda: {})
     data: Union[Text, Dict[Text, Any], None] = None
-    cookies: caseVoHandle.Cookies = {}
+    cookies: caseVoHandle.Cookies = Field(default_factory=lambda: {})
     result: Union[Result, None] = Result()
-    # cookies: caseVoHandle.Cookies = {}
+    # cookies: caseVoHandle.Cookies = Field(default_factory=lambda: {})
     recv_num: int = 1  # 消息接受条数，1表示只接受一条
 
     @model_validator(mode="before")
@@ -95,8 +95,8 @@ class TestCaseTime(BaseModel):
 
 
 class TestCaseInOut(BaseModel):
-    config_vars: caseVoHandle.VariablesMapping = {}
-    export_vars: Dict = {}
+    config_vars: caseVoHandle.VariablesMapping = Field(default_factory=lambda: {})
+    export_vars: Dict = Field(default_factory=lambda: {})
 
 
 class RequestStat(BaseModel):
@@ -123,10 +123,10 @@ class SessionData(BaseModel):
     success: bool = False
     # in most cases, req_resps only contains one request & response
     # while when 30X redirect occurs, req_resps will contain multiple request & response
-    req_resps: List[ReqRespData] = []
+    req_resps: List[ReqRespData] = Field(default_factory=lambda: [])
     stat: RequestStat = RequestStat()
     address: AddressData = AddressData()
-    validators: Dict = {}
+    validators: Dict = Field(default_factory=lambda: {})
 
 
 class StepResult(BaseModel):
@@ -141,7 +141,7 @@ class StepResult(BaseModel):
     data: Union[SessionData, List["StepResult"]] = None
     elapsed: float = 0.0  # teststep elapsed time
     content_size: float = 0  # response content size
-    export_vars: caseVoHandle.VariablesMapping = {}
+    export_vars: caseVoHandle.VariablesMapping = Field(default_factory=lambda: {})
     log: Text = ""
     attachment: Text = ""  # teststep attachment
 
@@ -171,8 +171,8 @@ class TestCaseSummary(BaseModel):
     case_id: Text | int | None = None
     time: TestCaseTime = TestCaseTime()
     in_out: TestCaseInOut = TestCaseInOut()
-    log: Dict[Text, Any] = {}
-    step_results: List[StepResult] = []
+    log: Dict[Text, Any] = Field(default_factory=lambda: {})
+    step_results: List[StepResult] = Field(default_factory=lambda: [])
 
 
 class PlatformInfo(BaseModel):
@@ -214,11 +214,11 @@ class ReportDtailToView(BaseModel):
     测试报告用于前端显示的模型
     """
     exitstatus: int = 0
-    status_items: List[str] = [st.name for st in CaseRunStatus]
-    platform: Dict = get_platform()
+    status_items: List[str] = Field(default_factory=lambda: [st.name for st in CaseRunStatus])
+    platform: Dict = Field(default_factory=lambda: get_platform())
     start_time: str = ''
-    results: List[Dict] = []
-    status_count: Dict[str, int] | CaseRunResultCount = {}
+    results: List[Dict] = Field(default_factory=lambda: [])
+    status_count: Dict[str, int] | CaseRunResultCount = Field(default_factory=lambda: {})
 
 
 class ReportInfo(BaseModel):

@@ -4,7 +4,11 @@ const value = defineModel()
 </script>
 
 <template>
-  <el-select v-model="value" :placeholder="placeholder" clearable>
+  <el-select v-model="value"
+             :placeholder="placeholder"
+             :filterable="true"
+             clearable
+  >
 
     <el-option
         v-for="(value, key, index) in optionsDict"
@@ -13,15 +17,21 @@ const value = defineModel()
         :value="key"
     >
       <el-popover
-          placement="bottom"
+          placement="right"
           :title="key"
-          :width="200"
           trigger="hover"
+          :width="300"
           :content="value"
       >
         <template #reference>
-          <el-text class="m-2">{{key}}</el-text>
+          <el-text class="m-2">{{ key }}</el-text>
         </template>
+        <el-scrollbar>
+          <div>
+            <el-text style="white-space: pre">{{ value }}</el-text>
+          </div>
+        </el-scrollbar>
+
       </el-popover>
     </el-option>
   </el-select>

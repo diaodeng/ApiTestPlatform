@@ -15,7 +15,7 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="状态" clearable style="width: 100px">
           <el-option
-              v-for="dict in sys_normal_disable"
+              v-for="dict in qtr_data_status"
               :key="dict.value"
               :label="dict.label"
               :value="dict.value"
@@ -57,7 +57,7 @@
       </el-table-column>
       <el-table-column prop="status" label="状态" align="center" width="70">
         <template #default="scope">
-          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
+          <dict-tag :options="qtr_data_status" :value="scope.row.status"/>
         </template>
       </el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150">
@@ -111,7 +111,7 @@ import {listProject} from "@/api/hrm/project.js";
 import {initDebugTalkFormData} from "@/components/hrm/data-template.js";
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
 
 const debugtalkList = ref([]);
 const total = ref(0);

@@ -60,24 +60,72 @@ export const EditTableContextMenuEnum = {
 
 
 export const ForwardRuleMatchTypeEnum = {
-    urlEqual: {name: "URL相等", value:1},
-    urlNotEqual: {name: "Url不相等", value:2},
-    urlContain: {name: "Url包含", value:4},
-    hostEqual: {name: "HOST相等", value:8},
-    hostNotEqual: {name: "HOST不相等", value:16},
-    hostContain: {name: "HOST包含", value:32},
-    pathEqual: {name: "PATH相等", value:64},
-    pathNotEqual: {name: "PATH不相等", value:128},
-    pathContain: {name: "PATH包含", value:256}
+    urlEqual: {label: "URL相等", value:1},
+    urlNotEqual: {label: "Url不相等", value:2},
+    urlContain: {label: "Url包含", value:4},
+    hostEqual: {label: "HOST相等", value:8},
+    hostNotEqual: {label: "HOST不相等", value:16},
+    hostContain: {label: "HOST包含", value:32},
+    pathEqual: {label: "PATH相等", value:64},
+    pathNotEqual: {label: "PATH不相等", value:128},
+    pathContain: {label: "PATH包含", value:256}
 }
 
 
 export const DelFlagNewEnum = {
-    normal :{name: "normal", value:1},
-    delete: {name: "delete", value:2},
+    normal :{label: "normal", value:1},
+    delete: {label: "delete", value:2},
 }
 
 export const StatusNewEnum = {
-    disabled :{name: "disabled", value:1},
-    normal: {name: "normal", value:2},
+    disabled :{label: "禁用", value:1, elTagType: "danger"},
+    normal: {label: "正常", value:2, elTagType: "primary"},
 }
+
+export const AgentStatusEnum = {
+    disabled :{label: "离线", value:1, elTagType: "danger"},
+    normal: {label: "在线", value:2, elTagType: "success"},
+}
+
+
+/*
+* 作用范围
+* */
+export const ScopeEnum = {
+    global: {label: "全局", value:1, elTagType: "success"},
+    project :{label: "项目", value:2, elTagType: "danger"},
+    module: {label: "模块", value:4, elTagType: "success"},
+    case: {label: "用例", value:8, elTagType: "success"},
+
+}
+
+
+/*
+* 作用范围
+* */
+export const CodeTypeEnum = {
+    python: {label: "python", value:1, elTagType: "primary"},
+    js :{label: "js", value:2, elTagType: "primary"},
+
+
+}
+
+/*
+* 断言实际值取值方式
+* */
+export const AssertOriginalEnum = {
+    expression: {label: "表达式", value:1, elTagType: "primary"},
+    original :{label: "原始值", value:2, elTagType: "primary"},
+}
+
+export const CaseRunStatusEnum = {
+    passed: {label: "成功", value:1, elTagType: "primary"},
+    failed :{label: "失败", value:2, elTagType: "primary"},
+    skipped :{label: "跳过", value:3, elTagType: "primary"},
+    // deselected :{label: "原始值", value:4, elTagType: "primary"},
+    xfailed :{label: "标记失败", value:5, elTagType: "primary"},
+    xpassed :{label: "标记成功", value:6, elTagType: "primary"},
+    warnings :{label: "警告", value:7, elTagType: "primary"},
+    error :{label: "错误", value:8, elTagType: "primary"},
+}
+

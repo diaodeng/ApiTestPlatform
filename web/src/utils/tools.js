@@ -330,3 +330,9 @@ export function findDuplicates(arr) {
 
     return arr.filter(val => counts[val] > 1);
 }
+
+
+export function isFullUrl(url) {
+  const regex = /^(https?|ftp|mailto):\/\//i; // 支持 http, https, ftp, mailto
+  return regex.test(url);
+}

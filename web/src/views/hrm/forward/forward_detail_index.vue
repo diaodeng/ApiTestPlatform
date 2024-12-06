@@ -31,7 +31,7 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="转发规则状态" clearable style="width: 100px">
           <el-option
-              v-for="dict in qtr_rule_status"
+              v-for="dict in StatusNewEnum"
               :key="dict.value"
               :label="dict.label"
               :value="dict.value"
@@ -81,9 +81,24 @@
       <el-table-column label="转发规则ID" prop="ruleId" width="150px"/>
       <el-table-column label="转发规则详情ID" prop="ruleDetailId" width="150px"/>
       <el-table-column label="转发规则详情名称" prop="ruleDetailName" width="auto" min-width="200px"/>
-      <el-table-column label="匹配模式" prop="matchType" width="auto" min-width="200px"/>
+      <el-table-column label="匹配模式" align="center" prop="matchType" width="155px" min-width="200px">
+        <template #default="scope">
+          <TagEnum :options="Object.values(ForwardRuleMatchTypeEnum)" :value="[scope.row.matchType]"/>
+        </template>
+
+      </el-table-column>
       <el-table-column label="源地址" prop="originUrl" width="auto" min-width="200px"/>
       <el-table-column label="目标地址" prop="targetUrl" width="auto" min-width="200px"/>
+      <el-table-column label="状态" align="center" prop="status" width="110px" min-width="100px">
+        <template #default="scope">
+          <TagSelector v-model:selected-value="scope.row.status"
+                       :options="Object.values(StatusNewEnum)"
+                       selector-width="85px"
+                       :source-data="scope.row"
+                       @selectChanged="changeStatus"
+          ></TagSelector>
+        </template>
+      </el-table-column>
       <el-table-column label="创建人" align="center" prop="createBy" width="80px"></el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width"
                        width="150px">
@@ -121,7 +136,6 @@
         @pagination="getList"
     />
 
-
     <!-- 新增或者编辑转发规则 -->
     <el-dialog :title="title + ' >> ' + currentRuleDetailId + form?.ruleDetailName"
                v-model="showDetailDialog" append-to-body destroy-on-close>
@@ -131,6 +145,12 @@
           <el-form>
             <el-form-item label="规则名称：">
               <el-input v-model="form.ruleDetailName"></el-input>
+            </el-form-item>
+            <el-form-item label="匹配模式：">
+              <TagSelector v-model:selected-value="form.matchType"
+                           :options="Object.values(ForwardRuleMatchTypeEnum)"
+                           selector-width="130px"
+              ></TagSelector>
             </el-form-item>
 
             <el-form-item label="待转地址：">
@@ -176,6 +196,9 @@ import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import {initForwardRulesDetailFormData} from "@/components/hrm/data-template";
 import {ElMessage, ElMessageBox} from "element-plus";
 import {Remove} from "@element-plus/icons-vue";
+import {ForwardRuleMatchTypeEnum, StatusNewEnum} from "@/components/hrm/enum.js";
+import DictTag from "@/components/DictTag/index.vue";
+import TagEnum from "@/components/hrm/common/tag-enum.vue"
 
 const {proxy} = getCurrentInstance();
 
@@ -247,7 +270,7 @@ function copyRulesHandle() {
 
 /** 查询列表 */
 function getList() {
-  if(!queryParams.value.ruleId){
+  if (!queryParams.value.ruleId) {
     console.log("没有数据ID");
     return
   }
@@ -310,6 +333,7 @@ function handleUpdate(row) {
 * 更新转发规则状态
 * */
 function changeStatus(row) {
+  return
 
   forwardDetailApi.changeRulesStatus({ruleDetailId: row.ruleDetailId, status: row.status}).then((response) => {
     ElMessage.success("修改成功");

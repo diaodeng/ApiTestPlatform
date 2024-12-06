@@ -14,6 +14,7 @@ const en = {
                 vph: "variables/parameters/hooks",
                 vphc: "variables",  // 配置页面使用的
                 other: "other",
+                request_base: "RunCondition",
                 request: "request",
                 ev: "extract/validate",
                 vh: "variables/hooks",
@@ -31,6 +32,7 @@ const en = {
                 key: "key",
                 value: "value",
                 desc: "desc",
+                sourceWay: "SourceWay",
                 check: "check",
                 comparator: "Comparator",
                 type: "type",
@@ -39,6 +41,7 @@ const en = {
                 enable: "enable",
                 originUrl: "OriginUrl",
                 targetUrl: "TargetUrl",
+                scope: "Scope"
 
             }
         },
@@ -89,6 +92,7 @@ const zh = {
                 vph: "变量/参数化/回调",
                 vphc: "变量",
                 other: "其他",
+                request_base: "执行条件",
                 request: "请求",
                 ev: "抽取/断言",
                 vh: "变量/回调",
@@ -106,6 +110,7 @@ const zh = {
                 key: "键",
                 value: "值",
                 desc: "描述",
+                sourceWay: "实际值来源",
                 check: "实际值",
                 comparator: "对比方法",
                 type: "类型",
@@ -114,6 +119,7 @@ const zh = {
                 enable: "启用",
                 originUrl: "源地址",
                 targetUrl: "目标地址",
+                scope: "范围"
 
             }
         },

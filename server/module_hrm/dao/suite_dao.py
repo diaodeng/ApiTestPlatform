@@ -49,7 +49,7 @@ class SuiteDao:
                     eval(data_scope_sql))
         if page_object.only_self:
             suite_result = suite_result.filter(QtrSuite.manager == page_object.manager)
-        suite_result = suite_result.order_by(QtrSuite.order_num) \
+        suite_result = suite_result.order_by(QtrSuite.order_num, QtrSuite.create_time.desc(),QtrSuite.update_time.desc()) \
             .distinct()
         suite_list = PageUtil.paginate(suite_result, page_object.page_num, page_object.page_size, is_page)
 
@@ -175,7 +175,7 @@ class SuiteDetailDao:
         if query_object.only_self:
             query = query.filter(QtrSuiteDetail.manager == query_object.manager)
         # 添加排序条件
-        query = query.order_by(QtrSuiteDetail.create_time.desc()).order_by(QtrSuiteDetail.order_num).distinct()
+        query = query.order_by(QtrSuiteDetail.order_num, QtrSuiteDetail.create_time.desc()).distinct()
 
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
         return post_list

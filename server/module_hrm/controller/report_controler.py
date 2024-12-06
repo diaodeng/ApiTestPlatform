@@ -1,17 +1,17 @@
 from fastapi import APIRouter, Request
 from fastapi import Depends
+from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
-from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportQueryModel, ReportDelModel
+from module_hrm.entity.vo.report_vo import ReportQueryModel, ReportDelModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel
-from module_hrm.service.case_service import *
-from utils.page_util import *
-from utils.response_util import *
+from module_hrm.service.case_service import CurrentUserModel
+from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
 
 reportController = APIRouter(prefix='/hrm/report', dependencies=[Depends(LoginService.get_current_user)])
 

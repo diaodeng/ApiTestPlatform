@@ -1,5 +1,8 @@
-from module_hrm.dao.env_dao import *
+from sqlalchemy.orm import Session
+
+from module_hrm.dao.env_dao import EnvDao
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.entity.vo.env_vo import EnvModel, EnvQueryModel, DeleteEnvModel, EnvModelForApi
 from utils.common_util import CamelCaseUtil
 
 
@@ -35,19 +38,51 @@ class EnvService:
         return env_list_result
 
     @classmethod
-    def add_env_services(cls, query_db: Session, page_object: EnvModel):
+    def add_env_services(cls, query_db: Session, env_object: EnvModel):
         """
         新增环境信息service
         :param query_db: orm对象
         :param page_object: 新增环境对象
         :return: 新增环境校验结果
         """
-        env = EnvDao.get_env_detail_by_info(query_db, EnvModel(env_name=page_object.env_name))
+        env = EnvDao.get_env_detail_by_info(query_db, EnvModel(env_name=env_object.env_name))
         if env:
             result = dict(is_success=False, message='环境名称已存在')
         else:
             try:
-                EnvDao.add_env_dao(query_db, page_object)
+                EnvDao.add_env_dao(query_db, env_object)
+                query_db.commit()
+                result = dict(is_success=True, message='新增成功')
+            except Exception as e:
+                query_db.rollback()
+                raise e
+
+        return CrudResponseModel(**result)
+
+    @classmethod
+    def copy_env_services(cls, query_db: Session, env_object: EnvModel):
+        """
+        新增环境信息service
+        :param query_db: orm对象
+        :param page_object: 新增环境对象
+        :return: 新增环境校验结果
+        """
+        env = EnvDao.get_env_detail_by_id(query_db, env_object.env_id)
+        if not env:
+            result = dict(is_success=False, message='原环境信息不存在')
+        else:
+            try:
+                env_dict = CamelCaseUtil.transform_result(env)
+                env_obj = EnvModel(**env_dict)
+                del env_obj.env_id
+                del env_obj.create_time
+                del env_obj.update_time
+
+                env_obj.create_by = env_object.create_by
+                env_obj.update_by = env_object.update_by
+                env_obj.env_name = f"{env_obj.env_name}-副本"
+                env_obj.manager = env_object.manager
+                EnvDao.add_env_dao(query_db, env_obj)
                 query_db.commit()
                 result = dict(is_success=True, message='新增成功')
             except Exception as e:
@@ -69,7 +104,7 @@ class EnvService:
         if env_info:
             if env_info.env_name != env_object.env_name:
                 env = EnvDao.get_env_detail_by_info(query_db, EnvModel(env_name=env_object.env_name))
-                if env:
+                if env and env.env_id != env_info.env_id:
                     result = dict(is_success=False, message='环境名称不能重复')
                     return CrudResponseModel(**result)
             try:

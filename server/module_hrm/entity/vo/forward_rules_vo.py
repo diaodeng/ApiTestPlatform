@@ -1,8 +1,7 @@
 import json
 from typing import Optional, Dict, Any
 
-from fastapi.openapi.models import Schema
-from pydantic import model_validator, field_serializer, ConfigDict
+from pydantic import model_validator, field_serializer, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query, as_form
@@ -51,7 +50,7 @@ class ForwardRulesQueryModel(QueryModel, ForwardRulesModel):
 
 
 class ForwardRulesDeleteModel(ForwardRulesModel):
-    rule_id: list = []
+    rule_id: list = Field(default_factory=lambda: [])
 
 
 class ForwardRulesDetailModel(CommonDataModel):
@@ -79,5 +78,5 @@ class ForwardRulesDetailQueryModel(QueryModel, ForwardRulesDetailModel):
 
 
 class ForwardRulesDetailDeleteModel(ForwardRulesDetailModel):
-    rule_id: list = []
-    rule_detail_id: list = []
+    rule_id: list = Field(default_factory=lambda: [])
+    rule_detail_id: list = Field(default_factory=lambda: [])

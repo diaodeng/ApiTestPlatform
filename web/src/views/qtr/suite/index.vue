@@ -55,7 +55,6 @@
       <el-table-column type="selection" width="55" align="center"/>
       <el-table-column prop="suiteId" label="ID" width="160"></el-table-column>
       <el-table-column prop="suiteName" label="套件名称" width="200"></el-table-column>
-      \
       <el-table-column prop="orderNum" label="排序" width="200"></el-table-column>
       <el-table-column prop="status" label="状态" width="100">
         <template #default="scope">

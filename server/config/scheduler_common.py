@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 
 from config.database import engine, SQLALCHEMY_DATABASE_URL
 from config.env import RedisConfig
-from loguru import logger
+from utils.log_util import logger
 import module_task
 from module_hrm.enums.enums import TaskStatusEnum
 

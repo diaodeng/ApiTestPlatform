@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunListModel, HrmRunDetailModel
 from utils.page_util import PageUtil
+from utils.log_util import logger
 
 
 class RunDetailDao:
@@ -49,6 +50,7 @@ class RunDetailDao:
 
     @classmethod
     def list(cls, db: Session, query_info: RunDetailQueryModel):
+        logger.info(f"开始查询执行历史：{query_info.model_dump()}")
         query = db.query(HrmRunDetail)
         if query_info.only_self:
             query = query.filter(HrmRunDetail.manager == query_info.manager)
@@ -66,12 +68,17 @@ class RunDetailDao:
         if query_info.run_name:
             query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
 
-        query = query.order_by(HrmRunDetail.run_start_time.desc())
+        if query_info.report_id:
+            query = query.order_by(HrmRunDetail.run_start_time, HrmRunDetail.run_end_time)
+        elif query_info.run_id:
+            query = query.order_by(HrmRunDetail.run_start_time.desc(), HrmRunDetail.run_end_time.desc())
 
         result = PageUtil.paginate(query, query_info.page_num, query_info.page_size, True)
+        logger.info(f"执行历史查询结束")
         rows = []
         for row in result.rows:
-            rows.append(HrmRunListModel.from_orm(row))
+            rows.append(HrmRunListModel.model_validate(row))
 
         result.rows = rows
+        logger.info(f"执行历史数据组装完成: {len(result.rows)}")
         return result

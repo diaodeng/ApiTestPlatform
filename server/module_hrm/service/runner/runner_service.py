@@ -1,15 +1,16 @@
 import asyncio
+import gc
 import multiprocessing
 import os
 import platform
 import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
+from typing import Type
 
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
-from config.env import FeishuBotConfig
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.case_dao import CaseDao
 from module_hrm.dao.env_dao import EnvDao
@@ -17,7 +18,7 @@ from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.do.module_do import HrmModule
-from module_hrm.entity.do.suite_do import QtrSuiteDetail
+from module_hrm.entity.do.suite_do import QtrSuiteDetail, QtrSuite
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
@@ -29,7 +30,7 @@ from module_hrm.service.runner.case_data_handler import CaseInfoHandle, Paramete
 from module_hrm.service.runner.case_runner import TestRunner
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
-from utils.message_util import FeiShuHandler, MessageHandler
+from utils.message_util import MessageHandler
 
 logger.info(f"平台信息：{platform.platform()}")
 if "WSL" in str(platform.platform()):
@@ -90,7 +91,9 @@ async def run_by_single(query_db: Session,
             step.result.logs.before_request = f"用例状态为[{status.name}]不执行"
         case_res_datas = [test_case]
     else:
-        runner = TestRunner(test_case, func_map, run_info)
+        debugtalk_info = DebugTalkService.project_debugtalk_map(query_db, case_data.project_id, run_info=run_info)
+        # func_map = debugtalk_info.func_map
+        runner = TestRunner(test_case, debugtalk_info, run_info)
         case_res_datas = await runner.start()
 
     all_result = []
@@ -123,82 +126,76 @@ async def run_by_batch(query_db: Session,
     :param mode: boolean：True 同步 False: 异步
     :return: list
     """
-    project_cases = defaultdict(set)
-    if run_info.run_type == RunTypeEnum.project.value:
-        for project_id in run_info.ids:
-            project_cases[project_id].add(project_id)
-    elif run_info.run_type == RunTypeEnum.model.value:
-        all_module_obj = query_db.query(HrmModule.project_id, HrmModule.module_id).filter(
-            HrmModule.module_id.in_(run_info.ids)).all()
-        for project_id, module_id in all_module_obj:
-            project_cases[project_id].add(module_id)
-    elif run_info.run_type == RunTypeEnum.suite.value:
-        project_case_ids = (query_db.query(QtrSuiteDetail.data_id, QtrSuiteDetail.data_type).
-                            filter(QtrSuiteDetail.suite_id.in_(run_info.ids)).filter(
-            QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).all())
-        datas = defaultdict(set)
-        for data_id, data_type in project_case_ids:
-            datas[data_type].add(data_id)
 
-        tmp_all_case = []
-        for test_type in datas:
-            if test_type == DataType.project.value:
-                tmp_project_case = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(
-                    HrmCase.project_id.in_(datas[test_type])).filter(
-                    HrmCase.status != CaseStatusEnum.disabled.value).all()
-                tmp_all_case.extend(tmp_project_case)
-            elif test_type == DataType.module.value:
-                module_obj = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(
-                    HrmCase.module_id.in_(datas[test_type])).filter(
-                    HrmCase.status != CaseStatusEnum.disabled.value).all()
-                tmp_all_case.extend(module_obj)
-            elif test_type == DataType.case.value:
-                case_obj = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(
-                    HrmCase.case_id.in_(datas[test_type])).filter(HrmCase.status != CaseStatusEnum.disabled.value).all()
-                tmp_all_case.extend(case_obj)
-            for project_id, case_id in tmp_all_case:
-                project_cases[project_id].add(case_id)
+    def get_case_data(all_cases, data_type, ids: list):
+        tmp_case_info_query = query_db.query(HrmCase.project_id, HrmCase.module_id,
+                                             HrmCase.case_id).filter(
+            HrmCase.status != CaseStatusEnum.disabled.value).filter(HrmCase.type == DataType.case.value)
+        if data_type == RunTypeEnum.project.value:
+            tmp_case_info_query = tmp_case_info_query.filter(HrmCase.project_id.in_(ids))
+        elif data_type == RunTypeEnum.model.value:
+            tmp_case_info_query = tmp_case_info_query.filter(HrmCase.module_id.in_(ids))
+        else:
+            tmp_case_info_query = tmp_case_info_query.filter(HrmCase.case_id.in_(ids))
+        tmp_case_info_query = tmp_case_info_query.all()
+        for project_id, module_id, case_id in tmp_case_info_query:
+            all_cases[project_id].append(case_id)
+
+    all_cases = defaultdict(list)
+    if run_info.run_type == RunTypeEnum.suite.value:
+        all_suite_orm = query_db.query(QtrSuite).filter(QtrSuite.suite_id.in_(run_info.ids)).order_by(
+            QtrSuite.order_num).all()
+        for suite_orm in all_suite_orm:
+            if run_info.run_by_sort:
+                all_suite_content_orm = (query_db.query(QtrSuiteDetail).
+                                         filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
+                                         filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
+                                         order_by(QtrSuiteDetail.order_num).all())
+                for suite_content_orm in all_suite_content_orm:
+                    suite_data_id = suite_content_orm.data_id
+                    data_type = suite_content_orm.data_type
+                    get_case_data(all_cases, data_type, [suite_data_id])
+            else:
+                all_case_item = (query_db.query(QtrSuiteDetail.data_id).
+                                 filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
+                                 filter(QtrSuiteDetail.data_type == DataType.case.value).
+                                 filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
+                                 order_by(QtrSuiteDetail.order_num).
+                                 all())
+                get_case_data(all_cases, RunTypeEnum.case.value, [case_item[0] for case_item in all_case_item])
+
+                all_not_case_item: list[Type[QtrSuiteDetail]] = (query_db.query(QtrSuiteDetail).
+                                                                 filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
+                                                                 filter(
+                    QtrSuiteDetail.data_type != DataType.case.value).
+                                                                 filter(
+                    QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
+                                                                 order_by(QtrSuiteDetail.order_num).
+                                                                 all())
+                for not_case_item in all_not_case_item:
+                    run_type = RunTypeEnum.project.value if not_case_item.data_type == RunTypeEnum.project.value else RunTypeEnum.model.value
+
+                    get_case_data(all_cases, run_type, [not_case_item.data_id])
     else:
-        project_case_ids = query_db.query(HrmCase.project_id, HrmCase.case_id).filter(
-            HrmCase.case_id.in_(run_info.ids)).filter(HrmCase.status != CaseStatusEnum.disabled.value).all()
-        for project_id, case_id in project_case_ids:
-            project_cases[project_id].add(case_id)
-
-    # project_ids = project_cases.keys()
-
-    # init_data_handle(path, project_names)
-    # debugtalk_source = DebugTalkService.debugtalk_source_for_caseid_or_projectid(query_db=query_db, project_ids=project_ids)
-    # debugtalk_obj = DebugTalkHandler(debugtalk_source)
-    # debugtalk_func_map = debugtalk_obj.func_map(user)
+        get_case_data(all_cases, run_info.run_type, run_info.ids)
 
     env_data = CamelCaseUtil.transform_result(EnvDao.get_env_by_id(query_db, run_info.env))
     env_obj = EnvModel.from_orm(env_data)
 
     try:
         result = []
-        for project_id, ids in project_cases.items():  # 按项目执行
+        debugtalk_func_map = None
+        for project_id, ids in all_cases.items():  # 按项目执行
             if not ids: continue
-            commom_debugtalk, project_debugtalk = DebugTalkService.debugtalk_source(query_db, project_id=project_id)
-            debugtalk_handler = DebugTalkHandler(project_debugtalk, commom_debugtalk)
-            try:
-                debugtalk_func_map = debugtalk_handler.func_map(user)
-                if run_info.run_type not in [RunTypeEnum.project.value, RunTypeEnum.model.value]:  # 套件或者用例
-                    res_data = await run_by_concurrent(query_db, list(ids), env_obj, debugtalk_func_map, run_info)
-                    result.extend(res_data)
-                else:  # 项目或者模块
-                    for value in ids:
-                        res_data = []
-                        if run_info.run_type == RunTypeEnum.project.value:
-                            res_data = await run_by_project(query_db, value, env_obj, debugtalk_func_map, run_info)
-                        elif run_info.run_type == RunTypeEnum.model.value:
-                            res_data = await run_by_module(query_db, value, env_obj, debugtalk_func_map, run_info)
 
-                        result.extend(res_data)
-            finally:
-                debugtalk_handler.del_import()
+            res_data = await run_by_concurrent(query_db, list(ids), env_obj, debugtalk_func_map, run_info)
+            result.extend(res_data)
+
     finally:
-        pass
-        # debugtalk_obj.del_import()
+        for pdi in run_info.project_debugtalk_set.values():
+            for mn in pdi.module_names:
+                DebugTalkHandler.del_module(mn)
+        gc.collect()
     return result
 
 
@@ -211,6 +208,14 @@ def get_case_info_batch(query_db, case_ids, env_obj) -> list[TestCase]:
         tmp_case_datas = ParametersHandler.get_parameters_case([test_case])
         all_data.extend(tmp_case_datas)
     return all_data
+
+
+def get_case_info(query_db, case_id, env_obj) -> list[TestCase]:
+    case_obj = CaseDao.get_case_by_id(query_db, case_id)
+    logger.info(type(case_obj))
+    test_case = CaseInfoHandle(query_db).from_db(case_obj).toRun(env_obj).run_data()
+    tmp_case_datas = ParametersHandler.get_parameters_case([test_case])
+    return tmp_case_datas
 
 
 async def run_by_module(query_db: Session, id, env, func_map=None, run_info: CaseRunModel = None):
@@ -235,7 +240,8 @@ async def run_by_project(query_db: Session, id, env_obj, func_map=None, run_info
     :param env: 环境对象
     :return: list
     """
-    module_index_list = query_db.query(HrmModule.module_id).filter(HrmModule.project_id == id).distinct()
+    module_index_list = query_db.query(HrmModule.module_id).filter(HrmModule.project_id == id).order_by(
+        HrmModule.sort).distinct()
     result = []
     for index in module_index_list:
         module_id = index[0]
@@ -250,22 +256,43 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
     并发执行多个用例
     """
     case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
-    if run_info.concurrent > 1:
+    if not run_info.run_by_sort and run_info.concurrent > 1:
+        # case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
         case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
                            range(0, len(case_data_list), run_info.concurrent)]
-        tasks = []
 
+        results = []
         for case_datas in case_data_group:
-            for case_data in case_datas:
-                tasks.append(run_by_single(query_db, case_data, env_obj, func_map, run_info))
-        result = await asyncio.gather(*tasks)
-        return [res for res_list in result for res in res_list]
+            try:
+                tasks = []
+                for case_data in case_datas:
+                    tasks.append(run_by_single(query_db, case_data, env_obj, func_map, run_info))
+                result = await asyncio.gather(*tasks, return_exceptions=True)
+                results.extend([res for res_list in result for res in res_list])
+            except Exception as e:
+                logger.error(f"并发执行测试用例异常： {e}")
+        return results
     else:
         result = []
+        # for case_id in case_ids:
+        #     case_datas = get_case_info(query_db, case_id, env_obj)
         for case_data in case_data_list:
             res_data = await run_by_single(query_db, case_data, env_obj, func_map, run_info)
             result.extend(res_data)
         return result
+
+
+def test_run(run_info, current_user):
+    query_db = SessionLocal()
+    try:
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+
+        new_loop.run_until_complete(new_loop.create_task(run_by_async(query_db, run_info, current_user)))
+        new_loop.close()
+
+    finally:
+        query_db.close()
 
 
 async def run_by_async(query_db: Session, run_info: CaseRunModel,
@@ -274,8 +301,8 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
     """
     异步执行用例
     """
-    # query_db = SessionLocal()
     try:
+        # query_db = SessionLocal()
         test_start_time = time.time()
         report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -285,9 +312,9 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
         report_data.update_by = current_user.user.user_name
         report_data.create_by = current_user.user.user_name
         report_data.manager = current_user.user.user_id
-        report_info = ReportDao.create(query_db, report_data)
-        report_info.start_at = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
+        report_data.start_at = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
             timezone(timedelta(hours=8)))
+        report_info = ReportDao.create(query_db, report_data)
         query_db.commit()
 
         run_info.report_id = report_info.report_id
@@ -297,6 +324,7 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
                                         user=current_user.user.user_id)
         test_end_time = time.time()
 
+        report_info = ReportDao.get_by_id(query_db, report_info.report_id)
         report_info.test_duration = test_end_time - test_start_time
         report_status = report_info.status
         report_total = 0

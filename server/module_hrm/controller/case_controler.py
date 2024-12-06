@@ -1,26 +1,27 @@
-import time
+from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
+from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.entity.vo.case_vo import *
-from module_hrm.enums.enums import TstepTypeEnum
-from module_hrm.service.case_service import *
+from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_admin.service.login_service import LoginService
+from module_hrm.entity.vo.case_vo import CasePageQueryModel, AddCaseModel, CaseModel, DeleteCaseModel
+from module_hrm.service.case_service import CaseService
 from utils.common_util import bytes2file_response
-from utils.log_util import *
-from utils.page_util import *
-from utils.response_util import *
+from utils.log_util import logger
+from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
 
 caseController = APIRouter(prefix='/hrm/case', dependencies=[Depends(LoginService.get_current_user)])
 
 
 @caseController.get("/list", response_model=PageResponseModel,
                     dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:list'))])
-async def get_hrm_case(request: Request,
+async def get_hrm_case_list(request: Request,
                        page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
                        query_db: Session = Depends(get_db),
                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)
@@ -56,10 +57,10 @@ async def add_hrm_case(request: Request,
         add_module_result = CaseService.add_case_services(query_db, add_case)
         if add_module_result.is_success:
             logger.info(add_module_result.message)
-            return ResponseUtil.success(msg=add_module_result.message)
+            return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
         else:
             logger.warning(add_module_result.message)
-            return ResponseUtil.failure(msg=add_module_result.message)
+            return ResponseUtil.failure(data=add_module_result.result, msg=add_module_result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

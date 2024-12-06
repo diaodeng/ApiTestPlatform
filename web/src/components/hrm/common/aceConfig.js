@@ -18,6 +18,9 @@ import themeEclipse from "ace-builds/src-noconflict/theme-eclipse?url";
 ace.config.setModuleUrl("ace/theme/eclipse", themeEclipse);
 
 // 导入不同语言的语法模式模块，并设置对应 URL (所有支持的主题和模式：node_modules/ace-builds/src-noconflict)
+import modeTextUrl from "ace-builds/src-noconflict/mode-text?url";
+ace.config.setModuleUrl("ace/mode/text", modeTextUrl);
+
 import modeJsonUrl from "ace-builds/src-noconflict/mode-json?url";
 ace.config.setModuleUrl("ace/mode/json", modeJsonUrl);
 
@@ -63,6 +66,42 @@ ace.config.setModuleUrl("ace/snippets/python", snippetsPyhontUrl);
 import extSearchboxUrl from "ace-builds/src-noconflict/ext-searchbox?url";
 ace.config.setModuleUrl("ace/ext/searchbox", extSearchboxUrl);
 
+//https://plnkr.co/edit/6MVntVmXYUbjR0DI82Cr?p=preview&preview
+// const customCompleter = {
+//   getCompletions: function (editor, session, pos, prefix, callback) {
+//     // 自定义候选项
+//     const completions = [
+//       { caption: 'console.log', value: 'console.log()', meta: 'JavaScript', snippet: "console.log('content') \n\ 这是什么啊", completerId: "88888" },
+//       { caption: 'function', value: 'function () {}', meta: 'Snippet' },
+//       { caption: 'var', value: 'var ', meta: 'Keyword' },
+//       { caption: 'test', value: 'test123 ', meta: 'Keyword' },
+//     ];
+//     callback(null, completions); // 传递补全项
+//   },
+// };
+//
+// const apiCompleter = {
+//   getCompletions: async function (editor, session, pos, prefix, callback) {
+//       console.log(prefix)
+//     if (prefix.length === 0) return;
+//     try {
+//       const response = await fetch(`/api/completions?q=${prefix}`);
+//       const suggestions = await response.json();
+//       const completions = suggestions.map((item) => ({
+//         caption: item.name,
+//         value: item.value,
+//         meta: item.type,
+//       }));
+//       callback(null, completions);
+//     } catch (err) {
+//       console.error('Error fetching completions:', err);
+//       callback(null, []);
+//     }
+//   },
+// };
+
 // 启用自动补全等高级编辑支持
 import "ace-builds/src-noconflict/ext-language_tools";
-ace.require("ace/ext/language_tools");
+const languageTool = ace.require("ace/ext/language_tools");
+// languageTool.setCompleters([customCompleter]);
+// languageTool.addCompleter(apiCompleter);

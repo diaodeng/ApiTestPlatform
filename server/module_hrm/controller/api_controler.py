@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -7,14 +9,13 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.api_dao import ApiOperation
-from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiQueryModel, ApiModel, ApiPageQueryModel
+from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiModel, ApiPageQueryModel
 from module_hrm.entity.vo.case_vo import AddCaseModel
-from module_hrm.enums.enums import DataType, TstepTypeEnum
 from module_hrm.service.api_service import api_tree
 from module_hrm.service.case_service import CaseService
-from utils.log_util import *
-from utils.page_util import *
-from utils.response_util import *
+from utils.common_util import CamelCaseUtil
+from utils.log_util import logger
+from utils.response_util import ResponseUtil
 
 hrmApiController = APIRouter(prefix='/hrm/api', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -50,7 +51,7 @@ async def api_copy_as_case(request: Request,
 
         caseMode.case_name = api_data.name
         caseMode.request = api_data.request_info
-        data = CaseService.add_case_services(query_db,caseMode)
+        data = CaseService.add_case_services(query_db, caseMode)
         return ResponseUtil.success(data=data)
     except Exception as e:
         logger.exception(e)
@@ -116,6 +117,3 @@ async def api_del(request: Request,
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-
-
-

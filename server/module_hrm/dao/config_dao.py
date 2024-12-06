@@ -48,7 +48,7 @@ class ConfigDao:
             query = query.filter(HrmCase.module_id == None)
 
         # 添加排序条件
-        query = query.order_by(HrmCase.sort).distinct()
+        query = query.order_by(HrmCase.sort, HrmCase.create_time.desc(), HrmCase.update_time.desc()).distinct()
 
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
 

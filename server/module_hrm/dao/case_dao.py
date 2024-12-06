@@ -1,3 +1,6 @@
+from typing import Type
+
+from sqlalchemy import select, case, Sequence
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
@@ -29,14 +32,17 @@ class CaseDao:
         return info
 
     @classmethod
-    def get_case_by_ids(cls, db: Session, case_ids: list[int]) -> list[HrmCase]:
+    def get_case_by_ids(cls, db: Session, case_ids: list[int]) -> Sequence[HrmCase]:
         """
         根据用例id获取在用用例详细信息
         :param db: orm对象
         :param case_ids: 用例id
         :return: 在用用例信息对象
         """
-        info = db.query(HrmCase).filter(HrmCase.case_id.in_(case_ids)).all()
+        ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)], else_=len(case_ids))
+        # info = db.query(HrmCase).filter(HrmCase.case_id.in_(case_ids)).order_by(ordering_case).all()
+
+        info = db.execute(select(HrmCase).where(HrmCase.case_id.in_(case_ids)).order_by(ordering_case)).scalars().all()
 
         return info
 
@@ -111,7 +117,7 @@ class CaseDao:
             query = query.filter(HrmCase.case_id == query_object.case_id)
 
         # 添加排序条件
-        query = query.order_by(HrmCase.create_time.desc()).order_by(HrmCase.sort).distinct()
+        query = query.order_by(HrmCase.sort, HrmCase.create_time.desc(), HrmCase.update_time.desc()).distinct()
 
         post_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
 
@@ -131,7 +137,7 @@ class CaseDao:
         db_case = HrmCase(**data_dict)
         db.add(db_case)
         db.flush()
-        # db.commit()
+        db.commit()
 
         return db_case
 

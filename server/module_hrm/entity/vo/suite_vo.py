@@ -1,12 +1,11 @@
-import json
+from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
-from typing import Union, Optional, List, Dict, Text, Any
-from datetime import datetime
+
 from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
-from utils.common_util import CamelCaseUtil
+from module_hrm.enums.enums import QtrDataStatusEnum
 
 
 class SuiteModel(CommonDataModel):
@@ -19,7 +18,7 @@ class SuiteModel(CommonDataModel):
     suite_name: Optional[str] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None
-    status: Optional[int] = None
+    status: Optional[int] = QtrDataStatusEnum.normal.value
     del_flag: Optional[str] = None
 
 

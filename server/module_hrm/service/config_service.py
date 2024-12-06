@@ -1,5 +1,7 @@
-from module_hrm.dao.case_dao import *
+from sqlalchemy.orm import Session
+
 from module_hrm.dao.config_dao import ConfigDao
+from module_hrm.entity.vo.case_vo import CasePageQueryModel
 from utils.page_util import PageResponseModel
 
 
@@ -7,6 +9,7 @@ class ConfigService:
     """
     用例管理服务层
     """
+
     @classmethod
     def get_config_select(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False):
         """
@@ -29,4 +32,3 @@ class ConfigService:
             if list_result:
                 case_list_result = [{**row[0], **row[1], **row[2]} for row in list_result]
         return case_list_result
-

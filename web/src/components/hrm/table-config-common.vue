@@ -10,6 +10,7 @@ import {inject, useTemplateRef} from "vue";
 import {useClipboard} from "@vueuse/core";
 import {Json, parseHeader} from "@/utils/tools.js";
 import Sortable from "sortablejs";
+import {ScopeEnum} from "@/components/hrm/enum.js";
 
 const props = defineProps({
   cols: {type: Object},
@@ -47,7 +48,8 @@ function addRow(event) {
       type: 'string',
       desc: '',
       dataId: selfData.value.length,
-    })
+      scope: ScopeEnum.case.value
+    });
   } else {
     console.log("selfData is not object")
     // selfData = ref([{
@@ -176,6 +178,14 @@ function setSort() {//行拖拽
   });
 }
 
+function selectOptions(options) {
+  console.log(options)
+  if (options){
+    return options;
+  }
+  return hrm_data_type;
+}
+
 </script>
 
 <template>
@@ -239,7 +249,7 @@ function setSort() {//行拖拽
 
         <template #default="{ row, $index }">
           <template v-if="col.type === 'select'">
-            <SelectDataType v-model="row.type" :options="hrm_data_type"></SelectDataType>
+            <SelectDataType v-model="row[col.prop]" :options="col.options || hrm_data_type"></SelectDataType>
           </template>
           <template v-else-if="col.type === 'compaList'">
             <SelectComparator v-model="row[col.prop]" :options-dict="hrm_comparator_dict"></SelectComparator>
@@ -250,6 +260,7 @@ function setSort() {//行拖拽
           <template v-else>
             <el-input v-model="row[col.prop]"></el-input>
           </template>
+<!--          <el-input v-model="row[col.prop]"></el-input>-->
         </template>
 
       </el-table-column>

@@ -1,20 +1,25 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from fastapi import Depends
+from sqlalchemy.orm import Session
+
 from config.get_db import get_db
-from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.service.debugtalk_service import *
-from utils.page_util import PageResponseModel
-from utils.response_util import *
-from utils.log_util import *
-from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.aspect.data_scope import GetDataScope
 from module_admin.annotation.log_annotation import log_decorator
+from module_admin.aspect.data_scope import GetDataScope
+from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
+from module_admin.service.login_service import LoginService, CurrentUserModel
+from module_hrm.entity.vo.debugtalk_vo import DeleteDebugTalkModel, DebugTalkModel, DebugTalkQueryModel
+from module_hrm.service.debugtalk_service import DebugTalkService
+from utils.log_util import logger
+from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
 from utils.snowflake import snowIdWorker
 
 debugtalkController = APIRouter(prefix='/hrm/debugtalk', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@debugtalkController.get("/list", response_model=List[DebugTalkModel] | PageResponseModel,
+@debugtalkController.get("/list", response_model=list[DebugTalkModel] | PageResponseModel,
                          dependencies=[Depends(CheckUserInterfaceAuth('hrm:debugtalk:list'))])
 async def get_hrm_debugtalk_list(request: Request,
                                  query: DebugTalkQueryModel = Depends(DebugTalkQueryModel.as_query),

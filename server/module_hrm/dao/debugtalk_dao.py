@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from module_hrm.entity.do.debugtalk_do import HrmDebugTalk
 from module_hrm.entity.do.project_do import HrmProject
-from module_hrm.entity.vo.debugtalk_vo import *
+from module_hrm.entity.vo.debugtalk_vo import DebugTalkModel, DebugTalkQueryModel
 from utils.page_util import PageUtil
 
 
@@ -40,7 +40,8 @@ class DebugTalkDao:
             or_(HrmDebugTalk.project_id == page_object.project_id if page_object.project_id else True,
                 HrmDebugTalk.project_id == None)).filter(HrmDebugTalk.del_flag == 0,
                                                          HrmDebugTalk.status == page_object.status if page_object.status else True,
-                                                         eval(data_scope_sql)).order_by(HrmDebugTalk.debugtalk_id)
+                                                         eval(data_scope_sql)).order_by(
+            HrmDebugTalk.debugtalk_id).order_by(HrmDebugTalk.create_time.desc(), HrmDebugTalk.update_time.desc())
 
         debugtalk_list = PageUtil.paginate(debugtalk_list, page_object.page_num, page_object.page_size,
                                            page_object.is_page)

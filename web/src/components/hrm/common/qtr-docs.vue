@@ -1,5 +1,4 @@
 <script setup>
-import {marked} from 'marked';
 import hljs from 'highlight.js';
 import {useTemplateRef} from 'vue';
 import markdownit from 'markdown-it'

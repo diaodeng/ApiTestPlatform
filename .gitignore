@@ -9,6 +9,7 @@ server/.env.prod
 server/.env.test
 server/alembic
 server/alembic.ini
+server/node_modules
 
 web/vite.config.js.timestamp*.mjs
 

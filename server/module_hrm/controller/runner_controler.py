@@ -1,22 +1,26 @@
 import asyncio
+from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
+from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.run_detail_dao import RunDetailDao
-from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel, HrmRunDetailModel
-from module_hrm.service.case_service import *
-from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
+from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_vo import CaseModel, CaseRunModel
+from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel
+from module_hrm.service.debugtalk_service import DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler, ForwardRulesHandler
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_async, save_run_detail
-from utils.log_util import *
-from utils.message_util import FeiShuHandler, MessageHandler
-from utils.page_util import *
-from utils.response_util import *
+from utils.log_util import logger
+from utils.message_util import MessageHandler
+from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
 
 runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -33,6 +37,8 @@ async def run_test(request: Request,
         ForwardRulesHandler.transform(query_db, run_info)
         run_info.runner = current_user.user.user_id
         run_info.feishu_robot.push = run_info.push
+        # data = ""
+        # threading.Thread(target=test_run, args=(run_info, current_user)).start()
         if run_info.is_async:
             asyncio.create_task(run_by_async(query_db, run_info, current_user))
             data = "请耐心等待运行结果"
@@ -68,13 +74,13 @@ async def for_debug(request: Request,
 
         if not case_objs: return ResponseUtil.success(msg="没有可执行的用例", data="没有可执行的用例")
 
-        # 读取项目debugtalk
-        common_debugtalk_source, project_debugtalk_source = DebugTalkService.debugtalk_source(query_db,
-                                                                                              project_id=page_query_result.project_id)
-        debugtalk_obj = DebugTalkHandler(project_debugtalk_source, common_debugtalk_source)
-        debugtalk_func_map = debugtalk_obj.func_map(user=current_user.user.user_id)
+        # # 读取项目debugtalk
+        debugtalk_info = DebugTalkService.project_debugtalk_map(query_db,
+                                                                case_id=case_data["caseId"] or int(
+                                                                    datetime.now().timestamp() * 1000000),
+                                                                run_info=debug_info)
 
-        test_runner = TestRunner(case_objs[0], debugtalk_func_map, debug_info)
+        test_runner = TestRunner(case_objs[0], debugtalk_info, debug_info)
         all_case_res = await test_runner.start()
         logger.info('执行成功')
         all_log = []

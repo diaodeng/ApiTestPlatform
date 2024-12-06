@@ -92,6 +92,14 @@
         </template>
       </el-table-column>
       <el-table-column prop="dataName" label="数据名称"></el-table-column>
+      <el-table-column prop="orderNum" label="排序" width="80px">
+        <template #default="scope">
+          <el-input v-model="scope.row.orderNum"
+                    @change="changeOrder(scope.row)"
+
+          ></el-input>
+        </template>
+      </el-table-column>
       <el-table-column prop="dataStatus" label="数据状态" width="100" align="center">
         <template #default="scope">
           <dict-tag :options="qtr_case_status" :value="scope.row.dataStatus + ''"/>
@@ -145,10 +153,11 @@
 </template>
 
 <script setup name="SuiteDetail">
-import {getSuiteDetail, listDetailSuite, updateSuiteDetail} from "@/api/qtr/suite.js";
+import {changeContentOrder, getSuiteDetail, listDetailSuite, updateSuiteDetail} from "@/api/qtr/suite.js";
 import {listProject} from "@/api/hrm/project.js";
 import {selectModulList} from "@/api/hrm/module.js";
 import ConfigSuiteDataDialog from "@/components/qtr/config-suite-data-dialog.vue";
+import {ElMessage} from "element-plus";
 
 const suiteId = defineModel("suiteId")
 const {proxy} = getCurrentInstance();
@@ -198,6 +207,8 @@ function toggleExpandAll() {
 function handleSelectionChange(selection) {
   suiteDetailIds.value = selection.map(item => item.suiteDetailId);
 }
+
+
 
 /** 表单重置 */
 function reset() {
@@ -312,6 +323,14 @@ function handleStatusChange(row) {
     loadingSwitch.value = false;
   });
 
+}
+
+function changeOrder(row) {
+  changeContentOrder({"suiteId": row.suiteId, "orderNum": row.orderNum, "dataId": row.dataId}).then(response =>{
+    ElMessage.success(response.msg);
+  }).catch(reason=>{
+    ElMessage.error("操作失败");
+  });
 }
 
 getProjectSelect();

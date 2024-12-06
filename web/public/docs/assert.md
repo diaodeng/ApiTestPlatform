@@ -35,5 +35,58 @@ text  # {"status_code":200,"data":{"a":1,"b":"2","c":"test"}}
 content  # b'{"status_code":200,"data":{"a":1,"b":"2","c":"test"}}'
 body  # 
 data.c  # test， 不给类型这里默认走的json 
-re.*  # 匹配任意人内容，re.后面直接跟正则表达式
+re.*  # 匹配text中的任意内容，re.后面直接跟正则表达式
 ```
+
+> 计入有如下返回数据，图片中有各种情况的使用介绍
+> 类型选json，表示期望数据会使用json.loads处理
+
+```json
+{
+    "code": 200,
+    "msg": "操作成功",
+    "cookies": {},
+    "body": {},
+    "queryParams": {
+        "A": "1",
+        "B1": "1",
+        "B2": "2",
+        "D": "jmespathvalue",
+        "C": "999999999999",
+        "E": "London"
+    },
+    "pathParams": {},
+    "data": {
+        "1234": "1234",
+        "5678": 5678,
+        "name": "name",
+        "value": "value",
+        "map": {
+            "name": "name",
+            "value": "value",
+            "int_str": "1122",
+            "int": 1122,
+            "float_str": "1122.01",
+            "float": 1122.01
+        },
+        "row": [
+            {
+                "1234": "1122",
+                "5678": 1122,
+                "name": "name",
+                "value": "value"
+            },
+            {
+                "1234": "1133",
+                "5678": 1133,
+                "name": "name",
+                "value": "value"
+            }
+        ]
+    },
+    "success": true,
+    "time": "2024-11-21T15:00:04.272606"
+}
+```
+
+![assert使用说明](images/case_config/case_step_assert.png)

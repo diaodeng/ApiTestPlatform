@@ -285,11 +285,6 @@ const dataName = computed(() => {
   return props.dataType === HrmDataTypeEnum.case ? "用例" : "配置";
 });
 
-const caseEditDialogTitle = computed(() => {
-  return title.value + '【' + form.value.caseId + ' - ' + form.value.caseName + '】'
-});
-
-
 provide("hrm_data_type", hrm_data_type);
 provide('sys_normal_disable', sys_normal_disable);
 provide('qtr_case_status', qtr_case_status);
@@ -336,11 +331,16 @@ const loading = ref({
   edite: false,
   run: false,
   copy: false
-})
+});
 
 function nameOrGlob(val) {
   return val ? val : "全局";
 }
+
+const caseEditDialogTitle = computed(() => {
+  const caseId = form.value.caseId ? '【' + form.value.caseId + '】' : ""
+  return title.value + '>> ' + caseId + form.value.caseName;
+});
 
 
 function lineStatusChange(selectValue, dataSource) {
@@ -373,7 +373,6 @@ function runTest(row) {
 * */
 function showCopyDialog(data) {
   copyDialog.value = true;
-  console.log(isRef(data))
   copyCaseInfo.value = structuredClone(toValue(toRaw(data)));
 }
 

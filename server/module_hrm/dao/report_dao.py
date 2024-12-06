@@ -12,7 +12,7 @@ class ReportDao:
 
     @classmethod
     def get_by_id(cls, db: Session, report_id: int):
-        pass
+        return db.query(HrmReport).filter(HrmReport.report_id == report_id).first()
 
     @classmethod
     def get_by_name(cls, db: Session, report_name: str):

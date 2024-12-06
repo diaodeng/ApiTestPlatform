@@ -1,8 +1,13 @@
-from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_admin.entity.vo.role_vo import RoleMenuQueryModel
-from module_admin.entity.vo.common_vo import CrudResponseModel
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from module_admin.dao.menu_dao import MenuDao
 from module_admin.dao.role_dao import RoleDao
-from module_admin.dao.menu_dao import *
+from module_admin.entity.vo.common_vo import CrudResponseModel
+from module_admin.entity.vo.menu_vo import MenuQueryModel, MenuModel, DeleteMenuModel
+from module_admin.entity.vo.role_vo import RoleMenuQueryModel
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from utils.common_util import CamelCaseUtil
 
 
@@ -25,7 +30,8 @@ class MenuService:
         return menu_tree_result
 
     @classmethod
-    def get_role_menu_tree_services(cls, query_db: Session, role_id: int, current_user: Optional[CurrentUserModel] = None):
+    def get_role_menu_tree_services(cls, query_db: Session, role_id: int,
+                                    current_user: Optional[CurrentUserModel] = None):
         """
         根据角色id获取菜单树信息service
         :param query_db: orm对象
@@ -45,7 +51,8 @@ class MenuService:
         return result
 
     @classmethod
-    def get_menu_list_services(cls, query_db: Session, page_object: MenuQueryModel, current_user: Optional[CurrentUserModel] = None):
+    def get_menu_list_services(cls, query_db: Session, page_object: MenuQueryModel,
+                               current_user: Optional[CurrentUserModel] = None):
         """
         获取菜单列表信息service
         :param query_db: orm对象
@@ -53,7 +60,8 @@ class MenuService:
         :param current_user: 当前用户对象
         :return: 菜单列表信息对象
         """
-        menu_list_result = MenuDao.get_menu_list(query_db, page_object, current_user.user.user_id, current_user.user.role)
+        menu_list_result = MenuDao.get_menu_list(query_db, page_object, current_user.user.user_id,
+                                                 current_user.user.role)
 
         return CamelCaseUtil.transform_result(menu_list_result)
 
@@ -65,7 +73,9 @@ class MenuService:
         :param page_object: 新增菜单对象
         :return: 新增菜单校验结果
         """
-        menu = MenuDao.get_menu_detail_by_info(query_db, MenuModel(parentId=page_object.parent_id, menuName=page_object.menu_name, menuType=page_object.menu_type))
+        menu = MenuDao.get_menu_detail_by_info(query_db,
+                                               MenuModel(parentId=page_object.parent_id, menuName=page_object.menu_name,
+                                                         menuType=page_object.menu_type))
         if menu:
             result = dict(is_success=False, message='同一目录下不允许存在同名同类型的菜单')
         else:
@@ -91,7 +101,9 @@ class MenuService:
         menu_info = cls.menu_detail_services(query_db, edit_menu.get('menu_id'))
         if menu_info:
             if menu_info.parent_id != page_object.parent_id or menu_info.menu_name != page_object.menu_name or menu_info.menu_type != page_object.menu_type:
-                menu = MenuDao.get_menu_detail_by_info(query_db, MenuModel(parentId=page_object.parent_id, menuName=page_object.menu_name, menuType=page_object.menu_type))
+                menu = MenuDao.get_menu_detail_by_info(query_db, MenuModel(parentId=page_object.parent_id,
+                                                                           menuName=page_object.menu_name,
+                                                                           menuType=page_object.menu_type))
                 if menu:
                     result = dict(is_success=False, message='同一目录下不允许存在同名同类型的菜单')
                     return CrudResponseModel(**result)
@@ -149,7 +161,8 @@ class MenuService:
         :param permission_list: 菜单列表信息
         :return: 菜单树形嵌套数据
         """
-        permission_list = [dict(id=item.menu_id, label=item.menu_name, parentId=item.parent_id) for item in permission_list]
+        permission_list = [dict(id=item.menu_id, label=item.menu_name, parentId=item.parent_id) for item in
+                           permission_list]
         # 转成id为key的字典
         mapping: dict = dict(zip([i['id'] for i in permission_list], permission_list))
 

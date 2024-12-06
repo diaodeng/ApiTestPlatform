@@ -1,9 +1,10 @@
 import math
 from typing import Optional, List
 from sqlalchemy.orm.query import Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from utils.common_util import CamelCaseUtil
+from utils.log_util import logger
 
 
 class PageResponseModel(BaseModel):
@@ -12,7 +13,7 @@ class PageResponseModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    rows: List = []
+    rows: List = Field(default_factory=lambda: [])
     page_num: Optional[int] = None
     page_size: Optional[int] = None
     total: int
@@ -65,6 +66,7 @@ class PageUtil:
             total = query.count()
             paginated_data = query.offset((page_num - 1) * page_size).limit(page_size).all()
             has_next = True if math.ceil(len(paginated_data) / page_size) > page_num else False
+            logger.info(f"分页查询结束")
             result = PageResponseModel(
                 rows=CamelCaseUtil.transform_result(paginated_data),
                 pageNum=page_num,

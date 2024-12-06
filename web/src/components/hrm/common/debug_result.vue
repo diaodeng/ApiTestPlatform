@@ -77,11 +77,11 @@ const calcErrorLogs = computed({
 });
 
 const responseEditHeight = computed(() => {
-  return (containerHeight.value - 33) + 'px';
+  return (containerHeight.value - 35) + 'px';
 })
 
 const logEditHeight = computed(() => {
-  return (containerHeight.value - 25) + 'px';
+  return (containerHeight.value - 27) + 'px';
 })
 
 useResizeObserver(debugContainerRef, (entries) => {
@@ -102,11 +102,27 @@ useResizeObserver(debugContainerRef, (entries) => {
                    :height="responseEditHeight" key="edit_response"></AceEditor>
       </el-tab-pane>
       <el-tab-pane label="日志" name="logs" key="tab_logs">
-        <AceEditor v-model:content="calcLogs" :can-set="true" :height="logEditHeight" key="edit_logs"></AceEditor>
+        <AceEditor v-model:content="calcLogs"
+                   :can-set="true"
+                   :height="logEditHeight"
+                   key="edit_logs"
+                   lang="text"
+                   :read-only="true"
+                   :enable-basic-autocompletion="false"
+                   :enable-live-autocompletion="false"
+                   :enable-snippets="false"
+        ></AceEditor>
       </el-tab-pane>
       <el-tab-pane label="异常" name="errorLogs" key="tab_errorLogs">
-        <AceEditor v-model:content="calcErrorLogs" :can-set="true" :height="logEditHeight"
-                   key="edit_errorLogs"></AceEditor>
+        <AceEditor v-model:content="calcErrorLogs"
+                   :can-set="true"
+                   :height="logEditHeight"
+                   key="edit_errorLogs"
+                   :read-only="true"
+                   :enable-basic-autocompletion="false"
+                   :enable-live-autocompletion="false"
+                   :enable-snippets="false"
+        ></AceEditor>
       </el-tab-pane>
     </el-tabs>
   </div>

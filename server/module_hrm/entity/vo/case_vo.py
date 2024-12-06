@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Optional, List, Any, Dict
 
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query, as_form
@@ -71,18 +71,31 @@ class FeishuRobotModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
     url: Optional[str] = None
     secret: Optional[str] = None
-    keywords: Optional[list] = []
-    at_user_id: Optional[list] = []
+    keywords: Optional[list] = Field(default_factory=lambda: [])
+    at_user_id: Optional[list] = Field(default_factory=lambda: [])
     push: bool = False
+
+
+class ForwardRulesForRunModel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    match_type: Optional[int] = None  # module_hrm.enums.enums.ForwardRuleMatchTypeEnum
+    origin_url: str | None = None
+    target_url: Optional[str] = None
 
 
 class ForwardConfigModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
-    forward_rule_ids: Optional[list] = []
+    forward_rule_ids: Optional[list] = Field(default_factory=lambda: [])
     agent_code: Optional[str] = None
-    forward_rules: Optional[dict] = None
+    forward_rules: list[ForwardRulesForRunModel] = Field(default_factory=lambda: [])
     agent_id: Optional[int] = None
     forward: bool = False
+
+
+class ProjectDebugtalkInfoModel(BaseModel):
+    module_names: list[str] = Field(default_factory=lambda: [])
+    func_map: dict[str, Any] = Field(default_factory=lambda: {})
+    module_instance: list[Any] = Field(default_factory=lambda: [])
 
 
 class CaseRunModel(BaseModel):
@@ -95,11 +108,12 @@ class CaseRunModel(BaseModel):
     run_type: Optional[int] = RunTypeEnum.case.value  # 用例执行数据源，项目、模块、套件、用例
     run_model: Optional[int | None] = None  # 执行方式，1手动，2定时任务
     report_name: Optional[str] = None  # 测试报告名称
-    report_id: Optional[int] = None  # 测试报告名称
+    report_id: Optional[int] = -1  # 测试报告名称
     is_async: Optional[bool] = False  # 本次执行同步或异步
     repeat_num: int = 1  # 用例重复执行次数
     env: int  # 环境id
     concurrent: int = 1  # 并发数(同时执行的用例数)
+    run_by_sort: Optional[bool] = False
     case_data: Optional[CaseModel | dict | None] = None  # 用例数据
     runner: Any = None
 
@@ -107,6 +121,9 @@ class CaseRunModel(BaseModel):
 
     push: bool = False
     feishu_robot: Optional[FeishuRobotModel] = FeishuRobotModel()
+
+    global_vars: dict = Field(default_factory=lambda: {})
+    project_debugtalk_set: dict[str | int, ProjectDebugtalkInfoModel] = Field(default_factory=lambda: {})  # 当前加载的所有debugtalk
 
 
 class CaseModuleProjectModel(BaseModel):

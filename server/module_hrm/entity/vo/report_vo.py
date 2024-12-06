@@ -1,6 +1,6 @@
 from typing import Optional, Any, Text
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
@@ -42,4 +42,4 @@ class ReportDelModel(BaseModel):
     报告模型
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
-    report_ids: list | None = []
+    report_ids: list | None = Field(default_factory=lambda: [])
