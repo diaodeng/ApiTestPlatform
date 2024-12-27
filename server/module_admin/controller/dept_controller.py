@@ -4,7 +4,7 @@ from config.get_db import get_db
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_admin.service.dept_service import *
 from utils.response_util import *
-from utils.log_util import *
+from utils.log_util import logger
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.annotation.log_annotation import log_decorator

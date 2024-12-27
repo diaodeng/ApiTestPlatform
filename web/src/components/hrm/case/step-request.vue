@@ -35,11 +35,9 @@ const tabsMaxHeight = ref(0);
 useResizeObserver(stepRef, (entries) => {
   const entry = entries[0]
   const {width, height} = entry.contentRect;
-
   containerHeight.value = height;
-
   tabsMaxHeight.value = containerHeight.value - 133;
-})
+});
 
 
 const calcRequestContainerHeight = computed(()=>{
@@ -101,21 +99,8 @@ const calcRequestContainerHeight = computed(()=>{
                        v-model:step-detail-data="stepDetailData"
                        :tab-height="tabsMaxHeight"
           ></DebugResult>
-          <!--        <el-tabs v-model="activeResultTab" class="request-detail">-->
-          <!--          <el-tab-pane label="响应" name="response">-->
-          <!--            <AceEditor v-model:content="calcResponse" can-set="true" can-search="true"-->
-          <!--                       :height="editHeight"></AceEditor>-->
-          <!--          </el-tab-pane>-->
-          <!--          <el-tab-pane label="日志" name="logs">-->
-          <!--            <AceEditor v-model:content="calcLogs" can-set="true" :height="editHeight"></AceEditor>-->
-          <!--          </el-tab-pane>-->
-          <!--          <el-tab-pane label="异常" name="errorLogs">-->
-          <!--            <AceEditor v-model:content="calcErrorLogs" can-set="true" :height="editHeight"></AceEditor>-->
-          <!--          </el-tab-pane>-->
-          <!--        </el-tabs>-->
         </template>
       </SplitWindow>
-
     </el-row>
   </div>
 

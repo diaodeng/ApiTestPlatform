@@ -152,7 +152,7 @@ const crontabValueObj = ref({
     day: "*",
     month: "*",
     week: "?",
-    year: "",
+    year: "*",
 })
 const crontabValueString = computed(() => {
     const obj = crontabValueObj.value
@@ -169,7 +169,7 @@ const crontabValueString = computed(() => {
         + obj.week
         + (obj.year === "" ? "" : " " + obj.year)
 })
-watch(expression, () => resolveExp())
+watch(()=>expression.value, () => resolveExp())
 function shouldHide(key) {
     return !(hideComponent.value && hideComponent.value.includes(key))
 }
@@ -188,9 +188,7 @@ function resolveExp() {
                 week: arr[5],
                 year: arr[6] ? arr[6] : ""
             }
-            crontabValueObj.value = {
-                ...obj,
-            }
+            crontabValueObj.value = {...obj};
         }
     } else {
         // 没有传入的表达式 则还原
@@ -203,6 +201,7 @@ function tabCheck(index) {
 }
 // 由子组件触发，更改表达式组成的字段值
 function updateCrontabValue(name, value, from) {
+    console.log(name + ": " + value + ": " + from)
     crontabValueObj.value[name] = value
 }
 // 表单选项的子组件校验数字格式（通过-props传递）
@@ -234,7 +233,7 @@ function clearCron() {
         day: "*",
         month: "*",
         week: "?",
-        year: "",
+        year: "*",
     }
 }
 onMounted(() => {

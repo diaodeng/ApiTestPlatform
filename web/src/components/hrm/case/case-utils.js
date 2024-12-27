@@ -18,7 +18,7 @@ export function getStepDataByType(stepType) {
         tapData = JSON.parse(JSON.stringify(initStepData));
     } else if (stepType === CaseStepTypeEnum.websocket) {
         let stepData = JSON.parse(JSON.stringify(initStepData));
-        stepData.request = initWebsocketData;
+        stepData.request = JSON.parse(JSON.stringify(initWebsocketData));
         tapData = stepData;
     } else {
         return {};

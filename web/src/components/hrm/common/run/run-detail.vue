@@ -127,6 +127,9 @@
 </template>
 
 <script setup name="RunDetail">
+/*
+* 查看执行详情的组件
+* */
 import * as ApiRunDetail from "@/api/hrm/run_detail.js";
 import {listProject} from "@/api/hrm/project";
 import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
