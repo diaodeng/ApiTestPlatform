@@ -221,6 +221,8 @@ export const initDebugTalkFormData = {
 
 
 export const initRunConfig = {
+    userName: "",
+    userId: null,
     env: null,
     ids: [],
     runType: RunTypeEnum.case,
