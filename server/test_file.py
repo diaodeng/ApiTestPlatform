@@ -3514,5 +3514,7 @@ var day = day.html(s3);
 </script>
 
      """
-    res = re.search("var\s+sign\s=\s\"(\S+)\"", data)
-    print(res.groups())
+    res = re.search("var\s+sign \s=\s\"(\S+)\"", data)
+    if res:
+        print("333333333333")
+    print(res.groups()[0])
