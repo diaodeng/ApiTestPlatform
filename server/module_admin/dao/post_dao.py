@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from module_admin.entity.do.post_do import SysPost
-from module_admin.entity.vo.post_vo import *
+from module_admin.entity.vo.post_vo import PostModel, PostPageQueryModel
 from utils.page_util import PageUtil
 
 

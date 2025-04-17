@@ -34,6 +34,7 @@ const calcResponse = computed({
     }
   },
   set(newValue) {
+    nextTick();
     stepDetailData.value.result.response.body = newValue
   }
 });
@@ -77,18 +78,25 @@ const calcErrorLogs = computed({
 });
 
 const responseEditHeight = computed(() => {
+  nextTick();
   return (containerHeight.value - 35) + 'px';
 })
 
 const logEditHeight = computed(() => {
+  nextTick();
   return (containerHeight.value - 27) + 'px';
 })
 
-useResizeObserver(debugContainerRef, (entries) => {
-  const entry = entries[0]
-  const {width, height} = entry.contentRect;
-  containerHeight.value = height;
-})
+
+onMounted(() => {
+  nextTick(() => {
+    useResizeObserver(debugContainerRef, (entries) => {
+      const entry = entries[0]
+      const {width, height} = entry.contentRect;
+      containerHeight.value = height;
+    });
+  });
+});
 
 
 </script>

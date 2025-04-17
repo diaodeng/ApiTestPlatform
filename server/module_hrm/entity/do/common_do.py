@@ -6,6 +6,7 @@ from sqlalchemy.orm import mapped_column, Mapped
 
 class BaseModel():
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment='ID')
+    dept_id: Mapped[int] = mapped_column(Integer, default=-1, comment='部门ID')
     create_by: Mapped[str] = mapped_column(String(100), nullable=True, default='', comment='创建者')
     update_by: Mapped[str] = mapped_column(String(100), nullable=True, default='', comment='更新者')
     manager: Mapped[int] = mapped_column(BigInteger, nullable=True, default=None, comment='管理者')

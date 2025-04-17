@@ -4,8 +4,10 @@ from fastapi import APIRouter, Request
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from common.common_enums import BusinessTypeEnum
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
+from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
@@ -22,16 +24,17 @@ caseController = APIRouter(prefix='/hrm/case', dependencies=[Depends(LoginServic
 @caseController.get("/list", response_model=PageResponseModel,
                     dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:list'))])
 async def get_hrm_case_list(request: Request,
-                       page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
-                       query_db: Session = Depends(get_db),
-                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)
-                       ):
+                            page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
+                            query_db: Session = Depends(get_db),
+                            current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                            data_scope_sql: str = Depends(GetDataScope('HrmCase', user_alias='manager'))
+                            ):
     try:
         # 获取分页数据
         if not page_query.type:
             raise ValueError("参数错误")
         page_query.manager = current_user.user.user_id
-        page_query_result = CaseService.get_case_list_services(query_db, page_query, is_page=True)
+        page_query_result = CaseService.get_case_list_services(query_db, page_query, is_page=True, data_scope_sql=data_scope_sql)
         logger.info('获取成功')
         data = ResponseUtil.success(model_content=page_query_result)
         return data
@@ -41,7 +44,7 @@ async def get_hrm_case_list(request: Request,
 
 
 @caseController.post("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:add'))])
-@log_decorator(title='用例管理', business_type=1)
+@log_decorator(title='用例管理', business_type=BusinessTypeEnum.ADD.value)
 async def add_hrm_case(request: Request,
                        add_case: AddCaseModel,
                        query_db: Session = Depends(get_db),
@@ -54,6 +57,7 @@ async def add_hrm_case(request: Request,
         add_case.manager = current_user.user.user_id
         add_case.create_by = current_user.user.user_name
         add_case.update_by = current_user.user.user_name
+        add_case.dept_id = current_user.user.dept_id
         add_module_result = CaseService.add_case_services(query_db, add_case)
         if add_module_result.is_success:
             logger.info(add_module_result.message)
@@ -67,7 +71,7 @@ async def add_hrm_case(request: Request,
 
 
 @caseController.post("/copy", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:copy'))])
-@log_decorator(title='用例复制', business_type=1)
+@log_decorator(title='用例复制', business_type=BusinessTypeEnum.COPY.value)
 async def copy_hrm_case(request: Request,
                         add_case: AddCaseModel,
                         query_db: Session = Depends(get_db),
@@ -89,7 +93,7 @@ async def copy_hrm_case(request: Request,
 
 
 @caseController.put("", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:edit'))])
-@log_decorator(title='用例管理', business_type=2)
+@log_decorator(title='用例管理', business_type=BusinessTypeEnum.UPDATE.value)
 async def edit_hrm_case(request: Request,
                         edit_module: CaseModel,
                         query_db: Session = Depends(get_db),
@@ -112,7 +116,7 @@ async def edit_hrm_case(request: Request,
 
 
 @caseController.post("/status", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:edit'))])
-@log_decorator(title='用例管理', business_type=2)
+@log_decorator(title='用例管理', business_type=BusinessTypeEnum.UPDATE.value)
 async def change_status(request: Request,
                         edit_module: CaseModel,
                         query_db: Session = Depends(get_db),
@@ -137,7 +141,7 @@ async def change_status(request: Request,
 
 
 @caseController.delete("/{case_ids}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:remove'))])
-@log_decorator(title='用例管理', business_type=3)
+@log_decorator(title='用例管理', business_type=BusinessTypeEnum.DELETE.value)
 async def delete_hrm_case(request: Request,
                           case_ids: str,
                           query_db: Session = Depends(get_db),
@@ -172,13 +176,15 @@ async def query_detail_hrm_case(request: Request, case_id: int, query_db: Sessio
 
 
 @caseController.post("/export", dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:export'))])
-@log_decorator(title='用例管理', business_type=5)
+@log_decorator(title='用例管理', business_type=BusinessTypeEnum.EXPORT.value)
 async def export_hrm_case_list(request: Request,
                                page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
-                               query_db: Session = Depends(get_db)):
+                               query_db: Session = Depends(get_db),
+                               data_scope_sql: str = Depends(GetDataScope('HrmCase', user_alias='manager'))
+                               ):
     try:
         # 获取全量数据
-        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False)
+        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False, data_scope_sql=data_scope_sql)
         export_result = CaseService.export_case_list_services(query_result)
         logger.info('导出成功')
         return ResponseUtil.streaming(data=bytes2file_response(export_result))

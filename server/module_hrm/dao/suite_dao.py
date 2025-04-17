@@ -1,5 +1,8 @@
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import or_
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail

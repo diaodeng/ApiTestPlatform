@@ -15,6 +15,12 @@ logs/
 agentTools/config.ini
 node_modules
 
+package.json
+package-lock.json
+test_file.py
+
+*.zip
+
 # C extensions
 *.so
 

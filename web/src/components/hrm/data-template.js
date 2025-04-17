@@ -1,5 +1,11 @@
-import {randomString} from "@/utils/tools.js";
-import {HrmDataTypeEnum, CaseStepTypeEnum, CodeTypeEnum, CaseRunStatusEnum} from "@/components/hrm/enum.js";
+import {randomNumber, randomString} from "@/utils/tools.js";
+import {
+    HrmDataTypeEnum,
+    CaseStepTypeEnum,
+    CodeTypeEnum,
+    CaseRunStatusEnum,
+    RunTypeEnum
+} from "@/components/hrm/enum.js";
 
 
 /*
@@ -23,7 +29,12 @@ export const initRequestData = {
 export const initWebsocketData = {
     url: "",
     headers: [],
-    data: ""
+    data: "",
+
+    json: "",
+    params: [],
+    dataType: "",
+    method: "GET",
 }
 
 
@@ -74,8 +85,8 @@ export const initStepData =
         validate: [],
         extract: [],
         variables: [],
-        setup_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent:""}},
-        teardown_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent:""}},
+        setup_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent: ""}},
+        teardown_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent: ""}},
         result: {response: {}, logs: {}, status: CaseRunStatusEnum.passed.value},
     }
 
@@ -95,8 +106,8 @@ export const initCaseRequestData = {
             limit: 0,
             delay: 0
         },
-        setup_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent:""}},
-        teardown_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent:""}},
+        setup_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent: ""}},
+        teardown_hooks: {functions: [], codeInfo: {codeType: CodeTypeEnum.js.value, codeContent: ""}},
         variables: [],
         headers: [],
         parameters: [],
@@ -136,7 +147,7 @@ export const initCaseFormData = {
 * API库表对应数据模板
 * */
 export const initApiFormData = {
-    apiId: randomString(10),
+    apiId: randomNumber(10),
     name: "新增API",
     path: "",
     interface: "",
@@ -209,7 +220,24 @@ export const initDebugTalkFormData = {
 }
 
 
-
+export const initRunConfig = {
+    userName: "",
+    userId: null,
+    env: null,
+    ids: [],
+    runType: RunTypeEnum.case,
+    reportName: null,
+    isAsync: false,
+    repeatNum: 1,
+    concurrent: 1,
+    push: false,
+    forwardConfig: {
+        forward: false,
+        agentId: undefined,
+        forwardRuleIds: [],
+    },
+    runBySort: false
+}
 
 
 

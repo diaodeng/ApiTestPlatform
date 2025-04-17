@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
+from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.entity.dto.forward_rules_dto import ForwardRulesModelForApi
@@ -24,10 +25,11 @@ forwardRulesController = APIRouter(prefix='/qtr/forwardRules', dependencies=[Dep
                             dependencies=[Depends(CheckUserInterfaceAuth('qtr:forwardRules:list'))])
 async def get_all_rules(request: Request,
                         query_db: Session = Depends(get_db),
+                        data_scope_sql: str = Depends(GetDataScope('QtrForwardRules', user_alias='manager')),
                         ):
     try:
         logger.info("查询所有转发规则")
-        page_query_result = ForwardRulesService.query_all(query_db)
+        page_query_result = ForwardRulesService.query_all(query_db, data_scope_sql=data_scope_sql)
         data = ResponseUtil.success(data=page_query_result)
         return data
     except Exception as e:
@@ -40,12 +42,13 @@ async def get_all_rules(request: Request,
 async def get_rules_by_page(request: Request,
                             page_query: ForwardRulesQueryModel = Depends(ForwardRulesQueryModel.as_query),
                             query_db: Session = Depends(get_db),
-                            current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                            current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                            data_scope_sql: str = Depends(GetDataScope('QtrForwardRules', user_alias='manager'))
                             ):
     try:
         logger.info("分页查询转发规则")
         page_query.manager = current_user.user.user_id
-        page_query_result = ForwardRulesService.query_list(query_db, query_info=page_query)
+        page_query_result = ForwardRulesService.query_list(query_db, query_info=page_query, data_scope_sql=data_scope_sql)
         data = ResponseUtil.success(dict_content=page_query_result)
         return data
     except Exception as e:
@@ -66,6 +69,7 @@ async def add_rules(request: Request,
         page_query.manager = current_user.user.user_id
         page_query.create_by = current_user.user.user_name
         page_query.update_by = current_user.user.user_name
+        page_query.dept_id = current_user.user.dept_id
         ForwardRulesService.add(query_db, data=page_query)
         data = ResponseUtil.success(msg="新增成功")
         return data
@@ -188,12 +192,13 @@ async def get_rules_detail_by_page(request: Request,
                                    page_query: ForwardRulesDetailQueryModel = Depends(
                                        ForwardRulesDetailQueryModel.as_query),
                                    query_db: Session = Depends(get_db),
-                                   current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                                   current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                                   data_scope_sql: str = Depends(GetDataScope('QtrForwardRulesDetail', user_alias='manager'))
                                    ):
     try:
         logger.info("分页查询转发规则详情")
         page_query.manager = current_user.user.user_id
-        page_query_result = ForwardRulesDetailService.query_list(query_db, query_info=page_query)
+        page_query_result = ForwardRulesDetailService.query_list(query_db, query_info=page_query, data_scope_sql=data_scope_sql)
         data = ResponseUtil.success(dict_content=page_query_result)
         return data
     except Exception as e:
@@ -214,6 +219,7 @@ async def add_rules_detail(request: Request,
         page_query.manager = current_user.user.user_id
         page_query.create_by = current_user.user.user_name
         page_query.update_by = current_user.user.user_name
+        page_query.dept_id = current_user.user.dept_id
         ForwardRulesDetailService.add(query_db, data=page_query)
         data = ResponseUtil.success(msg="新增成功")
         return data

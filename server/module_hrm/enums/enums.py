@@ -6,7 +6,10 @@ class PageType(Enum):
     api = 2
     apiTree = 3
     config = 4
-
+    element = 5  # 元素
+    function = 6  # 方法
+    page = 7  # UI的页面数据
+    group = 8  # 分组数据
 
 class DataType(Enum):
     project = 1
@@ -25,7 +28,27 @@ class DataType(Enum):
     run_detail = 14
     api_http = 15
     api_websocket = 16
+    element = 17
+    base_function = 18  # 基础方法
+    custom_function = 19  # 封装的组合方法
+    page = 20
+    group = 21
 
+
+class PageRelationTypeEnum(Enum):
+    """
+    页面关系关联的元素类型：元素、页面
+    """
+    element = 1
+    page = 2
+
+
+class FuncTypeEnum(Enum):
+    """
+    方法类型
+    """
+    basic = 1  # 基础方法
+    custom = 2  # 封装方法
 
 class CaseRunStatus(Enum):
     passed = 1
@@ -44,6 +67,7 @@ class QtrDataStatusEnum(Enum):
     """
     disabled = 1
     normal = 2
+    deleted = 3
 
 
 class CaseStatusEnum(Enum):

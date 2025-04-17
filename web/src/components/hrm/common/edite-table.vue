@@ -600,9 +600,11 @@ function exportToExcel() {
 }
 
 onMounted(() => {
-  setSort();
-  setSortCloumn();
-})
+  nextTick(() => {
+    setSort();
+    setSortCloumn();
+  });
+});
 
 </script>
 

@@ -1,7 +1,16 @@
 import json
 import datetime
+import logging
+import sys
+import threading
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+import time
 
+import httpx
 import jmespath
+import requests
+
 from utils.log_util import logger
 
 {
@@ -115,10 +124,20 @@ def get_pro_price(record):
         return str(jmespath.search("promotions[*] |[0].rewardInfo.triggerRewardInfos[*].rewardValue|[0]", record) or "")
     return ""
 
-def get_pro_desc(record):
-    if "${itemIpf}" in ("STOCKOUT", "NORMAL"):
+
+def get_pro_desc(case_step_pro_info):
+    if "${itemIpfApi}" in ("STOCKOUT", "NORMAL"):
         return ""
-    return str(jmespath.search("promotions[*].proSloganMap.en_US | [0]", record) or "")
+    if "${itemIpfApi}" == "YUU":
+        # YUU会员促销 满件促销或者分类促销
+        menber_pro = jmespath.search(
+            '[0].memberOtherProInfos."2"[?proApplyUserLevels[0]==`2`[?proApplyUserLevels[0]==`2` && (proType==`3` || proType==`8`)]',
+            case_step_pro_info) or []
+        if not menber_pro:
+            return ""
+        return str(jmespath.search("[0].proSloganMap.en_US | [0]", menber_pro) or "")
+
+    return str(jmespath.search("[0].commonProInfos|[0].proSloganMap.en_US | [0]", case_step_pro_info) or "")
 
 
 def get_rptype(record):
@@ -128,6 +147,13 @@ def get_rptype(record):
                   "2": "MO",
                   "9": "ND"}
     return rptype_map.get(rptype, "")
+
+
+def get_supply_code(record):
+    code = jmespath.search("data.records[].storePurchasesInfo.supplierCode", record)
+    if code and len(code) > 0:
+        return code[0]
+    return ""
 
 
 file_temp = """
@@ -641,12 +667,12 @@ def get_file_content_map_ftp(file_contents: str) -> dict:
         file_contents_map[item_code] = f'{line.split(" ", maxsplit=2)[2:-2]}'
     return file_contents_map
 
+
 def map2str_ftp(map_content: dict) -> str:
     str_list = []
     for key, value in map_content.items():
         str_list.append(f"{key}|{value}")
     return "|".join(str_list)
-
 
 
 def get_file_content_map_api(file_contents: str) -> dict:
@@ -658,6 +684,7 @@ def get_file_content_map_api(file_contents: str) -> dict:
         item_code = line.strip().split("|")[1]
         file_contents_map[item_code] = line.split("|", maxsplit=1)[1]
     return file_contents_map
+
 
 def map2str_api(map_content: dict) -> str:
     return "|".join(map_content.values())
@@ -694,7 +721,7 @@ current_map = {
     " 13 0 ": jmespath.search("ware.extVO.specQty", record) or "",
     " 17 0 ": jmespath.search("ware.sapVO.mmsta", record),
     " 18 0 ": "",
-    " 19 0 ": jmespath.search("extraDataInfo.supplierCode", record) or "",
+    " 19 0 ": get_supply_code(record),
     " 23 0 ": str(jmespath.search("ware.sapVO.retailPrice.cent", record) or ""),
     " 25 0 ": get_pro_price(record),
     " 32 0 ": "${proStartTime}",
@@ -756,7 +783,498 @@ api_data = {
 # logger.info(apt.case_variables["ftp_file_content"])
 
 
+<<<<<<< Updated upstream
 if __name__ == "__main__":
     # print(json.dumps(gen_map(), indent=4, ensure_ascii=False))
     # print(json.dumps(current_map, indent=4, ensure_ascii=False))
     print(len("29300650371938|5120209|PHILADELPHIA CREAM CHEESE 226G|PHILADELPHIA|30104|3010401|1 EA|EA|1.000| |Y|||||0|660||||||||||||||MO||0|NORMAL".split("|")))
+=======
+payment_display_data = """
+{
+    "successful": true,
+    "code": "0000",
+    "msg": "请求成功",
+    "displayMsg": null,
+    "data": [
+        {
+            "id": 3813,
+            "vendorId": 11,
+            "psId": 1,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"現金\",\"en_US\":\"Cash\"}",
+            "psCurrentLanguageName": "現金",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 1,
+            "yn": 1
+        },
+        {
+            "id": 3818,
+            "vendorId": 11,
+            "psId": 3,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"人民幣\",\"en_US\":\"RMB\"}",
+            "psCurrentLanguageName": "人民幣",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 2,
+            "yn": 1
+        },
+        {
+            "id": 3823,
+            "vendorId": 11,
+            "psId": 4,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"信用卡\",\"en_US\":\"Credit Card\"}",
+            "psCurrentLanguageName": "信用卡",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 3,
+            "yn": 1
+        },
+        {
+            "id": 3828,
+            "vendorId": 11,
+            "psId": 5,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"信用卡積分\",\"en_US\":\"Credit Card Points\"}",
+            "psCurrentLanguageName": "信用卡積分",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 4,
+            "yn": 1
+        },
+        {
+            "id": 3833,
+            "vendorId": 11,
+            "psId": 6,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"銀聯\",\"en_US\":\"UnionPay\"}",
+            "psCurrentLanguageName": "銀聯",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 5,
+            "yn": 1
+        },
+        {
+            "id": 3838,
+            "vendorId": 11,
+            "psId": 7,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"八達通\",\"en_US\":\"Octopus\"}",
+            "psCurrentLanguageName": "八達通",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 6,
+            "yn": 1
+        },
+        {
+            "id": 3843,
+            "vendorId": 11,
+            "psId": 9,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"易辦事\",\"en_US\":\"EPS\"}",
+            "psCurrentLanguageName": "易辦事",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 7,
+            "yn": 1
+        },
+        {
+            "id": 3853,
+            "vendorId": 11,
+            "psId": 11,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"enJoy卡折扣\",\"en_US\":\"enJoy Discount\",\"zh_CN\":\"enJoy卡折扣\"}",
+            "psCurrentLanguageName": "enJoy卡折扣",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 8,
+            "yn": 1
+        },
+        {
+            "id": 3858,
+            "vendorId": 11,
+            "psId": 17,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"Enjoy 獎賞現金券\",\"en_US\":\"EnJoy Reward\"}",
+            "psCurrentLanguageName": "Enjoy 獎賞現金券",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 9,
+            "yn": 1
+        },
+        {
+            "id": 3878,
+            "vendorId": 11,
+            "psId": 114,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\" 港幣\",\"en_US\":\"Hong Kong Dollar\"}",
+            "psCurrentLanguageName": " 港幣",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 10,
+            "yn": 1
+        },
+        {
+            "id": 3883,
+            "vendorId": 11,
+            "psId": 116,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"澳門通\",\"en_US\":\"Macau Pass\"}",
+            "psCurrentLanguageName": "澳門通",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 11,
+            "yn": 1
+        },
+        {
+            "id": 3913,
+            "vendorId": 11,
+            "psId": 184,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"澳門錢包\",\"en_US\":\"Mpay\"}",
+            "psCurrentLanguageName": "澳門錢包",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 12,
+            "yn": 1
+        },
+        {
+            "id": 3908,
+            "vendorId": 11,
+            "psId": 183,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"支付寶（中國）\",\"en_US\":\"Alipay(China)\"}",
+            "psCurrentLanguageName": "支付寶（中國）",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 13,
+            "yn": 1
+        },
+        {
+            "id": 3983,
+            "vendorId": 11,
+            "psId": 185,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"聚易用\",\"en_US\":\"SimplePay\"}",
+            "psCurrentLanguageName": "聚易用",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 14,
+            "yn": 1
+        },
+        {
+            "id": 3848,
+            "vendorId": 11,
+            "psId": 8,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"QR支付\",\"en_US\":\"QR Payment\"}",
+            "psCurrentLanguageName": "QR支付",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 15,
+            "yn": 1
+        },
+        {
+            "id": 3898,
+            "vendorId": 11,
+            "psId": 180,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"TNG\",\"en_US\":\"TNG\"}",
+            "psCurrentLanguageName": "TNG",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 16,
+            "yn": 1
+        },
+        {
+            "id": 3903,
+            "vendorId": 11,
+            "psId": 182,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"Tap&go\",\"en_US\":\"Tap&go\"}",
+            "psCurrentLanguageName": "Tap&go",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 17,
+            "yn": 1
+        },
+        {
+            "id": 3873,
+            "vendorId": 11,
+            "psId": 26,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"yuu 現金券\",\"en_US\":\"yuu Cash Voucher\"}",
+            "psCurrentLanguageName": "yuu 現金券",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 19,
+            "yn": 1
+        },
+        {
+            "id": 3923,
+            "vendorId": 11,
+            "psId": 191,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"711電子優惠券\",\"en_US\":\"711 e-voucher\"}",
+            "psCurrentLanguageName": "711電子優惠券",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 20,
+            "yn": 1
+        },
+        {
+            "id": 3928,
+            "vendorId": 11,
+            "psId": 192,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"禮券\",\"en_US\":\"711 Gift Voucher\"}",
+            "psCurrentLanguageName": "禮券",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 22,
+            "yn": 1
+        },
+        {
+            "id": 3863,
+            "vendorId": 11,
+            "psId": 19,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"商場券1\",\"en_US\":\"landlord coupon1\"}",
+            "psCurrentLanguageName": "商場券1",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 23,
+            "yn": 1
+        },
+        {
+            "id": 3868,
+            "vendorId": 11,
+            "psId": 20,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"商場券2\",\"en_US\":\"landlord coupon2\"}",
+            "psCurrentLanguageName": "商場券2",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 24,
+            "yn": 1
+        },
+        {
+            "id": 3933,
+            "vendorId": 11,
+            "psId": 193,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"八達通流動入數\",\"en_US\":\"Mobile Octopus\"}",
+            "psCurrentLanguageName": "八達通流動入數",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 25,
+            "yn": 1
+        },
+        {
+            "id": 3893,
+            "vendorId": 11,
+            "psId": 124,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"澳覓\",\"en_US\":\"Aomei\"}",
+            "psCurrentLanguageName": "澳覓",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 26,
+            "yn": 1
+        },
+        {
+            "id": 3938,
+            "vendorId": 11,
+            "psId": 205,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"foodpanda\",\"en_US\":\"foodpanda\"}",
+            "psCurrentLanguageName": "foodpanda",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 27,
+            "yn": 1
+        },
+        {
+            "id": 3943,
+            "vendorId": 11,
+            "psId": 252,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"M FOOD\",\"en_US\":\"M FOOD\"}",
+            "psCurrentLanguageName": "M FOOD",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 28,
+            "yn": 1
+        },
+        {
+            "id": null,
+            "vendorId": 11,
+            "psId": 129,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"日圓\",\"en_US\":\"Japanese Yen\"}",
+            "psCurrentLanguageName": "日圓",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 100,
+            "yn": 1
+        },
+        {
+            "id": null,
+            "vendorId": 11,
+            "psId": 131,
+            "posType": 1,
+            "psDisplayName": "{\"zh_HK\":\"美元\",\"en_US\":\"United States dollar\"}",
+            "psCurrentLanguageName": "美元",
+            "displayType": 1,
+            "displayGroup": null,
+            "displayIndex": 100,
+            "yn": 1
+        }
+    ]
+}
+"""
+
+
+def get_psid_from_displaydata(data):
+    json_data = json.loads(data)
+    json_data = json_data['data']
+    ps_id = []
+    for item in json_data:
+        ps_id.append(item['psId'])
+    print(",".join(ps_id))
+
+
+all_times = {}
+current_done_index = 0
+
+def check_status(i, client_id, headers, start_time):
+    global current_done_index
+    is_done = False
+    error_num = 0
+    while not is_done:
+        try:
+            # https://newpricetag-partner.rta-os.com/api/print/async/info
+            res_status = requests.request(
+                "GET",
+                "http://newpricetag-partner.rta-os.com/api/print/async/info",
+                params={"clientId": client_id},
+                headers=headers)
+            time.sleep(3)
+            if res_status.json()["data"]["status"] == "done":
+                lock.acquire_lock()
+                current_done_index = current_done_index + 1
+                long_time = datetime.datetime.now() - start_time
+                print(f"已经完成 {str(current_done_index):^4} 条， 第{str(i+1):^4} 【{client_id}】次打印使用时间：{long_time}")
+                is_done = True
+                all_times[client_id] = long_time.seconds
+                lock.release()
+        except Exception as e:
+            time.sleep(1)
+            error_num += 1
+
+
+def pricetag_test(concurrent_num=10):
+
+    """
+    测试环境的数据
+    %7B%22selectParam%22%3A%7B%22printed%22%3A%22%22%2C%22end%22%3A1742977208000%2C%22orderNoType%22%3A10%2C%22orderNos%22%3Anull%2C%22brandId%22%3Anull%2C%22pogType%22%3A-1%2C%22shelvesCodes%22%3Anull%2C%22storeId%22%3A%2221%22%2C%22deptOp%22%3A1%2C%22deptIdList%22%3A%5B%225%22%2C%226%22%2C%2299%22%2C%22LogTest2%22%5D%2C%22deptLevel%22%3A1%2C%22effectTimes%22%3A%5B%5D%2C%22mainType%22%3A%5B%5D%2C%22selectedChangeReasonList%22%3A%5B%5D%2C%22current%22%3A1%2C%22size%22%3A20%2C%22sortField%22%3A%22pog_id%22%2C%22sortOrder%22%3A%22asc%22%2C%22layoutId%22%3A153%2C%22priceTagType%22%3A2%2C%22tab%22%3A2%2C%22effectiveStartPoint%22%3Anull%2C%22effectiveEndPoint%22%3Anull%2C%22selectedPriceChangeTypeList%22%3A%5B%5D%2C%22queryStockAndSaleFlag%22%3A1%2C%22checkedWareItemStatus%22%3A%5B%5D%2C%22pogNameList%22%3A%5B%5D%2C%22scaleHalf%22%3A1%2C%22printType%22%3A%220%22%2C%22forceFlag%22%3Afalse%2C%22print%22%3Atrue%2C%22selectedPogLocation%22%3Atrue%7D%2C%22settings%22%3A%5B%5D%7D
+
+    """
+    start_time = datetime.datetime.now()
+    print(f"开始打印的时间{start_time}")
+    headers = {
+        "Cookie": 'menu_route_key=5; returnUrl=http://idms.db.rta-os.com/#/mysql/mysql_query?instance_id=1297&instance_name=%25E6%2596%25B0%25E4%25BB%25B7%25E7%25AD%25BE%25E7%25B3%25BB%25E7%25BB%259F%25E5%2590%258E%25E7%25AB%25AF-%25E6%2596%25B0%25E4%25BB%25B7%25E7%25AD%25BE%25E7%25B3%25BB%25E7%25BB%259F%25EF%25BC%2588API%25E7%25AB%25AF%25EF%25BC%2589%2C%25E6%2596%25B0%25E4%25BB%25B7%25E7%25AD%25BE%25E7%25B3%25BB%25E7%25BB%259F%25EF%25BC%2588MAN%25E7%25AB%25AF%2520%253E%2520rta_price_tag&env_type=pro&env_type_display=pro&db_name=rta_price_tag&type=mysql; aladdin_gray=; HWWAFSESTIME=1742212174397; HWWAFSESID=58c3d76a7e9f681a99; __token_="SEg6bW0jIzExOS42Ljk3LjM3IyNISDptbSMjMzFiNTIjIzNGRDJGMTdFMzA3OTBEMTU3MDA5NEY3NDAyNzUyQjRCRUU0NTZERTlDNUFGQzQyMDk4QTk0QTgxNEE2MUYwQkExQTZFNTkwMzc2RkIzOEUzMjZFODlEMUQzNDg2QzkyOTc5REFBNEI1NjVFQ0NFMjNFRTdBNjgxQUY2OTk4Mjk5RTgxQzgyMTk4M0M5MDk1MTFDOEZFM0IzQjE0MTM4RkY4MTRGNkI4QjdBMkNDMTM1RDZDRTgxRDdCMTQ2RkM4RkYxQUNFOURDRTQyRjYzQ0Y2QjBGQUMwOTM3Q0Y1NTMyRkNGRUMyRjNGRjNENDVCNjEwMEEyOTZENzA0NUQzNDQ="; rta-os_vender=3; venderId=3; dmall-locale=zh_HK',
+        "Host": "newpricetag-partner.rta-os.com",
+        "Origin": "https://partner.rta-os.com",
+        "Referer": "https://partner.rta-os.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+        "Connection": "close",
+        # "graytoken": "gray"
+    }
+    client_ids = []
+    ip_set= defaultdict(int)
+    for i in range(concurrent_num):
+        try:
+            index = i
+            start_time = datetime.datetime.now()
+            res = requests.post("https://newpricetag-partner.rta-os.com/api/print/all/async",
+                                data={
+                                    # 5千多品
+                                    # "json": "%7B%22selectParam%22%3A%7B%22printed%22%3A%22%22%2C%22end%22%3A1742913596000%2C%22orderNoType%22%3A10%2C%22orderNos%22%3Anull%2C%22brandId%22%3Anull%2C%22pogType%22%3A-1%2C%22shelvesCodes%22%3Anull%2C%22storeId%22%3A%223%22%2C%22deptOp%22%3A1%2C%22deptIdList%22%3A%5B%2204%22%2C%2211%22%5D%2C%22deptLevel%22%3A2%2C%22effectTimes%22%3A%5B%5D%2C%22mainType%22%3A%5B%5D%2C%22selectedChangeReasonList%22%3A%5B%5D%2C%22current%22%3A1%2C%22size%22%3A20%2C%22sortField%22%3A%22pog_id%22%2C%22sortOrder%22%3A%22asc%22%2C%22layoutId%22%3A73%2C%22priceTagType%22%3A2%2C%22tab%22%3A2%2C%22effectiveStartPoint%22%3Anull%2C%22effectiveEndPoint%22%3Anull%2C%22selectedPriceChangeTypeList%22%3A%5B%5D%2C%22queryStockAndSaleFlag%22%3A-1%2C%22checkedWareItemStatus%22%3A%5B%5D%2C%22pogNameList%22%3A%5B%5D%2C%22scaleHalf%22%3A1%2C%22printType%22%3A%220%22%2C%22forceFlag%22%3Atrue%2C%22print%22%3Atrue%2C%22selectedPogLocation%22%3Atrue%7D%2C%22settings%22%3A%5B%5D%7D"
+                                    # 单品
+                                    # "json": "%7B%22selectParam%22%3A%7B%22printed%22%3A%22%22%2C%22end%22%3A1742907834000%2C%22orderNoType%22%3A10%2C%22orderNos%22%3A%5B%22766956%22%5D%2C%22brandId%22%3Anull%2C%22pogType%22%3A-1%2C%22shelvesCodes%22%3Anull%2C%22storeId%22%3A%223%22%2C%22deptOp%22%3A1%2C%22deptIdList%22%3A%5B%5D%2C%22effectTimes%22%3A%5B%5D%2C%22mainType%22%3A%5B%5D%2C%22selectedChangeReasonList%22%3A%5B%5D%2C%22current%22%3A1%2C%22size%22%3A20%2C%22sortField%22%3A%22pog_id%22%2C%22sortOrder%22%3A%22asc%22%2C%22layoutId%22%3A73%2C%22priceTagType%22%3A2%2C%22tab%22%3A2%2C%22effectiveStartPoint%22%3Anull%2C%22effectiveEndPoint%22%3Anull%2C%22selectedPriceChangeTypeList%22%3A%5B%5D%2C%22queryStockAndSaleFlag%22%3A-1%2C%22checkedWareItemStatus%22%3A%5B%5D%2C%22pogNameList%22%3A%5B%5D%2C%22scaleHalf%22%3A1%2C%22printType%22%3A%220%22%2C%22forceFlag%22%3Atrue%2C%22print%22%3Atrue%2C%22selectedPogLocation%22%3Atrue%7D%2C%22settings%22%3A%5B%5D%7D"
+                                    #3千8百多品
+                                    "json": "%7B%22selectParam%22%3A%7B%22printed%22%3A%22%22%2C%22end%22%3A1742926830000%2C%22orderNoType%22%3A10%2C%22orderNos%22%3Anull%2C%22brandId%22%3Anull%2C%22pogType%22%3A-1%2C%22shelvesCodes%22%3Anull%2C%22storeId%22%3A%223%22%2C%22deptOp%22%3A1%2C%22deptIdList%22%3A%5B%2206%22%5D%2C%22deptLevel%22%3A2%2C%22effectTimes%22%3A%5B%5D%2C%22mainType%22%3A%5B%5D%2C%22selectedChangeReasonList%22%3A%5B%5D%2C%22current%22%3A1%2C%22size%22%3A20%2C%22sortField%22%3A%22pog_id%22%2C%22sortOrder%22%3A%22asc%22%2C%22layoutId%22%3A73%2C%22priceTagType%22%3A2%2C%22tab%22%3A2%2C%22effectiveStartPoint%22%3Anull%2C%22effectiveEndPoint%22%3Anull%2C%22selectedPriceChangeTypeList%22%3A%5B%5D%2C%22queryStockAndSaleFlag%22%3A-1%2C%22checkedWareItemStatus%22%3A%5B%5D%2C%22pogNameList%22%3A%5B%5D%2C%22scaleHalf%22%3A1%2C%22printType%22%3A%220%22%2C%22forceFlag%22%3Atrue%2C%22print%22%3Atrue%2C%22selectedPogLocation%22%3Atrue%7D%2C%22settings%22%3A%5B%5D%7D"
+                                },
+                                headers=headers
+                                )
+            res_data = res.json()
+            client_id = res_data["data"]
+            ip = res_data["ip"]
+            ip_set[ip] += 1
+
+            # print(f"第 {i} 次请求的ID {client_id}")
+            client_ids.append((index, client_id, headers, start_time))
+        except Exception as pe:
+            print(f"第{i}次打印失败： {pe}")
+    print(json.dumps(ip_set, ensure_ascii=False, indent=4))
+    print(f"打印请求完成，开始检查状态的时间{datetime.datetime.now()}")
+    # with ThreadPoolExecutor(max_workers=200) as executor:
+    #     for request_info in client_ids:
+    #         executor.submit(check_status, *request_info)
+
+    threads = []
+    for request_info in client_ids:
+        threads.append(threading.Thread(target=check_status, args=request_info))
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+    print(f"打印结束时间:{datetime.datetime.now()}")
+    print(f"共耗时:{datetime.datetime.now()-start_time}")
+
+
+def check_ip(headers):
+    count = defaultdict(int)
+    for i in range(10):
+        try:
+            res_status = requests.request(
+                "GET",
+                "http://newpricetag-partner.rta-os.com/common/printType",
+                headers=headers)
+            if res_status.status_code == 200:
+                ip = res_status.json()['ip']
+                # print(ip)
+                count[ip] += 1
+
+        except Exception as e:
+            pass
+
+    print(count)
+
+
+
+if __name__ == "__main__":
+    lock = threading.Lock()
+    headers = {
+        "Cookie": 'menu_route_key=5; returnUrl=http://idms.db.rta-os.com/#/mysql/mysql_query?instance_id=1297&instance_name=%25E6%2596%25B0%25E4%25BB%25B7%25E7%25AD%25BE%25E7%25B3%25BB%25E7%25BB%259F%25E5%2590%258E%25E7%25AB%25AF-%25E6%2596%25B0%25E4%25BB%25B7%25E7%25AD%25BE%25E7%25B3%25BB%25E7%25BB%259F%25EF%25BC%2588API%25E7%25AB%25AF%25EF%25BC%2589%2C%25E6%2596%25B0%25E4%25BB%25B7%25E7%25AD%25BE%25E7%25B3%25BB%25E7%25BB%259F%25EF%25BC%2588MAN%25E7%25AB%25AF%2520%253E%2520rta_price_tag&env_type=pro&env_type_display=pro&db_name=rta_price_tag&type=mysql; aladdin_gray=; HWWAFSESTIME=1742212174397; HWWAFSESID=58c3d76a7e9f681a99; __token_="SEg6bW0jIzExOS42Ljk3LjM3IyNISDptbSMjMzFiNTIjIzNGRDJGMTdFMzA3OTBEMTU3MDA5NEY3NDAyNzUyQjRCRUU0NTZERTlDNUFGQzQyMDk4QTk0QTgxNEE2MUYwQkExQTZFNTkwMzc2RkIzOEUzMjZFODlEMUQzNDg2QzkyOTc5REFBNEI1NjVFQ0NFMjNFRTdBNjgxQUY2OTk4Mjk5RTgxQzgyMTk4M0M5MDk1MTFDOEZFM0IzQjE0MTM4RkY4MTRGNkI4QjdBMkNDMTM1RDZDRTgxRDdCMTQ2RkM4RkYxQUNFOURDRTQyRjYzQ0Y2QjBGQUMwOTM3Q0Y1NTMyRkNGRUMyRjNGRjNENDVCNjEwMEEyOTZENzA0NUQzNDQ="; rta-os_vender=3; venderId=3; dmall-locale=zh_HK',
+        "Host": "newpricetag-partner.rta-os.com",
+        "Origin": "https://partner.rta-os.com",
+        "Referer": "https://partner.rta-os.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+        # "graytoken": "gray"
+    }
+    # get_psid_from_displaydata(payment_display_data)
+    # print(json.loads("null"))
+    # with open("C:\\Users\\Administrator\\Downloads/S030.item_details_260220251006.i1", 'r') as f:
+    #     for line in f.readlines():
+    #         print(len(line.split("|")))
+    # check_ip(headers)
+
+    num = sys.argv[1] if len(sys.argv)>1 else 10
+    pricetag_test(int(num))
+>>>>>>> Stashed changes
