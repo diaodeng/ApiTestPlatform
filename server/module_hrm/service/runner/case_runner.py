@@ -234,7 +234,6 @@ class CaseRunner(object):
 
             except Exception as e:
 
-
                 step_data = step_obj.step_data if step_obj else step
 
                 if step_obj:
