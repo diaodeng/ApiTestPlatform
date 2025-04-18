@@ -101,12 +101,13 @@ class CaseRunner(object):
         # 全局变量中自身替换
         self.case_data.config.variables = self.__parse_in_case(self.case_data.config.variables)
 
-    def __parse_in_case(self, data):
+    def __parse_in_case(self, data, not_found_exception=True):
         return ConfigHandle.parse_data_for_run(data,
-                                        self.debugtalk_func_map,
-                                        self.run_info.global_vars,
-                                        self.case_data.config.variables
-                                        )
+                                               not_found_exception,
+                                               self.debugtalk_func_map,
+                                               self.run_info.global_vars,
+                                               self.case_data.config.variables
+                                               )
 
     def __exec_hook_script(self, hooks_info: HooksModel, is_before=True):
         """
@@ -195,6 +196,7 @@ class CaseRunner(object):
             try:
                 step_run_condition_dict = step.run_condition.model_dump(by_alias=True)
                 new_data = ConfigHandle.parse_data_for_run(step_run_condition_dict,
+                                                           True,
                                                            self.debugtalk_func_map,
                                                            self.run_info.global_vars,
                                                            self.case_data.config.variables,
@@ -232,7 +234,6 @@ class CaseRunner(object):
 
             except Exception as e:
 
-
                 step_data = step_obj.step_data if step_obj else step
 
                 if step_obj:
@@ -246,7 +247,7 @@ class CaseRunner(object):
                     step_data.result.status = CaseRunStatus.failed.value
                     step_data.result.success = False
 
-                    if not  step_data.result.logs:
+                    if not step_data.result.logs:
                         step_data.result.logs = StepLogs()
 
                 log_content = self.handler.get_log()
@@ -338,8 +339,9 @@ class RequestRunner(object):
         self.case_runner.case_data.config.result.status = CaseRunStatus.failed.value
         self.case_runner.case_data.config.result.success = False
 
-    def parse_data_in_step(self, data: str | dict):
+    def parse_data_in_step(self, data: str | dict, not_found_exception=True):
         new_data = ConfigHandle.parse_data_for_run(data,
+                                                   not_found_exception,
                                                    self.debugtalk_func_map,
                                                    self.case_runner.run_info.global_vars,
                                                    self.case_runner.case_data.config.variables,
@@ -404,12 +406,12 @@ class RequestRunner(object):
                 log_store.before_request += self.case_runner.handler.get_log()
             raise TestFailError(f"{hook_name} error：{setupre}") from setupre
 
-    def parse_request_data(self):
+    def parse_request_data(self, not_found_exception=True):
         self.logger.info("开始替换请求信息中的变量")
         step_data = self.step_data.model_dump(by_alias=True)
         request_data = step_data["request"]
 
-        request_data = self.parse_data_in_step(request_data)
+        request_data = self.parse_data_in_step(request_data, not_found_exception)
 
         try:
             if not urllib.parse.urlparse(request_data["url"]).scheme:
@@ -505,13 +507,16 @@ class RequestRunner(object):
         执行统一调用这个方法
         """
         try:
-            self.parse_request_data()
+            self.step_data.variables = self.parse_data_in_step(self.step_data.variables)
+            self.parse_request_data(not_found_exception=False)
 
             # 系统回调
             self.before_teststep_handler()
 
             # 自定义回调
             self.teststep_setup_handler()
+
+            self.parse_request_data()
 
             self.logger.info(f'{">>>请求:" + self.step_data.name:=^100}')
             self.logger.info(f"原url: {self.step_data.request.url}")
@@ -787,7 +792,12 @@ class RequestRunner(object):
         elif key.startswith('json.'):
             par_data = jmespath.search(key[5:], self.response.json())
         elif key.startswith('re.'):
-            par_data = re.search(key[3:], self.response.text)
+            par_data = re.search(key[3:], self.response.text).groups()
+        elif key.startswith('re['):
+            key_index = int(key[3])
+            par_data = re.search(key[6:], self.response.text).groups()
+            if par_data:
+                par_data = par_data[key_index]
         else:
             par_data = jmespath.search(key, self.response.json())
 

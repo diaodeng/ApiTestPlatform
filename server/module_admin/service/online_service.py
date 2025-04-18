@@ -1,3 +1,4 @@
+import jose
 from fastapi import Request
 from jose import jwt
 
@@ -24,10 +25,15 @@ class OnlineService:
         access_token_keys = await scan_keys(request.app.state.redis, f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}*")
         if not access_token_keys:
             access_token_keys = []
-        access_token_values_list = [await request.app.state.redis.get(key) for key in access_token_keys]
+        access_token_values_list = [(key, await request.app.state.redis.get(key)) for key in access_token_keys]
+
         online_info_list = []
-        for item in access_token_values_list:
-            payload = jwt.decode(item, JwtConfig.jwt_secret_key, algorithms=[JwtConfig.jwt_algorithm])
+        for key,value in access_token_values_list:
+            try:
+                payload = jwt.decode(value, JwtConfig.jwt_secret_key, algorithms=[JwtConfig.jwt_algorithm])
+            except jose.exceptions.ExpiredSignatureError as e:
+                await request.app.state.redis.delete(f"{key}")  # 过期的token删除掉
+                continue
             online_dict = dict(
                 token_id=payload.get('session_id'),
                 user_name=payload.get('user_name'),

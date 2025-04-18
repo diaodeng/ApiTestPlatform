@@ -1,4 +1,8 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 from module_hrm.entity.do.agent_do import QtrAgent
 from module_hrm.entity.vo.agent_vo import *
 from utils.page_util import PageUtil

@@ -24,7 +24,7 @@ debugtalkController = APIRouter(prefix='/hrm/debugtalk', dependencies=[Depends(L
 async def get_hrm_debugtalk_list(request: Request,
                                  query: DebugTalkQueryModel = Depends(DebugTalkQueryModel.as_query),
                                  query_db: Session = Depends(get_db),
-                                 data_scope_sql: str = Depends(GetDataScope('HrmDebugTalk'))):
+                                 data_scope_sql: str = Depends(GetDataScope('HrmDebugTalk', user_alias='manager'))):
     try:
         query_result = DebugTalkService.get_debugtalk_list_services(query_db, query, data_scope_sql)
         if query.is_page:
@@ -47,6 +47,7 @@ async def add_hrm_debugtalk(request: Request,
         add_debugtalk.create_by = current_user.user.user_name
         add_debugtalk.update_by = current_user.user.user_name
         add_debugtalk.debugtalk_id = snowIdWorker.get_id()
+        add_debugtalk.dept_id = current_user.user.dept_id
         add_debugtalk_result = DebugTalkService.add_debugtalk_services(query_db, add_debugtalk)
         if add_debugtalk_result.is_success:
             logger.info(add_debugtalk_result.message)

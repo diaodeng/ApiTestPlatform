@@ -84,20 +84,20 @@ function getConfigSelect() {
 function resetModule() {
   formData.value.moduleId = undefined;
   formData.value.request.config.include.configId = null;
-  getModuleSelect();
+  // getModuleSelect();
   let projectId = "";
   if (formData.value && formData.value.projectId) {
     projectId = formData.value.projectId;
   }
 
   getComparator({projectId: projectId}).then(response => {
-    hrm_comparator_dict.value = response.data
-  })
+    hrm_comparator_dict.value = response.data;
+  });
 }
 
 function resetConfig() {
   formData.value.request.config.include.configId = null;
-  getConfigSelect();
+  // getConfigSelect();
 }
 
 function startParameterDialog() {
@@ -110,7 +110,7 @@ function startParameterDialog() {
     if (!value.__row_key) {
       value.__row_key = randomString(10);
     }
-  })
+  });
   parameterDialogShow.value = true;
 }
 
@@ -131,9 +131,31 @@ function saveParameters(header, data) {
 }
 
 onMounted(() => {
-  getModuleSelect();
-  getConfigSelect();
-})
+  nextTick(() => {
+    getModuleSelect();
+    getConfigSelect();
+    useResizeObserver(configContainerRef, (entries) => {
+      const entry = entries[0]
+      const {width, height} = entry?.contentRect;
+      nextTick(() => {
+        configContainerCurrentHeight.value = height;
+      });
+    });
+  });
+
+});
+
+watch(()=>formData.value.projectId, ()=>{
+  // resetModule();
+  getModuleSelect()
+});
+
+watch(()=>formData.value.moduleId, ()=>{
+  nextTick(()=>{
+    // resetConfig();
+    getConfigSelect();
+  });
+});
 
 function beforeColseDialog(done) {
   ElMessageBox.confirm("退出前请保存数据", "关闭确认", {
@@ -145,17 +167,8 @@ function beforeColseDialog(done) {
     loading.value.initParameter = false;
   }).catch(() => {
 
-  })
+  });
 }
-
-useResizeObserver(configContainerRef, (entries) => {
-  const entry = entries[0]
-  const {width, height} = entry.contentRect;
-  nextTick(() => {
-    configContainerCurrentHeight.value = height;
-  })
-
-})
 
 const calcConfigContainerHeight = computed(() => {
   return parseHeightValue(props.configContainerHeight);

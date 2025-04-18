@@ -14,7 +14,8 @@ export default defineConfig(({mode, command}) => {
                     chunkFileNames: `static/js/[name].[hash:8].js`,
                     entryFileNames: `static/js/[name].[hash:8].js`,
                 }
-            }
+            },
+            sourcemap: true
         },
         // 部署生产环境和开发环境下的URL。
         // 默认情况下，vite 会假设你的应用是被部署在一个域名的根路径上

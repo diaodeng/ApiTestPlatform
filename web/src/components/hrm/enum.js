@@ -101,7 +101,7 @@ export const ScopeEnum = {
 
 
 /*
-* 作用范围
+* 自定义脚本类型
 * */
 export const CodeTypeEnum = {
     python: {label: "python", value:1, elTagType: "primary"},

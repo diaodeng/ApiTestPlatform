@@ -14,7 +14,6 @@ from module_hrm.service.env_service import EnvService
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
 from utils.response_util import ResponseUtil
-from utils.snowflake import snowIdWorker
 
 envController = APIRouter(prefix='/hrm/env', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -24,7 +23,7 @@ envController = APIRouter(prefix='/hrm/env', dependencies=[Depends(LoginService.
 async def get_hrm_env_list(request: Request,
                            env_query: EnvQueryModel = Depends(EnvQueryModel.as_query),
                            query_db: Session = Depends(get_db),
-                           data_scope_sql: str = Depends(GetDataScope('HrmEnv')),
+                           data_scope_sql: str = Depends(GetDataScope('HrmEnv',user_alias='manager')),
                            current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                            ):
     try:
@@ -41,7 +40,7 @@ async def get_hrm_env_list(request: Request,
 async def get_hrm_env_all(request: Request,
                           env_query: EnvQueryModel = Depends(EnvQueryModel.as_query),
                           query_db: Session = Depends(get_db),
-                          data_scope_sql: str = Depends(GetDataScope('HrmEnv')),
+                          data_scope_sql: str = Depends(GetDataScope('HrmEnv',user_alias='manager')),
                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                           ):
     try:
@@ -66,6 +65,7 @@ async def add_hrm_env(request: Request,
         add_env.manager = current_user.user.user_id
         add_env.create_by = current_user.user.user_name
         add_env.update_by = current_user.user.user_name
+        add_env.dept_id = current_user.user.dept_id
         add_env_result = EnvService.add_env_services(query_db, add_env)
         if add_env_result.is_success:
             logger.info(add_env_result.message)
@@ -87,6 +87,7 @@ async def copy_hrm_env(request: Request,
         add_env.manager = current_user.user.user_id
         add_env.create_by = current_user.user.user_name
         add_env.update_by = current_user.user.user_name
+        add_env.dept_id = current_user.user.dept_id
         add_env_result = EnvService.copy_env_services(query_db, add_env)
         if add_env_result.is_success:
             logger.info(add_env_result.message)

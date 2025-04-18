@@ -46,12 +46,12 @@ class ForwardRulesService:
         return datas
 
     @classmethod
-    def query_all(cls, db: Session) -> list[ForwardRulesModel]:
-        return ForwardRulesDao.get_list_all(db)
+    def query_all(cls, db: Session, data_scope_sql: str) -> list[ForwardRulesModel]:
+        return ForwardRulesDao.get_list_all(db, data_scope_sql=data_scope_sql)
 
     @classmethod
-    def query_list(cls, db: Session, query_info: ForwardRulesQueryModel) -> list[ForwardRulesModel]:
-        return ForwardRulesDao.get_list_by_page(db, query_info)
+    def query_list(cls, db: Session, query_info: ForwardRulesQueryModel, data_scope_sql:str) -> list[ForwardRulesModel]:
+        return ForwardRulesDao.get_list_by_page(db, query_info, data_scope_sql=data_scope_sql)
 
     @classmethod
     def delete(cls, db: Session, data: ForwardRulesDeleteModel, user: CurrentUserModel):
@@ -107,8 +107,8 @@ class ForwardRulesDetailService:
         return datas
 
     @classmethod
-    def query_list(cls, db: Session, query_info: ForwardRulesDetailQueryModel) -> list[ForwardRulesDetailModel]:
-        return ForwardRulesDetailDao.get_list_by_page(db, query_info)
+    def query_list(cls, db: Session, query_info: ForwardRulesDetailQueryModel, data_scope_sql: str) -> list[ForwardRulesDetailModel]:
+        return ForwardRulesDetailDao.get_list_by_page(db, query_info, data_scope_sql=data_scope_sql)
 
     @classmethod
     def delete(cls, db: Session, data: ForwardRulesDetailDeleteModel, user: CurrentUserModel):

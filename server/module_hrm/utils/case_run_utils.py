@@ -6,12 +6,14 @@ from module_hrm.entity.vo.case_vo_detail_for_handle import CustomHooksParams, Ho
 from module_hrm.entity.vo import case_vo_detail_for_run as caseVoForRun
 from module_hrm.enums.enums import CodeTypeEnum, DataType
 from module_hrm.exceptions import TestFailError
+from module_hrm.utils.CaseRunLogHandle import CustomStackLevelLogger
 from module_hrm.utils.common import key_value_dict, update_or_extend_list, dict2list
 from utils.log_util import logger
 import json
 import jmespath
 import datetime
 from jsonpath import jsonpath
+
 
 # 初始化一个 JS 运行环境（默认是 Node.js）
 js_code = """
@@ -21,7 +23,10 @@ js_code = """
 """
 
 
-def exec_js(js_code_source: str, data, logger=None):
+def exec_js(js_code_source: str, data, logger: CustomStackLevelLogger = None):
+    """
+    执行自定义js脚本
+    """
     js_source = f"""
             
     
@@ -79,7 +84,10 @@ def exec_js(js_code_source: str, data, logger=None):
     return result
 
 
-def exec_python(python_code_source: str, apt: CustomHooksParams, logger=None):
+def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomStackLevelLogger = None):
+    """
+    执行自定义python脚本
+    """
     def assertC(condition, successMsg, errorMsg):
         if condition:
             apt.logs.info.append(f'断言成功: {str(successMsg or "")} >> {condition}')
@@ -98,6 +106,9 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger=None):
 
 
 def get_script_name(data_type, script_type, is_before):
+    """
+    组装脚本名称方便打印日志以及其他显示使用
+    """
     type_name = ""
     script_type_name = ""
     position_name = ""
@@ -119,9 +130,8 @@ def get_script_name(data_type, script_type, is_before):
     return f"{type_name}-{position_name}-自定义{script_type_name}回调脚本"
 
 
-
 def exec_hook_script(hooks_info: HooksModel,
-                     logger,
+                     logger: CustomStackLevelLogger,
                      handler,
                      data_obj,
                      global_vars,
@@ -174,7 +184,7 @@ def exec_hook_script(hooks_info: HooksModel,
     except Exception as e:
         raise TestFailError(f"{script_name}执行异常：{e}, 脚本: {script_source}") from e
     finally:
-        if not script_source:return
+        if not script_source: return
         if isinstance(step_data_obj, dict):
             step_data_obj = CustomHooksParams(**step_data_obj)
         if step_data_obj.logs:  # 处理回调中的日志
@@ -199,8 +209,6 @@ def exec_hook_script(hooks_info: HooksModel,
                 logs.error += error_log
         if step_data_obj.failed:
             raise TestFailError(f"{script_name}执行异常")
-
-
 
 
 if __name__ == '__main__':

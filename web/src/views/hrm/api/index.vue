@@ -11,7 +11,7 @@ import {CaseStepTypeEnum, HrmDataTypeEnum, runDetailViewTypeEnum, RunTypeEnum} f
 import StepRequest from "@/components/hrm/case/step-request.vue";
 import StepWebsocket from "@/components/hrm/case/step-websocket.vue";
 import {getApiFormDataByType} from "@/components/hrm/case/case-utils.js";
-import RunDetail from "@/components/hrm/common/run-detail.vue";
+import RunDetail from "@/components/hrm/common/run/run-detail.vue";
 import DebugComponent from "@/components/hrm/common/debug_component.vue";
 
 
@@ -57,8 +57,10 @@ onMounted(() => {
   });
 });
 
-const debugFromCaseData = computed(() => {
-  const apiData = toRaw(currentApiData.value);
+const debugFromCaseData = ref(null);
+
+watch(() => currentApiData.value, (newData) => {
+  const apiData = toRaw(newData);
 
   const data = apiData ? {
     request: apiData.requestInfo,
@@ -66,8 +68,8 @@ const debugFromCaseData = computed(() => {
     name: apiData.name,
     caseId: apiData.apiId,
   } : {};
-  return data;
-})
+  debugFromCaseData.value = data;
+});
 
 provide("hrm_case_config_list", hrm_config_list);
 
@@ -101,9 +103,9 @@ function saveApiInfo(type) {
   if (data.id && data.apiId && !data.isNew) {
     if (type === 'copy2case') {
       copyApiAsCase(data).then(res => {
-        ElMessage({message: "API复制成功", type: "success"});
+        ElMessage({message: "API成功另存为CASE", type: "success"});
       }).catch(error => {
-        ElMessage.error("API复制失败");
+        ElMessage.error("API另存为CASE失败");
       }).finally(() => {
         loading.value.saveApi = false;
         loading.value.preSaveDialog = false;
@@ -131,7 +133,7 @@ function saveApiInfo(type) {
     }).finally(() => {
       loading.value.saveApi = false;
       loading.value.preSaveDialog = false;
-    })
+    });
   }
 
 }
@@ -140,6 +142,9 @@ function saveApiInfo(type) {
 * 保存成功后更新apiTabsData和treeDataSource、当前选中的tabid
 * */
 function apiSaveSuccess(res, oldApiId) {
+  if (res && res.data && res.data.apiId) {
+    currentApiData.value.apiId = res.data.apiId;
+  }
   let response = res;
   if (response) {
     let treeNode = treeRef.value.getNode(oldApiId);
@@ -333,7 +338,7 @@ const handleAddNode = (type, newData, parentNodeData) => {
   addApi({type: dataType, apiType: type, name: newData.name, parentId: parentNodeData.apiId}).then(res => {
     ElMessage.success("文件夹【" + newData.name + "】新增成功");
   }).catch(err => {
-  })
+  });
 
 }
 
@@ -341,7 +346,7 @@ const copyAsCase = () => {
   copyApi({apiId: data.apiId}).then(res => {
     ElMessage.success("复制成功");
   }).catch(err => {
-  })
+  });
 }
 
 function showRunHistory() {
@@ -397,7 +402,7 @@ function showFolderDialog() {
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item @click="saveApiInfo('copy2case');">另存为用例</el-dropdown-item>
-            <el-dropdown-item @click="console.log('复制API')">复制</el-dropdown-item>
+            <el-dropdown-item disabled @click="console.log('复制API')">复制</el-dropdown-item>
             <el-dropdown-item @click="showRunHistory">执行历史</el-dropdown-item>
           </el-dropdown-menu>
         </template>

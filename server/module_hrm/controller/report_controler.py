@@ -3,6 +3,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
+from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.report_dao import ReportDao
@@ -21,10 +22,12 @@ reportController = APIRouter(prefix='/hrm/report', dependencies=[Depends(LoginSe
 async def report_list(request: Request,
                       query_info: ReportQueryModel = Depends(ReportQueryModel.as_query),
                       query_db: Session = Depends(get_db),
-                      current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                      current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                      data_scope_sql: str = Depends(GetDataScope('HrmReport', user_alias='manager'))
+
                       ):
     query_info.manager = current_user.user.user_id
-    result = ReportDao.get_list(query_db, query_info)
+    result = ReportDao.get_list(query_db, query_info, data_scope_sql)
     return ResponseUtil.success(model_content=result)
 
 
@@ -33,10 +36,12 @@ async def report_list(request: Request,
                       dependencies=[Depends(CheckUserInterfaceAuth(['hrm:report:detail']))])
 async def report_detail(request: Request,
                         report_id: int,
-                        query_db: Session = Depends(get_db)):
+                        query_db: Session = Depends(get_db),
+                        data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
+                        ):
     query_obj = RunDetailQueryModel(**{"report_id": report_id})
 
-    result = RunDetailDao.list(query_db, query_obj)
+    result = RunDetailDao.list(query_db, query_obj, data_scope_sql)
     return ResponseUtil.success(model_content=result)
 
 

@@ -47,7 +47,7 @@ function exitFullscreenHandle() {
   }
   isFullscreen.value = false;
   ElMessage.info('已退出全屏模式');
-};
+}
 </script>
 
 <template>

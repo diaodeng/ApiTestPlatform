@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
-from module_admin.entity.do.dept_do import SysDept
-from module_admin.entity.do.role_do import SysRoleDept
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 from module_admin.entity.vo.dept_vo import *
 from utils.time_format_util import list_format_datetime
 

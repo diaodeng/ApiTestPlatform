@@ -70,11 +70,15 @@
                 <p class="title">时间表达式</p>
                 <table>
                     <thead>
+                    <tr>
                         <th v-for="item of tabTitles" :key="item">{{item}}</th>
                         <th>Cron 表达式</th>
+                    </tr>
+
                     </thead>
                     <tbody>
-                        <td>
+                    <tr>
+                      <td>
                             <span v-if="crontabValueObj.second.length < 10">{{crontabValueObj.second}}</span>
                             <el-tooltip v-else :content="crontabValueObj.second" placement="top"><span>{{crontabValueObj.second}}</span></el-tooltip>
                         </td>
@@ -106,6 +110,8 @@
                             <span v-if="crontabValueString.length < 90">{{crontabValueString}}</span>
                             <el-tooltip v-else :content="crontabValueString" placement="top"><span>{{crontabValueString}}</span></el-tooltip>
                         </td>
+                    </tr>
+
                     </tbody>
                 </table>
             </div>
@@ -152,7 +158,7 @@ const crontabValueObj = ref({
     day: "*",
     month: "*",
     week: "?",
-    year: "",
+    year: "*",
 })
 const crontabValueString = computed(() => {
     const obj = crontabValueObj.value
@@ -169,7 +175,7 @@ const crontabValueString = computed(() => {
         + obj.week
         + (obj.year === "" ? "" : " " + obj.year)
 })
-watch(expression, () => resolveExp())
+watch(()=>expression.value, () => resolveExp())
 function shouldHide(key) {
     return !(hideComponent.value && hideComponent.value.includes(key))
 }
@@ -188,9 +194,7 @@ function resolveExp() {
                 week: arr[5],
                 year: arr[6] ? arr[6] : ""
             }
-            crontabValueObj.value = {
-                ...obj,
-            }
+            crontabValueObj.value = {...obj};
         }
     } else {
         // 没有传入的表达式 则还原
@@ -203,6 +207,7 @@ function tabCheck(index) {
 }
 // 由子组件触发，更改表达式组成的字段值
 function updateCrontabValue(name, value, from) {
+    console.log(name + ": " + value + ": " + from)
     crontabValueObj.value[name] = value
 }
 // 表单选项的子组件校验数字格式（通过-props传递）
@@ -234,7 +239,7 @@ function clearCron() {
         day: "*",
         month: "*",
         week: "?",
-        year: "",
+        year: "*",
     }
 }
 onMounted(() => {

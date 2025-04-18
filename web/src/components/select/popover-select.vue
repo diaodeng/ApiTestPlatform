@@ -1,13 +1,32 @@
 <script setup>
-const props = defineProps(["optionsDict", "placeholder"])
+import {useTemplateRef} from "vue";
+
+const props = defineProps({optionsDict:{require: true}, placeholder:{default:"请选择"}, clearable:{default: false}})
 const value = defineModel()
+const emits = defineEmits(["blur"])
+
+const selectRef = useTemplateRef('selectRef')
+function focus() {
+  if (selectRef.value){
+
+    nextTick(()=>{
+      selectRef.value.focus();
+    });
+  }
+}
+
+defineExpose({focus});
+
 </script>
 
 <template>
   <el-select v-model="value"
+             ref="selectRef"
              :placeholder="placeholder"
              :filterable="true"
-             clearable
+             @blur="$emit('blur', $event)"
+             :automatic-dropdown="true"
+             :clearable="clearable"
   >
 
     <el-option

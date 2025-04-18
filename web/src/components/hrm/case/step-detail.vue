@@ -4,17 +4,49 @@ import TableHooks from "@/components/hrm/table-hooks.vue";
 import TableVariables from "@/components/hrm/table-variables.vue";
 import TableValidate from "@/components/hrm/table-validate.vue";
 import TableExtract from "@/components/hrm/table-extract.vue";
-import {initStepData} from "@/components/hrm/data-template.js";
+import {initRequestData, initStepData, initWebsocketData} from "@/components/hrm/data-template.js";
 import StepRequest from "@/components/hrm/case/step-request.vue"
 import StepWebsocket from "@/components/hrm/case/step-websocket.vue"
 
-const currentStepDataRef = defineModel("stepData", {required: true, default: JSON.parse(JSON.stringify(initStepData))});
+const currentStepDataRef = defineModel("stepData", {required: true});
 const loading = defineModel('loading');
 const props = defineProps({tabsHeight: {type: Number}});
 const activeRequestName = ref("stepRequest");
-watch(()=>currentStepDataRef.value, async (newData)=>{
+watch(() => currentStepDataRef.value, async (newData) => {
   await nextTick();
   loading.value = false;
+});
+
+
+const httpStepData = computed({
+  get() {
+    if (currentStepDataRef.value && currentStepDataRef.value.step_type === CaseStepTypeEnum.http) {
+      return currentStepDataRef.value;
+    }else {
+      const stepData = JSON.parse(JSON.stringify(initStepData));
+      stepData.request = JSON.parse(JSON.stringify(initRequestData));
+      return stepData;
+    }
+  },
+  set(newValue) {
+  }
+
+});
+
+const websocketStepData = computed({
+  get() {
+    if (currentStepDataRef.value && currentStepDataRef.value.step_type === CaseStepTypeEnum.websocket) {
+      return currentStepDataRef.value;
+    }else {
+
+      const stepData = JSON.parse(JSON.stringify(initStepData));
+      stepData.request = JSON.parse(JSON.stringify(initWebsocketData));
+      return stepData;
+    }
+  },
+  set(newValue) {
+  }
+
 });
 
 </script>
@@ -61,15 +93,14 @@ watch(()=>currentStepDataRef.value, async (newData)=>{
       </div>
     </el-tab-pane>
     <el-tab-pane :label="$t('message.caseDetail.tabNames.request')" name="stepRequest">
-      <template v-if="currentStepDataRef.step_type === CaseStepTypeEnum.http">
-        <StepRequest v-model:step-detail-data="currentStepDataRef"
+        <StepRequest v-model:step-detail-data="httpStepData"
                      :request-container-height="tabsHeight - 5"
+                     v-show="currentStepDataRef.step_type === CaseStepTypeEnum.http"
         ></StepRequest>
-      </template>
-      <template v-if="currentStepDataRef.step_type === CaseStepTypeEnum.websocket">
-        <StepWebsocket v-model:step-detail-data="currentStepDataRef"
-                       :step-container-height="tabsHeight - 5"></StepWebsocket>
-      </template>
+        <StepWebsocket v-model:step-detail-data="websocketStepData"
+                       :step-container-height="tabsHeight - 5"
+                       v-show="currentStepDataRef.step_type === CaseStepTypeEnum.websocket"
+        ></StepWebsocket>
 
     </el-tab-pane>
     <el-tab-pane :label="$t('message.caseDetail.tabNames.ev')" name="stepEv">

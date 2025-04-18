@@ -35,11 +35,9 @@ const tabsMaxHeight = ref(0);
 useResizeObserver(stepRef, (entries) => {
   const entry = entries[0]
   const {width, height} = entry.contentRect;
-
   containerHeight.value = height;
-
   tabsMaxHeight.value = containerHeight.value - 133;
-})
+});
 
 
 const calcRequestContainerHeight = computed(()=>{
@@ -61,21 +59,6 @@ const calcRequestContainerHeight = computed(()=>{
               placeholder="Please input"
           >
             <template #prepend>URL</template>
-            <template #append>
-              <el-dropdown>
-              <span class="el-dropdown-link">
-                <el-icon class="el-icon--right">
-                  <arrow-down/>
-                </el-icon>
-              </span>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item disabled>111</el-dropdown-item>
-                    <el-dropdown-item disabled>222</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </template>
           </el-input>
         </div>
       </el-col>
@@ -116,21 +99,8 @@ const calcRequestContainerHeight = computed(()=>{
                        v-model:step-detail-data="stepDetailData"
                        :tab-height="tabsMaxHeight"
           ></DebugResult>
-          <!--        <el-tabs v-model="activeResultTab" class="request-detail">-->
-          <!--          <el-tab-pane label="响应" name="response">-->
-          <!--            <AceEditor v-model:content="calcResponse" can-set="true" can-search="true"-->
-          <!--                       :height="editHeight"></AceEditor>-->
-          <!--          </el-tab-pane>-->
-          <!--          <el-tab-pane label="日志" name="logs">-->
-          <!--            <AceEditor v-model:content="calcLogs" can-set="true" :height="editHeight"></AceEditor>-->
-          <!--          </el-tab-pane>-->
-          <!--          <el-tab-pane label="异常" name="errorLogs">-->
-          <!--            <AceEditor v-model:content="calcErrorLogs" can-set="true" :height="editHeight"></AceEditor>-->
-          <!--          </el-tab-pane>-->
-          <!--        </el-tabs>-->
         </template>
       </SplitWindow>
-
     </el-row>
   </div>
 

@@ -1,4 +1,8 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 from module_hrm.entity.do.module_do import HrmModule, HrmModuleProject
 from module_hrm.entity.vo.module_vo import *
 from utils.page_util import PageUtil
@@ -56,7 +60,8 @@ class ModuleDao:
         return info
 
     @classmethod
-    def get_module_list(cls, db: Session, query_object: ModulePageQueryModel, is_page: bool = False):
+    def get_module_list(cls, db: Session, query_object: ModulePageQueryModel, data_scope_sql: str,
+                        is_page: bool = False):
         """
         根据查询参数获取模块列表信息
         :param db: orm对象
@@ -67,7 +72,8 @@ class ModuleDao:
         query = db.query(HrmModule) \
             .filter(HrmModule.project_id == query_object.project_id if query_object.project_id else True,
                     HrmModule.module_name.like(f'%{query_object.module_name}%') if query_object.module_name else True,
-                    HrmModule.status == query_object.status if query_object.status else True
+                    HrmModule.status == query_object.status if query_object.status else True,
+                    eval(data_scope_sql)
                     ) \
             .order_by(HrmModule.sort, HrmModule.create_time.desc(), HrmModule.update_time.desc()) \
             .distinct()
@@ -76,7 +82,7 @@ class ModuleDao:
         return post_list
 
     @classmethod
-    def get_module_list_all(cls, db: Session, page_object: ModuleModel):
+    def get_module_list_all(cls, db: Session, page_object: ModuleModel, data_scope_sql: str):
         """
         根据查询参数获取模块列表信息
         :param db: orm对象
@@ -85,15 +91,15 @@ class ModuleDao:
         :return: 模块列表信息对象
         """
         result = db.query(HrmModule) \
-            .filter(HrmModule.project_id == page_object.project_id).order_by(HrmModule.sort,
-                                                                             HrmModule.create_time.desc(),
-                                                                             HrmModule.update_time.desc()) \
+            .filter(HrmModule.project_id == page_object.project_id, eval(data_scope_sql)).order_by(HrmModule.sort,
+                                                                                                   HrmModule.create_time.desc(),
+                                                                                                   HrmModule.update_time.desc()) \
             .distinct().all()
 
         return result
 
     @classmethod
-    def get_module_list_show(cls, db: Session, page_object: ModuleModel):
+    def get_module_list_show(cls, db: Session, page_object: ModuleModel, data_scope_sql:str):
         """
         根据查询参数获取模块列表信息
         :param db: orm对象
@@ -101,7 +107,7 @@ class ModuleDao:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: 模块列表信息对象
         """
-        result = (db.query(HrmModule).distinct().all())
+        result = (db.query(HrmModule).filter(eval(data_scope_sql)).distinct().all())
 
         return result
 

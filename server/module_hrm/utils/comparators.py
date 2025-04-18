@@ -211,7 +211,23 @@ def endswith(check_value: Text, expect_value: Any, message: Text = ""):
     assert str(check_value).endswith(str(expect_value)), message
 
 
+def contain_any(check_value: Text, expect_value: list, message: Text = ""):
+    """
+    any([va in check_value for va in expect_value])
+    """
+
+    assert any([va in check_value for va in expect_value]), f"{message}:{expect_value} not in {check_value}"
+
+
+def contain_all(check_value: Text, expect_value: list, message: Text = ""):
+    """
+    all([va in check_value for va in expect_value])
+    """
+
+    assert all([va in check_value for va in expect_value]), f"{message}:{expect_value} not in {check_value}"
+
+
 __all__ = ["equals", "equals_as_int", "equals_as_str", "greater_than", "less_than", "greater_or_equals",
            "less_or_equals", "not_equals",
            "length_equals", "length_greater_than", "length_greater_or_equals", "length_less_than",
-           "length_less_or_equals", "contains", "contained_by", "type_match", "startswith", "endswith"]
+           "length_less_or_equals", "contains", "contained_by", "contain_any", "contain_all", "type_match", "startswith", "endswith"]

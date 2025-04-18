@@ -12,7 +12,7 @@ class ModuleService:
     """
 
     @classmethod
-    def get_module_list_services(cls, query_db: Session, query_object: ModulePageQueryModel, is_page: bool = False):
+    def get_module_list_services(cls, query_db: Session, query_object: ModulePageQueryModel, data_scope_sql:str, is_page: bool = False):
         """
         获取模块列表信息service
         :param query_db: orm对象
@@ -20,12 +20,12 @@ class ModuleService:
         :param is_page: 是否开启分页
         :return: 模块列表信息对象
         """
-        list_result = ModuleDao.get_module_list(query_db, query_object, is_page)
+        list_result = ModuleDao.get_module_list(query_db, query_object, data_scope_sql, is_page)
 
         return list_result
 
     @classmethod
-    def get_module_list_services_all(cls, query_db: Session, page_object: ModuleModel):
+    def get_module_list_services_all(cls, query_db: Session, page_object: ModuleModel, data_scope_sql:str):
         """
         获取项目信息service
         :param query_db: orm对象
@@ -33,12 +33,12 @@ class ModuleService:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: 项目信息对象
         """
-        project_list_result = ModuleDao.get_module_list_all(query_db, page_object)
+        project_list_result = ModuleDao.get_module_list_all(query_db, page_object, data_scope_sql)
 
         return CamelCaseUtil.transform_result(project_list_result)
 
     @classmethod
-    def get_module_list_services_show(cls, query_db: Session, page_object: ModuleModel):
+    def get_module_list_services_show(cls, query_db: Session, page_object: ModuleModel, data_scope_sql:str):
         """
         获取项目信息service
         :param query_db: orm对象
@@ -46,7 +46,7 @@ class ModuleService:
         :param data_scope_sql: 数据权限对应的查询sql语句
         :return: 项目信息对象
         """
-        project_list_result = ModuleDao.get_module_list_show(query_db, page_object)
+        project_list_result = ModuleDao.get_module_list_show(query_db, page_object, data_scope_sql)
 
         return CamelCaseUtil.transform_result(project_list_result)
 

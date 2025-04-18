@@ -25,7 +25,7 @@ agentController = APIRouter(prefix='/qtr/agent', dependencies=[Depends(LoginServ
 async def get_qtr_agent_list(request: Request,
                              query: AgentQueryModel = Depends(AgentQueryModel.as_query),
                              query_db: Session = Depends(get_db),
-                             data_scope_sql: str = Depends(GetDataScope('QtrAgent'))):
+                             data_scope_sql: str = Depends(GetDataScope('QtrAgent', user_alias='manager'))):
     try:
         query_result = AgentService.get_agent_list_services(query_db, query, data_scope_sql)
         if query.is_page:
@@ -47,6 +47,7 @@ async def add_qtr_agent(request: Request,
         add_agent.manager = current_user.user.user_id
         add_agent.create_by = current_user.user.user_name
         add_agent.update_by = current_user.user.user_name
+        add_agent.dept_id = current_user.user.dept_id
         add_agent.agent_id = snowIdWorker.get_id()
         add_agent_result = AgentService.add_agent_services(query_db, add_agent)
         if add_agent_result.is_success:

@@ -15,14 +15,16 @@
 | 4.  | 自定义回调 | 用例执行前   | func([TestCase](#class-testcasebasemodel), **args, ***kwargs) |
 | 5.  | 默认回调  | 步骤开始执行前 | before_test_step([TStep](#class-tstepbasemodel))              |
 | 6.  | 自定义回调 | 步骤执行前   | func([TStep](#class-tstepbasemodel), **args, ***kwargs)       |
-| 7.  | 执行请求  | 执行请求    | 执行步骤中配置的请求                                                    |
-| 8.  | 默认回调  | 校验前的回调  | before_request_validate(List[Dict])                           |
-| 9.  | 默认回调  | 步骤执行后   | after_test_step([TStep](#class-tstepbasemodel))               |
-| 10. | 自定义回调 | 步骤执行后   | func([TStep](#class-tstepbasemodel), **args, ***kwargs)       |
-| 11. | 默认回调  | 用例执行后   | after_test_case([TestCase](#class-testcasebasemodel))         |
-| 12. | 自定义回调 | 用例执行后   | func([TestCase](#class-testcasebasemodel), **args, ***kwargs) |
-| 13. | 自定义回调 | 模块执行后   | func()**[未实现]**                                               |
-| 14. | 默认回调  | 测试执行后   | after_test()**[未实现]**                                         |
+| 7.  | 自定义脚本 | 步骤执行前   | func([CustomHooksParams](#class-CustomHooksParams))       |
+| 8.  | 执行请求  | 执行请求    | 执行步骤中配置的请求                                                    |
+| 9.  | 默认回调  | 校验前的回调  | before_request_validate(List[Dict])                           |
+| 10. | 默认回调  | 步骤执行后   | after_test_step([TStep](#class-tstepbasemodel))               |
+| 11. | 自定义回调 | 步骤执行后   | func([TStep](#class-tstepbasemodel), **args, ***kwargs)       |
+| 12. | 自定义脚本 | 步骤执行后   | func([CustomHooksParams](#class-CustomHooksParams))       |
+| 13. | 默认回调  | 用例执行后   | after_test_case([TestCase](#class-testcasebasemodel))         |
+| 14. | 自定义回调 | 用例执行后   | func([TestCase](#class-testcasebasemodel), **args, ***kwargs) |
+| 15. | 自定义回调 | 模块执行后   | func()**[未实现]**                                               |
+| 16. | 默认回调  | 测试执行后   | after_test()**[未实现]**                                         |
 
 
 ### 自定义回调的使用示例：  
@@ -39,6 +41,15 @@
 实际调用会带上默认参数：`test_case_start(test_case, value1, value2, arg4=value4)`
 
 ## 类
+
+
+### <span id="class-CustomHooksParams">CustomHooksParams</span>
+
+##### class CustomHooksParams(BaseModel):
+- data: [TStep](#class-tstepbasemodel) | [TestCase](class-testcasebasemodel) | None = None
+- globals: dict = Field(default_factory=lambda: {})
+- case_variables: dict = Field(default_factory=lambda: {})
+
 
 ### <span id="class-testcasebasemodel">TestCase</span>
 
@@ -166,3 +177,69 @@
 ##### class ParameterModel(BaseModel):
 - type: int = ParameterTypeEnum.local_table.value
 - value: Text = ""
+
+## 自定义脚本中可以使用的内容
+js脚本
+> 直接从apt中取用对应数据，apt对应的是CustomHooksParams对象
+```js
+logInfo("来至于测试环境的");  // info日志
+logError("错误日志");  // 错误日志
+console.log("很好，正常日志");  // info日志
+
+
+assert(1<2, "断言成功", "测试失败了哈1");  // 断言，前面是成功的信息，后面是失败的信息
+assert(1<3, "断言成功", "测试失败了哈2");
+assert(1==1, "断言成功", "测试成功了哈3");
+
+// throw new Error("Something went wrong!");
+
+
+var test9 = jmespath.search({a:"jmespathvalue",b:2}, "a");  // 使用jmespath提取内容
+apt.caseVariables.test111 = test9;  // 在用例作用域的变量池中增加变量test111
+
+apt.data.request.params.D = test9;  // 修改请求参数中D的值为test9变量对应的值
+
+apt.globals.step1HookGv = "global_hook_var";  // 向全局变量池中增加或修改变量step1HookGv
+apt.caseVariables.step1HookCv = "case_hook_var";  // 向用例范围的变量池中增加或修改变量step1HookCv
+
+apt.data.request.params.C = 999999999999;
+
+var cities = [
+  { name: "London", "population": 8615246 },
+  { name: "Berlin", "population": 3517424 },
+  { name: "Madrid", "population": 3165235 },
+  { name: "Rome",   "population": 2870528 }
+];
+
+var names = jsonpath.query(cities, '$..name');  //使用jsonpath提取内容
+apt.caseVariables.names = names;
+
+apt.data.request.params.E = names[0];
+
+
+```
+
+python脚本
+> 直接从apt中取用对应数据，apt对应的是CustomHooksParams对象
+```python
+assertC(1<2, "1", "2");  # 断言，前面是成功的信息，后面是失败的信息
+assertC(1<2, "1", "2");  
+logger.info("正常信息");  # info日志
+logger.error("异常信息");  # 错误日志
+
+
+jsonpath({"a":"jsonpathvalue","b":2}, "$.a")  # 使用jsonpath提取内容
+jmespath.search("a", {"a":"jmespathvalue","b":2})  # 使用jmespath提取内容
+
+apt.globals["step1_hook_gv"] = "1111111"  # 设置全局变量
+stepResponseCode = apt.data.result.response.status_code
+stepResponseText = apt.data.result.response.text
+
+apt.globals["stepResponseText"] = apt.data.result.response.text
+
+apt.globals["case_hook_var3"] = json.loads(stepResponseText)["data"].get("1234")  # 将结果中的值设置到全局变量
+
+#apt.globals["case_hook_var3"] = "990099"
+
+
+```

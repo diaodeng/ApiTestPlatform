@@ -1,7 +1,7 @@
 <template>
   <el-dialog
       v-model="openConfigSuiteDataDialog"
-      width="1200"
+      width="90%"
       title="套件数据配置"
       append-to-body
       destroy-on-close

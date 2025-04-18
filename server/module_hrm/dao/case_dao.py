@@ -2,6 +2,10 @@ from typing import Type
 
 from sqlalchemy import select, case, Sequence
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.suite_dao import SuiteDetailDao
@@ -71,7 +75,7 @@ class CaseDao:
         return info
 
     @classmethod
-    def get_case_list(cls, db: Session, query_object: CasePageQueryModel, is_page: bool = False):
+    def get_case_list(cls, db: Session, query_object: CasePageQueryModel, is_page: bool = False, data_scope_sql:str='true'):
         """
         根据查询参数获取用例列表信息
         :param db: orm对象
@@ -86,6 +90,7 @@ class CaseDao:
                          ).outerjoin(HrmProject,
                                      HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
                                                                                             HrmCase.module_id == HrmModule.module_id)
+        query = query.filter(eval(data_scope_sql))
         if query_object.suite_id:
             # 查询条件中增加需要排除部分caseId
             query_obj = {"suite_id": query_object.suite_id, "data_type": query_object.data_type}
