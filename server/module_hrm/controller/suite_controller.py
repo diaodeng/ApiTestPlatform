@@ -24,8 +24,8 @@ suiteController = APIRouter(prefix='/qtr/suite', dependencies=[Depends(LoginServ
 async def get_qtr_suite_list(request: Request,
                              suite_query: SuitePageQueryModel = Depends(SuitePageQueryModel.as_query),
                              query_db: Session = Depends(get_db),
-                             data_scope_sql: str = Depends(GetDataScope('QtrSuite')),
-                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                             data_scope_sql: str = Depends(GetDataScope('QtrSuite', user_alias='manager')),
+                             current_user: CurrentUserModel = Depends(LoginService.get_current_user),
                              ):
     try:
         suite_query.manager = current_user.user.user_id
@@ -43,7 +43,7 @@ async def get_qtr_suite_detail_list(request: Request,
                                     suite_detail_query: SuiteDetailPageQueryModel = Depends(
                                         SuiteDetailPageQueryModel.as_query),
                                     query_db: Session = Depends(get_db),
-                                    data_scope_sql: str = Depends(GetDataScope('QtrSuiteDetail')),
+                                    data_scope_sql: str = Depends(GetDataScope('QtrSuiteDetail', user_alias='manager')),
                                     current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                                     ):
     try:
@@ -67,6 +67,7 @@ async def add_qtr_suite(request: Request,
         add_suite.manager = current_user.user.user_id
         add_suite.create_by = current_user.user.user_name
         add_suite.update_by = current_user.user.user_name
+        add_suite.dept_id = current_user.user.dept_id
         add_suite.suite_id = snowIdWorker.get_id()
         add_suite_result = SuiteService.add_suite_services(query_db, add_suite)
         if add_suite_result.is_success:
@@ -96,6 +97,7 @@ async def add_qtr_suite_detail(request: Request,
             add_suite_detail.manager = current_user.user.user_id
             add_suite_detail.create_by = current_user.user.user_name
             add_suite_detail.update_by = current_user.user.user_name
+            add_suite_detail.dept_id = current_user.user.dept_id
             add_suite_detail.suite_detail_id = snowIdWorker.get_id()
             add_suite_detail.suite_id = suiteId
             add_suite_detail.data_id = dataId
@@ -108,41 +110,6 @@ async def add_qtr_suite_detail(request: Request,
         else:
             logger.warning(add_suite_detail_result.message)
             return ResponseUtil.failure(msg=add_suite_detail_result.message)
-    except Exception as e:
-        logger.exception(e)
-        return ResponseUtil.error(msg=str(e))
-
-
-@suiteController.post("/addSuiteDetail", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:add'))])
-@log_decorator(title='测试套件详情', business_type=1)
-async def add_qtr_suite_detail(request: Request,
-                               data: dict,
-                               query_db: Session = Depends(get_db),
-                               current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
-    try:
-        obj_list = []
-        suiteId = data.get('suiteId')
-        dataType = data.get('dataType')
-        dataIds = data.get('dataIds')
-        for dataId in dataIds:
-            add_suite_detail = SuiteDetailModel()
-            add_suite_detail.manager = current_user.user.user_id
-            add_suite_detail.create_by = current_user.user.user_name
-            add_suite_detail.update_by = current_user.user.user_name
-            add_suite_detail.suite_detail_id = snowIdWorker.get_id()
-            add_suite_detail.suite_id = suiteId
-            add_suite_detail.data_id = dataId
-            add_suite_detail.data_type = dataType
-            obj_list.append(add_suite_detail)
-
-        add_suite_detail_result = SuiteDetailService.add_suite_detail_services(query_db, obj_list)
-        if add_suite_detail_result.is_success:
-            logger.info(add_suite_detail_result.message)
-            return ResponseUtil.success(data=add_suite_detail_result)
-        else:
-            logger.warning(add_suite_detail_result.message)
-            return ResponseUtil.failure(msg=add_suite_detail_result.message)
-        pass
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

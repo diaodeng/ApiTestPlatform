@@ -14,6 +14,9 @@ dist
 logs/
 agentTools/config.ini
 node_modules
+temp_test
+app
+.vscode
 
 package.json
 package-lock.json
@@ -129,8 +132,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-
 
 # Spyder project settings
 .spyderproject

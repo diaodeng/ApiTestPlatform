@@ -313,6 +313,7 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
         report_data.update_by = current_user.user.user_name
         report_data.create_by = current_user.user.user_name
         report_data.manager = current_user.user.user_id
+        report_data.dept_id = current_user.user.dept_id
         report_data.start_at = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
             timezone(timedelta(hours=8)))
         report_info = ReportDao.create(query_db, report_data)

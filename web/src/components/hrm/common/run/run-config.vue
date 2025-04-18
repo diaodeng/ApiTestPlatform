@@ -29,6 +29,11 @@ function getAgent() {
 //   }
 // });
 
+watch(() => configData.value, (newValue) => {
+  form.value = configData.value;
+}, {deep: true});
+
+
 watch(() => form.value, (newValue) => {
   if (form.value.runBySort) {
     form.value.concurrent = 1;

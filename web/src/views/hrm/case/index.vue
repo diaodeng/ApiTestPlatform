@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <CaseTableQuery @select-change="handleSelectionChange" ref="caseQueryViewRef">
+    <CaseTableQuery @select-change="handleSelectionChange" :data-type="dataType" ref="caseQueryViewRef">
       <template #table-tool>
         <el-col :span="1.5">
           <el-button
@@ -225,7 +225,10 @@ function lineStatusChange(selectValue, dataSource) {
 function runTest(row) {
   if (row && "caseId" in row && row.caseId) {
     runIds.value = [row.caseId];
+  }else {
+    runIds.value = selectIds.value;
   }
+
   if (!runIds.value || runIds.value.length === 0) {
     ElMessageBox.alert('请选择要运行的用例', "提示！", {type: "warning"});
     return;

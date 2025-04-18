@@ -70,11 +70,15 @@
                 <p class="title">时间表达式</p>
                 <table>
                     <thead>
+                    <tr>
                         <th v-for="item of tabTitles" :key="item">{{item}}</th>
                         <th>Cron 表达式</th>
+                    </tr>
+
                     </thead>
                     <tbody>
-                        <td>
+                    <tr>
+                      <td>
                             <span v-if="crontabValueObj.second.length < 10">{{crontabValueObj.second}}</span>
                             <el-tooltip v-else :content="crontabValueObj.second" placement="top"><span>{{crontabValueObj.second}}</span></el-tooltip>
                         </td>
@@ -106,6 +110,8 @@
                             <span v-if="crontabValueString.length < 90">{{crontabValueString}}</span>
                             <el-tooltip v-else :content="crontabValueString" placement="top"><span>{{crontabValueString}}</span></el-tooltip>
                         </td>
+                    </tr>
+
                     </tbody>
                 </table>
             </div>

@@ -52,6 +52,8 @@ function handleRun(env) {
   try {
     disableCanRun.value = true;
     dialogCanClose.value = false;
+    form.value.ids = runIds;
+    form.value.runType = props.runType;
     if (form.value.ids.length === 0) {
       ElMessage.error({
         message: "请选择要执行的数据",

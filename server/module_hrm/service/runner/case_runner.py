@@ -792,7 +792,12 @@ class RequestRunner(object):
         elif key.startswith('json.'):
             par_data = jmespath.search(key[5:], self.response.json())
         elif key.startswith('re.'):
-            par_data = re.search(key[3:], self.response.text)
+            par_data = re.search(key[3:], self.response.text).groups()
+        elif key.startswith('re['):
+            key_index = int(key[3])
+            par_data = re.search(key[6:], self.response.text).groups()
+            if par_data:
+                par_data = par_data[key_index]
         else:
             par_data = jmespath.search(key, self.response.json())
 
