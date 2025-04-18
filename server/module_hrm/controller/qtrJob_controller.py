@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -72,6 +73,13 @@ async def add_qtr_job(request: Request, add_job: JobModel, query_db: Session = D
         add_job.create_by = current_user.user.user_name
         add_job.update_by = current_user.user.user_name
         add_job.dept_id = current_user.user.dept_id
+        add_job.manager = current_user.user.user_id
+
+        job_kw = json.loads(add_job.job_kwargs)
+        job_kw["userName"] = current_user.user.user_name if not job_kw.get("userName", "") else job_kw["userName"]
+        job_kw["userId"] = current_user.user.user_id if not job_kw.get("userId", "") else job_kw["userId"]
+        add_job.job_kwargs = json.dumps(job_kw)
+
         add_job_result = JobService.add_job_services(query_db, add_job)
         if add_job_result.is_success:
             logger.info(add_job_result.message)
