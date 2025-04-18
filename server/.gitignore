@@ -15,6 +15,9 @@ logs/
 agentTools/config.ini
 node_modules
 temp_test/
+.vscode
+app
+
 
 package.json
 package-lock.json
