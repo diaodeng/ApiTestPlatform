@@ -27,6 +27,13 @@ class DataType(Enum):
     api_websocket = 16
 
 
+class FuncTypeEnum(Enum):
+    """
+    方法类型
+    """
+    basic = 1  # 基础方法
+    custom = 2  # 封装方法
+
 class CaseRunStatus(Enum):
     passed = 1
     failed = 2
@@ -44,6 +51,7 @@ class QtrDataStatusEnum(Enum):
     """
     disabled = 1
     normal = 2
+    deleted = 3
 
 
 class CaseStatusEnum(Enum):

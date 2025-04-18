@@ -11,15 +11,16 @@ class JobLogService:
     """
 
     @classmethod
-    def get_job_log_list_services(cls, query_db: Session, query_object: JobLogPageQueryModel, is_page: bool = False):
+    def get_job_log_list_services(cls, query_db: Session, query_object: JobLogPageQueryModel, data_scope_sql:str, is_page: bool = False):
         """
         获取定时任务日志列表信息service
         :param query_db: orm对象
         :param query_object: 查询参数对象
+        :param data_scope_sql: 数据权限依赖sql
         :param is_page: 是否开启分页
         :return: 定时任务日志列表信息对象
         """
-        job_log_list_result = JobLogDao.get_job_log_list(query_db, query_object, is_page)
+        job_log_list_result = JobLogDao.get_job_log_list(query_db, query_object, data_scope_sql, is_page)
 
         return job_log_list_result
 

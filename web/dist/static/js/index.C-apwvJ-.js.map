@@ -1,0 +1,1 @@
+{"version":3,"file":"index.C-apwvJ-.js","sources":["../../../src/views/tool/build/index.vue"],"sourcesContent":["<template>\r\n   <div> 表单构建 <svg-icon icon-class=\"build\" /> </div>\r\n</template>"],"names":["_openBlock","_createElementBlock","_cache","_createTextVNode"],"mappings":"4HAAA,OAAAA,EAAA,EAAAC,EAAA,MACc,KAAA,CAAAC,EAA+B,CAAA,IAAAA,EAAA,CAAA,EAAAC,EAAX,QAAQ"}

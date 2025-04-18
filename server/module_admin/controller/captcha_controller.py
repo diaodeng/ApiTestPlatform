@@ -4,7 +4,7 @@ from config.env import RedisInitKeyConfig
 from module_admin.service.captcha_service import *
 from module_admin.entity.vo.login_vo import CaptchaCode
 from utils.response_util import *
-from utils.log_util import *
+from utils.log_util import logger
 from datetime import timedelta
 
 

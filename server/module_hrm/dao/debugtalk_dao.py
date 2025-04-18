@@ -1,5 +1,8 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 from module_hrm.entity.do.debugtalk_do import HrmDebugTalk
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.debugtalk_vo import DebugTalkModel, DebugTalkQueryModel

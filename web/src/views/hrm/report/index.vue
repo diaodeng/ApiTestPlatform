@@ -96,7 +96,7 @@
 import * as ReportApi from "@/api/hrm/report.js";
 import {runDetailViewTypeEnum} from "@/components/hrm/enum.js";
 import DictTag from "@/components/DictTag/index.vue";
-import RunDetail from "@/components/hrm/common/run-detail.vue";
+import RunDetail from "@/components/hrm/common/run/run-detail.vue";
 
 
 const {proxy} = getCurrentInstance();

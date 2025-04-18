@@ -6,6 +6,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
+from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
@@ -124,10 +125,11 @@ async def run_history_detail(request: Request,
 async def run_history_list(request: Request,
                            query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
                            query_db: Session = Depends(get_db),
-                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                           current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                           data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
                            ):
     query_info.manager = current_user.user.user_id
-    result = RunDetailDao.list(query_db, query_info)
+    result = RunDetailDao.list(query_db, query_info, data_scope_sql)
     return ResponseUtil.success(model_content=result)
 
 

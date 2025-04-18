@@ -1,14 +1,16 @@
 <script setup>
+import "./aceConfig.js"
 import {useTemplateRef, defineAsyncComponent} from "vue";
 import {ElMessage} from "element-plus";
 import {Setting, Search} from "@element-plus/icons-vue";
 import {Json} from "@/utils/tools.js";
 import {VAceEditor} from 'vue3-ace-editor';
-import "./aceConfig.js"
 import {search as jmespath} from '@metrichor/jmespath';
 import FullscreenComponent from "@/components/hrm/common/fullscreen-component.vue";
 
 onErrorCaptured((error) => {
+
+  console.log("编辑器相关异常");
   console.log(error);
 });
 
@@ -130,17 +132,29 @@ watch(() => props.width, (newValue) => {
 });
 
 onMounted(() => {
-  console.log("挂载了编辑器")
-  editorHeight.value = props.height;
-  document.addEventListener('mousemove', onMoveResizeEditor);
-})
+  // console.log("浏览器的新值" + modelContent.value);
+  nextTick(() => {
+    try {
+      console.log("挂载了编辑器");
+      editorHeight.value = props.height;
+      document?.addEventListener('mousemove', onMoveResizeEditor);
+    } catch (e) {
+      console.log("编辑挂载载异常");
+    }
+  });
+
+});
 
 onBeforeUnmount(() => {
   console.log("卸载了编辑器")
-  document.removeEventListener('mousemove', resizeEditor);
-  document.removeEventListener('mouseup', stopResizing);
-  document.removeEventListener('mouseleave', onMouseLeave);
-  document.removeEventListener('mousemove', onMoveResizeEditor);
+  try {
+    document?.removeEventListener('mousemove', resizeEditor);
+    document?.removeEventListener('mouseup', stopResizing);
+    document?.removeEventListener('mouseleave', onMouseLeave);
+    document?.removeEventListener('mousemove', onMoveResizeEditor);
+  } catch (e) {
+    console.log("编辑器卸载异常");
+  }
 });
 
 let originalStyles = {
@@ -163,11 +177,12 @@ const editorContent = computed(() => {
       return toRaw(data);
     }
   }
-
-})
+});
 
 function updateValue(newVal) {
-  modelContent.value = newVal;
+  nextTick(() => {
+    modelContent.value = newVal;
+  });
 }
 
 function jsonFormat(env) {
@@ -236,7 +251,7 @@ const resizeEditor = (e) => {
 
 // 停止调整
 const stopResizing = () => {
-  console.log("停止高度调整")
+  console.log("停止高度调整");
   isDragging = false;
   document.removeEventListener('mousemove', resizeEditor);
   document.removeEventListener('mouseup', stopResizing);
@@ -244,7 +259,7 @@ const stopResizing = () => {
 };
 
 function onMouseLeave(e) {
-  console.log("鼠标离开页面")
+  console.log("鼠标离开页面");
   if (isDragging) {
     const lastMouseMove = e; // 你可以记录鼠标离开时的位置
     isDragging = false;
@@ -300,20 +315,21 @@ function onMoveResizeEditor(e) {
 // });
 
 function changeFullScreenStatus(currentStatus) {
-  if (currentStatus) {
-    const editor = aceEditorRef.value.$el;
-    originalStyles.height = aceEditorRef.value.$el.style.height;
-    originalStyles.width = aceEditorRef.value.$el.style.width;
-    editorHeight.value = "calc(100%)";
-    editorWidth.value = "calc(100%)";
-  } else {
-    const editor = aceEditorRef.value.$el;
-    editorHeight.value = originalStyles.height;
-    editorWidth.value = originalStyles.width;
-    editor.style.position = "relative";
-  }
+
   nextTick(() => {
-    aceEditorRef.value.getAceInstance().resize(true);
+    if (currentStatus) {
+      const editor = aceEditorRef.value.$el;
+      originalStyles.height = editor.style.height;
+      originalStyles.width = editor.style.width;
+      editorHeight.value = "calc(100%)";
+      editorWidth.value = "calc(100%)";
+    } else {
+      const editor = aceEditorRef.value.$el;
+      editorHeight.value = originalStyles.height;
+      editorWidth.value = originalStyles.width;
+      editor.style.position = "relative";
+    }
+    aceEditorRef?.value?.getAceInstance()?.resize(true);
   });
 }
 
@@ -404,14 +420,15 @@ function changeFullScreenStatus(currentStatus) {
         </el-row>
       </div>
       <div style="flex-grow: 1">
-        <v-ace-editor
-            ref="aceEditorRef"
-            :value="editorContent"
-            @update:value="updateValue"
-            :lang="languageValue"
-            :theme="themesValue"
-            :style="{height: editorHeight, width: editorWidth}"
-            :options="{
+        <Suspense>
+          <v-ace-editor
+              ref="aceEditorRef"
+              :value="editorContent"
+              @update:value="updateValue"
+              :lang="languageValue"
+              :theme="themesValue"
+              :style="{height: editorHeight, width: editorWidth}"
+              :options="{
           useWorker: props.useWorker,
           enableBasicAutocompletion: props.enableBasicAutocompletion,
           enableLiveAutocompletion: props.enableLiveAutocompletion,
@@ -424,8 +441,10 @@ function changeFullScreenStatus(currentStatus) {
           wrap: props.wrap,
           readOnly: props.readOnly,
         }"
-            aria-autocomplete="list"
-        ></v-ace-editor>
+              aria-autocomplete="list"
+          ></v-ace-editor>
+        </Suspense>
+
       </div>
     </div>
 
