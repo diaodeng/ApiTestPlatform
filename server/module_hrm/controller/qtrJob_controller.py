@@ -75,12 +75,7 @@ async def add_qtr_job(request: Request, add_job: JobModel, query_db: Session = D
         add_job.dept_id = current_user.user.dept_id
         add_job.manager = current_user.user.user_id
 
-        job_kw = json.loads(add_job.job_kwargs)
-        job_kw["userName"] = current_user.user.user_name if not job_kw.get("userName", "") else job_kw["userName"]
-        job_kw["userId"] = current_user.user.user_id if not job_kw.get("userId", "") else job_kw["userId"]
-        add_job.job_kwargs = json.dumps(job_kw)
-
-        add_job_result = JobService.add_job_services(query_db, add_job)
+        add_job_result = JobService.add_job_services(query_db, add_job, current_user)
         if add_job_result.is_success:
             logger.info(add_job_result.message)
             return ResponseUtil.success(msg=add_job_result.message)
@@ -99,7 +94,7 @@ async def edit_qtr_job(request: Request, edit_job: EditJobModel, query_db: Sessi
     try:
         edit_job.update_by = current_user.user.user_name
         edit_job.update_time = datetime.now()
-        edit_job_result = JobService.edit_job_services(query_db, edit_job)
+        edit_job_result = JobService.edit_job_services(query_db, edit_job, current_user)
         if edit_job_result.is_success:
             logger.info(edit_job_result.message)
             return ResponseUtil.success(msg=edit_job_result.message)
@@ -122,7 +117,7 @@ async def change_status_qtr_job(request: Request, edit_job: EditJobModel, query_
         job_info.job_id = edit_job.job_id
         job_info.update_by = current_user.user.user_name
         job_info.update_time = datetime.now()
-        edit_job_result = JobService.edit_job_services(query_db, job_info)
+        edit_job_result = JobService.edit_job_services(query_db, job_info, current_user)
         if edit_job_result.is_success:
             logger.info(edit_job_result.message)
             return ResponseUtil.success(msg=edit_job_result.message)
