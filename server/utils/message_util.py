@@ -25,6 +25,10 @@ class FeiShuHandler:
         self._token = token or FeishuBotConfig.feishu_bot_token
         self._secret_key = secret_key or FeishuBotConfig.feishu_bot_key
 
+        logger.debug(f"FeiShuHandler token: {token}   secret_key: {secret_key}")
+        logger.debug(f"FeiShuHandler FeishuBotConfig: {FeishuBotConfig.model_dump_json()}")
+        logger.debug(f"FeiShuHandler self._token: {self._token}   self._secret_key: {self._secret_key}")
+
         self.config = feishu_bot_config
 
     def content_text(self, content):
@@ -109,10 +113,12 @@ class FeiShuHandler:
 
     def push(self, content):
         if not self.config.push:
+            logger.info(f"飞书推送配置关闭，不推送：push=={self.config.push}")
             return
 
         # 没配置参数则直接返回
         if not self._token or not self._secret_key:
+            logger.info(f"没有飞书推送配置，不推送：token=={self._token}; secret_key=={self._secret_key}")
             return
         try:
             # logger.info("飞书机器人推送参数：token:{}, key:{}".format(self._token, self._secret_key))
@@ -134,6 +140,7 @@ class FeiShuHandler:
 
 class MessageHandler:
     def __init__(self, run_info: CaseRunModel):
+        logger.info(f"用例执行信息：{run_info.model_dump()}")
         self.is_push = run_info.push
         self.run_info = run_info
 
