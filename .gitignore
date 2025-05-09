@@ -13,6 +13,7 @@ server/node_modules
 server/temp_test
 server/app
 server/.vscode
+
 *.zip
 package.json
 package-lock.json
@@ -21,7 +22,6 @@ logs/
 build
 dist
 node_modules
-
 
 web/vite.config.js.timestamp*.mjs
 

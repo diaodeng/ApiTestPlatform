@@ -310,6 +310,7 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
         report_data = ReportCreatModel(**{"reportName": report_name,
                                           "status": CaseRunStatus.passed.value,
                                           })
+        logger.info(f"当前用户信息:{current_user.user.model_dump()}")
         report_data.update_by = current_user.user.user_name
         report_data.create_by = current_user.user.user_name
         report_data.manager = current_user.user.user_id

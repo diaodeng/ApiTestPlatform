@@ -1,0 +1,2 @@
+import{X as t}from"./index.N0ypA0wQ.js";function e(r){return t({url:"/hrm/runner/runHistoryList",method:"get",params:r})}function u(r){return t({url:"/hrm/runner/runHistory",method:"DELETE",data:r})}function o(r){return t({url:`/hrm/runner/runHistory/${r}`,method:"GET"})}function s(r){return t({url:"/hrm/runner/test",method:"POST",data:r})}export{o as a,u as d,e as l,s as t};
+//# sourceMappingURL=run_detail.BRg85oWr.js.map
