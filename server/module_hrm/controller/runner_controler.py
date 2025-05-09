@@ -19,7 +19,7 @@ from module_hrm.service.runner.case_data_handler import CaseInfoHandle, Paramete
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_async, save_run_detail
 from utils.log_util import logger
-from utils.message_util import MessageHandler
+from module_message import MessageHandler
 from utils.page_util import PageResponseModel
 from utils.response_util import ResponseUtil
 

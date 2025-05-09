@@ -129,3 +129,22 @@ export const CaseRunStatusEnum = {
     error :{label: "错误", value:8, elTagType: "primary"},
 }
 
+
+export const PushTypeEnum = {
+    DISABLED: {label: "禁用", value:1, elTagType: "primary"},
+    ALWAYS :{label: "始终推送", value:2, elTagType: "primary"},
+    SUCCESS :{label: "仅成功", value:4, elTagType: "primary"},
+    FAIL :{label: "仅失败", value:8, elTagType: "primary"},
+}
+
+
+export const PushWayEnum = {
+    FEISHU_BOT: {label: "飞书机器人", value:1, elTagType: "primary"},
+    FEISHU_APPLICATION :{label: "飞书应用", value:2, elTagType: "primary"},
+    WECHAT_PUBLIC :{label: "微信公众号", value:4, elTagType: "primary"},
+    ENTERPRISE_WECHAT :{label: "企业微信", value:8, elTagType: "primary"},
+    EMAIL :{label: "邮箱", value:16, elTagType: "primary"},
+    SMS :{label: "短信", value:32, elTagType: "primary"},
+    DINGDING :{label: "钉钉", value:64, elTagType: "primary"},
+}
+

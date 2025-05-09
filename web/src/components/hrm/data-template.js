@@ -4,7 +4,7 @@ import {
     CaseStepTypeEnum,
     CodeTypeEnum,
     CaseRunStatusEnum,
-    RunTypeEnum
+    RunTypeEnum, PushTypeEnum, PushWayEnum
 } from "@/components/hrm/enum.js";
 
 
@@ -231,6 +231,19 @@ export const initRunConfig = {
     repeatNum: 1,
     concurrent: 1,
     push: false,
+    pushInfo: {
+        pushType: PushTypeEnum.DISABLED.value,
+        pushWay: [
+            {
+                pushType: PushTypeEnum.DISABLED.value,
+                pushWay: PushWayEnum.FEISHU_BOT.value,
+                configTye: null,
+                configId: null,
+                configContent: "",
+                pushName: "",
+            }
+        ]
+    },
     forwardConfig: {
         forward: false,
         agentId: undefined,

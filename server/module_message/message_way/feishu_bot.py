@@ -8,10 +8,6 @@ from module_hrm.entity.vo.case_vo import CaseRunModel, FeishuRobotModel
 from utils.log_util import logger
 
 
-def message_service(sms_code: str):
-    logger.info(f"短信验证码为{sms_code}")
-
-
 """
 https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot#132a114c
 """
@@ -138,14 +134,4 @@ class FeiShuHandler:
         pass
 
 
-class MessageHandler:
-    def __init__(self, run_info: CaseRunModel):
-        logger.info(f"用例执行信息：{run_info.model_dump()}")
-        self.is_push = run_info.push
-        self.run_info = run_info
 
-    def can_push(self):
-        return self.run_info.push
-
-    def feishu(self):
-        return FeiShuHandler(self.run_info.feishu_robot)

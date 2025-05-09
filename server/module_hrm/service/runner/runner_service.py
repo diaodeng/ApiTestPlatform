@@ -30,7 +30,7 @@ from module_hrm.service.runner.case_data_handler import CaseInfoHandle, Paramete
 from module_hrm.service.runner.case_runner import TestRunner
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
-from utils.message_util import MessageHandler
+from module_message import MessageHandler
 
 logger.info(f"平台信息：{platform.platform()}")
 if "WSL" in str(platform.platform()):
