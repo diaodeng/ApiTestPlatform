@@ -20,7 +20,7 @@ from module_admin.entity.vo.user_vo import TokenData, CurrentUserModel, UserInfo
 from module_admin.service.user_service import UserService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
-from module_message.message_way.sms import message_service
+from module_message.utils.message_way.sms import message_service
 from utils.pwd_util import PwdUtil
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")

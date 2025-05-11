@@ -1,6 +1,6 @@
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from utils.log_util import logger
-from .message_way.feishu_bot import FeiShuHandler
+from .utils.message_way.feishu_bot import FeiShuHandler
 
 
 class MessageHandler:
