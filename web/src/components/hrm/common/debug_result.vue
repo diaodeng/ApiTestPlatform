@@ -106,11 +106,11 @@ onMounted(() => {
     <div v-if="!calcResponse">{{ calcResponse }}</div>
     <el-tabs v-model="activeTab" class="request-detail">
       <el-tab-pane label="响应" name="response" key="tab_response">
-        <AceEditor v-model:content="calcResponse" :can-set="true" :can-search="true"
+        <AceEditor :content="calcResponse" :can-set="true" :can-search="true"
                    :height="responseEditHeight" key="edit_response"></AceEditor>
       </el-tab-pane>
       <el-tab-pane label="日志" name="logs" key="tab_logs">
-        <AceEditor v-model:content="calcLogs"
+        <AceEditor :content="calcLogs"
                    :can-set="true"
                    :height="logEditHeight"
                    key="edit_logs"
@@ -122,7 +122,7 @@ onMounted(() => {
         ></AceEditor>
       </el-tab-pane>
       <el-tab-pane label="异常" name="errorLogs" key="tab_errorLogs">
-        <AceEditor v-model:content="calcErrorLogs"
+        <AceEditor :content="calcErrorLogs"
                    :can-set="true"
                    :height="logEditHeight"
                    key="edit_errorLogs"

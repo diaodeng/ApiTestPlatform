@@ -1,4 +1,5 @@
 import pako from 'pako';
+import JSON5 from 'json5'
 
 export function randomString(length) {
     var text = "";
@@ -25,11 +26,15 @@ export class Json {
             let jsonObjTmp = "";
 
             try {
+                // jsonObjTmp = JSON5.parse(jsonStr);
+                // console.log(JSON5.stringify(jsonObjTmp))
                 jsonObjTmp = JSON.parse(jsonStr);
             } catch (e) {
                 try {
                     // let tttt = jsonStr.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2": ');
-                    let tttt = jsonStr.replace(/([{,]\s*)([0-9]+)(\s*:)/g, '$1"$2"$3');
+                    let tttt = jsonStr.replace(/([{,]\s*)([0-9]+)(\s*:)/g, '$1"$2"$3').replace(/([:,]\s*)True(?=\s*[,}])/g, '$1true')  // 匹配值位置的 True
+                        .replace(/([:,]\s*)False(?=\s*[,}])/g, '$1false')
+                        .replace(/:\s*None\b/g, ': null');
                     jsonObjTmp = JSON5.parse(tttt);
                     // jsonObjTmp = jsonlint.parse(jsonStr);
                     // jsonObjTmp = JSON.parse(jsonStr);
@@ -70,12 +75,25 @@ export class Json {
         return json.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     }
 
+    static unescapeJson(jsonStr, maxDepth = 5) {
+        let depth = 0;
+        let prev;
+        do {
+            prev = jsonStr;
+            jsonStr = jsonStr.replace(/(\\+)"/g, (m, s) => '\\'.repeat(Math.floor((s.length - 1) / 2)) + '"');
+            depth++;
+        } while (prev !== jsonStr && depth < maxDepth);
+        return jsonStr;
+    }
+
     /*
     * 删除转义符
     * */
     static removeEscape(jsonStr) {
         // return jsonStr.replace(/\\(.)/g, '$1');
-        return jsonStr.replace(new RegExp("\\\\\"", "gm"), "\"");
+
+        return Json.unescapeJson(jsonStr, 1);
+        // return jsonStr.replace(new RegExp("\\\\\"", "gm"), "\"");
     }
 
     /*
@@ -333,6 +351,6 @@ export function findDuplicates(arr) {
 
 
 export function isFullUrl(url) {
-  const regex = /^(https?|ftp|mailto):\/\//i; // 支持 http, https, ftp, mailto
-  return regex.test(url);
+    const regex = /^(https?|ftp|mailto):\/\//i; // 支持 http, https, ftp, mailto
+    return regex.test(url);
 }
