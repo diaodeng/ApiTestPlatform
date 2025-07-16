@@ -20,7 +20,7 @@ class JobModel(CommonDataModel):
     job_executor: Optional[str] = None
     invoke_target: Optional[str] = None
     job_args: Optional[str] = None
-    job_kwargs: Optional[str] = None
+    job_kwargs: Optional[str] = "{}"
     cron_expression: Optional[str] = None
     misfire_policy: Optional[str] = None
     concurrent: Optional[str] = None

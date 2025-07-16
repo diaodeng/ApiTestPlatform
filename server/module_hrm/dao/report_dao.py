@@ -61,11 +61,11 @@ class ReportDao:
 
         query = query.order_by(HrmReport.create_time.desc())
 
-        result = PageUtil.paginate(query, query_object.page_num, query_object.page_size, True)
+        result = PageUtil.paginate(query, query_object.page_num, query_object.page_size, query_object.is_page)
 
         rows = []
         for row in result.rows:
-            rows.append(ReportListModel.from_orm(row))
+            rows.append(ReportListModel.model_validate(row))
 
         result.rows = rows
         return result

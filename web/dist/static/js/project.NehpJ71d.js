@@ -1,0 +1,2 @@
+import{X as r}from"./index.DLM0P_FN.js";function o(t){return r({url:"/hrm/project/list",method:"get",params:t})}function u(t){return r({url:"/hrm/project/"+t,method:"get"})}function c(t){return r({url:"/hrm/project",method:"post",data:t})}function a(t){return r({url:"/hrm/project",method:"put",data:t})}function n(t){return r({url:"/hrm/project/"+t,method:"delete"})}export{c as a,n as d,u as g,o as l,a as u};
+//# sourceMappingURL=project.NehpJ71d.js.map

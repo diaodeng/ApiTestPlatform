@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大数据量测试报告</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #3498db;
+            --success: #2ecc71;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --info: #9b59b6;
+            --dark: #2c3e50;
+            --light: #ecf0f1;
+            --gray: #95a5a6;
+            --border: #ddd;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary), #1a5276);
+            color: white;
+            padding: 30px 0;
+            text-align: center;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .logo i {
+            margin-right: 10px;
+        }
+
+        .report-title {
+            font-size: 32px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .report-meta {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .meta-item {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 15px 20px;
+            background: var(--light);
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+
+        .card-header i {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .kpi-container {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .kpi-item {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 120px;
+        }
+
+        .kpi-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .kpi-label {
+            font-size: 14px;
+            color: var(--gray);
+        }
+
+        .chart-container {
+            height: 250px;
+            position: relative;
+        }
+
+        .status-success { background-color: rgba(46, 204, 113, 0.1); color: var(--success); }
+        .status-failed { background-color: rgba(231, 76, 60, 0.1); color: var(--danger); }
+        .status-warning { background-color: rgba(243, 156, 18, 0.1); color: var(--warning); }
+        .status-skipped { background-color: rgba(155, 89, 182, 0.1); color: var(--info); }
+
+        .test-results {
+            margin: 30px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--light);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: rgba(52, 152, 219, 0.03);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-success { background-color: rgba(46, 204, 113, 0.15); color: var(--success); }
+        .badge-failed { background-color: rgba(231, 76, 60, 0.15); color: var(--danger); }
+        .badge-warning { background-color: rgba(243, 156, 18, 0.15); color: var(--warning); }
+        .badge-skipped { background-color: rgba(155, 89, 182, 0.15); color: var(--info); }
+
+        .detail-row {
+            background-color: #fafafa;
+        }
+
+        .detail-content {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #eee;
+        }
+
+        .detail-content pre {
+            white-space: pre-wrap;
+            font-family: monospace;
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .toggle-detail {
+            cursor: pointer;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray);
+            font-size: 14px;
+            border-top: 1px solid var(--border);
+            margin-top: 30px;
+        }
+
+        .export-btn {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 12px 25px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: 600;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray);
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            gap: 10px;
+        }
+
+        .pagination button {
+            padding: 8px 16px;
+            background: var(--light);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .pagination button.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+
+            .report-meta {
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+
+            th, td {
+                padding: 8px 10px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-laptop-code"></i>大数据量测试报告系统
+            </div>
+            <h1 class="report-title">性能优化测试报告</h1>
+            <div class="report-meta">
+                <div class="meta-item"><i class="fas fa-calendar"></i> 生成日期: 2023-10-15</div>
+                <div class="meta-item"><i class="fas fa-database"></i> 用例总数: 5,427</div>
+                <div class="meta-item"><i class="fas fa-tag"></i> 版本: v3.2.0</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="dashboard">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-chart-pie"></i> 测试结果概览
+                </div>
+                <div class="card-body">
+                    <div class="kpi-container">
+                        <div class="kpi-item status-success">
+                            <div class="kpi-value">4,289</div>
+                            <div class="kpi-label">通过用例</div>
+                        </div>
+                        <div class="kpi-item status-failed">
+                            <div class="kpi-value">87</div>
+                            <div class="kpi-label">失败用例</div>
+                        </div>
+                        <div class="kpi-item status-warning">
+                            <div class="kpi-value">32</div>
+                            <div class="kpi-label">阻塞用例</div>
+                        </div>
+                        <div class="kpi-item status-skipped">
+                            <div class="kpi-value">1,019</div>
+                            <div class="kpi-label">跳过用例</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="resultsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-stopwatch"></i> 执行时间分析
+                </div>
+                <div class="card-body">
+                    <div class="kpi-container">
+                        <div class="kpi-item">
+                            <div class="kpi-value">3h 45m</div>
+                            <div class="kpi-label">总执行时间</div>
+                        </div>
+                        <div class="kpi-item">
+                            <div class="kpi-value">1.8m</div>
+                            <div class="kpi-label">平均用例时间</div>
+                        </div>
+                        <div class="kpi-item">
+                            <div class="kpi-value">12.3m</div>
+                            <div class="kpi-label">最长用例时间</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="timeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-layer-group"></i> 模块通过率
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="moduleChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card test-results">
+            <div class="card-header">
+                <i class="fas fa-table"></i> 测试用例列表 (分页加载)
+            </div>
+            <div class="card-body">
+                <div class="pagination">
+                    <button id="prev-page">上一页</button>
+                    <span id="page-info">第 1 页，共 109 页</span>
+                    <button id="next-page">下一页</button>
+                </div>
+
+                <table id="test-cases">
+                    <thead>
+                        <tr>
+                            <th width="80px">用例ID</th>
+                            <th width="120px">测试模块</th>
+                            <th>用例名称</th>
+                            <th width="100px">状态</th>
+                            <th width="100px">执行时间</th>
+                            <th width="150px">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="case-list">
+                        <!-- 动态加载数据 -->
+                    </tbody>
+                </table>
+
+                <div class="pagination">
+                    <button id="prev-page-bottom">上一页</button>
+                    <span id="page-info-bottom">第 1 页，共 109 页</span>
+                    <button id="next-page-bottom">下一页</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>© 2023 大数据测试报告系统 | 本报告由系统自动生成，数据更新时间: 2023-10-15 14:30:25</p>
+            <p>数据加载策略: 分页加载 + 按需展开 | 当前页数据大小: <span id="data-size">0 KB</span></p>
+        </div>
+    </div>
+
+    <script>
+        // 模拟大数据集
+        const testCases = [];
+        const modules = ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'];
+        const statuses = ['通过', '失败', '阻塞', '跳过'];
+        const users = ['张三', '李四', '王五', '赵六', '钱七', '孙八'];
+
+        // 生成测试数据（实际项目中从后端获取）
+        for (let i = 1; i <= 1000; i++) {
+            const module = modules[Math.floor(Math.random() * modules.length)];
+            const status = statuses[Math.floor(Math.random() * statuses.length)];
+            const execTime = status === '阻塞' || status === '跳过' ? 'N/A' : (Math.random() * 5 + 0.5).toFixed(1) + 'm';
+            const user = users[Math.floor(Math.random() * users.length)];
+
+            testCases.push({
+                id: `TC-${i.toString().padStart(4, '0')}`,
+                module: module,
+                name: `${module}测试用例 #${i}`,
+                status: status,
+                execTime: execTime,
+                user: user,
+                details: `用例ID: TC-${i.toString().padStart(4, '0')}\n模块: ${module}\n描述: 这是${module}模块的一个详细测试用例，包含多个测试步骤和验证点。\n步骤:\n1. 准备测试数据\n2. 执行操作\n3. 验证结果\n4. 清理测试数据\n\n预期结果: 所有验证点通过\n实际结果: ${status === '通过' ? '所有验证点通过' : '部分验证点失败'}\n日志文件: tc-${i}.log\n错误信息: ${status === '失败' ? '错误代码: ERR-'+Math.floor(Math.random()*1000) : '无'}`
+            });
+        }
+
+        // 分页配置
+        const config = {
+            currentPage: 1,
+            itemsPerPage: 10,
+            totalPages: Math.ceil(testCases.length / 10)
+        };
+
+        // DOM元素
+        const caseList = document.getElementById('case-list');
+        const pageInfo = document.getElementById('page-info');
+        const pageInfoBottom = document.getElementById('page-info-bottom');
+        const dataSize = document.getElementById('data-size');
+
+        // 初始化图表
+        function initCharts() {
+            // 测试结果饼图
+            const resultsCtx = document.getElementById('resultsChart').getContext('2d');
+            new Chart(resultsCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['通过', '失败', '阻塞', '跳过'],
+                    datasets: [{
+                        data: [4289, 87, 32, 1019],
+                        backgroundColor: [
+                            '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 20,
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 执行时间柱状图
+            const timeCtx = document.getElementById('timeChart').getContext('2d');
+            new Chart(timeCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                    datasets: [{
+                        label: '执行时间 (分钟)',
+                        data: [45.5, 78.3, 56.2, 63.7, 42.8, 38.5],
+                        backgroundColor: '#3498db',
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '分钟'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 模块通过率水平条形图
+            const moduleCtx = document.getElementById('moduleChart').getContext('2d');
+            new Chart(moduleCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                    datasets: [{
+                        label: '通过率 (%)',
+                        data: [98, 87, 92, 85, 96, 100],
+                        backgroundColor: [
+                            '#2ecc71', '#f39c12', '#2ecc71', '#f39c12', '#2ecc71', '#2ecc71'
+                        ],
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 渲染测试用例列表
+        function renderCases() {
+            caseList.innerHTML = '';
+
+            const startIndex = (config.currentPage - 1) * config.itemsPerPage;
+            const endIndex = startIndex + config.itemsPerPage;
+            const pageCases = testCases.slice(startIndex, endIndex);
+
+            // 计算数据大小（模拟）
+            const size = (JSON.stringify(pageCases).length / 1024).toFixed(2);
+            dataSize.textContent = size + ' KB';
+
+            pageCases.forEach((testCase, index) => {
+                const row = document.createElement('tr');
+
+                // 状态标记
+                let badgeClass = '';
+                switch(testCase.status) {
+                    case '通过': badgeClass = 'badge-success'; break;
+                    case '失败': badgeClass = 'badge-failed'; break;
+                    case '阻塞': badgeClass = 'badge-warning'; break;
+                    case '跳过': badgeClass = 'badge-skipped'; break;
+                }
+
+                row.innerHTML = `
+                    <td>${testCase.id}</td>
+                    <td>${testCase.module}</td>
+                    <td>${testCase.name}</td>
+                    <td><span class="status-badge ${badgeClass}">${testCase.status}</span></td>
+                    <td>${testCase.execTime}</td>
+                    <td>
+                        <span class="toggle-detail" data-id="${testCase.id}">查看详情</span>
+                    </td>
+                `;
+
+                caseList.appendChild(row);
+
+                // 添加详情行（初始隐藏）
+                const detailRow = document.createElement('tr');
+                detailRow.className = 'detail-row';
+                detailRow.style.display = 'none';
+                detailRow.id = `detail-${testCase.id}`;
+                detailRow.innerHTML = `
+                    <td colspan="6">
+                        <div class="detail-content">
+                            <h4>用例详情: ${testCase.name}</h4>
+                            <pre>${testCase.details}</pre>
+                        </div>
+                    </td>
+                `;
+
+                caseList.appendChild(detailRow);
+            });
+
+            // 更新分页信息
+            pageInfo.textContent = `第 ${config.currentPage} 页，共 ${config.totalPages} 页`;
+            pageInfoBottom.textContent = `第 ${config.currentPage} 页，共 ${config.totalPages} 页`;
+        }
+
+        // 切换详情显示
+        function setupDetailToggles() {
+            caseList.addEventListener('click', function(e) {
+                if (e.target.classList.contains('toggle-detail')) {
+                    const caseId = e.target.getAttribute('data-id');
+                    const detailRow = document.getElementById(`detail-${caseId}`);
+
+                    if (detailRow.style.display === 'none') {
+                        detailRow.style.display = 'table-row';
+                        e.target.textContent = '隐藏详情';
+                    } else {
+                        detailRow.style.display = 'none';
+                        e.target.textContent = '查看详情';
+                    }
+                }
+            });
+        }
+
+        // 分页控制
+        function setupPagination() {
+            document.getElementById('prev-page').addEventListener('click', function() {
+                if (config.currentPage > 1) {
+                    config.currentPage--;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('next-page').addEventListener('click', function() {
+                if (config.currentPage < config.totalPages) {
+                    config.currentPage++;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('prev-page-bottom').addEventListener('click', function() {
+                if (config.currentPage > 1) {
+                    config.currentPage--;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('next-page-bottom').addEventListener('click', function() {
+                if (config.currentPage < config.totalPages) {
+                    config.currentPage++;
+                    renderCases();
+                }
+            });
+        }
+
+        // 初始化
+        window.onload = function() {
+            initCharts();
+            renderCases();
+            setupDetailToggles();
+            setupPagination();
+        };
+    </script>
+</body>
+</html>
