@@ -71,8 +71,11 @@ class ReportService:
         info = {
             "count": len(result),
             "success": success_count,
+            "successPercent": f"{round(success_count / len(result) * 100, 2)}%",
             "fail": fail_count,
+            "failPercent": f"{round(fail_count / len(result) * 100, 2)}%",
             "skip": skip_count,
+            "skipPercent": f"{round(skip_count / len(result) * 100, 2)}%",
             "maxTime": format_duration(max_time),
             "minTime": format_duration(min_time),
             "avgTime": format_duration(avg_time),
