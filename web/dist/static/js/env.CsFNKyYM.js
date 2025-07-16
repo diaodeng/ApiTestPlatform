@@ -1,2 +1,0 @@
-import{X as n}from"./index.N0ypA0wQ.js";function e(t){return n({url:"/hrm/env/list",method:"get",params:t})}function u(t){return n({url:"/hrm/env/all",method:"get",params:t})}function a(t){return n({url:"/hrm/env/"+t,method:"get"})}function o(t){return n({url:"/hrm/env",method:"post",data:t})}function m(t){return n({url:"/hrm/env/copy",method:"post",data:t})}function d(t){return n({url:"/hrm/env",method:"put",data:t})}function l(t){return n({url:"/hrm/env/"+t,method:"delete"})}export{o as a,u as b,m as c,l as d,a as g,e as l,d as u};
-//# sourceMappingURL=env.CsFNKyYM.js.map

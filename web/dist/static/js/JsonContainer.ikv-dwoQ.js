@@ -1,0 +1,2 @@
+import{_ as n,r as a,e as t,j as r,o as c,i as p,h as _,y as l}from"./index.DLM0P_FN.js";const i={__name:"JsonContainer",props:{json:Object},setup(o){const s=a(JSON.stringify(o.json,null,2));return(u,d)=>{const e=t("el-card");return c(),r(e,{class:"json-container"},{default:p(()=>[_("pre",null,l(s.value),1)]),_:1})}}},m=n(i,[["__scopeId","data-v-2f82fbbc"]]);export{m as default};
+//# sourceMappingURL=JsonContainer.ikv-dwoQ.js.map

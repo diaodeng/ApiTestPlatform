@@ -1,2 +1,0 @@
-import{X as e}from"./index.N0ypA0wQ.js";function a(){return e({url:"/qtr/agent/list",method:"get",data:{isPage:!1}})}function n(t){return e({url:"/qtr/agent/list",method:"get",params:t})}function u(t){return e({url:"/qtr/agent/"+t,method:"get"})}function l(t){return e({url:"/qtr/agent",method:"put",data:t})}function g(t){return e({url:"/qtr/agent"+t,method:"delete"})}export{a,g as d,u as g,n as l,l as u};
-//# sourceMappingURL=agent.CW2QP-1A.js.map
