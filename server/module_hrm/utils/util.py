@@ -425,3 +425,22 @@ def get_system_stats():
     }
     logger.info(f"系统状态信息: {stats}")
     return stats
+
+
+def format_duration(seconds, show_days=True):
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+
+    s = f"{seconds:.2f}".rstrip('0').rstrip('.')  # 去掉多余的0
+
+    parts = []
+    if show_days and days:
+        parts.append(f"{int(days)}d")
+    if hours or (show_days and days):
+        parts.append(f"{int(hours)}h")
+    if minutes or parts:
+        parts.append(f"{int(minutes)}m")
+    parts.append(f"{s}s")
+
+    return ' '.join(parts)

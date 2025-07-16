@@ -72,7 +72,7 @@ class JobService:
 
         job_info = cls.job_detail_services(query_db, page_object.job_id)
         if job_info:
-            job_kw = json.loads(page_object.job_kwargs)
+            job_kw = json.loads(page_object.job_kwargs or "{}")
             if not job_kw.get('userName') and not job_kw.get('userId'):
                 job_kw['userName'] = user_info.user.user_name
                 job_kw['userId'] = user_info.user.user_id
