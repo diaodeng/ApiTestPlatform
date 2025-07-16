@@ -45,8 +45,10 @@
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
         <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
-        <el-button type="danger" icon="Refresh" @click="handleDelete" v-hasPermi="['hrm:history:delete']">删除
-        </el-button>
+        <el-button type="danger" icon="Delete" @click="handleDelete" v-hasPermi="['hrm:history:delete']">删除</el-button>
+        <el-button type="info" icon="Download" @click="handleDownloadHtml" v-hasPermi="['hrm:report:downloadHtml']">导出HTML</el-button>
+        <el-button v-if="false" type="info" icon="Download" @click="handleDownloadPdf" v-hasPermi="['hrm:report:downloadPdf']">导出PDF</el-button>
+
       </el-form-item>
     </el-form>
 
@@ -131,6 +133,7 @@
 * 查看执行详情的组件
 * */
 import * as ApiRunDetail from "@/api/hrm/run_detail.js";
+import { downloadHtml, downloadPdf } from "@/api/hrm/report.js";
 import {listProject} from "@/api/hrm/project";
 import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import {HrmDataTypeEnum, runDetailViewTypeEnum} from "@/components/hrm/enum.js";
@@ -243,6 +246,33 @@ function handleDelete(row) {
     proxy.$modal.msgSuccess("删除成功");
   }).catch(() => {
   });
+}
+
+/** 导出HTML按钮操作 */
+function handleDownloadHtml(row) {
+  loading.value.page = true;
+  downloadHtml(queryParams.value).then(response => {
+    // 创建下载链接
+    const url = window.URL.createObjectURL(new Blob([response]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', 'data_report.html')
+    document.body.appendChild(link)
+    link.click()
+
+    // 清理资源
+    link.remove()
+    window.URL.revokeObjectURL(url)
+
+  }).finally(()=>{loading.value.page = false;});
+}
+
+/** 导出PDF按钮操作 */
+function handleDownloadPdf(row) {
+  loading.value.page = true;
+  downloadPdf(queryParams.value).then(response => {
+    loading.value.page = false;
+  }).finally(()=>{loading.value.page = false;});
 }
 
 function handleView(row) {

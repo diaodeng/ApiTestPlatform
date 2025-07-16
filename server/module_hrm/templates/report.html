@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #3498db;
+            --success: #2ecc71;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --info: #9b59b6;
+            --dark: #2c3e50;
+            --light: #ecf0f1;
+            --gray: #95a5a6;
+            --border: #ddd;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary), #1a5276);
+            color: white;
+            padding: 30px 0;
+            text-align: center;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .logo i {
+            margin-right: 10px;
+        }
+
+        .report-title {
+            font-size: 32px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .report-meta {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .meta-item {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-header {
+            padding: 15px 20px;
+            background: var(--light);
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+
+        .card-header i {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .kpi-container {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .kpi-item {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 120px;
+        }
+
+        .kpi-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .kpi-label {
+            font-size: 14px;
+            color: var(--gray);
+        }
+
+        .chart-container {
+            height: 250px;
+            position: relative;
+        }
+
+        .status-success { background-color: rgba(46, 204, 113, 0.1); color: var(--success); }
+        .status-failed { background-color: rgba(231, 76, 60, 0.1); color: var(--danger); }
+        .status-warning { background-color: rgba(243, 156, 18, 0.1); color: var(--warning); }
+        .status-skipped { background-color: rgba(155, 89, 182, 0.1); color: var(--info); }
+
+        .test-results {
+            margin: 30px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--light);
+            font-weight: 600;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: rgba(52, 152, 219, 0.03);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-success { background-color: rgba(46, 204, 113, 0.15); color: var(--success); }
+        .badge-failed { background-color: rgba(231, 76, 60, 0.15); color: var(--danger); }
+        .badge-warning { background-color: rgba(243, 156, 18, 0.15); color: var(--warning); }
+        .badge-skipped { background-color: rgba(155, 89, 182, 0.15); color: var(--info); }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray);
+            font-size: 14px;
+            border-top: 1px solid var(--border);
+            margin-top: 30px;
+        }
+
+        .export-btn {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 12px 25px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: 600;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .export-btn:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+
+            .report-meta {
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-laptop-code"></i>QTR测试平台
+            </div>
+            <h1 class="report-title">{{ title }}</h1>
+            <div class="report-meta">
+                <div class="meta-item"><i class="fas fa-calendar"></i> 生成日期: {{ timestamp }}</div>
+                <div class="meta-item"><i class="fas fa-user"></i> 测试负责人: 张工程师</div>
+<!--                <div class="meta-item"><i class="fas fa-tag"></i> 版本: v2.5.0</div>-->
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="dashboard">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-chart-pie"></i> 测试结果概览
+                </div>
+                <div class="card-body">
+                    <div class="kpi-container">
+                        <div class="kpi-item status-success">
+                            <div class="kpi-value">{{ info.success }}</div>
+                            <div class="kpi-label">通过用例</div>
+                        </div>
+                        <div class="kpi-item status-failed">
+                            <div class="kpi-value">{{ info.fail }}</div>
+                            <div class="kpi-label">失败用例</div>
+                        </div>
+                        <div class="kpi-item status-warning" style="display: none">
+                            <div class="kpi-value">{{ info.success }}</div>
+                            <div class="kpi-label">阻塞用例</div>
+                        </div>
+                        <div class="kpi-item status-skipped">
+                            <div class="kpi-value">{{ info.skip }}</div>
+                            <div class="kpi-label">跳过用例</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="resultsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-stopwatch"></i> 执行时间分析
+                </div>
+                <div class="card-body">
+                    <div class="kpi-container">
+                        <div class="kpi-item">
+                            <div class="kpi-value">{{ info.totalTime }}</div>
+                            <div class="kpi-label">总执行时间</div>
+                        </div>
+                        <div class="kpi-item">
+                            <div class="kpi-value">{{ info.avgTime }}</div>
+                            <div class="kpi-label">平均用例时间</div>
+                        </div>
+                        <div class="kpi-item">
+                            <div class="kpi-value">{{ info.maxTime }}</div>
+                            <div class="kpi-label">最长用例时间</div>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="display: none">
+                        <canvas id="timeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="display: none">
+                <div class="card-header">
+                    <i class="fas fa-layer-group"></i> 模块通过率
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="moduleChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card test-results">
+            <div class="card-header">
+                <i class="fas fa-table"></i> 详细测试结果
+            </div>
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>用例ID</th>
+                            <th>用例名称</th>
+                            <th>状态</th>
+                            <th>执行时间</th>
+                            <th>执行人</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in data %}
+                            <tr>
+                                <td>{{ line.runId }}</td>
+                                <td>{{ line.runName }}</td>
+                                <td>
+                                    {% if line.status == 1 %}
+                                    <span class="status-badge badge-success">通过</span>
+                                    {% elif line.status == 2 %}
+                                    <span class="status-badge badge-failed">失败</span>
+                                    {% elif line.status == 3 %}
+                                    <span class="status-badge badge-warning">跳过</span>
+                                    {% elif line.status == 4 %}
+                                    <span class="status-badge badge-skipped">阻塞</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ line.runDuration }}</td>
+                                <td>{{ line.manager }}</td>
+                            </tr>
+                        {% endfor %}
+
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin: 30px 0; display: none">
+            <button class="export-btn">
+                <i class="fas fa-download"></i> 导出PDF报告
+            </button>
+        </div>
+
+        <div class="footer">
+            <p>© 2023 QTR测试平台 | 本报告由系统自动生成，数据更新时间: {{ timestamp }}</p>
+            <p style="display: none">测试环境: Linux 5.15, Chrome 117, MySQL 8.0, Python 3.10</p>
+        </div>
+    </div>
+
+    <script>
+        // 测试结果饼图
+        const resultsCtx = document.getElementById('resultsChart').getContext('2d');
+        const resultsChart = new Chart(resultsCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['通过', '失败', '阻塞', '跳过'],
+                datasets: [{
+                    data: [142, 8, 5, 15],
+                    backgroundColor: [
+                        '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 20,
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
+                    }
+                }
+            }
+        });
+
+        // 执行时间柱状图
+        const timeCtx = document.getElementById('timeChart').getContext('2d');
+        const timeChart = new Chart(timeCtx, {
+            type: 'bar',
+            data: {
+                labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                datasets: [{
+                    label: '执行时间 (分钟)',
+                    data: [12.5, 25.3, 18.2, 15.7, 9.8, 6.5],
+                    backgroundColor: '#3498db',
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: '分钟'
+                        }
+                    }
+                }
+            }
+        });
+
+        // 模块通过率水平条形图
+        const moduleCtx = document.getElementById('moduleChart').getContext('2d');
+        const moduleChart = new Chart(moduleCtx, {
+            type: 'bar',
+            data: {
+                labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                datasets: [{
+                    label: '通过率 (%)',
+                    data: [98, 87, 92, 85, 96, 100],
+                    backgroundColor: [
+                        '#2ecc71', '#f39c12', '#2ecc71', '#f39c12', '#2ecc71', '#2ecc71'
+                    ],
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: {
+                            callback: function(value) {
+                                return value + '%';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

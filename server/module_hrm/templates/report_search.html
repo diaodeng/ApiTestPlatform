@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试报告模板 - 增强版（带搜索功能）</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #3498db;
+            --success: #2ecc71;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --info: #9b59b6;
+            --dark: #2c3e50;
+            --light: #ecf0f1;
+            --gray: #95a5a6;
+            --border: #ddd;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary), #1a5276);
+            color: white;
+            padding: 30px 0;
+            text-align: center;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .logo i {
+            margin-right: 10px;
+        }
+
+        .report-title {
+            font-size: 32px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .report-meta {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .meta-item {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .search-controls {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .search-group {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .search-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+        }
+
+        .status-filters {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .status-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 500;
+            transition: all 0.3s;
+            user-select: none;
+        }
+
+        .filter-badge {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+        }
+
+        .status-success-bg { background-color: var(--success); }
+        .status-failed-bg { background-color: var(--danger); }
+        .status-warning-bg { background-color: var(--warning); }
+        .status-skipped-bg { background-color: var(--info); }
+
+        .status-filter.active {
+            background-color: rgba(52, 152, 219, 0.1);
+            color: var(--primary);
+        }
+
+        .search-results-info {
+            background: rgba(52, 152, 219, 0.1);
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 15px;
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-header {
+            padding: 15px 20px;
+            background: var(--light);
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+
+        .card-header i {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .kpi-container {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .kpi-item {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 120px;
+        }
+
+        .kpi-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .kpi-label {
+            font-size: 14px;
+            color: var(--gray);
+        }
+
+        .chart-container {
+            height: 250px;
+            position: relative;
+        }
+
+        .status-success { background-color: rgba(46, 204, 113, 0.1); color: var(--success); }
+        .status-failed { background-color: rgba(231, 76, 60, 0.1); color: var(--danger); }
+        .status-warning { background-color: rgba(243, 156, 18, 0.1); color: var(--warning); }
+        .status-skipped { background-color: rgba(155, 89, 182, 0.1); color: var(--info); }
+
+        .test-results {
+            margin: 30px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--light);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: rgba(52, 152, 219, 0.03);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-success { background-color: rgba(46, 204, 113, 0.15); color: var(--success); }
+        .badge-failed { background-color: rgba(231, 76, 60, 0.15); color: var(--danger); }
+        .badge-warning { background-color: rgba(243, 156, 18, 0.15); color: var(--warning); }
+        .badge-skipped { background-color: rgba(155, 89, 182, 0.15); color: var(--info); }
+
+        .no-results {
+            text-align: center;
+            padding: 30px;
+            color: var(--gray);
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray);
+            font-size: 14px;
+            border-top: 1px solid var(--border);
+            margin-top: 30px;
+        }
+
+        .export-btn {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 12px 25px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: 600;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .export-btn:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+
+            .report-meta {
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .search-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-group {
+                min-width: 100%;
+            }
+
+            th, td {
+                padding: 8px 10px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-laptop-code"></i>测试报告系统
+            </div>
+            <h1 class="report-title">测试分析报告</h1>
+            <div class="report-meta">
+                <div class="meta-item"><i class="fas fa-calendar"></i> 生成日期: 2023-10-15</div>
+                <div class="meta-item"><i class="fas fa-user"></i> 测试负责人: 张工程师</div>
+                <div class="meta-item"><i class="fas fa-tag"></i> 版本: v2.5.0</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- 搜索控制栏 -->
+        <div class="search-controls">
+            <div class="search-group">
+                <label for="search-input"><i class="fas fa-search"></i> 搜索用例名称</label>
+                <input type="text" id="search-input" class="search-input" placeholder="输入用例名称关键字...">
+            </div>
+
+            <div>
+                <label>状态筛选</label>
+                <div class="status-filters">
+                    <div class="status-filter active" data-status="all">
+                        <span class="filter-badge" style="background: linear-gradient(135deg, #2ecc71, #3498db);"></span>
+                        <span>全部状态</span>
+                    </div>
+                    <div class="status-filter" data-status="passed">
+                        <span class="filter-badge status-success-bg"></span>
+                        <span>通过</span>
+                    </div>
+                    <div class="status-filter" data-status="failed">
+                        <span class="filter-badge status-failed-bg"></span>
+                        <span>失败</span>
+                    </div>
+                    <div class="status-filter" data-status="blocked">
+                        <span class="filter-badge status-warning-bg"></span>
+                        <span>阻塞</span>
+                    </div>
+                    <div class="status-filter" data-status="skipped">
+                        <span class="filter-badge status-skipped-bg"></span>
+                        <span>跳过</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="search-results-info">
+            <div>
+                <i class="fas fa-info-circle"></i>
+                <span id="results-count">正在加载数据...</span>
+            </div>
+            <div>
+                <button id="reset-search" class="export-btn" style="padding: 8px 15px; font-size: 14px;">
+                    <i class="fas fa-sync-alt"></i> 重置搜索
+                </button>
+            </div>
+        </div>
+
+        <div class="dashboard">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-chart-pie"></i> 测试结果概览
+                </div>
+                <div class="card-body">
+                    <div class="kpi-container">
+                        <div class="kpi-item status-success">
+                            <div class="kpi-value">142</div>
+                            <div class="kpi-label">通过用例</div>
+                        </div>
+                        <div class="kpi-item status-failed">
+                            <div class="kpi-value">8</div>
+                            <div class="kpi-label">失败用例</div>
+                        </div>
+                        <div class="kpi-item status-warning">
+                            <div class="kpi-value">5</div>
+                            <div class="kpi-label">阻塞用例</div>
+                        </div>
+                        <div class="kpi-item status-skipped">
+                            <div class="kpi-value">15</div>
+                            <div class="kpi-label">跳过用例</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="resultsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-stopwatch"></i> 执行时间分析
+                </div>
+                <div class="card-body">
+                    <div class="kpi-container">
+                        <div class="kpi-item">
+                            <div class="kpi-value">1h 28m</div>
+                            <div class="kpi-label">总执行时间</div>
+                        </div>
+                        <div class="kpi-item">
+                            <div class="kpi-value">2.5m</div>
+                            <div class="kpi-label">平均用例时间</div>
+                        </div>
+                        <div class="kpi-item">
+                            <div class="kpi-value">8.7m</div>
+                            <div class="kpi-label">最长用例时间</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="timeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-layer-group"></i> 模块通过率
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="moduleChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card test-results">
+            <div class="card-header">
+                <i class="fas fa-table"></i> 详细测试结果
+            </div>
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr>
+                            <th width="80px">用例ID</th>
+                            <th width="120px">测试模块</th>
+                            <th>用例名称</th>
+                            <th width="100px">状态</th>
+                            <th width="100px">执行时间</th>
+                            <th width="120px">执行人</th>
+                        </tr>
+                    </thead>
+                    <tbody id="test-cases">
+                        <!-- 动态加载数据 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <button class="export-btn">
+                <i class="fas fa-download"></i> 导出完整报告
+            </button>
+        </div>
+
+        <div class="footer">
+            <p>© 2023 测试报告系统 | 本报告由系统自动生成 | 搜索功能支持名称和状态筛选</p>
+            <p>数据更新时间: 2023-10-15 14:30:25</p>
+        </div>
+    </div>
+
+    <script>
+        // 测试数据
+        const testCases = [
+            { id: "TC-1021", module: "用户管理", name: "创建新用户", status: "passed", execTime: "1.2m", user: "张三" },
+            { id: "TC-1022", module: "用户管理", name: "删除用户", status: "passed", execTime: "0.8m", user: "张三" },
+            { id: "TC-1023", module: "用户管理", name: "编辑用户信息", status: "passed", execTime: "1.5m", user: "张三" },
+            { id: "TC-1024", module: "用户管理", name: "用户权限设置", status: "failed", execTime: "2.3m", user: "张三" },
+            { id: "TC-1025", module: "用户管理", name: "用户批量导入", status: "blocked", execTime: "N/A", user: "张三" },
+            { id: "TC-2035", module: "订单管理", name: "创建新订单", status: "failed", execTime: "3.5m", user: "李四" },
+            { id: "TC-2036", module: "订单管理", name: "取消订单", status: "blocked", execTime: "N/A", user: "李四" },
+            { id: "TC-2037", module: "订单管理", name: "订单支付流程", status: "passed", execTime: "4.2m", user: "李四" },
+            { id: "TC-2038", module: "订单管理", name: "订单退款处理", status: "failed", execTime: "3.8m", user: "李四" },
+            { id: "TC-2039", module: "订单管理", name: "订单导出功能", status: "passed", execTime: "1.7m", user: "李四" },
+            { id: "TC-3050", module: "支付管理", name: "支付宝支付", status: "passed", execTime: "2.1m", user: "王五" },
+            { id: "TC-3051", module: "支付管理", name: "微信支付", status: "skipped", execTime: "N/A", user: "王五" },
+            { id: "TC-3052", module: "支付管理", name: "银联支付", status: "passed", execTime: "2.4m", user: "王五" },
+            { id: "TC-3053", module: "支付管理", name: "支付对账功能", status: "failed", execTime: "5.1m", user: "王五" },
+            { id: "TC-3054", module: "支付管理", name: "支付回调处理", status: "passed", execTime: "1.9m", user: "王五" },
+            { id: "TC-4012", module: "库存管理", name: "库存查询", status: "passed", execTime: "1.5m", user: "赵六" },
+            { id: "TC-4013", module: "库存管理", name: "库存调整", status: "failed", execTime: "4.2m", user: "赵六" },
+            { id: "TC-4014", module: "库存管理", name: "库存预警设置", status: "passed", execTime: "2.3m", user: "赵六" },
+            { id: "TC-4015", module: "库存管理", name: "库存盘点功能", status: "skipped", execTime: "N/A", user: "赵六" },
+            { id: "TC-4016", module: "库存管理", name: "库存调拨流程", status: "passed", execTime: "3.1m", user: "赵六" },
+            { id: "TC-5020", module: "报表管理", name: "销售报表生成", status: "passed", execTime: "2.8m", user: "钱七" },
+            { id: "TC-5021", module: "报表管理", name: "用户行为分析", status: "failed", execTime: "3.9m", user: "钱七" },
+            { id: "TC-5022", module: "报表管理", name: "财务报表导出", status: "blocked", execTime: "N/A", user: "钱七" },
+            { id: "TC-5023", module: "报表管理", name: "库存报表分析", status: "passed", execTime: "2.5m", user: "钱七" },
+            { id: "TC-5024", module: "报表管理", name: "自定义报表设置", status: "passed", execTime: "3.2m", user: "钱七" }
+        ];
+
+        // DOM元素
+        const testCasesTable = document.getElementById('test-cases');
+        const searchInput = document.getElementById('search-input');
+        const statusFilters = document.querySelectorAll('.status-filter');
+        const resultsCount = document.getElementById('results-count');
+        const resetSearchBtn = document.getElementById('reset-search');
+
+        // 当前过滤状态
+        let currentSearchTerm = '';
+        let currentStatusFilter = 'all';
+
+        // 初始化图表
+        function initCharts() {
+            // 测试结果饼图
+            const resultsCtx = document.getElementById('resultsChart').getContext('2d');
+            new Chart(resultsCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['通过', '失败', '阻塞', '跳过'],
+                    datasets: [{
+                        data: [142, 8, 5, 15],
+                        backgroundColor: [
+                            '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 20,
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 执行时间柱状图
+            const timeCtx = document.getElementById('timeChart').getContext('2d');
+            new Chart(timeCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                    datasets: [{
+                        label: '执行时间 (分钟)',
+                        data: [12.5, 25.3, 18.2, 15.7, 9.8, 6.5],
+                        backgroundColor: '#3498db',
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '分钟'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 模块通过率水平条形图
+            const moduleCtx = document.getElementById('moduleChart').getContext('2d');
+            new Chart(moduleCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                    datasets: [{
+                        label: '通过率 (%)',
+                        data: [98, 87, 92, 85, 96, 100],
+                        backgroundColor: [
+                            '#2ecc71', '#f39c12', '#2ecc71', '#f39c12', '#2ecc71', '#2ecc71'
+                        ],
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 渲染测试用例列表
+        function renderTestCases() {
+            testCasesTable.innerHTML = '';
+
+            // 过滤用例
+            const filteredCases = testCases.filter(testCase => {
+                // 名称搜索过滤
+                const nameMatch = testCase.name.toLowerCase().includes(currentSearchTerm.toLowerCase());
+
+                // 状态过滤
+                let statusMatch = false;
+                switch(currentStatusFilter) {
+                    case 'all':
+                        statusMatch = true;
+                        break;
+                    case 'passed':
+                        statusMatch = testCase.status === 'passed';
+                        break;
+                    case 'failed':
+                        statusMatch = testCase.status === 'failed';
+                        break;
+                    case 'blocked':
+                        statusMatch = testCase.status === 'blocked';
+                        break;
+                    case 'skipped':
+                        statusMatch = testCase.status === 'skipped';
+                        break;
+                }
+
+                return nameMatch && statusMatch;
+            });
+
+            // 更新结果计数
+            resultsCount.innerHTML = `找到 ${filteredCases.length} 个测试用例 (共 ${testCases.length} 个用例)`;
+
+            if (filteredCases.length === 0) {
+                testCasesTable.innerHTML = `
+                    <tr class="no-results">
+                        <td colspan="6">
+                            <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px;"></i>
+                            <h3>没有找到匹配的测试用例</h3>
+                            <p>请尝试其他搜索关键词或状态筛选</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            // 渲染用例
+            filteredCases.forEach(testCase => {
+                const row = document.createElement('tr');
+
+                // 状态标记
+                let badgeClass = '';
+                let statusText = '';
+                switch(testCase.status) {
+                    case 'passed':
+                        badgeClass = 'badge-success';
+                        statusText = '通过';
+                        break;
+                    case 'failed':
+                        badgeClass = 'badge-failed';
+                        statusText = '失败';
+                        break;
+                    case 'blocked':
+                        badgeClass = 'badge-warning';
+                        statusText = '阻塞';
+                        break;
+                    case 'skipped':
+                        badgeClass = 'badge-skipped';
+                        statusText = '跳过';
+                        break;
+                }
+
+                row.innerHTML = `
+                    <td>${testCase.id}</td>
+                    <td>${testCase.module}</td>
+                    <td>${testCase.name}</td>
+                    <td><span class="status-badge ${badgeClass}">${statusText}</span></td>
+                    <td>${testCase.execTime}</td>
+                    <td>${testCase.user}</td>
+                `;
+
+                testCasesTable.appendChild(row);
+            });
+        }
+
+        // 设置状态过滤器
+        function setupStatusFilters() {
+            statusFilters.forEach(filter => {
+                filter.addEventListener('click', function() {
+                    // 移除所有active类
+                    statusFilters.forEach(f => f.classList.remove('active'));
+
+                    // 添加active类到当前点击的过滤器
+                    this.classList.add('active');
+
+                    // 更新当前状态过滤器
+                    currentStatusFilter = this.getAttribute('data-status');
+
+                    // 重新渲染用例
+                    renderTestCases();
+                });
+            });
+        }
+
+        // 设置搜索功能
+        function setupSearch() {
+            // 搜索框输入事件
+            searchInput.addEventListener('input', function() {
+                currentSearchTerm = this.value;
+                renderTestCases();
+            });
+
+            // 重置搜索按钮
+            resetSearchBtn.addEventListener('click', function() {
+                // 重置搜索状态
+                currentSearchTerm = '';
+                currentStatusFilter = 'all';
+
+                // 重置UI
+                searchInput.value = '';
+                statusFilters.forEach(f => f.classList.remove('active'));
+                document.querySelector('.status-filter[data-status="all"]').classList.add('active');
+
+                // 重新渲染
+                renderTestCases();
+            });
+        }
+
+        // 初始化
+        window.onload = function() {
+            initCharts();
+            renderTestCases();
+            setupStatusFilters();
+            setupSearch();
+        };
+    </script>
+</body>
+</html>
