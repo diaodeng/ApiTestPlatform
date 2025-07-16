@@ -184,7 +184,7 @@
         }
 
         .status-badge {
-            display: inline-block;
+            display: ruby-text;
             padding: 5px 12px;
             border-radius: 20px;
             font-size: 12px;
@@ -248,7 +248,7 @@
             <h1 class="report-title">{{ title }}</h1>
             <div class="report-meta">
                 <div class="meta-item"><i class="fas fa-calendar"></i> 生成日期: {{ timestamp }}</div>
-                <div class="meta-item"><i class="fas fa-user"></i> 测试负责人: 张工程师</div>
+                <div class="meta-item" style="display: none"><i class="fas fa-user"></i> 测试负责人: 张工程师</div>
 <!--                <div class="meta-item"><i class="fas fa-tag"></i> 版本: v2.5.0</div>-->
             </div>
         </div>
@@ -264,11 +264,11 @@
                     <div class="kpi-container">
                         <div class="kpi-item status-success">
                             <div class="kpi-value">{{ info.success }}</div>
-                            <div class="kpi-label">通过用例</div>
+                            <div class="kpi-label">通过用例({{ info.successPercent }})</div>
                         </div>
                         <div class="kpi-item status-failed">
                             <div class="kpi-value">{{ info.fail }}</div>
-                            <div class="kpi-label">失败用例</div>
+                            <div class="kpi-label">失败用例({{ info.failPercent }})</div>
                         </div>
                         <div class="kpi-item status-warning" style="display: none">
                             <div class="kpi-value">{{ info.success }}</div>
@@ -276,10 +276,10 @@
                         </div>
                         <div class="kpi-item status-skipped">
                             <div class="kpi-value">{{ info.skip }}</div>
-                            <div class="kpi-label">跳过用例</div>
+                            <div class="kpi-label">跳过用例({{ info.skipPercent }})</div>
                         </div>
                     </div>
-                    <div class="chart-container">
+                    <div class="chart-container" style="display: none">
                         <canvas id="resultsChart"></canvas>
                     </div>
                 </div>
