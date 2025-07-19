@@ -565,7 +565,7 @@ class RequestRunner(object):
         request_data = self.step_data.request.model_dump(by_alias=True)
 
         self.logger.info(f"method: {self.step_data.request.method}")
-        self.logger.info(f"Request: {json.dumps(request_data, indent=4, ensure_ascii=False)}")
+
 
         try:
             self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
@@ -573,6 +573,11 @@ class RequestRunner(object):
             request_data.pop("upload")
             request_data["follow_redirects"] = request_data.pop("allow_redirects", True)
             request_data.pop("verify", True)
+            # request_data['data'] = json.dumps(request_data['data'], ensure_ascii=False)
+            if not request_data.get("json"):
+                request_data.pop("json")
+
+            self.logger.info(f"Request: {json.dumps(request_data, indent=4, ensure_ascii=False)}")
 
             start_time = time.time()
             start_request_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
