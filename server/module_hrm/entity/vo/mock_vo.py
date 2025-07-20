@@ -36,7 +36,7 @@ class DeleteMockRuleModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    rule_ids: str
+    rule_ids: list[int|str] = Field(default_factory=lambda : [])
     update_by: Optional[str] = None
     update_time: Optional[datetime] = None
 
@@ -63,7 +63,7 @@ class DeleteMockRequestModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    rule_request_ids: str
+    rule_request_ids: list[str|int] = Field(default_factory=lambda : [])
     update_by: Optional[str] = None
     update_time: Optional[datetime] = None
 
@@ -90,6 +90,6 @@ class DeleteMockResponseModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    rule_response_ids: str
+    rule_response_ids: list[str|int] = Field(default_factory=lambda : [])
     update_by: Optional[str] = None
     update_time: Optional[datetime] = None

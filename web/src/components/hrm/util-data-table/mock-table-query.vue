@@ -139,7 +139,7 @@
 </template>
 
 <script setup>
-import {listCase} from "@/api/hrm/case";
+import {listMockRule} from "@/api/hrm/mock";
 import {selectModulList} from "@/api/hrm/module";
 import {listProject} from "@/api/hrm/project";
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
@@ -218,7 +218,7 @@ function nameOrGlob(val) {
 function getList() {
   loading.value.page = true;
   // console.log(tableRef.value.getSelectionRows());
-  listCase(queryParams.value).then(response => {
+  listMockRule(queryParams.value).then(response => {
     ruleList.value = response.rows;
     total.value = response.total;
     nextTick(() => {

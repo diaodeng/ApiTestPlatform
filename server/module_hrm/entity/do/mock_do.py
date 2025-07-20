@@ -3,7 +3,7 @@ from sqlalchemy.orm import mapped_column, Mapped
 
 from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
-from module_hrm.enums.enums import DataType
+from module_hrm.enums.enums import DataType, QtrDataStatusEnum
 from utils.snowflake import snowIdWorker
 
 
@@ -28,7 +28,7 @@ class MockRules(Base, BaseModel):
     method = mapped_column(String(10), comment='HTTP方法', nullable=True, default="GET")
     priority: Mapped[int] = mapped_column(Integer, comment='优先级', nullable=False, default=1)
     rule_condition: Mapped[str] = mapped_column(Text, comment='mock规则的命中条件', nullable=True, default=None)
-    status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=1)  # 启用、禁用、删除
+    status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=QtrDataStatusEnum.normal.value)  # 启用、禁用、删除 QtrDataStatusEnum
     desc: Mapped[str] = mapped_column(Text, comment='MOCK描述', nullable=True, default=None)
 
 
@@ -41,7 +41,8 @@ class RuleResponse(Base, BaseModel):
     name: Mapped[str] = mapped_column(String(500), comment='mock响应名称', nullable=False)
     response_tag: Mapped[str] = mapped_column(String(50), comment='response_tag or version', nullable=False)
     is_default: Mapped[int] = mapped_column(Integer, comment='默认响应', nullable=False, default=0)
-    status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=1)  # 启用、禁用、删除
+    status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=QtrDataStatusEnum.normal.value)  # 启用、禁用、删除
+    priority: Mapped[int] = mapped_column(Integer, comment='优先级', nullable=False, default=1)
     response_condition: Mapped[str] = mapped_column(Text, comment='mock规则的命中条件', nullable=True, default=None)
     rule_id: Mapped[int] = mapped_column(BigInteger, comment='rule_id', nullable=False, index=True)
     status_code: Mapped[int] = mapped_column(Integer, comment='响应状态码', nullable=False, default=1)
@@ -59,7 +60,8 @@ class RuleRequest(Base, BaseModel):
     name: Mapped[str] = mapped_column(String(500), comment='mock请求名称', nullable=False)
     request_tag: Mapped[str] = mapped_column(String(50), comment='request_tag or version', nullable=False)
     is_default: Mapped[int] = mapped_column(Integer, comment='默认请求', nullable=False, default=0)  # 默认、非默认
-    status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=1)  # 启用、禁用、删除
+    status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=QtrDataStatusEnum.normal.value)  # 启用、禁用、删除
+    priority: Mapped[int] = mapped_column(Integer, comment='优先级', nullable=False, default=1)
     request_condition: Mapped[str] = mapped_column(Text, comment='mock规则的命中条件', nullable=True, default=None)
     rule_id: Mapped[int] = mapped_column(BigInteger, comment='rule_id', nullable=False, index=True)
     # response_id: Mapped[int] = mapped_column(BigInteger, comment='关联的响应id', nullable=False, index=True)

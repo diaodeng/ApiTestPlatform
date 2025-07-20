@@ -3,7 +3,7 @@ import request from '@/utils/request'
 // 查询用例列表
 export function listMockRule(query) {
   return request({
-    url: '/hrm/case/list',
+    url: '/hrm/mockManager/ruleList',
     method: 'get',
     params: query
   })
