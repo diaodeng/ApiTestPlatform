@@ -1,6 +1,6 @@
 import request from '@/utils/request'
 
-// 查询用例列表
+// 查询mock规则列表
 export function listMockRule(query) {
   return request({
     url: '/hrm/mockManager/ruleList',
@@ -10,60 +10,61 @@ export function listMockRule(query) {
 }
 
 
-// 查询用例详细
-export function getMockRule(caseId) {
+// 查询mock规则详细
+export function getMockRule(ruleId) {
   return request({
-    url: '/hrm/case/' + caseId,
+    url: '/hrm/mockManager/rule/' + ruleId,
     method: 'get'
   })
 }
 
-// 新增用例
+// 新增mock规则
 export function addMockRule(data) {
   return request({
-    url: '/hrm/case',
+    url: '/hrm/mockManager/addRule',
     method: 'post',
     data: data
   })
 }
 
-// 复制用例
+// 复制mock规则
 export function copyMockRule(data) {
   return request({
-    url: '/hrm/case/copy',
+    url: '/hrm/mockManager/copyRule',
     method: 'post',
     data: data
   })
 }
 
-// 修改用例状态
+// 修改mock规则状态
 export function changeMockRuleStatus(data) {
   return request({
-    url: '/hrm/case/status',
+    url: '/hrm/mockManager/ruleStatus',
     method: 'post',
     data: data
   })
 }
 
-// 修改用例
+// 修改mock规则
 export function updateMockRule(data) {
   return request({
-    url: '/hrm/case',
+    url: '/hrm/mockManager/modifyRule',
     method: 'put',
     data: data
   })
 }
 
-// 删除用例
-export function delMockRule(caseId) {
+// 删除mock规则
+export function delMockRule(data) {
   return request({
-    url: '/hrm/case/' + caseId,
-    method: 'delete'
+    url: '/hrm/mockManager/ruleDelete',
+    method: 'delete',
+    data: data
   })
 }
 
 
-// debug用例
+// debugmock规则
 export function debugMockRule(data) {
   return request({
     url: '/hrm/runner/debug',

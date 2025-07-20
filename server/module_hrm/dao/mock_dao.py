@@ -1,6 +1,6 @@
 from typing import Type
 
-from sqlalchemy import select, mock_rule, Sequence
+from sqlalchemy import select, case, Sequence
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_, func  # 不能把删掉，数据权限sql依赖
 
@@ -13,7 +13,8 @@ from module_hrm.entity.do.mock_do import MockRules, RuleRequest, RuleResponse
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.dto.mock_dto import MockModel, MockResponseModel, MockRequestModel
-from module_hrm.entity.vo.mock_vo import MockPageQueryModel, DeleteMockRuleModel, MockResponsePageQueryModel, MockRequestPageQueryModel, DeleteMockResponseModel
+from module_hrm.entity.vo.mock_vo import MockPageQueryModel, DeleteMockRuleModel, MockResponsePageQueryModel, \
+    MockRequestPageQueryModel, DeleteMockResponseModel, AddMockResponseModel
 from module_hrm.utils.util import PermissionHandler
 from utils.page_util import PageUtil, PageResponseModel
 
@@ -177,6 +178,28 @@ class MockResponseDao:
         :return: 在用mock响应信息对象
         """
         info = db.query(RuleResponse).filter(RuleResponse.rule_response_id == rule_response_id).first()
+
+        return info
+
+    @classmethod
+    def get_detail_by_info(cls, db: Session, mock_rule: MockResponseModel|AddMockResponseModel) -> MockRules | None:
+        """
+        根据mock规则参数获取mock规则信息
+        :param db: orm对象
+        :param mock_rule: mock规则参数对象
+        :return: mock规则信息对象
+        """
+        info = db.query(RuleResponse)
+        if mock_rule.name:
+            info = info.filter(RuleResponse.name == mock_rule.name)
+        if mock_rule.status:
+            info = info.filter(RuleResponse.status == mock_rule.status)
+        if mock_rule.is_default:
+            info = info.filter(RuleResponse.is_default == mock_rule.is_default)
+        if mock_rule.response_condition:
+            info = info.filter(RuleResponse.response_condition == mock_rule.response_condition)
+
+        info = info.first()
 
         return info
 

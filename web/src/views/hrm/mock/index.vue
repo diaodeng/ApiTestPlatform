@@ -14,17 +14,6 @@
         </el-col>
         <el-col :span="1.5">
           <el-button
-              type="success"
-              plain
-              icon="Edit"
-              :disabled="single"
-              @click="handleUpdate"
-              v-hasPermi="['hrm:case:edit']"
-          >修改
-          </el-button>
-        </el-col>
-        <el-col :span="1.5">
-          <el-button
               type="danger"
               plain
               icon="Delete"
@@ -44,18 +33,6 @@
           >导出
           </el-button>
         </el-col>
-        <el-col :span="1.5">
-          <el-button type="warning"
-                     icon="CaretRight"
-                     @click="runTest"
-                     v-hasPermi="['hrm:case:run']"
-                     title="运行"
-                     v-if="dataType === HrmDataTypeEnum.case"
-                     :disabled="multiple"
-          >
-            执行
-          </el-button>
-        </el-col>
       </template>
       <template #caseStatus="{scope}">
         <TagSelector v-model:selected-value="scope.row.status"
@@ -73,9 +50,6 @@
         <el-button link type="warning" icon="Edit" :loading="loading.edite" @click="handleUpdate(scope.row)"
                    v-hasPermi="['hrm:case:edit']" title="编辑">
         </el-button>
-        <el-button link type="warning" icon="CaretRight" :loading="loading.run" @click="runTest(scope.row)"
-                   v-hasPermi="['hrm:case:run']" title="运行" v-if="dataType === HrmDataTypeEnum.case">
-        </el-button>
         <el-button link type="warning" icon="CopyDocument" :loading="loading.copy" @click="showCopyDialog(scope.row)"
                    v-hasPermi="['hrm:case:copy']" title="复制">
         </el-button>
@@ -86,26 +60,13 @@
     </MockTableQuery>
 
     <!-- 添加或修改用例对话框 -->
-    <CaseEditDialog :form-datas="form"
+    <MockRuleDetailDialog :form-datas="form"
                     :data-type="dataType"
                     :form-rules="formRules"
-                    v-model:open-case-edit-dialog="open"
+                    v-model:open-dialog="open"
                     :title=caseEditDialogTitle
 
-    ></CaseEditDialog>
-
-    <!-- 用例执行历史对话框 -->
-    <el-dialog fullscreen :title="'【' + currentCaseInfo?.caseId + '】' + currentCaseInfo?.caseName"
-               v-model="showHistoryDialog" append-to-body
-               v-if="dataType===HrmDataTypeEnum.case" destroy-on-close>
-      <el-container style="height: 100%">
-        <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
-        <!--          </el-header>-->
-        <el-main style="max-height: calc(100vh - 95px);">
-          <RunDetail :run-id="currentRunId" :view-type="runDetailViewTypeEnum.case"></RunDetail>
-        </el-main>
-      </el-container>
-    </el-dialog>
+    ></MockRuleDetailDialog>
 
     <!-- 复制用例对话框 -->
     <el-dialog :title="copyCaseInfo?.caseName" v-model="copyDialog" append-to-body destroy-on-close>
@@ -122,8 +83,6 @@
       </el-container>
     </el-dialog>
 
-    <!-- 运行用例对话框 -->
-    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="RunTypeEnum.case" :run-ids="runIds"></RunDialog>
   </div>
 </template>
 
@@ -131,6 +90,7 @@
 import {changeCaseStatus, copyCase, delCase, getCase, listCase} from "@/api/hrm/case";
 import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
+import MockRuleDetailDialog from "@/components/hrm/mock/rule_detail.vue"
 import {initCaseFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run/run-detail.vue';
 import RunDialog from '@/components/hrm/common/run/run_dialog.vue';
@@ -219,22 +179,6 @@ function lineStatusChange(selectValue, dataSource) {
   });
 }
 
-/*
-* 行执行用例
-* **/
-function runTest(row) {
-  if (row && "caseId" in row && row.caseId) {
-    runIds.value = [row.caseId];
-  }else {
-    runIds.value = selectIds.value;
-  }
-
-  if (!runIds.value || runIds.value.length === 0) {
-    ElMessageBox.alert('请选择要运行的用例', "提示！", {type: "warning"});
-    return;
-  }
-  runDialogShow.value = true;
-}
 
 /*
 * 换起用例复制弹窗

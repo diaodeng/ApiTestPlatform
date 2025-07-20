@@ -181,6 +181,16 @@ class ConfigDataTypeEnum(Enum):
     any = "any"
 
 
+class MockTypeEnum(Enum):
+    """
+    mock规则数据处理类型
+    """
+    only_response = 1
+    only_request = 2
+    request_and_response = 3
+    not_mock = 4
+
+
 if __name__ == "__main__":
 
     eval("print")
