@@ -19,6 +19,7 @@ class MockPageQueryModel(QueryModel, MockModel):
     """
     查询模型
     """
+    rule_condition: Optional[str] = None
 
     pass
 

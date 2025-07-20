@@ -59,14 +59,15 @@ class MockModelForDb(MockModel):
     """
     mock数据入库使用
     """
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
-    @field_serializer('ruleCondition')
-    def rule_condition(self, request: Any):
+    @field_serializer('rule_condition')
+    def serializer_rule_condition(self, request: Any):
         if isinstance(request, str):
             return request
         elif isinstance(request, (dict, list)):
             return json.dumps(request, ensure_ascii=False)
-        elif isinstance(request, TestCase):
+        elif isinstance(request, MockConditionModel):
             return request.model_dump_json(by_alias=True, exclude_unset=True)
         else:
             return request
@@ -77,6 +78,7 @@ class MockRequestModel(CommonDataModel):
     """
     mock请求数据的数据处理模型，内部数据交换使用
     """
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
     rule_request_id: int | str | None = None
     name: Optional[str] = None
@@ -109,14 +111,15 @@ class MockRequestModelForDb(MockRequestModel):
     """
     mock请求数据入库使用
     """
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
-    @field_serializer('requestCondition')
+    @field_serializer('request_condition')
     def request_condition(self, request: Any):
         if isinstance(request, str):
             return request
         elif isinstance(request, (dict, list)):
             return json.dumps(request, ensure_ascii=False)
-        elif isinstance(request, TestCase):
+        elif isinstance(request, MockConditionModel):
             return request.model_dump_json(by_alias=True, exclude_unset=True)
         else:
             return request
@@ -127,6 +130,7 @@ class MockResponseModel(CommonDataModel):
     """
     mock响应数据的数据处理模型，内部数据交换使用
     """
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
     rule_response_id: int | str | None = None
     name: Optional[str] = None
@@ -160,14 +164,15 @@ class MockResponseModelForDb(MockResponseModel):
     """
     mock响应数据入库使用
     """
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
-    @field_serializer('responseCondition')
+    @field_serializer('response_condition')
     def request_data(self, request: Any):
         if isinstance(request, str):
             return request
         elif isinstance(request, (dict, list)):
             return json.dumps(request, ensure_ascii=False)
-        elif isinstance(request, TestCase):
+        elif isinstance(request, MockConditionModel):
             return request.model_dump_json(by_alias=True, exclude_unset=True)
         else:
             return request

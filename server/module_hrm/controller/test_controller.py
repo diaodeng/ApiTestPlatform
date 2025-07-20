@@ -14,8 +14,10 @@ from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
-from module_hrm.entity.vo.mock_vo import MockPageQueryModel, MockModel, AddMockRuleModel
-from module_hrm.service.mock_service import MockService
+from module_hrm.dao.mock_dao import MockRuleDao
+from module_hrm.entity.vo.mock_vo import MockPageQueryModel, MockModel, AddMockRuleModel, DeleteMockRuleModel, \
+    AddMockResponseModel
+from module_hrm.service.mock_service import MockService, MockResponseService
 from utils.common_util import bytes2file_response
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -135,7 +137,7 @@ async def get_mock_rule_list(request: Request,
                             page_query: MockPageQueryModel = Depends(MockPageQueryModel.as_query),
                             query_db: Session = Depends(get_db),
                             current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                            data_scope_sql: str = Depends(GetDataScope('HrmCase', user_alias='manager'))
+                            data_scope_sql: str = Depends(GetDataScope('MockRules', user_alias='manager'))
                             ):
     try:
         # 获取分页数据
@@ -159,15 +161,33 @@ async def add_hrm_mock_rule(request: Request,
                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         if not add_mock_rule.type:
-            raise ValueError("参数错误")
-        if not add_mock_rule.mock_rule_name:
+            raise ValueError("参数错误，请指定type")
+        if not add_mock_rule.name:
             raise ValueError("mock规则名不能为空")
+        if not add_mock_rule.path:
+            raise ValueError("mock路径不能为空")
+
+        response_data = add_mock_rule.response
         add_mock_rule.manager = current_user.user.user_id
         add_mock_rule.create_by = current_user.user.user_name
         add_mock_rule.update_by = current_user.user.user_name
         add_mock_rule.dept_id = current_user.user.dept_id
+        add_mock_rule.type = 2 # mock规则
         add_module_result = MockService.add_mock_rule_services(query_db, add_mock_rule)
-        if add_module_result.is_success:
+        if not add_module_result.is_success:
+            logger.warning(add_module_result.message)
+            return ResponseUtil.failure(data=add_module_result.result, msg=add_module_result.message)
+
+        add_mock_response = AddMockResponseModel(**response_data)
+        add_mock_response.name = add_mock_rule.name
+        add_mock_response.manager = current_user.user.user_id
+        add_mock_response.create_by = current_user.user.user_name
+        add_mock_response.update_by = current_user.user.user_name
+        add_mock_response.dept_id = current_user.user.dept_id
+        add_mock_response.is_default = 1
+        add_response_result = MockResponseService.add_mock_response_services(query_db, add_mock_rule)
+
+        if add_response_result.is_success:
             logger.info(add_module_result.message)
             return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
         else:
@@ -178,7 +198,7 @@ async def add_hrm_mock_rule(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@mockController.post("/mockManager/copyRule", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:copy'))])
+@mockController.post("/mockManager/copyRule", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:copyRule'))])
 @log_decorator(title='mock规则复制', business_type=1)
 async def copy_hrm_mock_rule(request: Request,
                         add_mock_rule: AddMockRuleModel,
@@ -200,7 +220,7 @@ async def copy_hrm_mock_rule(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@mockController.put("/mockManager/modifyRule", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:edit'))])
+@mockController.put("/mockManager/modifyRule", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:editRule'))])
 @log_decorator(title='mock规则管理', business_type=2)
 async def edit_hrm_mock_rule(request: Request,
                         edit_module: MockModel,
@@ -223,20 +243,20 @@ async def edit_hrm_mock_rule(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@mockController.post("/mockManager/ruleStatus", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:edit'))])
+@mockController.post("/mockManager/ruleStatus", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:editRule'))])
 @log_decorator(title='mock规则管理', business_type=2)
 async def change_status(request: Request,
-                        edit_module: CaseModel,
+                        edit_module: MockModel,
                         query_db: Session = Depends(get_db),
                         current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
 
-        new_mock_rule_model = CaseModel()
+        new_mock_rule_model = MockModel()
         new_mock_rule_model.status = edit_module.status
-        new_mock_rule_model.mock_rule_id = edit_module.mock_rule_id
+        new_mock_rule_model.rule_id = edit_module.rule_id
         new_mock_rule_model.update_by = current_user.user.user_name
         new_mock_rule_model.update_time = datetime.now()
-        edit_module_result = CaseService.edit_mock_rule_services(query_db, new_mock_rule_model, current_user)
+        edit_module_result = MockRuleDao.edit(query_db, new_mock_rule_model, current_user)
         if edit_module_result.is_success:
             logger.info(edit_module_result.message)
             return ResponseUtil.success(msg=edit_module_result.message)
@@ -248,16 +268,17 @@ async def change_status(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@mockController.delete("/mockManager/rule/{ids}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:remove'))])
+@mockController.delete("/mockManager/ruleDelete", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:removeRule'))])
 @log_decorator(title='mock规则管理', business_type=3)
 async def delete_hrm_mock_rule(request: Request,
-                          ids: str,
                           query_db: Session = Depends(get_db),
                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                           ):
     try:
-        delete_module = DeleteCaseModel(mock_ruleIds=ids)
-        delete_module_result = CaseService.delete_mock_rule_services(query_db, delete_module, current_user)
+        ids_json = await request.json()
+        ids = ids_json.get('ruleIds', [])
+        delete_module = DeleteMockRuleModel(rule_ids=ids)
+        delete_module_result = MockRuleDao.delete(query_db, delete_module, current_user)
         if delete_module_result.is_success:
             logger.info(delete_module_result.message)
             return ResponseUtil.success(msg=delete_module_result.message)
@@ -270,12 +291,12 @@ async def delete_hrm_mock_rule(request: Request,
 
 
 @mockController.get("/mockManager/rule/{mock_rule_id}",
-                    response_model=CaseModel,
-                    dependencies=[Depends(CheckUserInterfaceAuth(['hrm:mockManager:detail', "hrm.mock_rule:edit"],
+                    response_model=MockModel,
+                    dependencies=[Depends(CheckUserInterfaceAuth(['hrm:mockManager:detailRule', "hrm.mock_rule:editRule"],
                                                                  False))])
 async def query_detail_hrm_mock_rule(request: Request, mock_rule_id: int, query_db: Session = Depends(get_db)):
     try:
-        detail_result = CaseService.mock_rule_detail_services(query_db, mock_rule_id)
+        detail_result = MockService.mock_rule_detail_services(query_db, mock_rule_id)
         logger.info(f'获取mock_rule_id为{mock_rule_id}的信息成功')
         return ResponseUtil.success(data=detail_result.model_dump(by_alias=True))
     except Exception as e:
@@ -283,19 +304,44 @@ async def query_detail_hrm_mock_rule(request: Request, mock_rule_id: int, query_
         return ResponseUtil.error(msg=str(e))
 
 
-@mockController.post("/mockManager/rule/export", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:export'))])
+@mockController.post("/mockManager/rule/export", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:exportRule'))])
 @log_decorator(title='mock规则管理', business_type=5)
 async def export_hrm_mock_rule_list(request: Request,
-                               page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
+                               page_query: MockPageQueryModel = Depends(MockPageQueryModel.as_form),
                                query_db: Session = Depends(get_db),
                                data_scope_sql: str = Depends(GetDataScope('HrmCase', user_alias='manager'))
                                ):
     try:
         # 获取全量数据
-        query_result = CaseService.get_mock_rule_list_services(query_db, page_query, is_page=False, data_scope_sql=data_scope_sql)
-        export_result = CaseService.export_mock_rule_list_services(query_result)
+        query_result = MockService.get_mock_rule_list_services(query_db, page_query, is_page=False, data_scope_sql=data_scope_sql)
+        export_result = MockService.export_mock_rule_list_services(query_result)
         logger.info('导出成功')
         return ResponseUtil.streaming(data=bytes2file_response(export_result))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@mockController.post("/mockManager/addResponse", dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:addResponse'))])
+@log_decorator(title='mock规则响应管理', business_type=1)
+async def add_hrm_mock_rule(request: Request,
+                       add_mock_rule: AddMockResponseModel,
+                       query_db: Session = Depends(get_db),
+                       current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    try:
+        if not add_mock_rule.name:
+            raise ValueError("mock响应名不能为空")
+        add_mock_rule.manager = current_user.user.user_id
+        add_mock_rule.create_by = current_user.user.user_name
+        add_mock_rule.update_by = current_user.user.user_name
+        add_mock_rule.dept_id = current_user.user.dept_id
+        add_module_result = MockResponseService.add_mock_response_services(query_db, add_mock_rule)
+        if add_module_result.is_success:
+            logger.info(add_module_result.message)
+            return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
+        else:
+            logger.warning(add_module_result.message)
+            return ResponseUtil.failure(data=add_module_result.result, msg=add_module_result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

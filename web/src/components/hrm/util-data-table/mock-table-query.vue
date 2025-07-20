@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
-      <el-form-item label="所属项目" prop="projectId">
+      <el-form-item label="所属项目" prop="projectId" v-if="false">
         <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable filterable
                    style="width: 150px">
           <el-option
@@ -12,7 +12,7 @@
           </el-option>
         </el-select>
       </el-form-item>
-      <el-form-item label="所属模块" prop="moduleId">
+      <el-form-item label="所属模块" prop="moduleId" v-if="false">
         <el-select v-model="queryParams.moduleId" placeholder="请选择" clearable filterable style="width: 150px">
           <el-option
               v-for="option in moduleOptions"
@@ -34,7 +34,7 @@
       <el-form-item label="path" prop="path">
         <el-input
             v-model="queryParams.path"
-            placeholder="'请输入path"
+            placeholder="请输入path"
             clearable
             style="width: 200px"
             @keyup.enter="handleQuery"
@@ -88,12 +88,13 @@
       <el-table-column type="selection" width="55" align="center"/>
       <el-table-column :label="dataName+'ID'" prop="ruleId" width="150px"/>
       <el-table-column :label="dataName+'名称'" prop="name" width="auto" min-width="200px"/>
-      <el-table-column label="所属项目" prop="projectName">
+      <el-table-column :label="dataName+'路径'" prop="path" width="auto" min-width="200px"/>
+      <el-table-column label="所属项目" prop="projectName" v-if="false">
         <template #default="scope">
           <span>{{ nameOrGlob(scope.row.projectName) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="所属模块" prop="moduleName">
+      <el-table-column label="所属模块" prop="moduleName" v-if="false">
         <template #default="scope">
           <span>{{ nameOrGlob(scope.row.moduleName) }}</span>
         </template>
@@ -165,7 +166,7 @@ defineExpose({handleQuery, getSelectedIds});
 * 区分用例还是配置
 * */
 const dataName = computed(() => {
-  return props.dataType === HrmDataTypeEnum.case ? "用例" : "配置";
+  return props.dataType === HrmDataTypeEnum.case ? "Rule" : "配置";
 });
 
 // provide("hrm_data_type", hrm_data_type);

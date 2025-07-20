@@ -129,3 +129,10 @@ export const CaseRunStatusEnum = {
     error :{label: "错误", value:8, elTagType: "primary"},
 }
 
+export const MockTypeEnum = {
+    only_response: {label: "仅响应", value:1, elTagType: "primary"},
+    only_request: {label: "仅请求", value:2, elTagType: "primary"},
+    request_and_response: {label: "请求和响应", value:3, elTagType: "primary"},
+    not_mock: {label: "原始请求", value:4, elTagType: "primary"},
+}
+
