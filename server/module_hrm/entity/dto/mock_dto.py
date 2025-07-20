@@ -38,8 +38,8 @@ class MockModel(CommonDataModel):
     path: Optional[str] = None
     method: Optional[str] = None
     priority: Optional[int] = None
-    rule_condition: Optional[list[MockConditionModel]] = []
-    status: Optional[int] = None
+    rule_condition: Optional[list[MockConditionModel]] = Field(default_factory=lambda: [])
+    status: Optional[int] = None  # QtrDataStatusEnum.normal.value
     desc: Optional[str] = None
 
     @model_validator(mode="before")
@@ -61,7 +61,7 @@ class MockModelForDb(MockModel):
     """
 
     @field_serializer('ruleCondition')
-    def request_data(self, request: Any):
+    def rule_condition(self, request: Any):
         if isinstance(request, str):
             return request
         elif isinstance(request, (dict, list)):
@@ -82,8 +82,9 @@ class MockRequestModel(CommonDataModel):
     name: Optional[str] = None
     request_tag: Optional[str] = None
     is_default: Optional[int] = None
-    status: Optional[int] = None
-    request_condition: Optional[list[MockConditionModel]] = []
+    status: Optional[int] = None  # QtrDataStatusEnum.normal.value
+    priority: Optional[int] = None
+    request_condition: Optional[list[MockConditionModel]] = Field(default_factory=lambda: [])
     rule_id: int | str | None = None
 
     headers_template: Optional[str] = None
@@ -110,7 +111,7 @@ class MockRequestModelForDb(MockRequestModel):
     """
 
     @field_serializer('requestCondition')
-    def request_data(self, request: Any):
+    def request_condition(self, request: Any):
         if isinstance(request, str):
             return request
         elif isinstance(request, (dict, list)):
@@ -131,8 +132,9 @@ class MockResponseModel(CommonDataModel):
     name: Optional[str] = None
     response_tag: Optional[str] = None
     is_default: Optional[int] = None
-    status: Optional[int] = None
-    response_condition: Optional[list[MockConditionModel]] = []
+    status: Optional[int] = None  # QtrDataStatusEnum.normal.value
+    priority: Optional[int] = None
+    response_condition: Optional[list[MockConditionModel]] = Field(default_factory=lambda: [])
     rule_id: int | str | None = None
     status_code: int = None
 
