@@ -194,3 +194,10 @@ def ensure_path(path_str: str):
     path_str = path_str.replace('\\', os.sep)
     path_str = path_str.replace("/", os.sep)
     return path_str
+
+
+def db_dd_user_info(obj, user_info):
+    obj.manager = user_info.user.user_id
+    obj.create_by = user_info.user.user_name
+    obj.update_by = user_info.user.user_name
+    obj.dept_id = user_info.user.dept_id

@@ -88,6 +88,7 @@
 
 <script setup>
 import {changeCaseStatus, copyCase, delCase, getCase, listCase} from "@/api/hrm/case";
+import { getMockRule } from "@/api/hrm/mock.js";
 import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import MockRuleDetailDialog from "@/components/hrm/mock/rule_detail.vue"
@@ -105,7 +106,7 @@ const {hrm_data_type} = proxy.useDict("hrm_data_type");
 const {qtr_case_status} = proxy.useDict("qtr_case_status");
 
 const props = defineProps({
-  dataType: {type: Number, default: HrmDataTypeEnum.case},
+  dataType: {type: Number, default: 2},
   formRules: {
     type: Object,
     default: {
@@ -150,7 +151,7 @@ const queryParams = toRef({
   pageNum: 1,
   pageSize: 10,
   type: props.dataType,
-  caseId: undefined,
+  ruleId: undefined,
   caseName: undefined,
   projectId: undefined,
   moduleId: undefined,
@@ -167,12 +168,12 @@ const loading = ref({
 });
 
 const caseEditDialogTitle = computed(() => {
-  const caseId = form.value.caseId ? '【' + form.value.caseId + '】' : "";
-  return title.value + '>> ' + caseId + form.value.caseName;
+  const ruleId = form.value.ruleId ? '【' + form.value.ruleId + '】' : "";
+  return title.value + '>> ' + ruleId + form.value.caseName;
 });
 
 function lineStatusChange(selectValue, dataSource) {
-  changeCaseStatus({caseId: dataSource.caseId, status: selectValue}).then((response) => {
+  changeCaseStatus({ruleId: dataSource.ruleId, status: selectValue}).then((response) => {
     ElMessage.success("修改成功");
   }).catch(() => {
     ElMessage.error("修改失败");
@@ -194,7 +195,7 @@ function showCopyDialog(data) {
 function copyCaseHandle() {
   copyDialog.value = true;
   let data = {
-    caseId: copyCaseInfo.value.caseId,
+    ruleId: copyCaseInfo.value.ruleId,
     caseName: copyCaseInfo.value.caseName,
   }
   copyCase(data).then(response => {
@@ -214,8 +215,8 @@ function handleAdd() {
 /** 修改按钮操作 */
 function handleUpdate(row) {
   loading.value.edite = true;
-  const caseId = row.caseId || selectIds.value;
-  getCase(caseId).then((response) => {
+  const ruleId = row.ruleId || selectIds.value;
+  getMockRule(ruleId).then((response) => {
     if (!response.data || Object.keys(response.data).length === 0) {
       ElMessage.warning("未查到对应数据！");
       return;
@@ -230,17 +231,17 @@ function handleUpdate(row) {
 }
 
 function showHistory(row) {
-  const caseId = row.caseId || selectIds.value;
+  const ruleId = row.ruleId || selectIds.value;
   currentCaseInfo.value = row;
-  currentRunId.value = caseId;
+  currentRunId.value = ruleId;
   showHistoryDialog.value = true;
 }
 
 /** 删除按钮操作 */
 function handleDelete(row) {
-  const caseIds = row.caseId || selectIds.value;
-  proxy.$modal.confirm('是否确认删除ID为"' + caseIds + '"的数据项？').then(function () {
-    return delCase(caseIds);
+  const ruleIds = row.ruleId || selectIds.value;
+  proxy.$modal.confirm('是否确认删除ID为"' + ruleIds + '"的数据项？').then(function () {
+    return delCase(ruleIds);
   }).then(() => {
     if (mockQueryViewRef.value){
       mockQueryViewRef.value.handleQuery();
@@ -259,7 +260,7 @@ function handleExport() {
 
 /** 多选框选中数据 */
 function handleSelectionChange(selection) {
-  selectIds.value = selection.map(item => item.caseId);
+  selectIds.value = selection.map(item => item.ruleId);
   single.value = selection.length !== 1;
   multiple.value = !selection.length;
 }

@@ -15,35 +15,6 @@ from utils.common_util import CamelCaseUtil
 
 @as_query
 @as_form
-class MockPageQueryModel(QueryModel, MockModel):
-    """
-    查询模型
-    """
-    rule_condition: Optional[str] = None
-
-    pass
-
-
-class AddMockRuleModel(MockModel):
-    """
-    新增mock规则模型
-    """
-    pass
-
-
-class DeleteMockRuleModel(BaseModel):
-    """
-    删除mock规则模型
-    """
-    model_config = ConfigDict(alias_generator=to_camel)
-
-    rule_ids: list[int|str] = Field(default_factory=lambda : [])
-    update_by: Optional[str] = None
-    update_time: Optional[datetime] = None
-
-
-@as_query
-@as_form
 class MockRequestPageQueryModel(QueryModel, MockRequestModel):
     """
     查询模型
@@ -92,5 +63,34 @@ class DeleteMockResponseModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel)
 
     rule_response_ids: list[str|int] = Field(default_factory=lambda : [])
+    update_by: Optional[str] = None
+    update_time: Optional[datetime] = None
+
+
+@as_query
+@as_form
+class MockPageQueryModel(QueryModel, MockModel):
+    """
+    查询模型
+    """
+    rule_condition: Optional[str] = None
+    pass
+
+
+class AddMockRuleModel(MockModel):
+    """
+    新增mock规则模型
+    """
+    request: Optional[AddMockRequestModel] = None
+    response: Optional[AddMockResponseModel] = None
+
+
+class DeleteMockRuleModel(BaseModel):
+    """
+    删除mock规则模型
+    """
+    model_config = ConfigDict(alias_generator=to_camel)
+
+    rule_ids: list[int|str] = Field(default_factory=lambda : [])
     update_by: Optional[str] = None
     update_time: Optional[datetime] = None
