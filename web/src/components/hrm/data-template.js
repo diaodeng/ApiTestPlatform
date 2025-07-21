@@ -4,7 +4,7 @@ import {
     CaseStepTypeEnum,
     CodeTypeEnum,
     CaseRunStatusEnum,
-    RunTypeEnum
+    RunTypeEnum, StatusNewEnum, MockTypeEnum
 } from "@/components/hrm/enum.js";
 
 
@@ -237,6 +237,31 @@ export const initRunConfig = {
         forwardRuleIds: [],
     },
     runBySort: false
+}
+
+
+export const initMockRuleFormData = {
+    name: '',
+    projectId: null,
+    path: '',
+    method: 'GET',
+    priority: 1,
+    type: 2,
+    status: StatusNewEnum.normal.value,
+    mockType: MockTypeEnum.only_response.value,
+    ruleConditions: [{
+        source: 'query',
+        key: '',
+        operator: '=',
+        value: '',
+        data_type: 'str'
+    }],
+    response: {
+        statusCode: 200,
+        headersTemplate: [{key: 'Content-Type', value: 'application/json'}],
+        bodyTemplate: '{\n  "id": "{{uuid}}",\n  "name": "{{request.args.name}}",\n  "status": "active"\n}',
+        delay: 0
+    }
 }
 
 

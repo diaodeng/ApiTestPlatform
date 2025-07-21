@@ -55,7 +55,7 @@
             </el-col>
             <el-col :span="6">
               <el-form-item label="启用规则">
-                <el-switch v-model="ruleForm.is_active"/>
+                <el-switch v-model="ruleForm.status"/>
               </el-form-item>
             </el-col>
           </el-row>
@@ -168,34 +168,13 @@ import {reactive} from 'vue'
 import {HrmDataTypeEnum, StatusNewEnum, MockTypeEnum} from "@/components/hrm/enum.js";
 import {addMockRule, getMockRule} from "@/api/hrm/mock.js"
 import {ElMessage, ElMessageBox} from "element-plus";
+import {initMockRuleFormData} from "@/components/hrm/data-template.js";
 
 // 初始表单结构
-const initialForm = () => ({
-  name: '',
-  projectId: null,
-  path: '',
-  method: 'GET',
-  priority: 1,
-  type: 2,
-  status: StatusNewEnum.normal.value,
-  mockType: MockTypeEnum.only_response.value,
-  ruleConditions: [{
-    source: 'query',
-    key: '',
-    operator: '=',
-    value: '',
-    data_type: 'str'
-  }],
-  response: {
-    statusCode: 200,
-    headersTemplate: [{key: 'Content-Type', value: 'application/json'}],
-    bodyTemplate: '{\n  "id": "{{uuid}}",\n  "name": "{{request.args.name}}",\n  "status": "active"\n}',
-    delay: 0
-  }
-})
+const initialForm = () => (JSON.parse(JSON.stringify(initMockRuleFormData)));
 
 const openDialog = defineModel("openDialog");
-const ruleId = defineModel("ruleId");
+const props = defineProps(["ruleId", "isAdd"]);
 const doing = reactive({
   saving: false,
   loadingDetail: false,
@@ -259,18 +238,27 @@ const saveRule = async () => {
 }
 
 const resetForm = () => {
-  Object.assign(ruleForm, initialForm())
+  Object.assign(ruleForm, JSON.parse(JSON.stringify(initMockRuleFormData)));
+  ruleForm.id = null;
+  ruleForm.ruleId = null;
 }
 
-onBeforeMount(() =>{
-  doing.loadingDetail = true;
-  const ruleId = row.ruleId || selectIds.value;
-  getMockRule(ruleId).then((response) => {
-    Object.assign(ruleForm, response.data);
-  }).finally(() => {
-    doing.loadingDetail = false;
-  });
+onBeforeMount(() => {
+
 });
+
+watch(() => props.ruleId, (value, oldValue, onCleanup) => {
+  if (value && !props.isAdd) {
+    doing.loadingDetail = true;
+    getMockRule(value).then((response) => {
+      Object.assign(ruleForm, response.data);
+    }).finally(() => {
+      doing.loadingDetail = false;
+    });
+  }else {
+    resetForm();
+  }
+})
 
 onMounted(() => {
 
