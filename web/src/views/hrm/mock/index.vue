@@ -61,22 +61,24 @@
 
     <!-- 添加或修改用例对话框 -->
     <MockRuleDetailDialog :form-datas="form"
-                    :data-type="dataType"
-                    :form-rules="formRules"
-                    v-model:open-dialog="open"
-                    :title=caseEditDialogTitle
+                          :data-type="dataType"
+                          :form-rules="formRules"
+                          v-model:open-dialog="open"
+                          :rule-id="editingRuleId"
+                          :title=ruleEditDialogTitle
+                          :is-add="isAdd"
 
     ></MockRuleDetailDialog>
 
     <!-- 复制用例对话框 -->
-    <el-dialog :title="copyCaseInfo?.caseName" v-model="copyDialog" append-to-body destroy-on-close>
+    <el-dialog :title="copyMockRuleInfo?.name" v-model="copyDialog" append-to-body destroy-on-close>
       <el-container style="height: 100%">
         <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
         <!--          </el-header>-->
         <el-main style="max-height: calc(100vh - 95px);">
-          <el-input placeholder="请输入用例名称" v-model="copyCaseInfo.caseName">
+          <el-input placeholder="请输入名称" v-model="copyMockRuleInfo.name">
             <template #suffix>
-              <el-button @click="copyCaseHandle">保存</el-button>
+              <el-button @click="copyMockRuleHandle">保存</el-button>
             </template>
           </el-input>
         </el-main>
@@ -88,11 +90,11 @@
 
 <script setup>
 import {changeCaseStatus, copyCase, delCase, getCase, listCase} from "@/api/hrm/case";
-import { getMockRule } from "@/api/hrm/mock.js";
+import {getMockRule} from "@/api/hrm/mock.js";
 import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import MockRuleDetailDialog from "@/components/hrm/mock/rule_detail.vue"
-import {initCaseFormData} from "@/components/hrm/data-template.js";
+import {initCaseFormData, initMockRuleFormData} from "@/components/hrm/data-template.js";
 import RunDetail from '@/components/hrm/common/run/run-detail.vue';
 import RunDialog from '@/components/hrm/common/run/run_dialog.vue';
 import {HrmDataTypeEnum, runDetailViewTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
@@ -110,7 +112,7 @@ const props = defineProps({
   formRules: {
     type: Object,
     default: {
-      caseName: [{required: true, message: "用例名称不能为空", trigger: "blur"}],
+      name: [{required: true, message: "用例名称不能为空", trigger: "blur"}],
       projectId: [{required: true, message: "所属项目不能为空", trigger: "blur"}],
       moduleId: [{required: true, message: "所属模块不能为空", trigger: "blur"}]
     }
@@ -118,7 +120,7 @@ const props = defineProps({
 });
 
 const dataName = computed(() => {
-  return props.dataType === HrmDataTypeEnum.case ? "用例" : "配置";
+  return "mock规则";
 });
 
 provide("hrm_data_type", hrm_data_type);
@@ -128,7 +130,6 @@ provide('qtr_case_status', qtr_case_status);
 const mockQueryViewRef = ref(null);
 const projectOptions = ref([]);
 const open = ref(false);
-// const loading = ref(true);
 const showSearch = ref(true);
 const selectIds = ref([]);
 const single = ref(true);
@@ -136,8 +137,9 @@ const multiple = ref(true);
 const total = ref(0);
 const title = ref("");
 const onlySelf = ref(true);
+const editingRuleId = ref(null);
+const isAdd = ref(false);
 
-const runDialogShow = ref(false);
 const runIds = ref([]);
 
 const showHistoryDialog = ref(false);
@@ -145,21 +147,21 @@ const currentCaseInfo = ref(null);
 const currentRunId = ref();
 
 const copyDialog = ref(false);
-const copyCaseInfo = ref(initCaseFormData);
+const copyMockRuleInfo = ref(initMockRuleFormData);
 
 const queryParams = toRef({
   pageNum: 1,
   pageSize: 10,
   type: props.dataType,
   ruleId: undefined,
-  caseName: undefined,
+  name: undefined,
   projectId: undefined,
   moduleId: undefined,
   status: undefined,
   onlySelf: onlySelf
 });
 
-const form = ref(initCaseFormData);
+const form = ref(initMockRuleFormData);
 const loading = ref({
   page: false,
   edite: false,
@@ -167,9 +169,9 @@ const loading = ref({
   copy: false
 });
 
-const caseEditDialogTitle = computed(() => {
+const ruleEditDialogTitle = computed(() => {
   const ruleId = form.value.ruleId ? '【' + form.value.ruleId + '】' : "";
-  return title.value + '>> ' + ruleId + form.value.caseName;
+  return title.value + '>> ' + ruleId + form.value.name;
 });
 
 function lineStatusChange(selectValue, dataSource) {
@@ -186,17 +188,17 @@ function lineStatusChange(selectValue, dataSource) {
 * */
 function showCopyDialog(data) {
   copyDialog.value = true;
-  copyCaseInfo.value = structuredClone(toValue(toRaw(data)));
+  copyMockRuleInfo.value = structuredClone(toValue(toRaw(data)));
 }
 
 /*
 * 复制用例
 * */
-function copyCaseHandle() {
+function copyMockRuleHandle() {
   copyDialog.value = true;
   let data = {
-    ruleId: copyCaseInfo.value.ruleId,
-    caseName: copyCaseInfo.value.caseName,
+    ruleId: copyMockRuleInfo.value.ruleId,
+    name: copyMockRuleInfo.value.name,
   }
   copyCase(data).then(response => {
     ElMessage.success("复制成功");
@@ -208,14 +210,21 @@ function copyCaseHandle() {
 /** 新增按钮操作 */
 function handleAdd() {
   title.value = "添加" + dataName.value;
-  form.value = JSON.parse(JSON.stringify(initCaseFormData));
+  editingRuleId.value = null;
+  isAdd.value = true;
+  form.value = JSON.parse(JSON.stringify(initMockRuleFormData));
   open.value = true;
 }
 
 /** 修改按钮操作 */
 function handleUpdate(row) {
   loading.value.edite = true;
+  isAdd.value = false;
   const ruleId = row.ruleId || selectIds.value;
+  editingRuleId.value = ruleId;
+  open.value = true;
+  loading.value.edite = false;
+  return;
   getMockRule(ruleId).then((response) => {
     if (!response.data || Object.keys(response.data).length === 0) {
       ElMessage.warning("未查到对应数据！");
@@ -243,7 +252,7 @@ function handleDelete(row) {
   proxy.$modal.confirm('是否确认删除ID为"' + ruleIds + '"的数据项？').then(function () {
     return delCase(ruleIds);
   }).then(() => {
-    if (mockQueryViewRef.value){
+    if (mockQueryViewRef.value) {
       mockQueryViewRef.value.handleQuery();
     }
     proxy.$modal.msgSuccess("删除成功");

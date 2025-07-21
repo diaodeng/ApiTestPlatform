@@ -52,7 +52,7 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" :placeholder="dataName+'状态'" clearable style="width: 100px">
           <el-option
-              v-for="dict in qtr_case_status"
+              v-for="dict in sys_normal_disable"
               :key="dict.value * 1"
               :label="dict.label"
               :value="dict.value * 1"
@@ -102,8 +102,8 @@
       <!--         <el-table-column label="用例排序" align="center" prop="sort" />-->
       <el-table-column label="状态" align="center" prop="status" width="120px">
         <template #default="scope">
-          <slot name="caseStatus" :scope="scope">
-            <DictTag :options="qtr_case_status" :value="scope.row.status"></DictTag>
+          <slot name="ruleStatus" :scope="scope">
+            <DictTag :options="sys_normal_disable" :value="scope.row.status"></DictTag>
           </slot>
         </template>
       </el-table-column>
@@ -148,7 +148,7 @@ import DictTag from "@/components/DictTag/index.vue";
 // import JsonEditorVue from "json-editor-vue3";
 
 const {proxy} = getCurrentInstance();
-// const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 // const {hrm_data_type} = proxy.useDict("hrm_data_type");
 const {qtr_case_status} = proxy.useDict("qtr_case_status");
 
@@ -166,7 +166,7 @@ defineExpose({handleQuery, getSelectedIds});
 * 区分用例还是配置
 * */
 const dataName = computed(() => {
-  return props.dataType === HrmDataTypeEnum.case ? "Rule" : "配置";
+  return "mock规则";
 });
 
 // provide("hrm_data_type", hrm_data_type);
