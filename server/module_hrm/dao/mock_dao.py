@@ -12,7 +12,8 @@ from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.entity.do.mock_do import MockRules, RuleRequest, RuleResponse
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
-from module_hrm.entity.dto.mock_dto import MockModel, MockResponseModel, MockRequestModel
+from module_hrm.entity.dto.mock_dto import MockModel, MockResponseModel, MockRequestModel, MockResponseModelForDb, \
+    MockModelForDb
 from module_hrm.entity.vo.mock_vo import MockPageQueryModel, DeleteMockRuleModel, MockResponsePageQueryModel, \
     MockRequestPageQueryModel, DeleteMockResponseModel, AddMockResponseModel
 from module_hrm.utils.util import PermissionHandler
@@ -112,15 +113,15 @@ class MockRuleDao:
         return post_list
 
     @classmethod
-    def add(cls, db: Session, mock_rule: MockModel):
+    def add(cls, db: Session, mock_rule: MockModelForDb):
         """
         新增mock规则数据库操作
         :param db: orm对象
         :param mock_rule: mock规则对象
         :return:
         """
-        if not isinstance(mock_rule, MockModel):
-            mock_rule = MockModel(**mock_rule.model_dump(exclude_unset=True, by_alias=True))
+        if not isinstance(mock_rule, MockModelForDb):
+            mock_rule = MockModelForDb(**mock_rule.model_dump(exclude_unset=True, by_alias=True))
         data_dict = mock_rule.model_dump(exclude_unset=True)
         db_case = MockRules(**data_dict)
         db.add(db_case)
@@ -236,15 +237,15 @@ class MockResponseDao:
         return post_list
 
     @classmethod
-    def add(cls, db: Session, mock_response: MockResponseModel):
+    def add(cls, db: Session, mock_response: MockResponseModel|MockResponseModelForDb):
         """
         新增mock规则数据库操作
         :param db: orm对象
         :param mock_rule: mock规则对象
         :return:
         """
-        if not isinstance(mock_response, MockResponseModel):
-            mock_response = MockResponseModel(**mock_response.model_dump(exclude_unset=True, by_alias=True))
+        if not isinstance(mock_response, MockResponseModelForDb):
+            mock_response = MockResponseModelForDb(**mock_response.model_dump(exclude_unset=True, by_alias=True))
         data_dict = mock_response.model_dump(exclude_unset=True)
         db_rule_response = RuleResponse(**data_dict)
         db.add(db_rule_response)

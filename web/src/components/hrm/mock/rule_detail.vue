@@ -28,10 +28,10 @@
             <el-col :span="6">
               <el-form-item label="mock数据">
                 <el-select v-model="ruleForm.mockType">
-                  <el-option value=1 label="仅响应">仅响应</el-option>
-                  <el-option value=2 label="仅请求">仅请求</el-option>
-                  <el-option value=3 label="请求及响应">请求及响应</el-option>
-                  <el-option value=4 label="原始请求">原始请求</el-option>
+                  <el-option :value="1" label="仅响应"/>
+                  <el-option :value="2" label="仅请求"/>
+                  <el-option :value="3" label="请求及响应"/>
+                  <el-option :value="4" label="原始请求"/>
                 </el-select>
               </el-form-item>
             </el-col>
@@ -63,7 +63,7 @@
 
         <!-- 匹配条件 -->
         <el-card header="匹配条件">
-          <div v-for="(cond, idx) in ruleForm.conditions" :key="idx" class="condition-item">
+          <div v-for="(cond, idx) in ruleForm.ruleConditions" :key="idx" class="condition-item">
             <el-row :gutter="10">
               <el-col :span="5">
                 <el-select v-model="cond.source" placeholder="参数来源">
@@ -120,7 +120,7 @@
           <el-row :gutter="20">
             <el-col :span="6">
               <el-form-item label="状态码">
-                <el-input-number v-model="ruleForm.response.status_code" :min="100" :max="599"/>
+                <el-input-number v-model="ruleForm.response.statusCode" :min="100" :max="599"/>
               </el-form-item>
             </el-col>
             <el-col :span="6">
@@ -131,7 +131,7 @@
           </el-row>
 
           <el-form-item label="响应头">
-            <div v-for="(header, idx) in ruleForm.response.headers" :key="idx" class="header-item">
+            <div v-for="(header, idx) in ruleForm.response.headersTemplate" :key="idx" class="header-item">
               <el-input v-model="header.key" placeholder="Header名" style="width: 200px;"/>
               <span style="margin: 0 10px;">:</span>
               <el-input v-model="header.value" placeholder="Header值" style="width: 300px;"/>
@@ -146,7 +146,7 @@
               支持模板语法：
             </el-alert>
             <el-input
-                v-model="ruleForm.response.body_template"
+                v-model="ruleForm.response.bodyTemplate"
                 type="textarea"
                 :rows="10"
                 placeholder="响应内容（支持JSON/XML/Text）"
@@ -155,7 +155,7 @@
         </el-card>
 
         <div class="form-actions">
-          <el-button type="primary" @click="saveRule">保存规则</el-button>
+          <el-button type="primary" @click="saveRule" :loading="doing.saving">保存规则</el-button>
           <el-button @click="resetForm">重置</el-button>
         </div>
       </el-form>
@@ -166,8 +166,8 @@
 <script setup>
 import {reactive} from 'vue'
 import {HrmDataTypeEnum, StatusNewEnum, MockTypeEnum} from "@/components/hrm/enum.js";
-import {addMockRule} from "@/api/hrm/mock.js"
-import {ElMessageBox} from "element-plus";
+import {addMockRule, getMockRule} from "@/api/hrm/mock.js"
+import {ElMessage, ElMessageBox} from "element-plus";
 
 // 初始表单结构
 const initialForm = () => ({
@@ -195,8 +195,10 @@ const initialForm = () => ({
 })
 
 const openDialog = defineModel("openDialog");
+const ruleId = defineModel("ruleId");
 const doing = reactive({
-  saving: false
+  saving: false,
+  loadingDetail: false,
 });
 
 const ruleForm = reactive(initialForm())
@@ -220,7 +222,7 @@ function beforeCloseDialog(done) {
 
 // 条件操作
 const addCondition = () => {
-  ruleForm.conditions.push({
+  ruleForm.ruleConditions.push({
     source: 'query',
     key: '',
     operator: '=',
@@ -230,16 +232,16 @@ const addCondition = () => {
 }
 
 const removeCondition = (index) => {
-  ruleForm.conditions.splice(index, 1)
+  ruleForm.ruleConditions.splice(index, 1)
 }
 
 // 响应头操作
 const addHeader = () => {
-  ruleForm.response.headers.push({key: '', value: ''})
+  ruleForm.response.headersTemplate.push({key: '', value: ''})
 }
 
 const removeHeader = (index) => {
-  ruleForm.response.headers.splice(index, 1)
+  ruleForm.response.headersTemplate.splice(index, 1)
 }
 
 // 保存规则
@@ -247,18 +249,9 @@ const saveRule = async () => {
   // 调用API保存规则
   doing.saving = true;
   addMockRule(ruleForm).then(response => {
-    ElMessageBox.alert("mock规则保存成功！", "保存成功", {
-      type: "success",
-      // cancelButtonText: "返回保存",
-      confirmButtonText: "确定"
-    })
+
   }).catch((error) => {
-    console.log(error);
-    ElMessageBox.alert("mock规则保存失败！", "保存失败", {
-      type: "error",
-      // cancelButtonText: "返回保存",
-      confirmButtonText: "确定"
-    })
+
   }).finally(() => {
     doing.saving = false;
   });
@@ -268,6 +261,21 @@ const saveRule = async () => {
 const resetForm = () => {
   Object.assign(ruleForm, initialForm())
 }
+
+onBeforeMount(() =>{
+  doing.loadingDetail = true;
+  const ruleId = row.ruleId || selectIds.value;
+  getMockRule(ruleId).then((response) => {
+    Object.assign(ruleForm, response.data);
+  }).finally(() => {
+    doing.loadingDetail = false;
+  });
+});
+
+onMounted(() => {
+
+
+})
 </script>
 
 <style scoped>

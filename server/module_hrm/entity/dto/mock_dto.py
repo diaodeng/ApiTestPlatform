@@ -20,6 +20,12 @@ class MockConditionModel(BaseModel):
     data_type: str = 'str'  # str\num\float
 
 
+class MockHeadersModel(BaseModel):
+    key: Optional[str] = ''
+    value: Optional[Any] = ''
+    data_type: str = 'str'  # str\num\float
+
+
 class MockModel(CommonDataModel):
     """
     mock数据的数据处理模型，内部数据交换使用
@@ -89,7 +95,7 @@ class MockRequestModel(CommonDataModel):
     request_condition: Optional[list[MockConditionModel]] = Field(default_factory=lambda: [])
     rule_id: int | str | None = None
 
-    headers_template: Optional[str] = None
+    headers_template: Optional[list[MockHeadersModel]] = None
     body_template: Optional[str] = None
     query_template: Optional[str] = None
     desc: Optional[str] = None
@@ -142,7 +148,7 @@ class MockResponseModel(CommonDataModel):
     rule_id: int | str | None = None
     status_code: int = None
 
-    headers_template: Optional[str] = None
+    headers_template: Optional[list[MockHeadersModel]] = None
     body_template: Optional[str] = None
     delay: Optional[int] = None
     desc: Optional[str] = None
@@ -167,12 +173,26 @@ class MockResponseModelForDb(MockResponseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
     @field_serializer('response_condition')
-    def request_data(self, request: Any):
+    def serializer_response_condition(self, request: Any):
         if isinstance(request, str):
             return request
         elif isinstance(request, (dict, list)):
             return json.dumps(request, ensure_ascii=False)
         elif isinstance(request, MockConditionModel):
             return request.model_dump_json(by_alias=True, exclude_unset=True)
+        else:
+            return request
+
+    @field_serializer('headers_template')
+    def serializer_headers_template(self, request: Any):
+        if isinstance(request, str):
+            return request
+        elif isinstance(request, list):
+            headers = []
+            for req in request:
+                if isinstance(req, MockHeadersModel):
+                    req = req.model_dump_json(by_alias=True, exclude_unset=True)
+                headers.append(req)
+            return json.dumps(headers, ensure_ascii=False)
         else:
             return request

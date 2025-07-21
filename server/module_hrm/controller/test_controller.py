@@ -160,39 +160,13 @@ async def add_hrm_mock_rule(request: Request,
                        query_db: Session = Depends(get_db),
                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        if not add_mock_rule.type:
-            raise ValueError("参数错误，请指定type")
-        if not add_mock_rule.name:
-            raise ValueError("mock规则名不能为空")
-        if not add_mock_rule.path:
-            raise ValueError("mock路径不能为空")
-
-        response_data = add_mock_rule.response
-        add_mock_rule.manager = current_user.user.user_id
-        add_mock_rule.create_by = current_user.user.user_name
-        add_mock_rule.update_by = current_user.user.user_name
-        add_mock_rule.dept_id = current_user.user.dept_id
-        add_mock_rule.type = 2 # mock规则
-        add_module_result = MockService.add_mock_rule_services(query_db, add_mock_rule)
+        add_module_result = MockService.add_mock_rule_services(query_db, add_mock_rule, current_user)
         if not add_module_result.is_success:
             logger.warning(add_module_result.message)
             return ResponseUtil.failure(data=add_module_result.result, msg=add_module_result.message)
 
-        add_mock_response = AddMockResponseModel(**response_data)
-        add_mock_response.name = add_mock_rule.name
-        add_mock_response.manager = current_user.user.user_id
-        add_mock_response.create_by = current_user.user.user_name
-        add_mock_response.update_by = current_user.user.user_name
-        add_mock_response.dept_id = current_user.user.dept_id
-        add_mock_response.is_default = 1
-        add_response_result = MockResponseService.add_mock_response_services(query_db, add_mock_rule)
-
-        if add_response_result.is_success:
-            logger.info(add_module_result.message)
-            return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
-        else:
-            logger.warning(add_module_result.message)
-            return ResponseUtil.failure(data=add_module_result.result, msg=add_module_result.message)
+        logger.info(add_module_result.message)
+        return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

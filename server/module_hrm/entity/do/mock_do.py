@@ -33,13 +33,13 @@ class MockRules(Base, BaseModel):
 
 
 class RuleResponse(Base, BaseModel):
-    __tablename__ = 'rule_responses'
+    __tablename__ = 'qtr_rule_response'
 
     rule_response_id: Mapped[int] = mapped_column(BigInteger, comment='rule_response_id', nullable=False, unique=True,
                                          default=snowIdWorker.get_id,
                                          index=True)
     name: Mapped[str] = mapped_column(String(500), comment='mock响应名称', nullable=False)
-    response_tag: Mapped[str] = mapped_column(String(50), comment='response_tag or version', nullable=False)
+    response_tag: Mapped[str] = mapped_column(String(50), comment='response_tag or version', nullable=True)
     is_default: Mapped[int] = mapped_column(Integer, comment='默认响应', nullable=False, default=0)
     status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=QtrDataStatusEnum.normal.value)  # 启用、禁用、删除
     priority: Mapped[int] = mapped_column(Integer, comment='优先级', nullable=False, default=1)
@@ -53,12 +53,12 @@ class RuleResponse(Base, BaseModel):
 
 
 class RuleRequest(Base, BaseModel):
-    __tablename__ = 'rule_request'
+    __tablename__ = 'qtr_rule_request'
     rule_request_id: Mapped[int] = mapped_column(BigInteger, comment='rule_request_id', nullable=False, unique=True,
                                                   default=snowIdWorker.get_id,
                                                   index=True)
     name: Mapped[str] = mapped_column(String(500), comment='mock请求名称', nullable=False)
-    request_tag: Mapped[str] = mapped_column(String(50), comment='request_tag or version', nullable=False)
+    request_tag: Mapped[str] = mapped_column(String(50), comment='request_tag or version', nullable=True)
     is_default: Mapped[int] = mapped_column(Integer, comment='默认请求', nullable=False, default=0)  # 默认、非默认
     status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=QtrDataStatusEnum.normal.value)  # 启用、禁用、删除
     priority: Mapped[int] = mapped_column(Integer, comment='优先级', nullable=False, default=1)

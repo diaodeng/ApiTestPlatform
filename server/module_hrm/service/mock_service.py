@@ -6,10 +6,11 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.mock_dao import MockRuleDao, MockResponseDao
 from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.entity.do.mock_do import MockRules, RuleResponse, RuleRequest
-from module_hrm.entity.dto.mock_dto import MockModel, MockRequestModel, MockResponseModel
+from module_hrm.entity.dto.mock_dto import MockModel, MockRequestModel, MockResponseModel, MockModelForDb
 from module_hrm.entity.vo.mock_vo import MockPageQueryModel, MockResponsePageQueryModel, MockRequestPageQueryModel, \
     AddMockRuleModel, AddMockResponseModel, AddMockRequestModel, DeleteMockRuleModel, DeleteMockResponseModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.utils.common import db_dd_user_info
 from utils.common_util import export_list2excel, CamelCaseUtil
 from utils.page_util import PageResponseModel
 
@@ -44,29 +45,47 @@ class MockService:
         return mock_rule_list_result
 
     @classmethod
-    def add_mock_rule_services(cls, query_db: Session, page_object: AddMockRuleModel):
+    def add_mock_rule_services(cls, query_db: Session, add_mock_rule: AddMockRuleModel, user_info: CurrentUserModel):
         """
         新增mock规则信息service
         :param query_db: orm对象
         :param page_object: 新增mock规则对象
         :return: 新增mock规则校验结果
         """
-        add_mock_rule = MockModel(**page_object.model_dump(by_alias=True))
-        mock_rule = MockRuleDao.get_detail_by_info(query_db, MockPageQueryModel(name=page_object.name))
-        if mock_rule:
-            result = dict(is_success=False, message='mock规则名称已存在')
-        else:
-            try:
-                mock_rule_dao = MockRuleDao.add(query_db, add_mock_rule)
-                query_db.commit()
-                result = dict(is_success=True,
-                              message='新增成功',
-                              result=MockModel.model_validate(mock_rule_dao).model_dump(by_alias=True))
-            except Exception as e:
-                query_db.rollback()
-                raise e
+        if not add_mock_rule.type:
+            raise ValueError("参数错误，请指定type")
+        if not add_mock_rule.name:
+            raise ValueError("mock规则名不能为空")
+        if not add_mock_rule.path:
+            raise ValueError("mock路径不能为空")
 
-        return CrudResponseModel(**result)
+        db_dd_user_info(add_mock_rule, user_info)
+        add_mock_rule.type = 2
+
+        has_mock_rule = MockRuleDao.get_detail_by_info(query_db, MockPageQueryModel(name=add_mock_rule.name))
+        if has_mock_rule:
+            return CrudResponseModel(is_success=False, message=f'mock规则名称[{has_mock_rule.name}]已存在')
+
+        try:
+            mock_rule = MockModelForDb(**add_mock_rule.model_dump(by_alias=True))
+            mock_rule_dao = MockRuleDao.add(query_db, mock_rule)
+            query_db.commit()
+            result = MockModel.model_validate(mock_rule_dao)
+        except Exception as e:
+            query_db.rollback()
+            raise e
+
+        response_data = add_mock_rule.response
+        response_data.name = add_mock_rule.name
+        response_data.rule_id = result.rule_id
+        if not MockResponseService.has_default(query_db, result.rule_id):
+            response_data.is_default = 1
+
+        add_response_result = MockResponseService.add_mock_response_services(query_db, response_data)
+        if not add_response_result.is_success:
+            return CrudResponseModel(is_success=False, message=add_response_result.message)
+
+        return CrudResponseModel(is_success=True, message=f"mock规则添加成功", result=result.model_dump(by_alias=True))
 
     @classmethod
     def copy_mock_rule_services(cls, query_db: Session, page_object: AddMockRuleModel):
@@ -207,6 +226,18 @@ class MockService:
 
 
 class MockResponseService:
+    @classmethod
+    def has_default(cls, query_db: Session, rule_id: int):
+        """
+        判断mock规则是否有默认响应
+        :param rule_id: mock规则id
+        :return: 判断结果
+        """
+        mock_response = MockResponseDao.get_detail_by_info(query_db, MockResponsePageQueryModel(rule_id=rule_id))
+        if mock_response:
+            return True
+        return False
+
     @classmethod
     def get_mock_response_list_services(cls, query_db: Session, query_object: MockResponsePageQueryModel, is_page: bool = False,
                                     data_scope_sql: str = 'true'):
