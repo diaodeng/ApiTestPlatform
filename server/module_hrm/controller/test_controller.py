@@ -5,10 +5,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
-from fastapi import Query, Body, Header
+from fastapi import Query, Body, Header, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
@@ -79,20 +79,20 @@ async def mock_test(request: Request,
         if not content_type:
             content_type = "application/json"
 
-        if content_type == "application/json":
-            req["body"] = json.loads(req.get("body"))
-        elif content_type == "application/x-www-form-urlencoded":
-            req["body"] = dict(req.get("body"))
-        elif content_type == "multipart/form-data":
-            req["body"] = dict(req.get("body"))
-        elif content_type == "text/plain":
-            req["body"] = req.get("body")
-        elif content_type == "application/octet-stream":
-            req["body"] = req.get("body")
-        elif content_type == "text/html":
-            req["body"] = req.get("body")
+        # if content_type == "application/json":
+        #     # req["body"] = json.loads(req.get("body"))
+        # elif content_type == "application/x-www-form-urlencoded":
+        #     # req["body"] = dict(req.get("body"))
+        # elif content_type == "multipart/form-data":
+        #     # req["body"] = dict(req.get("body"))
+        # elif content_type == "text/plain":
+        #     req["body"] = req.get("body")
+        # elif content_type == "application/octet-stream":
+        #     req["body"] = req.get("body")
+        # elif content_type == "text/html":
+        #     req["body"] = req.get("body")
 
-        return Response(content=req, media_type=content_type, headers=req.get("headers"), status_code=req.get("status"))
+        return Response(content=req.get("body"), media_type=content_type, headers=req.get("headers"), status_code=req.get("status"))
     except Exception as e:
         logger.error(f"mock测试失败, path: {mock_path}, error: {e}")
         return ResponseUtil.error(msg=f"mock测试失败, path: {mock_path}, error: {e}")
