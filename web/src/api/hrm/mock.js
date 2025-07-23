@@ -84,3 +84,40 @@ export function getComparator(data) {
     params: data
   })
 }
+
+
+// 查询mock规则响应列表
+export function listMockRuleResponse(query) {
+  return request({
+    url: '/hrm/mockManager/responseList',
+    method: 'get',
+    params: query
+  })
+}
+
+// 查询mock规则响应详情
+export function getRuleResponseDetail(query) {
+  return request({
+    url: '/hrm/mockManager/responseDetail',
+    method: 'get',
+    params: query
+  })
+}
+
+// 添加mock规则响应详情
+export function addResponseDetail(data) {
+  return request({
+    url: '/hrm/mockManager/addResponse',
+    method: 'post',
+    data: data
+  })
+}
+
+// 修改mock规则响应详情
+export function editResponseDetail(data) {
+  return request({
+    url: '/hrm/mockManager/updateResponse',
+    method: 'put',
+    data: data
+  })
+}

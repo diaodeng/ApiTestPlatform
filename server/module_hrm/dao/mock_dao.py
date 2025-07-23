@@ -16,6 +16,7 @@ from module_hrm.entity.dto.mock_dto import MockModel, MockResponseModel, MockReq
     MockModelForDb
 from module_hrm.entity.vo.mock_vo import MockPageQueryModel, DeleteMockRuleModel, MockResponsePageQueryModel, \
     MockRequestPageQueryModel, DeleteMockResponseModel, AddMockResponseModel
+from module_hrm.enums.enums import QtrDataStatusEnum
 from module_hrm.utils.util import PermissionHandler
 from utils.page_util import PageUtil, PageResponseModel
 
@@ -58,6 +59,21 @@ class MockRuleDao:
         info = info.first()
 
         return info
+
+    @classmethod
+    def get_list_for_mock(cls, query_db: Session, path: str, method : str):
+        """
+        根据查询参数获取mock规则列表信息
+        :param query_db: orm对象
+        :param path: 查询路径
+        :param method: 查询请求方式
+        :return: mock规则列表信息对象
+        """
+        query = query_db.query(MockRules).filter(MockRules.path == path,
+                                                 MockRules.method == method,
+                                                 MockRules.status == QtrDataStatusEnum.normal.value).order_by(
+            MockRules.priority, MockRules.create_time.desc(), MockRules.update_time.desc()).all()
+        return query
 
     @classmethod
     def get_list(cls, db: Session,
@@ -131,15 +147,15 @@ class MockRuleDao:
         return db_case
 
     @classmethod
-    def edit(cls, db: Session, mock_rule: MockModel, user: CurrentUserModel = None):
+    def edit(cls, db: Session, mock_rule: MockModelForDb|MockModel, user: CurrentUserModel = None):
         """
         编辑mock规则数据库操作
         :param db: orm对象
         :param mock_rule: 编辑页面获取的CaseModel对象
         :return:
         """
-        if not isinstance(mock_rule, MockModel):
-            mock_rule = MockModel(**mock_rule.model_dump(exclude_unset=True, by_alias=True))
+        if not isinstance(mock_rule, MockModelForDb):
+            mock_rule = MockModelForDb(**mock_rule.model_dump(exclude_unset=True, by_alias=True))
 
         rule_data = mock_rule.model_dump(exclude_unset=True)
         PermissionHandler.check_is_self(user,
@@ -191,13 +207,17 @@ class MockResponseDao:
         :return: mock规则信息对象
         """
         info = db.query(RuleResponse)
+        if mock_rule.rule_id:
+            info = info.filter(RuleResponse.rule_id == mock_rule.rule_id)
+        if mock_rule.rule_response_id:
+            info = info.filter(RuleResponse.rule_response_id == mock_rule.rule_response_id)
         if mock_rule.name:
             info = info.filter(RuleResponse.name == mock_rule.name)
         if mock_rule.status:
             info = info.filter(RuleResponse.status == mock_rule.status)
         if mock_rule.is_default:
             info = info.filter(RuleResponse.is_default == mock_rule.is_default)
-        if mock_rule.response_condition:
+        if mock_rule.response_condition and len(mock_rule.response_condition) > 0:
             info = info.filter(RuleResponse.response_condition == mock_rule.response_condition)
 
         info = info.first()
@@ -255,15 +275,15 @@ class MockResponseDao:
         return db_rule_response
 
     @classmethod
-    def edit(cls, db: Session, mock_rule_response: MockResponseModel, user: CurrentUserModel = None):
+    def edit(cls, db: Session, mock_rule_response: MockResponseModel|MockResponseModelForDb, user: CurrentUserModel = None):
         """
         编辑mock规则数据库操作
         :param db: orm对象
         :param mock_rule: 编辑页面获取的CaseModel对象
         :return:
         """
-        if not isinstance(mock_rule_response, MockResponseModel):
-            mock_rule_response = MockResponseModel(**mock_rule_response.model_dump(exclude_unset=True, by_alias=True))
+        if not isinstance(mock_rule_response, MockResponseModelForDb):
+            mock_rule_response = MockResponseModelForDb(**mock_rule_response.model_dump(exclude_unset=True, by_alias=True))
 
         rule_data = mock_rule_response.model_dump(exclude_unset=True)
         # PermissionHandler.check_is_self(user,

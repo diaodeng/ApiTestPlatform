@@ -34,9 +34,9 @@
           </el-button>
         </el-col>
       </template>
-      <template #caseStatus="{scope}">
+      <template #ruleStatus="{scope}">
         <TagSelector v-model:selected-value="scope.row.status"
-                     :options="qtr_case_status"
+                     :options="qtr_data_status"
                      selector-width="90px"
                      :source-data="scope.row"
                      @selectChanged="lineStatusChange"
@@ -59,7 +59,7 @@
       </template>
     </MockTableQuery>
 
-    <!-- 添加或修改用例对话框 -->
+    <!-- 添加或修改mock规则对话框 -->
     <MockRuleDetailDialog :form-datas="form"
                           :data-type="dataType"
                           :form-rules="formRules"
@@ -70,7 +70,7 @@
 
     ></MockRuleDetailDialog>
 
-    <!-- 复制用例对话框 -->
+    <!-- 复制mock规则对话框 -->
     <el-dialog :title="copyMockRuleInfo?.name" v-model="copyDialog" append-to-body destroy-on-close>
       <el-container style="height: 100%">
         <!--          <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">-->
@@ -90,7 +90,7 @@
 
 <script setup>
 import {changeCaseStatus, copyCase, delCase, getCase, listCase} from "@/api/hrm/case";
-import {getMockRule} from "@/api/hrm/mock.js";
+import {getMockRule, copyMockRule, delMockRule, updateMockRule, changeMockRuleStatus} from "@/api/hrm/mock.js";
 import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import MockRuleDetailDialog from "@/components/hrm/mock/rule_detail.vue"
@@ -103,16 +103,16 @@ import MockTableQuery from "@/components/hrm/util-data-table/mock-table-query.vu
 // import JsonEditorVue from "json-editor-vue3";
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
-const {qtr_case_status} = proxy.useDict("qtr_case_status");
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
+
 
 const props = defineProps({
   dataType: {type: Number, default: 2},
   formRules: {
     type: Object,
     default: {
-      name: [{required: true, message: "用例名称不能为空", trigger: "blur"}],
+      name: [{required: true, message: "mock规则名称不能为空", trigger: "blur"}],
       projectId: [{required: true, message: "所属项目不能为空", trigger: "blur"}],
       moduleId: [{required: true, message: "所属模块不能为空", trigger: "blur"}]
     }
@@ -124,8 +124,7 @@ const dataName = computed(() => {
 });
 
 provide("hrm_data_type", hrm_data_type);
-provide('sys_normal_disable', sys_normal_disable);
-provide('qtr_case_status', qtr_case_status);
+
 
 const mockQueryViewRef = ref(null);
 const projectOptions = ref([]);
@@ -175,7 +174,7 @@ const ruleEditDialogTitle = computed(() => {
 });
 
 function lineStatusChange(selectValue, dataSource) {
-  changeCaseStatus({ruleId: dataSource.ruleId, status: selectValue}).then((response) => {
+  changeMockRuleStatus({ruleId: dataSource.ruleId, status: selectValue}).then((response) => {
     ElMessage.success("修改成功");
   }).catch(() => {
     ElMessage.error("修改失败");
@@ -184,7 +183,7 @@ function lineStatusChange(selectValue, dataSource) {
 
 
 /*
-* 换起用例复制弹窗
+* 换起mock规则复制弹窗
 * */
 function showCopyDialog(data) {
   copyDialog.value = true;
@@ -192,7 +191,7 @@ function showCopyDialog(data) {
 }
 
 /*
-* 复制用例
+* 复制mock规则
 * */
 function copyMockRuleHandle() {
   copyDialog.value = true;
@@ -200,7 +199,7 @@ function copyMockRuleHandle() {
     ruleId: copyMockRuleInfo.value.ruleId,
     name: copyMockRuleInfo.value.name,
   }
-  copyCase(data).then(response => {
+  copyMockRule(data).then(response => {
     ElMessage.success("复制成功");
   }).finally(() => {
     copyDialog.value = false;
@@ -248,9 +247,9 @@ function showHistory(row) {
 
 /** 删除按钮操作 */
 function handleDelete(row) {
-  const ruleIds = row.ruleId || selectIds.value;
+  const ruleIds = [row.ruleId] || selectIds.value;
   proxy.$modal.confirm('是否确认删除ID为"' + ruleIds + '"的数据项？').then(function () {
-    return delCase(ruleIds);
+    return delMockRule({ruleIds: ruleIds});
   }).then(() => {
     if (mockQueryViewRef.value) {
       mockQueryViewRef.value.handleQuery();

@@ -46,7 +46,8 @@ class MockResponsePageQueryModel(QueryModel, MockResponseModel):
     """
     查询模型
     """
-    pass
+    response_condition: Optional[str] = None
+    headers_template: Optional[str] = None
 
 
 class AddMockResponseModel(MockResponseModel):
