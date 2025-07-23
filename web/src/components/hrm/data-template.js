@@ -249,7 +249,7 @@ export const initMockRuleFormData = {
     type: 2,
     status: StatusNewEnum.normal.value,
     mockType: MockTypeEnum.only_response.value,
-    ruleConditions: [{
+    ruleCondition: [{
         source: 'query',
         key: '',
         operator: '=',
@@ -257,6 +257,15 @@ export const initMockRuleFormData = {
         data_type: 'str'
     }],
     response: {
+        ruleResponseId: null,
+        responseTag: '',
+        responseCondition: [{
+            source: 'query',
+            key: '',
+            operator: '=',
+            value: '',
+            data_type: 'str'
+        }],
         statusCode: 200,
         headersTemplate: [{key: 'Content-Type', value: 'application/json'}],
         bodyTemplate: '{\n  "id": "{{uuid}}",\n  "name": "{{request.args.name}}",\n  "status": "active"\n}',

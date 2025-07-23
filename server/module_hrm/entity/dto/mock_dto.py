@@ -71,10 +71,13 @@ class MockModelForDb(MockModel):
     def serializer_rule_condition(self, request: Any):
         if isinstance(request, str):
             return request
-        elif isinstance(request, (dict, list)):
-            return json.dumps(request, ensure_ascii=False)
-        elif isinstance(request, MockConditionModel):
-            return request.model_dump_json(by_alias=True, exclude_unset=True)
+        elif isinstance(request, list):
+            headers = []
+            for req in request:
+                if isinstance(req, MockConditionModel):
+                    req = req.model_dump(by_alias=True, exclude_unset=True)
+                headers.append(req)
+            return json.dumps(headers, ensure_ascii=False)
         else:
             return request
 
@@ -123,10 +126,13 @@ class MockRequestModelForDb(MockRequestModel):
     def request_condition(self, request: Any):
         if isinstance(request, str):
             return request
-        elif isinstance(request, (dict, list)):
-            return json.dumps(request, ensure_ascii=False)
-        elif isinstance(request, MockConditionModel):
-            return request.model_dump_json(by_alias=True, exclude_unset=True)
+        elif isinstance(request, list):
+            headers = []
+            for req in request:
+                if isinstance(req, MockConditionModel):
+                    req = req.model_dump(by_alias=True, exclude_unset=True)
+                headers.append(req)
+            return json.dumps(headers, ensure_ascii=False)
         else:
             return request
 
@@ -146,7 +152,7 @@ class MockResponseModel(CommonDataModel):
     priority: Optional[int] = None
     response_condition: Optional[list[MockConditionModel]] = Field(default_factory=lambda: [])
     rule_id: int | str | None = None
-    status_code: int = None
+    status_code: Optional[int] = None
 
     headers_template: Optional[list[MockHeadersModel]] = None
     body_template: Optional[str] = None
@@ -156,6 +162,7 @@ class MockResponseModel(CommonDataModel):
     @model_validator(mode="before")
     def convert_condition(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         values = CamelCaseUtil.transform_result(values)
+
         request_data = values.get('responseCondition')
         if not request_data:
             return values
@@ -163,6 +170,15 @@ class MockResponseModel(CommonDataModel):
             values["responseCondition"] = [MockConditionModel(**condition) for condition in json.loads(request_data)]
         elif isinstance(request_data, list):
             values["responseCondition"] = [MockConditionModel(**condition) for condition in request_data]
+
+        headers_data = values.get('headersTemplate')
+        if not headers_data:
+            return values
+        if isinstance(headers_data, str):
+            values["headersTemplate"] = [MockHeadersModel(**condition) for condition in json.loads(headers_data)]
+        elif isinstance(headers_data, list):
+            values["headersTemplate"] = [MockHeadersModel(**condition) for condition in headers_data]
+
         return values
 
 
@@ -176,10 +192,13 @@ class MockResponseModelForDb(MockResponseModel):
     def serializer_response_condition(self, request: Any):
         if isinstance(request, str):
             return request
-        elif isinstance(request, (dict, list)):
-            return json.dumps(request, ensure_ascii=False)
-        elif isinstance(request, MockConditionModel):
-            return request.model_dump_json(by_alias=True, exclude_unset=True)
+        elif isinstance(request, list):
+            headers = []
+            for req in request:
+                if isinstance(req, MockConditionModel):
+                    req = req.model_dump(by_alias=True)
+                headers.append(req)
+            return json.dumps(headers, ensure_ascii=False)
         else:
             return request
 
@@ -191,7 +210,7 @@ class MockResponseModelForDb(MockResponseModel):
             headers = []
             for req in request:
                 if isinstance(req, MockHeadersModel):
-                    req = req.model_dump_json(by_alias=True, exclude_unset=True)
+                    req = req.model_dump(by_alias=True)
                 headers.append(req)
             return json.dumps(headers, ensure_ascii=False)
         else:

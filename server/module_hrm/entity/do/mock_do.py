@@ -25,7 +25,7 @@ class MockRules(Base, BaseModel):
 
     name: Mapped[str] = mapped_column(String(500), comment='mock规则名称', nullable=False)
     path: Mapped[str] = mapped_column(String(500), comment='请求路径', nullable=False, index=True)
-    method = mapped_column(String(10), comment='HTTP方法', nullable=True, default="GET")
+    method = mapped_column(String(10), comment='HTTP方法', nullable=True, default="GET", index=True)
     priority: Mapped[int] = mapped_column(Integer, comment='优先级', nullable=False, default=1)
     rule_condition: Mapped[str] = mapped_column(Text, comment='mock规则的命中条件', nullable=True, default=None)
     status: Mapped[int] = mapped_column(Integer, comment='mock规则状态', nullable=False, default=QtrDataStatusEnum.normal.value)  # 启用、禁用、删除 QtrDataStatusEnum
