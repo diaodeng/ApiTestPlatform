@@ -5,6 +5,7 @@ import datetime
 import random
 import time
 import uuid
+import jmespath
 from typing import List
 
 from jinja2 import Environment, BaseLoader
@@ -455,11 +456,57 @@ class MockResponseService:
         result = MockResponseModel(**data)
         return result
 
+    @classmethod
+    def set_default_response(cls, query_db: Session, rule_response_info: AddMockResponseModel,
+                            user: CurrentUserModel = None):
+        mock_rule = query_db.query(RuleResponse).filter(RuleResponse.rule_id == rule_response_info.rule_id).all()
+        for item in mock_rule:
+            item_obj = AddMockResponseModel.model_validate(item)
+            if item_obj.response_condition == rule_response_info.response_condition:
+                item.update_time = datetime.datetime.now()
+                item.update_by = user.user.user_id if user else None
+                if item.rule_response_id == rule_response_info.rule_response_id:
+                    item.is_default = 1
+                else:
+                    item.is_default = 0
+        query_db.commit()
+
+    @classmethod
+    def get_by_response_condition(cls, query_db: Session, rule_response_info: AddMockResponseModel) -> List[MockResponseModel]:
+        mock_rule = query_db.query(RuleResponse).filter(RuleResponse.rule_id == rule_response_info.rule_id).all()
+        matched_response = []
+        for item in mock_rule:
+            item_obj = AddMockResponseModel.model_validate(item)
+            if ConditionMatcher.condition_match_condition(rule_response_info.response_condition, item_obj.response_condition):
+                matched_response.append(item_obj)
+        return matched_response
+
 
 class ConditionMatcher:
     def __init__(self, request: Request, conditions: List[MockConditionModel] | None = None):
         self.request = request
         self.conditions = conditions
+
+    @classmethod
+    def condition_match_condition(cls, conditions: List[MockConditionModel], conditions_target: List[MockConditionModel]) -> bool:
+        """
+        比较条件是否匹配，条件列表中的条件必须全部包含在目标列表的条件中
+        :param conditions: 条件列表
+        :param conditions_target: 目标条件列表
+        :return: 是否匹配
+        """
+        if not conditions and not conditions_target:
+            return True
+        conditions_target = conditions_target or []
+        conditions = conditions or []
+        condition_obj = {}
+        for condition in conditions:
+            condition_obj[condition.key] = f"{condition.source}{condition.value}{condition.operator}{condition.data_type}"
+        target_condition_obj = {}
+        for condition in conditions_target:
+            target_condition_obj[condition.key] = f"{condition.source}{condition.value}{condition.operator}{condition.data_type}"
+
+        return all(k in target_condition_obj and target_condition_obj[k] == v for k, v in condition_obj.items())
 
     def match_condition(self, conditions: List[MockConditionModel]) -> bool:
         """匹配请求条件"""
@@ -592,9 +639,9 @@ class ResponseGenerator:
         body = self._render_template()
 
         return {
-            'status': self.response.status_code,
+            'status_code': self.response.status_code,
             'headers': {data.key: data.value for data in self.response.headers_template},
-            'body': body
+            'content': body
         }
 
     def _render_template(self):

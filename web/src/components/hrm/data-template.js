@@ -257,6 +257,7 @@ export const initMockRuleFormData = {
         data_type: 'str'
     }],
     response: {
+        id: null,
         ruleResponseId: null,
         responseTag: '',
         responseCondition: [{

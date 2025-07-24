@@ -154,8 +154,17 @@
                        title="另存为">另存为
             </el-button>
 
-            <el-button style="margin-left: 5px" @click="addResponse" type="success" :disabled="!ruleForm.ruleId || doing.saving"
+            <el-button style="margin-left: 5px" @click="addResponse" type="success"
+                       :disabled="!ruleForm.ruleId || doing.saving"
                        title="保存">保存
+            </el-button>
+            <el-button style="margin-left: 5px" @click="setRuleDefaultResponse" type="success"
+                       :disabled="!ruleForm.ruleId || doing.saving"
+                       title="设置为默认响应">设置默认响应
+            </el-button>
+            <el-button style="margin-left: 5px" @click="getConditionResponse" type="success"
+                       :disabled="!ruleForm.ruleId || doing.saving"
+                       title="查看当前规则的响应">匹配
             </el-button>
           </template>
           <el-card style="margin-bottom: 5px" header="响应匹配条件">
@@ -267,7 +276,18 @@
   <el-dialog title='复制mock规则响应'
              v-model="openCopyResponseDialog">
     <el-input v-model="copyResponseName" placeholder="请输入响应名称"></el-input>
-    <el-button @click="saveAsResponse">保存</el-button>
+    <template #footer>
+      <el-button @click="saveAsResponse" type="primary">保存</el-button>
+    </template>
+
+  </el-dialog>
+
+  <el-dialog v-model="isShow.dialogConditionMatchVisible" title="当前条件匹配到的响应" width="800">
+    <el-table :data="matchedData">
+      <el-table-column property="name" label="名称"/>
+      <el-table-column property="responseTag" label="标签" width="200" />
+      <el-table-column property="isDefault" label="默认值" width="80" />
+    </el-table>
   </el-dialog>
 </template>
 
@@ -280,7 +300,7 @@ import {
   listMockRuleResponse,
   getRuleResponseDetail,
   addResponseDetail,
-  editResponseDetail
+  editResponseDetail, listMockRuleResponseByCondition, setDefaultResponse
 } from "@/api/hrm/mock.js"
 import {ElMessage, ElMessageBox} from "element-plus";
 import {initMockRuleFormData} from "@/components/hrm/data-template.js";
@@ -295,12 +315,17 @@ const doing = reactive({
   loadingDetail: false,
   loadingResponseList: false,
 });
+const isShow = reactive({
+  dialogConditionMatchVisible: false,
+});
 
 const ruleForm = reactive(initialForm())
 const projects = reactive([{id: 111, name: 'test'}]) // 从API获取项目列表
 const ruleResponseData = ref([]);
 const openCopyResponseDialog = ref(false);
 const copyResponseName = ref('');
+const matchedData = ref([]);  // 按条件匹配到的响应数据
+
 const selectResponseData = () => {
   console.log(ruleForm.response.ruleResponseId);
   return typeof ruleForm.response.ruleResponseId;
@@ -384,6 +409,42 @@ const saveRule = async () => {
   }
 }
 
+const setRuleDefaultResponse = async () => {
+  ElMessageBox.confirm("确认将当前响应设置为默认响应吗？", "确认", {
+    confirmButtonText: "确定",
+    cancelButtonText: "取消",
+    type: "warning"
+  }).then(() => {
+    doing.saving = true;
+    if (!ruleForm.response.ruleId) {
+      return;
+    }
+    setDefaultResponse(ruleForm.response).then((res) => {
+      ElMessage.success("更新成功");
+    }).finally(() => {
+      doing.saving = false;
+    }).catch((error) => {
+      ElMessage.error(error.message);
+    });
+  }).catch(() => {
+  });
+
+
+}
+
+const getConditionResponse = async () => {
+  doing.saving = true;
+  if (!ruleForm.response.ruleId) {
+    return;
+  }
+  await listMockRuleResponseByCondition(ruleForm.response).then((res) => {
+    matchedData.value = res.data;
+    isShow.dialogConditionMatchVisible = true;
+  }).finally(() => {
+    doing.saving = false;
+  });
+}
+
 const getResponseList = async (name) => {
 
   if (!ruleForm.ruleId) {
@@ -441,7 +502,7 @@ const addResponse = async () => {
       doing.loadingDetail = false;
       copyResponseName.value = "";
     });
-  }else {
+  } else {
     await editResponseDetail(copyData).then((response) => {
       // ruleForm.response = response.data;
       ElMessage.success("mock规则响应更新成功");
@@ -468,6 +529,8 @@ const saveAsResponse = async () => {
   copyData.name = copyResponseName.value;
   await addResponseDetail(copyData).then((response) => {
     ruleForm.response = response.data;
+    openCopyResponseDialog.value = false;
+    ElMessage.success("更新成功");
   }).catch((error) => {
 
   }).finally(() => {
