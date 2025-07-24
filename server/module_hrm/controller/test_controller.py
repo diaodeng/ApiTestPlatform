@@ -92,30 +92,15 @@ async def mock_test(request: Request,
         # elif content_type == "text/html":
         #     req["body"] = req.get("body")
 
-        return Response(content=req.get("body"), media_type=content_type, headers=req.get("headers"), status_code=req.get("status"))
+        return Response(content=req.get("content"), media_type=content_type, headers=req.get("headers"), status_code=req.get("status_code"))
     except Exception as e:
         logger.error(f"mock测试失败, path: {mock_path}, error: {e}")
         return ResponseUtil.error(msg=f"mock测试失败, path: {mock_path}, error: {e}")
 
 
-class Item(BaseModel):
-    name: str
-    price: float
-
-
-async def common_parameters(
-        # item_id: int = Path(..., gt=0),
-        q: str = Query(None, min_length=3),
-        x_token: str = Header(..., alias="X-Token")
-):
-    return {"q": q, "x_token": x_token}
-
 
 @mockController.api_route("/test", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
-async def get_hrm_test(request: Request,
-                       commons: dict = Depends(common_parameters),
-                       item: Optional[Item] = Body(None)
-                       ):
+async def get_hrm_test(request: Request):
     try:
         method = request.method
         # 获取分页数据
@@ -123,50 +108,46 @@ async def get_hrm_test(request: Request,
                 "method": method,
                 "headers": request.headers,
                 "cookies": request.cookies,
-                "body": request.body,
                 "queryParams": request.query_params,
                 "pathParams": request.path_params,
-                "data": {"name": "name",
-                         "value": "value",
-                         "1234": "1234",
-                         "5678": 5678,
-                         "map": {
-                             "name": "name",
-                             "value": "value",
-                             "int_str": "1122",
-                             "int": 1122,
-                             "float_str": "1122.01",
-                             "float": 1122.01,
-                         },
-                         "row": [
-                             {
-                                 "name": "name",
-                                 "value": "value",
-                                 "1234": "1122",
-                                 "5678": 1122,
-                             },
-                             {
-                                 "name": "name",
-                                 "value": "value",
-                                 "1234": "1133",
-                                 "5678": 1133,
-                             }
-                         ]
-                         },
-                **commons
-
                 }
+        try:
+            body_json = await request.json()
+        except:
+            body_json = None
+
+        try:
+            body_form = await request.form()
+            body_form = dict(body_form)
+        except:
+            body_form = None
+
+        try:
+            body_data = await request.body()
+        except:
+            body_data = None
 
         if method in ["POST", "PUT"]:
-            if not item:
+
+            if not body_data and not body_json and not body_form:
                 return {"error": "Missing request body"}
-            data["item"] = item.model_dump()
+            data["body"] = body_data
+
+        content_type = request.headers.get("req_content-type")
+        if not content_type:
+            content_type = "application/json"
+
+        status_code = request.headers.get("req_status_code")
+        if not status_code:
+            status_code = 200
+        else:
+            status_code = int(status_code)
 
             # 处理DELETE的特殊逻辑
         if method == "DELETE":
             data["status"] = "deleted"
 
-        result = ResponseUtil.success(dict_content=data)
+        result = Response(content=json.dumps(data), media_type=content_type, status_code=status_code)
         return result
     except Exception as e:
         return ResponseUtil.error(msg=str(e))
@@ -416,6 +397,38 @@ async def rule_response_list(request: Request,
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         add_module_result = MockResponseService.get_response_detail_services(query_db, query_rule_response.rule_response_id)
+
+        return ResponseUtil.success(data=add_module_result, msg="success")
+
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@mockController.post("/mockManager/setDefaultResponse",
+                    dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:updateResponse'))])
+@log_decorator(title='设置mock规则默认响应', business_type=2)
+async def set_default_response(request: Request,
+                             query_rule_response: AddMockResponseModel,
+                             query_db: Session = Depends(get_db),
+                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    try:
+        add_module_result = MockResponseService.set_default_response(query_db, query_rule_response, current_user)
+
+        return ResponseUtil.success(data=add_module_result, msg="success")
+
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+@mockController.post("/mockManager/getResponseByCondition",
+                    dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:responseList'))])
+@log_decorator(title='mock规则响应管理', business_type=0)
+async def set_default_response(request: Request,
+                             query_rule_response: AddMockResponseModel,
+                             query_db: Session = Depends(get_db)):
+    try:
+        add_module_result = MockResponseService.get_by_response_condition(query_db, query_rule_response)
 
         return ResponseUtil.success(data=add_module_result, msg="success")
 

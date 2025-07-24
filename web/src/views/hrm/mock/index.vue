@@ -89,16 +89,12 @@
 </template>
 
 <script setup>
-import {changeCaseStatus, copyCase, delCase, getCase, listCase} from "@/api/hrm/case";
 import {getMockRule, copyMockRule, delMockRule, updateMockRule, changeMockRuleStatus} from "@/api/hrm/mock.js";
 import TagSelector from "@/components/hrm/common/tag-selector.vue";
-import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import MockRuleDetailDialog from "@/components/hrm/mock/rule_detail.vue"
-import {initCaseFormData, initMockRuleFormData} from "@/components/hrm/data-template.js";
-import RunDetail from '@/components/hrm/common/run/run-detail.vue';
-import RunDialog from '@/components/hrm/common/run/run_dialog.vue';
-import {HrmDataTypeEnum, runDetailViewTypeEnum, RunTypeEnum} from "@/components/hrm/enum.js";
-import {ElMessage, ElMessageBox} from "element-plus";
+import { initMockRuleFormData } from "@/components/hrm/data-template.js";
+import { HrmDataTypeEnum } from "@/components/hrm/enum.js";
+import { ElMessage } from "element-plus";
 import MockTableQuery from "@/components/hrm/util-data-table/mock-table-query.vue";
 // import JsonEditorVue from "json-editor-vue3";
 
@@ -205,6 +201,7 @@ function copyMockRuleHandle() {
     copyDialog.value = false;
   });
 }
+
 
 /** 新增按钮操作 */
 function handleAdd() {

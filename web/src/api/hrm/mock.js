@@ -95,6 +95,15 @@ export function listMockRuleResponse(query) {
   })
 }
 
+// 通过条件查询mock规则响应列表
+export function listMockRuleResponseByCondition(data) {
+  return request({
+    url: '/hrm/mockManager/getResponseByCondition',
+    method: 'post',
+    data: data
+  })
+}
+
 // 查询mock规则响应详情
 export function getRuleResponseDetail(query) {
   return request({
@@ -108,6 +117,15 @@ export function getRuleResponseDetail(query) {
 export function addResponseDetail(data) {
   return request({
     url: '/hrm/mockManager/addResponse',
+    method: 'post',
+    data: data
+  })
+}
+
+// 设置mock规则的默认响应
+export function setDefaultResponse(data) {
+  return request({
+    url: '/hrm/mockManager/setDefaultResponse',
     method: 'post',
     data: data
   })
