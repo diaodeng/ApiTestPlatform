@@ -139,3 +139,12 @@ export function editResponseDetail(data) {
     data: data
   })
 }
+
+// 修改mock规则响应优先级
+export function editResponsePriority(data) {
+  return request({
+    url: '/hrm/mockManager/updateResponsePriority',
+    method: 'put',
+    data: data
+  })
+}
