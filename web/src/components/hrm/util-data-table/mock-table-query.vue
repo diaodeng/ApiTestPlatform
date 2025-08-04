@@ -89,6 +89,11 @@
       <el-table-column :label="dataName+'ID'" prop="ruleId" width="150px"/>
       <el-table-column :label="dataName+'名称'" prop="name" width="auto" min-width="200px"/>
       <el-table-column :label="dataName+'路径'" prop="path" width="auto" min-width="200px"/>
+      <el-table-column label="优先级" prop="priority" width="auto" min-width="50px">
+        <template #default="scope">
+          <el-input v-model="scope.row.priority" type="number" max="999" step="1" min="1" />
+        </template>
+      </el-table-column>
       <el-table-column label="所属项目" prop="projectName" v-if="false">
         <template #default="scope">
           <span>{{ nameOrGlob(scope.row.projectName) }}</span>
