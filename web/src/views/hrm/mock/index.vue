@@ -255,7 +255,13 @@ function showHistory(row) {
 
 /** 删除按钮操作 */
 function handleDelete(row) {
-  const ruleIds = [row.ruleId] || selectIds.value;
+  let ruleIds = [];
+  if (row.ruleId){
+    ruleIds = [row.ruleId];
+  }else {
+    ruleIds = selectIds.value;
+  }
+
   proxy.$modal.confirm('是否确认删除ID为"' + ruleIds + '"的数据项？').then(function () {
     return delMockRule({ruleIds: ruleIds});
   }).then(() => {
