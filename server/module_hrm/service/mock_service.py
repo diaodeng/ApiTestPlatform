@@ -13,6 +13,7 @@ from fastapi import Request, Response
 from requests.cookies import MockResponse
 
 from sqlalchemy.orm import Session
+from sqlalchemy.util import await_only
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.mock_dao import MockRuleDao, MockResponseDao
@@ -104,7 +105,10 @@ class MockService:
         if not add_response_result.is_success:
             return CrudResponseModel(is_success=False, message=add_response_result.message)
 
-        return CrudResponseModel(is_success=True, message=f"mock规则添加成功", result=result.model_dump(by_alias=True))
+        result_data = result.model_dump(by_alias=True)
+        result_data["response"] = add_response_result.result
+
+        return CrudResponseModel(is_success=True, message=f"mock规则添加成功", result=result_data)
 
     @classmethod
     def copy_mock_rule_services(cls, query_db: Session, page_object: AddMockRuleModel):
@@ -130,7 +134,30 @@ class MockService:
                 new_data.pop("update_time", None)
                 new_data.pop("_sa_instance_state", None)
 
-                MockRuleDao.add(query_db, MockModelForDb(**new_data))
+                new_rule = MockRuleDao.add(query_db, MockModelForDb(**new_data))
+
+                # 复制mock响应
+                original_records = MockResponseDao.get_list(query_db, MockResponsePageQueryModel(rule_id=page_object.rule_id))
+                new_records = []
+                for record in original_records:
+                    # 获取所有字段的字典表示（排除主键）
+                    exclude_key = ["id", "rule_id", "create_time", "update_time", "rule_response_id"]
+                    data = {c.name: getattr(record, c.name)
+                            for c in RuleResponse.__table__.columns
+                            if not c.primary_key and c.name not in exclude_key}
+
+                    # 修改特定字段
+                    data['rule_id'] = new_rule.rule_id
+                    data["manager"] = page_object.manager
+                    data["create_by"] = page_object.create_by
+                    data["update_by"] = page_object.update_by
+
+                    # 创建新对象
+                    new_records.append(RuleResponse(**data))
+
+                # 批量添加
+                query_db.bulk_save_objects(new_records)
+                query_db.commit()
 
                 result = dict(is_success=True, message='复制成功')
             except Exception as e:
@@ -340,9 +367,9 @@ class MockResponseService:
         :return: 新增mock规则校验结果
         """
 
-        mock_rule = MockResponseDao.get_detail_by_info(query_db, MockResponsePageQueryModel(name=page_object.name))
+        mock_rule = MockResponseDao.get_detail_by_info(query_db, MockResponsePageQueryModel(name=page_object.name, rule_id=page_object.rule_id))
         if mock_rule:
-            result = dict(is_success=False, message='mock规则响应名称已存在')
+            result = dict(is_success=False, message='当前mock规则中响应名称已存在')
         else:
             try:
                 add_mock_rule = MockResponseModelForDb(**page_object.model_dump(by_alias=True))
@@ -545,6 +572,8 @@ class ConditionMatcher:
             return expected_value in str(actual_value)
         elif operator == 'regex':
             return bool(re.match(expected_value, str(actual_value)))
+        elif operator == 'regex_search':
+            return bool(re.search(expected_value, str(actual_value)))
         elif operator == 'exists':
             return actual_value is not None
         return False
@@ -563,14 +592,15 @@ class ConditionMatcher:
                 if hasattr(self.request, "body_data"):
                     body = self.request.body_data
                     # 支持JSONPath（简化版）
-                    keys = key.split('.')
-                    value = body
-                    for k in keys:
-                        if k in value:
-                            value = value[k]
-                        else:
-                            return None
-                    return value
+                    return jmespath.search(key, body)
+                    # keys = key.split('.')
+                    # value = body
+                    # for k in keys:
+                    #     if k in value:
+                    #         value = value[k]
+                    #     else:
+                    #         return None
+                    # return value
                 return None
             except:
                 return None
@@ -636,7 +666,7 @@ class ResponseGenerator:
             await asyncio.sleep(self.response.delay / 1000.0)
 
         # 渲染响应体
-        body = self._render_template()
+        body = await self._render_template()
 
         return {
             'status_code': self.response.status_code,
@@ -644,16 +674,16 @@ class ResponseGenerator:
             'content': body
         }
 
-    def _render_template(self):
+
+    async def _render_template(self):
         """渲染动态模板"""
         context = {
             'request': {
                 'path': self.request.path_params,
                 'method': self.request.method,
-                'args': self.request.query_params,
-                'headers': self.request.headers,
-                'json': self.request.json() or {},
-                'form': self.request.form or {}
+                'args': dict(self.request.query_params),
+                'headers': dict(self.request.headers),
+                "body": getattr(self.request, "body_data", None),
             },
             'random': {
                 'int': lambda a, b: random.randint(a, b),
@@ -661,7 +691,8 @@ class ResponseGenerator:
             },
             'time': {
                 'now': time.time(),
-                'iso': datetime.datetime.now().isoformat()
+                'iso': datetime.datetime.now().isoformat(),
+                'format': lambda format: datetime.datetime.now().strftime(format)
             },
             'uuid': str(uuid.uuid4())
         }

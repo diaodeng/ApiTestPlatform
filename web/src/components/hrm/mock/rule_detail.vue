@@ -1,5 +1,5 @@
 <template>
-  <el-dialog fullscreen :title='initialForm.name'
+  <el-dialog fullscreen :title='ruleForm.name'
              v-model="openDialog"
              :before-close="beforeCloseDialog"
              append-to-body>
@@ -93,6 +93,7 @@
                   <el-option label="小于 <" value="<"/>
                   <el-option label="包含 contains" value="contains"/>
                   <el-option label="正则 regex" value="regex"/>
+                  <el-option label="正则 regex_search" value="regex_search"/>
                   <el-option label="存在 exists" value="exists"/>
                 </el-select>
               </el-col>
