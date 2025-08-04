@@ -37,9 +37,9 @@ export function copyMockRule(data) {
 }
 
 // 修改mock规则状态
-export function changeMockRuleStatus(data) {
+export function updateMockRuleInfo(data) {
   return request({
-    url: '/hrm/mockManager/ruleStatus',
+    url: '/hrm/mockManager/changeRuleInfo',
     method: 'post',
     data: data
   })

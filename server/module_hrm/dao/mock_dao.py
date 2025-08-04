@@ -306,3 +306,15 @@ class MockResponseDao:
         db.query(RuleResponse).filter(RuleResponse.rule_response_id.in_(mock_rule_response.rule_response_ids)).delete()
         db.flush()
         db.commit()
+
+    @classmethod
+    def delete_by_rule_id(cls, db: Session, rule_ids: list[int|str], user: CurrentUserModel = None):
+        """
+        根据mock规则id删除mock响应数据库操作
+        :param db: orm对象
+        :param mock_rule: mock规则对象
+        :return:
+        """
+        db.query(RuleResponse).filter(RuleResponse.rule_id.in_(rule_ids)).delete()
+        db.flush()
+        db.commit()
