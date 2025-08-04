@@ -159,12 +159,12 @@
                        :disabled="!ruleForm.ruleId || doing.saving"
                        title="保存">保存
             </el-button>
-            <el-button style="margin-left: 5px" @click="setRuleDefaultResponse" type="success"
+            <el-button style="margin-left: 5px" @click="setRuleDefaultResponse(ruleForm.response.ruleResponseId)" type="success"
                        :disabled="!ruleForm.ruleId || doing.saving"
                        title="设置为默认响应">设置默认响应
             </el-button>
             <el-button style="margin-left: 5px" @click="getConditionResponse" type="success"
-                       :disabled="!ruleForm.ruleId || doing.saving"
+                       :disabled="!ruleForm.ruleId || doing.saving || doing.loadingResponseList"
                        title="查看当前规则的响应">匹配
             </el-button>
           </template>
@@ -268,7 +268,7 @@
 
         <div class="form-actions">
           <el-button type="primary" @click="saveRule" :loading="doing.saving">保存规则</el-button>
-          <el-button @click="resetForm">重置</el-button>
+          <el-button @click="resetForm" v-if="!ruleForm.ruleId && !doing.saving">重置</el-button>
         </div>
       </el-form>
     </div>
@@ -284,10 +284,24 @@
   </el-dialog>
 
   <el-dialog v-model="isShow.dialogConditionMatchVisible" title="当前条件匹配到的响应" width="800">
+    <template #header>
+      {{ruleForm.ruleId}}--{{ruleForm.name}}
+      <el-button @click="getConditionResponse" type="primary" :disabled="doing.loadingResponseList">刷新列表</el-button>
+    </template>
     <el-table :data="matchedData">
       <el-table-column property="name" label="名称"/>
       <el-table-column property="responseTag" label="标签" width="200" />
+      <el-table-column property="priority" label="优先级" width="80">
+        <template #default="scope">
+          <el-input v-model="scope.row.priority" type="number" @blur="setResponsePriority(scope.row)" min="1" max="999" step="1" />
+        </template>
+      </el-table-column>
       <el-table-column property="isDefault" label="默认值" width="80" />
+      <el-table-column label="操作" width="120">
+        <template #default="scope">
+          <el-button type="primary" :disabled="!!scope.row.isDefault || doing.saving" @click="setRuleDefaultResponse(scope.row.ruleResponseId)">设为默认值</el-button>
+        </template>
+      </el-table-column>
     </el-table>
   </el-dialog>
 </template>
@@ -301,7 +315,7 @@ import {
   listMockRuleResponse,
   getRuleResponseDetail,
   addResponseDetail,
-  editResponseDetail, listMockRuleResponseByCondition, setDefaultResponse
+  editResponseDetail, listMockRuleResponseByCondition, setDefaultResponse, editResponsePriority
 } from "@/api/hrm/mock.js"
 import {ElMessage, ElMessageBox} from "element-plus";
 import {initMockRuleFormData} from "@/components/hrm/data-template.js";
@@ -410,7 +424,7 @@ const saveRule = async () => {
   }
 }
 
-const setRuleDefaultResponse = async () => {
+const setRuleDefaultResponse = async (responseId) => {
   ElMessageBox.confirm("确认将当前响应设置为默认响应吗？", "确认", {
     confirmButtonText: "确定",
     cancelButtonText: "取消",
@@ -420,7 +434,8 @@ const setRuleDefaultResponse = async () => {
     if (!ruleForm.response.ruleId) {
       return;
     }
-    setDefaultResponse(ruleForm.response).then((res) => {
+    let data = {"ruleResponseId": responseId, "ruleId":ruleForm.ruleId, "responseCondition": ruleForm.response.responseCondition};
+    setDefaultResponse(data).then((res) => {
       ElMessage.success("更新成功");
     }).finally(() => {
       doing.saving = false;
@@ -433,8 +448,26 @@ const setRuleDefaultResponse = async () => {
 
 }
 
+const setResponsePriority = async (row) => {
+    doing.saving = true;
+    if (!row.ruleResponseId) {
+      return;
+    }
+    let data = {"ruleResponseId": row.ruleResponseId, "priority":row.priority};
+    editResponsePriority(data).then((res) => {
+      ElMessage.success("更新成功");
+    }).finally(() => {
+      doing.saving = false;
+    }).catch((error) => {
+      ElMessage.error(error.message);
+    });
+
+
+
+}
+
 const getConditionResponse = async () => {
-  doing.saving = true;
+  doing.loadingResponseList = true;
   if (!ruleForm.response.ruleId) {
     return;
   }
@@ -442,7 +475,7 @@ const getConditionResponse = async () => {
     matchedData.value = res.data;
     isShow.dialogConditionMatchVisible = true;
   }).finally(() => {
-    doing.saving = false;
+    doing.loadingResponseList = false;
   });
 }
 

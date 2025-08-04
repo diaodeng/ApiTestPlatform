@@ -372,6 +372,10 @@ class MockResponseService:
             result = dict(is_success=False, message='当前mock规则中响应名称已存在')
         else:
             try:
+                if not cls.has_default(query_db, page_object.rule_id):
+                    page_object.is_default = 1
+                else:
+                    page_object.is_default = 0
                 add_mock_rule = MockResponseModelForDb(**page_object.model_dump(by_alias=True))
                 mock_rule_dao = MockResponseDao.add(query_db, add_mock_rule)
                 result = dict(is_success=True,
@@ -418,7 +422,8 @@ class MockResponseService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def edit_mock_response_services(cls, query_db: Session, page_object: AddMockResponseModel,
+    def edit_mock_response_services(cls, query_db: Session,
+                                    page_object: AddMockResponseModel,
                                     user: CurrentUserModel = None):
         """
         编辑mock规则信息service
@@ -438,6 +443,9 @@ class MockResponseService:
                 result = dict(is_success=False, message='mock规则名称已存在')
                 return CrudResponseModel(**result)
         try:
+            page_object.manager = user.user.user_id
+            page_object.update_by = user.user.user_name
+            page_object.dept_id = user.user.dept_id
             MockResponseDao.edit(query_db, page_object, user)
             result = dict(is_success=True, message='更新成功')
         except Exception as e:
