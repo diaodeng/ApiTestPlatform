@@ -530,7 +530,7 @@ class ConditionMatcher:
         :param conditions_target: 目标条件列表
         :return: 是否匹配
         """
-        if not conditions and not conditions_target:
+        if not conditions_target:
             return True
         conditions_target = conditions_target or []
         conditions = conditions or []
@@ -651,6 +651,10 @@ class MockResponseMatcher:
         default_response = None
         matched_response = []
         for response in self.mock_rule_response:
+            if not response.response_condition:
+                matched_response.append(response)
+                continue
+
             if self.condition_matcher.match_condition(response.response_condition):
                 matched_response.append(response)
                 if response.is_default:
