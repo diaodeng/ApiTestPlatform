@@ -38,22 +38,29 @@ async def mock_test(request: Request,
                     ):
 
     try:
-
         try:
-            body_data = await request.json()
-        except:
             try:
-                form = await request.form()
-                body_data = dict(form)
+                body_data = await request.json()
             except:
-                body_data = await request.body()
+                try:
+                    form = await request.form()
+                    body_data = dict(form)
+                except:
+                    body_data = await request.body()
 
-        body_data = body_data.decode("utf-8") if isinstance(body_data, bytes) else body_data
+            body_data = body_data.decode("utf-8") if isinstance(body_data, bytes) else body_data
+        except:
+            body_data = None
+        logger.info(f"url: {request.url}, method: {request.method}")
+        logger.info(f"request.query_params: {dict(request.query_params)}")
+        logger.info(f"request.headers: {dict(request.headers)}")
+        logger.info(f"body_data: {body_data}")
         setattr(request, "body_data", body_data)
 
         req = await RuleMatcher(request, query_db, f"/{mock_path}").match_response()
 
         if not req:
+
             method = request.method
             headers = dict(request.headers)
             query_params = dict(request.query_params)
@@ -71,7 +78,7 @@ async def mock_test(request: Request,
                 "message": "没有匹配到mock规则",
             }
             logger.info(json.dumps(req))
-            return JSONResponse(content=req, status_code=500)
+            return JSONResponse(content=req, status_code=500, media_type="application/json")
         logger.info(json.dumps(req))
         content_type = req.get("headers", {}).get("Content-Type")
         if not content_type:
@@ -95,6 +102,7 @@ async def mock_test(request: Request,
         return Response(content=req.get("content"), media_type=content_type, headers=req.get("headers"), status_code=req.get("status_code"))
     except Exception as e:
         logger.error(f"mock测试失败, path: {mock_path}, error: {e}")
+        logger.exception(e)
         return ResponseUtil.error(msg=f"mock测试失败, path: {mock_path}, error: {e}")
 
 
