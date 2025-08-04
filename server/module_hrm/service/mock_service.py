@@ -141,19 +141,19 @@ class MockService:
                 new_records = []
                 for record in original_records:
                     # 获取所有字段的字典表示（排除主键）
-                    exclude_key = ["id", "rule_id", "create_time", "update_time", "rule_response_id"]
-                    data = {c.name: getattr(record, c.name)
-                            for c in RuleResponse.__table__.columns
-                            if not c.primary_key and c.name not in exclude_key}
+                    exclude_key = ["id", "ruleId", "createTime", "updateTime", "ruleResponseId"]
+                    data = {c: record[c]
+                            for c in record
+                            if c not in exclude_key}
 
                     # 修改特定字段
-                    data['rule_id'] = new_rule.rule_id
+                    data['ruleId'] = new_rule.rule_id
                     data["manager"] = page_object.manager
-                    data["create_by"] = page_object.create_by
-                    data["update_by"] = page_object.update_by
+                    data["createBy"] = page_object.create_by
+                    data["updateBy"] = page_object.update_by
 
                     # 创建新对象
-                    new_records.append(RuleResponse(**data))
+                    new_records.append(RuleResponse(**MockResponseModelForDb(**data).model_dump(exclude_unset=True)))
 
                 # 批量添加
                 query_db.bulk_save_objects(new_records)
