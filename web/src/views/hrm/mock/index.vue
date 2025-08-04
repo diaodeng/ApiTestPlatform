@@ -34,6 +34,9 @@
           </el-button>
         </el-col>
       </template>
+      <template #rulePriority="{scope}">
+        <el-input v-model="scope.row.priority" @blur="linePriorityChange(scope.row)" type="number" max="999" step="1" min="1" />
+      </template>
       <template #ruleStatus="{scope}">
         <TagSelector v-model:selected-value="scope.row.status"
                      :options="qtr_data_status"
@@ -89,7 +92,7 @@
 </template>
 
 <script setup>
-import {getMockRule, copyMockRule, delMockRule, updateMockRule, changeMockRuleStatus} from "@/api/hrm/mock.js";
+import {getMockRule, copyMockRule, delMockRule, updateMockRule, updateMockRuleInfo} from "@/api/hrm/mock.js";
 import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import MockRuleDetailDialog from "@/components/hrm/mock/rule_detail.vue"
 import { initMockRuleFormData } from "@/components/hrm/data-template.js";
@@ -170,7 +173,15 @@ const ruleEditDialogTitle = computed(() => {
 });
 
 function lineStatusChange(selectValue, dataSource) {
-  changeMockRuleStatus({ruleId: dataSource.ruleId, status: selectValue}).then((response) => {
+  updateMockRuleInfo({ruleId: dataSource.ruleId, status: selectValue}).then((response) => {
+    ElMessage.success("修改成功");
+  }).catch(() => {
+    ElMessage.error("修改失败");
+  });
+}
+
+function linePriorityChange(row) {
+  updateMockRuleInfo({ruleId: row.ruleId, priority: row.priority}).then((response) => {
     ElMessage.success("修改成功");
   }).catch(() => {
     ElMessage.error("修改失败");

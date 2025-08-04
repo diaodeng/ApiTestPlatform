@@ -249,17 +249,17 @@ async def edit_hrm_mock_rule(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@mockController.post("/mockManager/ruleStatus",
+@mockController.post("/mockManager/changeRuleInfo",
                      dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:editRule'))])
 @log_decorator(title='mock规则管理', business_type=2)
-async def change_status(request: Request,
+async def change_rule_info(request: Request,
                         edit_module: AddMockRuleModel,
                         query_db: Session = Depends(get_db),
                         current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_module.update_by = current_user.user.user_name
         edit_module.update_time = datetime.now()
-        edit_module_result = MockService.change_rule_status(query_db, edit_module, current_user)
+        edit_module_result = MockService.change_rule_info(query_db, edit_module, current_user)
         if edit_module_result.is_success:
             logger.info(edit_module_result.message)
             return ResponseUtil.success(msg=edit_module_result.message)

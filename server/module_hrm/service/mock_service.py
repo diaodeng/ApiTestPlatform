@@ -204,7 +204,7 @@ class MockService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def change_rule_status(cls, query_db: Session, page_object: AddMockRuleModel, user: CurrentUserModel = None):
+    def change_rule_info(cls, query_db: Session, page_object: AddMockRuleModel, user: CurrentUserModel = None):
         info = MockRuleDao.get_by_id(query_db, page_object.rule_id)
         if not info:
             return CrudResponseModel(is_success=False, message='mock规则不存在')
@@ -230,8 +230,8 @@ class MockService:
             result = dict(is_success=False, message='传入mock规则id为空')
             return CrudResponseModel(**result)
         try:
+            MockResponseDao.delete_by_rule_id(query_db, page_object.rule_ids, user)
             MockRuleDao.delete(query_db, page_object, user)
-            # TODO 删除mock规则关联的响应信息以及请求信息
             result = dict(is_success=True, message='删除成功')
         except Exception as e:
             query_db.rollback()
