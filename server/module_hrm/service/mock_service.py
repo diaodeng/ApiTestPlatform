@@ -27,6 +27,7 @@ from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.utils.common import db_dd_user_info
 from utils.common_util import export_list2excel, CamelCaseUtil
 from utils.page_util import PageResponseModel
+from utils.log_util import logger
 
 
 class MockService:
@@ -330,6 +331,8 @@ class MockResponseService:
         info = query_db.query(RuleResponse).filter(RuleResponse.rule_id == rule_id)
         if name:
             info = info.filter(RuleResponse.name.like(f'%{name}%'))
+        info = info.order_by(
+            RuleResponse.priority, RuleResponse.create_time.desc(), RuleResponse.update_time.desc())
         info = info.all()
         return [MockResponseModel(**data) for data in CamelCaseUtil.transform_result(info)]
 
@@ -536,12 +539,12 @@ class ConditionMatcher:
         conditions = conditions or []
         condition_obj = {}
         for condition in conditions:
-            condition_obj[condition.key] = f"{condition.source}{condition.value}{condition.operator}{condition.data_type}"
+            condition_obj[f"{condition.source}{condition.key}"] = f"{condition.source}{condition.value}{condition.operator}{condition.data_type}"
         target_condition_obj = {}
         for condition in conditions_target:
-            target_condition_obj[condition.key] = f"{condition.source}{condition.value}{condition.operator}{condition.data_type}"
+            target_condition_obj[f"{condition.source}{condition.key}"] = f"{condition.source}{condition.value}{condition.operator}{condition.data_type}"
 
-        return all(k in target_condition_obj and target_condition_obj[k] == v for k, v in condition_obj.items())
+        return all(k in condition_obj and condition_obj[k] == v for k, v in target_condition_obj.items())
 
     def match_condition(self, conditions: List[MockConditionModel]) -> bool:
         """匹配请求条件"""
@@ -648,21 +651,26 @@ class MockResponseMatcher:
 
     async def match_request(self) -> MockResponseModel | None:
         """匹配当前请求的规则"""
-        default_response = None
         matched_response = []
+        matched_default_response = None
+        priority = 0
         for response in self.mock_rule_response:
-            if not response.response_condition:
-                matched_response.append(response)
-                continue
+            # 目标为空匹配所有条件，或者条件匹配
+            if not response.response_condition or self.condition_matcher.match_condition(response.response_condition):
+                if response.priority > priority and len(matched_response) > 0:
+                    logger.info(f"target response_condition is match, response_condition: {response}")
+                    return matched_response[0]
+                priority = response.priority
 
-            if self.condition_matcher.match_condition(response.response_condition):
+                if response.is_default:  # 优先级最高的默认值
+                    logger.info(f"target response_condition is default, response_condition: {response}")
+                    return response
+
                 matched_response.append(response)
-                if response.is_default:
-                    default_response = response
-        if default_response:
-            return default_response
+
         if len(matched_response) > 0:
             return matched_response[0]
+
         return None
 
 
