@@ -437,6 +437,9 @@ const setRuleDefaultResponse = async (responseId) => {
     }
     let data = {"ruleResponseId": responseId, "ruleId":ruleForm.ruleId, "responseCondition": ruleForm.response.responseCondition};
     setDefaultResponse(data).then((res) => {
+      if (ruleForm.response && ruleForm.response.ruleResponseId && ruleForm.response.ruleResponseId === responseId){
+        ruleForm.response.isDefault = 1;
+      }
       ElMessage.success("更新成功");
     }).finally(() => {
       doing.saving = false;
@@ -456,6 +459,9 @@ const setResponsePriority = async (row) => {
     }
     let data = {"ruleResponseId": row.ruleResponseId, "priority":row.priority};
     editResponsePriority(data).then((res) => {
+      if (ruleForm.response && ruleForm.response.ruleResponseId && ruleForm.response.ruleResponseId === row.ruleResponseId){
+        ruleForm.response.priority = row.priority;
+      }
       ElMessage.success("更新成功");
     }).finally(() => {
       doing.saving = false;
