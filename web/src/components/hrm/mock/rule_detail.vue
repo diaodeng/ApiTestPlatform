@@ -231,12 +231,12 @@
             <el-row :gutter="20">
               <el-col :span="6">
                 <el-form-item label="状态码">
-                  <el-input-number v-model="ruleForm.response.statusCode" :min="100" :max="599"/>
+                  <el-input-number v-model="ruleForm.response.statusCode" :min="0"/>
                 </el-form-item>
               </el-col>
               <el-col :span="6">
                 <el-form-item label="延迟(ms)">
-                  <el-input-number v-model="ruleForm.response.delay" :min="0" :max="10000"/>
+                  <el-input-number v-model="ruleForm.response.delay" :min="0" :max="9999999"/>
                 </el-form-item>
               </el-col>
             </el-row>
