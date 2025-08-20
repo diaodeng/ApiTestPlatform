@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 
 from sqlalchemy.orm import Session
@@ -50,6 +51,13 @@ class ReportService:
         avg_time = 0
 
         for item in result:
+            new_detail_data = ""
+            run_detail_dict = json.loads(item["runDetail"])
+            for step in run_detail_dict.get("teststeps", []):
+                new_detail_data += "\n".join(step.get("result", {}).get("logs", {}).values())
+
+            item["runDetail"] = new_detail_data
+
             run_time = round(item["runDuration"], 2)
             if run_time > max_time:
                 max_time = run_time
@@ -85,12 +93,16 @@ class ReportService:
         curren_dir = os.path.dirname(__file__)
         template_dir = os.path.join(os.path.dirname(curren_dir), 'templates')
 
+        report = ReportDao.get_by_id(query_db, query_info.report_id)
+
 
         html_content = TemplateHandler(template_dir).generate_html(
             template_file="report.html",
             data={
-                "title": "数据报告",
+                "title": f"{report.report_name}",
                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "report_name": report.report_name,
+                "start_time": report.start_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "data": result,
                 "info": info,
             })

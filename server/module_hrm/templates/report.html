@@ -83,7 +83,7 @@
             background: white;
             border-radius: 10px;
             padding: 20px;
-            margin-bottom: 30px;
+            margin-bottom: 5px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
             display: flex;
             flex-wrap: wrap;
@@ -155,10 +155,11 @@
 
         .search-results-info {
             background: rgba(52, 152, 219, 0.1);
-            padding: 12px 20px;
+            padding: 5px 20px;
             border-radius: 8px;
             font-size: 15px;
-            margin-top: 15px;
+            margin-top: 5px;
+            margin-bottom: 30px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -293,6 +294,7 @@
             padding: 15px;
             background-color: #f8f9fa;
             border-top: 1px solid #eee;
+            display: grid;
         }
 
         .detail-content pre {
@@ -334,7 +336,7 @@
             border-radius: 30px;
             text-decoration: none;
             font-weight: 600;
-            margin-top: 20px;
+            /*margin-top: 20px;*/
             transition: all 0.3s ease;
             border: none;
             cursor: pointer;
@@ -406,7 +408,7 @@
             <div class="logo">
                 <i class="fas fa-laptop-code"></i>QTR测试平台
             </div>
-            <h1 class="report-title">{{ title }}</h1>
+            <h1 class="report-title">{{ report_name }}</h1>
             <div class="report-meta">
                 <div class="meta-item"><i class="fas fa-calendar"></i> 生成日期: {{ timestamp }}</div>
 <!--                <div class="meta-item" style="display: none"><i class="fas fa-user"></i> 测试负责人: 张工程师</div>-->
@@ -453,7 +455,7 @@
         <div class="search-results-info">
             <div>
                 <i class="fas fa-info-circle"></i>
-                <span id="results-count">正在加载数据...</span>
+                <span id="results-count"></span>
             </div>
             <div>
                 <button id="reset-search" class="export-btn" style="padding: 8px 15px; font-size: 14px;">
@@ -836,14 +838,16 @@
         function filterTableData() {
             const allCaseRow = document.querySelectorAll("tr.case-row");
             // 过滤用例
-            const filteredCases = allCaseRow.filter(testCase => {
+            const filteredCases = Array.from(allCaseRow).filter(testCase => {
                 const caseName = testCase.querySelector("td.case-row-name").textContent;
-                const caseStatus = testCase.querySelector("td.case-row-status").textContent;
+                const caseStatus = testCase.querySelector("td.case-row-status").textContent.trim();
 
                 // 名称搜索过滤
                 let nameMatch = false;
 
-                if (currentSearchTerm){
+                if (currentSearchTerm === undefined && currentSearchTerm === ''){
+                    nameMatch = true;
+                }else {
                     nameMatch = caseName.toLowerCase().includes(currentSearchTerm.toLowerCase());
                 }
 
@@ -868,7 +872,7 @@
                 }
 
                 if (nameMatch && statusMatch){
-                    testCase.style.display = 'block';
+                    testCase.style.display = '';
                 }else {
                     testCase.style.display = 'none';
                 }
@@ -882,7 +886,7 @@
             }
 
             // 更新结果计数
-            resultsCount.innerHTML = `找到 ${filteredCases.length} 个测试用例 (共 ${testCases.length} 个用例)`;
+            resultsCount.innerHTML = `找到 ${filteredCases.length} 个测试用例 (共 ${Array.from(allCaseRow).length} 个用例)`;
 
             // if (filteredCases.length === 0) {
             //     testCasesTable.innerHTML = `
@@ -948,6 +952,7 @@
             setupDetailToggles();
             setupStatusFilters();
             setupSearch();
+            filterTableData();
             // setupPagination();
         };
     </script>
