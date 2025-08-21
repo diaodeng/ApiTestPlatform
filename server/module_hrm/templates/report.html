@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+
     <style>
         :root {
             --primary: #3498db;
@@ -579,7 +582,7 @@
                                 <td colspan="6">
                                     <div class="detail-content">
                                         <h4>用例详情:{{line.runName}}</h4>
-                                        <pre>{{line.runDetail}}</pre>
+                                        <pre logdata="{{line.runDetail}}" log-is-compressed="true"></pre>
                                     </div>
                                 </td>
                             </tr>
@@ -631,6 +634,15 @@
         let currentSearchTerm = '';
         let currentStatusFilter = 'all';
 
+        function decompressText(compressedText) {
+            let strData = atob(compressedText);
+            let charData = strData.split('').map(function (x) {
+                return x.charCodeAt(0);
+            });
+            let binData = new Uint8Array(charData);
+            const data = pako.inflate(binData, {"to": "string"});
+            return data;
+        }
 
         // 初始化图表
         function initCharts() {
@@ -791,6 +803,11 @@
                 if (e.target.classList.contains('toggle-detail')) {
                     const caseId = e.target.getAttribute('data-id');
                     const detailRow = document.getElementById(`detail-${caseId}`);
+                    const preElement = detailRow.querySelector("pre");
+                    if (preElement.getAttribute("log-is-compressed") === "true"){
+                        preElement.textContent = decompressText(preElement.getAttribute("logdata"));
+                        preElement.setAttribute("log-is-compressed", "false");
+                    }
 
                     if (detailRow.style.display === 'none') {
                         detailRow.style.display = 'table-row';
