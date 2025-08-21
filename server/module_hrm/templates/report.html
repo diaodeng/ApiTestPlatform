@@ -575,13 +575,13 @@
                                 <td>{{ line.runDuration }}</td>
 <!--                                <td>{{ line.manager }}</td>-->
                                 <td>
-                                    <span class="toggle-detail" data-id="{{line.runId}}">查看详情</span>
+                                    <span class="toggle-detail" data-id="{{line.detailId}}">查看详情</span>
                                 </td>
                             </tr>
-                            <tr class="detail-row" style="display: none" id="detail-{{line.runId}}">
+                            <tr class="detail-row" style="display: none" id="detail-{{line.detailId}}">
                                 <td colspan="6">
                                     <div class="detail-content">
-                                        <h4>用例详情:{{line.runName}}</h4>
+                                        <h4>用例详情:{{line.runName}} 详情ID：{{line.detailId}}</h4>
                                         <pre logdata="{{line.runDetail}}" log-is-compressed="true"></pre>
                                     </div>
                                 </td>
