@@ -12,7 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 from module_hrm.entity.vo.report_vo import ReportQueryModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel
 from module_hrm.enums.enums import CaseRunStatus
-from module_hrm.utils.util import format_duration
+from module_hrm.utils.util import format_duration, decompress_text, compress_text
 from utils.jinja_template import TemplateHandler
 
 
@@ -54,9 +54,16 @@ class ReportService:
             new_detail_data = ""
             run_detail_dict = json.loads(item["runDetail"])
             for step in run_detail_dict.get("teststeps", []):
-                new_detail_data += "\n".join(step.get("result", {}).get("logs", {}).values())
+                logs = step.get("result", {}).get("logs", {})
+                if type(logs) is str:
+                    try:
+                        logs = json.loads(decompress_text(logs))
+                    except:
+                        logs = {}
+                new_detail_data += "\n".join(logs.values())
 
-            item["runDetail"] = new_detail_data
+
+            item["runDetail"] = compress_text(new_detail_data)
 
             run_time = round(item["runDuration"], 2)
             if run_time > max_time:
