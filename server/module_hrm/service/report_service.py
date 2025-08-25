@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 
 from sqlalchemy.orm import Session
@@ -11,7 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 from module_hrm.entity.vo.report_vo import ReportQueryModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel
 from module_hrm.enums.enums import CaseRunStatus
-from module_hrm.utils.util import format_duration
+from module_hrm.utils.util import format_duration, decompress_text, compress_text
 from utils.jinja_template import TemplateHandler
 
 
@@ -50,6 +51,20 @@ class ReportService:
         avg_time = 0
 
         for item in result:
+            new_detail_data = ""
+            run_detail_dict = json.loads(item["runDetail"])
+            for step in run_detail_dict.get("teststeps", []):
+                logs = step.get("result", {}).get("logs", {})
+                if type(logs) is str:
+                    try:
+                        logs = json.loads(decompress_text(logs))
+                    except:
+                        logs = {}
+                new_detail_data += "\n".join(logs.values())
+
+
+            item["runDetail"] = compress_text(new_detail_data)
+
             run_time = round(item["runDuration"], 2)
             if run_time > max_time:
                 max_time = run_time
@@ -85,12 +100,16 @@ class ReportService:
         curren_dir = os.path.dirname(__file__)
         template_dir = os.path.join(os.path.dirname(curren_dir), 'templates')
 
+        report = ReportDao.get_by_id(query_db, query_info.report_id)
+
 
         html_content = TemplateHandler(template_dir).generate_html(
             template_file="report.html",
             data={
-                "title": "数据报告",
+                "title": f"{report.report_name}",
                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "report_name": report.report_name,
+                "start_time": report.start_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "data": result,
                 "info": info,
             })

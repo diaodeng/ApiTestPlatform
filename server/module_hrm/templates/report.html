@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+
     <style>
         :root {
             --primary: #3498db;
@@ -76,6 +79,95 @@
             padding: 8px 20px;
             border-radius: 20px;
             font-size: 14px;
+        }
+
+
+        .search-controls {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 5px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .search-group {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .search-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+        }
+
+        .status-filters {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .status-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 500;
+            transition: all 0.3s;
+            user-select: none;
+        }
+
+        .filter-badge {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+        }
+
+        .status-success-bg { background-color: var(--success); }
+        .status-failed-bg { background-color: var(--danger); }
+        .status-warning-bg { background-color: var(--warning); }
+        .status-skipped-bg { background-color: var(--info); }
+
+        .status-filter.active {
+            background-color: rgba(52, 152, 219, 0.1);
+            color: var(--primary);
+        }
+
+        .search-results-info {
+            background: rgba(52, 152, 219, 0.1);
+            padding: 5px 20px;
+            border-radius: 8px;
+            font-size: 15px;
+            margin-top: 5px;
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
         }
 
         .dashboard {
@@ -197,6 +289,39 @@
         .badge-warning { background-color: rgba(243, 156, 18, 0.15); color: var(--warning); }
         .badge-skipped { background-color: rgba(155, 89, 182, 0.15); color: var(--info); }
 
+        .detail-row {
+            background-color: #fafafa;
+        }
+
+        .detail-content {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #eee;
+            display: grid;
+        }
+
+        .detail-content pre {
+            white-space: pre-wrap;
+            font-family: monospace;
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .toggle-detail {
+            cursor: pointer;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 30px;
+            color: var(--gray);
+        }
+
         .footer {
             text-align: center;
             padding: 20px;
@@ -214,7 +339,7 @@
             border-radius: 30px;
             text-decoration: none;
             font-weight: 600;
-            margin-top: 20px;
+            /*margin-top: 20px;*/
             transition: all 0.3s ease;
             border: none;
             cursor: pointer;
@@ -227,6 +352,32 @@
             box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
         }
 
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray);
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            gap: 10px;
+        }
+
+        .pagination button {
+            padding: 8px 16px;
+            background: var(--light);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .pagination button.active {
+            background: var(--primary);
+            color: white;
+        }
+
         @media (max-width: 768px) {
             .dashboard {
                 grid-template-columns: 1fr;
@@ -237,6 +388,20 @@
                 align-items: center;
                 gap: 10px;
             }
+
+            .search-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-group {
+                min-width: 100%;
+            }
+
+            th, td {
+                padding: 8px 10px;
+                font-size: 14px;
+            }
         }
     </style>
 </head>
@@ -246,16 +411,62 @@
             <div class="logo">
                 <i class="fas fa-laptop-code"></i>QTR测试平台
             </div>
-            <h1 class="report-title">{{ title }}</h1>
+            <h1 class="report-title">{{ report_name }}</h1>
             <div class="report-meta">
                 <div class="meta-item"><i class="fas fa-calendar"></i> 生成日期: {{ timestamp }}</div>
-                <div class="meta-item" style="display: none"><i class="fas fa-user"></i> 测试负责人: 张工程师</div>
+<!--                <div class="meta-item" style="display: none"><i class="fas fa-user"></i> 测试负责人: 张工程师</div>-->
 <!--                <div class="meta-item"><i class="fas fa-tag"></i> 版本: v2.5.0</div>-->
             </div>
         </div>
     </header>
 
     <div class="container">
+        <!-- 搜索控制栏 -->
+        <div class="search-controls">
+            <div class="search-group">
+                <label for="search-input"><i class="fas fa-search"></i> 搜索用例名称</label>
+                <input type="text" id="search-input" class="search-input" placeholder="输入用例名称关键字...">
+            </div>
+
+            <div>
+                <label>状态筛选</label>
+                <div class="status-filters">
+                    <div class="status-filter active" data-status="all">
+                        <span class="filter-badge" style="background: linear-gradient(135deg, #2ecc71, #3498db);"></span>
+                        <span>全部状态</span>
+                    </div>
+                    <div class="status-filter" data-status="passed">
+                        <span class="filter-badge status-success-bg"></span>
+                        <span>通过</span>
+                    </div>
+                    <div class="status-filter" data-status="failed">
+                        <span class="filter-badge status-failed-bg"></span>
+                        <span>失败</span>
+                    </div>
+                    <div class="status-filter" data-status="blocked">
+                        <span class="filter-badge status-warning-bg"></span>
+                        <span>阻塞</span>
+                    </div>
+                    <div class="status-filter" data-status="skipped">
+                        <span class="filter-badge status-skipped-bg"></span>
+                        <span>跳过</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="search-results-info">
+            <div>
+                <i class="fas fa-info-circle"></i>
+                <span id="results-count"></span>
+            </div>
+            <div>
+                <button id="reset-search" class="export-btn" style="padding: 8px 15px; font-size: 14px;">
+                    <i class="fas fa-sync-alt"></i> 重置搜索
+                </button>
+            </div>
+        </div>
+
         <div class="dashboard">
             <div class="card">
                 <div class="card-header">
@@ -328,6 +539,12 @@
                 <i class="fas fa-table"></i> 详细测试结果
             </div>
             <div class="card-body">
+                <div class="pagination" style="display: none">
+                    <button id="prev-page">上一页</button>
+                    <span id="page-info">第 1 页，共 109 页</span>
+                    <button id="next-page">下一页</button>
+                </div>
+
                 <table>
                     <thead>
                         <tr>
@@ -335,15 +552,16 @@
                             <th>用例名称</th>
                             <th>状态</th>
                             <th>执行时间</th>
-                            <th>执行人</th>
+<!--                            <th>执行人</th>-->
+                            <th width="150px">操作</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="case-list">
                         {% for line in data %}
-                            <tr>
+                            <tr class="case-row">
                                 <td>{{ line.runId }}</td>
-                                <td>{{ line.runName }}</td>
-                                <td>
+                                <td class="case-row-name">{{ line.runName }}</td>
+                                <td class="case-row-status">
                                     {% if line.status == 1 %}
                                     <span class="status-badge badge-success">通过</span>
                                     {% elif line.status == 2 %}
@@ -355,12 +573,29 @@
                                     {% endif %}
                                 </td>
                                 <td>{{ line.runDuration }}</td>
-                                <td>{{ line.manager }}</td>
+<!--                                <td>{{ line.manager }}</td>-->
+                                <td>
+                                    <span class="toggle-detail" data-id="{{line.detailId}}">查看详情</span>
+                                </td>
+                            </tr>
+                            <tr class="detail-row" style="display: none" id="detail-{{line.detailId}}">
+                                <td colspan="6">
+                                    <div class="detail-content">
+                                        <h4>用例详情:{{line.runName}} 详情ID：{{line.detailId}}</h4>
+                                        <pre logdata="{{line.runDetail}}" log-is-compressed="true"></pre>
+                                    </div>
+                                </td>
                             </tr>
                         {% endfor %}
 
                     </tbody>
                 </table>
+
+                <div class="pagination" style="display: none">
+                    <button id="prev-page-bottom">上一页</button>
+                    <span id="page-info-bottom">第 1 页，共 109 页</span>
+                    <button id="next-page-bottom">下一页</button>
+                </div>
             </div>
         </div>
 
@@ -377,96 +612,366 @@
     </div>
 
     <script>
-        // 测试结果饼图
-        const resultsCtx = document.getElementById('resultsChart').getContext('2d');
-        const resultsChart = new Chart(resultsCtx, {
-            type: 'doughnut',
-            data: {
-                labels: ['通过', '失败', '阻塞', '跳过'],
-                datasets: [{
-                    data: [142, 8, 5, 15],
-                    backgroundColor: [
-                        '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'
-                    ],
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            padding: 20,
-                            usePointStyle: true,
-                            pointStyle: 'circle'
-                        }
-                    }
-                }
-            }
-        });
+        // 分页配置
+        // const config = {
+        //     currentPage: 1,
+        //     itemsPerPage: 10,
+        //     totalPages: Math.ceil(data.length / 10)
+        // };
 
-        // 执行时间柱状图
-        const timeCtx = document.getElementById('timeChart').getContext('2d');
-        const timeChart = new Chart(timeCtx, {
-            type: 'bar',
-            data: {
-                labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
-                datasets: [{
-                    label: '执行时间 (分钟)',
-                    data: [12.5, 25.3, 18.2, 15.7, 9.8, 6.5],
-                    backgroundColor: '#3498db',
-                    borderRadius: 5
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: '分钟'
-                        }
-                    }
-                }
-            }
-        });
+        // DOM元素
+        const caseList = document.getElementById('case-list');
+        const pageInfo = document.getElementById('page-info');
+        const pageInfoBottom = document.getElementById('page-info-bottom');
+        const dataSize = document.getElementById('data-size');
 
-        // 模块通过率水平条形图
-        const moduleCtx = document.getElementById('moduleChart').getContext('2d');
-        const moduleChart = new Chart(moduleCtx, {
-            type: 'bar',
-            data: {
-                labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
-                datasets: [{
-                    label: '通过率 (%)',
-                    data: [98, 87, 92, 85, 96, 100],
-                    backgroundColor: [
-                        '#2ecc71', '#f39c12', '#2ecc71', '#f39c12', '#2ecc71', '#2ecc71'
-                    ],
-                    borderRadius: 5
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        max: 100,
-                        ticks: {
-                            callback: function(value) {
-                                return value + '%';
+        const searchInput = document.getElementById('search-input');
+        const statusFilters = document.querySelectorAll('.status-filter');
+        const resultsCount = document.getElementById('results-count');
+        const resetSearchBtn = document.getElementById('reset-search');
+
+        // 当前过滤状态
+        let currentSearchTerm = '';
+        let currentStatusFilter = 'all';
+
+        function decompressText(compressedText) {
+            let strData = atob(compressedText);
+            let charData = strData.split('').map(function (x) {
+                return x.charCodeAt(0);
+            });
+            let binData = new Uint8Array(charData);
+            const data = pako.inflate(binData, {"to": "string"});
+            return data;
+        }
+
+        // 初始化图表
+        function initCharts() {
+            // 测试结果饼图
+            const resultsCtx = document.getElementById('resultsChart').getContext('2d');
+            const resultsChart = new Chart(resultsCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['通过', '失败', '阻塞', '跳过'],
+                    datasets: [{
+                        data: [142, 8, 5, 15],
+                        backgroundColor: [
+                            '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 20,
+                                usePointStyle: true,
+                                pointStyle: 'circle'
                             }
                         }
                     }
                 }
+            });
+
+            // 执行时间柱状图
+            const timeCtx = document.getElementById('timeChart').getContext('2d');
+            const timeChart = new Chart(timeCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                    datasets: [{
+                        label: '执行时间 (分钟)',
+                        data: [12.5, 25.3, 18.2, 15.7, 9.8, 6.5],
+                        backgroundColor: '#3498db',
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '分钟'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 模块通过率水平条形图
+            const moduleCtx = document.getElementById('moduleChart').getContext('2d');
+            const moduleChart = new Chart(moduleCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                    datasets: [{
+                        label: '通过率 (%)',
+                        data: [98, 87, 92, 85, 96, 100],
+                        backgroundColor: [
+                            '#2ecc71', '#f39c12', '#2ecc71', '#f39c12', '#2ecc71', '#2ecc71'
+                        ],
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 渲染测试用例列表
+        function renderCases() {
+            caseList.innerHTML = '';
+
+            const startIndex = (config.currentPage - 1) * config.itemsPerPage;
+            const endIndex = startIndex + config.itemsPerPage;
+            const pageCases = testCases.slice(startIndex, endIndex);
+
+            // 计算数据大小（模拟）
+            const size = (JSON.stringify(pageCases).length / 1024).toFixed(2);
+            dataSize.textContent = size + ' KB';
+
+            pageCases.forEach((testCase, index) => {
+                const row = document.createElement('tr');
+
+                // 状态标记
+                let badgeClass = '';
+                switch(testCase.status) {
+                    case '通过': badgeClass = 'badge-success'; break;
+                    case '失败': badgeClass = 'badge-failed'; break;
+                    case '阻塞': badgeClass = 'badge-warning'; break;
+                    case '跳过': badgeClass = 'badge-skipped'; break;
+                }
+
+                row.innerHTML = `
+                    <td>${testCase.id}</td>
+                    <td>${testCase.module}</td>
+                    <td>${testCase.name}</td>
+                    <td><span class="status-badge ${badgeClass}">${testCase.status}</span></td>
+                    <td>${testCase.execTime}</td>
+                    <td>
+                        <span class="toggle-detail" data-id="${testCase.id}">查看详情</span>
+                    </td>
+                `;
+
+                caseList.appendChild(row);
+
+                // 添加详情行（初始隐藏）
+                const detailRow = document.createElement('tr');
+                detailRow.className = 'detail-row';
+                detailRow.style.display = 'none';
+                detailRow.id = `detail-${testCase.id}`;
+                detailRow.innerHTML = `
+                    <td colspan="6">
+                        <div class="detail-content">
+                            <h4>用例详情: ${testCase.name}</h4>
+                            <pre>${testCase.details}</pre>
+                        </div>
+                    </td>
+                `;
+
+                caseList.appendChild(detailRow);
+            });
+
+            // 更新分页信息
+            pageInfo.textContent = `第 ${config.currentPage} 页，共 ${config.totalPages} 页`;
+            pageInfoBottom.textContent = `第 ${config.currentPage} 页，共 ${config.totalPages} 页`;
+        }
+
+        // 切换详情显示
+        function setupDetailToggles() {
+            caseList.addEventListener('click', function(e) {
+                if (e.target.classList.contains('toggle-detail')) {
+                    const caseId = e.target.getAttribute('data-id');
+                    const detailRow = document.getElementById(`detail-${caseId}`);
+                    const preElement = detailRow.querySelector("pre");
+                    if (preElement.getAttribute("log-is-compressed") === "true"){
+                        preElement.textContent = decompressText(preElement.getAttribute("logdata"));
+                        preElement.setAttribute("log-is-compressed", "false");
+                    }
+
+                    if (detailRow.style.display === 'none') {
+                        detailRow.style.display = 'table-row';
+                        e.target.textContent = '隐藏详情';
+                    } else {
+                        detailRow.style.display = 'none';
+                        e.target.textContent = '查看详情';
+                    }
+                }
+            });
+        }
+
+        // 分页控制
+        function setupPagination() {
+            document.getElementById('prev-page').addEventListener('click', function() {
+                if (config.currentPage > 1) {
+                    config.currentPage--;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('next-page').addEventListener('click', function() {
+                if (config.currentPage < config.totalPages) {
+                    config.currentPage++;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('prev-page-bottom').addEventListener('click', function() {
+                if (config.currentPage > 1) {
+                    config.currentPage--;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('next-page-bottom').addEventListener('click', function() {
+                if (config.currentPage < config.totalPages) {
+                    config.currentPage++;
+                    renderCases();
+                }
+            });
+        }
+
+        // 过滤表格数据
+        function filterTableData() {
+            const allCaseRow = document.querySelectorAll("tr.case-row");
+            // 过滤用例
+            const filteredCases = Array.from(allCaseRow).filter(testCase => {
+                const caseName = testCase.querySelector("td.case-row-name").textContent;
+                const caseStatus = testCase.querySelector("td.case-row-status").textContent.trim();
+
+                // 名称搜索过滤
+                let nameMatch = false;
+
+                if (currentSearchTerm === undefined && currentSearchTerm === ''){
+                    nameMatch = true;
+                }else {
+                    nameMatch = caseName.toLowerCase().includes(currentSearchTerm.toLowerCase());
+                }
+
+                // 状态过滤
+                let statusMatch = false;
+                switch(currentStatusFilter) {
+                    case 'all':
+                        statusMatch = true;
+                        break;
+                    case 'passed':
+                        statusMatch = caseStatus === '通过';
+                        break;
+                    case 'failed':
+                        statusMatch = caseStatus === '失败';
+                        break;
+                    case 'blocked':
+                        statusMatch = caseStatus === '阻塞';
+                        break;
+                    case 'skipped':
+                        statusMatch = caseStatus === '跳过';
+                        break;
+                }
+
+                if (nameMatch && statusMatch){
+                    testCase.style.display = '';
+                }else {
+                    testCase.style.display = 'none';
+                }
+
+                return nameMatch && statusMatch;
+            });
+
+            const detailRows = document.querySelectorAll('tr.detail-row[style*="display: table-row"]');
+            for (let detailRow of detailRows) {
+                detailRow.style.display = "none";
             }
-        });
+
+            // 更新结果计数
+            resultsCount.innerHTML = `找到 ${filteredCases.length} 个测试用例 (共 ${Array.from(allCaseRow).length} 个用例)`;
+
+            // if (filteredCases.length === 0) {
+            //     testCasesTable.innerHTML = `
+            //         <tr class="no-results">
+            //             <td colspan="6">
+            //                 <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px;"></i>
+            //                 <h3>没有找到匹配的测试用例</h3>
+            //                 <p>请尝试其他搜索关键词或状态筛选</p>
+            //             </td>
+            //         </tr>
+            //     `;
+            //     return;
+            // }
+        }
+
+        // 设置状态过滤器
+        function setupStatusFilters() {
+            statusFilters.forEach(filter => {
+                filter.addEventListener('click', function() {
+                    // 移除所有active类
+                    statusFilters.forEach(f => f.classList.remove('active'));
+
+                    // 添加active类到当前点击的过滤器
+                    this.classList.add('active');
+
+                    // 更新当前状态过滤器
+                    currentStatusFilter = this.getAttribute('data-status');
+
+                    // 重新渲染用例
+                    filterTableData();
+                });
+            });
+        }
+
+        // 设置搜索功能
+        function setupSearch() {
+            // 搜索框输入事件
+            searchInput.addEventListener('input', function() {
+                currentSearchTerm = this.value;
+                filterTableData();
+            });
+
+            // 重置搜索按钮
+            resetSearchBtn.addEventListener('click', function() {
+                // 重置搜索状态
+                currentSearchTerm = '';
+                currentStatusFilter = 'all';
+
+                // 重置UI
+                searchInput.value = '';
+                statusFilters.forEach(f => f.classList.remove('active'));
+                document.querySelector('.status-filter[data-status="all"]').classList.add('active');
+
+                // 重新渲染
+                filterTableData();
+            });
+        }
+
+        // 初始化
+        window.onload = function() {
+            // initCharts();
+            // renderCases();
+            setupDetailToggles();
+            setupStatusFilters();
+            setupSearch();
+            filterTableData();
+            // setupPagination();
+        };
     </script>
 </body>
 </html>
