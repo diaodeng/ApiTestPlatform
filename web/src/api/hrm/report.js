@@ -24,3 +24,28 @@ export function detail(detailId) {
     method: 'GET'
   })
 }
+
+export function countInfo(days) {
+  return request({
+    url: `/hrm/common/countInfo`,
+    method: 'GET'
+  })
+}
+
+export function downloadHtml(query) {
+  return request({
+    url: `/hrm/report/export/html`,
+    method: 'GET',
+    params: query,
+    responseType: 'blob'
+  })
+}
+
+export function downloadPdf(query) {
+  return request({
+    url: `/hrm/report/export/pdf`,
+    method: 'GET',
+    params: query,
+    responseType: 'blob'
+  })
+}

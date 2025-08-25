@@ -2,7 +2,7 @@ from module_admin.dao.job_dao import *
 from module_admin.service.dict_service import Request, DictDataService
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
-from config.get_scheduler import SchedulerUtil
+from config.get_scheduler import sys_scheduler_util as SchedulerUtil
 
 
 class JobService:
@@ -57,15 +57,8 @@ class JobService:
         :return: 编辑定时任务校验结果
         """
         edit_job = page_object.model_dump(exclude_unset=True)
-        if page_object.type == 'status':
-            del edit_job['type']
         job_info = cls.job_detail_services(query_db, edit_job.get('job_id'))
         if job_info:
-            if page_object.type != 'status' and (job_info.job_name != page_object.job_name or job_info.job_group != page_object.job_group or job_info.invoke_target != page_object.invoke_target or job_info.cron_expression != page_object.cron_expression):
-                job = JobDao.get_job_detail_by_info(query_db, page_object)
-                if job:
-                    result = dict(is_success=False, message='定时任务已存在')
-                    return CrudResponseModel(**result)
             try:
                 JobDao.edit_job_dao(query_db, edit_job)
                 query_job = SchedulerUtil.get_scheduler_job(job_id=edit_job.get('job_id'))
@@ -117,6 +110,7 @@ class JobService:
             try:
                 for job_id in job_id_list:
                     JobDao.delete_job_dao(query_db, JobModel(jobId=job_id))
+                    SchedulerUtil.remove_scheduler_job(job_id)
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
             except Exception as e:
@@ -168,11 +162,14 @@ class JobService:
         }
 
         data = job_list
-        job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis, dict_type='sys_job_group')
+        job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
+                                                                                        dict_type='sys_job_group')
         job_group_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in job_group_list]
         job_group_option_dict = {item.get('value'): item for item in job_group_option}
-        job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis, dict_type='sys_job_executor')
-        job_executor_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in job_executor_list]
+        job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
+                                                                                           dict_type='sys_job_executor')
+        job_executor_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in
+                               job_executor_list]
         job_executor_option_dict = {item.get('value'): item for item in job_executor_option}
 
         for item in data:
@@ -194,7 +191,8 @@ class JobService:
                 item['concurrent'] = '允许'
             else:
                 item['concurrent'] = '禁止'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in data]
+        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
+                    data]
         binary_data = export_list2excel(new_data)
 
         return binary_data

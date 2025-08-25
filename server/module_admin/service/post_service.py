@@ -1,3 +1,5 @@
+from typing import List
+from module_admin.entity.vo.post_vo import DeletePostModel
 from module_admin.dao.post_dao import *
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil

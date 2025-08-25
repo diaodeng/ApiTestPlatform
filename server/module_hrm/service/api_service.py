@@ -1,8 +1,12 @@
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
-from module_hrm.dao.api_dao import ApiOperation
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
+
 from module_hrm.entity.do.api_do import ApiInfo
-from module_hrm.entity.vo.api_vo import ApiQueryModel, ApiPageQueryModel
+from module_hrm.entity.vo.api_vo import ApiPageQueryModel
 from module_hrm.enums.enums import DataType
 
 
@@ -48,7 +52,7 @@ def api_dir_tree(request):
     return all_tree_data
 
 
-def api_tree(query_db: Session, query_info: ApiPageQueryModel):
+def api_tree(db: Session, query_info: ApiPageQueryModel, data_scope_sql:str='true'):
     """
     这个实现从根目录开始
     """
@@ -102,13 +106,13 @@ def api_tree(query_db: Session, query_info: ApiPageQueryModel):
                 data_handle(node_data, childrens, new_not_root_nodes_data)
 
     root_node = {"children": []}
-    root_nodes = query_db.query(ApiInfo).filter(ApiInfo.parent_id == None)
+    root_nodes = db.query(ApiInfo).filter(ApiInfo.parent_id == None, eval(data_scope_sql))
     if query_info.only_self:
         root_nodes = root_nodes.filter(ApiInfo.manager == query_info.manager)
     root_nodes = root_nodes.order_by(desc(ApiInfo.create_time)).all()
     root_nodes = [node_handle(root_node) for root_node in root_nodes]
 
-    not_root_nodes_obj = query_db.query(ApiInfo).filter(ApiInfo.parent_id != None)
+    not_root_nodes_obj = db.query(ApiInfo).filter(ApiInfo.parent_id != None, eval(data_scope_sql))
     if query_info.only_self:
         not_root_nodes_obj = not_root_nodes_obj.filter(ApiInfo.manager == query_info.manager)
     not_root_nodes_obj = not_root_nodes_obj.order_by(desc(ApiInfo.create_time)).all()

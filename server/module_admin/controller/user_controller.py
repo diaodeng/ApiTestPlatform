@@ -7,7 +7,7 @@ from module_admin.service.user_service import *
 from module_admin.service.dept_service import DeptService
 from utils.page_util import PageResponseModel
 from utils.response_util import *
-from utils.log_util import *
+from utils.log_util import logger
 from utils.common_util import bytes2file_response
 from utils.upload_util import UploadUtil
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth

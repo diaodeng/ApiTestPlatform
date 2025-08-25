@@ -22,6 +22,7 @@ class JobModel(BaseModel):
     misfire_policy: Optional[str] = None
     concurrent: Optional[str] = None
     status: Optional[str] = None
+    run_status: Optional[int] = None
     create_by: Optional[str] = None
     create_time: Optional[datetime] = None
     update_by: Optional[str] = None
@@ -71,7 +72,7 @@ class EditJobModel(JobModel):
     """
     编辑定时任务模型
     """
-    type: Optional[str] = None
+    pass
 
 
 class DeleteJobModel(BaseModel):

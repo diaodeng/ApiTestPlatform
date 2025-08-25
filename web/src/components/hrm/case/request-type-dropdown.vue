@@ -13,7 +13,7 @@ const props = defineProps(["indexKey"]);
   <el-dropdown trigger="click">
     <template #default>
       <slot name="default">
-        <el-icon :size="15" color="green">
+        <el-icon :size="15" color="green" @click.stop>
           <CirclePlus></CirclePlus>
         </el-icon>
       </slot>

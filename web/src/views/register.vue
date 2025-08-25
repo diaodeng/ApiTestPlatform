@@ -1,13 +1,16 @@
 <template>
   <div class="register">
     <el-form ref="registerRef" :model="registerForm" :rules="registerRules" class="register-form">
-      <h3 class="title">QTestRunner</h3>
+      <div class="title-container">
+        <img src="../assets/images/login-logo.png" alt="" style="width: 210px; margin-bottom: 10px; align-self: center;">
+        <h3 class="title">T-Runner 自动化测试平台</h3>
+      </div>
       <el-form-item prop="username">
-        <el-input 
-          v-model="registerForm.username" 
-          type="text" 
-          size="large" 
-          auto-complete="off" 
+        <el-input
+          v-model="registerForm.username"
+          type="text"
+          size="large"
+          auto-complete="off"
           placeholder="账号"
         >
           <template #prefix><svg-icon icon-class="user" class="el-input__icon input-icon" /></template>
@@ -17,7 +20,7 @@
         <el-input
           v-model="registerForm.password"
           type="password"
-          size="large" 
+          size="large"
           auto-complete="off"
           placeholder="密码"
           @keyup.enter="handleRegister"
@@ -29,7 +32,7 @@
         <el-input
           v-model="registerForm.confirmPassword"
           type="password"
-          size="large" 
+          size="large"
           auto-complete="off"
           placeholder="确认密码"
           @keyup.enter="handleRegister"
@@ -39,11 +42,11 @@
       </el-form-item>
       <el-form-item prop="code" v-if="captchaEnabled">
         <el-input
-          size="large" 
+          size="large"
           v-model="registerForm.code"
           auto-complete="off"
           placeholder="验证码"
-          style="width: 63%"
+          style="width: 67%"
           @keyup.enter="handleRegister"
         >
           <template #prefix><svg-icon icon-class="validCode" class="el-input__icon input-icon" /></template>
@@ -55,9 +58,9 @@
       <el-form-item style="width:100%;">
         <el-button
           :loading="loading"
-          size="large" 
+          size="large"
           type="primary"
-          style="width:100%;"
+          class="hover-button"
           @click.prevent="handleRegister"
         >
           <span v-if="!loading">注 册</span>
@@ -70,7 +73,7 @@
     </el-form>
     <!--  底部  -->
     <div class="el-register-footer">
-      <span>Copyright © 2024 insistence.tech All Rights Reserved.</span>
+<!--      <span>Copyright © 2024 insistence.tech All Rights Reserved.</span>-->
     </div>
   </div>
 </template>
@@ -161,22 +164,55 @@ getCode();
   height: 100%;
   background-image: url("../assets/images/login-background.jpg");
   background-size: cover;
+
+  :deep(.el-input__inner) {
+    background: transparent !important;
+    color: #ffffff;
+  }
+
+  :deep(.el-input__wrapper) {
+    background: transparent !important;
+    color: #454545;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+  }
+  .hover-button:hover, .hover-button:focus {
+    color: #ffffff;
+    background: #5c5c59;
+    border-color: #5c5c59;
+  }
+
+  .hover-button {
+    width: 100%;
+    background: #333330;
+    border-color: #333330;
+
+  }
+
+  :deep(input:-webkit-autofill) {
+	  box-shadow: 0 0 0 1000px transparent  !important;
+	  /* 浏览器记住密码的底色的颜色 */
+	  -webkit-text-fill-color: #fff !important;
+	  /* 浏览器记住密码的字的颜色 */
+	  transition: background-color 300000s ease-in-out 0s;
+	  /* 通过延时渲染背景色变相去除背景颜色 */
+	}
 }
 .title {
   margin: 0px auto 30px auto;
   text-align: center;
-  color: #707070;
+  color: #fff;
 }
 
 .register-form {
   border-radius: 6px;
-  background: #ffffff;
-  width: 400px;
+  //background: #ffffff;
+  background: transparent;
+  width: 450px;
   padding: 25px 25px 5px 25px;
   .el-input {
-    height: 40px;
+    height: 47px;
     input {
-      height: 40px;
+      height: 47px;
     }
   }
   .input-icon {
@@ -192,7 +228,7 @@ getCode();
 }
 .register-code {
   width: 33%;
-  height: 40px;
+  height: 47px;
   float: right;
   img {
     cursor: pointer;
@@ -212,7 +248,19 @@ getCode();
   letter-spacing: 1px;
 }
 .register-code-img {
-  height: 40px;
+  height: 47px;
   padding-left: 12px;
+}
+.title-container {
+
+  text-align: center;
+
+  .title {
+    font-size: 30px;
+    color: #fff;
+    margin: 10px auto 40px 10px;
+    text-align: center;
+    font-weight: bold;
+  }
 }
 </style>

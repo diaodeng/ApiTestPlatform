@@ -6,7 +6,7 @@ from module_admin.service.role_service import *
 from module_admin.service.dept_service import DeptService, DeptModel
 from module_admin.service.user_service import UserService, UserRoleQueryModel, UserRolePageQueryModel, CrudUserRoleModel
 from utils.response_util import *
-from utils.log_util import *
+from utils.log_util import logger
 from utils.page_util import PageResponseModel
 from utils.common_util import bytes2file_response
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
@@ -28,8 +28,8 @@ async def get_system_role_dept_tree(request: Request, role_id: int, query_db: Se
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-    
-    
+
+
 @roleController.get("/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('system:role:list'))])
 async def get_system_role_list(request: Request, role_page_query: RolePageQueryModel = Depends(RolePageQueryModel.as_query), query_db: Session = Depends(get_db)):
     try:
@@ -39,8 +39,8 @@ async def get_system_role_list(request: Request, role_page_query: RolePageQueryM
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-    
-    
+
+
 @roleController.post("", dependencies=[Depends(CheckUserInterfaceAuth('system:role:add'))])
 @log_decorator(title='角色管理', business_type=1)
 async def add_system_role(request: Request, add_role: AddRoleModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
@@ -57,8 +57,8 @@ async def add_system_role(request: Request, add_role: AddRoleModel, query_db: Se
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-    
-    
+
+
 @roleController.put("", dependencies=[Depends(CheckUserInterfaceAuth('system:role:edit'))])
 @log_decorator(title='角色管理', business_type=2)
 async def edit_system_role(request: Request, edit_role: AddRoleModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
@@ -93,8 +93,8 @@ async def edit_system_role_datascope(request: Request, role_data_scope: AddRoleM
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-    
-    
+
+
 @roleController.delete("/{role_ids}", dependencies=[Depends(CheckUserInterfaceAuth('system:role:remove'))])
 @log_decorator(title='角色管理', business_type=3)
 async def delete_system_role(request: Request, role_ids: str, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
@@ -114,8 +114,8 @@ async def delete_system_role(request: Request, role_ids: str, query_db: Session 
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-    
-    
+
+
 @roleController.get("/{role_id}", response_model=RoleModel, dependencies=[Depends(CheckUserInterfaceAuth('system:role:query'))])
 async def query_detail_system_role(request: Request, role_id: int, query_db: Session = Depends(get_db)):
     try:

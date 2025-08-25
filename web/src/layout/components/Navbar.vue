@@ -1,32 +1,47 @@
 <template>
   <div class="navbar">
-    <hamburger id="hamburger-container" :is-active="appStore.sidebar.opened" class="hamburger-container" @toggleClick="toggleSideBar" />
-    <breadcrumb id="breadcrumb-container" class="breadcrumb-container" v-if="!settingsStore.topNav" />
-    <top-nav id="topmenu-container" class="topmenu-container" v-if="settingsStore.topNav" />
+    <hamburger id="hamburger-container" :is-active="appStore.sidebar.opened" class="hamburger-container"
+               @toggleClick="toggleSideBar"/>
+    <breadcrumb id="breadcrumb-container" class="breadcrumb-container" v-if="!settingsStore.topNav"/>
+    <top-nav id="topmenu-container" class="topmenu-container" v-if="settingsStore.topNav"/>
 
     <div class="right-menu">
       <template v-if="appStore.device !== 'mobile'">
-        <header-search id="header-search" class="right-menu-item" />
+        <header-search id="header-search" class="right-menu-item"/>
 
-        <el-tooltip content="源码地址" effect="dark" placement="bottom">
-          <ruo-yi-git id="ruoyi-git" class="right-menu-item hover-effect" />
-        </el-tooltip>
+        <!--        <el-tooltip content="源码地址" effect="dark" placement="bottom">-->
+        <!--          <ruo-yi-git id="ruoyi-git" class="right-menu-item hover-effect" />-->
+        <!--        </el-tooltip>-->
 
         <el-tooltip content="文档地址" effect="dark" placement="bottom">
-          <ruo-yi-doc id="ruoyi-doc" class="right-menu-item hover-effect" />
+          <div id="qtr-doc" class="right-menu-item hover-effect">
+            <svg-icon icon-class="question" @click="openNewPage('/about')"/>
+          </div>
+          <!--          <router-link to="/about">文档</router-link>-->
+          <!--          <QtrDocsBack id="qtr-doc" class="right-menu-item hover-effect"></QtrDocsBack>-->
         </el-tooltip>
 
-        <screenfull id="screenfull" class="right-menu-item hover-effect" />
+        <div style="align-self: center" v-show="false">
+          <el-select style="width: 100px" size="small" v-model="currentLanguage" @change="changeLanguage"
+                     class="right-menu-item hover-effect">
+            <el-option value="zh" key="zh" label="中文"></el-option>
+            <el-option value="en" key="en" label="english"></el-option>
+          </el-select>
+        </div>
+
+        <screenfull id="screenfull" class="right-menu-item hover-effect"/>
 
         <el-tooltip content="布局大小" effect="dark" placement="bottom">
-          <size-select id="size-select" class="right-menu-item hover-effect" />
+          <size-select id="size-select" class="right-menu-item hover-effect"/>
         </el-tooltip>
       </template>
       <div class="avatar-container">
         <el-dropdown @command="handleCommand" class="right-menu-item hover-effect" trigger="click">
           <div class="avatar-wrapper">
-            <img :src="userStore.avatar" class="user-avatar" />
-            <el-icon><caret-bottom /></el-icon>
+            <img :src="userStore.avatar" class="user-avatar"/>
+            <el-icon>
+              <caret-bottom/>
+            </el-icon>
           </div>
           <template #dropdown>
             <el-dropdown-menu>
@@ -48,22 +63,35 @@
 </template>
 
 <script setup>
-import { ElMessageBox } from 'element-plus'
+import {useI18n} from "vue-i18n";
+import {ElMessageBox} from 'element-plus'
 import Breadcrumb from '@/components/Breadcrumb'
 import TopNav from '@/components/TopNav'
 import Hamburger from '@/components/Hamburger'
 import Screenfull from '@/components/Screenfull'
 import SizeSelect from '@/components/SizeSelect'
 import HeaderSearch from '@/components/HeaderSearch'
-import RuoYiGit from '@/components/RuoYi/Git'
-import RuoYiDoc from '@/components/RuoYi/Doc'
+// import RuoYiGit from '@/components/RuoYi/Git'
+// import RuoYiDoc from '@/components/RuoYi/Doc'
+// import QtrDocs from "@/components/hrm/common/qtr-docs.vue";
 import useAppStore from '@/store/modules/app'
 import useUserStore from '@/store/modules/user'
 import useSettingsStore from '@/store/modules/settings'
+import {useRouter} from "vue-router";
 
+const router = useRouter();
+
+const {locale} = useI18n();
+const currentLanguage = ref("zh");
 const appStore = useAppStore()
 const userStore = useUserStore()
 const settingsStore = useSettingsStore()
+
+
+function changeLanguage() {
+  locale.value = currentLanguage.value;
+  localStorage.setItem("lang", currentLanguage.value);
+}
 
 function toggleSideBar() {
   appStore.toggleSideBar()
@@ -89,12 +117,23 @@ function logout() {
     type: 'warning'
   }).then(() => {
     userStore.logOut().then(() => {
-      location.href = '/index';
+      location.href = '/#/index';
     })
-  }).catch(() => { });
+  }).catch(() => {
+  });
+}
+
+function openNewPage(routeName) {
+  const  routeUrl = {
+    name: "/about",
+    params: {}
+  };
+  // const fullUrl = router.resolve(routeUrl).href;
+  window.open("/#/about", "_blank")
 }
 
 const emits = defineEmits(['setLayout'])
+
 function setLayout() {
   emits('setLayout');
 }

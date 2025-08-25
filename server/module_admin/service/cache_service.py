@@ -3,6 +3,8 @@ from module_admin.entity.vo.cache_vo import *
 from config.env import RedisInitKeyConfig
 from config.get_redis import RedisUtil
 from module_admin.entity.vo.common_vo import CrudResponseModel
+from utils.redis_util import scan_keys
+
 
 class CacheService:
     """
@@ -57,7 +59,7 @@ class CacheService:
         :param cache_name: 缓存名称
         :return: 缓存键名列表信息
         """
-        cache_keys = await request.app.state.redis.keys(f"{cache_name}*")
+        cache_keys = await scan_keys(request.app.state.reids, f"{cache_name}*")
         cache_key_list = [key.split(':', 1)[1] for key in cache_keys if key.startswith(f"{cache_name}:")]
 
         return cache_key_list
@@ -83,7 +85,7 @@ class CacheService:
         :param cache_name: 缓存名称
         :return: 操作缓存响应信息
         """
-        cache_keys = await request.app.state.redis.keys(f"{cache_name}*")
+        cache_keys = await scan_keys(request.app.state.redis, f"{cache_name}*")
         if cache_keys:
             await request.app.state.redis.delete(*cache_keys)
         result = dict(is_success=True, message=f"{cache_name}对应键值清除成功")
@@ -98,7 +100,7 @@ class CacheService:
         :param cache_key: 缓存键名
         :return: 操作缓存响应信息
         """
-        cache_keys = await request.app.state.redis.keys(f"*{cache_key}")
+        cache_keys = await scan_keys(request.app.state.redis, f"*{cache_key}")
         if cache_keys:
             await request.app.state.redis.delete(*cache_keys)
         result = dict(is_success=True, message=f"{cache_key}清除成功")
@@ -112,7 +114,7 @@ class CacheService:
         :param request: Request对象
         :return: 操作缓存响应信息
         """
-        cache_keys = await request.app.state.redis.keys()
+        cache_keys = await scan_keys(request.app.state.redis, "*")
         if cache_keys:
             await request.app.state.redis.delete(*cache_keys)
 

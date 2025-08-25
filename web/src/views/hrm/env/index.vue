@@ -20,7 +20,9 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item><el-checkbox >仅自己的数据</el-checkbox></el-form-item>
+      <el-form-item>
+        <el-checkbox>仅自己的数据</el-checkbox>
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -48,37 +50,51 @@
         :data="envList"
         row-key="envId"
         :default-expand-all="isExpandAll"
+        table-layout="fixed"
+        max-height="calc(100vh - 280px)"
     >
       <el-table-column prop="envId" label="ID" width="160"></el-table-column>
-      <el-table-column prop="envName" label="环境名称" width="200"></el-table-column>
-      <el-table-column prop="envUrl" label="环境URL" width="260"></el-table-column>
-      <el-table-column prop="orderNum" label="排序" width="200"></el-table-column>
-      <el-table-column prop="status" label="状态" width="100">
+      <el-table-column prop="envName" label="环境名称"></el-table-column>
+      <el-table-column prop="envUrl" label="环境URL"></el-table-column>
+      <el-table-column prop="orderNum" label="排序" width="70"></el-table-column>
+      <el-table-column prop="status" label="状态" width="70">
         <template #default="scope">
           <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
         </template>
       </el-table-column>
-      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
+      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width"
+                       width="150">
         <template #default="scope">
           <span>{{ parseTime(scope.row.createTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">
+      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width"
+                       width="150">
         <template #default="scope">
           <span>{{ parseTime(scope.row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" align="center" class-name="small-padding fixed-width" width="110px">
+      <el-table-column label="操作" align="center" class-name="small-padding fixed-width" width="110px" fixed="right">
         <template #default="scope">
-          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:env:edit', 'hrm:env:detail']">
+          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)"
+                     v-hasPermi="['hrm:env:edit', 'hrm:env:detail']">
           </el-button>
-          <el-button link type="warning" icon="CopyDocument" @click="handleCopy(scope.row)" v-hasPermi="['hrm:env:copy']">
+          <el-button link type="warning" icon="CopyDocument" @click="handleCopy(scope.row)"
+                     v-hasPermi="['hrm:env:copy']">
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['hrm:env:remove']">
           </el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <pagination
+        v-show="total > 0"
+        :total="total"
+        v-model:page="queryParams.pageNum"
+        v-model:limit="queryParams.pageSize"
+        @pagination="getList"
+    />
 
     <!-- 添加或修改环境对话框 -->
     <el-dialog :title="title" v-model="open" width="70%" append-to-body>
@@ -134,31 +150,33 @@
             <div style="padding-bottom: 10px">
               <el-text>分组名称：</el-text>
               <EditLabelText v-model:content="item.key"></EditLabelText>
-              
+
               <el-tooltip content="删除环境变量分组"
                           placement="top-start"
               >
                 <el-button size="small" type="danger" icon="Delete" @click="delEnvGroup(index)"></el-button>
               </el-tooltip>
             </div>
-
             <TableVariables v-model="item.value"></TableVariables>
           </el-col>
 
         </el-row>
       </el-form>
       <template #footer>
-        <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:env:edit']">确 定</el-button>
-          <el-button @click="cancel">取 消</el-button>
-        </div>
+        <el-affix position="bottom" :offset="20">
+          <div class="dialog-footer">
+            <el-button type="primary" @click="submitForm" v-hasPermi="['hrm:env:edit']">确 定</el-button>
+            <el-button @click="cancel">取 消</el-button>
+          </div>
+        </el-affix>
+
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup name="Env">
-import {listEnv, getEnv, delEnv, addEnv, updateEnv} from "@/api/hrm/env";
+import {listEnv, getEnv, delEnv, addEnv, updateEnv, copyEnv} from "@/api/hrm/env";
 import TableVariables from '../../../components/hrm/table-variables.vue';
 import EditLabelText from "@/components/hrm/common/edit-label-text.vue";
 import {ElMessage} from "element-plus";
@@ -176,9 +194,12 @@ const showSearch = ref(true);
 const title = ref("");
 const isExpandAll = ref(true);
 const refreshTable = ref(true);
+const total = ref(0);
 
 const data = reactive({
   queryParams: {
+    pageNum: 1,
+    pageSize: 10,
     envName: undefined,
     status: undefined
   },
@@ -215,7 +236,8 @@ function delEnvGroup(index) {
 function getList() {
   loading.value = true;
   listEnv(queryParams.value).then(response => {
-    envList.value = proxy.handleTree(response.data, "envId");
+    envList.value = response.rows;
+    total.value = response.total;
     loading.value = false;
   });
 }
@@ -276,7 +298,7 @@ function handleUpdate(row) {
   getEnv(row.envId).then(response => {
     form.value = response.data;
     open.value = true;
-    title.value = "修改环境";
+    title.value = response.data.envId + "  >>  " + response.data.envName;
   });
 }
 
@@ -314,7 +336,11 @@ function handleDelete(row) {
 
 /** 删除按钮操作 */
 function handleCopy(row) {
-  ElMessage.warning("暂未实现复制功能")
+  copyEnv({envId: row.envId}).then(()=>{
+    ElMessage.success("复制成功");
+  }).catch((e)=>{
+    ElMessage.error("复制异常");
+  });
 }
 
 getList();

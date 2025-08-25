@@ -1,8 +1,11 @@
+import json
+
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.job_dao import *
 from module_admin.service.dict_service import Request, DictDataService
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
-from config.get_qtr_scheduler import QtrSchedulerUtil
+from config.get_qtr_scheduler import qtr_scheduler_util as QtrSchedulerUtil
 
 
 class JobService:
@@ -11,20 +14,21 @@ class JobService:
     """
 
     @classmethod
-    def get_job_list_services(cls, query_db: Session, query_object: JobPageQueryModel, is_page: bool = False):
+    def get_job_list_services(cls, query_db: Session, query_object: JobPageQueryModel, data_scope_sql: str, is_page: bool = False):
         """
         获取定时任务列表信息service
         :param query_db: orm对象
         :param query_object: 查询参数对象
+        :param data_scope_sql: 数据权限依赖sql
         :param is_page: 是否开启分页
         :return: 定时任务列表信息对象
         """
-        job_list_result = JobDao.get_job_list(query_db, query_object, is_page)
+        job_list_result = JobDao.get_job_list(query_db, query_object, data_scope_sql, is_page)
 
         return job_list_result
 
     @classmethod
-    def add_job_services(cls, query_db: Session, page_object: JobModel):
+    def add_job_services(cls, query_db: Session, page_object: JobModel, user_info: CurrentUserModel):
         """
         新增定时任务信息service
         :param query_db: orm对象
@@ -36,6 +40,13 @@ class JobService:
             result = dict(is_success=False, message='定时任务已存在')
         else:
             try:
+                job_kw = json.loads(page_object.job_kwargs)
+                job_kw["userName"] = user_info.user.user_name if not job_kw.get("userName", "") else job_kw[
+                    "userName"]
+                job_kw["userId"] = user_info.user.user_id if not job_kw.get("userId", "") else job_kw["userId"]
+                job_kw["deptId"] = user_info.user.dept_id if not job_kw.get("deptId", "") else job_kw["deptId"]
+                page_object.job_kwargs = json.dumps(job_kw)
+
                 JobDao.add_job_dao(query_db, page_object)
                 job_info = JobDao.get_job_detail_by_info(query_db, page_object)
                 if job_info.status == '0':
@@ -49,23 +60,29 @@ class JobService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def edit_job_services(cls, query_db: Session, page_object: EditJobModel):
+    def edit_job_services(cls, query_db: Session, page_object: EditJobModel, user_info: CurrentUserModel):
         """
         编辑定时任务信息service
         :param query_db: orm对象
         :param page_object: 编辑定时任务对象
         :return: 编辑定时任务校验结果
         """
-        edit_job = page_object.model_dump(exclude_unset=True)
-        if page_object.type == 'status':
-            del edit_job['type']
-        job_info = cls.job_detail_services(query_db, edit_job.get('job_id'))
+
+
+
+        job_info = cls.job_detail_services(query_db, page_object.job_id)
         if job_info:
-            if page_object.type != 'status' and (job_info.job_name != page_object.job_name or job_info.job_group != page_object.job_group or job_info.invoke_target != page_object.invoke_target or job_info.cron_expression != page_object.cron_expression):
-                job = JobDao.get_job_detail_by_info(query_db, page_object)
-                if job:
-                    result = dict(is_success=False, message='定时任务已存在')
-                    return CrudResponseModel(**result)
+            job_kw = json.loads(page_object.job_kwargs or "{}")
+            if not job_kw.get('userName') and not job_kw.get('userId'):
+                job_kw['userName'] = user_info.user.user_name
+                job_kw['userId'] = user_info.user.user_id
+
+            if not job_kw.get('deptId') and user_info.user.user_id == job_kw['userId'] :
+                job_kw['deptId'] = user_info.user.dept_id
+
+            page_object.job_kwargs = json.dumps(job_kw, ensure_ascii=False)
+            edit_job = page_object.model_dump(exclude_unset=True)
+
             try:
                 JobDao.edit_job_dao(query_db, edit_job)
                 query_job = QtrSchedulerUtil.get_scheduler_job(job_id=edit_job.get('job_id'))
@@ -92,11 +109,13 @@ class JobService:
         :param page_object: 定时任务对象
         :return: 执行一次定时任务结果
         """
-        query_job = QtrSchedulerUtil.get_scheduler_job(job_id=page_object.job_id)
+        once_job_id = f"{page_object.job_id}1"
+        query_job = QtrSchedulerUtil.get_scheduler_job(job_id=once_job_id)
         if query_job:
-            QtrSchedulerUtil.remove_scheduler_job(job_id=page_object.job_id)
+            QtrSchedulerUtil.remove_scheduler_job(job_id=once_job_id)
         job_info = cls.job_detail_services(query_db, page_object.job_id)
         if job_info:
+            job_info.job_id = once_job_id
             QtrSchedulerUtil.execute_scheduler_job_once(job_info=job_info)
             result = dict(is_success=True, message='执行成功')
         else:
@@ -116,6 +135,7 @@ class JobService:
             job_id_list = page_object.job_ids.split(',')
             try:
                 for job_id in job_id_list:
+                    QtrSchedulerUtil.remove_scheduler_job(job_id)
                     JobDao.delete_job_dao(query_db, JobModel(jobId=job_id))
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
@@ -140,7 +160,7 @@ class JobService:
         return result
 
     @staticmethod
-    async def export_job_list_services(request: Request, job_list: List):
+    async def export_job_list_services(request: Request, job_list: list):
         """
         导出定时任务信息service
         :param request: Request对象
@@ -168,11 +188,14 @@ class JobService:
         }
 
         data = job_list
-        job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis, dict_type='qtr_job_group')
+        job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
+                                                                                        dict_type='qtr_job_group')
         job_group_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in job_group_list]
         job_group_option_dict = {item.get('value'): item for item in job_group_option}
-        job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis, dict_type='qtr_job_executor')
-        job_executor_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in job_executor_list]
+        job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
+                                                                                           dict_type='qtr_job_executor')
+        job_executor_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in
+                               job_executor_list]
         job_executor_option_dict = {item.get('value'): item for item in job_executor_option}
 
         for item in data:
@@ -194,7 +217,8 @@ class JobService:
                 item['concurrent'] = '允许'
             else:
                 item['concurrent'] = '禁止'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in data]
+        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
+                    data]
         binary_data = export_list2excel(new_data)
 
         return binary_data

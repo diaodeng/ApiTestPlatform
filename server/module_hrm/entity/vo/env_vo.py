@@ -1,11 +1,11 @@
 import json
+from typing import Optional, List, Dict, Text, Any
 
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
 from pydantic.alias_generators import to_camel
-from typing import Union, Optional, List, Dict, Text, Any
-from datetime import datetime
+
 from module_admin.annotation.pydantic_annotation import as_query
-from module_hrm.entity.vo.common_vo import CommonDataModel
+from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from utils.common_util import CamelCaseUtil
 
 
@@ -13,7 +13,8 @@ class EnvConfig(BaseModel):
     """
     环境配置模型
     """
-    variables: Optional[List[Dict[Text, List[Dict] | Text]]] = [{"key": "default", "value": [], "desc": ""}]
+    variables: Optional[List[Dict[Text, List[Dict] | Text]]] = Field(
+        default_factory=lambda: [{"key": "default", "value": [], "desc": ""}])
 
 
 class EnvModel(CommonDataModel):
@@ -30,6 +31,7 @@ class EnvModel(CommonDataModel):
     simple_desc: Optional[str] = None
     status: Optional[str] = None
     del_flag: Optional[str] = None
+
     # create_by: Optional[str] = None
     # create_time: Optional[datetime] = None
     # update_by: Optional[str] = None
@@ -71,13 +73,11 @@ class EnvModelForApi(EnvModel):
 
 
 @as_query
-class EnvQueryModel(EnvModel):
+class EnvQueryModel(QueryModel, EnvModel):
     """
     环境管理不分页查询模型
     """
-    begin_time: Optional[str] = None
-    end_time: Optional[str] = None
-    only_self: bool = False
+    pass
 
 
 class DeleteEnvModel(BaseModel):

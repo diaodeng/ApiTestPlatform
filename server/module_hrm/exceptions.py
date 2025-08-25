@@ -3,9 +3,13 @@
 class ExistsError(Exception):
     pass
 
-
-class DebugtalkRepeatedError(Exception):
+class DebugtalkError(Exception):
     pass
+
+class DebugtalkRepeatedError(DebugtalkError):
+    pass
+
+
 
 
 """ failure type exceptions

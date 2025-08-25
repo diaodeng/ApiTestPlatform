@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Optional, Any, Dict
 
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query, as_form
@@ -63,7 +63,7 @@ class ApiModelForApi(ApiModel):
     """
     API和模块关联表对应pydantic模型
     """
-    request_info: TestCase | None = {}
+    request_info: TestCase | None = Field(default_factory=lambda: {})
 
     def request_data(self, request: Any):
         return request

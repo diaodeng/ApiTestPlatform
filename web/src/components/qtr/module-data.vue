@@ -23,10 +23,10 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="模块状态" clearable style="width: 200px">
           <el-option
-              v-for="dict in sys_normal_disable"
-              :key="dict.value"
+              v-for="dict in qtr_data_status"
+              :key="dict.value * 1"
               :label="dict.label"
-              :value="dict.value"
+              :value="dict.value * 1"
           />
         </el-select>
       </el-form-item>
@@ -58,7 +58,7 @@
       <el-table-column label="模块排序" align="center" prop="sort"/>
       <el-table-column label="状态" align="center" prop="status">
         <template #default="scope">
-          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
+          <dict-tag :options="qtr_data_status" :value="scope.row.status + ''"/>
         </template>
       </el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
@@ -94,15 +94,13 @@
 </template>
 
 <script setup name="Module">
-import {listModule, addModule, delModule, getModule, updateModule} from "@/api/hrm/module";
+import {addModule, delModule, getModule, listModule, updateModule} from "@/api/hrm/module";
 import {listProject} from "@/api/hrm/project";
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
-import RunDialog from "@/components/hrm/common/run_dialog.vue";
 import {ElMessageBox} from "element-plus";
 import {addSuiteDetail} from "@/api/qtr/suite.js";
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
 
 const moduleList = ref([]);
 const projectOptions = ref([]);
@@ -157,7 +155,7 @@ function getList() {
 
 /** 查询项目列表 */
 function getProjectSelect() {
-  listProject(null).then(response => {
+  listProject({isPage: false}).then(response => {
     projectOptions.value = response.data;
   });
 }
@@ -278,12 +276,12 @@ function handleExport() {
 
 /** 运行用例 */
 function runTest(row) {
-  if (row && "moduleId" in row && row.moduleId){
+  if (row && "moduleId" in row && row.moduleId) {
     runIds.value = [row.moduleId];
   }
   if (!runIds.value || runIds.value.length === 0) {
     ElMessageBox.alert('请选择要运行的模块', "提示！", {type: 'warning'});
-      return;
+    return;
   }
 
   runDialogShow.value = true;
@@ -292,12 +290,12 @@ function runTest(row) {
 
 /** 保存套件配置 **/
 function saveConfigSuite(row) {
-  if (row && "projectId" in row && row.moduleId){
+  if (row && "projectId" in row && row.moduleId) {
     moduleIds.value = [row.moduleId];
   }
   if (!moduleIds.value || moduleIds.value.length === 0) {
     ElMessageBox.alert('请选择模块', "提示！", {type: "warning"});
-      return;
+    return;
   }
   const data = {
     "suiteId": configSuiteId.value,

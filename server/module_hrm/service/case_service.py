@@ -1,19 +1,27 @@
-import copy
+import json
 
-from module_hrm.dao.case_dao import *
-from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseDetailForHandle
+from sqlalchemy.orm import Session
+
+from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_hrm.dao.case_dao import CaseDao
+from module_hrm.dao.suite_dao import SuiteDetailDao
+from module_hrm.entity.do.case_do import HrmCase
+from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_vo import CasePageQueryModel, CaseModel, CaseQuery, \
+    DeleteCaseModel, AddCaseModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
 from utils.page_util import PageResponseModel
-from utils.snowflake import snowIdWorker
 
 
 class CaseService:
     """
     用例管理服务层
     """
+
     @classmethod
-    def get_case_list_services(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False):
+    def get_case_list_services(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False,
+                               data_scope_sql: str = 'true'):
         """
         获取用例列表信息service
         :param query_db: orm对象
@@ -21,7 +29,7 @@ class CaseService:
         :param is_page: 是否开启分页
         :return: 用例列表信息对象
         """
-        list_result = CaseDao.get_case_list(query_db, query_object, is_page)
+        list_result = CaseDao.get_case_list(query_db, query_object, is_page, data_scope_sql)
         if is_page:
             case_list_result = PageResponseModel(
                 **{
@@ -49,9 +57,11 @@ class CaseService:
             result = dict(is_success=False, message='用例名称已存在')
         else:
             try:
-                CaseDao.add_case_dao(query_db, add_case)
+                case_dao = CaseDao.add_case_dao(query_db, add_case)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = dict(is_success=True,
+                              message='新增成功',
+                              result=CaseModelForApi.model_validate(case_dao).model_dump(by_alias=True))
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -93,7 +103,7 @@ class CaseService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def edit_case_services(cls, query_db: Session, page_object: CaseModel):
+    def edit_case_services(cls, query_db: Session, page_object: CaseModel, user: CurrentUserModel = None):
         """
         编辑用例信息service
         :param query_db: orm对象
@@ -103,13 +113,13 @@ class CaseService:
         # edit = page_object.model_dump(exclude_unset=True)
         info = cls.case_detail_services(query_db, page_object.case_id)
         if info:
-            if info.case_name != page_object.case_name:
+            if page_object.case_name and info.case_name != page_object.case_name:
                 case = CaseDao.get_case_detail_by_info(query_db, CaseModel(caseName=page_object.case_name))
                 if case:
                     result = dict(is_success=False, message='用例名称已存在')
                     return CrudResponseModel(**result)
             try:
-                CaseDao.edit_case_dao(query_db, page_object)
+                CaseDao.edit_case_dao(query_db, page_object, user)
                 query_db.commit()
                 result = dict(is_success=True, message='更新成功')
             except Exception as e:
@@ -121,7 +131,7 @@ class CaseService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def delete_case_services(cls, query_db: Session, page_object: DeleteCaseModel):
+    def delete_case_services(cls, query_db: Session, page_object: DeleteCaseModel, user: CurrentUserModel = None):
         """
         删除用例信息service
         :param query_db: orm对象
@@ -132,7 +142,8 @@ class CaseService:
             id_list = page_object.case_ids.split(',')
             try:
                 for case_id in id_list:
-                    CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id))
+                    CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id), user)
+                    SuiteDetailDao.del_suite_detail_by_id(query_db, case_id)
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
             except Exception as e:
@@ -153,7 +164,9 @@ class CaseService:
         case = CaseDao.get_case_by_id(query_db, case_id=case_id)
         if not case:
             return {}
-        result = CaseModelForApi(**CamelCaseUtil.transform_result(case))
+
+        data = CamelCaseUtil.transform_result(case)
+        result = CaseModelForApi(**data)
         if result.include is not None:
             result.include = json.loads(result.include)
         # new_request = TestCase(**result.request).model_dump(by_alias=True)
@@ -162,7 +175,7 @@ class CaseService:
         return result
 
     @staticmethod
-    def export_case_list_services(case_list: List):
+    def export_case_list_services(case_list: list):
         """
         导出用例信息service
         :param case_list: 用例信息列表
@@ -195,7 +208,8 @@ class CaseService:
                 item['status'] = '正常'
             else:
                 item['status'] = '停用'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in data]
+        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
+                    data]
         binary_data = export_list2excel(new_data)
 
         return binary_data

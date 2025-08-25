@@ -44,6 +44,8 @@ import TreeSelect from '@/components/TreeSelect'
 // 字典标签组件
 import DictTag from '@/components/DictTag'
 
+import i18n from "@/language/i18n.js";
+
 const app = createApp(App)
 
 // 全局方法挂载
@@ -68,7 +70,7 @@ app.component('Editor', Editor)
 
 app.use(router)
 app.use(store)
-app.use(plugins)
+app.use(plugins).use(i18n)
 app.use(elementIcons)
 app.component('svg-icon', SvgIcon)
 
@@ -79,6 +81,6 @@ app.use(ElementPlus, {
   locale: locale,
   // 支持 large、default、small
   size: Cookies.get('size') || 'default'
-})
+});
 
-app.mount('#app')
+app.mount('#app');

@@ -12,8 +12,12 @@ import re
 import socket
 import sys
 import zlib
+from datetime import datetime
 from itertools import combinations
 
+import psutil
+
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm import exceptions
 from utils.log_util import logger
 
@@ -249,13 +253,11 @@ def get_defined_symbols(source: str) -> set:
 
 def get_platform() -> dict:
     return {
-        "httprunner_version": f"Httprunner None",
         "python_version": "{} {}".format(
             platform.python_implementation(),
             platform.python_version()
         ),
         "platform": platform.platform(),
-        "pytest_version": f"pytest None",
     }
 
 
@@ -392,3 +394,53 @@ def get_local_ip():
     except (Exception) as e:
         print("get_local_ip found exception : %s" % e)
     return local_ip if ("" != local_ip and None != local_ip) else socket.gethostbyname(socket.gethostname())
+
+
+class PermissionHandler(object):
+    """
+    权限处理器
+    """
+    @classmethod
+    def check_is_self(cls, user: CurrentUserModel, data):
+        manager = getattr(data, "manager", None)
+
+        if user and user.user.user_id and (not user.user.admin) and manager and user.user.user_id != manager:
+            raise PermissionError("只能处理自己的数据")
+
+
+def get_system_stats():
+    cpu_percent = psutil.cpu_percent(interval=1)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+
+    stats = {
+        "cpu_percent": cpu_percent,
+        "memory_percent": memory.percent,
+        "memory_used": memory.used / (1024 ** 2),  # MB
+        "memory_total": memory.total / (1024 ** 2),  # MB
+        "disk_percent": disk.percent,
+        "disk_used": disk.used / (1024 ** 3),  # GB
+        "disk_total": disk.total / (1024 ** 3),  # GB
+        "timestamp": datetime.now().isoformat(),
+    }
+    logger.info(f"系统状态信息: {stats}")
+    return stats
+
+
+def format_duration(seconds, show_days=True):
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+
+    s = f"{seconds:.2f}".rstrip('0').rstrip('.')  # 去掉多余的0
+
+    parts = []
+    if show_days and days:
+        parts.append(f"{int(days)}d")
+    if hours or (show_days and days):
+        parts.append(f"{int(hours)}h")
+    if minutes or parts:
+        parts.append(f"{int(minutes)}m")
+    parts.append(f"{s}s")
+
+    return ' '.join(parts)

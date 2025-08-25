@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.enums.enums import DataType
+from module_hrm.utils.util import PermissionHandler
 from utils.log_util import logger
 from module_hrm.entity.do.api_do import ApiInfo
 from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiQueryModel, ApiModel
@@ -29,18 +31,19 @@ class ApiOperation(object):
         return "删除成功"
 
     @staticmethod
-    def delete_recursion(query_db: Session, ids: []):
+    def delete_recursion(query_db: Session, ids: [], user:CurrentUserModel=None):
         """
         递归删除API及目录
         """
         try:
             get_ids = query_db.query(ApiInfo).filter(ApiInfo.api_id.in_(ids)).all()
             for api_data in get_ids:
+                PermissionHandler.check_is_self(user, api_data)
                 ApiOperation.delete(query_db, [api_data.api_id])
                 if api_data.type == DataType.folder.value:
                     child_ids = query_db.query(ApiInfo.api_id).filter(ApiInfo.parent_id.in_([api_data.api_id])).all()
                     if child_ids:
-                        ApiOperation.delete_recursion(query_db, child_ids)
+                        ApiOperation.delete_recursion(query_db, child_ids, user_id)
 
         except Exception as e:
             logger.error(f"删除API失败：{ids}")
@@ -49,7 +52,8 @@ class ApiOperation(object):
         return "删除成功"
 
     @staticmethod
-    def update(query_db: Session, api_info: ApiModelForApi):
+    def update(query_db: Session, api_info: ApiModelForApi, user:CurrentUserModel=None):
+        PermissionHandler.check_is_self(user, api_info)
         data_info = api_info.model_dump(exclude_unset=True, by_alias=True)
         data_info = ApiModel(**data_info).model_dump(exclude_unset=True)
         # data_info.pop("api_id")

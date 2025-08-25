@@ -11,7 +11,7 @@ import ContextMenu from "@/components/hrm/common/context-menu.vue";
 import {HrmDataTypeEnum, CaseStepTypeEnum} from "@/components/hrm/enum";
 import {ElMessage, ElMessageBox} from "element-plus";
 import {delApi} from "@/api/hrm/api.js";
-import {randomString} from "@/utils/tools.js";
+import {randomNumber, randomString} from "@/utils/tools.js";
 
 
 const dataSource = defineModel("dataSource");
@@ -68,7 +68,8 @@ interface Tree {
   apiType: number,
   name: string,
   parentId: bigint,
-  children?: Tree[]
+  children?: Tree[],
+  isParent: boolean
 }
 
 let id = 1000;
@@ -186,6 +187,7 @@ const defaultProps = {
 
 const append = (data: Tree, type) => {
   if (!data.isParent) {
+    ElMessage.warning("只能在文件夹中新增节点");
     return;
   }
 
@@ -356,7 +358,7 @@ const handleCurrentNodeChange = (nodeData, node) => {
   >
     <template #default="{ node, data }">
       <span @dblclick="(event) => {handleDbClick(event, node, data)}"
-            @click="(event)=>{handleNodeClick(data, node, event)}"
+            @click="(event)=>{handleNodeClick(data, node, undefined, event)}"
             @mouseenter="(event)=>{node.data.edit=true}"
             @mouseleave="(event)=>{node.data.edit=false}"
       >
@@ -370,7 +372,7 @@ const handleCurrentNodeChange = (nodeData, node) => {
           ></edit-label-text></span>
           <span v-if="node.data.edit">
 <!--            <el-icon color="blue"><edit></edit></el-icon>-->
-          <el-icon color="green" @click.stop="handleNodeRightClick($event, data, node);" v-if="data.apiType===CaseStepTypeEnum.folder">
+          <el-icon color="green" @click.stop="handleNodeRightClick($event, data, node, undefined);" v-if="data.apiType===CaseStepTypeEnum.folder">
             <circle-plus-filled></circle-plus-filled>
           </el-icon>
             <!--            <RequestTypeDropdown @type-selected="append" :index-key="data"></RequestTypeDropdown>-->

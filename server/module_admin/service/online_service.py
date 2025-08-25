@@ -1,9 +1,12 @@
+import jose
 from fastapi import Request
 from jose import jwt
+
 from config.env import JwtConfig, RedisInitKeyConfig
-from module_admin.entity.vo.online_vo import *
 from module_admin.entity.vo.common_vo import CrudResponseModel
+from module_admin.entity.vo.online_vo import OnlineQueryModel, DeleteOnlineModel
 from utils.common_util import CamelCaseUtil
+from utils.redis_util import scan_keys
 
 
 class OnlineService:
@@ -19,13 +22,18 @@ class OnlineService:
         :param query_object: 查询参数对象
         :return: 在线用户列表信息
         """
-        access_token_keys = await request.app.state.redis.keys(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}*")
+        access_token_keys = await scan_keys(request.app.state.redis, f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}*")
         if not access_token_keys:
             access_token_keys = []
-        access_token_values_list = [await request.app.state.redis.get(key) for key in access_token_keys]
+        access_token_values_list = [(key, await request.app.state.redis.get(key)) for key in access_token_keys]
+
         online_info_list = []
-        for item in access_token_values_list:
-            payload = jwt.decode(item, JwtConfig.jwt_secret_key, algorithms=[JwtConfig.jwt_algorithm])
+        for key,value in access_token_values_list:
+            try:
+                payload = jwt.decode(value, JwtConfig.jwt_secret_key, algorithms=[JwtConfig.jwt_algorithm])
+            except jose.exceptions.ExpiredSignatureError as e:
+                await request.app.state.redis.delete(f"{key}")  # 过期的token删除掉
+                continue
             online_dict = dict(
                 token_id=payload.get('session_id'),
                 user_name=payload.get('user_name'),
@@ -45,7 +53,8 @@ class OnlineService:
                     online_info_list = [online_dict]
                     break
             elif query_object.user_name and query_object.ipaddr:
-                if query_object.user_name == payload.get('user_name') and query_object.ipaddr == payload.get('login_info').get('ipaddr'):
+                if query_object.user_name == payload.get('user_name') and query_object.ipaddr == payload.get(
+                        'login_info').get('ipaddr'):
                     online_info_list = [online_dict]
                     break
             else:

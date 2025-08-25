@@ -26,7 +26,11 @@ class RedisUtil:
             password=RedisConfig.redis_password,
             db=RedisConfig.redis_database,
             encoding="utf-8",
-            decode_responses=True
+            decode_responses=True,
+            socket_keepalive=True,
+            health_check_interval=30,
+            retry_on_timeout=True,
+            # retry_on_exception=True
         )
         try:
             connection = await redis.ping()

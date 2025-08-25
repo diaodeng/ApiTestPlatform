@@ -1,20 +1,22 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
+from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.api_dao import ApiOperation
-from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiQueryModel, ApiModel, ApiPageQueryModel
+from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiModel, ApiPageQueryModel
 from module_hrm.entity.vo.case_vo import AddCaseModel
-from module_hrm.enums.enums import DataType, TstepTypeEnum
 from module_hrm.service.api_service import api_tree
 from module_hrm.service.case_service import CaseService
-from utils.log_util import *
-from utils.page_util import *
-from utils.response_util import *
+from utils.common_util import CamelCaseUtil
+from utils.log_util import logger
+from utils.response_util import ResponseUtil
 
 hrmApiController = APIRouter(prefix='/hrm/api', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -23,12 +25,13 @@ hrmApiController = APIRouter(prefix='/hrm/api', dependencies=[Depends(LoginServi
 async def api_tree_handle(request: Request,
                           page_query: ApiPageQueryModel = Depends(ApiPageQueryModel.as_query),
                           query_db: Session = Depends(get_db),
-                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                          current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                          data_scope_sql: str = Depends(GetDataScope('ApiInfo', user_alias='manager'))
                           ):
     try:
         # 获取分页数据
         page_query.manager = current_user.user.user_id
-        tree_data = api_tree(query_db, page_query)
+        tree_data = api_tree(query_db, page_query, data_scope_sql)
         data = ResponseUtil.success(data=tree_data)
         return data
     except Exception as e:
@@ -50,7 +53,7 @@ async def api_copy_as_case(request: Request,
 
         caseMode.case_name = api_data.name
         caseMode.request = api_data.request_info
-        data = CaseService.add_case_services(query_db,caseMode)
+        data = CaseService.add_case_services(query_db, caseMode)
         return ResponseUtil.success(data=data)
     except Exception as e:
         logger.exception(e)
@@ -80,6 +83,7 @@ async def api_add(request: Request,
         api_data.author = current_user.user.user_name
         api_data.create_by = current_user.user.user_name
         api_data.update_by = current_user.user.user_name
+        api_data.dept_id = current_user.user.dept_id
         tree_data = ApiOperation.add(query_db, api_data)
         return ResponseUtil.success(data=tree_data)
     except Exception as e:
@@ -98,7 +102,7 @@ async def api_update(request: Request,
             page_query = ApiModel(**CamelCaseUtil.transform_result(page_query))
         page_query.update_by = current_user.user.user_name
         page_query.update_time = datetime.now()
-        data = ApiOperation.update(query_db, page_query)
+        data = ApiOperation.update(query_db, page_query, current_user)
         return ResponseUtil.success(data=data)
     except Exception as e:
         logger.exception(e)
@@ -106,14 +110,13 @@ async def api_update(request: Request,
 
 
 @hrmApiController.delete("/{api_id}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:api:delete'))])
-async def api_del(request: Request, api_id, query_db: Session = Depends(get_db)):
+async def api_del(request: Request,
+                  api_id, query_db: Session = Depends(get_db),
+                  current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         # 获取分页数据
-        data = ApiOperation.delete_recursion(query_db, [api_id])
+        data = ApiOperation.delete_recursion(query_db, [api_id], current_user)
         return ResponseUtil.success(data="删除成功")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-
-
-

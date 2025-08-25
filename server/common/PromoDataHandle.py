@@ -2,7 +2,7 @@ import asyncio
 import json
 
 import websockets
-from loguru import logger
+from utils.log_util import logger
 
 
 class PromoDataHandle:

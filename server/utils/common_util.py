@@ -1,4 +1,4 @@
-from loguru import logger
+from utils.log_util import logger
 import pandas as pd
 import io
 import os
@@ -135,6 +135,10 @@ def export_list2excel(list_data: List):
     binary_data = binary_data.getvalue()
 
     return binary_data
+
+
+def load_excel2data():
+    pass
 
 
 def get_excel_template(header_list: List, selector_header_list: List, option_list: List[dict]):

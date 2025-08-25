@@ -1,19 +1,25 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from fastapi import Depends
-from config.get_db import get_db
-from module_admin.service.login_service import LoginService
-from module_admin.service.menu_service import *
-from utils.response_util import *
-from utils.log_util import *
-from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.annotation.log_annotation import log_decorator
+from sqlalchemy.orm import Session
 
+from config.get_db import get_db
+from module_admin.annotation.log_annotation import log_decorator
+from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
+from module_admin.entity.vo.menu_vo import MenuModel, MenuQueryModel, DeleteMenuModel
+from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_admin.service.login_service import LoginService
+from module_admin.service.menu_service import MenuService
+from utils.log_util import logger
+from utils.response_util import ResponseUtil
 
 menuController = APIRouter(prefix='/system/menu', dependencies=[Depends(LoginService.get_current_user)])
 
 
 @menuController.get("/treeselect")
-async def get_system_menu_tree(request: Request, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def get_system_menu_tree(request: Request, query_db: Session = Depends(get_db),
+                               current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         menu_query_result = MenuService.get_menu_tree_services(query_db, current_user)
         logger.info('获取成功')
@@ -24,7 +30,8 @@ async def get_system_menu_tree(request: Request, query_db: Session = Depends(get
 
 
 @menuController.get("/roleMenuTreeselect/{role_id}")
-async def get_system_role_menu_tree(request: Request, role_id: int, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def get_system_role_menu_tree(request: Request, role_id: int, query_db: Session = Depends(get_db),
+                                    current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         role_menu_query_result = MenuService.get_role_menu_tree_services(query_db, role_id, current_user)
         logger.info('获取成功')
@@ -34,8 +41,11 @@ async def get_system_role_menu_tree(request: Request, role_id: int, query_db: Se
         return ResponseUtil.error(msg=str(e))
 
 
-@menuController.get("/list", response_model=List[MenuModel], dependencies=[Depends(CheckUserInterfaceAuth('system:menu:list'))])
-async def get_system_menu_list(request: Request, menu_query: MenuQueryModel = Depends(MenuQueryModel.as_query), query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+@menuController.get("/list", response_model=list[MenuModel],
+                    dependencies=[Depends(CheckUserInterfaceAuth('system:menu:list'))])
+async def get_system_menu_list(request: Request, menu_query: MenuQueryModel = Depends(MenuQueryModel.as_query),
+                               query_db: Session = Depends(get_db),
+                               current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         menu_query_result = MenuService.get_menu_list_services(query_db, menu_query, current_user)
         logger.info('获取成功')
@@ -47,7 +57,8 @@ async def get_system_menu_list(request: Request, menu_query: MenuQueryModel = De
 
 @menuController.post("", dependencies=[Depends(CheckUserInterfaceAuth('system:menu:add'))])
 @log_decorator(title='菜单管理', business_type=1)
-async def add_system_menu(request: Request, add_menu: MenuModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def add_system_menu(request: Request, add_menu: MenuModel, query_db: Session = Depends(get_db),
+                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         add_menu.create_by = current_user.user.user_name
         add_menu.update_by = current_user.user.user_name
@@ -65,7 +76,8 @@ async def add_system_menu(request: Request, add_menu: MenuModel, query_db: Sessi
 
 @menuController.put("", dependencies=[Depends(CheckUserInterfaceAuth('system:menu:edit'))])
 @log_decorator(title='菜单管理', business_type=2)
-async def edit_system_menu(request: Request, edit_menu: MenuModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def edit_system_menu(request: Request, edit_menu: MenuModel, query_db: Session = Depends(get_db),
+                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_menu.update_by = current_user.user.user_name
         edit_menu.update_time = datetime.now()
@@ -98,7 +110,8 @@ async def delete_system_menu(request: Request, menu_ids: str, query_db: Session 
         return ResponseUtil.error(msg=str(e))
 
 
-@menuController.get("/{menu_id}", response_model=MenuModel, dependencies=[Depends(CheckUserInterfaceAuth('system:menu:query'))])
+@menuController.get("/{menu_id}", response_model=MenuModel,
+                    dependencies=[Depends(CheckUserInterfaceAuth('system:menu:query'))])
 async def query_detail_system_menu(request: Request, menu_id: int, query_db: Session = Depends(get_db)):
     try:
         menu_detail_result = MenuService.menu_detail_services(query_db, menu_id)
