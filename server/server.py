@@ -30,18 +30,21 @@ from module_hrm.controller.report_controler import reportController
 from module_hrm.controller.config_controller import hrmConfigController
 from module_hrm.controller.common_controller import hrmCommonController
 from module_hrm.controller.api_controler import hrmApiController
-# from module_hrm.controller.loaddata_controller import hrmLoadController
 from module_hrm.controller.qtrJob_controller import qtrJobController
 from module_hrm.controller.suite_controller import suiteController
+from module_hrm.controller.checkStatus_controler import qtrServiceStatusController
+from module_qtr.controller.agent_controller import agentController, startup_handler
+from module_hrm.controller.forward_rules_controller import forwardRulesController
+from module_hrm.controller.test_controller import mockController
+from module_hrm.controller.agent_controller import agentController as agentManagerController
 
 from config.env import AppConfig
 from config.get_redis import RedisUtil
 from config.get_db import init_create_table
-from config.get_scheduler import SchedulerUtil
-from config.get_qtr_scheduler import QtrSchedulerUtil
+from config.get_scheduler import sys_scheduler_util as SysSchedulerUtil
+from config.get_qtr_scheduler import qtr_scheduler_util as QtrSchedulerUtil
 from utils.log_util import logger
 from utils.common_util import worship
-
 
 # 生命周期事件
 @asynccontextmanager
@@ -52,13 +55,14 @@ async def lifespan(app: FastAPI):
     app.state.redis = await RedisUtil.create_redis_pool()
     await RedisUtil.init_sys_dict(app.state.redis)
     await RedisUtil.init_sys_config(app.state.redis)
-    await SchedulerUtil.init_system_scheduler()
+    await SysSchedulerUtil.init_system_scheduler()
     await QtrSchedulerUtil.init_qtr_scheduler()
+    await startup_handler()
     logger.info(f"{AppConfig.app_name}启动成功")
     yield
+    await SysSchedulerUtil.close_scheduler()
+    await QtrSchedulerUtil.close_scheduler()
     await RedisUtil.close_redis_pool(app)
-    await SchedulerUtil.close_system_scheduler()
-    await QtrSchedulerUtil.close_qtr_scheduler()
 
 
 # 初始化FastAPI对象
@@ -105,10 +109,13 @@ controller_list = [
     {'router': hrmConfigController, 'tags': ['HRM-配置管理']},
     {'router': hrmCommonController, 'tags': ['HRM-common']},
     {'router': hrmApiController, 'tags': ['HRM-接口管理']},
-    # {'router': hrmLoadController, 'tags': ['HRM-迁移数据']},
     {'router': qtrJobController, 'tags': ['HRM-测试计划']},
     {'router': suiteController, 'tags': ['HRM-测试套件']},
-
+    {'router': qtrServiceStatusController, 'tags': ['HRM-服务状态']},
+    {'router': agentController, 'tags': ['QTR-Agent管理']},
+    {'router': mockController, 'tags': ['QTR-mock管理']},
+    {'router': forwardRulesController, 'tags': ['QTR-转发规则管理']},
+    {'router': agentManagerController, 'tags': ['QTR-agent后台管理']},
 ]
 
 for controller in controller_list:

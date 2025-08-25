@@ -1,6 +1,11 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.project_vo import *
+from utils.page_util import PageUtil
 from utils.time_format_util import list_format_datetime
 
 
@@ -68,7 +73,7 @@ class ProjectDao:
         return project_info
 
     @classmethod
-    def get_project_list(cls, db: Session, page_object: ProjectModel, data_scope_sql: str):
+    def get_project_list(cls, db: Session, page_object: ProjectQueryModel, data_scope_sql: str):
         """
         根据查询参数获取项目列表信息
         :param db: orm对象
@@ -81,10 +86,12 @@ class ProjectDao:
                     HrmProject.status == page_object.status if page_object.status else True,
                     HrmProject.project_name.like(f'%{page_object.project_name}%') if page_object.project_name else True,
                     eval(data_scope_sql)) \
-            .order_by(HrmProject.order_num) \
-            .distinct().all()
+            .order_by(HrmProject.order_num, HrmProject.create_time.desc(), HrmProject.update_time.desc()) \
+            .distinct()
 
-        return project_result
+        post_list = PageUtil.paginate(project_result, page_object.page_num, page_object.page_size, page_object.is_page)
+
+        return post_list
 
     @classmethod
     def add_project_dao(cls, db: Session, project: ProjectModel):

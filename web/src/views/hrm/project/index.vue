@@ -1,96 +1,37 @@
 <template>
   <div class="app-container">
-    <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
-      <el-form-item label="项目名称" prop="projectName">
-        <el-input
-            v-model="queryParams.projectName"
-            placeholder="请输入项目名称"
-            clearable
-            style="width: 200px"
-            @keyup.enter="handleQuery"
-        />
-      </el-form-item>
-      <el-form-item label="状态" prop="status">
-        <el-select v-model="queryParams.status" placeholder="项目状态" clearable style="width: 200px">
-          <el-option
-              v-for="dict in sys_normal_disable"
-              :key="dict.value"
-              :label="dict.label"
-              :value="dict.value"
-          />
-        </el-select>
-      </el-form-item>
-      <el-form-item>
-        <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
-        <el-button icon="Refresh" @click="resetQuery">重置</el-button>
-      </el-form-item>
-    </el-form>
-
-    <el-row :gutter="10" class="mb8">
-      <el-col :span="1.5">
-        <el-button
-            type="primary"
-            plain
-            icon="Plus"
-            @click="handleAdd"
-            v-hasPermi="['hrm:project:add']"
-        >新增
-        </el-button>
-      </el-col>
-      <el-col :span="1.5">
-        <el-button type="warning" icon="CaretRight" @click="runTest"
-                   v-hasPermi="['hrm:case:run']" title="运行">
-          执行
-        </el-button>
-      </el-col>
-      <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
-    </el-row>
-
-    <el-table
-        border
-        v-if="refreshTable"
-        v-loading="loading"
-        :data="projectList"
-        row-key="projectId"
-        :default-expand-all="isExpandAll"
-        @selection-change="handleSelectionChange"
-    >
-      <el-table-column type="selection" width="55" align="center"/>
-      <el-table-column prop="projectId" label="ID" width="150"></el-table-column>
-      <el-table-column prop="projectName" align="center" label="项目名称" width="200"></el-table-column>
-      <el-table-column prop="responsibleName" align="center" label="负责人" width="120"></el-table-column>
-      <el-table-column prop="testUser" label="测试负责人" align="center" width="120"></el-table-column>
-      <el-table-column prop="devUser" label="开发负责人" align="center" width="120"></el-table-column>
-      <el-table-column prop="orderNum" label="排序" align="center" width="100"></el-table-column>
-      <el-table-column prop="status" label="状态" align="center" width="100">
-        <template #default="scope">
-          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
-        </template>
-      </el-table-column>
-      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
-        <template #default="scope">
-          <span>{{ parseTime(scope.row.createTime) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">
-        <template #default="scope">
-          <span>{{ parseTime(scope.row.updateTime) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" align="center" class-name="small-padding fixed-width">
-        <template #default="scope">
-          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:project:edit']" title="修改">
+    <ProjectTableQuery @select-change="handleSelectionChange" ref="projectQueryViewRef">
+      <template #table-tool>
+        <el-col :span="1.5">
+          <el-button
+              type="primary"
+              plain
+              icon="Plus"
+              @click="handleAdd"
+              v-hasPermi="['hrm:project:add']"
+          >新增
           </el-button>
-          <el-button link type="warning" icon="CaretRight" v-loading="loading" @click="runTest(scope.row)"
+        </el-col>
+        <el-col :span="1.5">
+          <el-button type="warning" icon="CaretRight" @click="runTest"
                      v-hasPermi="['hrm:case:run']" title="运行">
+            执行
           </el-button>
-          <!--               <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['hrm:project:add']">新增</el-button>-->
-          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
-                     v-hasPermi="['hrm:project:remove']" title="修改">
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        </el-col>
+      </template>
+      <template #tableOperate="{scope}">
+        <el-button link type="primary" icon="Edit" :loading="loading" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:project:edit']"
+                   title="修改">
+        </el-button>
+        <el-button link type="warning" icon="CaretRight" @click="runTest(scope.row)"
+                   v-hasPermi="['hrm:case:run']" title="运行">
+        </el-button>
+        <!--               <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['hrm:project:add']">新增</el-button>-->
+        <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
+                   v-hasPermi="['hrm:project:remove']" title="修改">
+        </el-button>
+      </template>
+    </ProjectTableQuery>
 
     <!-- 添加或修改项目对话框 -->
     <el-dialog :title="title" v-model="open" width="800px" append-to-body>
@@ -140,9 +81,9 @@
             <el-form-item label="项目状态">
               <el-radio-group v-model="form.status">
                 <el-radio
-                    v-for="dict in sys_normal_disable"
-                    :key="dict.value"
-                    :label="dict.value"
+                    v-for="dict in qtr_data_status"
+                    :key="dict.value * 1"
+                    :value="dict.value * 1"
                 >{{ dict.label }}
                 </el-radio>
               </el-radio-group>
@@ -159,22 +100,24 @@
     </el-dialog>
 
     <!-- 运行用例对话框 -->
-    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="HrmDataTypeEnum.project" :run-ids="runIds"></RunDialog>
+    <RunDialog v-model:dialog-visible="runDialogShow" :run-type="RunTypeEnum.project" :run-ids="runIds"></RunDialog>
   </div>
 </template>
 
 <script setup name="project">
 import {ElMessageBox} from "element-plus";
-import {listProject, getProject, delProject, addProject, updateProject} from "@/api/hrm/project.js";
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
-import RunDialog from "@/components/hrm/common/run_dialog.vue";
+import {addProject, delProject, getProject, updateProject} from "@/api/hrm/project.js";
+import {RunTypeEnum, StatusNewEnum} from "@/components/hrm/enum.js";
+import RunDialog from "@/components/hrm/common/run/run_dialog.vue";
+import ProjectTableQuery from "@/components/hrm/util-data-table/project-table-query.vue";
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
 
-const projectList = ref([]);
+const projectQueryViewRef = ref(null);
+const total = ref(0);
 const open = ref(false);
-const loading = ref(true);
+const loading = ref(false);
 const showSearch = ref(true);
 const title = ref("");
 const isExpandAll = ref(true);
@@ -187,7 +130,9 @@ const data = reactive({
   form: {},
   queryParams: {
     projectName: undefined,
-    status: undefined
+    status: undefined,
+    pageNum: 1,
+    pageSize: 10
   },
   rules: {
     projectName: [{required: true, message: "项目名称不能为空", trigger: "blur"}],
@@ -197,19 +142,9 @@ const data = reactive({
 
 const {queryParams, form, rules} = toRefs(data);
 
-/** 查询项目列表 */
-function getList() {
-  loading.value = true;
-  listProject(queryParams.value).then(response => {
-    projectList.value = response.data;
-    loading.value = false;
-  });
-}
-
 function handleSelectionChange(selection) {
   runIds.value = selection.map(item => item.projectId);
 }
-
 
 
 /** 取消按钮 */
@@ -225,28 +160,15 @@ function reset() {
     projectName: undefined,
     orderNum: 0,
     simpleDesc: undefined,
-    status: "0"
+    status: StatusNewEnum.normal.value
   };
   proxy.resetForm("projectRef");
 }
 
-/** 搜索按钮操作 */
-function handleQuery() {
-  getList();
-}
-
-/** 重置按钮操作 */
-function resetQuery() {
-  proxy.resetForm("queryRef");
-  handleQuery();
-}
 
 /** 新增按钮操作 */
 function handleAdd(row) {
   reset();
-  listProject().then(response => {
-    projectOptions.value = proxy.handleTree(response.data, "projectId");
-  });
   open.value = true;
   title.value = "添加项目";
 }
@@ -262,11 +184,14 @@ function toggleExpandAll() {
 
 /** 修改按钮操作 */
 function handleUpdate(row) {
+  loading.value = true;
   reset();
   getProject(row.projectId).then(response => {
     form.value = response.data;
     open.value = true;
     title.value = "修改项目";
+  }).finally(()=>{
+    loading.value = false;
   });
 }
 
@@ -278,13 +203,13 @@ function submitForm() {
         updateProject(form.value).then(response => {
           proxy.$modal.msgSuccess("修改成功");
           open.value = false;
-          getList();
+          projectQueryViewRef.value.handleQuery();
         });
       } else {
         addProject(form.value).then(response => {
           proxy.$modal.msgSuccess("新增成功");
           open.value = false;
-          getList();
+          projectQueryViewRef.value.handleQuery();
         });
       }
     }
@@ -296,7 +221,7 @@ function handleDelete(row) {
   proxy.$modal.confirm('是否确认删除名称为"' + row.projectName + '"的数据项?').then(function () {
     return delProject(row.projectId);
   }).then(() => {
-    getList();
+    projectQueryViewRef.value.handleQuery();
     proxy.$modal.msgSuccess("删除成功");
   }).catch(() => {
   });
@@ -314,6 +239,4 @@ function runTest(row) {
   runDialogShow.value = true;
 
 }
-
-getList();
 </script>

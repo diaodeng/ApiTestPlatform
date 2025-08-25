@@ -1,6 +1,11 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 from module_hrm.entity.do.env_do import HrmEnv
 from module_hrm.entity.vo.env_vo import *
+from utils.page_util import PageUtil
 from utils.time_format_util import list_format_datetime
 
 
@@ -70,7 +75,7 @@ class EnvDao:
         return env_info
 
     @classmethod
-    def get_env_list(cls, db: Session, page_object: EnvQueryModel, data_scope_sql: str):
+    def get_env_list(cls, db: Session, page_object: EnvQueryModel, data_scope_sql: str, is_page=False):
         """
         根据查询参数获取环境列表信息
         :param db: orm对象
@@ -86,13 +91,29 @@ class EnvDao:
         if page_object.only_self:
             env_result = env_result.filter(HrmEnv.manager == page_object.manager)
 
-        env_result = env_result.order_by(HrmEnv.order_num) \
-            .distinct().all()
+        env_result = env_result.order_by(HrmEnv.order_num, HrmEnv.create_time.desc(), HrmEnv.update_time.desc()) \
+            .distinct()
 
-        return env_result
+        post_list = PageUtil.paginate(env_result, page_object.page_num, page_object.page_size, is_page)
+
+        return post_list
 
     @classmethod
     def add_env_dao(cls, db: Session, env: EnvModel):
+        """
+        新增部门数据库操作
+        :param db: orm对象
+        :param env: 环境对象
+        :return: 新增校验结果
+        """
+        db_env = HrmEnv(**env.model_dump(exclude_unset=True))
+        db.add(db_env)
+        db.flush()
+
+        return db_env
+
+    @classmethod
+    def copy_env_dao(cls, db: Session, env: EnvModel):
         """
         新增部门数据库操作
         :param db: orm对象

@@ -62,7 +62,7 @@ function boxResize(event) {
 </script>
 
 <template>
-  <el-container>
+  <el-container style="width: 100%;height: 100%">
     <div class="box" ref="boxRef" :style="{width: windowWidth, height: windowHeight}" @resize="boxResize">
       <!--    <div class="box" ref="boxRef" >-->
       <div class="left" ref="leftRef" :style="{width: selfLeftWidth}" style="height: 100%">

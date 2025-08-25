@@ -1,8 +1,13 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunListModel, HrmRunDetailModel
-from utils.page_util import PageUtil
+from utils.page_util import PageUtil, PageResponseModel
+from utils.log_util import logger
 
 
 class RunDetailDao:
@@ -38,8 +43,8 @@ class RunDetailDao:
         """
         创建报告
         """
-        duration = (detail.run_end_time - detail.run_start_time).microseconds / 1000000
-        detail.run_duration = duration
+        # duration = (detail.run_end_time - detail.run_start_time).microseconds / 1000000
+        # detail.run_duration = duration
         detail_dict = detail.model_dump(exclude_unset=True)
         run_detail = HrmRunDetail(**detail_dict)
         db.add(run_detail)
@@ -48,7 +53,8 @@ class RunDetailDao:
         return run_detail
 
     @classmethod
-    def list(cls, db: Session, query_info: RunDetailQueryModel):
+    def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str) -> PageResponseModel|list:
+        logger.info(f"开始查询执行历史：{query_info.model_dump()}")
         query = db.query(HrmRunDetail)
         if query_info.only_self:
             query = query.filter(HrmRunDetail.manager == query_info.manager)
@@ -66,12 +72,21 @@ class RunDetailDao:
         if query_info.run_name:
             query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
 
-        query = query.order_by(HrmRunDetail.create_time.desc())
+        query = query.filter(eval(data_scope_sql))
 
-        result = PageUtil.paginate(query, query_info.page_num, query_info.page_size, True)
+        if query_info.report_id:
+            query = query.order_by(HrmRunDetail.run_start_time, HrmRunDetail.run_end_time)
+        elif query_info.run_id:
+            query = query.order_by(HrmRunDetail.run_start_time.desc(), HrmRunDetail.run_end_time.desc())
+
+        result = PageUtil.paginate(query, query_info.page_num, query_info.page_size, query_info.is_page)
+        if not query_info.is_page:
+            return result
+        logger.info(f"执行历史查询结束")
         rows = []
         for row in result.rows:
-            rows.append(HrmRunListModel.from_orm(row))
+            rows.append(HrmRunListModel.model_validate(row))
 
         result.rows = rows
+        logger.info(f"执行历史数据组装完成: {len(result.rows)}")
         return result

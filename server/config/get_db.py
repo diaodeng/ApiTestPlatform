@@ -1,4 +1,4 @@
-from config.database import *
+from config.database import SessionLocal, Base, engine
 from utils.log_util import logger
 
 

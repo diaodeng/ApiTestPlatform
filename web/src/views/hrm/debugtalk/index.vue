@@ -1,8 +1,8 @@
 <template>
-   <div class="app-container">
-     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
+  <div class="app-container">
+    <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
       <el-form-item label="所属项目" prop="projectId">
-        <el-select v-model="queryParams.projectId" placeholder="请选择" @change="resetModule" clearable
+        <el-select v-model="queryParams.projectId" placeholder="请选择" clearable
                    style="width: 150px">
           <el-option
               v-for="option in projectOptions"
@@ -15,7 +15,7 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="状态" clearable style="width: 100px">
           <el-option
-              v-for="dict in sys_normal_disable"
+              v-for="dict in qtr_data_status"
               :key="dict.value"
               :label="dict.label"
               :value="dict.value"
@@ -27,72 +27,94 @@
         <el-button type="default" icon="Refresh" @click="resetQuery">重置</el-button>
       </el-form-item>
     </el-form>
-      <el-table
-          border
-         v-if="refreshTable"
-         v-loading="loading"
-         :data="debugtalkList"
-         row-key="debugtalkId"
-         :default-expand-all="isExpandAll">
-         <el-table-column prop="debugtalkId" label="ID" width="150"></el-table-column>
-         <el-table-column label="项目ID" width="150" prop="projectId" align="center"></el-table-column>
-         <el-table-column label="所属项目" width="260" prop="projectName" align="center"></el-table-column>
-<!--         <el-table-column label="所属项目" width="260" :formatter="formatProject" align="center"></el-table-column>-->
-         <el-table-column align="center" label="DebugTalk" width="260">
-           <template #default="scope">
-             <el-button link type="primary" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:debugtalk:edit', 'hrm:debugtalk:detail']">debugtalk.py</el-button>
-           </template>
-         </el-table-column>
-         <el-table-column prop="status" label="状态" align="center" width="120">
-            <template #default="scope">
-               <dict-tag :options="sys_normal_disable" :value="scope.row.status" />
-            </template>
-         </el-table-column>
-         <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
-            <template #default="scope">
-               <span>{{ parseTime(scope.row.createTime) }}</span>
-            </template>
-         </el-table-column>
-        <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width">
-            <template #default="scope">
-               <span>{{ parseTime(scope.row.updateTime) }}</span>
-            </template>
-         </el-table-column>
-      </el-table>
+    <el-table
+        border
+        v-if="refreshTable"
+        v-loading="loading"
+        :data="debugtalkList"
+        row-key="debugtalkId"
+        :default-expand-all="isExpandAll"
+        max-height="calc(100vh - 240px)"
+    >
+      <el-table-column prop="debugtalkId" label="ID" width="150"></el-table-column>
+      <el-table-column label="项目ID" width="150" prop="projectId" align="center">
+        <template #default="scope">
+          <span>{{ nameOrGlob(scope.row.projectId) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="所属项目" min-width="260" prop="projectName" align="left">
+        <template #default="scope">
+          <el-text>{{ nameOrGlob(scope.row.projectName) }}</el-text>
+        </template>
+      </el-table-column>
+      <!--         <el-table-column label="所属项目" width="260" :formatter="formatProject" align="center"></el-table-column>-->
+      <el-table-column align="left" label="DebugTalk" min-width="115">
+        <template #default="scope">
+          <el-button link type="primary" @click="handleUpdate(scope.row)"
+                     v-hasPermi="['hrm:debugtalk:edit', 'hrm:debugtalk:detail']">debugtalk.py
+          </el-button>
+        </template>
+      </el-table-column>
+      <el-table-column prop="status" label="状态" align="center" width="70">
+        <template #default="scope">
+          <dict-tag :options="qtr_data_status" :value="scope.row.status"/>
+        </template>
+      </el-table-column>
+      <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width" width="150">
+        <template #default="scope">
+          <span>{{ parseTime(scope.row.createTime) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="更新时间" align="center" prop="updateTime" class-name="small-padding fixed-width" width="150">
+        <template #default="scope">
+          <span>{{ parseTime(scope.row.updateTime) }}</span>
+        </template>
+      </el-table-column>
+    </el-table>
 
-      <!-- 修改debugtalk对话框 -->
+    <pagination
+        v-show="total > 0"
+        :total="total"
+        v-model:page="queryParams.pageNum"
+        v-model:limit="queryParams.pageSize"
+        @pagination="getList"
+    />
+
+    <!-- 修改debugtalk对话框 -->
     <el-dialog fullscreen :title="title" v-model="open" append-to-body>
       <el-form ref="debugtalkRef" :model="form" :rules="rules" label-width="100px" style="height: 100%">
         <el-container style="height: 100%">
           <el-header height="20px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
             <el-button-group>
-              <el-button type="primary" icon="Save" @click="submitForm" v-hasPermi="['hrm:debugtalk:edit']">保存</el-button>
-              <el-button type="primary" icon="Cancel" @click="cancel" >取消</el-button>
+              <el-button type="primary" icon="Save" @click="submitForm" v-hasPermi="['hrm:debugtalk:edit']">保存
+              </el-button>
+              <el-button type="primary" icon="Cancel" @click="cancel">取消</el-button>
             </el-button-group>
           </el-header>
 
           <el-main style="max-height: calc(100vh - 95px);">
 
-            <AceEditor v-model:content="form.debugtalk" can-set="true" lang="python" themes="monokai"></AceEditor>
+            <AceEditor v-model:content="form.debugtalk" :can-set="true" lang="python" themes="monokai"></AceEditor>
 
           </el-main>
         </el-container>
       </el-form>
 
     </el-dialog>
-   </div>
+  </div>
 </template>
 
 <script setup name="debugtalk">
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
-import { listDebugTalk, getDebugTalk, addDebugTalk, updateDebugTalk } from "@/api/hrm/debugtalk.js";
-import { listProject } from "@/api/hrm/project.js";
+import {listDebugTalk, getDebugTalk, addDebugTalk, updateDebugTalk} from "@/api/hrm/debugtalk.js";
+import {listProject} from "@/api/hrm/project.js";
 import {initDebugTalkFormData} from "@/components/hrm/data-template.js";
 
-const { proxy } = getCurrentInstance();
-const { sys_normal_disable } = proxy.useDict("sys_normal_disable");
+const {proxy} = getCurrentInstance();
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
 
 const debugtalkList = ref([]);
+const total = ref(0);
 const projectOptions = ref([]);
 const projectList = ref([]);
 const open = ref(false);
@@ -109,34 +131,42 @@ const data = reactive({
   queryParams: {
     debugtalkId: undefined,
     projectId: undefined,
-    status: undefined
+    status: undefined,
+    pageSize: 10,
+    pageNum: 1
   },
   rules: {
-    orderNum: [{ required: true, message: "显示排序不能为空", trigger: "blur" }]
+    orderNum: [{required: true, message: "显示排序不能为空", trigger: "blur"}]
   },
 
 });
 const form = ref({
   debugtalk: JSON.parse(JSON.stringify(initDebugTalkFormData))
 });
-const { queryParams, rules } = toRefs(data);
+const {queryParams, rules} = toRefs(data);
 
 
-getProjectList();
+
+function nameOrGlob(val) {
+  return val ? val : "全局";
+}
 
 /** 查询DebugTalk列表 */
 function getList() {
   loading.value = true;
   listDebugTalk(queryParams.value).then(response => {
-    debugtalkList.value = proxy.handleTree(response.data, "debugtalkId");
+    debugtalkList.value = response.rows;
+    total.value = response.total;
     loading.value = false;
   });
 }
+
 /** 取消按钮 */
 function cancel() {
   open.value = false;
   reset();
 }
+
 /** 表单重置 */
 function reset() {
   form.value = {
@@ -147,10 +177,12 @@ function reset() {
   };
   proxy.resetForm("debugtalkRef");
 }
+
 /** 搜索按钮操作 */
 function handleQuery() {
   getList();
 }
+
 /** 重置按钮操作 */
 function resetQuery() {
   proxy.resetForm("queryRef");
@@ -191,43 +223,38 @@ function submitForm() {
     }
   });
 }
+
 /** 删除按钮操作 */
 function handleDelete(row) {
-  proxy.$modal.confirm('是否确认删除名称为"' + row.projectName + '"的数据项?').then(function() {
+  proxy.$modal.confirm('是否确认删除名称为"' + row.projectName + '"的数据项?').then(function () {
     return delProject(row.projectId);
   }).then(() => {
     getList();
     proxy.$modal.msgSuccess("删除成功");
-  }).catch(() => {});
+  }).catch(() => {
+  });
 }
 
 // 格式化项目名称的函数
-function formatProject(row, column, cellValue ){
+function formatProject(row, column, cellValue) {
   // 假设每个debugtalk对象都有一个projectId属性，用于从其他地方获取项目名称
   return getProjectName(row.projectId); // getProjectName是一个根据projectId获取项目名称的函数
 }
 
 // 获取项目名称的函数（这里应该是你的实际逻辑）
-function getProjectName(projectId){
+function getProjectName(projectId) {
   // 根据projectId从某个地方（例如另一个数组或API）获取项目名称
   for (const project of projectList.value) {
-    if(projectId === project.projectId){
+    if (projectId === project.projectId) {
       return project.projectName;
     }
   }
 }
-/** 查询项目列表 */
-function getProjectList() {
-  loading.value = true;
-  listProject(queryParams.value).then(response => {
-    projectList.value = response.data;
-    loading.value = false;
-  });
-}
+
 
 /** 查询项目列表 */
 function getProjectSelect() {
-  listProject(null).then(response => {
+  listProject({isPage: false}).then(response => {
     projectOptions.value = response.data;
   });
 }

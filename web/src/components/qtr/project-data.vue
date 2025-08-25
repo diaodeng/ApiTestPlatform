@@ -13,10 +13,10 @@
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="项目状态" clearable style="width: 200px">
           <el-option
-              v-for="dict in sys_normal_disable"
-              :key="dict.value"
+              v-for="dict in qtr_data_status"
+              :key="dict.value * 1"
               :label="dict.label"
-              :value="dict.value"
+              :value="dict.value * 1"
           />
         </el-select>
       </el-form-item>
@@ -49,7 +49,7 @@
       <el-table-column prop="testUser" label="测试负责人" align="center" width="120"></el-table-column>
       <el-table-column prop="status" label="状态" align="center" width="100">
         <template #default="scope">
-          <dict-tag :options="sys_normal_disable" :value="scope.row.status"/>
+          <dict-tag :options="qtr_data_status" :value="scope.row.status + ''"/>
         </template>
       </el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" class-name="small-padding fixed-width">
@@ -72,7 +72,7 @@ import {listProject, getProject, delProject, addProject, updateProject} from "@/
 import {addSuiteDetail} from "@/api/qtr/suite.js";
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
+const {qtr_data_status} = proxy.useDict("qtr_data_status");
 
 const projectList = ref([]);
 const open = ref(false);
@@ -91,6 +91,7 @@ const data = reactive({
   queryParams: {
     projectName: undefined,
     status: undefined,
+    isPage: false,
     suiteId: configSuiteId,
     dataType: 1
   },

@@ -52,17 +52,29 @@ const tagsViewStore = useTagsViewStore()
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 11px;
+  height: 11px;
 }
 
 ::-webkit-scrollbar-track {
   background-color: #f1f1f1;
+  border-radius: 12px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #c0c0c0;
-  border-radius: 3px;
+  background-color: rgba(192, 192, 192, 0.49);
+  border-radius: 12px;
+  background-clip: padding-box;
+  border: 2px dashed transparent;
+}
+
+
+::-webkit-scrollbar-thumb:hover {
+  background: #c0c0c0;
+  //background-color: #c0c0c0;
+  //border-radius: 6px;
+  //background-color: rgba(192, 192, 192, 0.8);
+  //box-shadow: inset 6px 6px 6px hsl(0deg 0% 100% / 25%), inset -6px -6px 6px rgb(0 0 0 / 25%);
 }
 </style>
 

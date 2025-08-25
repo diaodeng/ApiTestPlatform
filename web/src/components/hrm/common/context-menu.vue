@@ -35,9 +35,9 @@ function calculateContextMenuPosition(x, y) {
   menuPosition.value.y = yPosition;
 }
 
-watch([()=>props.x, ()=>props.y], ([newX, newY], oldProps) => {
+watch([() => props.x, () => props.y], ([newX, newY], oldProps) => {
   nextTick(() => {
-      calculateContextMenuPosition(newX, newY);
+    calculateContextMenuPosition(newX, newY);
   });
   // calculateContextMenuPosition(newProps.x, newProps.y);
 });
@@ -45,42 +45,25 @@ watch([()=>props.x, ()=>props.y], ([newX, newY], oldProps) => {
 </script>
 
 <template>
-  <div v-show="visible"
-       :style="{left: menuPosition.x + 'px',top: menuPosition.y + 'px',display: visible ? 'block' : 'none'}"
-       class="context-menu"
-       v-click-outside="hide"
-       ref="menuRef"
-  >
-    <div
-        v-for="(item, i) in menus"
-        :key="i"
-        class="menu-item"
-        @click="visible = false;$emit('select', item)"
-        style="display: flex;flex-direction: column;"
+    <div v-show="visible"
+         :style="{left: menuPosition.x + 'px',top: menuPosition.y + 'px',display: visible ? 'block' : 'none'}"
+         class="context-menu"
+         v-click-outside="hide"
+         ref="menuRef"
     >
-      {{ item.title }}
-      <!--      <el-button type="success">{{ item.title }}</el-button>-->
+      <div
+          v-for="(item, i) in menus"
+          :key="i"
+          class="menu-item"
+          @click="visible = false;$emit('select', item)"
+          style="display: flex;flex-direction: column;"
+      >
+        {{ item.title }}
+        <!--      <el-button type="success">{{ item.title }}</el-button>-->
+
+      </div>
 
     </div>
-    <!--    <el-menu-->
-    <!--        class="el-menu-demo"-->
-    <!--        mode="horizontal"-->
-    <!--        @select="visible = false;$emit('select', 'fadfadsf')"-->
-    <!--    >-->
-    <!--      <el-sub-menu index="1">-->
-    <!--        <template #title>Workspace</template>-->
-    <!--        <el-menu-item index="2-1">item one</el-menu-item>-->
-    <!--        <el-menu-item index="2-2">item two</el-menu-item>-->
-    <!--        <el-menu-item index="2-3">item three</el-menu-item>-->
-    <!--        <el-sub-menu index="2-4">-->
-    <!--          <template #title>item four</template>-->
-    <!--          <el-menu-item index="2-4-1">item one</el-menu-item>-->
-    <!--          <el-menu-item index="2-4-2">item two</el-menu-item>-->
-    <!--          <el-menu-item index="2-4-3">item three</el-menu-item>-->
-    <!--        </el-sub-menu>-->
-    <!--      </el-sub-menu>-->
-    <!--    </el-menu>-->
-  </div>
 
 </template>
 

@@ -6,8 +6,15 @@ __pycache__/
 .idea
 server/.env.dev
 server/.env.prod
+server/.env.test
 server/alembic
 server/alembic.ini
+server/node_modules
+server/temp_test
+server/app
+server/.vscode
+
+web/vite.config.js.timestamp*.mjs
 
 # C extensions
 *.so
@@ -15,7 +22,7 @@ server/alembic.ini
 # Distribution / packaging
 .Python
 develop-eggs/
-dist/
+server/dist/
 downloads/
 eggs/
 .eggs/

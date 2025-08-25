@@ -46,7 +46,8 @@ class QueryModel(BaseModel):
     end_time: Optional[Any] = None
     status: Optional[Any] = None
     id: Optional[Any] = None
-    only_self:bool = False
+    only_self: bool = False
+    is_page: bool = True
 
 
 class CommonDataModel(BaseModel):
@@ -55,6 +56,7 @@ class CommonDataModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
     id: int | None = None
+    dept_id: int | None = None
     create_by: Optional[str | Any] = None
     update_by: Optional[str | Any] = None
     create_time: Optional[str | Any] = None

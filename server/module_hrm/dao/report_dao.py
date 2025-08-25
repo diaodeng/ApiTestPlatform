@@ -1,4 +1,8 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 
 from module_hrm.entity.do.report_do import HrmReport
 from module_hrm.entity.vo.report_vo import ReportQueryModel, ReportListModel, ReportCreatModel
@@ -12,7 +16,7 @@ class ReportDao:
 
     @classmethod
     def get_by_id(cls, db: Session, report_id: int):
-        pass
+        return db.query(HrmReport).filter(HrmReport.report_id == report_id).first()
 
     @classmethod
     def get_by_name(cls, db: Session, report_name: str):
@@ -44,8 +48,8 @@ class ReportDao:
         return report
 
     @classmethod
-    def get_list(cls, db: Session, query_object: ReportQueryModel):
-        query = db.query(HrmReport)
+    def get_list(cls, db: Session, query_object: ReportQueryModel, data_scope_sql:str):
+        query = db.query(HrmReport).filter(eval(data_scope_sql))
         if query_object.only_self:
             query = query.filter(HrmReport.manager == query_object.manager)
 
@@ -57,11 +61,11 @@ class ReportDao:
 
         query = query.order_by(HrmReport.create_time.desc())
 
-        result = PageUtil.paginate(query, query_object.page_num, query_object.page_size, True)
+        result = PageUtil.paginate(query, query_object.page_num, query_object.page_size, query_object.is_page)
 
         rows = []
         for row in result.rows:
-            rows.append(ReportListModel.from_orm(row))
+            rows.append(ReportListModel.model_validate(row))
 
         result.rows = rows
         return result

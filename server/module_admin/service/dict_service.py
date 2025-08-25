@@ -4,6 +4,7 @@ from config.env import RedisInitKeyConfig
 from module_admin.dao.dict_dao import *
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import export_list2excel, CamelCaseUtil
+from utils.redis_util import scan_keys
 
 
 class DictTypeService:
@@ -205,8 +206,10 @@ class DictDataService:
         :param redis: redis对象
         :return:
         """
+
+
         # 获取以sys_dict:开头的键列表
-        keys = await redis.keys(f"{RedisInitKeyConfig.SYS_DICT.get('key')}:*")
+        keys = await scan_keys(redis, f"{RedisInitKeyConfig.SYS_DICT.get('key')}:*")
         # 删除匹配的键
         if keys:
             await redis.delete(*keys)

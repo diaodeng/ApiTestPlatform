@@ -1,12 +1,12 @@
 import json
+from typing import Optional, List, Any, Text, Dict
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, root_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
-from typing import Union, Optional, List, Any, Text, Dict
 
 from module_admin.annotation.pydantic_annotation import as_query
-from module_hrm.entity.vo.common_vo import QueryModel, CommonDataModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
+from module_hrm.entity.vo.common_vo import QueryModel, CommonDataModel
 from module_hrm.enums.enums import CaseRunStatus
 from utils.common_util import CamelCaseUtil
 
@@ -16,7 +16,7 @@ class RunDetailDelModel(BaseModel):
     报告删除模型
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
-    detail_ids: Optional[List[Text | int]] = []
+    detail_ids: Optional[List[Text | int]] = Field(default_factory=lambda: [])
 
 
 class HrmRunListModel(CommonDataModel):

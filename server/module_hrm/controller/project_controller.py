@@ -1,28 +1,34 @@
 from fastapi import APIRouter, Request
 from fastapi import Depends
 from config.get_db import get_db
+from sqlalchemy.orm import Session
 from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.service.project_service import *
-from module_hrm.service.debugtalk_service import *
-from utils.response_util import *
-from utils.log_util import *
+from module_hrm.service.project_service import ProjectService, ProjectModel, ProjectQueryModel, DeleteProjectModel
+from module_hrm.service.debugtalk_service import DebugTalkService, DeleteDebugTalkModel
+from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
+from utils.log_util import logger
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.annotation.log_annotation import log_decorator
 from utils.snowflake import snowIdWorker
+from datetime import datetime
 
 projectController = APIRouter(prefix='/hrm/project', dependencies=[Depends(LoginService.get_current_user)])
 
 
-@projectController.get("/list", response_model=List[ProjectModel], dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
+@projectController.get("/list", response_model=list[ProjectModel] | PageResponseModel,
+                       dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:list'))])
 async def get_hrm_project_list(request: Request,
                                query: ProjectQueryModel = Depends(ProjectQueryModel.as_query),
                                query_db: Session = Depends(get_db),
-                               data_scope_sql: str = Depends(GetDataScope('HrmProject'))):
+                               data_scope_sql: str = Depends(GetDataScope('HrmProject', user_alias='manager'))):
     try:
         query_result = ProjectService.get_project_list_services(query_db, query, data_scope_sql)
-        logger.info('获取成功')
-        return ResponseUtil.success(data=query_result)
+        if query.is_page:
+            return ResponseUtil.success(model_content=query_result)
+        else:
+            return ResponseUtil.success(data=query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -38,7 +44,8 @@ async def add_hrm_project(request: Request,
         add_project.manager = current_user.user.user_id
         add_project.create_by = current_user.user.user_name
         add_project.update_by = current_user.user.user_name
-        add_project.project_id =snowIdWorker.get_id()
+        add_project.dept_id = current_user.user.dept_id
+        add_project.project_id = snowIdWorker.get_id()
         add_project_result = ProjectService.add_project_services(query_db, add_project)
         if add_project_result.is_success:
             logger.info(add_project_result.message)
@@ -74,7 +81,8 @@ async def edit_hrm_project(request: Request,
 
 @projectController.delete("/{project_ids}", dependencies=[Depends(CheckUserInterfaceAuth('hrm:project:remove'))])
 @log_decorator(title='项目管理', business_type=3)
-async def delete_hrm_project(request: Request, project_ids: str, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+async def delete_hrm_project(request: Request, project_ids: str, query_db: Session = Depends(get_db),
+                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         delete_project = DeleteProjectModel(projectIds=project_ids)
         delete_project.update_by = current_user.user.user_name
@@ -96,7 +104,9 @@ async def delete_hrm_project(request: Request, project_ids: str, query_db: Sessi
         return ResponseUtil.error(msg=str(e))
 
 
-@projectController.get("/{project_id}", response_model=ProjectModel, dependencies=[Depends(CheckUserInterfaceAuth(['hrm:project:detail', "hrm:project:edit"], False))])
+@projectController.get("/{project_id}", response_model=ProjectModel,
+                       dependencies=[
+                           Depends(CheckUserInterfaceAuth(['hrm:project:detail', "hrm:project:edit"], False))])
 async def query_detail_system_project(request: Request, project_id: int, query_db: Session = Depends(get_db)):
     try:
         detail_project_result = ProjectService.project_detail_services(query_db, project_id)

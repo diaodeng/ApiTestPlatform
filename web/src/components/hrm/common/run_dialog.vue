@@ -1,23 +1,26 @@
 <script setup>
-import {ElDialog, ElLoading, ElMessage, ElMessageBox} from "element-plus";
+import {ElDialog, ElMessage} from "element-plus";
+import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {testRun} from "@/api/hrm/run_detail.js";
-import {listEnv} from "@/api/hrm/env";
-import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
+import {all as getAllForwardRules} from "@/api/hrm/forward";
+import {all as getAllAgent} from "@/api/hrm/agent.js";
+import {RunTypeEnum} from "@/components/hrm/enum.js";
 
 
 const dialogVisible = defineModel("dialogVisible");
 const runIds = defineModel("runIds");
+const allForwardRules = ref([]);
+const allAgent = ref([]);
 
 const props = defineProps({
-  runType: {type: Number, default: HrmDataTypeEnum.case},
+  runType: Number,
   // runIds: {type: Array, default: []},
   showDialog: {type: Boolean, default: false}
-})
+});
 
 // const dialogVisible = props.showDialog;
 const dialogTestLoading = ref(false);
 const dialogCanClose = ref(true);
-const envList = ref([]);
 const disableCanRun = ref(false);
 
 const form = ref({
@@ -25,9 +28,17 @@ const form = ref({
   runType: props.runType,
   env: null,
   reportName: null,
-  isAsync: "1",
-  repeatNum: 1
-})
+  isAsync: false,
+  repeatNum: 1,
+  concurrent: 1,
+  push: false,
+  forwardConfig: {
+    forward: false,
+    agentId: undefined,
+    forwardRuleIds: undefined,
+  },
+  runBySort: false
+});
 
 
 function handleRun(env) {
@@ -76,6 +87,20 @@ function handleRun(env) {
 
 }
 
+
+function getForwardRule() {
+  getAllForwardRules().then(response => {
+    allForwardRules.value = response.data;
+  });
+}
+
+function getAgent() {
+  getAllAgent().then(response => {
+    allAgent.value = response.rows;
+  });
+}
+
+
 function handleClose() {
   dialogCanClose.value = true;
   dialogVisible.value = false;
@@ -91,13 +116,16 @@ function beforeClose(done) {
   }
 }
 
-function envListLoad() {
-  listEnv().then(response => {
-    envList.value = response.data;
-  });
-}
+watch(()=>form.value.runBySort, (newValue)=>{
+  if (form.value.runBySort){
+    form.value.concurrent = 1;
+  }
+})
 
-envListLoad();
+onMounted(() => {
+  getForwardRule();
+  getAgent();
+});
 
 </script>
 
@@ -114,15 +142,7 @@ envListLoad();
   >
     <el-form :model="form" v-loading.fullscreen.lock="dialogTestLoading">
       <el-form-item label="测试环境：">
-        <el-select v-model="form.env" placeholder="请选择测试环境">
-          <el-option
-              v-for="option in envList"
-              :key="option.envId"
-              :label="option.envName"
-              :value="option.envId">
-          </el-option>
-        </el-select>
-
+        <EnvSelector v-model:selected-env="form.env" selector-width="100%"></EnvSelector>
       </el-form-item>
       <el-form-item label="报告名称：">
         <el-input v-model="form.reportName" autocomplete="off" placeholder="报告名称，默认为执行时间"/>
@@ -131,10 +151,56 @@ envListLoad();
         <el-input-number :min="1" controls-position="right" v-model="form.repeatNum"/>
       </el-form-item>
       <el-form-item label="同步执行：">
-        <el-select v-model="form.isAsync" placeholder="Please select a zone">
-          <el-option label="同步" value="1"/>
-          <el-option label="异步" value="2"/>
+        <el-select v-model="form.isAsync" placeholder="选择本次执行方式">
+          <el-option label="同步" :value="false"/>
+          <el-option label="异步" :value="true"/>
         </el-select>
+      </el-form-item>
+      <el-form-item label="并发数量：">
+        <el-input-number :min="1" controls-position="right" v-model="form.concurrent"
+                         placeholder="输入并发执行的用例数量" :disabled="form.runBySort"></el-input-number>
+      </el-form-item>
+
+      <el-form-item label="转发配置：">
+        <div style="display: flex;flex-direction: row;flex-grow: 1">
+          <el-checkbox v-model="form.forwardConfig.forward" style="margin-right: 20px"></el-checkbox>
+          <el-row style="flex-grow: 1" :gutter="10">
+            <el-col :span="12">
+              <el-select placeholder="请选择客户机"
+                         v-model="form.forwardConfig.agentId"
+              >
+                <el-option
+                    v-for="item in allAgent"
+                    :key="item.agentId"
+                    :label="item.agentName"
+                    :value="item.agentId"
+                />
+              </el-select>
+            </el-col>
+            <el-col :span="12">
+              <el-select multiple
+                         placeholder="请选择转发规则"
+                         v-model="form.forwardConfig.forwardRuleIds"
+              >
+                <el-option
+                    v-for="item in allForwardRules"
+                    :key="item.ruleId"
+                    :label="item.ruleName"
+                    :value="item.ruleId"
+                />
+              </el-select>
+            </el-col>
+          </el-row>
+        </div>
+      </el-form-item>
+
+      <el-form-item label="顺序执行：">
+        <!--        <el-input v-model="form.push" type="checkbox"></el-input>-->
+        <el-checkbox v-model="form.runBySort"></el-checkbox>
+      </el-form-item>
+      <el-form-item label="结果通知：">
+        <!--        <el-input v-model="form.push" type="checkbox"></el-input>-->
+        <el-checkbox v-model="form.push"></el-checkbox>
       </el-form-item>
     </el-form>
     <template #footer>
