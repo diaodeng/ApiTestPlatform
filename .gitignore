@@ -23,6 +23,7 @@ web/vite.config.js.timestamp*.mjs
 .Python
 develop-eggs/
 server/dist/
+web/dist/
 downloads/
 eggs/
 .eggs/
