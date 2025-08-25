@@ -3,7 +3,7 @@ from fastapi import Depends, File, Query
 from module_admin.service.login_service import LoginService
 from module_admin.service.common_service import *
 from utils.response_util import *
-from utils.log_util import *
+from utils.log_util import logger
 
 commonController = APIRouter(prefix='/common', dependencies=[Depends(LoginService.get_current_user)])
 

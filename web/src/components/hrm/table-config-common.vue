@@ -5,12 +5,15 @@
 * */
 import SelectDataType from "@/components/hrm/select-dataType.vue";
 import SelectComparator from '@/components/select/popover-select.vue'
+
 import {ElMessage, ElMessageBox} from 'element-plus';
 import {inject, useTemplateRef} from "vue";
 import {useClipboard} from "@vueuse/core";
 import {Json, parseHeader} from "@/utils/tools.js";
 import Sortable from "sortablejs";
 import {ScopeEnum} from "@/components/hrm/enum.js";
+import CellAssertComparator from "@/components/hrm/common/cells/cell-assert-comparator.vue";
+import CellDictSelectChange from "@/components/hrm/common/cells/cell-dict-select-change.vue";
 
 const props = defineProps({
   cols: {type: Object},
@@ -48,7 +51,9 @@ function addRow(event) {
       type: 'string',
       desc: '',
       dataId: selfData.value.length,
-      scope: ScopeEnum.case.value
+      scope: ScopeEnum.case.value,
+      sourceWay: 1,
+      assert: "equals"
     });
   } else {
     console.log("selfData is not object")
@@ -147,17 +152,17 @@ function uniKey(row) {
 /*
 * 数据没有ID需要添加唯一ID作为数据行唯一标识
 * */
-onMounted(() => {
+onMounted(async () => {
   selfData.value.map((item, index) => {
     if (!("dataId" in item)) {
       item["dataId"] = index;
     }
 
   })
-  setSort();
+  await setSort();
 })
 
-function setSort() {//行拖拽
+async function setSort() {//行拖拽
   // const tbody = document.querySelector('table.drag-table tbody');
   const tableEl = multipleTable.value.$el;
   const tbody = tableEl.querySelector(`tbody`);
@@ -180,7 +185,7 @@ function setSort() {//行拖拽
 
 function selectOptions(options) {
   console.log(options)
-  if (options){
+  if (options) {
     return options;
   }
   return hrm_data_type;
@@ -219,55 +224,59 @@ function selectOptions(options) {
         <slot name="tableHeader"></slot>
       </div>
     </div>
-
     <el-table
-        table-layout="fixed"
-        ref="tableRef"
-        show-overflow-tooltip
-        tooltip-effect="dark"
-        style="width: 100%"
-        size="small"
-        border
-        :row-key="uniKey"
-        v-model:data="selfData"
-    >
-      <el-table-column type="selection" width="30"></el-table-column>
-      <el-table-column v-for="col in cols" :label="col.name" v-bind="colWith(col.width)">
-        <template #header>
+          table-layout="fixed"
+          ref="tableRef"
+          show-overflow-tooltip
+          tooltip-effect="dark"
+          style="width: 100%"
+          size="small"
+          border
+          :row-key="uniKey"
+          v-model:data="selfData"
+      >
+        <el-table-column type="selection" width="30"></el-table-column>
+        <el-table-column v-for="col in cols" :label="col.name" v-bind="colWith(col.width)">
+          <template #header>
 
-          <template v-if="col.type === 'switch'">
-            <el-popover trigger="click">
-              <template #reference>
-                {{ col.name }}
-              </template>
-              <el-button size="small" type="primary" circle @click="changeSwitch('open')">全开</el-button>
-              <el-button size="small" type="success" circle @click="changeSwitch('invert')">反选</el-button>
-              <el-button size="small" type="warning" circle @click="changeSwitch('close')">全关</el-button>
-            </el-popover>
+            <template v-if="col.type === 'switch'">
+              <el-popover trigger="click">
+                <template #reference>
+                  {{ col.name }}
+                </template>
+                <el-button size="small" type="primary" circle @click="changeSwitch('open')">全开</el-button>
+                <el-button size="small" type="success" circle @click="changeSwitch('invert')">反选</el-button>
+                <el-button size="small" type="warning" circle @click="changeSwitch('close')">全关</el-button>
+              </el-popover>
+            </template>
           </template>
-        </template>
 
-        <template #default="{ row, $index }">
-          <template v-if="col.type === 'select'">
-            <SelectDataType v-model="row[col.prop]" :options="col.options || hrm_data_type"></SelectDataType>
+          <template #default="{ row, $index }">
+            <template v-if="col.type === 'select'">
+<!--              <SelectDataType v-model="row[col.prop]" :options="col.options || hrm_data_type"></SelectDataType>-->
+              <CellDictSelectChange v-model="row[col.prop]" :options="col.options || hrm_data_type"></CellDictSelectChange>
+            </template>
+            <template v-else-if="col.type === 'compaList'">
+              <CellAssertComparator v-model:cell-data="row[col.prop]"
+                                    :hrm_comparator_dict="hrm_comparator_dict"
+              ></CellAssertComparator>
+<!--              <SelectComparator v-model="row[col.prop]" :options-dict="hrm_comparator_dict"></SelectComparator>-->
+            </template>
+            <template v-else-if="col.type === 'switch'">
+              <el-switch v-model="row[col.prop]"></el-switch>
+            </template>
+            <template v-else>
+              <el-input v-model="row[col.prop]"></el-input>
+            </template>
+            <!--          <el-input v-model="row[col.prop]"></el-input>-->
           </template>
-          <template v-else-if="col.type === 'compaList'">
-            <SelectComparator v-model="row[col.prop]" :options-dict="hrm_comparator_dict"></SelectComparator>
-          </template>
-          <template v-else-if="col.type === 'switch'">
-            <el-switch v-model="row[col.prop]"></el-switch>
-          </template>
-          <template v-else>
-            <el-input v-model="row[col.prop]"></el-input>
-          </template>
-<!--          <el-input v-model="row[col.prop]"></el-input>-->
-        </template>
 
-      </el-table-column>
-      <!--    <el-table-column prop="key" label="key" width="300"></el-table-column>-->
-      <!--    <el-table-column prop="value" label="type" width="300"></el-table-column>-->
-      <!--    <el-table-column prop="desc" label="value" show-overflow-tooltip></el-table-column>-->
-    </el-table>
+        </el-table-column>
+        <!--    <el-table-column prop="key" label="key" width="300"></el-table-column>-->
+        <!--    <el-table-column prop="value" label="type" width="300"></el-table-column>-->
+        <!--    <el-table-column prop="desc" label="value" show-overflow-tooltip></el-table-column>-->
+      </el-table>
+
   </div>
 
 </template>

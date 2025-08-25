@@ -1,4 +1,8 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunListModel, HrmRunDetailModel
@@ -49,7 +53,7 @@ class RunDetailDao:
         return run_detail
 
     @classmethod
-    def list(cls, db: Session, query_info: RunDetailQueryModel):
+    def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str):
         logger.info(f"开始查询执行历史：{query_info.model_dump()}")
         query = db.query(HrmRunDetail)
         if query_info.only_self:
@@ -67,6 +71,8 @@ class RunDetailDao:
 
         if query_info.run_name:
             query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
+
+        query = query.filter(eval(data_scope_sql))
 
         if query_info.report_id:
             query = query.order_by(HrmRunDetail.run_start_time, HrmRunDetail.run_end_time)

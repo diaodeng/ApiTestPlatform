@@ -160,8 +160,79 @@
         @pagination="getList"
     />
 
-    <!-- 添加或修改定时任务对话框 -->
+    <!-- 添加或修改定时任务对话框 基础操作 -->
     <el-dialog :title="title" v-model="open" width="820px" append-to-body>
+      <el-form ref="jobRef" :model="form" :rules="rules" label-width="120px">
+        <el-row>
+          <el-col :span="24">
+            <el-form-item label="任务名称" prop="jobName">
+              <el-input v-model="form.jobName" placeholder="请输入任务名称"/>
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="测试数据" prop="testData">
+              <RunDataConfig v-model:run-ids="runIds" v-model:run-type="runType"></RunDataConfig>
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <RunConfig label-width="120px"
+                       v-model:config-data="runConfigDataRef"
+                       @update="updateRunConfigData"
+            ></RunConfig>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="cron表达式" prop="cronExpression">
+              <el-input v-model="form.cronExpression" placeholder="请输入cron执行表达式">
+                <template #append>
+                  <el-button type="primary" @click="handleShowCron">
+                    生成表达式
+                    <i class="el-icon-time el-icon--right"></i>
+                  </el-button>
+                </template>
+              </el-input>
+            </el-form-item>
+          </el-col>
+          <el-col :span="24" v-if="form.jobId !== undefined">
+            <el-form-item label="状态">
+              <el-radio-group v-model="form.status">
+                <el-radio
+                    v-for="dict in sys_job_status"
+                    :key="dict.value"
+                    :value="dict.value"
+                >{{ dict.label }}
+                </el-radio>
+              </el-radio-group>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="执行策略" prop="misfirePolicy">
+              <el-radio-group v-model="form.misfirePolicy">
+                <el-radio-button value="1">立即执行</el-radio-button>
+                <el-radio-button value="2">执行一次</el-radio-button>
+                <el-radio-button value="3">放弃执行</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="是否并发" prop="concurrent">
+              <el-radio-group v-model="form.concurrent">
+                <el-radio-button value="0">允许</el-radio-button>
+                <el-radio-button value="1">禁止</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button type="primary" @click="submitForm">确 定</el-button>
+          <el-button @click="cancel">取 消</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 添加或修改定时任务对话框 高级操作 -->
+    <el-dialog :title="title" v-model="openAdvanced" width="820px" append-to-body>
       <el-form ref="jobRef" :model="form" :rules="rules" label-width="120px">
         <el-row>
           <el-col :span="24">
@@ -243,7 +314,7 @@
                 <el-radio
                     v-for="dict in sys_job_status"
                     :key="dict.value"
-                    :label="dict.value"
+                    :value="dict.value"
                 >{{ dict.label }}
                 </el-radio>
               </el-radio-group>
@@ -252,17 +323,17 @@
           <el-col :span="12">
             <el-form-item label="执行策略" prop="misfirePolicy">
               <el-radio-group v-model="form.misfirePolicy">
-                <el-radio-button label="1">立即执行</el-radio-button>
-                <el-radio-button label="2">执行一次</el-radio-button>
-                <el-radio-button label="3">放弃执行</el-radio-button>
+                <el-radio-button value="1">立即执行</el-radio-button>
+                <el-radio-button value="2">执行一次</el-radio-button>
+                <el-radio-button value="3">放弃执行</el-radio-button>
               </el-radio-group>
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="是否并发" prop="concurrent">
               <el-radio-group v-model="form.concurrent">
-                <el-radio-button label="0">允许</el-radio-button>
-                <el-radio-button label="1">禁止</el-radio-button>
+                <el-radio-button value="0">允许</el-radio-button>
+                <el-radio-button value="1">禁止</el-radio-button>
               </el-radio-group>
             </el-form-item>
           </el-col>
@@ -343,6 +414,7 @@
 
 <script setup name="QtrJob">
 import {ElMessage} from "element-plus";
+import RunConfig from "@/components/hrm/common/run/run-config.vue";
 import {
   listJob,
   getJob,
@@ -356,6 +428,9 @@ import {
 } from "@/api/qtr/job.js";
 import Crontab from '@/components/Crontab/index.vue'
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
+import RunDataConfig from "@/components/hrm/common/run/run-data-config.vue";
+import {RunTypeEnum} from "@/components/hrm/enum.js";
+import {initRunConfig} from "@/components/hrm/data-template.js";
 
 const router = useRouter();
 const {proxy} = getCurrentInstance();
@@ -368,6 +443,7 @@ const {job_run_status} = proxy.useDict("job_run_status");
 
 const jobList = ref([]);
 const open = ref(false);
+const openAdvanced = ref(false);  // 高级配置弹窗
 const loading = ref(true);
 const showSearch = ref(true);
 const ids = ref([]);
@@ -378,24 +454,79 @@ const title = ref("");
 const openView = ref(false);
 const openCron = ref(false);
 const expression = ref("");
+const runConfigDataRef = computed(() => {
+  return form.value.jobKwargs ? JSON.parse(form.value.jobKwargs) : JSON.parse(JSON.stringify(initRunConfig));
+});
+const runType = computed({
+  get(){
+  return form.value.jobKwargs && JSON.parse(form.value.jobKwargs).runType ? JSON.parse(form.value.jobKwargs).runType : RunTypeEnum.case;
+  },
+  set(newValue){
+    let kw = JSON.parse(form.value.jobKwargs || '{}');
+    kw.runType = newValue;
+    form.value.jobKwargs = JSON.stringify(kw);
+  }
+});
+const runIds = computed({
+  get(){
+    return form.value.jobKwargs && JSON.parse(form.value.jobKwargs).ids ? JSON.parse(form.value.jobKwargs).ids : [];
+  },
+  set(newValue){
+    let kw = JSON.parse(form.value.jobKwargs || '{}');
+    kw.ids = newValue;
+    form.value.jobKwargs = JSON.stringify(kw);
+  }
+});
+
+/*
+* 验证测试数据不能为空
+* */
+const validateTestData = (rule, value, callback) => {
+  if (!runIds.value || runIds.value.length <= 0 || !runType.value){
+    callback(new Error('请选择测试数据'));
+  }
+  callback();
+}
 
 const data = reactive({
-  form: {},
+  form: {
+    jobGroup: 'sqlalchemy',
+    jobExecutor: 'default',
+    cronExpression: '0 0 0 1 1 ?',
+    jobArgs: "",
+    jobKwargs: "",
+    jobId: undefined,
+    jobName: undefined,
+    invokeTarget: "module_task.scheduler_qtr.job_run_test",
+    misfirePolicy: "1",
+    concurrent: "1",
+    status: "0"
+  },
   queryParams: {
     pageNum: 1,
     pageSize: 10,
     jobName: undefined,
     jobGroup: undefined,
-    status: undefined
+    status: undefined,
+    jobExecutor: undefined,
+    cronExpression: undefined
   },
   rules: {
     jobName: [{required: true, message: "任务名称不能为空", trigger: "blur"}],
+    testData: [{required: true, message: "测试数据不能为空", trigger: "blur", validator: validateTestData}],
     invokeTarget: [{required: true, message: "调用目标字符串不能为空", trigger: "blur"}],
     cronExpression: [{required: true, message: "cron执行表达式不能为空", trigger: "change"}]
   }
 });
 
-const {queryParams, form, rules} = toRefs(data);
+const {form, queryParams, rules} = toRefs(data);
+
+const runConfigRules = ref({
+  env: [{required: true, message: "运行环境不能为空", trigger: 'blur'}],
+});
+
+
+
 
 /** 查询定时任务列表 */
 function getList() {
@@ -437,12 +568,15 @@ function reset() {
   form.value = {
     jobId: undefined,
     jobName: undefined,
-    jobGroup: undefined,
-    invokeTarget: undefined,
-    cronExpression: undefined,
-    misfirePolicy: "1",
+    jobGroup: "sqlalchemy",
+    jobExecutor: "default",
+    invokeTarget: 'module_task.scheduler_qtr.job_run_test',
+    cronExpression: '0 0 0 1 1 ?',
+    misfirePolicy: "2",
     concurrent: "1",
-    status: "0"
+    status: "0",
+    jobArgs: "",
+    jobKwargs: "",
   };
   proxy.resetForm("jobRef");
 }
@@ -599,6 +733,10 @@ function handleExport() {
   proxy.download("qtr/job/export", {
     ...queryParams.value,
   }, `job_${new Date().getTime()}.xlsx`);
+}
+
+function updateRunConfigData(configData) {
+  form.value.jobKwargs = configData ? JSON.stringify(configData) : ""
 }
 
 getList();

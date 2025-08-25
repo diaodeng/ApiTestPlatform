@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 
 from config.database import engine, SQLALCHEMY_DATABASE_URL
 from config.env import RedisConfig
+from module_hrm.entity.vo.job_vo import JobModel
 from utils.log_util import logger
 import module_task
 from module_hrm.enums.enums import TaskStatusEnum
@@ -219,7 +220,7 @@ class SchedulerUtil:
         except JobLookupError as e:
             logger.info(f"job {job_id} 不存在")
 
-    def add_scheduler_job(self, job_info):
+    def add_scheduler_job(self, job_info: JobModel):
         """
         根据输入的任务对象信息添加任务
         :param job_info: 任务对象信息

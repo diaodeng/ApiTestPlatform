@@ -124,12 +124,14 @@ function setpTabsSortAble() {//行拖拽
 
 function clickStep(stepIndex, event) {
   let currentElement = undefined;
-  if (event && event.nodeType === 1){
+  if (event && event.nodeType === 1) {
     currentElement = event;
-  }else {
+  } else {
     currentElement = event.currentTarget;
   }
-  if (!currentElement){return}
+  if (!currentElement) {
+    return
+  }
   loading.value.switchStep = true;
   for (const child of currentElement.parentElement.children) {
     child.classList.remove("selected-list");
@@ -142,8 +144,16 @@ function clickStep(stepIndex, event) {
 }
 
 onMounted(() => {
-  setpTabsSortAble();
-  clickStep(0, tabsRef?.value.children[0]);
+  nextTick(() => {
+    setpTabsSortAble();
+    clickStep(0, tabsRef?.value.children[0]);
+  });
+});
+
+watch(() => testStepsData.value, (newValue) => {
+  nextTick(() => {
+    clickStep(0, tabsRef?.value.children[0]);
+  });
 });
 
 </script>
@@ -168,8 +178,8 @@ onMounted(() => {
                 :key="step.step_id"
                 style="white-space: nowrap">
               <el-link :underline="false">
-                <el-button style="margin: 0;padding: 0;" type="primary" circle size="small">{{index +1}}</el-button>
-                <EditLabel v-model:name-text="step.name"
+                <el-button style="margin: 0;padding: 0;" type="primary" circle size="small">{{ index + 1 }}</el-button>
+                <EditLabel v-model:name-text="testStepsData[index].name"
                            :notify="step.result && step.result.status !== CaseRunStatusEnum.passed.value"
                            v-model:enable="testStepsData[index].enable"
                            :index-key="index"
@@ -191,7 +201,6 @@ onMounted(() => {
               ></StepDetail>
               <template #fallback>加载中。。。</template>
             </Suspense>
-
           </div>
         </template>
       </split-window>

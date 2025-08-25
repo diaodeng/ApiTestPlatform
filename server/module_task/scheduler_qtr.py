@@ -73,8 +73,11 @@ def job_run_test(*args, **kwargs):
         user_info_module = UserInfoModel()
         user_info_module.user_name = in_data["userName"]
         user_info_module.user_id = in_data["userId"]
+        user_info_module.dept_id = in_data.get("deptId", None)
+        user_info = user_info_module.model_dump(by_alias=True)
+        logger.info(f"用户信息：{user_info}")
         user_module = CurrentUserModel(
-            **{"permissions": [], "roles": [], "user": user_info_module.model_dump(by_alias=True)})
+            **{"permissions": [], "roles": [], "user": user_info})
 
         data = CaseRunModel(env=1)
         data.ids = in_data.get("ids", [])

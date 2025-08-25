@@ -3,7 +3,7 @@ from fastapi import Depends
 from module_admin.service.login_service import LoginService
 from module_admin.service.cache_service import *
 from utils.response_util import *
-from utils.log_util import *
+from utils.log_util import logger
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 
 

@@ -1,4 +1,8 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 
 from module_hrm.entity.do.report_do import HrmReport
 from module_hrm.entity.vo.report_vo import ReportQueryModel, ReportListModel, ReportCreatModel
@@ -44,8 +48,8 @@ class ReportDao:
         return report
 
     @classmethod
-    def get_list(cls, db: Session, query_object: ReportQueryModel):
-        query = db.query(HrmReport)
+    def get_list(cls, db: Session, query_object: ReportQueryModel, data_scope_sql:str):
+        query = db.query(HrmReport).filter(eval(data_scope_sql))
         if query_object.only_self:
             query = query.filter(HrmReport.manager == query_object.manager)
 

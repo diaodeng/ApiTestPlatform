@@ -56,6 +56,7 @@ class CommonDataModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
     id: int | None = None
+    dept_id: int | None = None
     create_by: Optional[str | Any] = None
     update_by: Optional[str | Any] = None
     create_time: Optional[str | Any] = None

@@ -1,8 +1,8 @@
 <script setup>
 
 import SplitWindow from "@/components/hrm/common/split-window.vue";
-import DebugResult from "@/components/hrm/common/debug_result.vue";
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
+import DebugResult from "@/components/hrm/common/debug_result.vue";
 import TableHeaders from "@/components/hrm/table-headers.vue";
 import {useResizeObserver} from "@vueuse/core";
 import {parseHeightValue} from "@/utils/tools.js";
@@ -20,26 +20,26 @@ const props = defineProps({stepContainerHeight: {default: "calc(100vh-160px)"}})
 const activeRequestDetailName = ref("requestHeader")
 const activeResultTab = ref("response")
 
-const stepContainerRef = ref();
+const stepContainerRef = ref(null);
 const containerHeight = ref(0);
+const tabsMaxHeight = ref(0);
+
 
 useResizeObserver(stepContainerRef, (entries) => {
-  const entry = entries[0]
+  const entry = entries[0];
   const {width, height} = entry.contentRect;
-
   containerHeight.value = height;
-  console.log(containerHeight.value)
+  tabsMaxHeight.value = containerHeight.value - 133;
+});
 
-})
-
-const calcStepContainerHeight = computed(()=>{
+const calcStepContainerHeight = computed(() => {
   return parseHeightValue(props.stepContainerHeight);
 });
 
 </script>
 
 <template>
-  <div :style="{height:calcStepContainerHeight}" ref="stepContainerRef">
+  <div :style="{height:calcStepContainerHeight}" style="display: flex;flex-direction: column" ref="stepContainerRef">
     <el-row :gutter="10" type="flex" class="row-bg">
       <el-col :span="24">
         <div>
@@ -48,33 +48,18 @@ const calcStepContainerHeight = computed(()=>{
               placeholder="Please input"
           >
             <template #prepend>URL</template>
-            <template #append>
-              <el-dropdown>
-                                        <span class="el-dropdown-link">
-                                          <el-icon class="el-icon--right">
-                                            <arrow-down/>
-                                          </el-icon>
-                                        </span>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item disabled>111</el-dropdown-item>
-                    <el-dropdown-item disabled>222</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </template>
           </el-input>
         </div>
       </el-col>
     </el-row>
-    <el-row class="row-bg" justify="start">
+    <el-row type="flex" class="row-bg" justify="start" style="flex-grow: 1; ">
 
       <SplitWindow left-width="50%" :window-height="containerHeight + 'px'">
 
         <template #left>
           <el-tabs v-model="activeRequestDetailName" style="width: 100%">
             <el-tab-pane label="header" name="requestHeader">
-              <el-scrollbar :height="containerHeight - 55">
+              <el-scrollbar :max-height="tabsMaxHeight">
                 <TableHeaders
                     v-model:self-data="stepDetailData.request.headers"
                     v-model:include="stepDetailData.include"
@@ -83,10 +68,10 @@ const calcStepContainerHeight = computed(()=>{
               </el-scrollbar>
             </el-tab-pane>
             <el-tab-pane label="data" name="requestJson">
-              <div style="width: 100%">
-                <AceEditor v-model:content="stepDetailData.request.data" :can-set="true"
-                           :height="containerHeight - 80 + 'px'"></AceEditor>
-              </div>
+              <AceEditor v-model:content="stepDetailData.request.data"
+                         :can-set="true"
+                         :height="tabsMaxHeight - 25 + 'px'"
+              ></AceEditor>
             </el-tab-pane>
           </el-tabs>
         </template>
@@ -95,11 +80,10 @@ const calcStepContainerHeight = computed(()=>{
           <DebugResult
               v-model:active-tab="activeResultTab"
               v-model:step-detail-data="stepDetailData"
-              :tab-height="containerHeight - 52"></DebugResult>
+              :tab-height="tabsMaxHeight"
+          ></DebugResult>
         </template>
-
       </SplitWindow>
-
     </el-row>
   </div>
 

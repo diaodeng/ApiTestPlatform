@@ -72,6 +72,10 @@ export function debugCase(data) {
   })
 }
 
+
+/*
+* 获取可使用的断言方法
+* */
 export function getComparator(data) {
   return request({
     url: '/hrm/common/comparator',

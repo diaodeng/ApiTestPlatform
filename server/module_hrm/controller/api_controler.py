@@ -5,6 +5,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
+from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
@@ -24,12 +25,13 @@ hrmApiController = APIRouter(prefix='/hrm/api', dependencies=[Depends(LoginServi
 async def api_tree_handle(request: Request,
                           page_query: ApiPageQueryModel = Depends(ApiPageQueryModel.as_query),
                           query_db: Session = Depends(get_db),
-                          current_user: CurrentUserModel = Depends(LoginService.get_current_user)
+                          current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                          data_scope_sql: str = Depends(GetDataScope('ApiInfo', user_alias='manager'))
                           ):
     try:
         # 获取分页数据
         page_query.manager = current_user.user.user_id
-        tree_data = api_tree(query_db, page_query)
+        tree_data = api_tree(query_db, page_query, data_scope_sql)
         data = ResponseUtil.success(data=tree_data)
         return data
     except Exception as e:
@@ -81,6 +83,7 @@ async def api_add(request: Request,
         api_data.author = current_user.user.user_name
         api_data.create_by = current_user.user.user_name
         api_data.update_by = current_user.user.user_name
+        api_data.dept_id = current_user.user.dept_id
         tree_data = ApiOperation.add(query_db, api_data)
         return ResponseUtil.success(data=tree_data)
     except Exception as e:

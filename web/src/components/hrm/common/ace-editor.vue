@@ -1,14 +1,16 @@
 <script setup>
+import "./aceConfig.js"
 import {useTemplateRef, defineAsyncComponent} from "vue";
 import {ElMessage} from "element-plus";
 import {Setting, Search} from "@element-plus/icons-vue";
 import {Json} from "@/utils/tools.js";
 import {VAceEditor} from 'vue3-ace-editor';
-import "./aceConfig.js"
 import {search as jmespath} from '@metrichor/jmespath';
 import FullscreenComponent from "@/components/hrm/common/fullscreen-component.vue";
 
 onErrorCaptured((error) => {
+
+  console.log("编辑器相关异常");
   console.log(error);
 });
 
@@ -34,13 +36,16 @@ const props = defineProps({
   useWorker: {type: Boolean, default: true},
   canResize: {type: Boolean, default: false}
 });
-const modelContent = defineModel("content");
+const acceptContent = defineModel("content");
 const languageValue = ref("json");
 const themesValue = ref("github");
 const jmespathRex = ref("");
 const aceEditorRef = useTemplateRef("aceEditorRef");
 const isFullscreen = ref(false);
 
+const modelContent = ref("");
+const originalData = ref([]);  // 原始数据（用于恢复）
+const isFiltered = ref(false);  // 是否处于搜索状态
 const startY = ref(0);
 const startHeight = ref(0);
 let isDragging = false;
@@ -119,6 +124,12 @@ const editorConfig = ref(
 languageValue.value = props.lang;
 themesValue.value = props.themes;
 
+watch(() => acceptContent.value, (newValue) => {
+  originalData.value = newValue;
+  modelContent.value = newValue;
+  isFiltered.value = false;
+});
+
 watch(() => props.lang, (newValue) => {
   languageValue.value = newValue;
 });
@@ -130,17 +141,30 @@ watch(() => props.width, (newValue) => {
 });
 
 onMounted(() => {
-  console.log("挂载了编辑器")
-  editorHeight.value = props.height;
-  document.addEventListener('mousemove', onMoveResizeEditor);
-})
+  // console.log("浏览器的新值" + modelContent.value);
+  modelContent.value = acceptContent.value;
+  nextTick(() => {
+    try {
+      console.log("挂载了编辑器");
+      editorHeight.value = props.height;
+      document?.addEventListener('mousemove', onMoveResizeEditor);
+    } catch (e) {
+      console.log("编辑挂载载异常");
+    }
+  });
+
+});
 
 onBeforeUnmount(() => {
   console.log("卸载了编辑器")
-  document.removeEventListener('mousemove', resizeEditor);
-  document.removeEventListener('mouseup', stopResizing);
-  document.removeEventListener('mouseleave', onMouseLeave);
-  document.removeEventListener('mousemove', onMoveResizeEditor);
+  try {
+    document?.removeEventListener('mousemove', resizeEditor);
+    document?.removeEventListener('mouseup', stopResizing);
+    document?.removeEventListener('mouseleave', onMouseLeave);
+    document?.removeEventListener('mousemove', onMoveResizeEditor);
+  } catch (e) {
+    console.log("编辑器卸载异常");
+  }
 });
 
 let originalStyles = {
@@ -163,11 +187,13 @@ const editorContent = computed(() => {
       return toRaw(data);
     }
   }
-
-})
+});
 
 function updateValue(newVal) {
-  modelContent.value = newVal;
+  nextTick(() => {
+    modelContent.value = newVal;
+    acceptContent.value = newVal;
+  });
 }
 
 function jsonFormat(env) {
@@ -188,6 +214,11 @@ function jsonRemoveEscapeAndBeautiful(env) {
 }
 
 function jmespathSearch() {
+  if (isFiltered.value) {
+    modelContent.value = originalData.value;
+    isFiltered.value = !isFiltered.value;
+    return;
+  }
   let data = modelContent.value;
   let dataObj = null;
   const rex = jmespathRex.value;
@@ -214,6 +245,7 @@ function jmespathSearch() {
   } catch (e) {
     ElMessage.error("查询异常" + e);
   }
+  isFiltered.value = !isFiltered.value;
 }
 
 const startResizing = (e) => {
@@ -236,7 +268,7 @@ const resizeEditor = (e) => {
 
 // 停止调整
 const stopResizing = () => {
-  console.log("停止高度调整")
+  console.log("停止高度调整");
   isDragging = false;
   document.removeEventListener('mousemove', resizeEditor);
   document.removeEventListener('mouseup', stopResizing);
@@ -244,7 +276,7 @@ const stopResizing = () => {
 };
 
 function onMouseLeave(e) {
-  console.log("鼠标离开页面")
+  console.log("鼠标离开页面");
   if (isDragging) {
     const lastMouseMove = e; // 你可以记录鼠标离开时的位置
     isDragging = false;
@@ -300,20 +332,21 @@ function onMoveResizeEditor(e) {
 // });
 
 function changeFullScreenStatus(currentStatus) {
-  if (currentStatus) {
-    const editor = aceEditorRef.value.$el;
-    originalStyles.height = aceEditorRef.value.$el.style.height;
-    originalStyles.width = aceEditorRef.value.$el.style.width;
-    editorHeight.value = "calc(100%)";
-    editorWidth.value = "calc(100%)";
-  } else {
-    const editor = aceEditorRef.value.$el;
-    editorHeight.value = originalStyles.height;
-    editorWidth.value = originalStyles.width;
-    editor.style.position = "relative";
-  }
+
   nextTick(() => {
-    aceEditorRef.value.getAceInstance().resize(true);
+    if (currentStatus) {
+      const editor = aceEditorRef.value.$el;
+      originalStyles.height = editor.style.height;
+      originalStyles.width = editor.style.width;
+      editorHeight.value = "calc(100%)";
+      editorWidth.value = "calc(100%)";
+    } else {
+      const editor = aceEditorRef.value.$el;
+      editorHeight.value = originalStyles.height;
+      editorWidth.value = originalStyles.width;
+      editor.style.position = "relative";
+    }
+    aceEditorRef?.value?.getAceInstance()?.resize(true);
   });
 }
 
@@ -354,8 +387,16 @@ function changeFullScreenStatus(currentStatus) {
                       style="padding-left: 5px;padding-right: 5px"
             >
               <template #append>
-                <el-tooltip content="使用jmespath搜索" placement="top-start" effect="light">
-                  <el-button :icon="Search" @click="jmespathSearch"></el-button>
+                <el-tooltip :content="isFiltered ? '显示原数据' : '使用jmespath搜索'" placement="top-start"
+                            effect="light">
+                  <el-button @click="jmespathSearch">
+                    <el-icon v-if="isFiltered">
+                      <RefreshLeft/>
+                    </el-icon>
+                    <el-icon v-else>
+                      <Search/>
+                    </el-icon>
+                  </el-button>
                 </el-tooltip>
               </template>
             </el-input>
@@ -404,14 +445,15 @@ function changeFullScreenStatus(currentStatus) {
         </el-row>
       </div>
       <div style="flex-grow: 1">
-        <v-ace-editor
-            ref="aceEditorRef"
-            :value="editorContent"
-            @update:value="updateValue"
-            :lang="languageValue"
-            :theme="themesValue"
-            :style="{height: editorHeight, width: editorWidth}"
-            :options="{
+        <Suspense>
+          <v-ace-editor
+              ref="aceEditorRef"
+              :value="editorContent"
+              @update:value="updateValue"
+              :lang="languageValue"
+              :theme="themesValue"
+              :style="{height: editorHeight, width: editorWidth}"
+              :options="{
           useWorker: props.useWorker,
           enableBasicAutocompletion: props.enableBasicAutocompletion,
           enableLiveAutocompletion: props.enableLiveAutocompletion,
@@ -424,8 +466,10 @@ function changeFullScreenStatus(currentStatus) {
           wrap: props.wrap,
           readOnly: props.readOnly,
         }"
-            aria-autocomplete="list"
-        ></v-ace-editor>
+              aria-autocomplete="list"
+          ></v-ace-editor>
+        </Suspense>
+
       </div>
     </div>
 

@@ -81,6 +81,6 @@ app.use(ElementPlus, {
   locale: locale,
   // 支持 large、default、small
   size: Cookies.get('size') || 'default'
-})
+});
 
-app.mount('#app')
+app.mount('#app');

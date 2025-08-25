@@ -5,8 +5,8 @@ from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_admin.service.job_service import *
 from module_admin.service.job_log_service import *
 from utils.response_util import *
-from utils.log_util import *
-from utils.page_util import *
+from utils.log_util import logger
+from utils.page_util import PageResponseModel
 from utils.common_util import bytes2file_response
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.annotation.log_annotation import log_decorator

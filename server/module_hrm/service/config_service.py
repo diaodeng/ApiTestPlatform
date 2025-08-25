@@ -11,7 +11,7 @@ class ConfigService:
     """
 
     @classmethod
-    def get_config_select(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False):
+    def get_config_select(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False, data_scope_sql:str='true'):
         """
         获取用例列表信息service
         :param query_db: orm对象
@@ -19,7 +19,7 @@ class ConfigService:
         :param is_page: 是否开启分页
         :return: 用例列表信息对象
         """
-        list_result = ConfigDao.get_config_select(query_db, query_object, is_page)
+        list_result = ConfigDao.get_config_select(query_db, query_object, is_page, data_scope_sql)
         if is_page:
             case_list_result = PageResponseModel(
                 **{

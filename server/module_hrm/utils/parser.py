@@ -16,6 +16,8 @@ dolloar_regex_compile = re.compile(r"\$\$")
 # variable notation, e.g. ${var} or $var
 # variable should start with a-zA-Z_
 variable_regex_compile = re.compile(r"\$\{([a-zA-Z_]\w*)\}|\$([a-zA-Z_]\w*)")
+variable_regex_compile_1 = re.compile(r"\$\{([a-zA-Z_]\w*)\}")
+variable_regex_compile_2 = re.compile(r"\$([a-zA-Z_]\w*)")
 # function notation, e.g. ${func1($var_1, $var_3)}
 function_regex_compile = re.compile(r"\$\{([a-zA-Z_]\w*)\(([\$\w\.\-/\s=,]*)\)\}")
 
@@ -58,6 +60,11 @@ def build_url(base_url, step_url):
     return o_step_url.geturl()
 
 
+def regex_find_variables(raw_string: Text) -> List[Text]:
+    pass
+
+
+
 def regex_findall_variables(raw_string: Text) -> List[Text]:
     """extract all variable names from content, which is in format $variable
 
@@ -75,6 +82,9 @@ def regex_findall_variables(raw_string: Text) -> List[Text]:
         ["postid"]
 
         >>> regex_findall_variables("/$var1/$var2")
+        ["var1", "var2"]
+
+        >>> regex_findall_variables("/$var1/${var2}")
         ["var1", "var2"]
 
         >>> regex_findall_variables("abc")
@@ -296,6 +306,7 @@ def parse_string(
         raw_string: Text,
         variables_mapping: VariablesMapping,
         functions_mapping: FunctionsMapping,
+        not_found_exception = True,
 ) -> Any:
     """parse string content with variables and functions mapping.
 
@@ -303,6 +314,7 @@ def parse_string(
         raw_string: raw string content to be parsed.
         variables_mapping: variables mapping.
         functions_mapping: functions mapping.
+        not_found_exception = True.  没找到对应变量的值是否抛出异常
 
     Returns:
         str: parsed string content.
@@ -338,29 +350,35 @@ def parse_string(
         func_match = function_regex_compile.match(raw_string, match_start_position)
         if func_match:
             func_name = func_match.group(1)
-            func = get_mapping_function(func_name, functions_mapping)
-
             func_params_str = func_match.group(2)
-            function_meta = parse_function_params(func_params_str)
-            args = function_meta["args"]
-            kwargs = function_meta["kwargs"]
-            parsed_args = parse_data(args, variables_mapping, functions_mapping)
-            parsed_kwargs = parse_data(kwargs, variables_mapping, functions_mapping)
-
             try:
-                func_eval_value = func(*parsed_args, **parsed_kwargs)
-            except Exception as ex:
-                logger.error(
-                    f"call function error:\n"
-                    f"func_name: {func_name}\n"
-                    f"args: {parsed_args}\n"
-                    f"kwargs: {parsed_kwargs}\n"
-                    f"{type(ex).__name__}: {ex}"
-                )
-                raise
+                func = get_mapping_function(func_name, functions_mapping)
+
+                function_meta = parse_function_params(func_params_str)
+                args = function_meta["args"]
+                kwargs = function_meta["kwargs"]
+                parsed_args = parse_data(args, variables_mapping, functions_mapping)
+                parsed_kwargs = parse_data(kwargs, variables_mapping, functions_mapping)
+            except (exceptions.VariableNotFound, exceptions.FunctionNotFound) as ef:
+                if not_found_exception:
+                    raise ef
+                else:
+                    func_eval_value = raw_string[func_match.start():func_match.end()]
+            else:
+                try:
+                    func_eval_value = func(*parsed_args, **parsed_kwargs)
+                except Exception as ex:
+                    logger.error(
+                        f"call function error:\n"
+                        f"func_name: {func_name}\n"
+                        f"args: {parsed_args}\n"
+                        f"kwargs: {parsed_kwargs}\n"
+                        f"{type(ex).__name__}: {ex}"
+                    )
+                    raise
 
             func_raw_str = "${" + func_name + f"({func_params_str})" + "}"
-            if func_raw_str == raw_string:
+            if func_raw_str == raw_string or func_eval_value == raw_string:
                 # raw_string is a function, e.g. "${add_one(3)}", return its eval value directly
                 return func_eval_value
 
@@ -373,9 +391,15 @@ def parse_string(
         var_match = variable_regex_compile.match(raw_string, match_start_position)
         if var_match:
             var_name = var_match.group(1) or var_match.group(2)
-            var_value = get_mapping_variable(var_name, variables_mapping)
+            try:
+                var_value = get_mapping_variable(var_name, variables_mapping)
+            except exceptions.VariableNotFound as ex:
+                if not_found_exception:
+                    raise ex
+                else:
+                    var_value = raw_string[var_match.start():var_match.end()]
 
-            if f"${var_name}" == raw_string or "${" + var_name + "}" == raw_string:
+            if f"${var_name}" == raw_string or "${" + var_name + "}" == raw_string or var_value == raw_string:
                 # raw_string is a variable, $var or ${var}, return its value directly
                 return var_value
 
@@ -442,6 +466,7 @@ def parse_data(
         raw_data: Any,
         variables_mapping: VariablesMapping = None,
         functions_mapping: FunctionsMapping = None,
+        not_found_exception = True,
 ) -> Any:
     """parse raw data with evaluated variables mapping.
     Notice: variables_mapping should not contain any variable or function.
@@ -452,18 +477,18 @@ def parse_data(
         functions_mapping = functions_mapping or {}
         # only strip whitespaces and tabs, \n\r is left because they maybe used in changeset
         raw_data = raw_data.strip(" \t")
-        return parse_string(raw_data, variables_mapping, functions_mapping)
+        return parse_string(raw_data, variables_mapping, functions_mapping, not_found_exception)
 
     elif isinstance(raw_data, (list, set, tuple)):
         return [
-            parse_data(item, variables_mapping, functions_mapping) for item in raw_data
+            parse_data(item, variables_mapping, functions_mapping, not_found_exception) for item in raw_data
         ]
 
     elif isinstance(raw_data, dict):
         parsed_data = {}
         for key, value in raw_data.items():
-            parsed_key = parse_data(key, variables_mapping, functions_mapping)
-            parsed_value = parse_data(value, variables_mapping, functions_mapping)
+            parsed_key = parse_data(key, variables_mapping, functions_mapping, not_found_exception)
+            parsed_value = parse_data(value, variables_mapping, functions_mapping, not_found_exception)
             parsed_data[parsed_key] = parsed_value
 
         return parsed_data
@@ -648,3 +673,14 @@ class Parser(object):
 
 if __name__ == "__main__":
     print(regex_findall_functions("${fadfadsf($13,$567)}"))
+    print(regex_findall_variables("/$var1/${var2}"))
+    print(extract_variables({"a": "$a11", "b": "${a123}", "c": "func(1, 2)"}))
+    raw_string = "${ffff} ${dd333}"
+    result = variable_regex_compile.match(raw_string, 0)
+    print(result)
+    print(result.group(1))
+    print(raw_string[result.start():result.end()])
+
+    raw_func_string = "1${func($a, $b)}gdsfgsdfg2"
+    f_result = function_regex_compile.match(raw_func_string, 0)
+    print(raw_func_string[f_result.start():f_result.end()])

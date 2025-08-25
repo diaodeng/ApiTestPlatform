@@ -33,6 +33,7 @@
     "install": "^0.13.0",
     "js-cookie": "3.0.5",
     "jsencrypt": "3.3.2",
+    "json5": "^2.2.3",
     "markdown-it": "^14.1.0",
     "markdown-it-highlightjs": "^4.2.0",
     "monaco-editor": "^0.48.0",

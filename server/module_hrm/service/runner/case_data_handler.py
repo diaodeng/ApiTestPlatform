@@ -414,7 +414,7 @@ class ConfigHandle:
         return old_config
 
     @classmethod
-    def parse_data_for_run(cls, data: str | dict, debug_talk_map: dict = None, globals_var: dict | list = None, *args):
+    def parse_data_for_run(cls, data: str | dict, not_found_exception = True, debug_talk_map: dict = None, globals_var: dict | list = None, *args):
         if globals_var is None:
             globals_var = []
         if debug_talk_map is None:
@@ -430,7 +430,9 @@ class ConfigHandle:
         temp_all_val_dict = key_value_dict(temp_all_val)
         new_data = parse_data(data,
                               temp_all_val_dict,
-                              debug_talk_map)
+                              debug_talk_map,
+                              not_found_exception
+                              )
         return new_data
 
 

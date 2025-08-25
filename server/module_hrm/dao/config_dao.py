@@ -1,5 +1,8 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+
+from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseModuleProject
 from module_hrm.entity.do.module_do import HrmModule
@@ -16,7 +19,7 @@ class ConfigDao:
     """
 
     @classmethod
-    def get_config_select(cls, db: Session, query_object: CasePageQueryModel, is_page: bool = False):
+    def get_config_select(cls, db: Session, query_object: CasePageQueryModel, is_page: bool = False, data_scope_sql:str='true'):
         """
         根据查询参数获取用例列表信息
         :param db: orm对象
@@ -32,7 +35,7 @@ class ConfigDao:
                                      HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
                                                                                             HrmCase.module_id == HrmModule.module_id)
 
-        query = query.filter(HrmCase.type == DataType.config.value)
+        query = query.filter(HrmCase.type == DataType.config.value, eval(data_scope_sql))
 
         if query_object.only_self:
             query = query.filter(HrmCase.manager == query_object.manager)

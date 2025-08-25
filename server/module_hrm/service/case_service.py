@@ -20,7 +20,8 @@ class CaseService:
     """
 
     @classmethod
-    def get_case_list_services(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False):
+    def get_case_list_services(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False,
+                               data_scope_sql: str = 'true'):
         """
         获取用例列表信息service
         :param query_db: orm对象
@@ -28,7 +29,7 @@ class CaseService:
         :param is_page: 是否开启分页
         :return: 用例列表信息对象
         """
-        list_result = CaseDao.get_case_list(query_db, query_object, is_page)
+        list_result = CaseDao.get_case_list(query_db, query_object, is_page, data_scope_sql)
         if is_page:
             case_list_result = PageResponseModel(
                 **{

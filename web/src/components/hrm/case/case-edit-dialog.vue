@@ -127,6 +127,9 @@ function reset() {
   proxy.resetForm("postRef");
 }
 
+/*
+* 获取可以使用的断言方法
+* */
 async function getComparatorFromNetwork() {
   let data = "";
   if (formData.value && formData.value.caseId) {
@@ -137,6 +140,9 @@ async function getComparatorFromNetwork() {
   });
 }
 
+/*
+* 获取可以使用的配置数据（所属模块或者全局的）
+* */
 async function getConfigSelect() {
   if (props.dataType === HrmDataTypeEnum.case) {
     let data = {
@@ -186,7 +192,7 @@ function beforeCloseDialog(done) {
 }
 
 useResizeObserver(caseMainRef, (entries) => {
-  const entry = entries[0]
+  const entry = entries[0];
   const {width, height} = entry.contentRect;
   nextTick(() => {
     caseMainHeight.value = height;
@@ -200,7 +206,7 @@ useResizeObserver(caseMainRef, (entries) => {
   <el-dialog fullscreen :title='title'
              v-model="openCaseEditDialog"
              :before-close="beforeCloseDialog"
-             append-to-body destroy-on-close>
+             append-to-body>
     <el-form ref="postRef" :model="formData" :rules="formRules" label-width="100px" style="height: 100%" v-loading="loading.init">
       <el-container style="height: 100%; overflow-y: hidden">
         <el-header height="40px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
