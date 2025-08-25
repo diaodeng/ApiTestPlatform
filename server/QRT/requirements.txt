@@ -1,0 +1,14 @@
+flet==0.28.3
+loguru==0.7.3
+psutil==7.0.0
+requests==2.32.4
+pyperclip== 1.9.0
+pyinstaller==6.15.0
+python-barcode==0.15.1
+pillow==11.3.0
+
+fastapi>=0.95.0
+uvicorn>=0.21.0
+httpx>=0.24.0
+
+mitmproxy==11.1.2
