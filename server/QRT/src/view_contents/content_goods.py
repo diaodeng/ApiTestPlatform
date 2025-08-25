@@ -231,9 +231,9 @@ class Goods(object):
         for goods in self.goodsDB:
             options.append(
                 self.ft.DropdownOption(
-                    key=f"{goods["env"]}-{goods["vendorName"]}-{goods['vendorId']}-{goods['storeId']}",
+                    key=f"{goods['env']}-{goods['vendorName']}-{goods['vendorId']}-{goods['storeId']}",
                     content=self.ft.Text(
-                        value=f"{goods["env"]}-{goods["vendorName"]}-{goods['vendorId']}-{goods['storeId']}"
+                        value=f"{goods['env']}-{goods['vendorName']}-{goods['vendorId']}-{goods['storeId']}"
                     ),
                 )
             )

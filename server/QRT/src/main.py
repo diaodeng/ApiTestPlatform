@@ -30,7 +30,7 @@ def main(page: ft.Page):
                 ft.Row(
                     controls=[
                         ft.Text(
-                            value=f"用户：{config["UserInfo"]["username"]}-{config['UserInfo']['nickname']}",
+                            value=f"用户：{config['UserInfo']['username']}-{config['UserInfo']['nickname']}",
                             size=16
                         ),
                         ft.Text(
