@@ -1,4 +1,4 @@
-
+from src.view_contents.content_mitmproxy import MitmHandel
 from view_contents.content_home import Home
 from view_contents.content_settings import Settings
 from view_contents.content_shortcut import Shortcut
@@ -18,6 +18,7 @@ class Contents(object):
         self.shortcut = Shortcut(ft, page, log).shortcut()
         self.about = About(ft).about()
         self.fileSearcher = FileSearcher(ft, page).fileSearcher()
+        self.mitmproxy = MitmHandel(page).init()
         self.goods = Goods(ft, page, log, **kwargs).goods()
 
     # 内容区域函数
@@ -28,6 +29,7 @@ class Contents(object):
             self.settings,
             self.goods,
             self.fileSearcher,
+            self.mitmproxy,
             self.about
 
         ]

@@ -30,7 +30,7 @@ class Shortcut(object):
         self.timer = None  # 用于保存定时器对象
         self.timer_status = False  # 定时器运行状态
         self.timer_status_text = self.ft.Text(
-            f"{"已启动" if self.timer_status else "未启动"}",
+            f"{'已启动' if self.timer_status else '未启动'}",
             color=self.ft.Colors.GREEN if self.timer_status else self.ft.Colors.RED
         )
         self.timer_control_btn = self.ft.Button("启动定时刷新", on_click=self.toggle_timer)
@@ -66,23 +66,23 @@ class Shortcut(object):
             # POS 状态
             if not self.pos_status_text:
                 self.pos_status_text = self.ft.Text(
-                    f"{"已启动" if self.pos_status else "未启动"}",
+                    f"{'已启动' if self.pos_status else '未启动'}",
                     color=self.ft.Colors.GREEN if self.pos_status else self.ft.Colors.RED
                 )
             else:
                 self.pos_status = check_process(self.pos_process_name, self.log)
-                self.pos_status_text.value = f"{"已启动" if self.pos_status else "未启动"}"
+                self.pos_status_text.value = f"{'已启动' if self.pos_status else ''}"
                 self.pos_status_text.color = self.ft.Colors.GREEN if self.pos_status else self.ft.Colors.RED
         if flag == 2 or flag == 0:
             # Offline Service 状态
             if not self.offline_status_text:
                 self.offline_status_text = self.ft.Text(
-                    f"{"已启动" if self.offline_status else "未启动"}",
+                    f"{'已启动' if self.offline_status else ''}",
                     color=self.ft.Colors.GREEN if self.offline_status else self.ft.Colors.RED
                 )
             else:
                 self.offline_status = check_offline_service_status(self.log)
-                self.offline_status_text.value = f"{"已启动" if self.offline_status else "未启动"}"
+                self.offline_status_text.value = f"{'已启动' if self.offline_status else ''}"
                 self.offline_status_text.color = self.ft.Colors.GREEN if self.offline_status else self.ft.Colors.RED
 
     def start_auto_refresh(self):
@@ -93,7 +93,7 @@ class Shortcut(object):
 
         self.timer_status = True
         self.log.info(f"定时器间隔时间:{config.timer}S")
-        self.timer_status_text.value = "已启动"
+        self.timer_status_text.value = '已启动'
         self.timer_status_text.color = self.ft.Colors.GREEN
         self.timer_control_btn.text = "停止定时刷新"
 
