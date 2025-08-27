@@ -76,6 +76,9 @@ For more details on building Linux package, refer to the [Linux Packaging Guide]
 
 ```
 flet build windows -v
+
+python -m nuitka main.py --standalone --assume-yes-for-downloads --include-data-files=tools_config.json=tools_config.json --include-package=flet_core --nofollow-import-to=tkinter.test --enable-plugin=tk-inter --output-filename=app.exe --remove-output
+
 ```
 
 For more details on building Windows package, refer to the [Windows Packaging Guide](https://flet.dev/docs/publish/windows/).
