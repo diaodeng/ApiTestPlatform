@@ -80,6 +80,7 @@ def exec_js(js_code_source: str, data, logger: CustomStackLevelLogger = None):
     except Exception as err:
         result["failed"] = True
         logger.error(f"自定义js脚本执行异常： {err}")
+        logger.exception(err)
 
     return result
 
@@ -103,6 +104,7 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomS
     except Exception as err:
         apt.failed = True
         logger.error(f"自定义python执行异常： {err}")
+        logger.exception(err)
 
 
 def get_script_name(data_type, script_type, is_before):
@@ -172,8 +174,7 @@ def exec_hook_script(hooks_info: HooksModel,
 
             elif script_type == CodeTypeEnum.python.value:
                 step_data_obj = CustomHooksParams(globals=global_vars,
-                                                  caseVariables=key_value_dict(
-                                                      case_vars),
+                                                  caseVariables=key_value_dict(case_vars),
                                                   failed=False
                                                   )
                 step_data_obj.data = data_obj
