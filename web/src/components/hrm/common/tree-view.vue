@@ -191,25 +191,11 @@ const append = (data: Tree, type) => {
     return;
   }
 
-  const newStepId = randomString(10);
-  const newStepName = "新增API";
-  const newChild = {
-    id: null,
-    name: newStepName,
-    children: [],
-    isNew: true,
-    apiId: newStepId,
-    isParent: type === CaseStepTypeEnum.folder,
-    parentId: data.apiId,
-    type: type !== CaseStepTypeEnum.folder ? HrmDataTypeEnum.api : HrmDataTypeEnum.folder,
-    apiType: type,
-    edit: false
-  }
   if (!data.children) {
     data.children = []
   }
-  data.children.splice(0, 0, newChild)
-  emit('addNode', type, newChild, data);
+  // data.children.splice(0, 0, newChild)
+  emit('addNode', type, "", data);
   // dataSource.value = [...dataSource.value]
 }
 
