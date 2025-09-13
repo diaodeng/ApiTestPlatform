@@ -6,7 +6,7 @@ import platform
 import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from typing import Type
+from typing import Type, AsyncGenerator
 
 from sqlalchemy.orm import Session
 
@@ -200,23 +200,15 @@ async def run_by_batch(query_db: Session,
     return result
 
 
-def get_case_info_batch(query_db, case_ids, env_obj) -> list[TestCase]:
+async def get_case_info_batch(query_db: Session, case_ids, env_obj) -> AsyncGenerator[TestCase, None]:
     all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
-    case_objs = CaseDao.get_case_by_ids(query_db, case_ids)
-    for case_obj in case_objs:
-        logger.info(type(case_obj))
+    # case_objs = CaseDao.get_case_by_ids(query_db, case_ids)
+    async for case_obj in CaseDao.get_case_by_ids_iter(query_db, case_ids):
         test_case = CaseInfoHandle(query_db).from_db(case_obj).toRun(env_obj).run_data()
-        tmp_case_datas = ParametersHandler.get_parameters_case([test_case])
-        all_data.extend(tmp_case_datas)
-    return all_data
-
-
-def get_case_info(query_db, case_id, env_obj) -> list[TestCase]:
-    case_obj = CaseDao.get_case_by_id(query_db, case_id)
-    logger.info(type(case_obj))
-    test_case = CaseInfoHandle(query_db).from_db(case_obj).toRun(env_obj).run_data()
-    tmp_case_datas = ParametersHandler.get_parameters_case([test_case])
-    return tmp_case_datas
+        async for case_data in ParametersHandler.get_parameters_case(query_db, [test_case]):
+            yield case_data
+        # all_data.extend(tmp_case_datas)
+    # return all_data
 
 
 async def run_by_module(query_db: Session, id, env, func_map=None, run_info: CaseRunModel = None):
@@ -256,20 +248,19 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
     """
     并发执行多个用例
     """
-    case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
+    # case_data_list = await get_case_info_batch(query_db, case_ids, env_obj)
     if not run_info.run_by_sort and run_info.concurrent > 1:
+        semaphore = asyncio.Semaphore(run_info.concurrent)
         # case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
-        case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
-                           range(0, len(case_data_list), run_info.concurrent)]
+        # case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
+        #                    range(0, len(case_data_list), run_info.concurrent)]
 
         results = []
-        for case_datas in case_data_group:
+        async for case_data in get_case_info_batch(query_db, case_ids, env_obj):
             try:
-                tasks = []
-                for case_data in case_datas:
-                    tasks.append(run_by_single(query_db, case_data, env_obj, func_map, run_info))
-                result = await asyncio.gather(*tasks, return_exceptions=True)
-                results.extend([res for res_list in result for res in res_list])
+                async with semaphore:
+                    res_list = await run_by_single(query_db, case_data, env_obj, func_map, run_info)
+                    results.extend(res_list)
             except Exception as e:
                 logger.error(f"并发执行测试用例异常： {e}")
         return results
@@ -277,7 +268,7 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
         result = []
         # for case_id in case_ids:
         #     case_datas = get_case_info(query_db, case_id, env_obj)
-        for case_data in case_data_list:
+        async for case_data in get_case_info_batch(query_db, case_ids, env_obj):
             res_data = await run_by_single(query_db, case_data, env_obj, func_map, run_info)
             result.extend(res_data)
         return result

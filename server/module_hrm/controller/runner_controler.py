@@ -71,9 +71,12 @@ async def for_debug(request: Request,
             case_data = case_data.model_dump(by_alias=True)
         page_query_result = CaseModelForApi(**case_data)
         data_for_run = CaseInfoHandle(query_db).from_page(page_query_result).toDebug(debug_info.env).run_data()
-        case_objs = ParametersHandler.get_parameters_case([data_for_run])
+        case_obj = None
+        async for case_obj in ParametersHandler.get_parameters_case(query_db, [data_for_run]):
+            case_obj = case_obj
+            break
 
-        if not case_objs: return ResponseUtil.success(msg="没有可执行的用例", data="没有可执行的用例")
+        if not case_obj: return ResponseUtil.success(msg="没有可执行的用例", data="没有可执行的用例")
 
         # # 读取项目debugtalk
         debugtalk_info = DebugTalkService.project_debugtalk_map(query_db,
@@ -81,7 +84,7 @@ async def for_debug(request: Request,
                                                                     datetime.now().timestamp() * 1000000),
                                                                 run_info=debug_info)
 
-        test_runner = TestRunner(case_objs[0], debugtalk_info, debug_info)
+        test_runner = TestRunner(case_obj, debugtalk_info, debug_info)
         all_case_res = await test_runner.start()
         logger.info('执行成功')
         all_log = []

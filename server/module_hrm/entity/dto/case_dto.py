@@ -4,6 +4,7 @@ from pydantic import Field
 
 from module_hrm.entity.vo.case_vo import CaseModel
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
+from module_hrm.entity.vo.common_vo import CommonDataModel
 
 
 class CaseModelForApi(CaseModel):
@@ -18,3 +19,15 @@ class CaseModelForApi(CaseModel):
 
     def include_data(self, include: Any):
         return include
+
+
+class CaseParamsModel(CommonDataModel):
+    case_id: int | str
+    enabled: bool | None = None
+    col_sort: int | None = None
+    row_id: str
+    sort_key: int | None = None
+    col_name: str
+    params_name: str
+    col_value: str = ""
+    params_type: int | None = None
