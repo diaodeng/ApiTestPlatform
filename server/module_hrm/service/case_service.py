@@ -1,11 +1,16 @@
 import json
+import io
+import csv
+from typing import AsyncGenerator, List
 
+from fastapi import UploadFile
+from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_hrm.dao.case_dao import CaseDao
+from module_hrm.dao.case_dao import CaseDao, CaseParamsDao
 from module_hrm.dao.suite_dao import SuiteDetailDao
-from module_hrm.entity.do.case_do import HrmCase
+from module_hrm.entity.do.case_do import HrmCase, HrmCaseParams
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import CasePageQueryModel, CaseModel, CaseQuery, \
     DeleteCaseModel, AddCaseModel
@@ -143,6 +148,7 @@ class CaseService:
             try:
                 for case_id in id_list:
                     CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id), user)
+                    CaseParamsDao.delete_table(query_db, use_case_id=case_id)
                     SuiteDetailDao.del_suite_detail_by_id(query_db, case_id)
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
@@ -213,3 +219,102 @@ class CaseService:
         binary_data = export_list2excel(new_data)
 
         return binary_data
+
+
+class CaseParamsService:
+    @classmethod
+    def get_case_params_pages_services(cls, query_db: Session, case_id: int, page: int, per_page: int) -> list[dict]:
+        """
+        获取用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :return: 用例参数信息
+        """
+        case_params = CaseParamsDao.load_table_page(query_db, use_case_id=case_id, page=page, page_size=per_page)
+        return case_params
+
+    @classmethod
+    def loadup_case_params_services(cls, query_db: Session, case_id: str|int, case_params: list[dict]):
+        """
+        获取用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :return: 用例参数信息
+        """
+        CaseParamsDao.insert_table(query_db, use_case_id=case_id, table_data=case_params)
+
+    @classmethod
+    async def load_case_params_iter(cls, query_db: Session, case_id: int) -> AsyncGenerator[dict, None]:
+        """
+        加载用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :return: 用例参数信息
+        """
+        async for case_param in CaseParamsDao.load_table_iter(query_db, use_case_id=case_id):
+            yield case_param
+
+    @classmethod
+    def add_case_params_services(cls, query_db: Session, case_id: int, params: dict):
+        """
+        添加用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :param params: 用例参数信息
+        :return: 用例参数信息
+        """
+        CaseParamsDao.add_table_row(query_db, use_case_id=case_id, row_data=params)
+
+
+    @classmethod
+    def update_case_params_services(cls, query_db: Session, case_id: int, params: dict):
+
+        """
+        更新用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :param params: 用例参数信息
+        :return: 用例参数信息
+        """
+        CaseParamsDao.update_table_row(query_db, use_case_id=case_id, row_data=params)
+
+    @classmethod
+    def delete_case_params_services(cls, query_db: Session, case_id: int, row_ids: list[str|int]):
+        """
+        删除用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :param params: 用例参数信息
+        :return: 用例参数信息
+        """
+        CaseParamsDao.delete_table_row(query_db, use_case_id=case_id, row_ids=row_ids)
+
+    @classmethod
+    async def import_csv_to_db(cls, db: Session, file: UploadFile):
+        # 用文本流解析
+        content = await file.read()
+        file_like = io.StringIO(content.decode("utf-8"))
+        reader = csv.DictReader(file_like)
+
+        batch_size = 1000
+        buffer: List[dict] = []
+
+        with db.begin():  # 事务
+            for row in reader:
+                buffer.append({
+                    "case_id": int(row.get("case_id")),
+                    "row_id": int(row.get("row_id")),
+                    "field_name": row.get("field_name"),
+                    "field_value": row.get("field_value"),
+                })
+
+                # 到达批量阈值，写入数据库
+                if len(buffer) >= batch_size:
+                    db.execute(insert(HrmCaseParams), buffer)
+                    buffer.clear()
+
+            # 剩余的数据写入
+            if buffer:
+                db.execute(insert(HrmCaseParams), buffer)
+
+        db.commit()

@@ -1,4 +1,6 @@
-from typing import Type
+import uuid
+from collections import defaultdict
+from typing import Type, Generator, AsyncGenerator
 
 from sqlalchemy import select, case, Sequence
 from sqlalchemy.orm import Session
@@ -9,7 +11,7 @@ from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数�
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.suite_dao import SuiteDetailDao
-from module_hrm.entity.do.case_do import HrmCase, HrmCaseModuleProject
+from module_hrm.entity.do.case_do import HrmCase, HrmCaseModuleProject, HrmCaseParams
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.dto.case_dto import CaseModelForApi
@@ -34,6 +36,37 @@ class CaseDao:
         info = db.query(HrmCase).filter(HrmCase.case_id == case_id).first()
 
         return info
+
+    @classmethod
+    async def get_case_by_ids_iter(cls, db: Session, case_ids: list[int]) -> AsyncGenerator[Any, None]:
+        """
+        根据用例id获取在用用例详细信息
+        :param db: orm对象
+        :param case_ids: 用例id
+        :return: 在用用例信息对象
+        """
+        ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)],
+                             else_=len(case_ids))
+        batch_size = 1000
+        offset = 0
+        while True:
+            batch = (
+                db.query(HrmCase)  # 替换成你的 ORM 模型
+                .filter(HrmCase.case_id.in_(case_ids))
+                .order_by(ordering_case)  # 保证顺序
+                .offset(offset)
+                .limit(batch_size)
+                .all()
+            )
+            if not batch:
+                break
+            for row in batch:
+                yield row  # 逐条 yield（或者改成 yield batch）
+            offset += batch_size
+
+        # ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)], else_=len(case_ids))
+        # info = db.execute(select(HrmCase).where(HrmCase.case_id.in_(case_ids)).order_by(ordering_case).offset(offset).limit(batch_size)).scalars().all()
+        # return info
 
     @classmethod
     def get_case_by_ids(cls, db: Session, case_ids: list[int]) -> Sequence[HrmCase]:
@@ -192,3 +225,267 @@ class CaseDao:
         """
         db_case_module_project = HrmCaseModuleProject(**case_project.model_dump())
         db.add(db_case_module_project)
+
+
+class CaseParamsDao:
+    @classmethod
+    def get_case_params_by_id(cls, db: Session, case_id: int):
+        """
+        获取用例参数信息数据库操作
+        :param db: orm对象
+        :param case_id: 用例id
+        :return: 用例参数信息
+        """
+        case_params = db.query(HrmCaseParams).filter(HrmCaseParams.case_id == case_id).all()
+        if not case_params:
+            return {}
+
+    @classmethod
+    def insert_table(cls, db: Session, use_case_id, table_data: list[dict]):
+        """
+        插入表格数据，一次插入用例所有参数化数据（主要用于导入）
+        :param use_case_id: 用例 ID
+        :param table_data: list[dict]  每个 dict 是一行
+        """
+        records = []
+        sort_key = 100
+        for row in table_data:
+            row_id = str(uuid.uuid4())  # 每行一个唯一 row_id
+            for col_name, col_value in row.items():
+                records.append(
+                    HrmCaseParams(
+                        case_id=use_case_id,
+                        row_id=row_id,
+                        col_name=col_name,
+                        params_name=col_name,
+                        col_value=str(col_value),
+                        sort_key=sort_key,
+                        enabled=True
+                    )
+                )
+            sort_key += 100
+        db.bulk_save_objects(records)
+        db.commit()
+
+    @classmethod
+    def add_table_row(cls, db: Session, use_case_id, row_data):
+        """
+        插入表格行
+        :param use_case_id: 用例 ID
+        :param row_data: 行数据，dict 格式
+        :param before_row_id: 移动到谁之前
+        :param after_row_id: 移动到谁之后
+        """
+        # 1️⃣ 先查最大的 sort_key
+        max_sort_key = db.query(func.max(HrmCaseParams.sort_key)).filter_by(case_id=use_case_id).scalar()
+        if max_sort_key is None:
+            max_sort_key = 0
+        max_sort_key += 100
+        # 2️⃣ 插入数据
+        row_id = str(uuid.uuid4())
+        records = []
+        for col_name, col_value in row_data.items():
+            records.append(
+                HrmCaseParams(
+                    case_id=use_case_id,
+                    row_id=row_id,
+                    col_name=col_name,
+                    params_name=col_name,
+                    col_value=str(col_value),
+                    sort_key=max_sort_key,
+                    enabled=True
+                )
+            )
+        db.bulk_save_objects(records)
+        db.commit()
+
+    @classmethod
+    def insert_table_col(cls, db: Session, use_case_id, col_name, col_value=""):
+        """
+        插入表格列
+        :param use_case_id: 用例 ID
+        :param col_name: 列名
+        :param col_value: 列值
+        :param row_id: 行 ID
+        """
+        # 1️⃣ 先查最大的 sort_key
+        row_info = db.query(HrmCaseParams.row_id, HrmCaseParams.sort_key).filter_by(case_id=use_case_id).distinct().all()
+
+        # 2️⃣ 插入数据
+        records = []
+        for row_id, max_sort_key in row_info:
+            records.append(
+                HrmCaseParams(
+                    case_id=use_case_id,
+                    row_id=row_id,
+                    col_name=col_name,
+                    params_name=col_name,
+                    col_value=str(col_value),
+                    sort_key=max_sort_key
+                )
+            )
+
+        db.bulk_save_objects(records)
+        db.commit()
+
+    @classmethod
+    def load_table(cls, db: Session, use_case_id) -> list[dict]:
+        """
+        加载表格数据，一次加载用例所有参数化数据
+        :param use_case_id: 用例 ID
+        :return: 表格数据
+        """
+        rows = (
+            db.query(HrmCaseParams)
+            .filter_by(case_id=use_case_id)
+            .order_by(HrmCaseParams.sort_key)
+            .all()
+        )
+        table = defaultdict(dict)
+        sort_keys = {}
+        for r in rows:
+            table[r.row_id][r.col_name] = r.col_value
+            sort_keys[r.row_id] = r.sort_key
+
+        # 按 sort_key 排序
+        result = [table[row_id] for row_id, _ in sorted(sort_keys.items(), key=lambda x: x[1])]
+        return result
+
+    @classmethod
+    def _reorder_all(cls, db: Session, use_case_id):
+        query = (
+            db.query(HrmCaseParams)
+            .filter_by(case_id=use_case_id)
+            .order_by(HrmCaseParams.sort_key)
+            .all()
+        )
+        new_key = 100
+        for r in query:
+            r.sort_key = new_key
+            new_key += 100
+        db.commit()
+
+    @classmethod
+    def update_row_sort(cls, db: Session, use_case_id, row_id, before_row_id=None, after_row_id=None):
+        """
+        更新某行的顺序
+        :param use_case_id: 用例 ID
+        :param row_id: 要移动的行
+        :param before_row_id: 移动到谁之前
+        :param after_row_id: 移动到谁之后
+        """
+        query = db.query(HrmCaseParams).filter_by(case_id=use_case_id)
+
+        if before_row_id and after_row_id:
+            before_key = query.filter_by(row_id=before_row_id).first().sort_key
+            after_key = query.filter_by(row_id=after_row_id).first().sort_key
+            new_key = (before_key + after_key) // 2
+        elif before_row_id:  # 移到某行之前
+            before_key = query.filter_by(row_id=before_row_id).first().sort_key
+            new_key = before_key - 1
+        elif after_row_id:  # 移到某行之后
+            after_key = query.filter_by(row_id=after_row_id).first().sort_key
+            new_key = after_key + 1
+        else:
+            raise ValueError("必须指定 before_row_id 或 after_row_id")
+
+        # 更新该行所有字段的 sort_key
+        query.filter_by(row_id=row_id).update({"sort_key": new_key})
+        db.commit()
+
+        # 如果 sort_key 冲突或太密集，重排
+        min_gap = query.order_by(HrmCaseParams.sort_key).limit(2).all()
+        if len(min_gap) == 2 and abs(min_gap[0].sort_key - min_gap[1].sort_key) < 2:
+            cls._reorder_all(db, use_case_id)
+
+    @classmethod
+    def update_table_row(cls, db: Session, use_case_id, row_id, row_data: dict):
+        """
+        更新某行数据
+        :param use_case_id: 用例 ID
+        :param row_id: 行 ID
+        :param row_data: 行数据
+        """
+        query = db.query(HrmCaseParams).filter_by(case_id=use_case_id, row_id=row_id).all()
+
+        for q in query:
+            q.update(col_value=row_data[q.col_name])
+        db.commit()
+
+    @classmethod
+    def load_table_page(cls, db: Session, use_case_id, page=1, page_size=1000, enabled=-1) -> list[dict]:
+        """
+        分页加载表格数据
+        :param use_case_id: 用例 ID
+        :param page: 页码（从 1 开始）
+        :param page_size: 每页多少行
+        :return: list[dict]
+        """
+        # 1️⃣ 先查 row_id（限制数量）
+        query = db.query(HrmCaseParams).filter_by(case_id=use_case_id)
+        if enabled != -1:
+            query = query.filter_by(enabled=enabled)
+        subquery = (
+            query
+            .distinct()
+            .order_by(HrmCaseParams.sort_key)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .subquery()
+        )
+
+        # 2️⃣ 再查这些 row_id 对应的所有字段
+        rows = (
+            db.query(HrmCaseParams)
+            .filter(HrmCaseParams.case_id == use_case_id)
+            .filter(HrmCaseParams.row_id.in_(subquery))
+            .order_by(HrmCaseParams.sort_key)
+            .all()
+        )
+
+        # 3️⃣ 拼成二维表
+        from collections import defaultdict
+        table = defaultdict(dict)
+        sort_keys = {}
+        for r in rows:
+            table[r.row_id][r.col_name] = r.col_value
+            sort_keys[r.row_id] = r.sort_key
+
+        result = [table[row_id] for row_id, _ in sorted(sort_keys.items(), key=lambda x: x[1])]
+        return result
+
+    @classmethod
+    async def load_table_iter(cls, db: Session, use_case_id) -> AsyncGenerator[dict, None]:
+        page = 1
+        while True:
+            datas = cls.load_table_page(db, use_case_id, page=page, page_size=1000, enabled=True)
+            if not datas:
+                break
+            for data in datas:
+                yield data
+            page += 1
+
+    @classmethod
+    def get_table_row_count(cls, db: Session, use_case_id):
+        """
+        获取表格行数
+        :param use_case_id: 用例 ID
+        :return: 行数
+        """
+        return db.query(HrmCaseParams.row_id).filter_by(case_id=use_case_id).distinct().count()
+
+    @classmethod
+    def delete_table(cls, db: Session, use_case_id):
+        db.query(HrmCaseParams).filter_by(case_id=use_case_id).delete()
+        db.commit()
+
+
+    @classmethod
+    def delete_table_row(cls, db: Session, use_case_id, row_ids: list[str|int]):
+        db.query(HrmCaseParams).filter(HrmCaseParams.case_id == use_case_id, HrmCaseParams.row_id.in_(row_ids)).delete()
+        db.commit()
+
+    @classmethod
+    def delete_table_col(cls, db: Session, use_case_id, col_name):
+        db.query(HrmCaseParams).filter_by(case_id=use_case_id, col_name=col_name).delete()
+        db.commit()

@@ -1,5 +1,6 @@
 import copy
 import json
+from typing import AsyncGenerator
 
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseF
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep
 from module_hrm.entity.vo.env_vo import EnvModel, EnvModelForApi
 from module_hrm.enums.enums import ParameterTypeEnum
+from module_hrm.service.case_service import CaseParamsService
 from module_hrm.utils.common import key_value_dict, dict2list, update_or_extend_list
 from module_hrm.utils.parser import parse_data
 from module_hrm.utils.util import decompress_text
@@ -322,9 +324,9 @@ class ParametersHandler(object):
         pass
 
     @classmethod
-    def get_parameters(cls, param_data):
+    async def get_parameters(cls, query_db: Session, param_data) -> AsyncGenerator[dict|list[dict], None]:
         param_tmp_data = param_data
-        parameters = []
+        param_index = 1
         if param_tmp_data.type == ParameterTypeEnum.local_table.value:
             parameter_source = decompress_text(param_tmp_data.value)
             parameter_obj = json.loads(parameter_source)
@@ -345,27 +347,41 @@ class ParametersHandler(object):
                         "key": item,
                         "value": data[item].get("content", ""),
                         "enable": True,
-                        "type": "string"
+                        "type": "string",
+                        "index": param_index
                     })
-                parameters.append(param)
-        return parameters
+                yield param
+                param_index += 1
+        elif param_tmp_data.type == ParameterTypeEnum.sql.value:
+            async for data in CaseParamsService.load_case_params_iter(query_db, param_data):
+                line_data = []
+                for item in data:
+                    if item in ("__enable", "__row_key"):
+                        continue
+                    line_data.append({
+                        "key": item,
+                        "value": data[item],
+                        "enable": True,
+                        "type": "string",
+                        "index": param_index
+                    })
+                yield line_data
+                param_index += 1
 
     @classmethod
-    def get_parameters_case(cls, case_datas: list[TestCase]) -> list[TestCase]:
+    async def get_parameters_case(cls, query_db: Session, case_datas: list[TestCase]) -> AsyncGenerator[TestCase, None]:
         """
         获取参数化之后的用例
         """
-        all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
+        # all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
         for test_case in case_datas:
             # test_case = CaseInfoHandle(query_db).from_db(case_id).toRun(env_obj).run_data()
             parameters = test_case.config.parameters
             if not parameters or not parameters.value:
-                all_data.append(test_case)
+                yield test_case
                 continue
 
-            params = cls.get_parameters(test_case.config.parameters)
-
-            for index, param in enumerate(params):
+            async for param in cls.get_parameters(query_db, test_case.config.parameters):
                 tmp_case_data = copy.deepcopy(test_case)
                 old_variables: list[dict] = tmp_case_data.config.variables
                 update_or_extend_list(old_variables, param)
@@ -380,10 +396,11 @@ class ParametersHandler(object):
                     tmp_case_data.config.name = f"{name}[{tmp_param['caseName']}]"
                     tmp_case_data.case_name = f"{name}[{tmp_param['caseName']}]"
                 else:
-                    tmp_case_data.config.name = f"{name}[{index + 1}]"
-                    tmp_case_data.case_name = f"{name}[{index + 1}]"
-                all_data.append(tmp_case_data)
-        return all_data
+                    tmp_case_data.config.name = f"{name}[{param['index']}]"
+                    tmp_case_data.case_name = f"{name}[{param['index']}]"
+                yield tmp_case_data
+                # all_data.append(tmp_case_data)
+        # return all_data
 
 
 class ForwardRulesHandler(object):
