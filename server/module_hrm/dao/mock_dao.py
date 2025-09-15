@@ -94,11 +94,16 @@ class MockRuleDao:
                          ).outerjoin(HrmProject,
                                      MockRules.project_id == HrmProject.project_id).outerjoin(HrmModule,
                                                                                               MockRules.module_id == HrmModule.module_id)
-        if query_object.path:
-            query = query.filter(MockRules.path == query_object.path)
-        #     query = query.filter(MockRules.path.like(f'%{query_object.path}%'))
 
         query = query.filter(eval(data_scope_sql))
+
+        if query_object.path:
+            query = query.filter(MockRules.path.like(f'%{query_object.path}%'))
+        #     query = query.filter(MockRules.path.like(f'%{query_object.path}%'))
+        if query_object.method:
+            query = query.filter(MockRules.method == query_object.method)
+
+
 
         if query_object.type:
             query = query.filter(MockRules.type == query_object.type)
