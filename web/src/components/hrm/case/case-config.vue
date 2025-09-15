@@ -8,9 +8,9 @@ import TableVariables from "@/components/hrm/table-variables.vue";
 import {selectModulList} from "@/api/hrm/module.js";
 import {list as listConfig, allConfig} from "@/api/hrm/config.js";
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
-import {getComparator} from "@/api/hrm/case.js";
+import {getComparator, uploadParamsFileToServer, listCaseParams, delCaseParams} from "@/api/hrm/case.js";
 import ParamsDalog from "@/components/hrm/common/edite-table.vue";
-import {ElMessageBox} from "element-plus";
+import {ElMessage, ElMessageBox} from "element-plus";
 import {useResizeObserver} from "@vueuse/core";
 import {useI18n} from "vue-i18n";
 
@@ -46,7 +46,11 @@ const moduleOptions = ref([]);
 const hrm_comparator_dict = inject("hrm_comparator_dict");
 
 const parameterDialogShow = ref(false);
+const uploadParameterDialogShow = ref(false);
 const parameterInfo = ref({tableHeaders: [], tableDatas: []});
+
+const paramsCount = ref(0);
+
 const loading = ref({
   initParameter: false,
   save: false,
@@ -57,6 +61,53 @@ const loading = ref({
 const configContainerRef = ref();
 const configContainerCurrentHeight = ref(0);
 
+
+const handleFileChange = (event) => {
+  file.value = event.target.files[0];
+};
+const file = ref(null);
+const uploadFile = () => {
+  if (file.value) {
+    const uploadFormData = new FormData();
+    uploadFormData.append('file', file.value);
+    uploadFormData.append('caseId', formData.value.caseId);
+    // 发送请求到后端
+    uploadParamsFileToServer(uploadFormData).then(response => {
+      // 处理上传成功的逻辑
+      console.log('上传成功', response);
+    }).catch(error => {
+      // 处理上传失败的逻辑
+      console.error('上传失败', error);
+    });
+  }
+};
+
+// 删除用例参数
+const delCaseParamsCall = () => {
+  let data = {
+    caseId: formData.value.caseId
+  }
+  delCaseParams(data).then(response => {
+    if (response.code === 200) {
+      ElMessage.success("删除成功");
+      getCaseParamsList();
+    }
+  });
+}
+
+// 查询用例参数列表
+const getCaseParamsList = () => {
+  let data = {
+    caseId: formData.value.caseId
+  }
+  listCaseParams(data).then(response => {
+    if (response.code === 200) {
+      paramsCount.value = response.total;
+      // parameterInfo.value.tableDatas = response.data;
+
+    }
+  });
+}
 
 function getModuleSelect() {
   selectModulList(formData.value).then(response => {
@@ -114,6 +165,11 @@ function startParameterDialog() {
   parameterDialogShow.value = true;
 }
 
+function startUploadParameterDialog() {
+  loading.value.initParameter = true;
+  uploadParameterDialogShow.value = true;
+}
+
 function replacer(key, value) {
   // 如果值是 undefined，则返回空字符串，否则返回原始值
   return value === undefined ? "" : value;
@@ -158,6 +214,9 @@ watch(()=>formData.value.moduleId, ()=>{
 });
 
 function beforeColseDialog(done) {
+  done();
+  loading.value.initParameter = false;
+  return;
   ElMessageBox.confirm("退出前请保存数据", "关闭确认", {
     type: "warning",
     cancelButtonText: "返回保存",
@@ -278,9 +337,11 @@ const calcConfigContainerHeight = computed(() => {
                 <el-option :value="3" :key="3" label="本地表格"></el-option>
                 <el-option :value="4" :key="4" label="本地数据" disabled></el-option>
                 <el-option :value="1" :key="1" label="文件" disabled></el-option>
-                <el-option :value="2" :key="2" label="数据库" disabled></el-option>
+                <el-option :value="2" :key="2" label="数据库"></el-option>
               </el-select>
-              <el-button @click="startParameterDialog" style="padding-left: 5px" type="primary">设置</el-button>
+              <el-button @click="startParameterDialog" style="padding-left: 5px" type="primary" :disabled="formData.request.config.parameters.type !== 3">设置</el-button>
+              <el-button @click="startUploadParameterDialog" style="padding-left: 5px" type="primary" :disabled="formData.request.config.parameters.type !== 2">上传CSV文件</el-button>
+
             </el-row>
             <el-row style="padding-bottom: 10px" v-if="formData.request.config.parameters">
               <template v-if="formData.request.config.parameters.value">
@@ -365,6 +426,25 @@ const calcConfigContainerHeight = computed(() => {
       </el-container>
     </el-dialog>
   </div>
+
+  <el-dialog fullscreen :title="'上传参数化文件' + '【' +formData.caseName + '】'"
+               v-model="uploadParameterDialogShow"
+               :before-close="beforeColseDialog"
+               append-to-body destroy-on-close>
+      <el-container style="height: 100%">
+        <el-main style="max-height: calc(100vh - 95px);">
+          <div>
+            <input type="file" @change="handleFileChange" />
+            <el-button @click="uploadFile" :disabled="!file">上传</el-button>
+            <el-button @click="delCaseParamsCall" type="danger">删除</el-button>
+
+            <el-text>当前参数数量：{{ paramsCount }}</el-text>
+            <el-button @click="getCaseParamsList" type="primary">查询</el-button>
+
+          </div>
+        </el-main>
+      </el-container>
+    </el-dialog>
 
 </template>
 

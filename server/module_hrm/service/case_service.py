@@ -1,6 +1,9 @@
 import json
 import io
 import csv
+import math
+import uuid
+from itertools import count
 from typing import AsyncGenerator, List
 
 from fastapi import UploadFile
@@ -12,6 +15,7 @@ from module_hrm.dao.case_dao import CaseDao, CaseParamsDao
 from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseParams
 from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_params_vo import CaseParamsQueryModel, CaseParamsDeleteModel
 from module_hrm.entity.vo.case_vo import CasePageQueryModel, CaseModel, CaseQuery, \
     DeleteCaseModel, AddCaseModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
@@ -223,15 +227,28 @@ class CaseService:
 
 class CaseParamsService:
     @classmethod
-    def get_case_params_pages_services(cls, query_db: Session, case_id: int, page: int, per_page: int) -> list[dict]:
+    def get_case_params_pages_services(cls, query_db: Session, query_info: CaseParamsQueryModel) -> dict:
         """
         获取用例参数信息service
         :param query_db: orm对象
         :param case_id: 用例id
         :return: 用例参数信息
         """
-        case_params = CaseParamsDao.load_table_page(query_db, use_case_id=case_id, page=page, page_size=per_page)
-        return case_params
+        count = CaseParamsDao.get_table_row_count(query_db, use_case_id=query_info.case_id)
+        case_params = CaseParamsDao.load_table_page(query_db,
+                                                    use_case_id=query_info.case_id,
+                                                    page=query_info.page_num,
+                                                    page_size=query_info.page_size,
+                                                    enabled=query_info.enabled,
+                                                    )
+        page_info = {
+            'total': count,
+            'page_num': query_info.page_num,
+            'page_size': query_info.page_size,
+            # 'total_page': math.ceil(count / query_info.page_size),
+            'rows': case_params,
+        }
+        return page_info
 
     @classmethod
     def loadup_case_params_services(cls, query_db: Session, case_id: str|int, case_params: list[dict]):
@@ -279,7 +296,7 @@ class CaseParamsService:
         CaseParamsDao.update_table_row(query_db, use_case_id=case_id, row_data=params)
 
     @classmethod
-    def delete_case_params_services(cls, query_db: Session, case_id: int, row_ids: list[str|int]):
+    def delete_case_params_services(cls, query_db: Session, delete_data: CaseParamsDeleteModel):
         """
         删除用例参数信息service
         :param query_db: orm对象
@@ -287,34 +304,60 @@ class CaseParamsService:
         :param params: 用例参数信息
         :return: 用例参数信息
         """
-        CaseParamsDao.delete_table_row(query_db, use_case_id=case_id, row_ids=row_ids)
+        CaseParamsDao.delete_table_row(query_db, use_case_id=delete_data.case_id, row_ids=delete_data.row_ids)
 
     @classmethod
-    async def import_csv_to_db(cls, db: Session, file: UploadFile):
+    async def import_csv_to_db(cls, db: Session, file: UploadFile, case_id: int|str, current_user: CurrentUserModel):
         # 用文本流解析
         content = await file.read()
-        file_like = io.StringIO(content.decode("utf-8"))
+        try:
+            file_like = io.StringIO(content.decode("utf-8"))
+        except UnicodeDecodeError:
+            try:
+                file_like = io.StringIO(content.decode("gbk"))
+            except UnicodeDecodeError:
+                raise Exception("文件编码不正确，请使用UTF-8或GBK编码")
         reader = csv.DictReader(file_like)
 
         batch_size = 1000
         buffer: List[dict] = []
+        sort_key = 100
 
-        with db.begin():  # 事务
-            for row in reader:
+
+        for row in reader:
+            enabled = row.pop("__enable", 1)
+            row_id = str(uuid.uuid4())
+            if enabled == '1':
+                enabled = True
+            else:
+                enabled = False
+            col_sort = 0
+            for key, value in row.items():
+                if value == '':
+                    row[key] = None
                 buffer.append({
-                    "case_id": int(row.get("case_id")),
-                    "row_id": int(row.get("row_id")),
-                    "field_name": row.get("field_name"),
-                    "field_value": row.get("field_value"),
+                    "dept_id": current_user.user.dept_id,
+                    "create_by": current_user.user.user_id,
+                    "update_by": current_user.user.user_id,
+                    "manager": current_user.user.user_id,
+                    "case_id": case_id,
+                    "row_id": row_id,
+                    "col_name": key,
+                    "params_name": key,
+                    "col_value": value,
+                    "params_type": 1,
+                    "enabled": enabled,
+                    "sort_key": sort_key,
+                    "col_sort": col_sort,
                 })
-
-                # 到达批量阈值，写入数据库
-                if len(buffer) >= batch_size:
-                    db.execute(insert(HrmCaseParams), buffer)
-                    buffer.clear()
-
-            # 剩余的数据写入
-            if buffer:
+                col_sort += 1
+            # 到达批量阈值，写入数据库
+            if len(buffer) >= batch_size:
                 db.execute(insert(HrmCaseParams), buffer)
+                buffer.clear()
+            sort_key += 100
+        # 剩余的数据写入
+        if buffer:
+            db.execute(insert(HrmCaseParams), buffer)
 
         db.commit()

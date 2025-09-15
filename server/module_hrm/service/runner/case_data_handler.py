@@ -348,12 +348,17 @@ class ParametersHandler(object):
                         "value": data[item].get("content", ""),
                         "enable": True,
                         "type": "string",
-                        "index": param_index
                     })
+                param.append({
+                    "key": "__index",
+                    "value": param_index,
+                    "enable": True,
+                    "type": "int",
+                })
                 yield param
                 param_index += 1
         elif param_tmp_data.type == ParameterTypeEnum.sql.value:
-            async for data in CaseParamsService.load_case_params_iter(query_db, param_data):
+            async for data in CaseParamsService.load_case_params_iter(query_db, param_data.value):
                 line_data = []
                 for item in data:
                     if item in ("__enable", "__row_key"):
@@ -365,6 +370,12 @@ class ParametersHandler(object):
                         "type": "string",
                         "index": param_index
                     })
+                line_data.append({
+                    "key": "__index",
+                    "value": param_index,
+                    "enable": True,
+                    "type": "int",
+                })
                 yield line_data
                 param_index += 1
 
@@ -377,11 +388,14 @@ class ParametersHandler(object):
         for test_case in case_datas:
             # test_case = CaseInfoHandle(query_db).from_db(case_id).toRun(env_obj).run_data()
             parameters = test_case.config.parameters
-            if not parameters or not parameters.value:
+            if not parameters or (parameters.type == ParameterTypeEnum.local_table.value and not parameters.value):
                 yield test_case
                 continue
 
-            async for param in cls.get_parameters(query_db, test_case.config.parameters):
+            if parameters.type == ParameterTypeEnum.sql.value:
+                parameters.value = test_case.case_id
+
+            async for param in cls.get_parameters(query_db, parameters):
                 tmp_case_data = copy.deepcopy(test_case)
                 old_variables: list[dict] = tmp_case_data.config.variables
                 update_or_extend_list(old_variables, param)
@@ -396,8 +410,8 @@ class ParametersHandler(object):
                     tmp_case_data.config.name = f"{name}[{tmp_param['caseName']}]"
                     tmp_case_data.case_name = f"{name}[{tmp_param['caseName']}]"
                 else:
-                    tmp_case_data.config.name = f"{name}[{param['index']}]"
-                    tmp_case_data.case_name = f"{name}[{param['index']}]"
+                    tmp_case_data.config.name = f"{name}[{tmp_param['__index']}]"
+                    tmp_case_data.case_name = f"{name}[{tmp_param['__index']}]"
                 yield tmp_case_data
                 # all_data.append(tmp_case_data)
         # return all_data
