@@ -423,11 +423,12 @@ class CaseParamsDao:
         """
         # 1️⃣ 先查 row_id（限制数量）
         query = db.query(HrmCaseParams).filter_by(case_id=use_case_id)
-        if enabled != -1:
+        if enabled is not None and enabled != -1:
             query = query.filter_by(enabled=enabled)
         subquery = (
             query
             .distinct()
+            .with_entities(HrmCaseParams.row_id, HrmCaseParams.sort_key)
             .order_by(HrmCaseParams.sort_key)
             .offset((page - 1) * page_size)
             .limit(page_size)
@@ -438,7 +439,7 @@ class CaseParamsDao:
         rows = (
             db.query(HrmCaseParams)
             .filter(HrmCaseParams.case_id == use_case_id)
-            .filter(HrmCaseParams.row_id.in_(subquery))
+            .filter(HrmCaseParams.row_id.in_(db.query(subquery.c.row_id)))
             .order_by(HrmCaseParams.sort_key)
             .all()
         )
@@ -482,7 +483,10 @@ class CaseParamsDao:
 
     @classmethod
     def delete_table_row(cls, db: Session, use_case_id, row_ids: list[str|int]):
-        db.query(HrmCaseParams).filter(HrmCaseParams.case_id == use_case_id, HrmCaseParams.row_id.in_(row_ids)).delete()
+        query = db.query(HrmCaseParams).filter(HrmCaseParams.case_id == use_case_id)
+        if row_ids:
+            query.filter(HrmCaseParams.row_id.in_(row_ids))
+        query.delete()
         db.commit()
 
     @classmethod

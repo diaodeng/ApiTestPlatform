@@ -1,6 +1,8 @@
+import csv
+import io
 from datetime import datetime
 
-from fastapi import APIRouter, Request, UploadFile, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Request, UploadFile, BackgroundTasks, HTTPException, Form
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,7 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_hrm.entity.vo.case_vo import CasePageQueryModel, AddCaseModel, CaseModel, DeleteCaseModel
+from module_hrm.entity.vo.case_params_vo import CaseParamsQueryModel, CaseParamsDeleteModel
 from module_hrm.service.case_service import CaseService, CaseParamsService
 from utils.common_util import bytes2file_response
 from utils.log_util import logger
@@ -33,7 +36,8 @@ async def get_hrm_case_list(request: Request,
         if not page_query.type:
             raise ValueError("参数错误")
         page_query.manager = current_user.user.user_id
-        page_query_result = CaseService.get_case_list_services(query_db, page_query, is_page=True, data_scope_sql=data_scope_sql)
+        page_query_result = CaseService.get_case_list_services(query_db, page_query, is_page=True,
+                                                               data_scope_sql=data_scope_sql)
         logger.info('获取成功')
         data = ResponseUtil.success(model_content=page_query_result)
         return data
@@ -183,7 +187,8 @@ async def export_hrm_case_list(request: Request,
                                ):
     try:
         # 获取全量数据
-        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False, data_scope_sql=data_scope_sql)
+        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False,
+                                                          data_scope_sql=data_scope_sql)
         export_result = CaseService.export_case_list_services(query_result)
         logger.info('导出成功')
         return ResponseUtil.streaming(data=bytes2file_response(export_result))
@@ -193,33 +198,33 @@ async def export_hrm_case_list(request: Request,
 
 
 @caseController.post("/params/list", dependencies=[Depends(CheckUserInterfaceAuth('hrm:caseParams:list'))])
-@log_decorator(title='获取用例参数列表', business_type=5)
+@log_decorator(title='获取用例参数列表', business_type=0)
 async def get_case_params_list(request: Request,
-                               page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
+                               page_query: CaseParamsQueryModel,
                                query_db: Session = Depends(get_db),
                                data_scope_sql: str = Depends(GetDataScope('HrmCaseParams', user_alias='manager'))
                                ):
     try:
         # 获取全量数据
-        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False, data_scope_sql=data_scope_sql)
-        export_result = CaseService.export_case_list_services(query_result)
-        logger.info('导出成功')
-        return ResponseUtil.streaming(data=bytes2file_response(export_result))
+        query_result = CaseParamsService.get_case_params_pages_services(query_db, page_query)
+        data = ResponseUtil.success(dict_content=query_result)
+        return data
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
 
 @caseController.post("/params", dependencies=[Depends(CheckUserInterfaceAuth('hrm:caseParams:add'))])
-@log_decorator(title='新增用例参数', business_type=5)
+@log_decorator(title='新增用例参数', business_type=1)
 async def add_case_params(request: Request,
-                               page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
-                               query_db: Session = Depends(get_db),
-                               data_scope_sql: str = Depends(GetDataScope('HrmCaseParams', user_alias='manager'))
-                               ):
+                          page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
+                          query_db: Session = Depends(get_db),
+                          data_scope_sql: str = Depends(GetDataScope('HrmCaseParams', user_alias='manager'))
+                          ):
     try:
         # 获取全量数据
-        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False, data_scope_sql=data_scope_sql)
+        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False,
+                                                          data_scope_sql=data_scope_sql)
         export_result = CaseService.export_case_list_services(query_result)
         logger.info('导出成功')
         return ResponseUtil.streaming(data=bytes2file_response(export_result))
@@ -229,15 +234,16 @@ async def add_case_params(request: Request,
 
 
 @caseController.put("/params", dependencies=[Depends(CheckUserInterfaceAuth('hrm:caseParams:edite'))])
-@log_decorator(title='编辑用例参数', business_type=5)
+@log_decorator(title='编辑用例参数', business_type=2)
 async def edite_case_params(request: Request,
-                               page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
-                               query_db: Session = Depends(get_db),
-                               data_scope_sql: str = Depends(GetDataScope('HrmCaseParams', user_alias='manager'))
-                               ):
+                            page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
+                            query_db: Session = Depends(get_db),
+                            data_scope_sql: str = Depends(GetDataScope('HrmCaseParams', user_alias='manager'))
+                            ):
     try:
         # 获取全量数据
-        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False, data_scope_sql=data_scope_sql)
+        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False,
+                                                          data_scope_sql=data_scope_sql)
         export_result = CaseService.export_case_list_services(query_result)
         logger.info('导出成功')
         return ResponseUtil.streaming(data=bytes2file_response(export_result))
@@ -245,19 +251,18 @@ async def edite_case_params(request: Request,
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
-@caseController.delete("/params", dependencies=[Depends(CheckUserInterfaceAuth('hrm:caseParams:delete'))])
-@log_decorator(title='删除用例参数', business_type=5)
+
+@caseController.delete("/params/delete", dependencies=[Depends(CheckUserInterfaceAuth('hrm:caseParams:delete'))])
+@log_decorator(title='删除用例参数', business_type=3)
 async def delete_case_params(request: Request,
-                               page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
-                               query_db: Session = Depends(get_db),
-                               data_scope_sql: str = Depends(GetDataScope('HrmCaseParams', user_alias='manager'))
-                               ):
+                             delete_data: CaseParamsDeleteModel,
+                             query_db: Session = Depends(get_db),
+                             data_scope_sql: str = Depends(GetDataScope('HrmCaseParams', user_alias='manager'))
+                             ):
     try:
         # 获取全量数据
-        query_result = CaseService.get_case_list_services(query_db, page_query, is_page=False, data_scope_sql=data_scope_sql)
-        export_result = CaseService.export_case_list_services(query_result)
-        logger.info('导出成功')
-        return ResponseUtil.streaming(data=bytes2file_response(export_result))
+        CaseParamsService.delete_case_params_services(query_db, delete_data)
+        return ResponseUtil.success(msg='删除成功')
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -266,18 +271,17 @@ async def delete_case_params(request: Request,
 @caseController.post("/params/import", dependencies=[Depends(CheckUserInterfaceAuth('hrm:caseParams:import'))])
 @log_decorator(title='导入用例参数', business_type=5)
 async def delete_case_params(request: Request,
-                               file: UploadFile, background_tasks: BackgroundTasks,
-                               query_db: Session = Depends(get_db)
-                               ):
+                             file: UploadFile, background_tasks: BackgroundTasks,
+                             caseId: str = Form(...),
+                             query_db: Session = Depends(get_db),
+                             current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                             ):
     try:
-        # 获取全量数据
-        if not file.filename.endswith(".csv") or not file.filename.endswith(".xlsx"):
-            raise HTTPException(status_code=400, detail="Only CSV files are supported")
-
-        background_tasks.add_task(CaseParamsService.import_csv_to_db, query_db, file)
-        return {"message": f"File {file.filename} is being processed in the background"}
+        await CaseParamsService.import_csv_to_db(query_db, file, caseId, current_user)
+        # background_tasks.add_task(CaseParamsService.import_csv_to_db, query_db, file, caseId)
+        return ResponseUtil.success(msg='导入成功')
+        # HTTPException(status_code=400, detail="文件编码不正确，请使用UTF-8或GBK编码")
         # return ResponseUtil.streaming(data=bytes2file_response(export_result))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-

@@ -83,3 +83,38 @@ export function getComparator(data) {
     params: data
   })
 }
+
+export function uploadParamsFileToServer(data) {
+  return request({
+    url: '/hrm/case/params/import',
+    method: 'POST',
+    data: data,
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    onUploadProgress: (progressEvent) => {
+      let percent = Math.round(
+          (progressEvent.loaded * 100) / progressEvent.total
+        );
+        console.log("上传进度:", percent + "%");
+    }
+  })
+}
+
+// 查询用例参数列表
+export function listCaseParams(query) {
+  return request({
+    url: '/hrm/case/params/list',
+    method: 'post',
+    data: query
+  })
+}
+
+// 删除用例参数
+export function delCaseParams(data) {
+  return request({
+    url: '/hrm/case/params/delete',
+    method: 'delete',
+    data: data
+  })
+}
