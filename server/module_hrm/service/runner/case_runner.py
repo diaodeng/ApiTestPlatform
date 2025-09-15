@@ -600,7 +600,7 @@ class RequestRunner(object):
                 res_response: AgentResponse = agent_res_obj.response
 
             else:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(verify=False) as client:
                     res_response = await client.request(**request_data)
 
             self.logger.debug(f"请求响应结果：{res_response}")
