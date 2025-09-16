@@ -7,7 +7,7 @@ from model.config import PosChangeParamsModel
 
 
 def change_pos_from_network(data: PosChangeParamsModel):
-    with httpx.Client() as client:
+    with httpx.Client(verify=False) as client:
         data = {"env": data.env,
                 "venderId": data.venderId,
                 "orgNo": data.orgNo,
@@ -34,7 +34,7 @@ def change_pos_from_network(data: PosChangeParamsModel):
 
 
 def pos_account_logout(data: PosChangeParamsModel):
-    with httpx.Client() as client:
+    with httpx.Client(verify=False) as client:
         data = {"env":"rta-test","cashierNo":"00011111","userid":"","username":""}
         logger.info(f"POS账号注销参数： {json.dumps(data)}")
         if "uat" in data["env"]:
