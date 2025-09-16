@@ -118,14 +118,14 @@ async def run_by_suite(query_db: Session, index, env, func_map=None):
 async def run_by_batch(query_db: Session,
                        run_info: CaseRunModel,
                        user=None
-                       ) -> list[TestCase]:
+                       ) -> tuple[int, int, int]:
     """
     批量组装用例数据
     :param test_list:
     :param base_url: str: 环境地址
     :param type: str：用例级别
     :param mode: boolean：True 同步 False: 异步
-    :return: list
+    :return: tuple[int, int, int]
     """
 
     def get_case_data(all_cases, data_type, ids: list):
@@ -142,6 +142,7 @@ async def run_by_batch(query_db: Session,
         for project_id, module_id, case_id in tmp_case_info_query:
             all_cases[project_id].append(case_id)
 
+    result = (0, 0, 0)
     all_cases = defaultdict(list)
     if run_info.run_type == RunTypeEnum.suite.value:
         all_suite_orm = query_db.query(QtrSuite).filter(QtrSuite.suite_id.in_(run_info.ids)).order_by(
@@ -184,13 +185,15 @@ async def run_by_batch(query_db: Session,
     env_obj = EnvModel.from_orm(env_data)
 
     try:
-        result = []
+
         debugtalk_func_map = None
         for project_id, ids in all_cases.items():  # 按项目执行
             if not ids: continue
 
             res_data = await run_by_concurrent(query_db, list(ids), env_obj, debugtalk_func_map, run_info)
-            result.extend(res_data)
+            result[0] += res_data[0]
+            result[1] += res_data[1]
+            result[2] += res_data[2]
 
     finally:
         for pdi in run_info.project_debugtalk_set.values():
@@ -244,34 +247,38 @@ async def run_by_project(query_db: Session, id, env_obj, func_map=None, run_info
 
 
 async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, func_map=None,
-                            run_info: CaseRunModel = None):
+                            run_info: CaseRunModel = None) -> tuple[int, int, int]:
     """
     并发执行多个用例
     """
-    # case_data_list = await get_case_info_batch(query_db, case_ids, env_obj)
-    if not run_info.run_by_sort and run_info.concurrent > 1:
-        semaphore = asyncio.Semaphore(run_info.concurrent)
-        # case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
-        # case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
-        #                    range(0, len(case_data_list), run_info.concurrent)]
+    if run_info.run_by_sort:
+        run_info.concurrent = 1
+    semaphore = asyncio.Semaphore(run_info.concurrent)
+    # case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
+    # case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
+    #                    range(0, len(case_data_list), run_info.concurrent)]
 
-        results = []
-        async for case_data in get_case_info_batch(query_db, case_ids, env_obj):
-            try:
-                async with semaphore:
-                    res_list = await run_by_single(query_db, case_data, env_obj, func_map, run_info)
-                    results.extend(res_list)
-            except Exception as e:
-                logger.error(f"并发执行测试用例异常： {e}")
-        return results
-    else:
-        result = []
-        # for case_id in case_ids:
-        #     case_datas = get_case_info(query_db, case_id, env_obj)
-        async for case_data in get_case_info_batch(query_db, case_ids, env_obj):
-            res_data = await run_by_single(query_db, case_data, env_obj, func_map, run_info)
-            result.extend(res_data)
-        return result
+    tasks = []
+    result_count = (0, 0, 0)
+    async for case_data in get_case_info_batch(query_db, case_ids, env_obj):
+        async with semaphore:
+            task = asyncio.create_task(run_by_single(query_db, case_data, env_obj, func_map, run_info))
+            tasks.append(task)
+
+    for coro in asyncio.as_completed(tasks):  # 谁先完成就先处理谁
+        try:
+            res_list = await coro
+            for res_data in res_list:
+                data: TestCase = res_data
+                if data.config.result.status == CaseRunStatus.passed.value:
+                    result_count[1] += 1
+                elif data.config.result.status == CaseRunStatus.failed.value:
+                    result_count[2] += 1
+                result_count[0] += 1
+        except Exception as e:
+            logger.error(f"并发执行测试用例异常： {e}")
+    return result_count
+
 
 
 def test_run(run_info, current_user):
@@ -320,19 +327,10 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
 
         report_info = ReportDao.get_by_id(query_db, report_info.report_id)
         report_info.test_duration = test_end_time - test_start_time
-        report_status = report_info.status
-        report_total = 0
-        report_success = 0
-        for case_data in run_result:
-            report_total += 1
-            if case_data.config.result.status == CaseRunStatus.failed.value:
-                report_status = CaseRunStatus.failed.value
-            elif case_data.config.result.status == CaseRunStatus.passed.value:
-                report_success += 1
 
-        report_info.status = report_status
-        report_info.total = report_total
-        report_info.success = report_success
+        report_info.status = CaseRunStatus.failed.value if run_result[2] > 0 else CaseRunStatus.passed.value
+        report_info.total = run_result[0]
+        report_info.success = run_result[1]
         query_db.commit()
 
         message_handler = MessageHandler(run_info)
