@@ -1,12 +1,12 @@
 import json
 import io
 import csv
-import math
 import uuid
-from itertools import count
+from loguru import logger
 from typing import AsyncGenerator, List
 
 from fastapi import UploadFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
@@ -307,57 +307,78 @@ class CaseParamsService:
         CaseParamsDao.delete_table_row(query_db, use_case_id=delete_data.case_id, row_ids=delete_data.row_ids)
 
     @classmethod
-    async def import_csv_to_db(cls, db: Session, file: UploadFile, case_id: int|str, current_user: CurrentUserModel):
+    async def import_csv_to_db(cls, db: Session, file: UploadFile, case_id: int|str, current_user: CurrentUserModel) -> dict:
+        """
+        导入用例参数信息service
+        :param query_db: orm对象
+        :param file: 上传文件
+        :param case_id: 用例id
+        :param current_user: 当前用户
+        :return: 用例参数信息
+        """
         # 用文本流解析
-        content = await file.read()
-        try:
-            file_like = io.StringIO(content.decode("utf-8"))
-        except UnicodeDecodeError:
-            try:
-                file_like = io.StringIO(content.decode("gbk"))
-            except UnicodeDecodeError:
-                raise Exception("文件编码不正确，请使用UTF-8或GBK编码")
-        reader = csv.DictReader(file_like)
-
         batch_size = 1000
         buffer: List[dict] = []
         sort_key = 100
+        total = 0
+        error_count = 0
+        try:
+            content = await file.read()
+            try:
+                file_like = io.StringIO(content.decode("utf-8"))
+            except UnicodeDecodeError:
+                try:
+                    file_like = io.StringIO(content.decode("gbk"))
+                except UnicodeDecodeError:
+                    raise Exception("文件编码不正确，请使用UTF-8或GBK编码")
+            reader = csv.DictReader(file_like)
 
 
-        for row in reader:
-            enabled = row.pop("__enable", 1)
-            row_id = str(uuid.uuid4())
-            if enabled == '1':
-                enabled = True
-            else:
-                enabled = False
-            col_sort = 0
-            for key, value in row.items():
-                if value == '':
-                    row[key] = None
-                buffer.append({
-                    "dept_id": current_user.user.dept_id,
-                    "create_by": current_user.user.user_id,
-                    "update_by": current_user.user.user_id,
-                    "manager": current_user.user.user_id,
-                    "case_id": case_id,
-                    "row_id": row_id,
-                    "col_name": key,
-                    "params_name": key,
-                    "col_value": value,
-                    "params_type": 1,
-                    "enabled": enabled,
-                    "sort_key": sort_key,
-                    "col_sort": col_sort,
-                })
-                col_sort += 1
-            # 到达批量阈值，写入数据库
-            if len(buffer) >= batch_size:
-                db.execute(insert(HrmCaseParams), buffer)
-                buffer.clear()
-            sort_key += 100
-        # 剩余的数据写入
-        if buffer:
-            db.execute(insert(HrmCaseParams), buffer)
+            for row in reader:
+                try:
+                    total += 1
+                    enabled = row.pop("__enable", 1)
+                    row_id = str(uuid.uuid4())
+                    if enabled == '1':
+                        enabled = True
+                    else:
+                        enabled = False
+                    col_sort = 0
+                    for key, value in row.items():
+                        if value == '':
+                            row[key] = None
+                        buffer.append({
+                            "dept_id": current_user.user.dept_id,
+                            "create_by": current_user.user.user_id,
+                            "update_by": current_user.user.user_id,
+                            "manager": current_user.user.user_id,
+                            "case_id": case_id,
+                            "row_id": row_id,
+                            "col_name": key,
+                            "params_name": key,
+                            "col_value": value,
+                            "params_type": 1,
+                            "enabled": enabled,
+                            "sort_key": sort_key,
+                            "col_sort": col_sort,
+                        })
+                        col_sort += 1
+                except Exception as e:
+                    error_count += 1
+                    continue
 
-        db.commit()
+                # 到达批量阈值，写入数据库
+                if len(buffer) >= batch_size:
+                    await run_in_threadpool(db.execute, insert(HrmCaseParams), buffer)
+                    buffer.clear()
+                sort_key += 100
+            # 剩余的数据写入
+            if buffer:
+                await run_in_threadpool(db.execute, insert(HrmCaseParams), buffer)
+
+            db.commit()
+        finally:
+            await file.close()
+
+        logger.info(f"导入用例参数完成，共导入{total}条数据，{error_count}条数据导入失败")
+        return {"total": total, "error_count": error_count}
