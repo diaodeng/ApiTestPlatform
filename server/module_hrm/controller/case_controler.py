@@ -270,7 +270,7 @@ async def delete_case_params(request: Request,
 
 @caseController.post("/params/import", dependencies=[Depends(CheckUserInterfaceAuth('hrm:caseParams:import'))])
 @log_decorator(title='导入用例参数', business_type=5)
-async def delete_case_params(request: Request,
+async def import_case_params(request: Request,
                              file: UploadFile, background_tasks: BackgroundTasks,
                              caseId: str = Form(...),
                              query_db: Session = Depends(get_db),
