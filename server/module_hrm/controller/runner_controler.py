@@ -6,6 +6,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
+from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
@@ -29,6 +30,7 @@ runnerController = APIRouter(prefix='/hrm/runner', dependencies=[Depends(LoginSe
 @runnerController.post("/test",
                        response_model=CaseModel,
                        dependencies=[Depends(CheckUserInterfaceAuth('hrm:case:run'))])
+@log_decorator(title='运行用例', business_type=0)
 async def run_test(request: Request,
                    run_info: CaseRunModel,
                    query_db: Session = Depends(get_db),
@@ -58,6 +60,7 @@ async def run_test(request: Request,
 @runnerController.post("/debug",
                        response_model=PageResponseModel,
                        dependencies=[Depends(CheckUserInterfaceAuth(['hrm:api:debug', 'hrm:case:debug']))])
+@log_decorator(title='调试用例', business_type=0)
 async def for_debug(request: Request,
                     debug_info: CaseRunModel,
                     query_db: Session = Depends(get_db),

@@ -317,13 +317,16 @@ class CaseParamsService:
         :return: 用例参数信息
         """
         # 用文本流解析
+        logger.info(f'导入用例参数，用例id：{case_id}，文件名：{file.filename}')
         batch_size = 1000
         buffer: List[dict] = []
+        writed_line: int = 0
         sort_key = 100
         total = 0
         error_count = 0
         try:
             content = await file.read()
+            logger.info(f'文件读取完成，导入用例参数，用例id：{case_id}，文件名：{file.filename}，文件大小：{len(content)}')
             try:
                 file_like = io.StringIO(content.decode("utf-8"))
             except UnicodeDecodeError:
@@ -332,14 +335,14 @@ class CaseParamsService:
                 except UnicodeDecodeError:
                     raise Exception("文件编码不正确，请使用UTF-8或GBK编码")
             reader = csv.DictReader(file_like)
-
+            logger.info(f'文件解析完成，导入用例参数，用例id：{case_id}，文件名：{file.filename}，文件大小：{len(content)}')
 
             for row in reader:
                 try:
                     total += 1
                     enabled = row.pop("__enable", 1)
                     row_id = str(uuid.uuid4())
-                    if enabled == '1':
+                    if enabled == '1' or enabled == 1:
                         enabled = True
                     else:
                         enabled = False
@@ -369,12 +372,16 @@ class CaseParamsService:
 
                 # 到达批量阈值，写入数据库
                 if len(buffer) >= batch_size:
+                    writed_line += len(buffer)
                     await run_in_threadpool(db.execute, insert(HrmCaseParams), buffer)
+                    logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file.filename}，文件大小：{len(content)}，已写入文件行数：{total}')
                     buffer.clear()
                 sort_key += 100
             # 剩余的数据写入
             if buffer:
+                writed_line += len(buffer)
                 await run_in_threadpool(db.execute, insert(HrmCaseParams), buffer)
+                logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file.filename}，文件大小：{len(content)}，已写入文件行数：{total}')
 
             db.commit()
         finally:

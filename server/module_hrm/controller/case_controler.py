@@ -271,12 +271,14 @@ async def delete_case_params(request: Request,
 @caseController.post("/params/import", dependencies=[Depends(CheckUserInterfaceAuth('hrm:caseParams:import'))])
 @log_decorator(title='导入用例参数', business_type=5)
 async def import_case_params(request: Request,
-                             file: UploadFile, background_tasks: BackgroundTasks,
+                             file: UploadFile,
+                             background_tasks: BackgroundTasks,
                              caseId: str = Form(...),
                              query_db: Session = Depends(get_db),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user),
                              ):
     try:
+        # background_tasks.add_task(CaseParamsService.import_csv_to_db, query_db, file, caseId, current_user)
         import_result = await CaseParamsService.import_csv_to_db(query_db, file, caseId, current_user)
         if import_result.get('error_count') > 0:
             return ResponseUtil.error(msg=f'导入失败，共导入{import_result.get("total")}条数据，{import_result.get("error_count")}条数据导入失败')
