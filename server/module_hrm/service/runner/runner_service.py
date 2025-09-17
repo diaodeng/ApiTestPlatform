@@ -7,6 +7,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Type, AsyncGenerator
+from fastapi.concurrency import run_in_threadpool
 
 from sqlalchemy.orm import Session
 
@@ -37,7 +38,8 @@ if "WSL" in str(platform.platform()):
     multiprocessing.set_start_method("spawn")
 
 
-async def save_run_detail(query_db, case_data, run_info):
+
+def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel|None:
     if case_data.case_id and isinstance(case_data.case_id, int):  # 没有ID的请求信息不记录
         case_data.config.variables = []
         case_data.config.headers = []
@@ -60,7 +62,12 @@ async def save_run_detail(query_db, case_data, run_info):
         run_detail_obj.run_duration = case_data.config.result.duration
         run_detail_obj.run_detail = case_data.model_dump_json(by_alias=True)
         run_detail_obj.status = case_data.config.result.status
+        return run_detail_obj
+    return None
 
+async def save_run_detail(query_db, case_data, run_info):
+    run_detail_obj = build_run_detail_info(case_data, run_info)
+    if run_detail_obj:
         run_detail = RunDetailDao.create(query_db, run_detail_obj)
         return run_detail
 
@@ -69,7 +76,9 @@ async def run_by_single(query_db: Session,
                         case_data,
                         env_obj,
                         func_map=None,
-                        run_info: CaseRunModel = None) -> list[TestCase]:
+                        run_info: CaseRunModel = None,
+                        semaphore: asyncio.Semaphore = None,
+                        ) -> list[TestCase]:
     # test_case = CaseInfoHandle(query_db).from_db(index).toRun(env_obj).run_data()
     test_case = case_data
     case_res_datas = []
@@ -92,17 +101,20 @@ async def run_by_single(query_db: Session,
             step.result.logs.before_request = f"用例状态为[{status.name}]不执行"
         case_res_datas = [test_case]
     else:
-        debugtalk_info = DebugTalkService.project_debugtalk_map(query_db, case_data.project_id, run_info=run_info)
-        # func_map = debugtalk_info.func_map
-        runner = TestRunner(test_case, debugtalk_info, run_info)
-        case_res_datas = await runner.start()
+        async with semaphore:
+            debugtalk_info = DebugTalkService.project_debugtalk_map(query_db, case_data.project_id, run_info=run_info)
+            # func_map = debugtalk_info.func_map
+            runner = TestRunner(test_case, debugtalk_info, run_info)
+            case_res_datas = await runner.start()
+    return case_res_datas
 
-    all_result = []
-    for case_res_data in case_res_datas:
-        all_result.append(case_res_data)
-        await save_run_detail(query_db, case_res_data, run_info)
+    # all_result = []
+    # for case_res_data in case_res_datas:
+        # all_result.append(case_res_data)
+        # await save_run_detail(query_db, case_res_data, run_info)
+        # await run_in_threadpool(save_run_detail, query_db, case_res_data, run_info)
 
-    return all_result
+    # return all_result
 
 
 async def run_by_suite(query_db: Session, index, env, func_map=None):
@@ -118,7 +130,7 @@ async def run_by_suite(query_db: Session, index, env, func_map=None):
 async def run_by_batch(query_db: Session,
                        run_info: CaseRunModel,
                        user=None
-                       ) -> tuple[int, int, int]:
+                       ) -> list[int]:
     """
     批量组装用例数据
     :param test_list:
@@ -142,7 +154,9 @@ async def run_by_batch(query_db: Session,
         for project_id, module_id, case_id in tmp_case_info_query:
             all_cases[project_id].append(case_id)
 
-    result = (0, 0, 0)
+    total_count: int = 0
+    success_count: int = 0
+    failed_count: int = 0
     all_cases = defaultdict(list)
     if run_info.run_type == RunTypeEnum.suite.value:
         all_suite_orm = query_db.query(QtrSuite).filter(QtrSuite.suite_id.in_(run_info.ids)).order_by(
@@ -191,16 +205,16 @@ async def run_by_batch(query_db: Session,
             if not ids: continue
 
             res_data = await run_by_concurrent(query_db, list(ids), env_obj, debugtalk_func_map, run_info)
-            result[0] += res_data[0]
-            result[1] += res_data[1]
-            result[2] += res_data[2]
+            total_count += res_data[0]
+            success_count += res_data[1]
+            failed_count += res_data[2]
 
     finally:
         for pdi in run_info.project_debugtalk_set.values():
             for mn in pdi.module_names:
                 DebugTalkHandler.del_module(mn)
         gc.collect()
-    return result
+    return [total_count, success_count, failed_count]
 
 
 async def get_case_info_batch(query_db: Session, case_ids, env_obj) -> AsyncGenerator[TestCase, None]:
@@ -247,10 +261,13 @@ async def run_by_project(query_db: Session, id, env_obj, func_map=None, run_info
 
 
 async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, func_map=None,
-                            run_info: CaseRunModel = None) -> tuple[int, int, int]:
+                            run_info: CaseRunModel = None) -> list[int]:
     """
     并发执行多个用例
     """
+    lock = asyncio.Lock()
+    stats = {"total": 0, "success": 0, "failed": 0}
+    queue = asyncio.Queue(maxsize=500)
     if run_info.run_by_sort:
         run_info.concurrent = 1
     semaphore = asyncio.Semaphore(run_info.concurrent)
@@ -258,27 +275,53 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
     # case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
     #                    range(0, len(case_data_list), run_info.concurrent)]
 
-    tasks = []
-    result_count = (0, 0, 0)
-    async for case_data in get_case_info_batch(query_db, case_ids, env_obj):
-        async with semaphore:
-            task = asyncio.create_task(run_by_single(query_db, case_data, env_obj, func_map, run_info))
-            tasks.append(task)
-
-    for coro in asyncio.as_completed(tasks):  # 谁先完成就先处理谁
-        try:
-            res_list = await coro
+    async def worker(query_db: Session, queue: asyncio.Queue, semaphore: asyncio.Semaphore, stats: dict, lock: asyncio.Lock):
+        buffer = []
+        batch_size = 50
+        while True:
+            case_data = await queue.get()
+            if case_data is None:
+                queue.task_done()
+                break
+            res_list = await run_by_single(query_db, case_data, env_obj, func_map, run_info, semaphore)
+            if not res_list:
+                continue
             for res_data in res_list:
-                data: TestCase = res_data
-                if data.config.result.status == CaseRunStatus.passed.value:
-                    result_count[1] += 1
-                elif data.config.result.status == CaseRunStatus.failed.value:
-                    result_count[2] += 1
-                result_count[0] += 1
-        except Exception as e:
-            logger.error(f"并发执行测试用例异常： {e}")
-    return result_count
+                async with lock:
+                    data: TestCase = res_data
+                    if data.config.result.status == CaseRunStatus.passed.value:
+                        stats["success"] += 1
+                    elif data.config.result.status == CaseRunStatus.failed.value:
+                        stats["failed"] += 1
+                    stats["total"] += 1
 
+                run_detail_obj = build_run_detail_info(data, run_info)
+                if run_detail_obj:
+                    buffer.append(run_detail_obj)
+
+            if len(buffer) >= batch_size:
+                async with lock:
+                    await run_in_threadpool(RunDetailDao.create_bulk, query_db, buffer)
+                buffer = []
+            queue.task_done()
+
+        if buffer:
+            async with lock:
+                await run_in_threadpool(RunDetailDao.create_bulk, query_db, buffer)
+
+    tasks = [asyncio.create_task(worker(query_db, queue, semaphore, stats=stats, lock=lock)) for i in range(5)]
+
+    async for case_data in get_case_info_batch(query_db, case_ids, env_obj):
+        await queue.put(case_data)
+
+    await queue.join()
+
+    for _ in range(len(tasks)):
+        await queue.put(None)
+
+    await asyncio.gather(*tasks)
+
+    return [stats["total"], stats["success"], stats["failed"]]
 
 
 def test_run(run_info, current_user):
