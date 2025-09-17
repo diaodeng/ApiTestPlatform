@@ -277,9 +277,10 @@ async def import_case_params(request: Request,
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user),
                              ):
     try:
-        await CaseParamsService.import_csv_to_db(query_db, file, caseId, current_user)
-        # background_tasks.add_task(CaseParamsService.import_csv_to_db, query_db, file, caseId)
-        return ResponseUtil.success(msg='导入成功')
+        import_result = await CaseParamsService.import_csv_to_db(query_db, file, caseId, current_user)
+        if import_result.get('error_count') > 0:
+            return ResponseUtil.error(msg=f'导入失败，共导入{import_result.get("total")}条数据，{import_result.get("error_count")}条数据导入失败')
+        return ResponseUtil.success(msg=f'导入成功，共导入{import_result.get("total")}条数据')
         # HTTPException(status_code=400, detail="文件编码不正确，请使用UTF-8或GBK编码")
         # return ResponseUtil.streaming(data=bytes2file_response(export_result))
     except Exception as e:
