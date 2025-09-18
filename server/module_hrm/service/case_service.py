@@ -10,6 +10,8 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
+from config.database import SessionLocal
+from config.get_db import get_db
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.case_dao import CaseDao, CaseParamsDao
 from module_hrm.dao.suite_dao import SuiteDetailDao
@@ -307,7 +309,7 @@ class CaseParamsService:
         CaseParamsDao.delete_table_row(query_db, use_case_id=delete_data.case_id, row_ids=delete_data.row_ids)
 
     @classmethod
-    async def import_csv_to_db(cls, db: Session, file: UploadFile, case_id: int|str, current_user: CurrentUserModel) -> dict:
+    def import_csv_to_db(cls, file_name:str, content: bytes, case_id: int|str, current_user: CurrentUserModel) -> dict:
         """
         导入用例参数信息service
         :param query_db: orm对象
@@ -317,7 +319,8 @@ class CaseParamsService:
         :return: 用例参数信息
         """
         # 用文本流解析
-        logger.info(f'导入用例参数，用例id：{case_id}，文件名：{file.filename}')
+        file_name = file_name
+        logger.info(f'导入用例参数，用例id：{case_id}，文件名：{file_name}')
         batch_size = 1000
         buffer: List[dict] = []
         writed_line: int = 0
@@ -325,8 +328,8 @@ class CaseParamsService:
         total = 0
         error_count = 0
         try:
-            content = await file.read()
-            logger.info(f'文件读取完成，导入用例参数，用例id：{case_id}，文件名：{file.filename}，文件大小：{len(content)}')
+            content = content
+            logger.info(f'文件读取完成，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}')
             try:
                 file_like = io.StringIO(content.decode("utf-8"))
             except UnicodeDecodeError:
@@ -335,8 +338,8 @@ class CaseParamsService:
                 except UnicodeDecodeError:
                     raise Exception("文件编码不正确，请使用UTF-8或GBK编码")
             reader = csv.DictReader(file_like)
-            logger.info(f'文件解析完成，导入用例参数，用例id：{case_id}，文件名：{file.filename}，文件大小：{len(content)}')
-
+            logger.info(f'文件解析完成，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}')
+            db = SessionLocal()
             for row in reader:
                 try:
                     total += 1
@@ -373,19 +376,23 @@ class CaseParamsService:
                 # 到达批量阈值，写入数据库
                 if len(buffer) >= batch_size:
                     writed_line += len(buffer)
-                    await run_in_threadpool(db.execute, insert(HrmCaseParams), buffer)
-                    logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file.filename}，文件大小：{len(content)}，已写入文件行数：{total}')
+                    db.execute(insert(HrmCaseParams), buffer)
+                    db.commit()
+                    logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}，已写入文件行数：{total}')
                     buffer.clear()
                 sort_key += 100
             # 剩余的数据写入
             if buffer:
                 writed_line += len(buffer)
-                await run_in_threadpool(db.execute, insert(HrmCaseParams), buffer)
-                logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file.filename}，文件大小：{len(content)}，已写入文件行数：{total}')
+                db.execute(insert(HrmCaseParams), buffer)
+                logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}，已写入文件行数：{total}')
 
             db.commit()
         finally:
-            await file.close()
+            try:
+                db.close()
+            except Exception:
+                pass
 
         logger.info(f"导入用例参数完成，共导入{total}条数据，{error_count}条数据导入失败")
         return {"total": total, "error_count": error_count}
