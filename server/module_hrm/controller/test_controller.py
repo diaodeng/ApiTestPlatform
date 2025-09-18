@@ -107,17 +107,17 @@ async def mock_test(request: Request,
 
 
 
-@mockController.api_route("/test", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
-async def get_hrm_test(request: Request):
+@mockController.api_route("/test{test_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+async def get_hrm_test(request: Request, test_path: str):
     try:
         method = request.method
         # 获取分页数据
-        data = {"url": request.url,
+        data = {"url": request.url.path,
                 "method": method,
-                "headers": request.headers,
-                "cookies": request.cookies,
-                "queryParams": request.query_params,
-                "pathParams": request.path_params,
+                "headers": dict(request.headers),
+                "cookies": dict(request.cookies),
+                "queryParams": dict(request.query_params),
+                "pathParams": dict(request.path_params),
                 }
         try:
             body_json = await request.json()
@@ -132,6 +132,7 @@ async def get_hrm_test(request: Request):
 
         try:
             body_data = await request.body()
+            body_data = body_data.decode("utf-8") if isinstance(body_data, bytes) else body_data
         except:
             body_data = None
 
@@ -140,6 +141,11 @@ async def get_hrm_test(request: Request):
             if not body_data and not body_json and not body_form:
                 return {"error": "Missing request body"}
             data["body"] = body_data
+
+        if body_json:
+            data["json"] = body_json
+        if body_form:
+            data["form"] = body_form
 
         content_type = request.headers.get("req_content-type")
         if not content_type:

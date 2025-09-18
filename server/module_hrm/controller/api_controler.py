@@ -12,6 +12,7 @@ from module_admin.service.login_service import LoginService
 from module_hrm.dao.api_dao import ApiOperation
 from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiModel, ApiPageQueryModel
 from module_hrm.entity.vo.case_vo import AddCaseModel
+from module_hrm.enums.enums import TstepTypeEnum
 from module_hrm.service.api_service import api_tree
 from module_hrm.service.case_service import CaseService
 from utils.common_util import CamelCaseUtil
@@ -85,6 +86,7 @@ async def api_add(request: Request,
         api_data.update_by = current_user.user.user_name
         api_data.dept_id = current_user.user.dept_id
         tree_data = ApiOperation.add(query_db, api_data)
+        tree_data["isParent"] = True if tree_data["apiType"] == TstepTypeEnum.folder.value else False
         return ResponseUtil.success(data=tree_data)
     except Exception as e:
         logger.exception(e)

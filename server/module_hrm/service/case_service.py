@@ -1,12 +1,23 @@
 import json
+import io
+import csv
+import uuid
+from loguru import logger
+from typing import AsyncGenerator, List
 
+from fastapi import UploadFile
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
+from config.database import SessionLocal
+from config.get_db import get_db
 from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_hrm.dao.case_dao import CaseDao
+from module_hrm.dao.case_dao import CaseDao, CaseParamsDao
 from module_hrm.dao.suite_dao import SuiteDetailDao
-from module_hrm.entity.do.case_do import HrmCase
+from module_hrm.entity.do.case_do import HrmCase, HrmCaseParams
 from module_hrm.entity.dto.case_dto import CaseModelForApi
+from module_hrm.entity.vo.case_params_vo import CaseParamsQueryModel, CaseParamsDeleteModel
 from module_hrm.entity.vo.case_vo import CasePageQueryModel, CaseModel, CaseQuery, \
     DeleteCaseModel, AddCaseModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
@@ -143,6 +154,7 @@ class CaseService:
             try:
                 for case_id in id_list:
                     CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id), user)
+                    CaseParamsDao.delete_table(query_db, use_case_id=case_id)
                     SuiteDetailDao.del_suite_detail_by_id(query_db, case_id)
                 query_db.commit()
                 result = dict(is_success=True, message='删除成功')
@@ -213,3 +225,174 @@ class CaseService:
         binary_data = export_list2excel(new_data)
 
         return binary_data
+
+
+class CaseParamsService:
+    @classmethod
+    def get_case_params_pages_services(cls, query_db: Session, query_info: CaseParamsQueryModel) -> dict:
+        """
+        获取用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :return: 用例参数信息
+        """
+        count = CaseParamsDao.get_table_row_count(query_db, use_case_id=query_info.case_id)
+        case_params = CaseParamsDao.load_table_page(query_db,
+                                                    use_case_id=query_info.case_id,
+                                                    page=query_info.page_num,
+                                                    page_size=query_info.page_size,
+                                                    enabled=query_info.enabled,
+                                                    )
+        page_info = {
+            'total': count,
+            'page_num': query_info.page_num,
+            'page_size': query_info.page_size,
+            # 'total_page': math.ceil(count / query_info.page_size),
+            'rows': case_params,
+        }
+        return page_info
+
+    @classmethod
+    def loadup_case_params_services(cls, query_db: Session, case_id: str|int, case_params: list[dict]):
+        """
+        获取用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :return: 用例参数信息
+        """
+        CaseParamsDao.insert_table(query_db, use_case_id=case_id, table_data=case_params)
+
+    @classmethod
+    async def load_case_params_iter(cls, query_db: Session, case_id: int) -> AsyncGenerator[dict, None]:
+        """
+        加载用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :return: 用例参数信息
+        """
+        async for case_param in CaseParamsDao.load_table_iter(query_db, use_case_id=case_id):
+            yield case_param
+
+    @classmethod
+    def add_case_params_services(cls, query_db: Session, case_id: int, params: dict):
+        """
+        添加用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :param params: 用例参数信息
+        :return: 用例参数信息
+        """
+        CaseParamsDao.add_table_row(query_db, use_case_id=case_id, row_data=params)
+
+
+    @classmethod
+    def update_case_params_services(cls, query_db: Session, case_id: int, params: dict):
+
+        """
+        更新用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :param params: 用例参数信息
+        :return: 用例参数信息
+        """
+        CaseParamsDao.update_table_row(query_db, use_case_id=case_id, row_data=params)
+
+    @classmethod
+    def delete_case_params_services(cls, query_db: Session, delete_data: CaseParamsDeleteModel):
+        """
+        删除用例参数信息service
+        :param query_db: orm对象
+        :param case_id: 用例id
+        :param params: 用例参数信息
+        :return: 用例参数信息
+        """
+        CaseParamsDao.delete_table_row(query_db, use_case_id=delete_data.case_id, row_ids=delete_data.row_ids)
+
+    @classmethod
+    def import_csv_to_db(cls, file_name:str, content: bytes, case_id: int|str, current_user: CurrentUserModel) -> dict:
+        """
+        导入用例参数信息service
+        :param query_db: orm对象
+        :param file: 上传文件
+        :param case_id: 用例id
+        :param current_user: 当前用户
+        :return: 用例参数信息
+        """
+        # 用文本流解析
+        file_name = file_name
+        logger.info(f'导入用例参数，用例id：{case_id}，文件名：{file_name}')
+        batch_size = 1000
+        buffer: List[dict] = []
+        writed_line: int = 0
+        sort_key = 100
+        total = 0
+        error_count = 0
+        try:
+            content = content
+            logger.info(f'文件读取完成，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}')
+            try:
+                file_like = io.StringIO(content.decode("utf-8"))
+            except UnicodeDecodeError:
+                try:
+                    file_like = io.StringIO(content.decode("gbk"))
+                except UnicodeDecodeError:
+                    raise Exception("文件编码不正确，请使用UTF-8或GBK编码")
+            reader = csv.DictReader(file_like)
+            logger.info(f'文件解析完成，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}')
+            db = SessionLocal()
+            for row in reader:
+                try:
+                    total += 1
+                    enabled = row.pop("__enable", 1)
+                    row_id = str(uuid.uuid4())
+                    if enabled == '1' or enabled == 1:
+                        enabled = True
+                    else:
+                        enabled = False
+                    col_sort = 0
+                    for key, value in row.items():
+                        if value == '':
+                            row[key] = None
+                        buffer.append({
+                            "dept_id": current_user.user.dept_id,
+                            "create_by": current_user.user.user_id,
+                            "update_by": current_user.user.user_id,
+                            "manager": current_user.user.user_id,
+                            "case_id": case_id,
+                            "row_id": row_id,
+                            "col_name": key,
+                            "params_name": key,
+                            "col_value": value,
+                            "params_type": 1,
+                            "enabled": enabled,
+                            "sort_key": sort_key,
+                            "col_sort": col_sort,
+                        })
+                        col_sort += 1
+                except Exception as e:
+                    error_count += 1
+                    continue
+
+                # 到达批量阈值，写入数据库
+                if len(buffer) >= batch_size:
+                    writed_line += len(buffer)
+                    db.execute(insert(HrmCaseParams), buffer)
+                    db.commit()
+                    logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}，已写入文件行数：{total}')
+                    buffer.clear()
+                sort_key += 100
+            # 剩余的数据写入
+            if buffer:
+                writed_line += len(buffer)
+                db.execute(insert(HrmCaseParams), buffer)
+                logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}，已写入文件行数：{total}')
+
+            db.commit()
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+        logger.info(f"导入用例参数完成，共导入{total}条数据，{error_count}条数据导入失败")
+        return {"total": total, "error_count": error_count}
