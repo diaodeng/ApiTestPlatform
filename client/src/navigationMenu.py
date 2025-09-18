@@ -1,8 +1,8 @@
-
+import flet
 from contents import Contents
 
 class NavigationMenu:
-    def __init__(self, ft, page, log, **kwargs):
+    def __init__(self, ft: flet, page, log, **kwargs):
         self.ft = ft
         self.page = page
         self.log = log
@@ -66,7 +66,17 @@ class NavigationMenu:
                 self.ft.NavigationRailDestination(
                     icon=self.ft.Icons.SEARCH_OUTLINED,
                     selected_icon=self.ft.Icons.SEARCH,
-                    label="文件搜索"
+                    label="POS快捷方式"
+                ),
+                self.ft.NavigationRailDestination(
+                    icon=self.ft.Icons.AIRPLAY,
+                    selected_icon=self.ft.Icons.AIRPLAY,
+                    label="mitmproxy"
+                ),
+                self.ft.NavigationRailDestination(
+                    icon=self.ft.Icons.TERMINAL,
+                    selected_icon=self.ft.Icons.TERMINAL,
+                    label="日志"
                 ),
                 self.ft.NavigationRailDestination(
                     icon=self.ft.Icons.ROUNDABOUT_LEFT_OUTLINED,

@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import insert
 from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
 
 from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
@@ -51,6 +52,18 @@ class RunDetailDao:
         db.commit()
         db.refresh(run_detail)
         return run_detail
+
+    @classmethod
+    def create_bulk(cls, db: Session, details: list[HrmRunDetailModel]):
+        """
+        批量创建报告
+        """
+
+        detail_dicts = [detail.model_dump(exclude_unset=True) for detail in details]
+        # run_details = [HrmRunDetail(**detail_dict) for detail_dict in detail_dicts]
+        stmt = insert(HrmRunDetail).values(detail_dicts)
+        db.execute(stmt)
+        db.commit()
 
     @classmethod
     def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str) -> PageResponseModel|list:

@@ -1,9 +1,9 @@
 import os
-from threading import Timer
-from utils.mytimers import active_timers, add_timer, clear_all_timers
+import sys
 
-from utils.common import check_process, kill_process_by_name, check_offline_service_status, run_bat
 from config import config
+from utils.common import check_process, kill_process_by_name, check_offline_service_status, run_bat
+from utils.mytimers import add_timer_and_start
 from view_contents.exitAlertDialog import ExitAlertDialog
 
 
@@ -30,7 +30,7 @@ class Shortcut(object):
         self.timer = None  # 用于保存定时器对象
         self.timer_status = False  # 定时器运行状态
         self.timer_status_text = self.ft.Text(
-            f"{"已启动" if self.timer_status else "未启动"}",
+            f"{'已启动' if self.timer_status else '未启动'}",
             color=self.ft.Colors.GREEN if self.timer_status else self.ft.Colors.RED
         )
         self.timer_control_btn = self.ft.Button("启动定时刷新", on_click=self.toggle_timer)
@@ -42,7 +42,13 @@ class Shortcut(object):
         def window_event(e):
             if e.data == "close":
                 self.page.open(ExitAlertDialog(self.ft, self.page).confirm_dialog)
-                self.page.update()
+                # self.page.update()
+
+        def on_window_event(e: ft.WindowEvent):
+            if e.data == "close":
+                # 在这里做清理工作
+                print("Closing app...")
+                sys.exit(0)  # 直接退出进程
 
         self.page.window.prevent_close = True
         self.page.window.on_event = window_event
@@ -66,23 +72,23 @@ class Shortcut(object):
             # POS 状态
             if not self.pos_status_text:
                 self.pos_status_text = self.ft.Text(
-                    f"{"已启动" if self.pos_status else "未启动"}",
+                    f"{'已启动' if self.pos_status else '未启动'}",
                     color=self.ft.Colors.GREEN if self.pos_status else self.ft.Colors.RED
                 )
             else:
                 self.pos_status = check_process(self.pos_process_name, self.log)
-                self.pos_status_text.value = f"{"已启动" if self.pos_status else "未启动"}"
+                self.pos_status_text.value = f"{'已启动' if self.pos_status else ''}"
                 self.pos_status_text.color = self.ft.Colors.GREEN if self.pos_status else self.ft.Colors.RED
         if flag == 2 or flag == 0:
             # Offline Service 状态
             if not self.offline_status_text:
                 self.offline_status_text = self.ft.Text(
-                    f"{"已启动" if self.offline_status else "未启动"}",
+                    f"{'已启动' if self.offline_status else ''}",
                     color=self.ft.Colors.GREEN if self.offline_status else self.ft.Colors.RED
                 )
             else:
                 self.offline_status = check_offline_service_status(self.log)
-                self.offline_status_text.value = f"{"已启动" if self.offline_status else "未启动"}"
+                self.offline_status_text.value = f"{'已启动' if self.offline_status else ''}"
                 self.offline_status_text.color = self.ft.Colors.GREEN if self.offline_status else self.ft.Colors.RED
 
     def start_auto_refresh(self):
@@ -93,14 +99,12 @@ class Shortcut(object):
 
         self.timer_status = True
         self.log.info(f"定时器间隔时间:{config.timer}S")
-        self.timer_status_text.value = "已启动"
+        self.timer_status_text.value = '已启动'
         self.timer_status_text.color = self.ft.Colors.GREEN
         self.timer_control_btn.text = "停止定时刷新"
 
         # 创建并启动新定时器
-        self.timer = Timer(config.timer, self.refresh_status)
-        add_timer(self.timer)
-        self.timer.start()
+        add_timer_and_start(config.timer, self.refresh_status)
 
         # 更新UI
         if self.timer_status_text:
@@ -164,7 +168,7 @@ class Shortcut(object):
         :return:
         """
         if flag == 1:
-            kill_process_by_name(self.pos_process_name, self.log)
+            kill_process_by_name(self.pos_process_name)
             self.log.info("已尝试终止POS进程")
 
             # 更新pos应用状态

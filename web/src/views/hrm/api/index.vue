@@ -99,7 +99,6 @@ function saveApiInfo(type) {
   data.requestInfo.teststeps.forEach((step) => {
     step.result = null;
   });
-
   if (data.id && data.apiId && !data.isNew) {
     if (type === 'copy2case') {
       copyApiAsCase(data).then(res => {
@@ -115,7 +114,7 @@ function saveApiInfo(type) {
         ElMessage({message: "API保存成功", type: "success"});
         apiSaveSuccess(res, data.apiId);
       }).catch(error => {
-        ElMessage({message: "API保存失败", type: "success"});
+        ElMessage({message: "API保存失败", type: "error"});
       }).finally(() => {
         loading.value.saveApi = false;
         loading.value.preSaveDialog = false;
@@ -143,22 +142,37 @@ function saveApiInfo(type) {
 * */
 function apiSaveSuccess(res, oldApiId) {
   if (res && res.data && res.data.apiId) {
-    currentApiData.value.apiId = res.data.apiId;
-  }
-  let response = res;
-  if (response) {
-    let treeNode = treeRef.value.getNode(oldApiId);
-    treeNode.data.apiId = response.data.apiId;
-    treeNode.data.name = response.data.name;
-    treeNode.data.isNew = false;
+    let treeNode = treeRef.value.getNode({apiId: oldApiId});
+    if (currentApiData.value.isNew) {
+      const parentNode = treeNode.parent;
+      treeRef.value.remove(treeNode.data);
+      if (parentNode.childNodes.length > 0) {
+        treeRef.value.insertBefore(res.data, parentNode.childNodes[0]);
+      }else {
+        treeRef.value.append(res.data, parentNode);
+      }
 
-    treeNode.apiId = response.data.apiId;
-    treeNode.name = response.data.name;
+      currentTab.value = res.data.apiId;
+      treeRef.value.setCurrentKey(res.data.apiId);
+    }else {
+      treeNode.data = res.data;
+    }
+
+    // treeNode.data.apiId = res.data.apiId;
+    // treeNode.data.name = res.data.name;
+    // treeNode.data.isNew = false;
+
+    // treeNode.apiId = res.data.apiId;
+    // treeNode.name = res.data.name;
+
+    currentApiData.value.apiId = res.data.apiId;
+    currentApiData.value.id = res.data.id;
+    currentApiData.value.isNew = false;
 
     apiTabsData.value.forEach(apiInfo => {
       if (apiInfo.apiId === oldApiId) {
-        apiInfo.apiId = response.data.apiId;
-        currentTab.value = response.data.apiId;
+        apiInfo.apiId = res.data.apiId;
+        currentTab.value = res.data.apiId;
       }
     })
   }
@@ -200,7 +214,7 @@ function getApiTree() {
 }
 
 function nodeDbClick(event, node, data) {
-
+  debugger
   if (node.data.isParent) {
     node.expanded = !node.expanded;
   } else {
@@ -212,28 +226,6 @@ function nodeDbClick(event, node, data) {
       loadingApi.value = false;
     } else {
       loadingApi.value = true;
-
-      if (node.data.isNew) {
-        let emptyData = getApiFormDataByType(node.data.apiType);
-        // currentApiData.value.apiId = nodeId;
-        emptyData.isNew = true;
-        emptyData.type = node.data.type;
-        emptyData.apiType = node.data.apiType;
-        emptyData.requestInfo.name = node.name;
-        emptyData.parentId = node.data.parentId;
-        emptyData.apiId = node.data.apiId;
-        apiTabsData.value.push(emptyData);
-
-        currentApiData.value = apiTabsData.value[apiTabsData.value.length - 1];
-        currentTab.value = emptyData.apiId;
-
-        if (apiTabsData.value[0].isEmpty) {
-          apiTabsData.value.splice(0, 1);
-        }
-
-        loadingApi.value = false;
-        return;
-      }
 
       getApi(node.data.apiId).then(res => {
         // const data = ref(res.data);
@@ -331,12 +323,41 @@ const handleEditNode = (evt, data, node) => {
 }
 
 const handleAddNode = (type, newData, parentNodeData) => {
-  if (type !== CaseStepTypeEnum.folder) {
+  if (parentNodeData.apiType !== CaseStepTypeEnum.folder) {
+    ElMessage.warning("只能在文件夹中新增节点");
     return;
   }
-  let dataType = type === CaseStepTypeEnum.folder ? HrmDataTypeEnum.folder : HrmDataTypeEnum.api;
-  addApi({type: dataType, apiType: type, name: newData.name, parentId: parentNodeData.apiId}).then(res => {
-    ElMessage.success("文件夹【" + newData.name + "】新增成功");
+  // let dataType = type === CaseStepTypeEnum.folder ? HrmDataTypeEnum.folder : HrmDataTypeEnum.api;
+
+  let emptyData = getApiFormDataByType(type);
+  emptyData.apiType = type;
+  emptyData.parentId = parentNodeData.apiId;
+  delete emptyData.apiId;
+  delete emptyData.isNew;
+  if (type === CaseStepTypeEnum.folder){
+    emptyData.name = "新增文件夹";
+    emptyData.type =  HrmDataTypeEnum.folder;
+    delete emptyData.requestInfo;
+  }else {
+    emptyData.type =  HrmDataTypeEnum.api;
+    emptyData.requestInfo.name = "新增接口";
+    emptyData.name ="新增接口";
+  }
+
+  // {type: dataType, apiType: type, name: newData.name, parentId: parentNodeData.apiId}
+
+  addApi(emptyData).then(res => {
+    parentNodeData.children.splice(0, 0, res.data);
+
+    if (res.data.apiType !== CaseStepTypeEnum.folder){
+      apiTabsData.value.push(res.data);
+      currentApiData.value = apiTabsData.value[apiTabsData.value.length - 1];
+      currentTab.value = res.data.apiId;
+    }
+    treeRef.value.setCurrentKey(res.data.apiId);
+
+
+    ElMessage.success("【" + emptyData.name + "】新增成功");
   }).catch(err => {
   });
 
