@@ -309,17 +309,16 @@ class CaseParamsService:
         CaseParamsDao.delete_table_row(query_db, use_case_id=delete_data.case_id, row_ids=delete_data.row_ids)
 
     @classmethod
-    def import_csv_to_db(cls, file_name:str, content: bytes, case_id: int|str, current_user: CurrentUserModel) -> dict:
+    def import_csv_to_db(cls, file: UploadFile, case_id: int|str, current_user: CurrentUserModel) -> dict:
         """
         导入用例参数信息service
-        :param query_db: orm对象
         :param file: 上传文件
         :param case_id: 用例id
         :param current_user: 当前用户
         :return: 用例参数信息
         """
         # 用文本流解析
-        file_name = file_name
+        file_name = file.filename
         logger.info(f'导入用例参数，用例id：{case_id}，文件名：{file_name}')
         batch_size = 1000
         buffer: List[dict] = []
@@ -327,18 +326,14 @@ class CaseParamsService:
         sort_key = 100
         total = 0
         error_count = 0
+
+        def line_iter():
+            for raw_line in file.file:
+                yield raw_line.decode("utf-8", errors="ignore")
+
         try:
-            content = content
-            logger.info(f'文件读取完成，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}')
-            try:
-                file_like = io.StringIO(content.decode("utf-8"))
-            except UnicodeDecodeError:
-                try:
-                    file_like = io.StringIO(content.decode("gbk"))
-                except UnicodeDecodeError:
-                    raise Exception("文件编码不正确，请使用UTF-8或GBK编码")
-            reader = csv.DictReader(file_like)
-            logger.info(f'文件解析完成，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}')
+            reader = csv.DictReader(line_iter())
+            logger.info(f'文件解析完成，导入用例参数，用例id：{case_id}，文件名：{file_name}')
             db = SessionLocal()
             for row in reader:
                 try:
@@ -378,16 +373,18 @@ class CaseParamsService:
                     writed_line += len(buffer)
                     db.execute(insert(HrmCaseParams), buffer)
                     db.commit()
-                    logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}，已写入文件行数：{total}')
+                    logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，已写入文件行数：{total}')
                     buffer.clear()
                 sort_key += 100
             # 剩余的数据写入
             if buffer:
                 writed_line += len(buffer)
                 db.execute(insert(HrmCaseParams), buffer)
-                logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，文件大小：{len(content)}，已写入文件行数：{total}')
+                logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，已写入文件行数：{total}')
 
             db.commit()
+        except Exception as e:
+            logger.error(f"用例导入失败： {e}")
         finally:
             try:
                 db.close()

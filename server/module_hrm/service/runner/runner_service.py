@@ -323,18 +323,9 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
 
     return [stats["total"], stats["success"], stats["failed"]]
 
-
-def test_run(run_info, current_user):
-    query_db = SessionLocal()
-    try:
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-
-        new_loop.run_until_complete(new_loop.create_task(run_by_async(query_db, run_info, current_user)))
-        new_loop.close()
-
-    finally:
-        query_db.close()
+async def run_test_in_background(run_info: CaseRunModel, current_user: CurrentUserModel):
+    with SessionLocal() as session:
+        await run_by_async(session, run_info, current_user)
 
 
 async def run_by_async(query_db: Session, run_info: CaseRunModel,
