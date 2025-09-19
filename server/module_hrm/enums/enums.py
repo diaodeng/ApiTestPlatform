@@ -43,6 +43,7 @@ class CaseRunStatus(Enum):
     xpassed = 6
     warnings = 7
     error = 8
+    running = 9
 
 
 class QtrDataStatusEnum(Enum):

@@ -41,6 +41,7 @@ if "WSL" in str(platform.platform()):
 
 def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel|None:
     if case_data.case_id and isinstance(case_data.case_id, int):  # 没有ID的请求信息不记录
+        # 保存前清空不必要的信息，减少数据存储
         case_data.config.variables = []
         case_data.config.headers = []
         case_data.config.parameters = None
@@ -208,6 +209,10 @@ async def run_by_batch(query_db: Session,
             total_count += res_data[0]
             success_count += res_data[1]
             failed_count += res_data[2]
+    except Exception as e:
+        logger.error(f"运行用例失败，错误信息：{e}")
+        # ReportDao.update(query_db, run_info.report_id, 0, total_count, CaseRunStatus.failed)
+        # raise e
 
     finally:
         for pdi in run_info.project_debugtalk_set.values():
@@ -302,14 +307,16 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
             if len(buffer) >= batch_size:
                 async with lock:
                     await run_in_threadpool(RunDetailDao.create_bulk, query_db, buffer)
+                    await run_in_threadpool(ReportDao.update, query_db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
                 buffer = []
             queue.task_done()
 
         if buffer:
             async with lock:
                 await run_in_threadpool(RunDetailDao.create_bulk, query_db, buffer)
+                await run_in_threadpool(ReportDao.update, query_db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
 
-    tasks = [asyncio.create_task(worker(query_db, queue, semaphore, stats=stats, lock=lock)) for i in range(5)]
+    tasks = [asyncio.create_task(worker(query_db, queue, semaphore, stats=stats, lock=lock)) for i in range(run_info.concurrent)]
 
     async for case_data in get_case_info_batch(query_db, case_ids, env_obj):
         await queue.put(case_data)
@@ -340,7 +347,7 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
         report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         report_data = ReportCreatModel(**{"reportName": report_name,
-                                          "status": CaseRunStatus.passed.value,
+                                          "status": CaseRunStatus.running.value,
                                           })
         logger.info(f"当前用户信息:{current_user.user.model_dump()}")
         report_data.update_by = current_user.user.user_name
@@ -362,7 +369,7 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
         report_info = ReportDao.get_by_id(query_db, report_info.report_id)
         report_info.test_duration = test_end_time - test_start_time
 
-        report_info.status = CaseRunStatus.failed.value if run_result[2] > 0 else CaseRunStatus.passed.value
+        report_info.status = CaseRunStatus.failed.value if (run_result[2] > 0 or run_info[0] != run_result[1]) else CaseRunStatus.passed.value
         report_info.total = run_result[0]
         report_info.success = run_result[1]
         query_db.commit()
