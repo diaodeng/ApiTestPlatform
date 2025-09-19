@@ -18,7 +18,7 @@ from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDel
 from module_hrm.service.debugtalk_service import DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler, ForwardRulesHandler
 from module_hrm.service.runner.case_runner import TestRunner
-from module_hrm.service.runner.runner_service import run_by_async, save_run_detail
+from module_hrm.service.runner.runner_service import run_by_async, save_run_detail, run_test_in_background
 from utils.log_util import logger
 from utils.message_util import MessageHandler
 from utils.page_util import PageResponseModel
@@ -40,10 +40,8 @@ async def run_test(request: Request,
         ForwardRulesHandler.transform(query_db, run_info)
         run_info.runner = current_user.user.user_id
         run_info.feishu_robot.push = run_info.push
-        # data = ""
-        # threading.Thread(target=test_run, args=(run_info, current_user)).start()
         if run_info.is_async:
-            asyncio.create_task(run_by_async(query_db, run_info, current_user))
+            asyncio.create_task(run_test_in_background(run_info, current_user))
             data = "请耐心等待运行结果"
         else:
             data = await run_by_async(query_db, run_info, current_user)

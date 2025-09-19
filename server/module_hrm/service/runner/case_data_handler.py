@@ -418,6 +418,9 @@ class ParametersHandler(object):
 
 
 class ForwardRulesHandler(object):
+    """
+    转发规则处理
+    """
     @classmethod
     def transform(cls, db, run_info: CaseRunModel):
         if run_info.forward_config.agent_id:
