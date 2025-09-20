@@ -227,7 +227,7 @@ export const initRunConfig = {
     ids: [],
     runType: RunTypeEnum.case,
     reportName: null,
-    logLevel: "INFO",
+    logLevel: 20,
     isAsync: false,
     repeatNum: 1,
     concurrent: 1,
