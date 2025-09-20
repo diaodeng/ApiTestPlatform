@@ -1,3 +1,5 @@
+import traceback
+
 import execjs
 import ast
 import autopep8
@@ -103,8 +105,9 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomS
         exec(new_code, global_namespace, local_namespace)
     except Exception as err:
         apt.failed = True
-        logger.error(f"自定义python执行异常： {err}")
-        logger.exception(err)
+        raise
+        # logger.error(f"自定义python执行异常： {err}")
+        # logger.exception(err)
 
 
 def get_script_name(data_type, script_type, is_before):
@@ -148,6 +151,7 @@ def exec_hook_script(hooks_info: HooksModel,
     script_name = ""
     step_data_obj: CustomHooksParams = None
     script_source = hooks_info.code_info.code_content
+    exception_str = ""
     try:
         if script_source:
             script_type = hooks_info.code_info.code_type
@@ -183,7 +187,9 @@ def exec_hook_script(hooks_info: HooksModel,
                 update_or_extend_list(case_vars,
                                       dict2list(step_data_obj.case_variables))
     except Exception as e:
-        raise TestFailError(f"{script_name}执行异常：{e}, 脚本: {script_source}") from e
+        logger.exception(e)
+        exception_str = "".join(traceback.format_exception(e))
+        # raise TestFailError(f"{script_name}执行异常：{e}, 脚本: {script_source}") from e
     finally:
         if not script_source: return
         if isinstance(step_data_obj, dict):
@@ -208,8 +214,11 @@ def exec_hook_script(hooks_info: HooksModel,
                 else:
                     logs.after_response += error_log
                 logs.error += error_log
+
+        if exception_str:
+            logs.error += f"{script_name}执行异常：{exception_str}"
         if step_data_obj.failed:
-            raise TestFailError(f"{script_name}执行异常")
+            raise AssertionError(f"{script_name}断言失败")
 
 
 if __name__ == '__main__':

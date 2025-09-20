@@ -29,6 +29,7 @@ const form = ref({
   runType: props.runType,
   env: null,
   reportName: null,
+  logLevel: "INFO",
   isAsync: false,
   repeatNum: 1,
   concurrent: 1,
