@@ -141,62 +141,64 @@ async def run_by_batch(query_db: Session,
     :return: tuple[int, int, int]
     """
 
-    def get_case_data(all_cases, data_type, ids: list):
-        tmp_case_info_query = query_db.query(HrmCase.project_id, HrmCase.module_id,
-                                             HrmCase.case_id).filter(
-            HrmCase.status != CaseStatusEnum.disabled.value).filter(HrmCase.type == DataType.case.value)
-        if data_type == RunTypeEnum.project.value:
-            tmp_case_info_query = tmp_case_info_query.filter(HrmCase.project_id.in_(ids))
-        elif data_type == RunTypeEnum.model.value:
-            tmp_case_info_query = tmp_case_info_query.filter(HrmCase.module_id.in_(ids))
-        else:
-            tmp_case_info_query = tmp_case_info_query.filter(HrmCase.case_id.in_(ids))
-        tmp_case_info_query = tmp_case_info_query.all()
-        for project_id, module_id, case_id in tmp_case_info_query:
-            all_cases[project_id].append(case_id)
+    async def get_case_data(all_cases, data_type, ids: list):
+        def _query(query_db: Session, all_cases, data_type, ids):
+            tmp_case_info_query = query_db.query(HrmCase.project_id, HrmCase.module_id,
+                                                 HrmCase.case_id).filter(
+                HrmCase.status != CaseStatusEnum.disabled.value).filter(HrmCase.type == DataType.case.value)
+            if data_type == RunTypeEnum.project.value:
+                tmp_case_info_query = tmp_case_info_query.filter(HrmCase.project_id.in_(ids))
+            elif data_type == RunTypeEnum.model.value:
+                tmp_case_info_query = tmp_case_info_query.filter(HrmCase.module_id.in_(ids))
+            else:
+                tmp_case_info_query = tmp_case_info_query.filter(HrmCase.case_id.in_(ids))
+            tmp_case_info_query = tmp_case_info_query.all()
+            for project_id, module_id, case_id in tmp_case_info_query:
+                all_cases[project_id].append(case_id)
+        await run_in_threadpool(_query, query_db, all_cases, data_type, ids)
 
     total_count: int = 0
     success_count: int = 0
     failed_count: int = 0
     all_cases = defaultdict(list)
     if run_info.run_type == RunTypeEnum.suite.value:
-        all_suite_orm = query_db.query(QtrSuite).filter(QtrSuite.suite_id.in_(run_info.ids)).order_by(
-            QtrSuite.order_num).all()
+        all_suite_orm = await run_in_threadpool(query_db.query(QtrSuite).filter(QtrSuite.suite_id.in_(run_info.ids)).order_by(
+            QtrSuite.order_num).all)
         for suite_orm in all_suite_orm:
             if run_info.run_by_sort:
-                all_suite_content_orm = (query_db.query(QtrSuiteDetail).
+                all_suite_content_orm = await run_in_threadpool(query_db.query(QtrSuiteDetail).
                                          filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
                                          filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
-                                         order_by(QtrSuiteDetail.order_num).all())
+                                         order_by(QtrSuiteDetail.order_num).all)
                 for suite_content_orm in all_suite_content_orm:
                     suite_data_id = suite_content_orm.data_id
                     data_type = suite_content_orm.data_type
-                    get_case_data(all_cases, data_type, [suite_data_id])
+                    await get_case_data(all_cases, data_type, [suite_data_id])
             else:
-                all_case_item = (query_db.query(QtrSuiteDetail.data_id).
+                all_case_item = await run_in_threadpool(query_db.query(QtrSuiteDetail.data_id).
                                  filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
                                  filter(QtrSuiteDetail.data_type == DataType.case.value).
                                  filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
                                  order_by(QtrSuiteDetail.order_num).
-                                 all())
-                get_case_data(all_cases, RunTypeEnum.case.value, [case_item[0] for case_item in all_case_item])
+                                 all)
+                await get_case_data(all_cases, RunTypeEnum.case.value, [case_item[0] for case_item in all_case_item])
 
-                all_not_case_item: list[Type[QtrSuiteDetail]] = (query_db.query(QtrSuiteDetail).
+                all_not_case_item: list[Type[QtrSuiteDetail]] = await run_in_threadpool(query_db.query(QtrSuiteDetail).
                                                                  filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
                                                                  filter(
                     QtrSuiteDetail.data_type != DataType.case.value).
                                                                  filter(
                     QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
                                                                  order_by(QtrSuiteDetail.order_num).
-                                                                 all())
+                                                                 all)
                 for not_case_item in all_not_case_item:
                     run_type = RunTypeEnum.project.value if not_case_item.data_type == RunTypeEnum.project.value else RunTypeEnum.model.value
 
-                    get_case_data(all_cases, run_type, [not_case_item.data_id])
+                    await get_case_data(all_cases, run_type, [not_case_item.data_id])
     else:
-        get_case_data(all_cases, run_info.run_type, run_info.ids)
-
-    env_data = CamelCaseUtil.transform_result(EnvDao.get_env_by_id(query_db, run_info.env))
+        await get_case_data(all_cases, run_info.run_type, run_info.ids)
+    env_orm = await run_in_threadpool(EnvDao.get_env_by_id, query_db, run_info.env)
+    env_data = CamelCaseUtil.transform_result(env_orm)
     env_obj = EnvModel.from_orm(env_data)
 
     try:
@@ -306,15 +308,15 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
 
             if len(buffer) >= batch_size:
                 async with lock:
-                    await run_in_threadpool(RunDetailDao.create_bulk, query_db, buffer)
-                    await run_in_threadpool(ReportDao.update, query_db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
+                    await RunDetailDao.create_bulk(query_db, buffer)
+                    await ReportDao.update(query_db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
                 buffer = []
             queue.task_done()
 
         if buffer:
             async with lock:
-                await run_in_threadpool(RunDetailDao.create_bulk, query_db, buffer)
-                await run_in_threadpool(ReportDao.update, query_db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
+                await RunDetailDao.create_bulk(query_db, buffer)
+                await ReportDao.update(query_db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
 
     tasks = [asyncio.create_task(worker(query_db, queue, semaphore, stats=stats, lock=lock)) for i in range(run_info.concurrent)]
 
@@ -330,9 +332,9 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
 
     return [stats["total"], stats["success"], stats["failed"]]
 
-def run_test_in_background(run_info: CaseRunModel, current_user: CurrentUserModel):
+async def run_test_in_background(run_info: CaseRunModel, current_user: CurrentUserModel):
     with SessionLocal() as session:
-        asyncio.run(run_by_async(session, run_info, current_user))
+        await run_by_async(session, run_info, current_user)
     logger.info(f"用例:{run_info.report_name}[{run_info.report_id}]执行完成")
     return "执行完成，请前往报告查看"
 
@@ -359,8 +361,7 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
         report_data.dept_id = current_user.user.dept_id
         report_data.start_at = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
             timezone(timedelta(hours=8)))
-        report_info = ReportDao.create(query_db, report_data)
-        query_db.commit()
+        report_info = await ReportDao.create(query_db, report_data)
 
         run_info.report_id = report_info.report_id
 
@@ -369,13 +370,13 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
                                         user=current_user.user.user_id)
         test_end_time = time.time()
 
-        report_info = ReportDao.get_by_id(query_db, report_info.report_id)
+        report_info = await ReportDao.get_by_id(query_db, report_info.report_id)
         report_info.test_duration = test_end_time - test_start_time
 
         report_info.status = CaseRunStatus.failed.value if (run_result[2] > 0 or run_result[0] != run_result[1]) else CaseRunStatus.passed.value
         report_info.total = run_result[0]
         report_info.success = run_result[1]
-        query_db.commit()
+        await run_in_threadpool(query_db.commit)
 
         message_handler = MessageHandler(run_info)
         if message_handler.can_push():

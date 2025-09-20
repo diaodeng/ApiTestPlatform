@@ -229,15 +229,15 @@ class CaseService:
 
 class CaseParamsService:
     @classmethod
-    def get_case_params_pages_services(cls, query_db: Session, query_info: CaseParamsQueryModel) -> dict:
+    async def get_case_params_pages_services(cls, query_db: Session, query_info: CaseParamsQueryModel) -> dict:
         """
         获取用例参数信息service
         :param query_db: orm对象
-        :param case_id: 用例id
+        :param query_info: 用例参数查询对象
         :return: 用例参数信息
         """
         count = CaseParamsDao.get_table_row_count(query_db, use_case_id=query_info.case_id)
-        case_params = CaseParamsDao.load_table_page(query_db,
+        case_params = await CaseParamsDao.load_table_page(query_db,
                                                     use_case_id=query_info.case_id,
                                                     page=query_info.page_num,
                                                     page_size=query_info.page_size,

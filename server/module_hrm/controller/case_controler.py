@@ -207,7 +207,7 @@ async def get_case_params_list(request: Request,
                                ):
     try:
         # 获取全量数据
-        query_result = CaseParamsService.get_case_params_pages_services(query_db, page_query)
+        query_result = await CaseParamsService.get_case_params_pages_services(query_db, page_query)
         data = ResponseUtil.success(dict_content=query_result)
         return data
     except Exception as e:

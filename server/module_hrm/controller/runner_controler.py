@@ -43,10 +43,10 @@ async def run_test(request: Request,
         run_info.runner = current_user.user.user_id
         run_info.feishu_robot.push = run_info.push
         if run_info.is_async:
-            asyncio.create_task(run_in_threadpool(run_test_in_background,run_info, current_user))
+            asyncio.create_task(run_test_in_background(run_info, current_user))
             data = "请耐心等待运行结果"
         else:
-            data = await run_in_threadpool(run_test_in_background, run_info, current_user)
+            data = await run_by_async(query_db, run_info, current_user)
 
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
@@ -136,7 +136,7 @@ async def run_history_list(request: Request,
                            data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
                            ):
     query_info.manager = current_user.user.user_id
-    result = RunDetailDao.list(query_db, query_info, data_scope_sql)
+    result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
     return ResponseUtil.success(model_content=result)
 
 

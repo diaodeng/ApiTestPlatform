@@ -39,9 +39,9 @@ class ReportService:
         report = HrmReport(report_name=report_name, **kwargs)
 
     @classmethod
-    def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str) -> str:
+    async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str) -> str:
         # 2. 渲染HTML模板
-        result = RunDetailDao.list(query_db, query_info, data_scope_sql)
+        result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
         success_count = 0
         fail_count = 0
         skip_count = 0
@@ -100,7 +100,7 @@ class ReportService:
         curren_dir = os.path.dirname(__file__)
         template_dir = os.path.join(os.path.dirname(curren_dir), 'templates')
 
-        report = ReportDao.get_by_id(query_db, query_info.report_id)
+        report = await ReportDao.get_by_id(query_db, query_info.report_id)
 
 
         html_content = TemplateHandler(template_dir).generate_html(
@@ -116,8 +116,8 @@ class ReportService:
         return html_content
 
     @classmethod
-    def generate_pdf_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str) -> bytes|bool:
-        result = RunDetailDao.list(query_db, query_info, data_scope_sql)
+    async def generate_pdf_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str) -> bytes|bool:
+        result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
 
         curren_dir = os.path.dirname(__file__)
         template_dir = os.path.join(os.path.dirname(curren_dir), 'templates')
