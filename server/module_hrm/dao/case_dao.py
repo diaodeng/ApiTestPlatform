@@ -5,6 +5,7 @@ from typing import Type, Generator, AsyncGenerator
 from sqlalchemy import select, case, Sequence
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+from starlette.concurrency import run_in_threadpool
 
 from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
 from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
@@ -51,9 +52,9 @@ class CaseDao:
         offset = 0
         while True:
             batch = (
-                db.query(HrmCase)  # 替换成你的 ORM 模型
+                db.query(HrmCase)
                 .filter(HrmCase.case_id.in_(case_ids))
-                .order_by(ordering_case)  # 保证顺序
+                .order_by(ordering_case)
                 .offset(offset)
                 .limit(batch_size)
                 .all()

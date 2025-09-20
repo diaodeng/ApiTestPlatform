@@ -1,9 +1,11 @@
 import asyncio
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
@@ -41,10 +43,10 @@ async def run_test(request: Request,
         run_info.runner = current_user.user.user_id
         run_info.feishu_robot.push = run_info.push
         if run_info.is_async:
-            asyncio.create_task(run_test_in_background(run_info, current_user))
+            asyncio.create_task(run_in_threadpool(run_test_in_background,run_info, current_user))
             data = "请耐心等待运行结果"
         else:
-            data = await run_by_async(query_db, run_info, current_user)
+            data = await run_in_threadpool(run_test_in_background, run_info, current_user)
 
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
@@ -67,6 +69,7 @@ async def for_debug(request: Request,
     try:
         ForwardRulesHandler.transform(query_db, debug_info)
         debug_info.runner = current_user.user.user_id
+        debug_info.log_level = logging.DEBUG
         case_data = debug_info.case_data
         if not isinstance(case_data, dict):
             case_data = case_data.model_dump(by_alias=True)

@@ -330,9 +330,12 @@ async def run_by_concurrent(query_db: Session, case_ids: list[int], env_obj, fun
 
     return [stats["total"], stats["success"], stats["failed"]]
 
-async def run_test_in_background(run_info: CaseRunModel, current_user: CurrentUserModel):
+def run_test_in_background(run_info: CaseRunModel, current_user: CurrentUserModel):
     with SessionLocal() as session:
-        await run_by_async(session, run_info, current_user)
+        asyncio.run(run_by_async(session, run_info, current_user))
+    logger.info(f"用例:{run_info.report_name}[{run_info.report_id}]执行完成")
+    return "执行完成，请前往报告查看"
+
 
 
 async def run_by_async(query_db: Session, run_info: CaseRunModel,
@@ -369,7 +372,7 @@ async def run_by_async(query_db: Session, run_info: CaseRunModel,
         report_info = ReportDao.get_by_id(query_db, report_info.report_id)
         report_info.test_duration = test_end_time - test_start_time
 
-        report_info.status = CaseRunStatus.failed.value if (run_result[2] > 0 or run_info[0] != run_result[1]) else CaseRunStatus.passed.value
+        report_info.status = CaseRunStatus.failed.value if (run_result[2] > 0 or run_result[0] != run_result[1]) else CaseRunStatus.passed.value
         report_info.total = run_result[0]
         report_info.success = run_result[1]
         query_db.commit()
