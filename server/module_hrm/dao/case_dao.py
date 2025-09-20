@@ -414,7 +414,7 @@ class CaseParamsDao:
         db.commit()
 
     @classmethod
-    def load_table_page(cls, db: Session, use_case_id, page=1, page_size=1000, enabled=-1) -> list[dict]:
+    async def load_table_page(cls, db: Session, use_case_id, page=1, page_size=1000, enabled=-1) -> list[dict]:
         """
         分页加载表格数据
         :param use_case_id: 用例 ID
@@ -437,12 +437,12 @@ class CaseParamsDao:
         )
 
         # 2️⃣ 再查这些 row_id 对应的所有字段
-        rows = (
+        rows = await run_in_threadpool(
             db.query(HrmCaseParams)
             .filter(HrmCaseParams.case_id == use_case_id)
             .filter(HrmCaseParams.row_id.in_(db.query(subquery.c.row_id)))
             .order_by(HrmCaseParams.sort_key)
-            .all()
+            .all
         )
 
         # 3️⃣ 拼成二维表
@@ -460,7 +460,7 @@ class CaseParamsDao:
     async def load_table_iter(cls, db: Session, use_case_id) -> AsyncGenerator[dict, None]:
         page = 1
         while True:
-            datas = cls.load_table_page(db, use_case_id, page=page, page_size=1000, enabled=True)
+            datas = await cls.load_table_page(db, use_case_id, page=page, page_size=1000, enabled=True)
             if not datas:
                 break
             for data in datas:

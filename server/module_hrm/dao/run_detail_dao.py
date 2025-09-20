@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import insert
 from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+from starlette.concurrency import run_in_threadpool
 
 from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
 from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
@@ -54,7 +55,7 @@ class RunDetailDao:
         return run_detail
 
     @classmethod
-    def create_bulk(cls, db: Session, details: list[HrmRunDetailModel]):
+    async def create_bulk(cls, db: Session, details: list[HrmRunDetailModel]):
         """
         批量创建报告
         """
@@ -63,10 +64,10 @@ class RunDetailDao:
         # run_details = [HrmRunDetail(**detail_dict) for detail_dict in detail_dicts]
         stmt = insert(HrmRunDetail).values(detail_dicts)
         db.execute(stmt)
-        db.commit()
+        await run_in_threadpool(db.commit)
 
     @classmethod
-    def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str) -> PageResponseModel|list:
+    async def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str) -> PageResponseModel|list:
         logger.info(f"开始查询执行历史：{query_info.model_dump()}")
         query = db.query(HrmRunDetail)
         if query_info.only_self:
@@ -92,7 +93,7 @@ class RunDetailDao:
         elif query_info.run_id:
             query = query.order_by(HrmRunDetail.run_start_time.desc(), HrmRunDetail.run_end_time.desc())
 
-        result = PageUtil.paginate(query, query_info.page_num, query_info.page_size, query_info.is_page)
+        result = await run_in_threadpool(PageUtil.paginate, query, query_info.page_num, query_info.page_size, query_info.is_page)
         if not query_info.is_page:
             return result
         logger.info(f"执行历史查询结束")
