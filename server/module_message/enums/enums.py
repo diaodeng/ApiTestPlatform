@@ -63,10 +63,13 @@ class PushConfigTypeEnum(BaseEnum):
         super().__init__(value, desc)
 
 
-class QtrDataStatusEnum(DataStatusEnum, BaseEnum):
+class QtrDataStatusEnum(BaseEnum):
     """
     数据状态
     """
+    disabled = (1, "禁用")
+    normal = (2, "正常")
+    deleted = (3, "删除")
 
     def __init__(self, value, desc):
         super().__init__(value, desc)
@@ -74,5 +77,5 @@ class QtrDataStatusEnum(DataStatusEnum, BaseEnum):
 
 
 if __name__ == "__main__":
-    print(PushTypeEnum.SUCCESS.value)
+    print(QtrDataStatusEnum.normal.value)
     print(PushTypeEnum.FAIL.desc)

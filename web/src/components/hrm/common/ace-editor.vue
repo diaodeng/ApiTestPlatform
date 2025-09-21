@@ -44,7 +44,7 @@ const aceEditorRef = useTemplateRef("aceEditorRef");
 const isFullscreen = ref(false);
 
 const modelContent = ref("");
-const originalData = ref([]);  // 原始数据（用于恢复）
+const originalData = ref("");  // 原始数据（用于恢复）
 const isFiltered = ref(false);  // 是否处于搜索状态
 const startY = ref(0);
 const startHeight = ref(0);
@@ -216,7 +216,7 @@ function jsonRemoveEscapeAndBeautiful(env) {
 function jmespathSearch() {
   if (isFiltered.value) {
     modelContent.value = originalData.value;
-    isFiltered.value = !isFiltered.value;
+    isFiltered.value =!isFiltered.value;
     return;
   }
   let data = modelContent.value;
@@ -387,15 +387,10 @@ function changeFullScreenStatus(currentStatus) {
                       style="padding-left: 5px;padding-right: 5px"
             >
               <template #append>
-                <el-tooltip :content="isFiltered ? '显示原数据' : '使用jmespath搜索'" placement="top-start"
-                            effect="light">
+                <el-tooltip :content="isFiltered ? '显示原数据' : '使用jmespath搜索'" placement="top-start" effect="light">
                   <el-button @click="jmespathSearch">
-                    <el-icon v-if="isFiltered">
-                      <RefreshLeft/>
-                    </el-icon>
-                    <el-icon v-else>
-                      <Search/>
-                    </el-icon>
+                    <el-icon v-if="isFiltered"><RefreshLeft /></el-icon>
+                    <el-icon v-else><Search /></el-icon>
                   </el-button>
                 </el-tooltip>
               </template>
