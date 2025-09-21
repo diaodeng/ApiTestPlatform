@@ -1,1 +1,1 @@
-from message_handler import MessageHandler
+from .message_handler import MessageHandler

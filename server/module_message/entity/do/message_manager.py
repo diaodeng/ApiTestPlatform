@@ -19,7 +19,7 @@ class QtrMessageManager(Base, BaseModel):
                                            default=snowIdWorker.get_id,
                                            comment='通知ID')
     name: Mapped[str] = mapped_column(String(500), nullable=False, comment='通知方式名称')
-    type: Mapped[int] = mapped_column(Integer, nullable=False, default=PushWayEnum.FEISHU_BOT.value, comment='通知类型')
+    push_way: Mapped[int] = mapped_column(Integer, nullable=False, default=PushWayEnum.FEISHU_BOT.value, comment='通知类型')
     desc: Mapped[str] = mapped_column(Text, nullable=True, default="", comment='描述信息')
     status: Mapped[int] = mapped_column(Integer, nullable=False, default=QtrDataStatusEnum.normal.value, comment='')
     config_type: Mapped[int] = mapped_column(Integer, nullable=False, default=PushConfigTypeEnum.CUSTOM.value, comment='配置类型')

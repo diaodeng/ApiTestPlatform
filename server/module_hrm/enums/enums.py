@@ -1,6 +1,25 @@
 from enum import Enum
 
 
+class BaseEnum(Enum):
+    def __init__(self, value, desc):
+        self._value_ = value  # 必须通过 _value_ 设置枚举值
+        self.desc = desc  # 自定义描述字段
+
+    @classmethod
+    def get_choices(cls):
+        """返回前端可用的选项列表（值 + 描述）"""
+        return [{"value": member.value, "desc": member.desc} for member in cls]
+
+    @classmethod
+    def get_desc(cls, value):
+        """根据值获取描述"""
+        for member in cls:
+            if member.value == value:
+                return member.desc
+        return None  # 或抛出 ValueError
+
+
 class PageType(Enum):
     case = 1
     api = 2
@@ -46,13 +65,16 @@ class CaseRunStatus(Enum):
     running = 9
 
 
-class QtrDataStatusEnum(Enum):
+class QtrDataStatusEnum(BaseEnum):
     """
     这里的值应该和CaseStatusEnum对应的值保持一致
     """
-    disabled = 1
-    normal = 2
-    deleted = 3
+    disabled = (1, "禁用")
+    normal = (2, "正常")
+    deleted = (3, "删除")
+
+    def __init__(self, value, desc):
+        super().__init__(value, desc)
 
 
 class CaseStatusEnum(Enum):

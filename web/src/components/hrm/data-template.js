@@ -237,11 +237,15 @@ export const initRunConfig = {
         pushWay: [
             {
                 pushType: PushTypeEnum.DISABLED.value,
-                pushWay: PushWayEnum.FEISHU_BOT.value,
-                configTye: null,
-                configId: null,
-                configContent: "",
-                pushName: "",
+                pushConfig: {
+                    pushWay: PushWayEnum.FEISHU_BOT.value,
+                    configTye: null,
+                    config: null,
+                    name: "",
+                    messageId: null,
+                    desc: null,
+                },
+
             }
         ]
     },

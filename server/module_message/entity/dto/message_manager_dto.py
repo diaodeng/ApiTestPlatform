@@ -5,10 +5,21 @@ from typing import Optional, Any, Dict
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
 from pydantic.alias_generators import to_camel
 
-from module_admin.annotation.pydantic_annotation import as_query, as_form
-from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
 from utils.common_util import CamelCaseUtil
 from .common_dto import CommonDataModel
+from ...enums.enums import PushConfigTypeEnum, PushWayEnum, QtrDataStatusEnum
+
+
+class MessageConfigModel(CommonDataModel):
+    """
+    消息通知配置内容
+    """
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+
+    config_id: Optional[int] = None
+    title: Optional[str] = None
+    content: Optional[str] = None
+    footer: Optional[str] = None
 
 
 class MessageManagerModel(CommonDataModel):
@@ -19,10 +30,11 @@ class MessageManagerModel(CommonDataModel):
 
     message_id: Optional[int] = None
     name: Optional[str] = None
-    type: Optional[int] = None
+    push_way: Optional[int] = PushWayEnum.FEISHU_BOT.value
     desc: Optional[str] = None
-    status: Optional[str] = None
-    config: Optional[str] = None
+    status: Optional[str] = QtrDataStatusEnum.normal.value
+    config_type: Optional[int] = PushConfigTypeEnum.TEMPLATE.value
+    config: Optional[Any] = None
 
     # create_by: Optional[str] = None
     # update_by: Optional[str] = None
@@ -31,47 +43,25 @@ class MessageManagerModel(CommonDataModel):
     # manager: Optional[int] = None
 
     @model_validator(mode="before")
-    def convert_address(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+    def convert_config(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         values = CamelCaseUtil.transform_result(values)
-        request_data = values.get('requestInfo')
-        if isinstance(request_data, str):
-            values["requestInfo"] = TestCase(**json.loads(request_data))
-        elif isinstance(request_data, dict):
-            values["requestInfo"] = TestCase(**request_data)
+        config_data = values.get('config')
+        if isinstance(config_data, str):
+            values["config"] = MessageConfigModel(**json.loads(config_data))
+        elif isinstance(config_data, dict):
+            values["config"] = MessageConfigModel(**config_data)
         return values
 
-    @field_serializer('request_info')
-    def request_data(self, request: Any):
-        if isinstance(request, str):
-            return request
-        elif isinstance(request, (dict, list)):
-            return json.dumps(request, ensure_ascii=False)
-        elif isinstance(request, TestCase):
-            return request.model_dump_json(by_alias=True, exclude_unset=True)
+    @field_serializer('config')
+    def config_data_handle(self, configs: Any):
+        if isinstance(configs, str):
+            return configs
+        elif isinstance(configs, (dict, list)):
+            return json.dumps(configs, ensure_ascii=False)
+        elif isinstance(configs, MessageConfigModel):
+            return configs.model_dump_json(by_alias=True, exclude_unset=True)
         else:
-            return request
-
-
-class MessageManagerModelForApi(MessageManagerModel):
-    """
-    MessageManagerModel和模块关联表对应pydantic模型
-    """
-    request_info: TestCase | None = Field(default_factory=lambda: {})
-
-    def request_data(self, request: Any):
-        return request
-
-
-@as_query
-@as_form
-class MessageManagerPageQueryModel(MessageManagerModel):
-    """
-    分页查询模型
-    """
-    page_num: int = 1
-    page_size: int = 10
-
-    only_self: Optional[bool] = False
+            return configs
 
 
 class MessageManagerDeleteModel(BaseModel):
