@@ -1,8 +1,11 @@
 import asyncio
 import inspect
+import logging
 import sys
 import time
 from datetime import datetime
+
+from starlette.concurrency import run_in_threadpool
 
 from module_hrm.utils.util import get_system_stats
 from utils.log_util import logger
@@ -10,7 +13,7 @@ from utils.log_util import logger
 from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel, UserInfoModel
 from module_hrm.entity.vo.case_vo import CaseRunModel, FeishuRobotModel
-from module_hrm.service.runner.runner_service import run_by_async
+from module_hrm.service.runner.runner_service import run_by_async, run_test_in_background
 
 
 def job_sys_info(*args, **kwargs):
@@ -83,6 +86,7 @@ def job_run_test(*args, **kwargs):
         data.ids = in_data.get("ids", [])
         data.run_type = in_data.get("runType", 1)
         data.report_name = f'{in_data.get("reportName", "")}{new_data_format}'
+        data.log_level = in_data.get("logLevel", logging.INFO)
         data.repeat_num = in_data.get("repeatNum", 1)
         data.env = in_data["env"]
         data.concurrent = in_data.get("concurrent", 1)
@@ -94,14 +98,17 @@ def job_run_test(*args, **kwargs):
             data.feishu_robot = feishu_bot_config
 
         logger.info(f"准备执行测试：{data.model_dump_json()}")
+        # asyncio.create_task(run_test_in_background(data, user_module))
+
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
-        with SessionLocal() as db_session:
-            task = asyncio.ensure_future(run_by_async(db_session, data, user_module))
-            new_loop.run_until_complete(task)
-            new_loop.stop()
-            new_loop.close()
+        # with SessionLocal() as db_session:
+        task = asyncio.ensure_future(run_by_async(data, user_module))
+        new_loop.run_until_complete(task)
+        new_loop.stop()
+        new_loop.close()
+        logger.info(f"测试任务执行完成：{data.report_name}-{data.report_id}")
     except Exception as e:
+        logger.error(f"执行测试任务失败：{e}")
         logger.exception(e)
-    finally:
-        logger.info("测试任务执行完成")
+

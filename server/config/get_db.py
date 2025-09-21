@@ -40,6 +40,10 @@ def get_db_pro():
     current_db = SessionLocal()
     try:
         yield current_db
+        current_db.commit()
+    except Exception as e:
+        current_db.rollback()
+        raise
     finally:
         current_db.close()
 
