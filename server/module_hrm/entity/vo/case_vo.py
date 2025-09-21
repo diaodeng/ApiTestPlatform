@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 from typing import Optional, List, Any, Dict
 
@@ -110,6 +111,7 @@ class CaseRunModel(BaseModel):
     report_name: Optional[str] = None  # 测试报告名称
     report_id: Optional[int] = -1  # 测试报告名称
     is_async: Optional[bool] = False  # 本次执行同步或异步
+    log_level: Optional[int] = logging.INFO  # 日志级别
     repeat_num: int = 1  # 用例重复执行次数
     env: int  # 环境id
     concurrent: int = 1  # 并发数(同时执行的用例数)

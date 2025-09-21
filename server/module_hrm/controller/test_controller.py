@@ -21,7 +21,7 @@ from module_hrm.entity.vo.mock_vo import MockPageQueryModel, MockModel, AddMockR
     AddMockResponseModel, MockResponsePageQueryModel
 from module_hrm.service.mock_service import MockService, MockResponseService, RuleMatcher
 from utils.common_util import bytes2file_response
-from utils.log_util import logger
+from utils.log_util import logger, logger_mock
 from utils.page_util import PageResponseModel
 from utils.response_util import ResponseUtil
 
@@ -51,10 +51,10 @@ async def mock_test(request: Request,
             body_data = body_data.decode("utf-8") if isinstance(body_data, bytes) else body_data
         except:
             body_data = None
-        logger.info(f"url: {request.url}, method: {request.method}")
-        logger.info(f"request.query_params: {dict(request.query_params)}")
-        logger.info(f"request.headers: {dict(request.headers)}")
-        logger.info(f"body_data: {body_data}")
+        logger_mock.info(f"url: {request.url}, method: {request.method}")
+        logger_mock.info(f"request.query_params: {dict(request.query_params)}")
+        logger_mock.info(f"request.headers: {dict(request.headers)}")
+        logger_mock.info(f"body_data: {body_data}")
         setattr(request, "body_data", body_data)
 
         req = await RuleMatcher(request, query_db, f"/{mock_path}").match_response()
@@ -77,9 +77,9 @@ async def mock_test(request: Request,
                 # "query2": query,
                 "message": "没有匹配到mock规则",
             }
-            logger.info(json.dumps(req, ensure_ascii=False))
+            logger_mock.info(json.dumps(req, ensure_ascii=False))
             return JSONResponse(content=req, status_code=500, media_type="application/json")
-        logger.info(json.dumps(req, ensure_ascii=False))
+        logger_mock.info(json.dumps(req, ensure_ascii=False))
         content_type = req.get("headers", {}).get("Content-Type")
         if not content_type:
             content_type = req.get("headers", {}).get("content-type")
@@ -101,8 +101,8 @@ async def mock_test(request: Request,
 
         return Response(content=req.get("content"), media_type=content_type, headers=req.get("headers"), status_code=req.get("status_code"))
     except Exception as e:
-        logger.error(f"mock测试失败, path: {mock_path}, error: {e}")
-        logger.exception(e)
+        logger_mock.error(f"mock测试失败, path: {mock_path}, error: {e}")
+        logger_mock.exception(e)
         return ResponseUtil.error(msg=f"mock测试失败, path: {mock_path}, error: {e}")
 
 
@@ -196,7 +196,7 @@ async def add_hrm_mock_rule(request: Request,
                             query_db: Session = Depends(get_db),
                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        add_module_result = MockService.add_mock_rule_services(query_db, add_mock_rule, current_user)
+        add_module_result = await MockService.add_mock_rule_services(query_db, add_mock_rule, current_user)
         if not add_module_result.is_success:
             logger.warning(add_module_result.message)
             return ResponseUtil.failure(data=add_module_result.result, msg=add_module_result.message)
@@ -243,7 +243,7 @@ async def edit_hrm_mock_rule(request: Request,
             raise ValueError("mock规则名不能为空")
         edit_module.update_by = current_user.user.user_name
         edit_module.update_time = datetime.now()
-        edit_module_result = MockService.edit_mock_rule_services(query_db, edit_module, current_user)
+        edit_module_result = await MockService.edit_mock_rule_services(query_db, edit_module, current_user)
         if edit_module_result.is_success:
             logger.info(edit_module_result.message)
             return ResponseUtil.success(msg=edit_module_result.message)
@@ -304,7 +304,7 @@ async def delete_hrm_mock_rule(request: Request,
                                                        False))])
 async def query_detail_hrm_mock_rule(request: Request, mock_rule_id: int, query_db: Session = Depends(get_db)):
     try:
-        detail_result = MockService.mock_rule_detail_services(query_db, mock_rule_id)
+        detail_result = await MockService.mock_rule_detail_services(query_db, mock_rule_id)
         logger.info(f'获取mock_rule_id为{mock_rule_id}的信息成功')
         return ResponseUtil.success(data=detail_result.model_dump(by_alias=True))
     except Exception as e:
@@ -346,7 +346,7 @@ async def add_hrm_mock_rule_response(request: Request,
         add_mock_rule.create_by = current_user.user.user_name
         add_mock_rule.update_by = current_user.user.user_name
         add_mock_rule.dept_id = current_user.user.dept_id
-        add_module_result = MockResponseService.add_mock_response_services(query_db, add_mock_rule)
+        add_module_result = await MockResponseService.add_mock_response_services(query_db, add_mock_rule)
         if add_module_result.is_success:
             logger.info(add_module_result.message)
             return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
@@ -369,7 +369,7 @@ async def update_hrm_mock_rule_response(request: Request,
         if not add_mock_rule.name:
             raise ValueError("mock响应名不能为空")
 
-        add_module_result = MockResponseService.edit_mock_response_services(query_db, add_mock_rule, current_user)
+        add_module_result = await MockResponseService.edit_mock_response_services(query_db, add_mock_rule, current_user)
         if add_module_result.is_success:
             logger.info(add_module_result.message)
             return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
@@ -388,7 +388,7 @@ async def update_hrm_mock_rule_response_priority(request: Request,
                                      query_db: Session = Depends(get_db),
                                      current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        add_module_result = MockResponseService.edit_mock_response_services(query_db, add_mock_rule, current_user)
+        add_module_result = await MockResponseService.edit_mock_response_services(query_db, add_mock_rule, current_user)
         if add_module_result.is_success:
             logger.info(add_module_result.message)
             return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
@@ -409,7 +409,7 @@ async def rule_response_list(request: Request,
                              query_db: Session = Depends(get_db),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        add_module_result = MockResponseService.get_by_rule_id(query_db, query_rule_response.rule_id)
+        add_module_result = await MockResponseService.get_by_rule_id(query_db, query_rule_response.rule_id)
 
         return ResponseUtil.success(data=add_module_result, msg="success")
 
@@ -427,7 +427,7 @@ async def rule_response_detail(request: Request,
                              query_db: Session = Depends(get_db),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        add_module_result = MockResponseService.get_response_detail_services(query_db, query_rule_response.rule_response_id)
+        add_module_result = await MockResponseService.get_response_detail_services(query_db, query_rule_response.rule_response_id)
 
         return ResponseUtil.success(data=add_module_result, msg="success")
 
@@ -444,7 +444,7 @@ async def set_default_response(request: Request,
                              query_db: Session = Depends(get_db),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        add_module_result = MockResponseService.set_default_response(query_db, query_rule_response, current_user)
+        add_module_result = await MockResponseService.set_default_response(query_db, query_rule_response, current_user)
 
         return ResponseUtil.success(data=add_module_result, msg="success")
 
@@ -459,7 +459,7 @@ async def get_response_by_condition(request: Request,
                              query_rule_response: AddMockResponseModel,
                              query_db: Session = Depends(get_db)):
     try:
-        add_module_result = MockResponseService.get_by_response_condition(query_db, query_rule_response)
+        add_module_result = await MockResponseService.get_by_response_condition(query_db, query_rule_response)
 
         return ResponseUtil.success(data=add_module_result, msg="success")
 

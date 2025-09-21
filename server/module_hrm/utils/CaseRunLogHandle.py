@@ -69,14 +69,15 @@ class RunLogCaptureHandler(logging.Handler):
 
 
 class TestLog:
-    def __init__(self, logger_name=None):
+    def __init__(self, logger_name=None, log_level=logging.INFO):
         self.logger_name = f'test_logger_{threading.get_ident()}'
         # self.logger = logging.getLogger(f'{self.logger_name}')
 
         self.logger = CustomStackLevelLogger(self.logger_name, 2)
 
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(log_level)
         self.handler = RunLogCaptureHandler()
+        self.handler.setLevel(log_level)
         self.logger.addHandler(self.handler)
 
         log_context.logger = self.logger
@@ -104,7 +105,6 @@ class TestLog:
         handler.close()
         del handler
 
-    def add_handler(self):
-        handler = RunLogCaptureHandler()
-        self.logger.addHandler(self.handler)
+    def add_handler(self, handler: RunLogCaptureHandler):
+        self.logger.addHandler(handler)
         return handler

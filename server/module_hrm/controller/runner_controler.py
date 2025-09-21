@@ -1,9 +1,11 @@
 import asyncio
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
@@ -18,7 +20,7 @@ from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDel
 from module_hrm.service.debugtalk_service import DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler, ForwardRulesHandler
 from module_hrm.service.runner.case_runner import TestRunner
-from module_hrm.service.runner.runner_service import run_by_async, save_run_detail
+from module_hrm.service.runner.runner_service import run_by_async, save_run_detail, run_test_in_background
 from utils.log_util import logger
 from utils.message_util import MessageHandler
 from utils.page_util import PageResponseModel
@@ -40,13 +42,11 @@ async def run_test(request: Request,
         ForwardRulesHandler.transform(query_db, run_info)
         run_info.runner = current_user.user.user_id
         run_info.feishu_robot.push = run_info.push
-        # data = ""
-        # threading.Thread(target=test_run, args=(run_info, current_user)).start()
         if run_info.is_async:
-            asyncio.create_task(run_by_async(query_db, run_info, current_user))
+            asyncio.create_task(run_by_async(run_info, current_user))
             data = "请耐心等待运行结果"
         else:
-            data = await run_by_async(query_db, run_info, current_user)
+            data = await run_by_async(run_info, current_user)
 
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
@@ -69,20 +69,21 @@ async def for_debug(request: Request,
     try:
         ForwardRulesHandler.transform(query_db, debug_info)
         debug_info.runner = current_user.user.user_id
+        debug_info.log_level = logging.DEBUG
         case_data = debug_info.case_data
         if not isinstance(case_data, dict):
             case_data = case_data.model_dump(by_alias=True)
         page_query_result = CaseModelForApi(**case_data)
         data_for_run = CaseInfoHandle(query_db).from_page(page_query_result).toDebug(debug_info.env).run_data()
         case_obj = None
-        async for case_obj in ParametersHandler.get_parameters_case(query_db, [data_for_run]):
+        async for case_obj in ParametersHandler.get_parameters_case([data_for_run]):
             case_obj = case_obj
             break
 
         if not case_obj: return ResponseUtil.success(msg="没有可执行的用例", data="没有可执行的用例")
 
         # # 读取项目debugtalk
-        debugtalk_info = DebugTalkService.project_debugtalk_map(query_db,
+        debugtalk_info = await DebugTalkService.project_debugtalk_map(query_db,
                                                                 case_id=case_data["caseId"] or int(
                                                                     datetime.now().timestamp() * 1000000),
                                                                 run_info=debug_info)
@@ -135,7 +136,7 @@ async def run_history_list(request: Request,
                            data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
                            ):
     query_info.manager = current_user.user.user_id
-    result = RunDetailDao.list(query_db, query_info, data_scope_sql)
+    result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
     return ResponseUtil.success(model_content=result)
 
 
