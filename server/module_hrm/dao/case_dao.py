@@ -5,7 +5,9 @@ from typing import Type, Generator, AsyncGenerator
 from sqlalchemy import select, case, Sequence
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+from starlette.concurrency import run_in_threadpool
 
+from config.database import SessionLocal
 from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
 from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
 
@@ -38,10 +40,9 @@ class CaseDao:
         return info
 
     @classmethod
-    async def get_case_by_ids_iter(cls, db: Session, case_ids: list[int]) -> AsyncGenerator[Any, None]:
+    async def get_case_by_ids_iter(cls, case_ids: list[int]) -> AsyncGenerator[Any, None]:
         """
         根据用例id获取在用用例详细信息
-        :param db: orm对象
         :param case_ids: 用例id
         :return: 在用用例信息对象
         """
@@ -50,14 +51,15 @@ class CaseDao:
         batch_size = 1000
         offset = 0
         while True:
-            batch = (
-                db.query(HrmCase)  # 替换成你的 ORM 模型
-                .filter(HrmCase.case_id.in_(case_ids))
-                .order_by(ordering_case)  # 保证顺序
-                .offset(offset)
-                .limit(batch_size)
-                .all()
-            )
+            with SessionLocal() as db:
+                batch = await run_in_threadpool(
+                    db.query(HrmCase)
+                    .filter(HrmCase.case_id.in_(case_ids))
+                    .order_by(ordering_case)
+                    .offset(offset)
+                    .limit(batch_size)
+                    .all
+                )
             if not batch:
                 break
             for row in batch:
@@ -413,7 +415,7 @@ class CaseParamsDao:
         db.commit()
 
     @classmethod
-    def load_table_page(cls, db: Session, use_case_id, page=1, page_size=1000, enabled=-1) -> list[dict]:
+    async def load_table_page(cls, use_case_id, page=1, page_size=1000, enabled=-1) -> list[dict]:
         """
         分页加载表格数据
         :param use_case_id: 用例 ID
@@ -422,27 +424,28 @@ class CaseParamsDao:
         :return: list[dict]
         """
         # 1️⃣ 先查 row_id（限制数量）
-        query = db.query(HrmCaseParams).filter_by(case_id=use_case_id)
-        if enabled is not None and enabled != -1:
-            query = query.filter_by(enabled=enabled)
-        subquery = (
-            query
-            .distinct()
-            .with_entities(HrmCaseParams.row_id, HrmCaseParams.sort_key)
-            .order_by(HrmCaseParams.sort_key)
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .subquery()
-        )
+        with SessionLocal() as db:
+            query = db.query(HrmCaseParams).filter_by(case_id=use_case_id)
+            if enabled is not None and enabled != -1:
+                query = query.filter_by(enabled=enabled)
+            subquery = (
+                query
+                .distinct()
+                .with_entities(HrmCaseParams.row_id, HrmCaseParams.sort_key)
+                .order_by(HrmCaseParams.sort_key)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .subquery()
+            )
 
-        # 2️⃣ 再查这些 row_id 对应的所有字段
-        rows = (
-            db.query(HrmCaseParams)
-            .filter(HrmCaseParams.case_id == use_case_id)
-            .filter(HrmCaseParams.row_id.in_(db.query(subquery.c.row_id)))
-            .order_by(HrmCaseParams.sort_key)
-            .all()
-        )
+            # 2️⃣ 再查这些 row_id 对应的所有字段
+            rows = await run_in_threadpool(
+                db.query(HrmCaseParams)
+                .filter(HrmCaseParams.case_id == use_case_id)
+                .filter(HrmCaseParams.row_id.in_(db.query(subquery.c.row_id)))
+                .order_by(HrmCaseParams.sort_key)
+                .all
+            )
 
         # 3️⃣ 拼成二维表
         from collections import defaultdict
@@ -456,10 +459,10 @@ class CaseParamsDao:
         return result
 
     @classmethod
-    async def load_table_iter(cls, db: Session, use_case_id) -> AsyncGenerator[dict, None]:
+    async def load_table_iter(cls, use_case_id) -> AsyncGenerator[dict, None]:
         page = 1
         while True:
-            datas = cls.load_table_page(db, use_case_id, page=page, page_size=1000, enabled=True)
+            datas = await cls.load_table_page(use_case_id, page=page, page_size=1000, enabled=True)
             if not datas:
                 break
             for data in datas:
@@ -467,13 +470,15 @@ class CaseParamsDao:
             page += 1
 
     @classmethod
-    def get_table_row_count(cls, db: Session, use_case_id):
+    async def get_table_row_count(cls, db: Session, use_case_id):
         """
         获取表格行数
         :param use_case_id: 用例 ID
         :return: 行数
         """
-        return db.query(HrmCaseParams.row_id).filter_by(case_id=use_case_id).distinct().count()
+        return await run_in_threadpool(
+            db.query(HrmCaseParams.row_id).filter_by(case_id=use_case_id).distinct().count
+        )
 
     @classmethod
     def delete_table(cls, db: Session, use_case_id):

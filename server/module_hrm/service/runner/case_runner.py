@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import logging
 import re
 import threading
 import time
@@ -88,13 +89,19 @@ class CaseRunUtil:
 
 
 class CaseRunner(object):
-    def __init__(self, case_data: TestCase, debugtalk_func_map={}, logger: CustomStackLevelLogger = None,
+    def __init__(self, case_data: TestCase,
+                 debugtalk_func_map=None,
+                 test_logging: TestLog = None,
                  run_info: CaseRunModel = None):
 
+        if debugtalk_func_map is None:
+            debugtalk_func_map = {}
         self.case_data = case_data
         self.run_info = run_info
-        self.logger = logger
+        self.logging = test_logging
+        self.logger: CustomStackLevelLogger = self.logging.logger
         self.handler = RunLogCaptureHandler()
+        self.handler.setLevel(run_info.log_level)
         self.logger.addHandler(self.handler)
 
         self.debugtalk_func_map: dict = debugtalk_func_map  # 对应项目debugtalk方法
@@ -253,8 +260,9 @@ class CaseRunner(object):
                 log_content = self.handler.get_log()
                 step_data.result.logs.after_response += log_content
 
-                self.logger.error(f"测试步骤【{step.name}】执行失败")
-                self.logger.exception(e)
+                if not isinstance(e, AssertionError):
+                    self.logger.error(f"测试步骤【{step.name}】执行失败")
+                    self.logger.exception(e)
                 step_data.result.logs.error += self.handler.get_log()
 
             finally:
@@ -274,7 +282,13 @@ class CaseRunner(object):
             "%Y-%m-%d %H:%M:%S")
         self.logger.debug(
             f"用例{self.case_data.config.name}执行完成时间，format：{self.case_data.config.result.end_time_iso}")
-        self.case_data.config.result.duration = (end_time - start_time).total_seconds()
+
+        case_total_time = 0
+        for step in self.case_data.teststeps:
+            if step.result and step.result.duration:
+                case_total_time += step.result.duration
+
+        self.case_data.config.result.duration = case_total_time
 
         self.__after_case()
         self.__case_teardown()
@@ -320,20 +334,22 @@ class RequestRunner(object):
         self.teststep_other_config_handler()
         # self.parse_request_data()
 
-    def format_time(self, start_time: int | float, end_time: int | float):
-        self.step_data.result.duration = round(end_time - start_time, 2)
+    def format_time(self, start_time: int | float, end_time: int | float, duration: float = None):
+        if duration is None:
+            duration = end_time - start_time
+        self.step_data.result.duration = round(duration, 2)
         self.step_data.result.start_time_stamp = start_time
         self.step_data.result.start_time_iso = datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S")
         self.step_data.result.end_time_stamp = end_time
         self.step_data.result.end_time_iso = datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S")
-        self.logger.debug(f"用例{self.case_runner.case_data.config.name}执行完成时间，step耗时：{end_time - start_time}")
+        self.logger.info(f"step耗时：{duration} -->> 用例[{self.case_runner.case_data.config.name}]--步骤【{self.step_data.name}】执行完成时间")
         self.logger.debug(
             f"用例{self.case_runner.case_data.config.name}执行完成时间，step format：{datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')}")
 
     def set_step_failed(self):
-        logger.info(f"全局变量： {self.case_runner.run_info.global_vars}")
-        logger.info(f"用例变量： {self.case_runner.case_data.config.variables}")
-        logger.info(f"步骤变量： {self.step_data.variables}")
+        logger.debug(f"全局变量： {self.case_runner.run_info.global_vars}")
+        logger.debug(f"用例变量： {self.case_runner.case_data.config.variables}")
+        logger.debug(f"步骤变量： {self.step_data.variables}")
         self.step_data.result.status = CaseRunStatus.failed.value
         self.step_data.result.success = False
         self.case_runner.case_data.config.result.status = CaseRunStatus.failed.value
@@ -373,7 +389,7 @@ class RequestRunner(object):
             try:
                 before_teststep(self.step_data)
                 # self.parse_data_in_step(self.step_data)
-                self.logger.info(f"系统{hook_name}回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
+                self.logger.debug(f"系统{hook_name}回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
             except Exception as e:
                 if is_after_step:
                     log_store.after_response += self.case_runner.handler.get_log()
@@ -394,7 +410,7 @@ class RequestRunner(object):
                     if not hook: continue
                     var = key_value_dict(self.case_runner.case_data.config.variables)
                     parse_function_set_default_params(hook, var, self.debugtalk_func_map, (self.step_data,))
-                    self.logger.info(
+                    self.logger.debug(
                         f"自定义{hook_name}回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
             if hooks_info.code_info.code_type != CodeTypeEnum.js.value:
                 hooks_info.code_info.code_content = self.parse_data_in_step(hooks_info.code_info.code_content)
@@ -404,10 +420,11 @@ class RequestRunner(object):
                 log_store.after_response += self.case_runner.handler.get_log()
             else:
                 log_store.before_request += self.case_runner.handler.get_log()
-            raise TestFailError(f"{hook_name} error：{setupre}") from setupre
+
+            raise
 
     def parse_request_data(self, not_found_exception=True):
-        self.logger.info("开始替换请求信息中的变量")
+        self.logger.debug("开始替换请求信息中的变量")
         step_data = self.step_data.model_dump(by_alias=True)
         request_data = step_data["request"]
 
@@ -428,7 +445,7 @@ class RequestRunner(object):
             old_json = self.step_data.request.req_json
             if old_json and isinstance(old_json, str):
                 self.step_data.request.req_json = json.loads(old_json)
-        self.logger.info("替换请求信息中的变量替换完成")
+        self.logger.debug("替换请求信息中的变量替换完成")
 
     def before_teststep_handler(self):
         # 请求前的回调
@@ -537,7 +554,7 @@ class RequestRunner(object):
             return self
         except Exception as e:
             self.step_data.result.logs.after_response += self.case_runner.handler.get_log()
-            raise TestFailError(f"测试步骤【{self.step_data.name}】异常了： {e}") from e
+            raise
         # finally:
         #     return self
 
@@ -566,7 +583,6 @@ class RequestRunner(object):
 
         self.logger.info(f"method: {self.step_data.request.method}")
 
-
         try:
             self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
             request_data.pop("dataType", None)
@@ -577,9 +593,8 @@ class RequestRunner(object):
             if not request_data.get("json"):
                 request_data.pop("json")
 
-            self.logger.info(f"Request: {json.dumps(request_data, indent=4, ensure_ascii=False)}")
+            self.logger.info(f"Request: {json.dumps(request_data, ensure_ascii=False)}")
 
-            start_time = time.time()
             start_request_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
             self.logger.debug(
                 f"发起请求，请求时间:{start_request_time} >> {self.case_runner.case_data.config.name}")
@@ -588,28 +603,42 @@ class RequestRunner(object):
 
             res_response: AgentResponse | httpx.Response = None
 
+            timings = {}
+
+            async def on_request(request):
+                timings[request] = time.perf_counter()
+
+            async def on_response(response):
+                start = timings.pop(response.request)
+                elapsed = time.perf_counter() - start
+                print(f"{response.request.url} -> {elapsed:.2f}s")
+
             if self.case_runner.run_info.forward_config.forward and self.case_runner.run_info.forward_config.agent_code:
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
                 request_data["requestType"] = self.step_data.step_type
+                start_time = time.perf_counter()
                 agent_res_obj: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
                                                                    request_data
                                                                    )
+                end_time = time.perf_counter()
+                self.format_time(start_time, end_time)
                 if agent_res_obj.status_code != AgentResponseEnum.SUCCESS.value:
                     raise AgentForwardError("", f"客户机异常： {agent_res_obj.message}")
 
                 res_response: AgentResponse = agent_res_obj.response
 
             else:
-                async with httpx.AsyncClient(verify=False) as client:
+                async with httpx.AsyncClient(verify=False, event_hooks={"request": [on_request], "response": [on_response]}) as client:
+                    start_time = time.time()
                     res_response = await client.request(**request_data)
+                    end_time = time.time()
+                    total_time = res_response.elapsed.total_seconds()
+                    self.format_time(start_time, end_time, total_time)
 
-            self.logger.debug(f"请求响应结果：{res_response}")
+            self.logger.debug(f"请求响应结果：{res_response.status_code}")
             self.logger.debug(f"请求总耗时时间：{res_response.elapsed.total_seconds()}")
             self.logger.debug(
                 f"请求完成，完成时间:{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')} >> {self.case_runner.case_data.config.name}")
-
-            end_time = time.time()
-            self.format_time(start_time, end_time)
 
             if self.step_data.think_time.limit:
                 await asyncio.sleep(self.step_data.think_time.limit)
@@ -618,7 +647,7 @@ class RequestRunner(object):
             self.logger.info(f'实际请求Url: {res_response.request.url}')
             self.logger.info(f'status_code: {res_response.status_code}')
             self.logger.info(
-                f'response.headers: {json.dumps(dict(res_response.headers), indent=4, ensure_ascii=False)}')
+                f'response.headers: {json.dumps(dict(res_response.headers), ensure_ascii=False)}')
             self.logger.info(f'response.text: {res_response.text}')
 
             res_obj = ResponseData()
@@ -822,7 +851,6 @@ class Websocket(RequestRunner):
 
     async def request(self):
         try:
-            start_time = time.time()
             self.logger.info(f'{self.step_data.name} 开始执行')
             request_data = self.step_data.request.model_dump(by_alias=True)
 
@@ -834,7 +862,7 @@ class Websocket(RequestRunner):
 
             res_content = []
             res_headers = {}
-
+            start_time = time.time()
             if self.case_runner.run_info.forward_config.forward and self.case_runner.run_info.forward_config.agent_code:
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
                 request_data["requestType"] = self.step_data.step_type
@@ -861,8 +889,8 @@ class Websocket(RequestRunner):
                         response = await websocket.recv()
                         res_content.append(response)
 
-
-
+            end_time = time.time()
+            self.format_time(start_time, end_time)
             self.logger.info(f'{self.step_data.name} 接收数据成功')
             self.logger.info(f'响应数据：{res_content}')
 
@@ -874,8 +902,7 @@ class Websocket(RequestRunner):
 
             self.step_data.result.response = response_data
             # self.response = Response(response_data, self.step_data.request)
-            end_time = time.time()
-            self.format_time(start_time, end_time)
+
             if self.step_data.think_time.limit:
                 await asyncio.sleep(self.step_data.think_time.limit)
         except Exception as e:
@@ -940,9 +967,9 @@ class TestRunner(object):
     def __init__(self, case_data: TestCase, debugtalk_info: ProjectDebugtalkInfoModel = None,
                  run_info: CaseRunModel = None):
         asyncio.current_task().set_name(f"{case_data.case_id}_{int(datetime.now().timestamp() * 1000000)}")
-        self.logger = TestLog()
+        self.logger = TestLog(log_level=run_info.log_level)
         debugtalk_func_map = debugtalk_info.func_map
-        if run_info.concurrent <= 1:
+        if run_info.concurrent <= 1:  # 如果是并发，这里拿到的日志会很乱
             for instance in debugtalk_info.module_instance:
                 setattr(instance, 'logger', self.logger.logger)
 
@@ -964,7 +991,7 @@ class TestRunner(object):
                 tem_case_data.config.name = f"{tem_case_data.config.name}-{i + 1}"
                 tem_case_data.case_name = f"{tem_case_data.case_name}-{i + 1}"
 
-            runner = CaseRunner(tem_case_data, self.debugtalk_func_map, self.logger.logger, run_info=self.run_info)
+            runner = CaseRunner(tem_case_data, self.debugtalk_func_map, self.logger, run_info=self.run_info)
             await runner.run()
             all_data.append(runner.case_data)
         return all_data

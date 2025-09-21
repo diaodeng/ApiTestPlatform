@@ -14,7 +14,7 @@ class JobModel(CommonDataModel):
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
-    job_id: Optional[int] = None
+    job_id: Optional[int|str] = None
     job_name: Optional[str] = None
     job_group: Optional[str] = None
     job_executor: Optional[str] = None

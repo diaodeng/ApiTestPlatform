@@ -81,6 +81,15 @@ const runConfigRules = ref({
       <el-input-number :min="1" controls-position="right" v-model="form.concurrent"
                        placeholder="输入并发执行的用例数量" :disabled="form.runBySort"></el-input-number>
     </el-form-item>
+    <el-form-item label="日志等级">
+      <el-select v-model="form.logLevel" placeholder="选择日志等级">
+        <el-option label="DEBUG" :value="10"/>
+        <el-option label="INFO" :value="20"/>
+        <el-option label="WARNING" :value="30"/>
+        <el-option label="ERROR" :value="40"/>
+        <el-option label="CRITICAL" :value="50"/>
+      </el-select>
+    </el-form-item>
 
     <el-form-item label="转发配置">
       <div style="display: flex;flex-direction: row;flex-grow: 1">

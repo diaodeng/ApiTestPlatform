@@ -33,7 +33,7 @@ async def report_list(request: Request,
 
                       ):
     query_info.manager = current_user.user.user_id
-    result = ReportDao.get_list(query_db, query_info, data_scope_sql)
+    result = await ReportDao.get_list(query_db, query_info, data_scope_sql)
     return ResponseUtil.success(model_content=result)
 
 
@@ -47,7 +47,7 @@ async def report_detail(request: Request,
                         ):
     query_obj = RunDetailQueryModel(**{"report_id": report_id})
 
-    result = RunDetailDao.list(query_db, query_obj, data_scope_sql)
+    result = await RunDetailDao.list(query_db, query_obj, data_scope_sql)
     return ResponseUtil.success(model_content=result)
 
 
@@ -55,7 +55,7 @@ async def report_detail(request: Request,
                          response_model=PageResponseModel,
                          dependencies=[Depends(CheckUserInterfaceAuth(['hrm:report:delete']))])
 async def report_del(request: Request, query_info: ReportDelModel, query_db: Session = Depends(get_db)):
-    result = ReportDao.delete(query_db, query_info.report_ids)
+    await ReportDao.delete(query_db, query_info.report_ids)
     return ResponseUtil.success(dict_content={"msg": "删除成功"})
 
 
@@ -73,7 +73,7 @@ async def export_html(request: Request,
         # data = await db.fetch("SELECT * FROM items")
         query_info.manager = current_user.user.user_id
         query_info.is_page = False
-        html_content = ReportService.generate_html_report(query_db, query_info, data_scope_sql)
+        html_content = await ReportService.generate_html_report(query_db, query_info, data_scope_sql)
 
         # 3. 设置下载头
         headers = {
@@ -95,6 +95,6 @@ async def export_pdf(request: Request,
                       data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager'))):
     query_info.manager = current_user.user.user_id
     query_info.is_page = False
-    html_content = ReportService.generate_pdf_report(query_db, query_info, data_scope_sql)
+    html_content = await ReportService.generate_pdf_report(query_db, query_info, data_scope_sql)
     return Response(content=html_content, media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=report.pdf"})

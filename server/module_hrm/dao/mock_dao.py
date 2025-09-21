@@ -3,6 +3,7 @@ from typing import Type
 from sqlalchemy import select, case, Sequence
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_, func  # 不能把删掉，数据权限sql依赖
+from starlette.concurrency import run_in_threadpool
 
 from module_admin.entity.do.dept_do import SysDept  # 不能把删掉，数据权限sql依赖
 from module_admin.entity.do.role_do import SysRoleDept  # 不能把删掉，数据权限sql依赖
@@ -39,7 +40,7 @@ class MockRuleDao:
         return info
 
     @classmethod
-    def get_detail_by_info(cls, db: Session, mock_rule: MockPageQueryModel) -> MockRules | None:
+    async def get_detail_by_info(cls, db: Session, mock_rule: MockPageQueryModel) -> MockRules | None:
         """
         根据mock规则参数获取mock规则信息
         :param db: orm对象
@@ -56,12 +57,12 @@ class MockRuleDao:
         if mock_rule.status:
             info = info.filter(MockRules.status == mock_rule.status)
 
-        info = info.first()
+        info = await run_in_threadpool(info.first)
 
         return info
 
     @classmethod
-    def get_list_for_mock(cls, query_db: Session, path: str, method : str):
+    async def get_list_for_mock(cls, query_db: Session, path: str, method : str):
         """
         根据查询参数获取mock规则列表信息
         :param query_db: orm对象
@@ -72,8 +73,9 @@ class MockRuleDao:
         query = query_db.query(MockRules).filter(MockRules.path == path,
                                                  MockRules.method == method,
                                                  MockRules.status == QtrDataStatusEnum.normal.value).order_by(
-            MockRules.priority, MockRules.create_time.desc(), MockRules.update_time.desc()).all()
-        return query
+            MockRules.priority, MockRules.create_time.desc(), MockRules.update_time.desc())
+        rules = await run_in_threadpool(query.all)
+        return rules
 
     @classmethod
     def get_list(cls, db: Session,
@@ -192,19 +194,34 @@ class MockResponseDao:
     """
 
     @classmethod
-    def get_by_id(cls, db: Session, rule_response_id: int):
+    async def get_by_rule_id(cls, db: Session, rule_id: int) -> list[Type[RuleResponse]]:
+        """
+        根据mock规则id获取mock响应列表
+        :param db: orm对象
+        :param rule_id: mock规则id
+        :return: mock响应列表
+        """
+        mock_rule = db.query(RuleResponse).filter(RuleResponse.rule_id == rule_id)
+        mock_rule = await run_in_threadpool(mock_rule.all)
+        # mock_rule = [AddMockResponseModel.model_validate(item) for item in mock_rule]
+
+        return mock_rule
+
+    @classmethod
+    async def get_by_id(cls, db: Session, rule_response_id: int):
         """
         根据mock响应id获取在用mock规则详细信息
         :param db: orm对象
         :param rule_response_id: mock规则id
         :return: 在用mock响应信息对象
         """
-        info = db.query(RuleResponse).filter(RuleResponse.rule_response_id == rule_response_id).first()
+        info = db.query(RuleResponse).filter(RuleResponse.rule_response_id == rule_response_id)
+        info = await run_in_threadpool(info.first)
 
         return info
 
     @classmethod
-    def get_detail_by_info(cls, db: Session, mock_rule: MockResponseModel|AddMockResponseModel) -> MockRules | None:
+    async def get_detail_by_info(cls, db: Session, mock_rule: MockResponseModel|AddMockResponseModel) -> MockRules | None:
         """
         根据mock规则参数获取mock规则信息
         :param db: orm对象
@@ -225,7 +242,7 @@ class MockResponseDao:
         if mock_rule.response_condition and len(mock_rule.response_condition) > 0:
             info = info.filter(RuleResponse.response_condition == mock_rule.response_condition)
 
-        info = info.first()
+        info = await run_in_threadpool(info.first)
 
         return info
 
@@ -262,7 +279,7 @@ class MockResponseDao:
         return post_list
 
     @classmethod
-    def add(cls, db: Session, mock_response: MockResponseModel|MockResponseModelForDb):
+    async def add(cls, db: Session, mock_response: MockResponseModel|MockResponseModelForDb):
         """
         新增mock规则数据库操作
         :param db: orm对象
@@ -273,9 +290,9 @@ class MockResponseDao:
             mock_response = MockResponseModelForDb(**mock_response.model_dump(exclude_unset=True, by_alias=True))
         data_dict = mock_response.model_dump(exclude_unset=True)
         db_rule_response = RuleResponse(**data_dict)
-        db.add(db_rule_response)
-        db.flush()
-        db.commit()
+        await run_in_threadpool(db.add, db_rule_response)
+        await run_in_threadpool(db.flush)
+        await run_in_threadpool(db.commit)
 
         return db_rule_response
 
