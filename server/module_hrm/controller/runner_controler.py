@@ -43,10 +43,10 @@ async def run_test(request: Request,
         run_info.runner = current_user.user.user_id
         run_info.feishu_robot.push = run_info.push
         if run_info.is_async:
-            asyncio.create_task(run_test_in_background(run_info, current_user))
+            asyncio.create_task(run_by_async(run_info, current_user))
             data = "请耐心等待运行结果"
         else:
-            data = await run_by_async(query_db, run_info, current_user)
+            data = await run_by_async(run_info, current_user)
 
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
@@ -76,14 +76,14 @@ async def for_debug(request: Request,
         page_query_result = CaseModelForApi(**case_data)
         data_for_run = CaseInfoHandle(query_db).from_page(page_query_result).toDebug(debug_info.env).run_data()
         case_obj = None
-        async for case_obj in ParametersHandler.get_parameters_case(query_db, [data_for_run]):
+        async for case_obj in ParametersHandler.get_parameters_case([data_for_run]):
             case_obj = case_obj
             break
 
         if not case_obj: return ResponseUtil.success(msg="没有可执行的用例", data="没有可执行的用例")
 
         # # 读取项目debugtalk
-        debugtalk_info = DebugTalkService.project_debugtalk_map(query_db,
+        debugtalk_info = await DebugTalkService.project_debugtalk_map(query_db,
                                                                 case_id=case_data["caseId"] or int(
                                                                     datetime.now().timestamp() * 1000000),
                                                                 run_info=debug_info)

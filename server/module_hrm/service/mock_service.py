@@ -1,34 +1,29 @@
 import asyncio
-import re
-import json
 import datetime
 import random
+import re
 import time
 import uuid
-import jmespath
 from typing import List
 
+import jmespath
+from fastapi import Request
 from jinja2 import Environment, BaseLoader
-from fastapi import Request, Response
-from requests.cookies import MockResponse
-
 from sqlalchemy.orm import Session
-from sqlalchemy.util import await_only
 from starlette.concurrency import run_in_threadpool
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.mock_dao import MockRuleDao, MockResponseDao
-from module_hrm.dao.suite_dao import SuiteDetailDao
-from module_hrm.entity.do.mock_do import MockRules, RuleResponse, RuleRequest
-from module_hrm.entity.dto.mock_dto import MockModel, MockRequestModel, MockResponseModel, MockModelForDb, \
+from module_hrm.entity.do.mock_do import RuleResponse
+from module_hrm.entity.dto.mock_dto import MockModel, MockResponseModel, MockModelForDb, \
     MockResponseModelForDb, MockConditionModel
-from module_hrm.entity.vo.mock_vo import MockPageQueryModel, MockResponsePageQueryModel, MockRequestPageQueryModel, \
-    AddMockRuleModel, AddMockResponseModel, AddMockRequestModel, DeleteMockRuleModel, DeleteMockResponseModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.entity.vo.mock_vo import MockPageQueryModel, MockResponsePageQueryModel, AddMockRuleModel, \
+    AddMockResponseModel, DeleteMockRuleModel, DeleteMockResponseModel
 from module_hrm.utils.common import db_dd_user_info
 from utils.common_util import export_list2excel, CamelCaseUtil
+from utils.log_util import logger_mock
 from utils.page_util import PageResponseModel
-from utils.log_util import logger
 
 
 class MockService:
@@ -660,12 +655,12 @@ class MockResponseMatcher:
             # 目标为空匹配所有条件，或者条件匹配
             if not response.response_condition or self.condition_matcher.match_condition(response.response_condition):
                 if response.priority > priority and len(matched_response) > 0:
-                    logger.info(f"target response_condition is match, response_condition: {response}")
+                    logger_mock.info(f"target response_condition is match, response_condition: {response}")
                     return matched_response[0]
                 priority = response.priority
 
                 if response.is_default:  # 优先级最高的默认值
-                    logger.info(f"target response_condition is default, response_condition: {response}")
+                    logger_mock.info(f"target response_condition is default, response_condition: {response}")
                     return response
 
                 matched_response.append(response)

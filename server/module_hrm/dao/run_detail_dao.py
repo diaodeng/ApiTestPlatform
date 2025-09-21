@@ -63,7 +63,7 @@ class RunDetailDao:
         detail_dicts = [detail.model_dump(exclude_unset=True) for detail in details]
         # run_details = [HrmRunDetail(**detail_dict) for detail_dict in detail_dicts]
         stmt = insert(HrmRunDetail).values(detail_dicts)
-        db.execute(stmt)
+        await run_in_threadpool(db.execute, stmt)
         await run_in_threadpool(db.commit)
 
     @classmethod

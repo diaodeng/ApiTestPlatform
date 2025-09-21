@@ -236,9 +236,8 @@ class CaseParamsService:
         :param query_info: 用例参数查询对象
         :return: 用例参数信息
         """
-        count = CaseParamsDao.get_table_row_count(query_db, use_case_id=query_info.case_id)
-        case_params = await CaseParamsDao.load_table_page(query_db,
-                                                    use_case_id=query_info.case_id,
+        count = await CaseParamsDao.get_table_row_count(query_db, use_case_id=query_info.case_id)
+        case_params = await CaseParamsDao.load_table_page(use_case_id=query_info.case_id,
                                                     page=query_info.page_num,
                                                     page_size=query_info.page_size,
                                                     enabled=query_info.enabled,
@@ -263,14 +262,14 @@ class CaseParamsService:
         CaseParamsDao.insert_table(query_db, use_case_id=case_id, table_data=case_params)
 
     @classmethod
-    async def load_case_params_iter(cls, query_db: Session, case_id: int) -> AsyncGenerator[dict, None]:
+    async def load_case_params_iter(cls, case_id: int) -> AsyncGenerator[dict, None]:
         """
         加载用例参数信息service
         :param query_db: orm对象
         :param case_id: 用例id
         :return: 用例参数信息
         """
-        async for case_param in CaseParamsDao.load_table_iter(query_db, use_case_id=case_id):
+        async for case_param in CaseParamsDao.load_table_iter(use_case_id=case_id):
             yield case_param
 
     @classmethod
