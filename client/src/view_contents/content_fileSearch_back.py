@@ -1,0 +1,437 @@
+import json
+import os
+import fnmatch
+import flet as ft
+import subprocess
+import platform
+from threading import Thread, Event
+from loguru import logger
+from server.config import SearchConfig, StartConfig, PaymentMockConfig
+
+
+class FileSearcher:
+    def __init__(self, ft, page: ft.Page):
+        self.start_config = StartConfig.read()
+        self.ft = ft
+        self.page = page
+        self.set_width = 400
+        self.stop_event = Event()
+        self.setup_ui()
+
+
+    def fileSearcher(self):
+
+        content = self.ft.Container(
+            content=self.ft.Column([
+                self.ft.Text("文件搜索>", size=20),
+                self.ft.Divider(),
+                self.ft.Row([
+                    # 搜索参数输入区
+                    self.dir_picker,
+                    self.browse_btn
+                ]),
+                ft.Row([
+                    self.file_pattern,
+                    self.dir_pattern,
+                    self.scan_deep,
+                ]),
+                self.ft.Row([
+                    # 控制按钮
+                    self.search_btn,
+                    self.stop_btn,
+                    self.before_start_back_view,
+                    self.before_start_cover_payment_driver_view,
+                    self.before_start_replace_mitm_cert_view,
+                    self.before_start_change_env_view,
+                    self.before_start_remove_cache_view,
+                ],
+                    # expand=True,
+                    alignment=ft.MainAxisAlignment.START,
+                ),
+                # 进度显示
+                # self.progress_bar,
+                self.status_text,
+                self.ft.Divider(),
+                # 结果展示
+                self.results_view
+            ], alignment=self.ft.MainAxisAlignment.START),
+            alignment=self.ft.alignment.center_left
+        )
+        return content
+
+    def setup_ui(self):
+        search_config = SearchConfig.read()
+        self.page.vertical_alignment = ft.MainAxisAlignment.CENTER
+        self.page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+        self.page.padding = 30
+
+        # 搜索参数输入区
+        self.dir_picker = ft.TextField(
+            label="搜索目录",
+            hint_text="输入或选择目录路径",
+            width=self.set_width,
+            value=search_config.dir[0],
+            on_change=self.validate_inputs
+        )
+
+        self.browse_btn = ft.ElevatedButton(
+            "浏览",
+            on_click=self.open_directory_dialog
+        )
+
+        self.file_pattern = ft.TextField(
+            label="文件名模式",
+            hint_text="例如: *.txt 或 report*.docx",
+            width=self.set_width,
+            value=search_config.file_pattern,
+            on_change=self.validate_inputs
+        )
+
+        self.dir_pattern = ft.TextField(
+            label="目录名模式",
+            hint_text="例如: * 或 report*.docx",
+            width=self.set_width,
+            value=search_config.dir_pattern,
+            on_change=self.validate_inputs
+        )
+
+        self.scan_deep = ft.TextField(
+            label="递归深度",
+            hint_text="1",
+            value=search_config.max_depth,
+            width=100,
+            # on_change=self.validate_inputs
+        )
+
+        # 控制按钮
+        self.search_btn = ft.ElevatedButton(
+            "开始搜索",
+            on_click=self.start_search,
+            disabled=not search_config.dir
+        )
+        self.stop_btn = ft.ElevatedButton(
+            "停止",
+            on_click=self.stop_search,
+            disabled=True,
+            # color="red"
+        )
+
+        self.before_start_back_view = ft.Checkbox(
+            label="备份",
+            value=self.start_config.backup,
+            on_change=self.update_start_config,
+        )
+
+        self.before_start_cover_payment_driver_view = ft.Checkbox(
+            label="覆盖支付驱动",
+            value=self.start_config.cover_payment_driver,
+            on_change=self.update_start_config,
+        )
+
+        self.before_start_replace_mitm_cert_view = ft.Checkbox(
+            label="替换mitm证书",
+            value=self.start_config.replace_mitm_cert,
+            on_change=self.update_start_config,
+        )
+
+        self.before_start_change_env_view = ft.Checkbox(
+            label="切换环境",
+            value=self.start_config.change_env,
+            on_change=self.update_start_config,
+        )
+
+        self.before_start_remove_cache_view = ft.Checkbox(
+            label="清除缓存",
+            value=self.start_config.remove_cache,
+            on_change=self.update_start_config,
+        )
+
+        # 进度显示
+        self.progress_bar = ft.ProgressBar(
+            width=self.set_width,
+            value=0,
+            visible=False
+        )
+        self.status_text = ft.Text()
+
+        # 结果展示
+        self.results_view = ft.ListView(
+            expand=True,
+            spacing=10,
+            auto_scroll=False
+        )
+
+        # # 布局组合
+        # self.page.add(
+        #     ft.Column([
+        #         ft.Row([self.dir_picker, self.browse_btn]),
+        #         self.file_pattern,
+        #         ft.Row([self.search_btn, self.stop_btn]),
+        #         self.progress_bar,
+        #         self.status_text,
+        #         ft.Divider(),
+        #         ft.Text("搜索结果:", weight=ft.FontWeight.BOLD),
+        #         ft.Container(
+        #             self.results_view,
+        #             height=300,
+        #             border=ft.border.all(1),
+        #             padding=10,
+        #             border_radius=5
+        #         )
+        #     ])
+        # )
+
+    def validate_inputs(self, e):
+        self.search_btn.disabled = not (self.dir_picker.value and self.file_pattern.value)
+        self.page.update()
+
+    def update_start_config(self, e):
+        logger.info(f"更新启动配置")
+        self.start_config.backup = self.before_start_back_view.value
+        self.start_config.replace_mitm_cert = self.before_start_replace_mitm_cert_view.value
+        self.start_config.change_env = self.before_start_change_env_view.value
+        self.start_config.remove_cache = self.before_start_remove_cache_view.value
+        self.start_config.cover_payment_driver = self.before_start_cover_payment_driver_view.value
+        StartConfig.write(self.start_config)
+
+    def open_directory_dialog(self, e):
+        def on_dialog_result(e: ft.FilePickerResultEvent):
+            # for i in e.files:
+            #     logger.info(f"选择文件: {i.name} path :{i.path}")
+            # logger.info(f"选择目录: {e.path}")
+            if e.path:
+                self.dir_picker.value = e.path
+                self.validate_inputs(None)
+
+        directory_dialog = ft.FilePicker(on_result=on_dialog_result)
+
+        self.page.overlay.append(directory_dialog)
+        self.page.update()
+        # directory_dialog.get_directory_path()
+        directory_dialog.pick_files(allow_multiple=True)
+
+    def start_search(self, e):
+        if not self.dir_picker.value:
+            return
+
+        # 重置状态
+        self.stop_event.clear()
+        self.results_view.controls.clear()
+        self.search_btn.disabled = True
+        self.stop_btn.disabled = False
+        self.progress_bar.visible = True
+        self.progress_bar.value = 0
+        self.page.update()
+
+        # 启动搜索线程
+        Thread(
+            target=self.search_files,
+            daemon=True
+        ).start()
+
+    def stop_search(self, e):
+        self.stop_event.set()
+        self.status_text.value = "正在停止搜索..."
+        self.page.update()
+
+    def open_file(self, path):
+        """打开文件"""
+        logger.info(f"打开文件: {path}")
+        if self.start_config.replace_mitm_cert:
+            logger.info(f"替换mitm证书")
+            file_dir = os.path.dirname(path)
+            cert_content = ""
+
+            if not os.path.exists("mitmproxy/mitmproxy-ca-cert.pem"):
+                logger.warning(f"mitmproxy-ca-cert.pem 不存在")
+            with open("mitmproxy/mitmproxy-ca-cert.pem", "r") as f:
+                cert_content = f.read()
+            with open(os.path.join(file_dir, "certifi/cacert.pem"), "r") as f:
+                old_content = f.read()
+            if cert_content not in old_content:
+                with open(os.path.join(file_dir, "certifi/cacert.pem"), "a+") as f:
+                    f.write(f"\n\n# mitmproxy \n{cert_content}")
+
+        if self.start_config.cover_payment_driver:
+            logger.info(f"覆盖支付驱动")
+            PaymentMockConfig.cover_payment_driver(path)
+
+        try:
+            if platform.system() == "Windows":
+
+
+                os.startfile(path,cwd=os.path.dirname(path))
+            elif platform.system() == "Darwin":
+                subprocess.run(["open", path])
+            else:  # Linux
+                subprocess.run(["xdg-open", path])
+        except Exception as e:
+            self.status_text.value = f"打开文件失败: {str(e)}"
+            self.page.update()
+
+    def open_file_location(self, path):
+        """打开文件所在目录"""
+        try:
+            dir_path = os.path.dirname(path)
+            if platform.system() == "Windows":
+                os.startfile(dir_path)
+            elif platform.system() == "Darwin":
+                subprocess.run(["open", dir_path])
+            else:  # Linux
+                subprocess.run(["xdg-open", dir_path])
+        except Exception as e:
+            self.status_text.value = f"打开目录失败: {str(e)}"
+            self.page.update()
+
+
+
+    def __find_files(self, directories: list[str], file_pattern=None, dir_pattern=None, max_depth=None):
+        """在多个目录中递归查找文件，可指定匹配规则和递归深度"""
+        logger.info(f"开始搜索: {directories}, 模式: {file_pattern}, 目录模式: {dir_pattern}, 递归深度: {max_depth}")
+
+        data = {"dir": directories, "file_pattern": file_pattern, "dir_pattern": dir_pattern, "max_depth": str(max_depth)}
+        SearchConfig.write(data)
+        result = []
+        found_files = 0
+        total_files = 0
+        depth = 0
+
+        def scan_dir(path, depth, found_files, total_files):
+            if max_depth is not None and depth >= max_depth:
+                return
+            try:
+                with os.scandir(path) as it:
+                    depth += 1
+                    for entry in it:
+                        logger.debug(f"当前目录: {path}, 深度: {depth}, 文件名: {entry.name}")
+                        if self.stop_event.is_set():
+                            break
+                        total_files += 1
+
+                        if entry.is_file():
+                            if file_pattern is None or fnmatch.fnmatch(entry.name.lower(), file_pattern.lower()):  # 可换成正则匹配
+                                result.append(entry.path)
+                                # 创建结果项
+                                result_item = ft.Row(
+                                    controls=[
+                                        ft.Text(entry.path, expand=True, bgcolor=ft.Colors.GREY_100),
+                                        ft.IconButton(
+                                            icon=ft.Icons.FOLDER_OPEN,
+                                            tooltip="打开所在目录",
+                                            on_click=lambda e, path=entry.path: self.open_file_location(
+                                                path),
+                                            bgcolor=ft.Colors.GREY_100
+                                        ),
+                                        ft.IconButton(
+                                            icon=ft.Icons.INSERT_DRIVE_FILE,
+                                            tooltip="打开文件",
+                                            on_click=lambda e, path=entry.path: self.open_file(path),
+                                            bgcolor=ft.Colors.GREY_100
+                                        )
+
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    spacing=1,
+                                    # auto_scroll=True,
+                                )
+                                found_files += 1
+
+                                self.results_view.controls.append(result_item)
+
+
+                        elif entry.is_dir() and (dir_pattern is None or fnmatch.fnmatch(entry.name.lower(), dir_pattern.lower())):
+                            scan_dir(entry.path, depth, found_files, total_files)
+
+                        # progress = found_files / total_files
+                        self.update_ui(
+                            f"已扫描 {entry.path} 个",
+                            True,
+                            0.5
+                        )
+            except PermissionError as e:
+                self.update_ui(f"权限错误: {path}", True)
+
+        for d in directories:
+            scan_dir(d, depth=depth, found_files=found_files, total_files=total_files)
+
+        return result
+
+    def search_files(self):
+        directory = self.dir_picker.value
+        pattern = self.file_pattern.value
+        max_depth = 1
+        try:
+
+            max_depth = int(self.scan_deep.value)
+            if max_depth < 1:
+                max_depth = 1
+        except Exception as e:
+            pass
+
+        depth = 0
+        # 预计算文件总数
+        # total_files = 0
+        # for root, dirs, files in os.walk(directory):
+        #     if self.stop_event.is_set():
+        #         break
+        #     total_files += len(files)
+        #
+        # if total_files == 0:
+        #     self.update_ui("未找到可搜索的文件", False)
+        #     return
+
+        # 开始搜索
+        found_files = 0
+        processed = 0
+        depth = 0
+
+        result = self.__find_files([directory], file_pattern=pattern, dir_pattern=self.dir_pattern.value, max_depth=max_depth)
+        found_files = len(result)
+
+        # for root, dirs, files in os.walk(directory):
+        #     if self.stop_event.is_set():
+        #         break
+        #
+        #     for filename in files:
+        #         if fnmatch.fnmatch(filename.lower(), pattern.lower()):
+        #             full_path = os.path.join(root, filename)
+        #
+        #             # 创建结果项
+        #             result_item = ft.Row(
+        #                 controls=[
+        #                     ft.Text(full_path, expand=True),
+        #                     ft.IconButton(
+        #                         icon=ft.Icons.FOLDER_OPEN,
+        #                         tooltip="打开所在目录",
+        #                         on_click=lambda e, path=full_path: self.open_file_location(path)
+        #                     ),
+        #                     ft.IconButton(
+        #                         icon=ft.Icons.INSERT_DRIVE_FILE,
+        #                         tooltip="打开文件",
+        #                         on_click=lambda e, path=full_path: self.open_file(path)
+        #                     )
+        #                 ],
+        #                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+        #             )
+        #
+        #             self.results_view.controls.append(result_item)
+        #             found_files += 1
+        #
+        #         processed += 1
+        #         progress = processed / total_files
+        #         self.update_ui(
+        #             f"已扫描 {processed}/{total_files} | 找到 {found_files} 个",
+        #             True,
+        #             progress
+        #         )
+
+        # 搜索完成
+        msg = "搜索已停止" if self.stop_event.is_set() else f"完成! 共找到 {found_files} 个文件"
+        self.update_ui(msg, False)
+
+    def update_ui(self, message, searching, progress=0):
+        self.status_text.value = message
+        self.progress_bar.value = progress
+        self.search_btn.disabled = searching
+        self.stop_btn.disabled = not searching
+        self.page.update()

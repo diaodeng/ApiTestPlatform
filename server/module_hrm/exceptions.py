@@ -108,3 +108,21 @@ class SqlMethodNotSupport(MyBaseError):
 
 class TestFailError(MyBaseError):
     pass
+
+class TestStepCustomScriptFailError(TestFailError):
+    pass
+
+class TestStepCustomFunctionFailError(TestFailError):
+    pass
+
+class TestStepSystemFunctionFailError(TestFailError):
+    pass
+
+class TestCaseCustomScriptFailError(TestFailError):
+    pass
+
+class TestCaseCustomFunctionFailError(TestFailError):
+    pass
+
+class TestCaseSystemFunctionFailError(TestFailError):
+    pass

@@ -53,7 +53,7 @@ class PageUtil:
         return result
 
     @classmethod
-    def paginate(cls, query: Query, page_num: int, page_size: int, is_page: bool = False):
+    def paginate(cls, query: Query, page_num: int, page_size: int, is_page: bool = False) -> PageResponseModel|List|None:
         """
         输入查询语句和分页信息，返回分页数据列表结果
         :param query: sqlalchemy查询语句

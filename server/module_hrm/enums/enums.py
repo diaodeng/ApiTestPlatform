@@ -43,6 +43,7 @@ class CaseRunStatus(Enum):
     xpassed = 6
     warnings = 7
     error = 8
+    running = 9
 
 
 class QtrDataStatusEnum(Enum):
@@ -179,6 +180,16 @@ class ConfigDataTypeEnum(Enum):
     float = "float"
     json = "json"
     any = "any"
+
+
+class MockTypeEnum(Enum):
+    """
+    mock规则数据处理类型
+    """
+    only_response = 1
+    only_request = 2
+    request_and_response = 3
+    not_mock = 4
 
 
 if __name__ == "__main__":

@@ -9,6 +9,10 @@ export function getStepDataByType(stepType) {
         ElMessageBox.alert("参数错误", "错误提示", {type: "error"});
         return;
     }
+    if (stepType === CaseStepTypeEnum.folder){
+        return {};
+    }
+
     if (stepType !== CaseStepTypeEnum.http && stepType !== CaseStepTypeEnum.websocket) {
         ElMessageBox.alert("不支持的测试步骤类型", "错误提示", {type: "error"});
         return;

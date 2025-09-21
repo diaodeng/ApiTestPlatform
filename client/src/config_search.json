@@ -1,0 +1,8 @@
+{
+    "dir": [
+        "C:\\CPOS-DF-SG711-1.0.4.0-uat-update"
+    ],
+    "file_pattern": "cpos-df.exe",
+    "dir_pattern": "",
+    "max_depth": 1
+}

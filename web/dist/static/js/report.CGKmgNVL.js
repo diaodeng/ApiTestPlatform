@@ -1,2 +1,0 @@
-import{X as o}from"./index.DLM0P_FN.js";function e(r){return o({url:"/hrm/report/list",method:"get",params:r})}function n(r){return o({url:"/hrm/report",method:"DELETE",data:r})}function m(r){return o({url:"/hrm/common/countInfo",method:"GET"})}function a(r){return o({url:"/hrm/report/export/html",method:"GET",params:r,responseType:"blob"})}function s(r){return o({url:"/hrm/report/export/pdf",method:"GET",params:r,responseType:"blob"})}export{a,s as b,m as c,n as d,e as l};
-//# sourceMappingURL=report.CGKmgNVL.js.map

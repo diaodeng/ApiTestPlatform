@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, Text, BigInteger
+from sqlalchemy import Integer, String, Text, BigInteger, Index, Boolean
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import mapped_column, Mapped
 
@@ -34,6 +34,36 @@ class HrmCase(Base, BaseModel):
                                         comment='状态（2正常 1停用）,CaseStatusEnum')
     remark: Mapped[Text] = mapped_column(Text, nullable=True, default='', comment='备注')
     # qtr_suite_detail = relationship("QtrSuiteDetail", backref="cases")
+
+
+class HrmCaseParams(Base, BaseModel):
+    """
+    模块信息表
+    """
+
+
+    class Meta:
+        verbose_name = '用例参数化信息'
+
+    __tablename__ = 'hrm_case_params'
+
+    case_id: Mapped[BigInteger] = mapped_column(BigInteger, nullable=False, comment='用例、配置ID')
+    # params_id: Mapped[BigInteger] = mapped_column(BigInteger, unique=True, primary_key=True, nullable=False,
+    #                                               default=snowIdWorker.get_id, comment='用例、配置ID')
+    enabled: Mapped[Boolean] = mapped_column(Boolean, nullable=False, default=True, comment='是否启用')
+    col_sort: Mapped[Integer] = mapped_column(Integer, nullable=False, default=0, comment='列排序')
+    row_id: Mapped[String] = mapped_column(String(36), nullable=False, comment='行ID')
+    sort_key: Mapped[Integer] = mapped_column(Integer, nullable=False, default=0, comment='行排序键')
+    col_name: Mapped[String] = mapped_column(String(500), nullable=False, comment='列名')
+    params_name: Mapped[String] = mapped_column(String(500), nullable=False, comment='参数名称')
+    col_value: Mapped[LONGTEXT] = mapped_column(LONGTEXT, nullable=False, comment='列值')
+    params_type: Mapped[Integer] = mapped_column(Integer, comment='1 字符串 2 数字 3 列表 4 字典', default=1,
+                                          nullable=False)
+
+    __table_args__ = (
+        Index("idx_case_row_enabled", "case_id", "row_id", "enabled"),  # 联合索引
+    )
+
 
 
 class HrmCaseModuleProject(Base):
