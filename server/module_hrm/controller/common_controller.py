@@ -32,7 +32,7 @@ async def comparators_dict(request: Request,
                            query_db: Session = Depends(get_db)):
     comparator_map = util.get_func_doc_map(comparators)
 
-    common_debugtalk, project_debugtalk = DebugTalkService.debugtalk_source(query_db,
+    common_debugtalk, project_debugtalk = await DebugTalkService.debugtalk_source(query_db,
                                                                             project_id=project_id,
                                                                             case_id=case_id)
     debugtalk_handler = DebugTalkHandler(project_debugtalk, common_debugtalk)
@@ -45,7 +45,7 @@ async def comparators_dict(request: Request,
 
 @hrmCommonController.get("/functions")
 async def functions_dict(request: Request, case_id: int | None = None, query_db: Session = Depends(get_db)):
-    common_debugtalk, project_debugtalk = DebugTalkService.debugtalk_source(query_db, case_id=case_id)
+    common_debugtalk, project_debugtalk = await DebugTalkService.debugtalk_source(query_db, case_id=case_id)
     debugtalk_handler = DebugTalkHandler(project_debugtalk, common_debugtalk)
     debugtalk_comparator_map = debugtalk_handler.func_doc_map(
         filter=lambda func: not func.startswith("assert_"))

@@ -324,7 +324,7 @@ class ParametersHandler(object):
         pass
 
     @classmethod
-    async def get_parameters(cls, query_db: Session, param_data) -> AsyncGenerator[dict|list[dict], None]:
+    async def get_parameters(cls, param_data) -> AsyncGenerator[dict|list[dict], None]:
         param_tmp_data = param_data
         param_index = 1
         if param_tmp_data.type == ParameterTypeEnum.local_table.value:
@@ -358,7 +358,7 @@ class ParametersHandler(object):
                 yield param
                 param_index += 1
         elif param_tmp_data.type == ParameterTypeEnum.sql.value:
-            async for data in CaseParamsService.load_case_params_iter(query_db, param_data.value):
+            async for data in CaseParamsService.load_case_params_iter(param_data.value):
                 line_data = []
                 for item in data:
                     if item in ("__enable", "__row_key"):
@@ -380,7 +380,7 @@ class ParametersHandler(object):
                 param_index += 1
 
     @classmethod
-    async def get_parameters_case(cls, query_db: Session, case_datas: list[TestCase]) -> AsyncGenerator[TestCase, None]:
+    async def get_parameters_case(cls, case_datas: list[TestCase]) -> AsyncGenerator[TestCase, None]:
         """
         获取参数化之后的用例
         """
@@ -395,7 +395,7 @@ class ParametersHandler(object):
             if parameters.type == ParameterTypeEnum.sql.value:
                 parameters.value = test_case.case_id
 
-            async for param in cls.get_parameters(query_db, parameters):
+            async for param in cls.get_parameters(parameters):
                 tmp_case_data = copy.deepcopy(test_case)
                 old_variables: list[dict] = tmp_case_data.config.variables
                 update_or_extend_list(old_variables, param)

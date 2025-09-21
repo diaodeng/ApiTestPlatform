@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from module_hrm.dao.debugtalk_dao import DebugTalkDao
 from module_hrm.entity.do.case_do import HrmCase
@@ -130,7 +131,7 @@ class DebugTalkService:
         return result
 
     @classmethod
-    def debugtalk_source(cls, query_db: Session, project_id: int = None, case_id: int = None) -> tuple:
+    async def debugtalk_source(cls, query_db: Session, project_id: int = None, case_id: int = None) -> tuple:
         """
         根据项目ID或者caseId查询debugtalk
         project_id and case_id，优先使用projectId,不会使用case_id
@@ -144,43 +145,46 @@ class DebugTalkService:
         :return: tuple(common_debugtalk, project_debugtalk),其中project_debugtalk可能为None
         """
 
-        common_debugtalk = cls.commondebugtalk_source(query_db=query_db)
+        common_debugtalk = await cls.commondebugtalk_source(query_db=query_db)
 
-        project_debugtalk = cls.project_debugtalk_source(query_db=query_db, project_id=project_id, case_id=case_id)
+        project_debugtalk = await cls.project_debugtalk_source(query_db=query_db, project_id=project_id, case_id=case_id)
 
         return common_debugtalk, project_debugtalk
 
     @classmethod
-    def commondebugtalk_source(cls, query_db: Session) -> str:
+    async def commondebugtalk_source(cls, query_db: Session) -> str:
 
         common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id == None)).first()
+            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id == None))
+        common_debugtalk = await run_in_threadpool(common_debugtalk.first)
         common_debugtalk = common_debugtalk.debugtalk if common_debugtalk else ""
         return common_debugtalk
 
     @classmethod
-    def project_debugtalk_source(cls, query_db: Session, project_id: int, case_id=None) -> str:
+    async def project_debugtalk_source(cls, query_db: Session, project_id: int, case_id=None) -> str:
         project_debugtalk = ""
         if not project_id and case_id:
-            project_info = query_db.query(HrmCase).filter(HrmCase.case_id == case_id).first()
+            project_info = query_db.query(HrmCase).filter(HrmCase.case_id == case_id)
+            project_info = await run_in_threadpool(project_info.first)
             project_id = project_info.project_id if project_info else None
         if project_id:
             project_debugtalk = query_db.query(HrmDebugTalk).filter(
-                HrmDebugTalk.project_id == project_id).first()
+                HrmDebugTalk.project_id == project_id)
+            project_debugtalk = await run_in_threadpool(project_debugtalk.first)
             project_debugtalk = project_debugtalk.debugtalk if project_debugtalk else ""
 
         return project_debugtalk
 
     @classmethod
-    def project_debugtalk_map(cls, query_db: Session, project_id: int = None, case_id: int = None,
+    async def project_debugtalk_map(cls, query_db: Session, project_id: int = None, case_id: int = None,
                               run_info: CaseRunModel = None) -> ProjectDebugtalkInfoModel:
         project_debugtalk_set = run_info.project_debugtalk_set.get(project_id, None)
         if project_debugtalk_set:
             return project_debugtalk_set
         else:
             try:
-                common_debugtalk_source = cls.commondebugtalk_source(query_db)
-                project_debugtalk_source = cls.project_debugtalk_source(query_db, project_id, case_id)
+                common_debugtalk_source = await cls.commondebugtalk_source(query_db)
+                project_debugtalk_source = await cls.project_debugtalk_source(query_db, project_id, case_id)
                 debugtalk_obj = DebugTalkHandler(project_debugtalk_source, common_debugtalk_source,
                                                  project_id or case_id)
                 pdm = ProjectDebugtalkInfoModel()

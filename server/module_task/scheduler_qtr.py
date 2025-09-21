@@ -103,7 +103,7 @@ def job_run_test(*args, **kwargs):
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
         # with SessionLocal() as db_session:
-        task = asyncio.ensure_future(run_test_in_background(data, user_module))
+        task = asyncio.ensure_future(run_by_async(data, user_module))
         new_loop.run_until_complete(task)
         new_loop.stop()
         new_loop.close()
