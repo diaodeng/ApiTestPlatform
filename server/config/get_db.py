@@ -1,4 +1,5 @@
 from config.database import SessionLocal, Base, engine
+from config.database_async import SessionLocalAsync
 from utils.log_util import logger
 
 
@@ -53,6 +54,15 @@ async def async_get_db_pro():
         yield session
 
 
+async def get_async_db():
+    """
+    每一个请求处理完毕后会关闭当前连接，不同的请求使用不同的连接
+    :return:
+    """
+    async with SessionLocalAsync() as session:
+        yield session
+
+
 async def init_create_table():
     """
     应用启动时初始化数据库连接
@@ -64,3 +74,4 @@ async def init_create_table():
 
 
 get_db = get_db_pro
+get_async_db = get_async_db
