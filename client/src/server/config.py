@@ -29,30 +29,20 @@ class SearchConfig:
         读取工作目录
         """
         if not os.path.exists(cls.config_file):
-            return []
-        with open(cls.config_file, "r", encoding="utf-8") as f:
-            try:
-                return json.load(f).get("dir", [])
-            except json.JSONDecodeError:
-                logger.warning(f"读取工作目录文件失败:{cls.config_file}")
-                return []
+            cls.write({})
+        return cls.read().dir
 
     @classmethod
     def save_work_dir(cls, dirs: list[str]):
         """
         保存工作目录
         """
-        with open(cls.config_file, "r", encoding="utf-8") as f:
-            try:
-                old_config = json.load(f)
-            except json.JSONDecodeError:
-                logger.warning(f"读取工作目录文件失败:{cls.config_file}")
-                return False
 
-        old_config["dir"] = dirs or []
-
-        with open(cls.config_file, "w", encoding="utf-8") as f:
-            json.dump(old_config, f, ensure_ascii=False)
+        if not os.path.exists(cls.config_file):
+            cls.write({})
+        data = cls.read()
+        data.dir = dirs or []
+        cls.write(data)
         return True
 
     @classmethod

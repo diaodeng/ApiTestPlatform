@@ -120,12 +120,13 @@ class MockHandle:
                                     timeout=3
                                     )
             if result_data.status_code == 200:
-                res_data = result_data.json()
-                logger.info(res_data)
+                logger.info(result_data.text)
+                content_type = result_data.headers.get("Content-Type", "application/json")
+
                 flow.response = Response.make(200,
-                                              content=json.dumps(res_data).encode('utf-8'),
-                                              headers={"Content-Type": "application/json"},
-                                              )
+                                              content=result_data.content,
+                                              headers={"Content-Type": content_type},
+                                          )
                 return
             logger.info(f"mock error[{flow.request.path}]: {result_data.status_code}")
         except Exception as e:

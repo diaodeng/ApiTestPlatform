@@ -26,6 +26,7 @@ class FeiShuHandler:
         logger.debug(f"FeiShuHandler self._token: {self._token}   self._secret_key: {self._secret_key}")
 
         self.config = feishu_bot_config
+        self.config.push = FeishuBotConfig.feishu_bot_push if self.config.push is None else self.config.push
 
     def content_text(self, content):
         "消息卡片"
