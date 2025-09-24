@@ -78,11 +78,11 @@ const uploadFile = () => {
     // 发送请求到后端
     uploadParamsFileToServer(uploadFormData).then(response => {
       // 处理上传成功的逻辑
-      ElMessage.success("上传成功");
+      ElMessage.success("导入成功");
       getCaseParamsList();
     }).catch(error => {
       // 处理上传失败的逻辑
-      ElMessage.error("上传失败");
+      ElMessage.error("导入失败");
     }).finally(() => {
       loading.value.import = false;
     });
