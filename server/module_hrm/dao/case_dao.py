@@ -421,10 +421,12 @@ class CaseParamsDao:
         :param use_case_id: 用例 ID
         :param page: 页码（从 1 开始）
         :param page_size: 每页多少行
+        :param enabled: 状态，-1 所有，0 禁用，1 启用
         :return: list[dict]
         """
         # 1️⃣ 先查 row_id（限制数量）
         with SessionLocal() as db:
+            # db.execute(f"SET ob_query_timeout=60000000") # 超时60s
             query = db.query(HrmCaseParams).filter_by(case_id=use_case_id)
             if enabled is not None and enabled != -1:
                 query = query.filter_by(enabled=enabled)
