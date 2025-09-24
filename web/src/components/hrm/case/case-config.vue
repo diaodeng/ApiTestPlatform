@@ -60,6 +60,8 @@ const loading = ref({
   searchParam: false
 });
 
+const importProcess = ref("");
+
 const configContainerRef = ref();
 const configContainerCurrentHeight = ref(0);
 
@@ -76,7 +78,7 @@ const uploadFile = () => {
     uploadFormData.append('file', file.value);
     uploadFormData.append('caseId', formData.value.caseId);
     // 发送请求到后端
-    uploadParamsFileToServer(uploadFormData).then(response => {
+    uploadParamsFileToServer(uploadFormData, importProcess).then(response => {
       // 处理上传成功的逻辑
       ElMessage.success("导入成功");
       getCaseParamsList();
@@ -448,6 +450,7 @@ const calcConfigContainerHeight = computed(() => {
         <el-main style="max-height: calc(100vh - 95px);">
           <div>
             <input type="file" @change="handleFileChange" />
+            <el-text type="primary" v-if="file">{{ importProcess }}</el-text>
             <el-button @click="uploadFile" :disabled="!file" :loading="loading.import">上传</el-button>
             <el-button @click="delCaseParamsCall" type="danger" :disabled="loading.import">删除</el-button>
 

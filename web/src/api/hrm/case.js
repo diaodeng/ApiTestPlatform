@@ -85,7 +85,7 @@ export function getComparator(data) {
   })
 }
 
-export function uploadParamsFileToServer(data) {
+export function uploadParamsFileToServer(data, inprocess) {
   return request({
     url: '/hrm/case/params/import',
     method: 'POST',
@@ -98,7 +98,8 @@ export function uploadParamsFileToServer(data) {
           (progressEvent.loaded * 100) / progressEvent.total
         );
         console.log("上传进度:", percent + "%");
-        ElMessage.success("上传进度: " + percent + "%");
+        inprocess.value = "上传进度: " + percent + "%";
+        // ElMessage.success("上传进度: " + percent + "%");
     }
   })
 }
