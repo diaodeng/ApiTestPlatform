@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import {ElMessage} from "element-plus";
 
 // 查询用例列表
 export function listCase(query) {
@@ -97,6 +98,7 @@ export function uploadParamsFileToServer(data) {
           (progressEvent.loaded * 100) / progressEvent.total
         );
         console.log("上传进度:", percent + "%");
+        ElMessage.success("上传进度: " + percent + "%");
     }
   })
 }
