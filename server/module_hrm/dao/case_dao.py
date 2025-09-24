@@ -484,8 +484,12 @@ class CaseParamsDao:
 
     @classmethod
     def delete_table(cls, db: Session, use_case_id):
-        db.query(HrmCaseParams).filter_by(case_id=use_case_id).delete()
-        db.commit()
+        while True:
+            delete_count = db.query(HrmCaseParams).filter_by(case_id=use_case_id).limit(5000).delete(synchronize_session=False)
+            db.commit()
+            if delete_count == 0:
+                break
+
 
 
     @classmethod
