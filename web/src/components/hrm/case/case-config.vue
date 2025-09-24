@@ -55,7 +55,9 @@ const loading = ref({
   initParameter: false,
   save: false,
   debug: false,
-  updateData: false
+  updateData: false,
+  import: false,
+  searchParam: false
 });
 
 const configContainerRef = ref();
@@ -68,22 +70,28 @@ const handleFileChange = (event) => {
 const file = ref(null);
 const uploadFile = () => {
   if (file.value) {
+    loading.value.import = true;
+    ElMessage.success("上传中...");
     const uploadFormData = new FormData();
     uploadFormData.append('file', file.value);
     uploadFormData.append('caseId', formData.value.caseId);
     // 发送请求到后端
     uploadParamsFileToServer(uploadFormData).then(response => {
       // 处理上传成功的逻辑
-      console.log('上传成功', response);
+      ElMessage.success("上传成功");
+      getCaseParamsList();
     }).catch(error => {
       // 处理上传失败的逻辑
-      console.error('上传失败', error);
+      ElMessage.error("上传失败");
+    }).finally(() => {
+      loading.value.import = false;
     });
   }
 };
 
 // 删除用例参数
 const delCaseParamsCall = () => {
+  loading.value.import = true;
   let data = {
     caseId: formData.value.caseId
   }
@@ -92,11 +100,14 @@ const delCaseParamsCall = () => {
       ElMessage.success("删除成功");
       getCaseParamsList();
     }
+  }).finally(() => {
+    loading.value.import = false;
   });
 }
 
 // 查询用例参数列表
 const getCaseParamsList = () => {
+  loading.value.searchParam = true;
   let data = {
     caseId: formData.value.caseId
   }
@@ -106,6 +117,8 @@ const getCaseParamsList = () => {
       // parameterInfo.value.tableDatas = response.data;
 
     }
+  }).finally(() => {
+    loading.value.searchParam = false;
   });
 }
 
@@ -435,11 +448,11 @@ const calcConfigContainerHeight = computed(() => {
         <el-main style="max-height: calc(100vh - 95px);">
           <div>
             <input type="file" @change="handleFileChange" />
-            <el-button @click="uploadFile" :disabled="!file">上传</el-button>
-            <el-button @click="delCaseParamsCall" type="danger">删除</el-button>
+            <el-button @click="uploadFile" :disabled="!file" :loading="loading.import">上传</el-button>
+            <el-button @click="delCaseParamsCall" type="danger" :disabled="loading.import">删除</el-button>
 
             <el-text>当前参数数量：{{ paramsCount }}</el-text>
-            <el-button @click="getCaseParamsList" type="primary">查询</el-button>
+            <el-button @click="getCaseParamsList" type="primary" :disabled="loading.searchParam">查询</el-button>
 
           </div>
         </el-main>
