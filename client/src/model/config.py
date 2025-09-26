@@ -19,6 +19,7 @@ class MitmProxyConfigModel(BaseModel):
     script_path: str = ""
     is_mock: bool = False
     mitmproxy_config_dir: str = os.path.join(os.path.expanduser("~"), ".mitmproxy")
+    proxy_client: str = ""
 
     add_headers: str = ""
     add_body: str = ""

@@ -210,19 +210,19 @@ class ProxyCore:
             self.master.shutdown()
 
 
-    def start_loop(self, port, web_port, web_open_browser, config_dir=None):
+    def start_loop(self, port, web_port, web_open_browser, config_dir=None, proxy_application=None):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self.run(port=port, web_port=web_port, web_open_browser=web_open_browser, config_dir=config_dir, loop=self.loop))
+        self.loop.run_until_complete(self.run(port=port, web_port=web_port, web_open_browser=web_open_browser, config_dir=config_dir, loop=self.loop, mode=proxy_application))
 
 
-    def start(self, port=8080, web_port=8081, open_browser=True, config_dir=None):
+    def start(self, port=8080, web_port=8081, open_browser=True, config_dir=None, proxy_application=None):
         if self.process and self.process.is_alive():
             print("mitmproxy already running")
             return
         self.process = threading.Thread(
-            target=self.start_loop, args=(port, web_port, open_browser, config_dir), daemon=True
+            target=self.start_loop, args=(port, web_port, open_browser, config_dir, proxy_application), daemon=True
         )
         self.process.start()
         print(f"mitmproxy started pid={self.process.name}")

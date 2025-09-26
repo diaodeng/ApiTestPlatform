@@ -7,6 +7,7 @@ from loguru import logger
 from server.config import MitmproxyConfig
 from utils.mitmproxy_tool import ProxyCore, MockHandle as mockHandle
 from utils.share_data import get_shared
+from common.ui_utils.ui_util import UiUtil
 
 
 class MitmHandel:
@@ -20,6 +21,7 @@ class MitmHandel:
         self.task = None
         self.port_field = ft.TextField(label="代理端口", value=str(self.config.port))
         self.web_port_field = ft.TextField(label="Web端口", value=str(self.config.web_port))
+        self.proxy_application_view = ft.TextField(label="代理应用", value=self.config.proxy_client)
         self.web_open_browser = ft.Checkbox("打开浏览器", value=self.config.web_open_browser)
         self.mitmproxy_config_dir = ft.TextField(label="mitmproxy配置目录", value=self.config.mitmproxy_config_dir)
         self.status_text = ft.Text("代理未启动")
@@ -57,6 +59,7 @@ class MitmHandel:
         self.config.port = int(self.port_field.value)
         self.config.web_port = int(self.web_port_field.value)
         self.config.web_open_browser = self.web_open_browser.value
+        self.config.proxy_client = self.proxy_application_view.value
         self.config.mitmproxy_config_dir = self.mitmproxy_config_dir.value
         self.config.is_mock = self.is_mock.value
         self.config.open_include = self.open_include.value
@@ -67,8 +70,7 @@ class MitmHandel:
         self.config.add_headers = self.add_headers_field.value
         self.config.add_body = self.add_body_field.value
         MitmproxyConfig.write(self.config)
-        self.page.snack_bar = ft.SnackBar(ft.Text("配置已保存"))
-        self.page.snack_bar.open = True
+        UiUtil.show_snackbar_success(self.page, "配置已保存")
         await ProxyCore.update_config()
         logger.info("代理配置已保存")
         logger.info(f"mitmproxy config: {self.config}")
@@ -89,8 +91,8 @@ class MitmHandel:
                     self.port_field,
                     self.web_port_field,
                     self.mitmproxy_config_dir
-
                 ]),
+                self.proxy_application_view,
                 self.include_field,
                 self.exclude_field,
                 self.add_headers_field,
@@ -120,6 +122,7 @@ class MitmHandel:
             self.proxy_core.run(int(self.port_field.value), int(self.web_port_field.value),
                                 self.web_open_browser.value))
         # await self.proxy_core.run(int(self.port_field.value),int(self.web_port_field.value),self.web_open_browser.value)
+        UiUtil.show_snackbar_success(self.page, "mitmproxy 已启动")
         self.page.update()
 
     async def stop_proxy_by_async(self, e):
@@ -149,9 +152,11 @@ class MitmHandel:
         logger.info("mitmproxy 已停止")
 
         self.proxy_core = None
+        UiUtil.show_snackbar_success(self.page, "mitmproxy 已停止")
         self.page.update()
 
     async def start_proxy(self, e):
+        await self.save_config()
         if self.proxy_running:
             logger.info("mitmproxy 已启动")
             return
@@ -169,6 +174,7 @@ class MitmHandel:
                                    int(self.web_port_field.value),
                                    self.web_open_browser.value,
                                    self.mitmproxy_config_dir.value,
+                                   self.proxy_application_view.value.split(",") if self.proxy_application_view.value.split(",") else [],
                                    ),
                              name="mitmproxy-tool",
                              daemon=True
@@ -176,6 +182,7 @@ class MitmHandel:
         self.proxy.start()
         self.status_text.value = f"代理已启动"
         self.page.update(self.status_text)
+        UiUtil.show_snackbar_success(self.page, "mitmproxy 已启动")
 
     def stop_proxy(self, e):
         if not self.proxy_running:
@@ -192,3 +199,4 @@ class MitmHandel:
         self.status_text.value = "代理已停止"
         logger.info("mitmproxy 已停止")
         self.page.update(self.status_text)
+        UiUtil.show_snackbar_success(self.page, "mitmproxy 已停止")
