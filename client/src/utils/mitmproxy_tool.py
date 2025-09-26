@@ -90,25 +90,25 @@ class MockHandle:
 
     def configure(self, updated: set[str]):
         try:
-            if updated:
-                old_config1 = MitmproxyConfig.read()
-                for key in updated :
-                    setattr(old_config1, key, getattr(ctx.options, key))
-                MitmproxyConfig.write(old_config1)
+            # if updated:
+            #     old_config1 = MitmproxyConfig.read()
+            #     for key in updated :
+            #         setattr(old_config1, key, getattr(ctx.options, key))
+            #     MitmproxyConfig.write(old_config1)
 
-            # if "mode" in updated:
-            #     # logger.info(ctx.options.items())
-            #     old_config = MitmproxyConfig.read()
-            #     model_value = getattr(ctx.options, "mode")
-            #     if model_value and model_value[0].startswith("local"):
-            #         model_config = model_value[0].split(":", 1)
-            #         old_config.proxy_model = model_config[0]
-            #         old_config.proxy_model_value = model_config[1]
-            #     elif model_value:
-            #         old_config.proxy_model = model_value[0]
-            #     else:
-            #         old_config.proxy_model = ""
-            #     MitmproxyConfig.write(old_config)
+            if "mode" in updated:
+                # logger.info(ctx.options.items())
+                old_config = MitmproxyConfig.read()
+                model_value = getattr(ctx.options, "mode")
+                if model_value and model_value[0].startswith("local"):
+                    model_config = model_value[0].split(":", 1)
+                    old_config.proxy_model = model_config[0]
+                    old_config.proxy_model_value = model_config[1]
+                elif model_value:
+                    old_config.proxy_model = model_value[0]
+                else:
+                    old_config.proxy_model = ""
+                MitmproxyConfig.write(old_config)
         except Exception as e:
             logger.error(f"回调配置更新失败： {e}")
 
