@@ -20,6 +20,8 @@ class MitmProxyConfigModel(BaseModel):
     is_mock: bool = False
     mitmproxy_config_dir: str = os.path.join(os.path.expanduser("~"), ".mitmproxy")
     proxy_client: str = ""
+    proxy_model: str = "local"
+    proxy_model_value: str = "CPOS-DF.exe"
 
     add_headers: str = ""
     add_body: str = ""
@@ -28,6 +30,10 @@ class MitmProxyConfigModel(BaseModel):
     open_include: bool = False
     open_exclude: bool = False
     mock_server: str = "https://testautoapi.rta-os.com/hrm/mock"
+
+    model_config = {
+        "extra": "allow"  # 允许未知字段
+    }
 
 
 class PaymentMockConfigModel(BaseModel):

@@ -117,8 +117,10 @@ class MitmproxyConfig:
 
     @classmethod
     def read(cls) -> MitmProxyConfigModel:
+
         if not os.path.exists(cls.config_file):
-            return MitmProxyConfigModel()
+            cls.write({})
+            # return MitmProxyConfigModel()
         with open(cls.config_file) as f:
             config = json.load(f)
             return MitmProxyConfigModel(**config)

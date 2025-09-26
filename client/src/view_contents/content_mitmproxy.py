@@ -2,6 +2,7 @@ import asyncio
 from multiprocessing import Process, Manager, freeze_support
 
 import flet as ft
+from flet.core.control_event import ControlEvent
 from loguru import logger
 
 from server.config import MitmproxyConfig
@@ -21,7 +22,15 @@ class MitmHandel:
         self.task = None
         self.port_field = ft.TextField(label="代理端口", value=str(self.config.port))
         self.web_port_field = ft.TextField(label="Web端口", value=str(self.config.web_port))
-        self.proxy_application_view = ft.TextField(label="代理应用", value=self.config.proxy_client)
+        self.proxy_model_view = ft.Dropdown(
+            value=self.config.proxy_model,
+            editable=True,
+            label="model",
+            options=self.get_options(),
+            on_change=self.dropdown_changed,
+        )
+        self.proxy_model_value_view = ft.TextField(label="需要代理的应用名，多个用逗号分隔", value=str(self.config.proxy_model_value), visible=self.config.proxy_model == "local")
+        self.proxy_application_view = ft.TextField(label="代理应用", value=self.config.proxy_model)
         self.web_open_browser = ft.Checkbox("打开浏览器", value=self.config.web_open_browser)
         self.mitmproxy_config_dir = ft.TextField(label="mitmproxy配置目录", value=self.config.mitmproxy_config_dir)
         self.status_text = ft.Text("代理未启动")
@@ -32,12 +41,12 @@ class MitmHandel:
                                              disabled=not self.proxy_running
                                              )
         self.is_mock = ft.Checkbox("启用mock", value=self.config.is_mock)
-        self.open_include = ft.Checkbox("启用包含", value=self.config.open_include)
-        self.open_exclude = ft.Checkbox("启用排除", value=self.config.open_exclude)
-        self.include_field = ft.TextField(label="包含", value=self.config.include, multiline=True)
-        self.exclude_field = ft.TextField(label="排除", value=self.config.exclude, multiline=True)
+        self.open_include = ft.Checkbox("启用包含", value=self.config.open_include, on_change=self.use_include_change)
+        self.open_exclude = ft.Checkbox("启用排除", value=self.config.open_exclude, on_change=self.use_exclude_change)
+        self.include_field = ft.TextField(label="包含的请求路径，多个用逗号分割", value=self.config.include, multiline=True, visible=self.config.open_include)
+        self.exclude_field = ft.TextField(label="排除的请求路径，多个用逗号分割", value=self.config.exclude, multiline=True, visible=self.config.open_exclude)
         self.mock_server_field = ft.TextField(label="mock服务器", value=self.config.mock_server)
-        self.add_headers_field = ft.TextField(label="添加headers", value=self.config.add_headers, multiline=True)
+        self.add_headers_field = ft.TextField(label="mock请求添加headers，一行一条记录", value=self.config.add_headers, multiline=True)
         self.add_body_field = ft.TextField(label="添加body", value=self.config.add_body, multiline=True)
         self.save_config_button = ft.ElevatedButton("保存配置",
                                                     on_click=self.save_config_by_button
@@ -45,6 +54,29 @@ class MitmHandel:
         self.stest_button = ft.ElevatedButton("测试",
                                               on_click=self.test_proxy
                                               )
+
+    def use_include_change(self, e:ControlEvent):
+        self.include_field.visible = e.control.value
+        self.page.update()
+
+    def use_exclude_change(self, e:ControlEvent):
+        self.exclude_field.visible = e.control.value
+        self.page.update()
+
+    def get_options(self):
+        options = ["local", "regular", "wireguard", "socks5", "dns"]
+
+        return [ft.DropdownOption(
+            key=model,
+            content=ft.Text(
+                value=model
+            ),
+        ) for model in options]
+
+    def dropdown_changed(self, e):
+        self.config.proxy_model = e.control.value
+        self.proxy_model_value_view.visible = self.config.proxy_model == "local"
+        self.page.update()
 
     def test_proxy(self, e):
         ProxyCore.find_mitm_children()
@@ -59,7 +91,8 @@ class MitmHandel:
         self.config.port = int(self.port_field.value)
         self.config.web_port = int(self.web_port_field.value)
         self.config.web_open_browser = self.web_open_browser.value
-        self.config.proxy_client = self.proxy_application_view.value
+        self.config.proxy_model = self.proxy_model_view.value
+        self.config.proxy_model_value = self.proxy_model_value_view.value
         self.config.mitmproxy_config_dir = self.mitmproxy_config_dir.value
         self.config.is_mock = self.is_mock.value
         self.config.open_include = self.open_include.value
@@ -92,11 +125,14 @@ class MitmHandel:
                     self.web_port_field,
                     self.mitmproxy_config_dir
                 ]),
-                self.proxy_application_view,
+                # ft.Row([
+                #     self.proxy_model_view,
+                #     self.proxy_model_value_view,
+                # ]),
                 self.include_field,
                 self.exclude_field,
                 self.add_headers_field,
-                self.add_body_field,
+                # self.add_body_field,
                 ft.Row([
                     self.start_button,
                     self.stop_button,
@@ -119,8 +155,7 @@ class MitmHandel:
         self.proxy_core = ProxyCore()
         self.loop = asyncio.get_running_loop()
         self.task = self.loop.create_task(
-            self.proxy_core.run(int(self.port_field.value), int(self.web_port_field.value),
-                                self.web_open_browser.value))
+            self.proxy_core.run(self.config))
         # await self.proxy_core.run(int(self.port_field.value),int(self.web_port_field.value),self.web_open_browser.value)
         UiUtil.show_snackbar_success(self.page, "mitmproxy 已启动")
         self.page.update()
@@ -156,7 +191,6 @@ class MitmHandel:
         self.page.update()
 
     async def start_proxy(self, e):
-        await self.save_config()
         if self.proxy_running:
             logger.info("mitmproxy 已启动")
             return
@@ -169,19 +203,16 @@ class MitmHandel:
         freeze_support()
         # share_data = get_shared()
         # share_data.update(self.config.model_dump())
-        self.proxy = Process(target=ProxyCore().start_loop,
-                             args=(int(self.port_field.value),
-                                   int(self.web_port_field.value),
-                                   self.web_open_browser.value,
-                                   self.mitmproxy_config_dir.value,
-                                   self.proxy_application_view.value.split(",") if self.proxy_application_view.value.split(",") else [],
-                                   ),
-                             name="mitmproxy-tool",
-                             daemon=True
-                             )
-        self.proxy.start()
-        self.status_text.value = f"代理已启动"
-        self.page.update(self.status_text)
+        try:
+            self.proxy = Process(target=ProxyCore().start_loop,
+                                 args=(self.config,),
+                                 name="mitmproxy-tool",
+                                 daemon=True
+                                 )
+            self.proxy.start()
+        except Exception as e:
+            UiUtil.show_snackbar_error(self.page, f"mitmproxy启动失败:{e}")
+            return
         UiUtil.show_snackbar_success(self.page, "mitmproxy 已启动")
 
     def stop_proxy(self, e):
@@ -196,7 +227,5 @@ class MitmHandel:
             self.proxy.terminate()
             self.proxy.join()
             self.proxy = None
-        self.status_text.value = "代理已停止"
         logger.info("mitmproxy 已停止")
-        self.page.update(self.status_text)
         UiUtil.show_snackbar_success(self.page, "mitmproxy 已停止")
