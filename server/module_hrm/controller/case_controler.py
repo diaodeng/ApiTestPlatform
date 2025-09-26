@@ -153,7 +153,7 @@ async def delete_hrm_case(request: Request,
                           ):
     try:
         delete_module = DeleteCaseModel(caseIds=case_ids)
-        delete_module_result = CaseService.delete_case_services(query_db, delete_module, current_user)
+        delete_module_result = await CaseService.delete_case_services(query_db, delete_module, current_user)
         if delete_module_result.is_success:
             logger.info(delete_module_result.message)
             return ResponseUtil.success(msg=delete_module_result.message)
@@ -262,7 +262,7 @@ async def delete_case_params(request: Request,
                              ):
     try:
         # 获取全量数据
-        CaseParamsService.delete_case_params_services(query_db, delete_data)
+        await CaseParamsService.delete_case_params_services(query_db, delete_data)
         return ResponseUtil.success(msg='删除成功')
     except Exception as e:
         logger.exception(e)

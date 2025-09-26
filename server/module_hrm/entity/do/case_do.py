@@ -61,7 +61,9 @@ class HrmCaseParams(Base, BaseModel):
                                           nullable=False)
 
     __table_args__ = (
-        Index("idx_case_row_enabled", "case_id", "row_id", "enabled"),  # 联合索引
+        Index("idx_case_enabled_sort", "case_id", "enabled", "sort_key", "row_id"),  # 联合索引
+        Index("idx_case_sort", "case_id", "sort_key", "row_id"),  # 联合索引
+        Index("idx_case_row", "case_id", "row_id"),  # 联合索引
     )
 
 
