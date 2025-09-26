@@ -62,6 +62,7 @@ class RedisSettings(BaseSettings):
     redis_username: str = ''
     redis_password: str = ''
     redis_database: int = 2
+    redis_celery_database: int = 3
 
 
 class MessageFeishuBotSettings(BaseSettings):

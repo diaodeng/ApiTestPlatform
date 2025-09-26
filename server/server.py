@@ -37,6 +37,7 @@ from module_qtr.controller.agent_controller import agentController, startup_hand
 from module_hrm.controller.forward_rules_controller import forwardRulesController
 from module_hrm.controller.test_controller import mockController
 from module_hrm.controller.agent_controller import agentController as agentManagerController
+from module_hrm.controller.celery_controller import celeryController
 
 from config.env import AppConfig
 from config.get_redis import RedisUtil
@@ -116,6 +117,7 @@ controller_list = [
     {'router': mockController, 'tags': ['QTR-mock管理']},
     {'router': forwardRulesController, 'tags': ['QTR-转发规则管理']},
     {'router': agentManagerController, 'tags': ['QTR-agent后台管理']},
+    {'router': celeryController, 'tags': ['celery']},
 ]
 
 for controller in controller_list:

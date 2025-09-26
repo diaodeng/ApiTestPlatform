@@ -12,12 +12,16 @@ import requests
 
 import psutil
 # import psutil
+from mitmproxy.addonmanager import Loader
+from mitmproxy import ctx
+from mitmproxy import tls
 from mitmproxy.options import Options
 from mitmproxy.tools.web.master import WebMaster, webaddons
 from mitmproxy.tools.dump import DumpMaster
 from mitmproxy.http import HTTPFlow, Response
 from loguru import logger
 
+from model.config import MitmProxyConfigModel
 from server.config import MitmproxyConfig
 
 
@@ -84,6 +88,39 @@ class MockHandle:
         MockHandle.include = config.include.split(",")
         MockHandle.mock_server = config.mock_server
 
+    def configure(self, updated: set[str]):
+        try:
+            if updated:
+                old_config1 = MitmproxyConfig.read()
+                for key in updated :
+                    setattr(old_config1, key, getattr(ctx.options, key))
+                MitmproxyConfig.write(old_config1)
+
+            # if "mode" in updated:
+            #     # logger.info(ctx.options.items())
+            #     old_config = MitmproxyConfig.read()
+            #     model_value = getattr(ctx.options, "mode")
+            #     if model_value and model_value[0].startswith("local"):
+            #         model_config = model_value[0].split(":", 1)
+            #         old_config.proxy_model = model_config[0]
+            #         old_config.proxy_model_value = model_config[1]
+            #     elif model_value:
+            #         old_config.proxy_model = model_value[0]
+            #     else:
+            #         old_config.proxy_model = ""
+            #     MitmproxyConfig.write(old_config)
+        except Exception as e:
+            logger.error(f"回调配置更新失败： {e}")
+
+    def load(self, loader: Loader):
+        logger.info("load被调用")
+
+    def tls_failed_client(self, data: tls.TlsData):
+        logger.info("tls_failed_client")
+
+    def tls_failed_server(data: tls.TlsData):
+        logger.info("tls_failed_server")
+
 
     async def request(self, flow: HTTPFlow):
         logger.info(f"request: {flow.request.path}")
@@ -120,11 +157,10 @@ class MockHandle:
                                     timeout=3
                                     )
             if result_data.status_code == 200:
-                res_data = result_data.json()
-                logger.info(res_data)
+                logger.info(result_data.text)
                 flow.response = Response.make(200,
-                                              content=json.dumps(res_data).encode('utf-8'),
-                                              headers={"Content-Type": "application/json"},
+                                              content=result_data.content,
+                                              headers={"Content-Type": result_data.headers.get("Content-Type")},
                                               )
                 return
             logger.info(f"mock error[{flow.request.path}]: {result_data.status_code}")
@@ -169,21 +205,24 @@ class ProxyCore:
         MockHandle.mock_server = config.mock_server
 
     async def run(self,
-                  port=8080,
-                  web_port=8081,
-                  web_open_browser=True,
-                  config_dir="",
-                  loop=None,
-                  mode=["local:CPOS-DF,df_sv,Launcher,java,Pos,CPOS-KH,ONENOTE,ONENOTEM,HttpServer"]):
+                  config_data: MitmProxyConfigModel,
+                  # mode=["local:CPOS-DF,df_sv,Launcher,java,Pos,CPOS-KH,ONENOTE,ONENOTEM,HttpServer"]
+                  ):
         """
         web-port
         """
         logger.info("mitmproxy proxy start")
+        mode = [config_data.proxy_model]
+        if config_data.proxy_model == "local":
+            mode = [f"{config_data.proxy_model}:{config_data.proxy_model_value}"]
+        if not config_data.proxy_model:
+            mode = []
         try:
+            config_dir = config_data.mitmproxy_config_dir
             if config_dir and not os.path.exists(config_dir):
                 os.makedirs(config_dir)
             opts = Options(listen_host="127.0.0.1",
-                           listen_port=port,
+                           listen_port=config_data.port,
                            confdir=config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy"),
                            # confdir="C:\\Users\\Administrator\\.mitmproxy",
                            mode=mode,
@@ -195,8 +234,8 @@ class ProxyCore:
 
             self.master.addons.add(MockHandle())
             self.master.options.add_option("web_host", str, "127.0.0.1", "")
-            self.master.options.add_option("web_port", int, web_port, "")
-            self.master.options.add_option("web_open_browser", bool, web_open_browser, "")
+            self.master.options.add_option("web_port", int, config_data.web_port, "")
+            self.master.options.add_option("web_open_browser", bool, config_data.web_open_browser, "")
         except Exception as e:
             logger.error(f"mitmproxy proxy error[{e}]")
             logger.exception(e)
@@ -210,19 +249,19 @@ class ProxyCore:
             self.master.shutdown()
 
 
-    def start_loop(self, port, web_port, web_open_browser, config_dir=None, proxy_application=None):
+    def start_loop(self, config_data: MitmProxyConfigModel):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self.run(port=port, web_port=web_port, web_open_browser=web_open_browser, config_dir=config_dir, loop=self.loop, mode=proxy_application))
+        self.loop.run_until_complete(self.run(config_data))
 
 
-    def start(self, port=8080, web_port=8081, open_browser=True, config_dir=None, proxy_application=None):
+    def start(self, config_data: MitmProxyConfigModel):
         if self.process and self.process.is_alive():
             print("mitmproxy already running")
             return
         self.process = threading.Thread(
-            target=self.start_loop, args=(port, web_port, open_browser, config_dir, proxy_application), daemon=True
+            target=self.start_loop, args=(config_data, ), daemon=True
         )
         self.process.start()
         print(f"mitmproxy started pid={self.process.name}")

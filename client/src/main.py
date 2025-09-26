@@ -1,4 +1,7 @@
+import asyncio
 import os
+import threading
+import time
 from multiprocessing import freeze_support
 
 import flet as ft
@@ -105,7 +108,13 @@ async def main(page: ft.Page):
             sys_show_view.value = f"获取系统信息异常:{e}"
         sys_show_view.update()
 
-    add_timer_and_start(10, get_sys_info_view)
+    def update_sys_info():
+        while True:
+            get_sys_info_view()
+            time.sleep(10)
+
+    # add_timer_and_start(10, get_sys_info_view)
+    threading.Thread(target=update_sys_info).start()
     page.on_error = lambda e: log.error(f"页面异常:{e}")
     page.update()
 

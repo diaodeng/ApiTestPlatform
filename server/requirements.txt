@@ -24,3 +24,4 @@ jsonpath==0.82.2
 jinja2
 pdfkit
 wkhtmltopdf
+celery
