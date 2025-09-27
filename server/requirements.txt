@@ -5,6 +5,7 @@ fastapi[all]==0.109.1
 loguru==0.7.2
 openpyxl==3.1.2
 pandas==2.1.4
+bcrypt==4.1.2
 passlib[bcrypt]==1.7.4
 Pillow==10.2.0
 psutil==5.9.7
@@ -24,4 +25,3 @@ jsonpath==0.82.2
 jinja2
 pdfkit
 wkhtmltopdf
-celery
