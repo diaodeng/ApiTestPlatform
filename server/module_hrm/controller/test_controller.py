@@ -78,7 +78,7 @@ async def mock_test(request: Request,
                 "message": "没有匹配到mock规则",
             }
             logger_mock.info(json.dumps(req, ensure_ascii=False))
-            return JSONResponse(content=req, status_code=500, media_type="application/json")
+            return JSONResponse(content=req, status_code=204, media_type="application/json")
         logger_mock.info(json.dumps(req, ensure_ascii=False))
         content_type = req.get("headers", {}).get("Content-Type")
         if not content_type:
