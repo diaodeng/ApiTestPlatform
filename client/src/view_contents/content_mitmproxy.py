@@ -43,8 +43,8 @@ class MitmHandel:
         self.is_mock = ft.Checkbox("启用mock", value=self.config.is_mock)
         self.open_include = ft.Checkbox("启用包含", value=self.config.open_include, on_change=self.use_include_change)
         self.open_exclude = ft.Checkbox("启用排除", value=self.config.open_exclude, on_change=self.use_exclude_change)
-        self.include_field = ft.TextField(label="包含的请求路径，多个用逗号分割", value=self.config.include, multiline=True, visible=self.config.open_include)
-        self.exclude_field = ft.TextField(label="排除的请求路径，多个用逗号分割", value=self.config.exclude, multiline=True, visible=self.config.open_exclude)
+        self.include_field = ft.TextField(label="启用mock的请求路径，多个用逗号分割", value=self.config.include, multiline=True, visible=self.config.open_include)
+        self.exclude_field = ft.TextField(label="禁用mock的请求路径，多个用逗号分割", value=self.config.exclude, multiline=True, visible=self.config.open_exclude)
         self.mock_server_field = ft.TextField(label="mock服务器", value=self.config.mock_server)
         self.add_headers_field = ft.TextField(label="mock请求添加headers，一行一条记录", value=self.config.add_headers, multiline=True)
         self.add_body_field = ft.TextField(label="添加body", value=self.config.add_body, multiline=True)
@@ -103,7 +103,7 @@ class MitmHandel:
         self.config.add_headers = self.add_headers_field.value
         self.config.add_body = self.add_body_field.value
         MitmproxyConfig.write(self.config)
-        UiUtil.show_snackbar_success(self.page, "配置已保存")
+        # UiUtil.show_snackbar_success(self.page, "配置已保存")
         await ProxyCore.update_config()
         logger.info("代理配置已保存")
         logger.info(f"mitmproxy config: {self.config}")

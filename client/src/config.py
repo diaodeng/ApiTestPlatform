@@ -3,12 +3,16 @@ import sys
 import flet as ft
 from loguru import logger
 
+from view_contents.exitAlertDialog import ExitAlertDialog
+
+
 def resource_path(relative_path: str) -> str:
     """获取资源文件绝对路径，兼容 PyInstaller 打包"""
     if hasattr(sys, '_MEIPASS'):  # PyInstaller 打包后执行路径
         return os.path.join(sys._MEIPASS, relative_path)
     # 正常开发环境
     return os.path.join(os.path.dirname(__file__), relative_path)
+
 
 class AppConfig:
     """配置应用基本信息"""

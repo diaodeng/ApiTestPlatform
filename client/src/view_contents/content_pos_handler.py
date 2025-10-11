@@ -5,10 +5,12 @@ import os
 from threading import Thread, Event
 
 import flet as ft
+from flet.core.alignment import bottom_right
 from loguru import logger
 
-from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig
-from utils import file_handle
+from model.pos_network_model import PosLogoutModel
+from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig
+from utils import file_handle, pos_network
 from utils.common import kill_process_by_name
 from common.ui_utils.ui_util import UiUtil
 
@@ -81,6 +83,7 @@ class PosHandler:
                     self.before_start_replace_mitm_cert_view,
                     self.before_start_change_pos_view,
                     self.before_start_change_env_view,
+                    self.before_start_logout_view,
                     self.before_start_remove_cache_view,
                     ft.TextField(label="查找结果", on_change=lambda e: self.search_result(e))
                 ],
@@ -149,7 +152,7 @@ class PosHandler:
             "结束POS",
             on_click=lambda e: self.kill_pos_process(),
             # disabled=True,
-            # color="red"
+            color="red"
         )
 
         self.before_start_back_view = ft.Checkbox(
@@ -182,8 +185,15 @@ class PosHandler:
 
         self.before_start_change_env_view = ft.Checkbox(
             label="切换环境",
-            tooltip="切换本地环境，修改pos.ini、切换database、logs、缓存等",
+            tooltip="调用posChange接口切换服务器环境",
             value=self.start_config.change_env,
+            on_change=self.update_start_config,
+        )
+
+        self.before_start_logout_view = ft.Checkbox(
+            label="注销账号",
+            tooltip="调用kickOut接口注销账号",
+            value=self.start_config.account_logout,
             on_change=self.update_start_config,
         )
 
@@ -223,7 +233,7 @@ class PosHandler:
                 ),
             ])),
             actions=[
-                ft.TextButton("Yes", on_click=lambda e: self.change_env(e, "RTA_TEST")),
+                ft.TextButton("Yes", on_click=self.change_env),
                 ft.TextButton("No", on_click=lambda e: e.control.close()),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
@@ -266,6 +276,8 @@ class PosHandler:
         self.start_config.backup = self.before_start_back_view.value
         self.start_config.replace_mitm_cert = self.before_start_replace_mitm_cert_view.value
         self.start_config.change_env = self.before_start_change_env_view.value
+        self.start_config.change_pos = self.before_start_change_pos_view.value
+        self.start_config.account_logout = self.before_start_logout_view.value
         self.start_config.remove_cache = self.before_start_remove_cache_view.value
         self.start_config.cover_payment_driver = self.before_start_cover_payment_driver_view.value
         StartConfig.write(self.start_config)
@@ -312,20 +324,47 @@ class PosHandler:
         self.status_text.value = "正在停止搜索..."
         self.page.update()
 
-    def open_pos_file(self,e:ft.ControlEvent, path):
+    async def open_pos_file(self,e:ft.ControlEvent):
         """打开文件"""
+        path = e.control.data
         logger.info(f"启动POS文件: {path}")
         logger.debug(f"启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
         kill_process_by_name("CPOS-DF.exe")
         UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
+        await asyncio.sleep(2)
 
         if self.start_config.change_pos:
             logger.info(f"切换环境")
-            if PosConfig.change_pos(path):
-                UiUtil.show_snackbar_success(self.page, "切换POS成功")
-            else:
-                UiUtil.show_snackbar_error(self.page, "切换POS失败")
+            try:
+                if PosConfig.change_pos(path):
+                    UiUtil.show_snackbar_success(self.page, "切换POS成功")
+                else:
+                    UiUtil.show_snackbar_error(self.page, "切换POS失败")
+                    return
+            except ValueError as e:
+                UiUtil.show_snackbar_error(self.page, f"切换POS失败: {e}")
                 return
+
+        if self.start_config.account_logout:
+            pos_config = PosConfig.read_pos_params(path)
+            if pos_config:
+                pos_env = PaymentMockConfig.get_pos_env(path)
+                pos_group, account = PosConfig.get_pos_group(pos_config.venderNo, pos_env)
+                if pos_group and account:
+                    logout_model = PosLogoutModel(
+                        env=pos_group,
+                        cashierNo=account
+                    )
+                    try:
+                        pos_network.pos_account_logout(logout_model)
+                    except Exception as e:
+                        UiUtil.show_snackbar_error(self.page, f"注销POS账号失败: {e}")
+                        return
+                else:
+                    UiUtil.show_snackbar_error(self.page, f"获取POS账号失败， 无法注销POS账号: pos_group={pos_group}, account={account}")
+            else:
+                UiUtil.show_snackbar_error(self.page, f"获取POS缓存失败， 无法注销POS账号: pos_config={pos_config}")
+
 
         if self.start_config.replace_mitm_cert:
             logger.info(f"替换mitm证书")
@@ -372,13 +411,16 @@ class PosHandler:
         else:
             UiUtil.show_snackbar_success(self.page, "启动POS成功")
 
-    def open_pos_file_location(self, path):
+    def open_pos_file_location(self, e: ft.ControlEvent):
         """打开文件所在目录"""
+        path = e.control.data
         if not file_handle.open_file_location(path):
             self.status_text.value = f"打开:{path} 所在目录失败"
             self.page.update()
 
-    def change_env(self, path, env):
+    def change_env(self, e: ft.ControlEvent):
+        path = e.control.parent.data
+        env = e.control.text
         logger.info(f"切换环境: {path}, {env}")
         success, msg = PaymentMockConfig.change_env(path, env)
         if success:
@@ -387,7 +429,8 @@ class PosHandler:
             UiUtil.show_snackbar_error(self.page, msg)
         self.page.update()
 
-    def clean_cache(self, path):
+    def clean_cache(self, e: ft.ControlEvent):
+        path = e.control.data
         logger.info(f"清理缓存: {path}")
         success, msg = PaymentMockConfig.clean_cache(path)
         if success:
@@ -396,29 +439,63 @@ class PosHandler:
             UiUtil.show_snackbar_error(self.page, msg)
         self.page.update()
 
-    def backup_payment_driver(self, path):
+    def backup_payment_driver(self, e: ft.ControlEvent):
+        path = e.control.data
         logger.info(f"备份支付驱动: {path}")
         PaymentMockConfig.backup_payment_driver(path)
         self.page.update()
 
-    def cover_payment_driver(self, path):
+    def cover_payment_driver(self, e: ft.ControlEvent):
+        path = e.control.data
         logger.info(f"使用mock支付驱动: {path}")
         PaymentMockConfig.cover_payment_driver(path)
         self.page.update()
 
-    def restore_payment_driver(self, path):
+    def restore_payment_driver(self, e: ft.ControlEvent):
+        path = e.control.data
         logger.info(f"恢复支付驱动: {path}")
         PaymentMockConfig.restore_payment_driver(path)
         self.page.update()
 
-    def get_pos_env(self, e: ft.ControlEvent, path):
+    def get_pos_env(self, e: ft.ControlEvent):
+        e.control.disabled = True
+        e.control.update()
+        path = e.control.data
         logger.info(f"获取POS环境: {path}")
-        pos_env = PaymentMockConfig.get_pos_env(path)
-        e.control.text = pos_env
-        UiUtil.show_snackbar_success(self.page, "获取POS环境成功")
-        # self.page.update()
+        try:
+            pos_env = PaymentMockConfig.get_pos_env(path)
+            e.control.text = pos_env
+            # if pos_env == "RTA":
+            #     UiUtil.show_snackbar_error(self.page, "生产环境【RTA】不支持获取POS环境")
+            #     return
 
-    def change_pos_env(self, e: ft.ControlEvent, path):
+            vender_id, org_no, store_list, env_list = PosToolConfig.get_store_list(path)
+            for child in e.control.parent.controls:
+                if isinstance(child, ft.Text) and child.key == "store":
+                    child.value = f" 门店:{org_no}"
+                    child.data = org_no
+                    child.update()
+                if isinstance(child, ft.Text) and child.key == "vendor":
+                    child.value = f"商家:{vender_id}"
+                    child.data = vender_id
+                    child.update()
+
+                if isinstance(child, ft.Text) and child.key == "env":
+                    child.value = f" 环境:{store_list[0].env if store_list else pos_env}"
+                    child.data = store_list[0].env if store_list else pos_env
+                    child.update()
+
+            UiUtil.show_snackbar_success(self.page, "获取POS环境成功")
+        except Exception as ex:
+            logger.error(f"获取POS环境失败: {ex}")
+            UiUtil.show_snackbar_error(self.page, f"获取POS环境失败: {ex}")
+        finally:
+            e.control.disabled = False
+            e.control.update()
+
+
+    def change_pos_env(self, e: ft.ControlEvent):
+        path = e.control.data
         try:
             logger.info(f"切换POS环境: {path}")
             if PosConfig.change_pos(path):
@@ -430,7 +507,8 @@ class PosHandler:
             UiUtil.show_snackbar_error(self.page, f"切换POS环境失败: {e}")
         # self.page.update()
 
-    def clear_pos_env_file(self, e: ft.ControlEvent, path):
+    def clear_pos_env_file(self, e: ft.ControlEvent):
+        path = e.control.data
         logger.info(f"清理POS环境文件: {path}")
         PaymentMockConfig.clear_env(path)
         e.page.open(ft.SnackBar(
@@ -451,58 +529,89 @@ class PosHandler:
             content=ft.Row(
                 controls=[
                     ft.Text(pos_path, expand=True),
+                    ft.Text("商家", key="vendor", bgcolor=ft.Colors.YELLOW_50),
+                    ft.Text("门店", key="store", bgcolor=ft.Colors.YELLOW_100),
+                    ft.Text("环境", key="env", bgcolor=ft.Colors.YELLOW_200),
+                    # ft.Dropdown(
+                    #     editable=True,
+                    #     label="门店",
+                    #     key="store",
+                    #     options=[
+                    #         ft.dropdown.Option(i) for i in ["111", "222", "333"]
+                    #     ],
+                    #     padding=0,
+                    #     border_width=1,
+                    #     border_color=ft.Colors.GREY_300,
+                    # ),
+                    # ft.Dropdown(
+                    #     editable=True,
+                    #     label="环境",
+                    #     key="env",
+                    #     options=[
+                    #         ft.dropdown.Option("")
+                    #     ],
+                    #     padding=0,
+                    #     border_width=1,
+                    #     border_color=ft.Colors.GREY_300,
+                    # ),
                     ft.ElevatedButton(
+                        data=pos_path,
                         text="切换POS",
-                        tooltip="调用接口切换对应环境的POS未当前POS",
-                        on_click=lambda e, path=pos_path: self.change_pos_env(e, path),
+                        tooltip="调用接口切换对应环境的POS为当前POS",
+                        on_click=self.change_pos_env,
                     ),
                     ft.ElevatedButton(
+                        data=pos_path,
+                        width=120,
                         text="点击查看环境",
                         tooltip="查看POS当前环境",
-                        on_click=lambda e, path=pos_path: self.get_pos_env(e, path),
+                        on_click=self.get_pos_env,
                     ),
                     ft.IconButton(
+                        data=pos_path,
                         icon=ft.Icons.FOLDER_OPEN,
                         tooltip="打开所在目录",
-                        on_click=lambda e, path=pos_path: self.open_pos_file_location(path),
+                        on_click=self.open_pos_file_location,
                     ),
                     ft.IconButton(
+                        data=pos_path,
                         icon=ft.Icons.PLAY_CIRCLE,
                         tooltip="启动POS",
-                        on_click=lambda e, path=pos_path: self.open_pos_file(e, path),
+                        on_click=self.open_pos_file,
                     ),
                     ft.PopupMenuButton(
+                        data=pos_path,
                         icon=ft.Icons.MORE_VERT,
                         tooltip="更多操作",
                         items=[
                             ft.PopupMenuItem(text="切换环境",
                                              content=ft.PopupMenuButton(
+                                                 data=pos_path,
                                                  tooltip="切换本地环境，修改pos.ini、切换database、logs、缓存等",
                                                  padding=0,
                                                  content=ft.Row([ft.Text("切换本地环境")]),
                                                  items=[
-                                                     ft.PopupMenuItem(text="RTA_TEST", on_click=lambda e,
-                                                                                                       path=pos_path: self.change_env(
-                                                         path, "RTA_TEST")),
-                                                     ft.PopupMenuItem(text="RTA_UAT", on_click=lambda e,
-                                                                                                      path=pos_path: self.change_env(
-                                                         path, "RTA_UAT")),
-                                                     ft.PopupMenuItem(text="RTA", on_click=lambda e,
-                                                                                                  path=pos_path: self.change_env(
-                                                         path, "RTA")),
+                                                     ft.PopupMenuItem(text="RTA_TEST", on_click=self.change_env),
+                                                     ft.PopupMenuItem(text="RTA_UAT", on_click=self.change_env),
+                                                     ft.PopupMenuItem(text="RTA", on_click=self.change_env)
                                                  ]
                                              )
                                              ),
                             ft.PopupMenuItem(text="备份支付驱动",
-                                             on_click=lambda e, path=pos_path: self.backup_payment_driver(path)),
+                                             data=pos_path,
+                                             on_click=self.backup_payment_driver),
                             ft.PopupMenuItem(text="恢复支付驱动",
-                                             on_click=lambda e, path=pos_path: self.restore_payment_driver(path)),
+                                             data=pos_path,
+                                             on_click=self.restore_payment_driver),
                             ft.PopupMenuItem(text="使用支付mock驱动",
-                                             on_click=lambda e, path=pos_path: self.cover_payment_driver(path)),
+                                             data=pos_path,
+                                             on_click=self.cover_payment_driver),
                             ft.PopupMenuItem(text="清理缓存",
-                                             on_click=lambda e, path=pos_path: self.clean_cache(path)),
+                                             data=pos_path,
+                                             on_click=self.clean_cache),
                             ft.PopupMenuItem(text="清理当前环境文件",
-                                             on_click=lambda e, path=pos_path: self.clear_pos_env_file(e, path)),
+                                             data=pos_path,
+                                             on_click=self.clear_pos_env_file),
                         ]
                     )
 

@@ -3,14 +3,17 @@ import hashlib
 import json
 import os
 from shutil import copytree, copyfile, rmtree
+from typing import Optional
+
 from loguru import logger
 from mitmproxy.net.dns.domain_names import cache
 
 from model.config import SearchConfigModel, MitmProxyConfigModel, PaymentMockConfigModel, StartConfigModel, \
     SetupConfigModel, PosParamsModel, PosConfigModel, PosChangeParamsModel
+from model.pos_network_model import PosInitRespStoreModel, PosInitRespEnvModel
 from utils.common import get_active_mac, get_local_ip
 from utils.file_handle import IniFileHandel
-from utils.pos_network import change_pos_from_network
+from utils.pos_network import change_pos_from_network, pos_tool_init
 
 if not os.path.exists("storage/data"):
     os.makedirs("storage/data")
@@ -478,6 +481,7 @@ class PosConfig:
         params = cls.read_pos_params(pos_path)
         if params:
             data.pos_params = params
+        return data
 
     @classmethod
     def change_pos(cls, pos_path: str) -> bool:
@@ -491,14 +495,14 @@ class PosConfig:
             new_env = "rta-uat"
         else:
             logger.warning(f"pos环境错误:{pos_path}")
-            return False
+            raise ValueError(f"pos环境错误:{env}")
 
         pos_info = cls.read_pos_params(pos_path)
         if not pos_info:
             logger.warning(f"获取pos_params参数失败:{pos_path}")
             return False
 
-        pos_group = cls.get_pos_group(pos_info.venderNo, env)
+        pos_group, account = cls.get_pos_group(pos_info.venderNo, env)
         if not pos_group:
             logger.warning(f"获取pos分组失败:{pos_path}")
             return False
@@ -518,26 +522,82 @@ class PosConfig:
         return change_pos_from_network(data)
 
     @classmethod
-    def get_pos_group(cls, vender_id: str, env: str) -> str|None:
+    def get_pos_group(cls, vender_id: str, env: str) -> tuple[Optional[str], Optional[str]]:
         data = {
-            "RTA_UAT": {
-                "stable": [7, 9],
-                "gray02": [11],
-                "gray03": [3,50],
-                "gray06": [12,58949,58959,58984,58969,58989,58964],
-                "gray07": [],
-                "gray08": [5, 10, 58938],
+            "vendor_group": {
+                "rta-uat": [7, 9, 11],
+                "rta-uat-gray03": [3, 50],
+                "rta-uat-gray06": [12, 58949, 58959, 58984, 58969, 58989, 58964],
+                "rta-uat-gray07": [],
+                "rta-uat-gray08": [5, 10, 58938],
+                "rta-test": [1],
             },
-            "RTA_TEST": {
-                "stable": [1],
+            "vendor_account": {
+                3: "30000789",
+                5: "50000789",
+                7: "70000789",
+                8: "80000789",
+                9: "90000789",
+                10: "10000789",
+                11: "11000789",
+                12: "12000789",
+                13: "13000789",
+                50: "50000789",
+                58949: "58949789",
+                58959: "58959789",
+                58984: "58984789",
+                58969: "58969789",
+                58989: "58989789",
+                58964: "58964789",
+                58938: "58938789",
+                1: "10000789",
             }
         }
-        if env == "RTA_TEST":
-            return "rta-test"
-        for k, v in data[env].items():
+        account = data["vendor_account"].get(int(vender_id), None)
+        if "test" in env.lower():
+            return "rta-test", account
+        for k, v in data["vendor_group"].items():
             if int(vender_id) in v:
-                return f"rta-uat-{k}"
-        return None
+                return k, account
+        return None, None
+
+
+class PosToolConfig:
+    @classmethod
+    def read_pos_tool_config(cls, pos_path: str):
+        data = pos_tool_init()
+        if not os.path.exists(pos_path):
+            return data
+        params = PosConfig.read_pos_params(pos_path)
+        if params:
+            data.pos_params = params
+        return data
+
+    @classmethod
+    def get_store_list(cls, pos_path: str) -> (str, str, list[PosInitRespStoreModel], list[PosInitRespEnvModel]):
+        res_data = ["", "", [], []]
+        if not os.path.exists(pos_path):
+            return res_data
+
+        data = pos_tool_init()
+        if data:
+            res_data[3] = data.data.env_list
+
+        params = PosConfig.read_pos_params(pos_path)
+        if params:
+            res_data[0] = params.venderNo
+            res_data[1] = params.orgNo
+
+        # 只获取当前环境的store_list
+        store_list = []
+        env = PaymentMockConfig.get_pos_env(pos_path)
+        group, account = PosConfig.get_pos_group(params.venderNo, env)
+        if group:
+            for store in data.data.store_list:
+                if store.env == group and store.vender_id == params.venderNo:
+                    store_list.append(store)
+        res_data[2] = store_list
+        return res_data
 
 
 if __name__ == "__main__":
