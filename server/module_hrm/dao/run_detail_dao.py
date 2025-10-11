@@ -67,7 +67,7 @@ class RunDetailDao:
         await run_in_threadpool(db.commit)
 
     @classmethod
-    async def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str) -> PageResponseModel|list:
+    async def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str|None = None) -> PageResponseModel|list:
         logger.info(f"开始查询执行历史：{query_info.model_dump()}")
         query = db.query(HrmRunDetail)
         if query_info.only_self:
@@ -85,8 +85,8 @@ class RunDetailDao:
 
         if query_info.run_name:
             query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
-
-        query = query.filter(eval(data_scope_sql))
+        if data_scope_sql:
+            query = query.filter(eval(data_scope_sql))
 
         if query_info.report_id:
             query = query.order_by(HrmRunDetail.run_start_time, HrmRunDetail.run_end_time)

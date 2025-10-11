@@ -25,9 +25,10 @@ agentController = APIRouter(prefix='/qtr/agent', dependencies=[Depends(LoginServ
 async def get_qtr_agent_list(request: Request,
                              query: AgentQueryModel = Depends(AgentQueryModel.as_query),
                              query_db: Session = Depends(get_db),
-                             data_scope_sql: str = Depends(GetDataScope('QtrAgent', user_alias='manager'))):
+                             # data_scope_sql: str = Depends(GetDataScope('QtrAgent', user_alias='manager'))
+                             ):
     try:
-        query_result = AgentService.get_agent_list_services(query_db, query, data_scope_sql)
+        query_result = AgentService.get_agent_list_services(query_db, query)
         if query.is_page:
             return ResponseUtil.success(model_content=query_result)
         else:

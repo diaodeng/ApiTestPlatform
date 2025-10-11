@@ -133,10 +133,10 @@ async def run_history_list(request: Request,
                            query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
                            query_db: Session = Depends(get_db),
                            current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                           data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
+                           # data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
                            ):
     query_info.manager = current_user.user.user_id
-    result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
+    result = await RunDetailDao.list(query_db, query_info)
     return ResponseUtil.success(model_content=result)
 
 

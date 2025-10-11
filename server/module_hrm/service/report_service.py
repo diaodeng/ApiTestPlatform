@@ -39,7 +39,7 @@ class ReportService:
         report = HrmReport(report_name=report_name, **kwargs)
 
     @classmethod
-    async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str) -> str:
+    async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str|None = None) -> str:
         # 2. 渲染HTML模板
         result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
         success_count = 0
@@ -116,7 +116,7 @@ class ReportService:
         return html_content
 
     @classmethod
-    async def generate_pdf_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str) -> bytes|bool:
+    async def generate_pdf_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str|None = None) -> bytes|bool:
         result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
 
         curren_dir = os.path.dirname(__file__)
