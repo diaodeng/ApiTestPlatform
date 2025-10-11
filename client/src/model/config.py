@@ -50,6 +50,7 @@ class StartConfigModel(BaseModel):
     change_pos: bool = False  # 调用接口切换云端POS
     remove_cache: bool = False  # 清除缓存
     cover_payment_driver: bool = False  # 覆盖支付驱动
+    account_logout: bool = False  # 退出登录
 
 
 class PosParamsModel(BaseModel):

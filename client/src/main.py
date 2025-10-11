@@ -1,25 +1,55 @@
-import asyncio
 import os
-import threading
-import time
+import sys
 from multiprocessing import freeze_support
 
 import flet as ft
+from flet import Page
 
-# from flet import Column, Row, Divider, Text, Page, MainAxisAlignment, TextAlign, VerticalDivider
 from config import AppConfig
 from navigationMenu import NavigationMenu
 from utils.common import load_json, ensure_directory_exists, get_sys_info, get_memory_usage, get_process_by_name
 from utils.logger import log
-from utils.mytimers import add_timer_and_start
+from utils.mytimers import ThreadPool, clear_all_timers
 
 ensure_directory_exists("logs")
 
 
 basepath = os.path.dirname(__file__)
 
-async def main(page: ft.Page):
+class ExitAlertDialog:
+    def __init__(self, page, **kwargs):
+        self.page: Page = page
+        self.kwargs = kwargs
 
+        self.confirm_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Do you really want to exit this app?"),
+            # content=ft.Text("Do you really want to exit this app?"),
+            actions=[
+                ft.ElevatedButton("Yes", on_click=self.yes_click),
+                ft.OutlinedButton("No", on_click=self.no_click),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.add(self.confirm_dialog)
+        page.update()
+
+    def yes_click(self, e):
+        e.control.page.close(self.confirm_dialog)
+        # e.control.page.update()
+        # 页面包含定时器，需要先关闭定时器，清理资源
+        clear_all_timers()
+        e.control.page.window.destroy()
+        # e.control.page.window.close()
+        # sys.exit(0)  # 直接退出进程
+
+    def no_click(self, e):
+        e.control.page.close(self.confirm_dialog)
+        e.control.page.update()
+
+async def main(page: ft.Page):
+    page.window.prevent_close = True
+    page.window.on_event = lambda e: page.open(ExitAlertDialog(page).confirm_dialog) if e.data == "close" else None
     app = AppConfig(page)
     config = load_json(app.tools_db)
     config["ToolsConfig"] = os.path.join(basepath, app.tools_db)
@@ -108,14 +138,12 @@ async def main(page: ft.Page):
             sys_show_view.value = f"获取系统信息异常:{e}"
         sys_show_view.update()
 
-    def update_sys_info():
-        while True:
-            get_sys_info_view()
-            time.sleep(10)
 
     # add_timer_and_start(10, get_sys_info_view)
-    threading.Thread(target=update_sys_info).start()
+    ThreadPool.add_task(get_sys_info_view, 10)
     page.on_error = lambda e: log.error(f"页面异常:{e}")
+    # page.on_window_event = lambda e: open_dlg(e) if e.data == "close" else None
+
     page.update()
 
 

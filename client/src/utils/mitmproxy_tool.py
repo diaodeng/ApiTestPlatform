@@ -81,11 +81,22 @@ class MockHandle:
                     MockHandle.add_body[line[0]] = line[1]
 
 
+        include_path = []
+        for line in config.include.split("\n"):
+            line = line.strip()
+            if line:
+                include_path.extend(line.split(","))
+        exclude_path = []
+        for line in config.exclude.split("\n"):
+            line = line.strip()
+            if line:
+                exclude_path.extend(line.split(","))
+
         MockHandle.is_mock = config.is_mock
         MockHandle.open_include = config.open_include
         MockHandle.open_exclude = config.open_exclude
-        MockHandle.exclude = config.exclude.split(",")
-        MockHandle.include = config.include.split(",")
+        MockHandle.exclude = exclude_path
+        MockHandle.include = include_path
         MockHandle.mock_server = config.mock_server
 
     def configure(self, updated: set[str]):
