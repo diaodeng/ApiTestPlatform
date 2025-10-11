@@ -12,7 +12,7 @@ class AgentService:
     """
 
     @classmethod
-    def get_agent_list_services(cls, query_db: Session, page_object: AgentQueryModel, data_scope_sql: str):
+    def get_agent_list_services(cls, query_db: Session, page_object: AgentQueryModel, data_scope_sql: str|None = None):
         """
         获取agent列表信息service
         :param query_db: orm对象

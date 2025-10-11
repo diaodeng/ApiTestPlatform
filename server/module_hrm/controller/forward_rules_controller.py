@@ -193,12 +193,12 @@ async def get_rules_detail_by_page(request: Request,
                                        ForwardRulesDetailQueryModel.as_query),
                                    query_db: Session = Depends(get_db),
                                    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                                   data_scope_sql: str = Depends(GetDataScope('QtrForwardRulesDetail', user_alias='manager'))
+                                   # data_scope_sql: str = Depends(GetDataScope('QtrForwardRulesDetail', user_alias='manager'))
                                    ):
     try:
         logger.info("分页查询转发规则详情")
         page_query.manager = current_user.user.user_id
-        page_query_result = ForwardRulesDetailService.query_list(query_db, query_info=page_query, data_scope_sql=data_scope_sql)
+        page_query_result = ForwardRulesDetailService.query_list(query_db, query_info=page_query)
         data = ResponseUtil.success(dict_content=page_query_result)
         return data
     except Exception as e:

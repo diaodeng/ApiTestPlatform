@@ -132,8 +132,10 @@ class ForwardRulesDetailDao:
         return info
 
     @classmethod
-    def get_list_by_page(cls, db: Session, query_object: ForwardRulesDetailQueryModel, data_scope_sql:str, is_page=True):
-        query = db.query(QtrForwardRulesDetail).filter(eval(data_scope_sql))
+    def get_list_by_page(cls, db: Session, query_object: ForwardRulesDetailQueryModel, data_scope_sql:str|None = None, is_page=True):
+        query = db.query(QtrForwardRulesDetail)
+        if data_scope_sql:
+            query = query.filter(eval(data_scope_sql))
 
         if query_object.rule_id:
             query = query.filter(QtrForwardRulesDetail.rule_id == query_object.rule_id)
