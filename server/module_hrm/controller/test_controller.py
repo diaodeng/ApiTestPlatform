@@ -66,6 +66,9 @@ async def mock_test(request: Request,
             query_params = dict(request.query_params)
             path_params = dict(request.path_params)
             req = {
+                "code": 4444444,
+                "success": False,
+                "time": datetime.now(),
                 "method": method,
                 "path": f"/{mock_path}",
                 "query": query_params,
@@ -78,7 +81,7 @@ async def mock_test(request: Request,
                 "message": "没有匹配到mock规则",
             }
             logger_mock.info(json.dumps(req, ensure_ascii=False))
-            return JSONResponse(content=req, status_code=204, media_type="application/json")
+            return JSONResponse(content=req, status_code=505, media_type="application/json")
         logger_mock.info(json.dumps(req, ensure_ascii=False))
         content_type = req.get("headers", {}).get("Content-Type")
         if not content_type:
