@@ -165,11 +165,11 @@ class MockHandle:
                                     json=json_data,
                                     data=dict(flow.request.urlencoded_form),
                                     headers=headers,
-                                    timeout=3
+                                    timeout=99999
                                     )
-            if result_data.status_code == 200:
+            if result_data.status_code != 505 or result_data.json().get("code") != 4444444:
                 logger.info(result_data.text)
-                flow.response = Response.make(200,
+                flow.response = Response.make(result_data.status_code,
                                               content=result_data.content,
                                               headers={"Content-Type": result_data.headers.get("Content-Type")},
                                               )

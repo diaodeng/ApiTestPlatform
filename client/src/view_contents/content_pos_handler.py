@@ -82,7 +82,7 @@ class PosHandler:
                     self.before_start_cover_payment_driver_view,
                     self.before_start_replace_mitm_cert_view,
                     self.before_start_change_pos_view,
-                    self.before_start_change_env_view,
+                    # self.before_start_change_env_view,
                     self.before_start_logout_view,
                     self.before_start_remove_cache_view,
                     ft.TextField(label="查找结果", on_change=lambda e: self.search_result(e))
@@ -184,8 +184,8 @@ class PosHandler:
         )
 
         self.before_start_change_env_view = ft.Checkbox(
-            label="切换环境",
-            tooltip="调用posChange接口切换服务器环境",
+            label="切换本地环境",
+            tooltip="切换本地环境",
             value=self.start_config.change_env,
             on_change=self.update_start_config,
         )
@@ -334,7 +334,7 @@ class PosHandler:
         await asyncio.sleep(2)
 
         if self.start_config.change_pos:
-            logger.info(f"切换环境")
+            logger.info(f"切换在线POS环境")
             try:
                 if PosConfig.change_pos(path):
                     UiUtil.show_snackbar_success(self.page, "切换POS成功")
