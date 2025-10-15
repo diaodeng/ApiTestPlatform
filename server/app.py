@@ -12,7 +12,8 @@ if __name__ == '__main__':
             port=AppConfig.app_port,
             root_path=AppConfig.app_root_path,
             reload=AppConfig.app_reload,
-            workers=AppConfig.worker_num
+            workers=AppConfig.worker_num,
+            log_config=None
         )
     except KeyboardInterrupt as e:
         logger.info("应用已停止")

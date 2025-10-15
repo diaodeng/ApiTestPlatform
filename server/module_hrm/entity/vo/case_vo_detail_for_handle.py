@@ -3,7 +3,7 @@
 """
 import json
 from enum import Enum
-from typing import Any, Callable, Dict, List, Text, Union
+from typing import Any, Callable, Dict, List, Text, Union, Annotated
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator, ConfigDict, field_serializer
 from pydantic.alias_generators import to_camel
@@ -208,7 +208,7 @@ class TConfig(BaseModel):
     base_url: BaseUrl = ""
     # Text: prepare variables in debugtalk.py, ${gen_variables()}
     variables: List[VariablesMapping] | Text = Field(default_factory=lambda: [])
-    parameters: ParameterModel | List[VariablesMapping] | None = None
+    parameters: Annotated[Union[ParameterModel, List[VariablesMapping], None], Field(None, description="请求参数")] = None
     headers: List[Headers] = Field(default_factory=lambda: [])
     setup_hooks: HooksModel = HooksModel()
     teardown_hooks: HooksModel = HooksModel()
@@ -319,7 +319,7 @@ class TStep(BaseModel):
     step_id: Text = ""
     enable: bool = True
     run_condition: StepRunCondition = StepRunCondition()
-    request: Union[TRequest, TWebsocket, None] = None
+    request: Annotated[Union[TRequest, TWebsocket, None], Field(None, description="请求信息")] = None
     include: Union[Include, None] = Include()
     testcase: Union[Text, Callable, None] = None
     variables: List[VariablesMapping] | Text = Field(default_factory=lambda: [])

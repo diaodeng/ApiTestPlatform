@@ -1,12 +1,10 @@
 ## 调试用接口数据
 import json
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
-from fastapi import Query, Body, Header, Response
-from pydantic import BaseModel
+from fastapi import Response
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
@@ -36,7 +34,6 @@ async def mock_test(request: Request,
                     # body = Body(default=None),
                     # content_type: str = Header(default=None)
                     ):
-
     try:
         try:
             try:
@@ -60,7 +57,6 @@ async def mock_test(request: Request,
         req = await RuleMatcher(request, query_db, f"/{mock_path}").match_response()
 
         if not req:
-
             method = request.method
             headers = dict(request.headers)
             query_params = dict(request.query_params)
@@ -68,7 +64,7 @@ async def mock_test(request: Request,
             req = {
                 "code": 4444444,
                 "success": False,
-                "time": datetime.now(),
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "method": method,
                 "path": f"/{mock_path}",
                 "query": query_params,
@@ -102,12 +98,12 @@ async def mock_test(request: Request,
         # elif content_type == "text/html":
         #     req["body"] = req.get("body")
 
-        return Response(content=req.get("content"), media_type=content_type, headers=req.get("headers"), status_code=req.get("status_code"))
+        return Response(content=req.get("content"), media_type=content_type, headers=req.get("headers"),
+                        status_code=req.get("status_code"))
     except Exception as e:
         logger_mock.error(f"mock测试失败, path: {mock_path}, error: {e}")
         logger_mock.exception(e)
         return ResponseUtil.error(msg=f"mock测试失败, path: {mock_path}, error: {e}")
-
 
 
 @mockController.api_route("/test{test_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
@@ -262,9 +258,9 @@ async def edit_hrm_mock_rule(request: Request,
                      dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:editRule'))])
 @log_decorator(title='mock规则管理', business_type=2)
 async def change_rule_info(request: Request,
-                        edit_module: AddMockRuleModel,
-                        query_db: Session = Depends(get_db),
-                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+                           edit_module: AddMockRuleModel,
+                           query_db: Session = Depends(get_db),
+                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_module.update_by = current_user.user.user_name
         edit_module.update_time = datetime.now()
@@ -362,12 +358,12 @@ async def add_hrm_mock_rule_response(request: Request,
 
 
 @mockController.put("/mockManager/updateResponse",
-                     dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:updateResponse'))])
+                    dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:updateResponse'))])
 @log_decorator(title='修改mock规则响应', business_type=2)
 async def update_hrm_mock_rule_response(request: Request,
-                                     add_mock_rule: AddMockResponseModel,
-                                     query_db: Session = Depends(get_db),
-                                     current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+                                        add_mock_rule: AddMockResponseModel,
+                                        query_db: Session = Depends(get_db),
+                                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         if not add_mock_rule.name:
             raise ValueError("mock响应名不能为空")
@@ -383,13 +379,15 @@ async def update_hrm_mock_rule_response(request: Request,
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
+
 @mockController.put("/mockManager/updateResponsePriority",
-                     dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:updateResponse'))])
+                    dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:updateResponse'))])
 @log_decorator(title='修改mock规则响应', business_type=2)
 async def update_hrm_mock_rule_response_priority(request: Request,
-                                     add_mock_rule: AddMockResponseModel,
-                                     query_db: Session = Depends(get_db),
-                                     current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+                                                 add_mock_rule: AddMockResponseModel,
+                                                 query_db: Session = Depends(get_db),
+                                                 current_user: CurrentUserModel = Depends(
+                                                     LoginService.get_current_user)):
     try:
         add_module_result = await MockResponseService.edit_mock_response_services(query_db, add_mock_rule, current_user)
         if add_module_result.is_success:
@@ -425,12 +423,13 @@ async def rule_response_list(request: Request,
                     dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:responseDetail'))])
 @log_decorator(title='mock规则响应详情查询', business_type=0)
 async def rule_response_detail(request: Request,
-                             query_rule_response: MockResponsePageQueryModel = Depends(
-                                 MockResponsePageQueryModel.as_query),
-                             query_db: Session = Depends(get_db),
-                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+                               query_rule_response: MockResponsePageQueryModel = Depends(
+                                   MockResponsePageQueryModel.as_query),
+                               query_db: Session = Depends(get_db),
+                               current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        add_module_result = await MockResponseService.get_response_detail_services(query_db, query_rule_response.rule_response_id)
+        add_module_result = await MockResponseService.get_response_detail_services(query_db,
+                                                                                   query_rule_response.rule_response_id)
 
         return ResponseUtil.success(data=add_module_result, msg="success")
 
@@ -440,12 +439,12 @@ async def rule_response_detail(request: Request,
 
 
 @mockController.post("/mockManager/setDefaultResponse",
-                    dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:updateResponse'))])
+                     dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:updateResponse'))])
 @log_decorator(title='设置mock规则默认响应', business_type=2)
 async def set_default_response(request: Request,
-                             query_rule_response: AddMockResponseModel,
-                             query_db: Session = Depends(get_db),
-                             current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+                               query_rule_response: AddMockResponseModel,
+                               query_db: Session = Depends(get_db),
+                               current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         add_module_result = await MockResponseService.set_default_response(query_db, query_rule_response, current_user)
 
@@ -455,12 +454,13 @@ async def set_default_response(request: Request,
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
+
 @mockController.post("/mockManager/getResponseByCondition",
-                    dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:responseList'))])
+                     dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:responseList'))])
 @log_decorator(title='mock规则响应管理', business_type=0)
 async def get_response_by_condition(request: Request,
-                             query_rule_response: AddMockResponseModel,
-                             query_db: Session = Depends(get_db)):
+                                    query_rule_response: AddMockResponseModel,
+                                    query_db: Session = Depends(get_db)):
     try:
         add_module_result = await MockResponseService.get_by_response_condition(query_db, query_rule_response)
 

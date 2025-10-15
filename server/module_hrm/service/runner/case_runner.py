@@ -142,7 +142,8 @@ class CaseRunner(object):
             try:
                 self.logger.info(f"开始处理{hook_name}")
                 before_test(self.case_data)
-                self.logger.info(f"{hook_name}处理完成:{self.case_data.model_dump_json(by_alias=True)}")
+                self.logger.info(f"{hook_name}处理完成")
+                self.logger.debug(f"{hook_name}处理完成:{self.case_data.model_dump_json(by_alias=True)}")
             except Exception as e:
                 self.logger.error(f"{hook_name}处理失败：{e}")
                 self.logger.exception(e)
@@ -157,7 +158,8 @@ class CaseRunner(object):
                     if not hook: continue
                     var = key_value_dict(self.case_data.config.variables)
                     parse_function_set_default_params(hook, var, self.debugtalk_func_map, (self.case_data,))
-                    self.logger.info(f"{hook_name}处理完成:{self.case_data.model_dump_json(by_alias=True)}")
+                    self.logger.info(f"{hook_name}处理完成")
+                    self.logger.debug(f"{hook_name}处理完成:{self.case_data.model_dump_json(by_alias=True)}")
             self.__exec_hook_script(hooks_info, is_before=is_before)
         except Exception as setupre:
             self.logger.error(f"{hook_name} error：{setupre}")
@@ -421,6 +423,14 @@ class RequestRunner(object):
             else:
                 log_store.before_request += self.case_runner.handler.get_log()
 
+            self.logger.error(f"回调{hook_name}执行失败: {setupre}")
+            log_store.error += self.case_runner.handler.get_log()
+
+            if is_after_step:
+                log_store.after_response += self.case_runner.handler.get_log()
+            else:
+                log_store.before_request += self.case_runner.handler.get_log()
+
             raise
 
     def parse_request_data(self, not_found_exception=True):
@@ -593,7 +603,7 @@ class RequestRunner(object):
             if not request_data.get("json"):
                 request_data.pop("json")
 
-            self.logger.info(f"Request: {json.dumps(request_data, ensure_ascii=False)}")
+            self.logger.debug(f"Request: {json.dumps(request_data, ensure_ascii=False)}")
 
             start_request_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
             self.logger.debug(
@@ -611,7 +621,7 @@ class RequestRunner(object):
             async def on_response(response):
                 start = timings.pop(response.request)
                 elapsed = time.perf_counter() - start
-                print(f"{response.request.url} -> {elapsed:.2f}s")
+                # print(f"{response.request.url} -> {elapsed:.2f}s")
 
             if self.case_runner.run_info.forward_config.forward and self.case_runner.run_info.forward_config.agent_code:
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
@@ -689,7 +699,7 @@ class RequestRunner(object):
                 elif item.get("scope") == ScopeEnum.globals.value:
                     self.case_runner.run_info.global_vars.update(self.extract_variable)
 
-            self.logger.info(f'{self.step_data.name} extract_variable: {json.dumps(self.extract_variable)}')
+            self.logger.debug(f'{self.step_data.name} extract_variable: {json.dumps(self.extract_variable)}')
             self.logger.info(f"{self.step_data.name} 变量提取完成")
 
             return self

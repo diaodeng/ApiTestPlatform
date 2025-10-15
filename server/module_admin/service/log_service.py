@@ -1,3 +1,5 @@
+import logging
+
 from module_admin.dao.log_dao import *
 from module_admin.service.dict_service import Request, DictDataService
 from module_admin.entity.vo.common_vo import CrudResponseModel
@@ -242,3 +244,59 @@ class LoginLogService:
         binary_data = export_list2excel(new_data)
 
         return binary_data
+
+
+class LoggerService:
+    """
+    日志管理模块服务层
+    """
+    @classmethod
+    def get_all_logger_services(cls, query_object: QueryLoggerModel):
+        """
+        获取所有日志信息service
+        :return: 所有日志信息列表
+        """
+        all_logger_list = []
+        # all_logger_list = logging.Logger.manager.loggerDict.keys()
+        # print(all_logger_list)
+        root_logger = logging.getLogger()
+        print(root_logger.name)
+        all_logger_list.append({
+            "loggerName": "ROOT",
+            "level": logging.getLevelName(root_logger.level),
+            "handlers": [f"{handler.__class__.__name__}({logging.getLevelName(handler.level)})" for handler in
+                         root_logger.handlers],
+        })
+
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if isinstance(logger, logging.Logger):
+                all_logger_list.append({
+                    "loggerName": name,
+                    "level": logging.getLevelName(logger.level),
+                    "handlers": [f"{handler.__class__.__name__}({logging.getLevelName(handler.level)})" for handler in
+                                 logger.handlers],
+                })
+
+        if query_object.logger_name:
+            all_logger_list = [logger for logger in all_logger_list if query_object.logger_name in logger['loggerName']]
+        if query_object.level:
+            all_logger_list = [logger for logger in all_logger_list if query_object.level == logger['level']]
+        all_logger_list = sorted(all_logger_list, key=lambda x: x['loggerName'])
+
+        return {"total": len(all_logger_list), "rows": all_logger_list}
+
+
+    @classmethod
+    def set_logger_level_services(cls, logger_name: list[str], level: str):
+        """
+        设置日志级别service
+        :param logger_name: 日志名称
+        :param level: 日志级别
+        :return: 设置日志级别校验结果
+        """
+        for name in logger_name:
+            if name == 'ROOT':
+                root_logger = logging.getLogger()
+                root_logger.setLevel(level)
+            else:
+                logging.getLogger(name).setLevel(level)
