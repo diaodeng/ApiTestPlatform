@@ -4,7 +4,6 @@ import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {testRun} from "@/api/hrm/run_detail.js";
 import {all as getAllForwardRules} from "@/api/hrm/forward";
 import {all as getAllAgent} from "@/api/hrm/agent.js";
-import {RunTypeEnum} from "@/components/hrm/enum.js";
 
 
 const dialogVisible = defineModel("dialogVisible");
@@ -96,7 +95,7 @@ function getForwardRule() {
 
 function getAgent() {
   getAllAgent().then(response => {
-    allAgent.value = response.rows;
+    allAgent.value = response.data;
   });
 }
 
