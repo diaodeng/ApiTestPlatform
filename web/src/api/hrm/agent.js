@@ -5,7 +5,7 @@ export function all() {
   return request({
     url: '/qtr/agent/list',
     method: 'get',
-      data:{"isPage": false}
+    params:{"isPage": false}
   })
 }
 
@@ -47,9 +47,10 @@ export function updateAgent(data) {
 }
 
 // 删除agent
-export function delAgent(deleteId) {
+export function delAgent(deleteData) {
   return request({
-    url: '/qtr/agent' + deleteId,
+    url: '/qtr/agent',
     method: 'delete',
+    data: deleteData
   })
 }

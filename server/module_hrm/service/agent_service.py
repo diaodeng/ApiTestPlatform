@@ -101,20 +101,18 @@ class AgentService:
         :param page_object: 删除Agent对象
         :return: 删除Agent校验结果
         """
-        if page_object.agent_ids.split(','):
-            agent_id_list = page_object.agent_ids.split(',')
-            try:
-                for agent_id in agent_id_list:
-                    AgentDao.delete_agent_dao(query_db, AgentModel(agentId=agent_id,
-                                                                   updateTime=page_object.update_time,
-                                                                   updateBy=page_object.update_by))
-                query_db.commit()
-                result = dict(is_success=True, message='删除成功')
-            except Exception as e:
-                query_db.rollback()
-                raise e
-        else:
-            result = dict(is_success=False, message='传入AgentId为空')
+
+        try:
+            for agent_id in page_object.agent_ids:
+                AgentDao.delete_agent_dao(query_db, AgentModel(agentId=agent_id,
+                                                               updateTime=page_object.update_time,
+                                                               updateBy=page_object.update_by))
+            query_db.commit()
+            result = dict(is_success=True, message='删除成功')
+        except Exception as e:
+            query_db.rollback()
+            raise e
+
         return CrudResponseModel(**result)
 
     @classmethod
