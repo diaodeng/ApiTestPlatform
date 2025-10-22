@@ -47,7 +47,7 @@ function getForwardRule() {
 
 function getAgent() {
   getAllAgent().then(response => {
-    allAgent.value = response.rows;
+    allAgent.value = response.data;
   });
 }
 
