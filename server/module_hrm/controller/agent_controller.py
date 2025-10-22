@@ -83,17 +83,16 @@ async def edit_qtr_agent(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@agentController.delete("/{agent_ids}", dependencies=[Depends(CheckUserInterfaceAuth('qtr:agent:remove'))])
+@agentController.delete("", dependencies=[Depends(CheckUserInterfaceAuth('qtr:agent:remove'))])
 @log_decorator(title='Agent管理', business_type=3)
 async def delete_qtr_agent(request: Request,
-                           agent_ids: str,
+                           agent_delete_obj: DeleteAgentModel,
                            query_db: Session = Depends(get_db),
                            current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        delete_agent = DeleteAgentModel(projectIds=agent_ids)
-        delete_agent.update_by = current_user.user.user_name
-        delete_agent.update_time = datetime.now()
-        delete_agent_result = AgentService.delete_agent_services(query_db, delete_agent)
+        agent_delete_obj.update_by = current_user.user.user_name
+        agent_delete_obj.update_time = datetime.now()
+        delete_agent_result = AgentService.delete_agent_services(query_db, agent_delete_obj)
         if delete_agent_result.is_success:
             logger.info(delete_agent_result.message)
             return ResponseUtil.success(msg=delete_agent_result.message)
