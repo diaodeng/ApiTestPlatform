@@ -83,8 +83,12 @@ class AgentDao:
         agent_list = db.query(QtrAgent).filter(QtrAgent.del_flag == 1,
                                                QtrAgent.agent_code == page_object.agent_code if page_object.agent_code else True,
                                                QtrAgent.agent_name == page_object.agent_name if page_object.agent_name else True,
-                                               QtrAgent.status == page_object.status if page_object.status else True,
-                                               eval(data_scope_sql)).order_by(QtrAgent.agent_id)
+                                               QtrAgent.status == page_object.status if page_object.status else True
+                                               )
+        if data_scope_sql:
+            agent_list = agent_list.filter(eval(data_scope_sql))
+
+        agent_list = agent_list.order_by(QtrAgent.agent_id)
 
         agent_list = PageUtil.paginate(agent_list, page_object.page_num, page_object.page_size,
                                            page_object.is_page)

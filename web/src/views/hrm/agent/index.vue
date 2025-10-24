@@ -244,7 +244,7 @@ function handleUpdate(row) {
 function handleDelete(row) {
   const agentIds = row.agentId ? [row.agentId] : checkedIds.value;
   proxy.$modal.confirm('是否确认删除ID为"' + agentIds + '"的数据项？').then(function () {
-    return agentApi.delAgent({"agentId": agentIds});
+    return agentApi.delAgent({"agentIds": agentIds});
   }).then(() => {
     getList();
     proxy.$modal.msgSuccess("删除成功");

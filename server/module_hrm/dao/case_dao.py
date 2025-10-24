@@ -205,7 +205,7 @@ class CaseDao:
             case_module_project)
 
     @classmethod
-    def delete_case_dao(cls, db: Session, case: CaseModel, user: CurrentUserModel = None):
+    async def delete_case_dao(cls, db: Session, case: CaseModel, user: CurrentUserModel = None):
         """
         删除用例数据库操作
         :param db: orm对象
@@ -213,9 +213,9 @@ class CaseDao:
         :return:
         """
         PermissionHandler.check_is_self(user, db.query(HrmCase).filter(HrmCase.case_id == case.case_id).first())
-        db.query(HrmCase).filter(HrmCase.case_id == case.case_id).delete()
+        await run_in_threadpool(db.query(HrmCase).filter(HrmCase.case_id == case.case_id).delete)
         # 删除用例、模块、项目关系
-        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).delete()
+        await run_in_threadpool(db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).delete)
 
     @classmethod
     def add_case_module_project_dao(cls, db: Session, case_project: CaseModuleProjectModel):
@@ -421,10 +421,12 @@ class CaseParamsDao:
         :param use_case_id: 用例 ID
         :param page: 页码（从 1 开始）
         :param page_size: 每页多少行
+        :param enabled: 状态，-1 所有，0 禁用，1 启用
         :return: list[dict]
         """
         # 1️⃣ 先查 row_id（限制数量）
         with SessionLocal() as db:
+            # db.execute(f"SET ob_query_timeout=60000000") # 超时60s
             query = db.query(HrmCaseParams).filter_by(case_id=use_case_id)
             if enabled is not None and enabled != -1:
                 query = query.filter_by(enabled=enabled)
@@ -481,18 +483,24 @@ class CaseParamsDao:
         )
 
     @classmethod
-    def delete_table(cls, db: Session, use_case_id):
-        db.query(HrmCaseParams).filter_by(case_id=use_case_id).delete()
-        db.commit()
-
+    async def delete_table(cls, db: Session, use_case_id):
+        await cls.delete_table_row(db, use_case_id)
 
     @classmethod
-    def delete_table_row(cls, db: Session, use_case_id, row_ids: list[str|int]):
-        query = db.query(HrmCaseParams).filter(HrmCaseParams.case_id == use_case_id)
-        if row_ids:
-            query.filter(HrmCaseParams.row_id.in_(row_ids))
-        query.delete()
-        db.commit()
+    async def delete_table_row(cls, db: Session, use_case_id, row_ids: list[str|int] = None):
+        while True:
+            query = db.query(HrmCaseParams.id).filter(HrmCaseParams.case_id == use_case_id)
+            if row_ids:
+                query.filter(HrmCaseParams.row_id.in_(row_ids))
+            all_data = await run_in_threadpool(query.limit(1000).all)
+            batch_ids = [r[0] for r in all_data]
+            if not batch_ids:
+                break
+            delete_count = await run_in_threadpool(
+                db.query(HrmCaseParams).filter(HrmCaseParams.id.in_(batch_ids)).delete,
+                synchronize_session=False
+            )
+            await run_in_threadpool(db.commit)
 
     @classmethod
     def delete_table_col(cls, db: Session, use_case_id, col_name):

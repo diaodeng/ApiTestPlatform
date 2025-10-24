@@ -43,11 +43,11 @@ async def report_list(request: Request,
 async def report_detail(request: Request,
                         report_id: int,
                         query_db: Session = Depends(get_db),
-                        data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
+                        # data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
                         ):
     query_obj = RunDetailQueryModel(**{"report_id": report_id})
 
-    result = await RunDetailDao.list(query_db, query_obj, data_scope_sql)
+    result = await RunDetailDao.list(query_db, query_obj)
     return ResponseUtil.success(model_content=result)
 
 
@@ -67,13 +67,14 @@ async def export_html(request: Request,
                       query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
                       query_db: Session = Depends(get_db),
                       current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                      data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager'))):
+                      # data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager'))
+                      ):
     try:
         # 1. 从数据库获取数据 (示例使用伪代码)
         # data = await db.fetch("SELECT * FROM items")
         query_info.manager = current_user.user.user_id
         query_info.is_page = False
-        html_content = await ReportService.generate_html_report(query_db, query_info, data_scope_sql)
+        html_content = await ReportService.generate_html_report(query_db, query_info)
 
         # 3. 设置下载头
         headers = {
@@ -92,9 +93,10 @@ async def export_pdf(request: Request,
                       query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
                       query_db: Session = Depends(get_db),
                       current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                      data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager'))):
+                      # data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager'))
+                     ):
     query_info.manager = current_user.user.user_id
     query_info.is_page = False
-    html_content = await ReportService.generate_pdf_report(query_db, query_info, data_scope_sql)
+    html_content = await ReportService.generate_pdf_report(query_db, query_info)
     return Response(content=html_content, media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=report.pdf"})

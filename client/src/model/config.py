@@ -19,6 +19,9 @@ class MitmProxyConfigModel(BaseModel):
     script_path: str = ""
     is_mock: bool = False
     mitmproxy_config_dir: str = os.path.join(os.path.expanduser("~"), ".mitmproxy")
+    proxy_client: str = ""
+    proxy_model: str = "local"
+    proxy_model_value: str = "CPOS-DF.exe"
 
     add_headers: str = ""
     add_body: str = ""
@@ -27,6 +30,10 @@ class MitmProxyConfigModel(BaseModel):
     open_include: bool = False
     open_exclude: bool = False
     mock_server: str = "https://testautoapi.rta-os.com/hrm/mock"
+
+    model_config = {
+        "extra": "allow"  # 允许未知字段
+    }
 
 
 class PaymentMockConfigModel(BaseModel):
@@ -43,6 +50,7 @@ class StartConfigModel(BaseModel):
     change_pos: bool = False  # 调用接口切换云端POS
     remove_cache: bool = False  # 清除缓存
     cover_payment_driver: bool = False  # 覆盖支付驱动
+    account_logout: bool = False  # 退出登录
 
 
 class PosParamsModel(BaseModel):

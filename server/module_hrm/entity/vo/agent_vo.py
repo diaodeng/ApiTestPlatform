@@ -48,10 +48,10 @@ class EditJobModel(AgentModel):
     pass
 
 
-class DeleteAgentModel(BaseModel):
+class DeleteAgentModel(CommonDataModel):
     """
     删除Agent模型
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    agent_ids: str
+    agent_ids: list[str|int]

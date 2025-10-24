@@ -3,7 +3,7 @@
 """
 
 import datetime
-from typing import Any, Dict, List, Text, Union
+from typing import Any, Dict, List, Text, Union, Annotated
 
 from pydantic import BaseModel, model_validator, Field
 
@@ -78,7 +78,7 @@ class TWebsocket(caseVoHandle.TWebsocket):
 
 class TStep(caseVoHandle.TStep):
     result: Union[Result, None] = Result()
-    request: Union[TRequest, TWebsocket, None] = None
+    request: Annotated[Union[TRequest, TWebsocket, None], Field(None, description="请求信息")] = None
 
 
 
@@ -113,7 +113,7 @@ class AddressData(BaseModel):
 
 
 class ReqRespData(BaseModel):
-    request: TRequest | TWebsocket | None = None
+    request: Annotated[Union[TRequest, TWebsocket, None], Field(None, description="请求信息")] = None
     response: ResponseData | None = None
 
 

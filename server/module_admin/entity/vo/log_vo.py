@@ -113,3 +113,24 @@ class UnlockUser(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel)
 
     user_name: str
+
+@as_query
+@as_form
+class QueryLoggerModel(BaseModel):
+    """
+    查询日志模型
+    """
+    model_config = ConfigDict(alias_generator=to_camel)
+
+    logger_name: Optional[str] = None
+    level: Optional[str] = None
+
+
+class SetLoggerLevelModel(BaseModel):
+    """
+    设置日志级别模型
+    """
+    model_config = ConfigDict(alias_generator=to_camel)
+
+    logger_name: list[str]
+    level: str

@@ -301,6 +301,8 @@ def get_sys_info() -> dict:
 
     return info
 
+
+
 if __name__ == "__main__":
     # 示例用法
     # test_dir = "./test_folder"

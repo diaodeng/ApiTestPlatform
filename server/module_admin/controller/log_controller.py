@@ -147,3 +147,30 @@ async def export_system_login_log_list(request: Request, login_log_page_query: L
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+@logController.get("/logger/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('monitor:logger:list'))])
+@log_decorator(title='查询logger', business_type=0)
+async def get_log_list(request: Request, log_page_query: QueryLoggerModel = Depends(QueryLoggerModel.as_query), query_db: Session = Depends(get_db)):
+    try:
+        # 获取分页数据
+        log_page_query_result = LoggerService.get_all_logger_services(log_page_query)
+        logger.info('获取成功')
+        return ResponseUtil.success(dict_content=log_page_query_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@logController.post("/logger/level", dependencies=[Depends(CheckUserInterfaceAuth('monitor:logger:level'))])
+@log_decorator(title='修改日志级别', business_type=1)
+async def set_logger_level(request: Request, logger_level: SetLoggerLevelModel, query_db: Session = Depends(get_db)):
+    try:
+        LoggerService.set_logger_level_services(logger_level.logger_name, logger_level.level)
+        logger.info(f'设置日志级别成功，logger_name：{logger_level.logger_name}，level：{logger_level.level}')
+        return ResponseUtil.success(msg=f'设置日志级别成功，logger_name：{logger_level.logger_name}，level：{logger_level.level}')
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+

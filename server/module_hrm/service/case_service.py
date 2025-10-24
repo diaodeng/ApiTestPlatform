@@ -142,7 +142,7 @@ class CaseService:
         return CrudResponseModel(**result)
 
     @classmethod
-    def delete_case_services(cls, query_db: Session, page_object: DeleteCaseModel, user: CurrentUserModel = None):
+    async def delete_case_services(cls, query_db: Session, page_object: DeleteCaseModel, user: CurrentUserModel = None):
         """
         删除用例信息service
         :param query_db: orm对象
@@ -153,13 +153,13 @@ class CaseService:
             id_list = page_object.case_ids.split(',')
             try:
                 for case_id in id_list:
-                    CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id), user)
-                    CaseParamsDao.delete_table(query_db, use_case_id=case_id)
-                    SuiteDetailDao.del_suite_detail_by_id(query_db, case_id)
-                query_db.commit()
+                    await CaseParamsDao.delete_table(query_db, use_case_id=case_id)
+                    await CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id), user)
+                    await SuiteDetailDao.del_suite_detail_by_id(query_db, case_id)
+                await run_in_threadpool(query_db.commit)
                 result = dict(is_success=True, message='删除成功')
             except Exception as e:
-                query_db.rollback()
+                await run_in_threadpool(query_db.rollback)
                 raise e
         else:
             result = dict(is_success=False, message='传入用例id为空')
@@ -297,7 +297,7 @@ class CaseParamsService:
         CaseParamsDao.update_table_row(query_db, use_case_id=case_id, row_data=params)
 
     @classmethod
-    def delete_case_params_services(cls, query_db: Session, delete_data: CaseParamsDeleteModel):
+    async def delete_case_params_services(cls, query_db: Session, delete_data: CaseParamsDeleteModel):
         """
         删除用例参数信息service
         :param query_db: orm对象
@@ -305,7 +305,7 @@ class CaseParamsService:
         :param params: 用例参数信息
         :return: 用例参数信息
         """
-        CaseParamsDao.delete_table_row(query_db, use_case_id=delete_data.case_id, row_ids=delete_data.row_ids)
+        await CaseParamsDao.delete_table_row(query_db, use_case_id=delete_data.case_id, row_ids=delete_data.row_ids)
 
     @classmethod
     def import_csv_to_db(cls, file: UploadFile, case_id: int|str, current_user: CurrentUserModel) -> dict:

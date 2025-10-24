@@ -24,3 +24,20 @@ export function cleanOperlog() {
     method: 'delete'
   })
 }
+
+export function getLoggerList(query) {
+  return request({
+    url: '/monitor/logger/list',
+    method: 'get',
+    params: query
+  })
+}
+
+export function setLoggerLevel(query) {
+  return request({
+    url: '/monitor/logger/level',
+    method: 'post',
+    data: query
+  })
+}
+

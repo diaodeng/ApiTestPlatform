@@ -1,12 +1,10 @@
-import sys
-import threading
+import flet as ft
 
 from utils.mytimers import clear_all_timers
 from flet import Page
 
 class ExitAlertDialog:
-    def __init__(self, ft, page, **kwargs):
-        self.ft = ft
+    def __init__(self, page, **kwargs):
         self.page: Page = page
         self.kwargs = kwargs
 

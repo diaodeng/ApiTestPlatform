@@ -9,6 +9,7 @@ temp/
 build/
 dist/
 .idea
+.zed
 server/.env.dev
 server/.env.prod
 server/.env.test
@@ -20,6 +21,8 @@ server/app
 server/.vscode
 
 web/vite.config.js.timestamp*.mjs
+pyrightconfig.json
+settings.json
 
 # C extensions
 *.so

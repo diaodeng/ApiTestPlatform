@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+from starlette.concurrency import run_in_threadpool
 
 from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
 from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
@@ -224,5 +225,5 @@ class SuiteDetailDao:
             .update(suite_detail)
 
     @classmethod
-    def del_suite_detail_by_id(cls, db: Session, detail_id):
-        db.query(QtrSuiteDetail).filter(QtrSuiteDetail.suite_detail_id == detail_id).delete()
+    async def del_suite_detail_by_id(cls, db: Session, detail_id):
+        await run_in_threadpool(db.query(QtrSuiteDetail).filter(QtrSuiteDetail.suite_detail_id == detail_id).delete)
