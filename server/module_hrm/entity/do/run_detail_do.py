@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, BigInteger, DateTime, Float, Integer
+from sqlalchemy import String, BigInteger, DateTime, Float, Integer, Index
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import mapped_column, Mapped
 
@@ -30,3 +30,9 @@ class HrmRunDetail(Base, BaseModel):
     run_duration: Mapped[float] = mapped_column(Float, nullable=False, default=0, comment='执行耗时')
     run_detail: Mapped[str] = mapped_column(LONGTEXT, nullable=False, default=None, comment='执行详情')
     status: Mapped[int] = mapped_column(Integer, nullable=False, comment='用例执行状态：1-成功，2-失败，3-跳过')
+
+    __table_args__ = (
+        Index("idx_report_user_status", "report_id", "manager", "status"),  # 联合索引
+        Index("idx_report_status", "report_id", "status"),  # 联合索引
+        Index("idx_run_type", "run_id", "run_type"),  # 联合索引
+    )

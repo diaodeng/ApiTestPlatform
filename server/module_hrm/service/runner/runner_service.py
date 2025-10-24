@@ -7,6 +7,8 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Type, AsyncGenerator
+
+import httpx
 from fastapi.concurrency import run_in_threadpool
 
 from sqlalchemy.orm import Session
@@ -189,14 +191,16 @@ async def run_by_batch(run_info: CaseRunModel,
     env_obj = EnvModel.from_orm(env_data)
 
     try:
+        limit = httpx.Limits(max_connections=100, max_keepalive_connections=50)
+        async with httpx.AsyncClient(limits=limit, http2=True) as client:
+            run_info.http_client = client
+            for project_id, ids in all_cases.items():  # 按项目执行
+                if not ids: continue
 
-        for project_id, ids in all_cases.items():  # 按项目执行
-            if not ids: continue
-
-            res_data = await run_by_concurrent(list(ids), env_obj, run_info)
-            total_count += res_data[0]
-            success_count += res_data[1]
-            failed_count += res_data[2]
+                res_data = await run_by_concurrent(list(ids), env_obj, run_info)
+                total_count += res_data[0]
+                success_count += res_data[1]
+                failed_count += res_data[2]
     except Exception as e:
         logger.error(f"运行用例失败，错误信息：{e}")
         success = False

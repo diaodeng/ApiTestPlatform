@@ -638,12 +638,13 @@ class RequestRunner(object):
                 res_response: AgentResponse = agent_res_obj.response
 
             else:
-                async with httpx.AsyncClient(verify=False, event_hooks={"request": [on_request], "response": [on_response]}) as client:
-                    start_time = time.time()
-                    res_response = await client.request(**request_data)
-                    end_time = time.time()
-                    total_time = res_response.elapsed.total_seconds()
-                    self.format_time(start_time, end_time, total_time)
+                # async with httpx.AsyncClient(verify=False, event_hooks={"request": [on_request], "response": [on_response]}) as client:
+                # request_client = self.case_runner.run_info.http_client
+                start_time = time.time()
+                res_response = await self.case_runner.run_info.http_client.request(**request_data)
+                end_time = time.time()
+                total_time = res_response.elapsed.total_seconds()
+                self.format_time(start_time, end_time, total_time)
 
             self.logger.debug(f"请求响应结果：{res_response.status_code}")
             self.logger.debug(f"请求总耗时时间：{res_response.elapsed.total_seconds()}")
