@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List, Any, Dict
 
+import httpx
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
 from pydantic.alias_generators import to_camel
 
@@ -103,7 +104,7 @@ class CaseRunModel(BaseModel):
     """
     用于用例运行前的序列化
     """
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, arbitrary_types_allowed=True)
 
     ids: Optional[int | List | None] = None  # 执行的数据源的ID
     run_type: Optional[int] = RunTypeEnum.case.value  # 用例执行数据源，项目、模块、套件、用例
@@ -126,6 +127,7 @@ class CaseRunModel(BaseModel):
 
     global_vars: dict = Field(default_factory=lambda: {})
     project_debugtalk_set: dict[str | int, ProjectDebugtalkInfoModel] = Field(default_factory=lambda: {})  # 当前加载的所有debugtalk
+    http_client: httpx.AsyncClient = Field(default=None, exclude=True)
 
 
 class CaseModuleProjectModel(BaseModel):

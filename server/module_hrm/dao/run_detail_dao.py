@@ -70,18 +70,20 @@ class RunDetailDao:
     async def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str|None = None) -> PageResponseModel|list:
         logger.info(f"开始查询执行历史：{query_info.model_dump()}")
         query = db.query(HrmRunDetail)
+        if query_info.report_id:
+            query = query.filter(HrmRunDetail.report_id == query_info.report_id)
+
         if query_info.only_self:
             query = query.filter(HrmRunDetail.manager == query_info.manager)
+
+        if query_info.status:
+            query = query.filter(HrmRunDetail.status == query_info.status)
+
         if query_info.run_id:
             query = query.filter(HrmRunDetail.run_id == query_info.run_id)
         if query_info.run_type:
             query = query.filter(HrmRunDetail.run_type == query_info.run_type)
 
-        if query_info.status:
-            query = query.filter(HrmRunDetail.status == query_info.status)
-
-        if query_info.report_id:
-            query = query.filter(HrmRunDetail.report_id == query_info.report_id)
 
         if query_info.run_name:
             query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))

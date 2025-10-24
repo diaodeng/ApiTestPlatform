@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 
+import httpx
 from fastapi import APIRouter, Request
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -87,9 +88,10 @@ async def for_debug(request: Request,
                                                                 case_id=case_data["caseId"] or int(
                                                                     datetime.now().timestamp() * 1000000),
                                                                 run_info=debug_info)
-
-        test_runner = TestRunner(case_obj, debugtalk_info, debug_info)
-        all_case_res = await test_runner.start()
+        async with httpx.AsyncClient() as client:
+            debug_info.http_client = client
+            test_runner = TestRunner(case_obj, debugtalk_info, debug_info)
+            all_case_res = await test_runner.start()
         logger.info('执行成功')
         all_log = []
         steps_result = {}
