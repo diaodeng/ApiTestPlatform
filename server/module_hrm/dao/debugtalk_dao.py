@@ -72,7 +72,7 @@ class DebugTalkDao:
         :param debugtalk: DebugTalk对象
         :return: 新增校验结果
         """
-        db_debugtalk = HrmDebugTalk(**debugtalk.model_dump())
+        db_debugtalk = HrmDebugTalk(**debugtalk.model_dump(exclude_unset=True))
         db.add(db_debugtalk)
         db.flush()
 

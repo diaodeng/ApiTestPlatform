@@ -41,7 +41,7 @@ class Shortcut(object):
         # 处理页面关闭事件,如果定时器运行中需要先清理资源
         def window_event(e):
             if e.data == "close":
-                self.page.open(ExitAlertDialog(self.ft, self.page).confirm_dialog)
+                self.page.open(ExitAlertDialog(self.page).confirm_dialog)
                 # self.page.update()
 
         def on_window_event(e: ft.WindowEvent):
@@ -50,8 +50,8 @@ class Shortcut(object):
                 print("Closing app...")
                 sys.exit(0)  # 直接退出进程
 
-        self.page.window.prevent_close = True
-        self.page.window.on_event = window_event
+        # self.page.window.prevent_close = True
+        # self.page.window.on_event = window_event
 
     def _on_page_loaded(self, e):
         """页面加载完成"""

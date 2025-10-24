@@ -107,7 +107,7 @@ class ForwardRulesDetailService:
         return datas
 
     @classmethod
-    def query_list(cls, db: Session, query_info: ForwardRulesDetailQueryModel, data_scope_sql: str) -> list[ForwardRulesDetailModel]:
+    def query_list(cls, db: Session, query_info: ForwardRulesDetailQueryModel, data_scope_sql: str|None = None) -> list[ForwardRulesDetailModel]:
         return ForwardRulesDetailDao.get_list_by_page(db, query_info, data_scope_sql=data_scope_sql)
 
     @classmethod

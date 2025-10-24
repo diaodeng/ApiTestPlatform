@@ -253,7 +253,7 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
             for res_data in res_list:
                 async with lock:
                     data: TestCase = res_data
-                    if data.config.result.status == CaseRunStatus.passed.value:
+                    if data.config.result.status in [CaseRunStatus.passed.value, CaseRunStatus.skipped.value, CaseRunStatus.xpassed.value]:
                         stats["success"] += 1
                     elif data.config.result.status == CaseRunStatus.failed.value:
                         stats["failed"] += 1

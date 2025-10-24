@@ -48,6 +48,9 @@ class DataBaseSettings(BaseSettings):
     db_pool_size: int = 50
     db_pool_recycle: int = 3600
     db_pool_timeout: int = 30
+    db_connect_timeout: int = 10
+    db_read_timeout: int = 30
+    db_write_timeout: int = 30
 
 
 class RedisSettings(BaseSettings):
@@ -59,6 +62,7 @@ class RedisSettings(BaseSettings):
     redis_username: str = ''
     redis_password: str = ''
     redis_database: int = 2
+    redis_celery_database: int = 3
 
 
 class MessageFeishuBotSettings(BaseSettings):
