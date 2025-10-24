@@ -626,11 +626,11 @@ class RequestRunner(object):
             if self.case_runner.run_info.forward_config.forward and self.case_runner.run_info.forward_config.agent_code:
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
                 request_data["requestType"] = self.step_data.step_type
-                start_time = time.perf_counter()
+                start_time = time.time()
                 agent_res_obj: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
                                                                    request_data
                                                                    )
-                end_time = time.perf_counter()
+                end_time = time.time()
                 self.format_time(start_time, end_time)
                 if agent_res_obj.status_code != AgentResponseEnum.SUCCESS.value:
                     raise AgentForwardError("", f"客户机异常： {agent_res_obj.message}")
