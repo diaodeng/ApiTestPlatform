@@ -7,8 +7,7 @@ from loguru import logger
 
 from common.enums import RequestTypeEnum, get_enum_name
 from common.SerializeData import serialize_response
-from common.utils import bs64_to_text, text_to_bs64, compress_text
-from websockets import InvalidStatusCode
+from websockets.exceptions import InvalidStatus
 
 
 class RequestByInput:
@@ -16,41 +15,33 @@ class RequestByInput:
         pass
 
     @classmethod
-    async def forward_by_rules(self, req_data):
+    async def forward_by_rules(self, message_data_dict: dict, http_client: httpx.AsyncClient) ->(dict, bool):
         """根据入参转发请求"""
         client_status = True
-        req_data = bs64_to_text(req_data)
-        req_data = json.loads(req_data)
-        request_id = req_data.pop('request_id')
-        request_type = req_data.pop('requestType')
+
+        request_type = message_data_dict.pop('requestType')
+        request_id = message_data_dict.pop('request_id')
         res_data = {}
         if request_type == RequestTypeEnum.http.value:
-            with httpx.Client() as client:
-                try:
-                    res_response = client.request(**req_data)
-                    res_data = serialize_response(res_response)
-                except HTTPError as e:
-                    logger.error(e)
-                    # client_status = False
-                except InvalidStatusCode as e:
-                    logger.error(e.args)
-                    res_data['Error'] = str(e)
-                    # client_status = False
-                except Exception as e:
-                    logger.error(e)
-                    res_data["Error"] = f'{e.args}'
-                    # client_status = False
-                res_data['request_id'] = request_id
-                res_data['request_type'] = request_type
-                string_to_encode = json.dumps(res_data, indent=4)
-                encoded_string = text_to_bs64(string_to_encode)
-                return compress_text(encoded_string), client_status
+            try:
+                res_response = http_client.request(**message_data_dict)
+                res_data = serialize_response(res_response)
+            except HTTPError as e:
+                logger.error(e)
+                # client_status = False
+            except Exception as e:
+                logger.error(e)
+                res_data["Error"] = f'{e.args}'
+                # client_status = False
+            res_data['request_id'] = request_id
+            res_data['request_type'] = request_type
+            return res_data, client_status
         elif request_type == RequestTypeEnum.websocket.value:
             try:
-                ws_res_data, response_headers = await self.websocket_agent(req_data)
+                ws_res_data, response_headers = await self.websocket_agent(message_data_dict)
                 res_data = {"ws_res_data": ws_res_data, "response_headers": response_headers}
                 logger.info(f"ws响应数据：{res_data},ws响应headers:{response_headers}")
-            except InvalidStatusCode as e:
+            except InvalidStatus as e:
                 logger.error(e.args)
                 res_data['Error'] = str(e)
                 # client_status = False
@@ -60,14 +51,10 @@ class RequestByInput:
                 # client_status = False
             res_data['request_id'] = request_id
             res_data['request_type'] = request_type
-            string_to_encode = json.dumps(res_data, indent=4)
-            encoded_string = text_to_bs64(string_to_encode)
-            return compress_text(encoded_string), client_status
+            return res_data, client_status
         else:
             res_data = {"request_id": request_id, "request_type": request_type, "message": f"请求类型错误:{get_enum_name(RequestTypeEnum, request_type)}"}
-            string_to_encode = json.dumps(res_data)
-            encoded_string = text_to_bs64(string_to_encode)
-            return compress_text(encoded_string), client_status
+            return res_data, client_status
 
     @classmethod
     async def websocket_agent(self, req_data: dict):

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from tkinter import messagebox
 from typing import Any
 
+import httpx
 from loguru import logger
 from ttkbootstrap import StringVar
 import threading
@@ -56,9 +57,12 @@ class AgentToolsMain(ttk.Frame):
         self.timer_running = False
         self.agent_id = config_setting.get('agent_id') if config_setting.get('agent_id') else get_mac_address()
         self.client = WebSocketClient(config_setting['server_uri'] + '/' + self.agent_id, self.on_message_received)
+        self.http_client: httpx.AsyncClient = httpx.AsyncClient()
 
         # 初始化设置窗口标志
         self.settings_window_open = False
+
+        self.show_log = False
 
         image_files = {
             'properties-dark': 'icons8_settings_24px.png',
@@ -108,17 +112,17 @@ class AgentToolsMain(ttk.Frame):
         btn.pack(side=LEFT, ipadx=5, ipady=5, padx=0, pady=1)
 
         # left panel
-        left_panel = ttk.Frame(self, style='bg.TFrame', width=220)
+        left_panel = ttk.Frame(self, style='bg.TFrame', width=280)
         # left_panel.pack(side=LEFT, fill=Y)
         left_panel.pack(side='left', fill='y', expand=False)  # 禁止在水平方向扩展
         left_panel.propagate(False)  # 关闭自动调整大小
 
         ## Client Status (collapsible)
-        bus_cf = CollapsingFrame(left_panel, width=220)
+        bus_cf = CollapsingFrame(left_panel, width=280)
         bus_cf.pack(fill=X, pady=1)
 
         ## container
-        bus_frm = ttk.Frame(bus_cf, padding=5, width=220)
+        bus_frm = ttk.Frame(bus_cf, padding=5, width=280)
         bus_frm.columnconfigure(1, weight=2)
         bus_cf.add(
             child=bus_frm,
@@ -144,6 +148,16 @@ class AgentToolsMain(ttk.Frame):
             command=self.stop_websocket
         )
         btn.grid(row=0, column=1, sticky=W, padx=1, pady=2)
+
+        self.show_log_btn = ttk.Checkbutton(
+            bus_frm,
+            text='显示日志',
+            compound=LEFT,
+            width=4,
+            command=self.show_log_evt
+        )
+        self.show_log_btn.setvar("variable", self.show_log)
+        self.show_log_btn.grid(row=0, column=2, sticky=W, padx=1, pady=2)
 
         ## Status
         lbl = ttk.Label(bus_frm, text='状态:')
@@ -279,16 +293,19 @@ class AgentToolsMain(ttk.Frame):
                 pass
         self.setvar('status', '连接已断开')
 
-    async def on_message_received(self, data):
+    def show_log_evt(self):
+        self.show_log = not self.show_log
+        print(f"是否显示日志：{self.show_log}")
+
+    async def on_message_received(self, message_data: dict) -> dict:
         self.st_input.delete("1.0", END)
-        data = decompress_text(data)
-        show_input_data = json.dumps(json.loads(bs64_to_text(data)), indent=4, ensure_ascii=False)
+        show_input_data = json.dumps(message_data, indent=4 ,ensure_ascii=True)
         logger.info(f"转发请求参数：{show_input_data}")
         self.st_input.insert(END, f'{show_input_data}\n')
         self.st_output.delete("1.0", END)
-        res, client_status = await RequestByInput.forward_by_rules(data)
+        res, client_status = await RequestByInput.forward_by_rules(message_data, self.http_client)
         self.client.status = client_status
-        show_output_data = json.dumps(json.loads(bs64_to_text(decompress_text(res))), indent=4, ensure_ascii=False)
+        show_output_data = json.dumps(res, indent=4, ensure_ascii=False)
         logger.info(f"转发响应参数：{show_output_data}")
         self.st_output.insert(END, f'{show_output_data}\n')
         return res

@@ -1,4 +1,5 @@
 import base64
+from collections import defaultdict
 from datetime import datetime, timedelta
 import asyncio
 from fastapi import APIRouter, WebSocket, Depends
@@ -8,11 +9,11 @@ import uuid
 from sqlalchemy.orm import Session
 
 from module_hrm.enums.enums import TstepTypeEnum, AgentResponseEnum
-from module_hrm.utils.util import decompress_text
+from module_hrm.utils.util import decompress_text, decompress_str_to_dict, compress_dict_to_str
 from utils.log_util import logger
 from config.get_db import get_db
 from config.database import SessionLocal
-from module_qtr.service.agent_service import agents, response_futures, compress_text, AgentResponse, \
+from module_qtr.service.agent_service import agents, response_futures, AgentResponse, \
     AgentResponseWebSocket, handle_response
 from module_hrm.entity.vo.agent_vo import AgentModel
 from module_hrm.service.agent_service import AgentService
@@ -22,11 +23,11 @@ from utils.snowflake import snowIdWorker
 agentController = APIRouter(prefix='/qtr/agent')
 
 # websocket发送数据分片大小
-MAX_MESSAGE_SIZE = 1024
+MAX_MESSAGE_SIZE = 1024 * 16
 # 心跳间隔（秒）
 HEARTBEAT_INTERVAL = 30
 # agent状态
-agent_status = {}
+agent_status = defaultdict(dict)
 
 def change_agent_status(current_db, agent):
     try:
@@ -45,13 +46,16 @@ class ConnectionManager:
     async def connect(self, agent_code: str, websocket: WebSocket):
         await websocket.accept()
         self.agents[agent_code] = websocket
+        agents[agent_code] = websocket
         agent_status.setdefault(agent_code, {})
         logger.info(f'Client connected: {self.agents[agent_code].client_state}')
 
     async def disconnect(self, agent_code: str, close_code):
         if agent_code in self.agents:
-            del self.agents[agent_code]
+            logger.info(self.agents[agent_code])
+            self.agents.pop(agent_code).close()
             logger.info(f'Client disconnected: {self.agents[agent_code].client_state}, close code: {close_code}')
+            del self.agents[agent_code]
 
     async def send_heartbeat(self):
         while True:
@@ -59,17 +63,16 @@ class ConnectionManager:
                 await asyncio.sleep(HEARTBEAT_INTERVAL)  # 每30秒发送一次心跳
                 # logger.info(f'开始向客户端发送心跳信息：{self.agents}')
                 invalid_agent_key = []
-                if agent_status is not None:
-                    for k, v in agent_status.items():
-                        if len(agent_status.get(k)) > 0:
-                            # logger.info(agent_status)
-                            if datetime.now() - agent_status.get(k).get('heart_time') > timedelta(seconds=(HEARTBEAT_INTERVAL + 5)):
-                                invalid_agent_key.append(k)
+                for k, v in agent_status.items():
+                    if len(v) > 0:
+                        # logger.info(agent_status)
+                        if datetime.now() - v.get('heart_time') > timedelta(seconds=(HEARTBEAT_INTERVAL + 5)):
+                            invalid_agent_key.append(k)
                 current_db = SessionLocal()
                 try:
                     for agent in invalid_agent_key:
+                        logger.info(f"agent【{agent}】已经离线")
                         del agent_status[agent]
-                        logger.info(agent_status.get(agent))
                         if self.agents.get(agent):
                             del self.agents[agent]
                         change_agent_status(current_db, agent)
@@ -80,7 +83,7 @@ class ConnectionManager:
                             agent_status[agent_code]['heart_time'] = datetime.now()
                             agent_status[agent_code]['heart_status'] = False
                             try:
-                                await self.agents[agent_code].send_text(json.dumps({"code": 200, "status": "ok", "message": "service is alive"}))
+                                await self.agents[agent_code].send_text(json.dumps({"type": "ping", "status": "ok", "message": "service is alive"}))
                             except Exception as e:
                                 change_agent_status(current_db, agent_code)
                         else:
@@ -145,62 +148,53 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
     try:
         while True:
             data = await manager.agents[agent_code].receive_text()
+            agent_status[agent_code]['heart_status'] = True
+            agent_status[agent_code]['heart_time'] = datetime.now()
             # 解析接收到的消息
+            logger.debug(f"收到消息：{data}")
             message_data = json.loads(data)
-            if message_data.get("code") == 200:
+            if message_data.get("type") in ("ping", "pong"):
                 agent_status[agent_code]['heart_status'] = True
                 # logger.info(message_data.get("message"))
             # 检查消息类型是否为分片
-            elif message_data.get('type') == 'chunk':
+            elif message_data.get('type') == 'response_chunk':
                 # 获取分片信息
-                index = message_data['index']
-                total = message_data['total']
+                request_id = message_data["request_id"]
                 data_chunk = message_data['data']
 
                 # 将分片存储在字典中
-                if agent_code not in response_futures[agent_code]:
-                    response_futures[agent_code][agent_code] = {
-                        'total': total,
-                        'chunks': [None] * total  # 初始化分片数组
-                    }
+                if "chunks" not in response_futures[request_id]:
+                    response_futures[request_id]["chunks"] = []
 
                 # 存储分片数据
-                response_futures[agent_code][agent_code]['chunks'][index] = data_chunk
+                response_futures[request_id]["chunks"].append(data_chunk)
 
                 # 检查是否收到了所有的分片
-                if all(chunk is not None for chunk in response_futures[agent_code][agent_code]['chunks']):
+                logger.debug(f"收到消息： {message_data}")
+                if message_data["finished"]:
                     # 重新组装消息
-                    complete_message = ''.join(response_futures[agent_code][agent_code]['chunks'])
-                    # 解压数据
-                    data = decompress_text(complete_message)
-
-                    # 将字符串转换为字节
-                    string_bytes = data.encode('utf-8')
-
-                    # 使用 base64 模块进行解码
-                    encoded_bytes = base64.b64decode(string_bytes)
-
-                    # 将编码后的字节转换回字符串
-                    data = encoded_bytes.decode('utf-8')
-
-                    response_data = json.loads(data)
+                    complete_message = ''.join(response_futures[request_id]['chunks'])
+                    response_data = decompress_str_to_dict(complete_message)
 
                     # 检查是否有等待这个响应的Future对象
                     # 假设response_data中包含一个"request_id"字段来标识是哪个HTTP请求发送的消息
                     request_id = response_data.get("request_id")
-                    if request_id and agent_code in response_futures and request_id in response_futures[agent_code]:
+                    response_future = response_futures[request_id]["future"]
+                    logger.debug(f"response_future状态： {response_future.done()}")
+                    if response_future and not response_future.done():
                         # 设置Future对象的结果
-                        response_futures[agent_code][request_id].set_result(response_data)
+                        response_future.set_result(response_data)
                         # 从字典中移除这个Future对象，因为它已经被设置了结果
-                        del response_futures[agent_code][request_id]
+                        # del response_futures[agent_code][request_id]
                     # 从字典中移除已处理的分片
-                    del response_futures[agent_code][agent_code]
+                    # del response_futures[agent_code][agent_code]
             else:
                 # 如果不是分片消息，则直接处理（这里可以根据需要添加逻辑）
                 pass
 
     except Exception as e:
-        print(f"Error with {agent_code}: connection closed, {e}")
+        logger.exception(e)
+        logger.error(f"Error with {agent_code}: connection closed, {e}")
     finally:
         try:
             # del agents[agent_code]
@@ -244,18 +238,8 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
 
         # 发送消息到WebSocket，并包含request_id以便客户端能够识别是哪个请求的响应
         message['request_id'] = request_id
-        message = json.dumps(message)
-        # 将字符串转换为字节
-        string_bytes = message.encode('utf-8')
 
-        # 使用 base64 模块进行编码
-        encoded_bytes = base64.b64encode(string_bytes)
-
-        # 将编码后的字节转换回字符串
-        message = encoded_bytes.decode('utf-8')
-
-        # 压缩数据
-        message = compress_text(message)
+        message = compress_dict_to_str(message)
         await agents[agent_code].send_text(json.dumps(message))
 
         # 等待Future对象的结果（即WebSocket客户端的响应）

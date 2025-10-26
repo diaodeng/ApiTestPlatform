@@ -1,5 +1,6 @@
 import base64
 import gzip
+import json
 import uuid
 import zlib
 
@@ -62,3 +63,33 @@ def get_mac_address():
     mac = uuid.UUID(int=node).hex[-12:]
     mac_lower = mac.replace(':', '').lower()
     return mac_lower
+
+
+def compress_dict_to_str(data: dict) -> str:
+    message = json.dumps(data)
+    # 将字符串转换为字节
+    string_bytes = message.encode('utf-8')
+
+    # 使用 base64 模块进行编码
+    encoded_bytes = base64.b64encode(string_bytes)
+
+    # 将编码后的字节转换回字符串
+    message = encoded_bytes.decode('utf-8')
+
+    # 压缩数据
+    return compress_text(message)
+
+
+def decompress_str_to_dict(data: str) -> dict:
+    data = decompress_text(data)
+
+    # 将字符串转换为字节
+    string_bytes = data.encode('utf-8')
+
+    # 使用 base64 模块进行解码
+    encoded_bytes = base64.b64decode(string_bytes)
+
+    # 将编码后的字节转换回字符串
+    data = encoded_bytes.decode('utf-8')
+
+    return json.loads(data)
