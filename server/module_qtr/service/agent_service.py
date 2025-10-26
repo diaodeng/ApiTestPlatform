@@ -4,20 +4,23 @@ import datetime
 import json
 import re
 import uuid
+from collections import defaultdict
 from typing import Any
 
 import httpx
+from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from websockets import WebSocketClientProtocol
 
 from module_hrm.enums.enums import TstepTypeEnum, AgentResponseEnum
-from module_hrm.utils.util import compress_text
+from module_hrm.utils.util import compress_dict_to_str, decompress_str_to_dict
 from utils.log_util import logger
 
 # 存储agent的WebSocket连接和Future对象（用于HTTP请求等待WebSocket响应）
-agents = {}
-response_futures = {}
+agents: dict = {}
+response_futures = defaultdict(dict)
+CHUNK_SIZE = 1024 * 16
 
 
 async def send_message(agent_code: str, message: dict, request_id: str = None):
@@ -27,6 +30,7 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
     # 如果没有提供request_id，则生成一个唯一的标识符
     if not request_id:
         request_id = str(uuid.uuid4())
+    message["request_id"] = request_id
 
     if agent_code in agents:
         # 创建一个Future对象来代表异步操作的结果
@@ -34,25 +38,25 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
         future = loop.create_future()
 
         # 将Future对象存储在字典中，以便稍后设置其结果
-        if agent_code not in response_futures:
-            response_futures[agent_code] = {}
-        response_futures[agent_code][request_id] = future
+        response_futures[request_id]["future"] = future
 
         # 发送消息到WebSocket，并包含request_id以便客户端能够识别是哪个请求的响应
-        message['request_id'] = request_id
-        message = json.dumps(message)
-        # 将字符串转换为字节
-        string_bytes = message.encode('utf-8')
+        compress_data = compress_dict_to_str(message)
+        request_chunks = [compress_data[i:i+CHUNK_SIZE] for i in range(0, len(compress_data), CHUNK_SIZE)]
+        total = len(request_chunks) or 1
+        for idx, chunk in enumerate(request_chunks):
+            message_data = {
+                "type": "request_chunk",
+                "index": idx,
+                "total": total,
+                "request_id": request_id,
+                "data": chunk,
+                "finished": (idx == total - 1),
+                "binary": False,
+                "meta": {}
 
-        # 使用 base64 模块进行编码
-        encoded_bytes = base64.b64encode(string_bytes)
-
-        # 将编码后的字节转换回字符串
-        message = encoded_bytes.decode('utf-8')
-
-        # 压缩数据
-        message = compress_text(message)
-        await agents[agent_code].send_text(json.dumps(message))
+            }
+            await agents[agent_code].send_text(json.dumps(message_data))
 
         # 等待Future对象的结果（即WebSocket客户端的响应）
         try:
@@ -68,9 +72,10 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
         except asyncio.TimeoutError as e:
             logger.error(f'wobsocket请求超时{e}，request_id：{request_id}')
             # 如果超时，取消Future对象
-            if agent_code in response_futures and request_id in response_futures[agent_code]:
-                response_futures[agent_code][request_id].cancel()
-                del response_futures[agent_code][request_id]
+            request_future: asyncio.Future|None = response_futures.get(request_id, {}).get("future", None)
+            if request_future and not request_future.done():
+                request_future.cancel()
+                del request_future
             if request_type == TstepTypeEnum.http.value:
                 response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value, None, f'wobsocket请求超时{e}，request_id：{request_id}'))
                 return response
@@ -80,17 +85,19 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
         except asyncio.CancelledError as e:
             logger.error(e)
             # 如果超时，取消Future对象
-            if agent_code in response_futures and request_id in response_futures[agent_code]:
-                response_futures[agent_code][request_id].cancel()
-                del response_futures[agent_code][request_id]
+            request_future: asyncio.Future | None = response_futures.get(request_id, {}).get("future", None)
+            if request_future and not request_future.done():
+                request_future.cancel()
+                del request_future
             response = handle_response((AgentResponseEnum.TASK_CANCELLED.value, None, str(e.args)))
             return response
         except Exception as e:
             logger.error(e)
             # 如果超时，取消Future对象
-            if agent_code in response_futures and request_id in response_futures[agent_code]:
-                response_futures[agent_code][request_id].cancel()
-                del response_futures[agent_code][request_id]
+            request_future: asyncio.Future | None = response_futures.get(request_id, {}).get("future", None)
+            if request_future and not request_future.done():
+                request_future.cancel()
+                del request_future
             response = handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, str(e.args)))
             return response
 

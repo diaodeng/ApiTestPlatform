@@ -1,9 +1,12 @@
+import base64
+import gzip
 import json
 import os
 import sys
 import socket
 import platform
 import re
+import zlib
 from typing import Any, Optional
 
 import psutil
@@ -300,6 +303,62 @@ def get_sys_info() -> dict:
     info["net"] = len(net)
 
     return info
+
+
+def compress_text(text: str) -> str:
+    """
+    压缩文本内容
+    """
+    # print(f"压缩前大小：{len(text)}")
+    # 压缩文本
+    compressed_data = gzip.compress(text.encode('utf-8'))
+    # 使用 base64 编码
+    encoded_data = base64.b64encode(compressed_data).decode('utf8')
+    # print(f"压缩后大小：{len(encoded_data)}")
+    return encoded_data
+
+def decompress_text(encoded_data: str) -> str:
+    """
+    被压缩后再经过base64编码的数据，先base64解码再解压
+    """
+    decode_data = base64.b64decode(encoded_data.encode("utf-8"))
+    if decode_data.startswith(b'x\x9c'):
+        decompress_text = zlib.decompress(decode_data).decode("utf8")
+    elif decode_data.startswith(b'x\x1f') or decode_data.startswith(b'\x1f\x8b'):
+        decompress_text = gzip.decompress(decode_data).decode("utf-8")
+    else:
+        raise TypeError("解压失败")
+    return decompress_text
+
+
+def compress_dict_to_str(data: dict) -> str:
+    message = json.dumps(data)
+    # 将字符串转换为字节
+    string_bytes = message.encode('utf-8')
+
+    # 使用 base64 模块进行编码
+    encoded_bytes = base64.b64encode(string_bytes)
+
+    # 将编码后的字节转换回字符串
+    message = encoded_bytes.decode('utf-8')
+
+    # 压缩数据
+    return compress_text(message)
+
+
+def decompress_str_to_dict(data: str) -> dict:
+    data = decompress_text(data)
+
+    # 将字符串转换为字节
+    string_bytes = data.encode('utf-8')
+
+    # 使用 base64 模块进行解码
+    encoded_bytes = base64.b64decode(string_bytes)
+
+    # 将编码后的字节转换回字符串
+    data = encoded_bytes.decode('utf-8')
+
+    return json.loads(data)
 
 
 

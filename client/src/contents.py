@@ -6,6 +6,7 @@ from view_contents.content_shortcut import Shortcut
 from view_contents.content_about import About
 from view_contents.content_pos_handler import PosHandler
 from view_contents.content_goods import Goods
+from view_contents.content_agent import AgentHandler
 
 
 class Contents(object):
@@ -18,6 +19,7 @@ class Contents(object):
         self.settings = Settings(ft, page, log).settings()
         self.shortcut = Shortcut(ft, page, log).shortcut()
         self.about = About(ft).about()
+        self.agent_handler = AgentHandler(ft, page).init_ui()
         self.pos_handler = PosHandler(ft, page).init_ui()
         self.mitmproxy = MitmHandel(page).init()
         self.log_view = LogViewerApp(page).init_ui()
@@ -30,6 +32,7 @@ class Contents(object):
             self.shortcut,
             self.settings,
             self.goods,
+            self.agent_handler,
             self.pos_handler,
             self.mitmproxy,
             self.log_view,

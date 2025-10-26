@@ -66,6 +66,11 @@ class NavigationMenu:
                 self.ft.NavigationRailDestination(
                     icon=self.ft.Icons.SEARCH_OUTLINED,
                     selected_icon=self.ft.Icons.SEARCH,
+                    label="Agent"
+                ),
+                self.ft.NavigationRailDestination(
+                    icon=self.ft.Icons.SEARCH_OUTLINED,
+                    selected_icon=self.ft.Icons.SEARCH,
                     label="POS快捷方式"
                 ),
                 self.ft.NavigationRailDestination(
