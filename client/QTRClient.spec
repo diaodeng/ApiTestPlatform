@@ -11,8 +11,8 @@ a = Analysis(
         # ('src/storage', 'storage'),        # storage 目录下的文件打包到 dist/MyApp/storage/
     ],
     hiddenimports=[
-        # 'flet',
-        #'flet_core',
+         'flet',
+        'flet_core',
         # 'tkinter',   # Flet 内部 UI 依赖
         # 'grpc',
     ],

@@ -333,7 +333,7 @@ class ProxyCore:
         for d in descendants:
             logger.info(f"后代 PID={d.pid}, 名称={d.name()}， 状态={d.status()}， 信息：{d.exe()}")
         logger.info(f"mitmproxy 后代进程获取完毕")
-        return
+        # return
 
         current_pid = os.getpid()
         children = []
@@ -341,16 +341,16 @@ class ProxyCore:
         # 查找所有子进程
         for proc in psutil.process_iter(['pid', 'ppid', 'name', "exe"]):
             try:
-                logger.debug(f"进程： {proc.info['name']}")
+                logger.info(f"进程： {proc.info['name']}  路径:{proc.info["exe"]}")
                 if "mitm" in proc.info["name"].lower():
                     logger.info(f"这是啥：{proc}")
 
-                if proc.info['ppid'] == current_pid:
-                    # 查找当前进程的所有线程
-                    parent = psutil.Process(current_pid)
-                    threads.extend(parent.threads())
-                    logger.info(proc)
-                    logger.info(f"{proc.info['pid']}  mitmproxy threads: {[thread.id for thread in threads]}")
+                # if proc.info['ppid'] == current_pid:
+                #     # 查找当前进程的所有线程
+                #     parent = psutil.Process(current_pid)
+                #     threads.extend(parent.threads())
+                #     logger.info(proc)
+                #     logger.info(f"{proc.info['pid']}  mitmproxy threads: {[thread.id for thread in threads]}")
 
                     # if proc.info['name'] != "flet.exe":
                     #     proc.terminate()

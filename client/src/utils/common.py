@@ -7,6 +7,8 @@ import socket
 import platform
 import re
 import zlib
+import signal
+import shutil
 from typing import Any, Optional
 
 import psutil
@@ -47,6 +49,10 @@ def ensure_directory_exists(dir_path):
         print(f"目录 {dir_path} 已创建")
     else:
         print(f"目录 {dir_path} 已存在")
+
+
+def kill_process_by_id(process_id) -> bool:
+    os.kill(process_id, signal.SIGTERM)  # 或者 signal.SIGKILL 以强制终止
 
 
 def kill_process_by_name(process_name) -> bool:
@@ -214,6 +220,7 @@ def get_active_mac():
                         return addr2.address.replace("-", "").lower()
     return None
 
+
 def get_process_by_name(process_name) -> list[(int, str)]:
     """
     获取指定进程名称的进程ID
@@ -228,6 +235,7 @@ def get_process_by_name(process_name) -> list[(int, str)]:
     except psutil.NoSuchProcess:
         return []
     return res
+
 
 def get_memory_usage(pid=None):
     """
@@ -266,6 +274,7 @@ def get_process_memory_usage(process_name: str) -> float:
     for pid, exe in pids:
         res += get_memory_usage(pid)
     return res
+
 
 def get_sys_info() -> dict:
     info = {}
@@ -317,6 +326,7 @@ def compress_text(text: str) -> str:
     # print(f"压缩后大小：{len(encoded_data)}")
     return encoded_data
 
+
 def decompress_text(encoded_data: str) -> str:
     """
     被压缩后再经过base64编码的数据，先base64解码再解压
@@ -360,6 +370,42 @@ def decompress_str_to_dict(data: str) -> dict:
 
     return json.loads(data)
 
+
+def get_all_process() -> list[dict]:
+    current_pid = os.getpid()
+    all_process = []
+    # 查找所有子进程
+    for proc in psutil.process_iter(['pid', 'ppid', 'name', "exe"]):
+        try:
+            # logger.info(f"进程： {proc.info['name']}  路径:{proc.info["exe"]}")
+            if proc.info['ppid'] == current_pid:
+                proc.info['is_current_child'] = True
+            all_process.append(proc.info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    return all_process
+
+
+def update_app(new_url):
+    new_path = "update_new.exe"
+    app_name = "QTRClient.exe"
+    with requests.get(new_url, stream=True) as r:
+        with open(new_path, "wb") as f:
+            shutil.copyfileobj(r.raw, f)
+
+    bat_script = f"""
+@echo off
+ping 127.0.0.1 -n 2 > nul
+del "{app_name}"
+move "{new_path}" "{app_name}"
+start "" "{app_name}"
+del "%~f0"
+"""
+    with open("update_temp.bat", "w") as f:
+        f.write(bat_script)
+    subprocess.Popen("update_temp.bat", shell=True)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

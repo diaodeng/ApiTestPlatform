@@ -11,7 +11,7 @@ from loguru import logger
 from model.pos_network_model import PosLogoutModel
 from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig
 from utils import file_handle, pos_network
-from utils.common import kill_process_by_name
+from utils.common import kill_process_by_name, get_all_process, kill_process_by_id
 from common.ui_utils.ui_util import UiUtil
 
 
@@ -21,6 +21,7 @@ class PosHandler:
         self.ft = ft
         self.page = page
         self.set_width = 400
+        self.all_p = []
         self.stop_event = Event()
         self.setup_ui()
 
@@ -46,6 +47,72 @@ class PosHandler:
         self.page.open(dialog)
         self.page.update()
 
+    def open_process_list_dialog(self, e):
+        self.all_p = get_all_process()
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("运行中的进程"),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.TextField(key="filter_key"),
+                        ft.ElevatedButton("查询", on_click=self.filter_process),
+                        ft.ElevatedButton("更新", on_click=self.update_all_process),
+                    ]),
+                    ft.ListView([
+                        ft.Row([
+                            ft.Text(f"{item['name']}:{item['exe']}", expand=True),
+                            ft.Text("子进程", color=ft.Colors.GREEN_100, visible=item.get('is_current_child', False)),
+                            ft.ElevatedButton("停止", on_click=self.kill_p_by_id, data=item['pid']),
+                        ], expand=True) for item in self.all_p
+                    ], expand=True, key="filter_result"),
+                ]),
+
+                expand=True,
+                width=1000
+            ),
+            actions=[
+                ft.TextButton("取消", on_click=lambda e: e.page.close(dialog)),
+                # ft.TextButton("添加", on_click=lambda e: dialog.dismiss()),
+            ],
+            alignment=ft.alignment.center
+        )
+        dialog.open = True
+        self.page.open(dialog)
+        self.page.update()
+
+    def filter_process(self, e:ft.ControlEvent):
+        filter_data = ""
+        for i  in e.control.parent.controls:
+            if i.key == "filter_key":
+                filter_data = i.value
+        filter_data = filter_data.lower()
+        for item_view in e.control.parent.parent.controls:
+            if item_view.key == "filter_result":
+                item_view.controls.clear()
+                item_view.update()
+                for item in self.all_p:
+                    if filter_data in item['name'].lower():
+                        item_view.controls.append(
+                            ft.Row([
+                                ft.Text(f"{item['name']}:{item['exe']}", expand=True),
+                                ft.Text("子进程", color=ft.Colors.GREEN_100,
+                                        visible=item.get('is_current_child', False)),
+                                ft.ElevatedButton("停止", on_click=self.kill_p_by_id, data=item['pid']),
+                            ], expand=True)
+                        )
+                        item_view.update()
+
+    def update_all_process(self, e:ft.ControlEvent):
+        self.all_p = get_all_process()
+
+    def kill_p_by_id(self, e):
+        k_id = e.control.data
+        if k_id:
+            kill_process_by_id(e.control.data)
+
+        UiUtil.show_snackbar_success(self.page, f"进程已停止")
+
     def remove_work_dir(self, e: ft.ControlEvent, item):
         SearchConfig.remove_work_dir(item)
         e.control.parent.parent.controls.remove(e.control.parent)
@@ -68,7 +135,9 @@ class PosHandler:
                     ft.Button("查看工作目录", tooltip="查看已经添加的工作目录", on_click=lambda e: self.open_work_dir_list_dialog(e)),
                     self.search_btn,
                     self.stop_btn,
-                    self.kill_process_btn,
+                    self.kill_pos_btn,
+                    self.kill_offline_btn,
+                    ft.Button("结束进程", tooltip="查看并结束进程", on_click=self.open_process_list_dialog),
                 ]),
                 ft.Row([
                     self.file_pattern,
@@ -148,9 +217,16 @@ class PosHandler:
             # color="red"
         )
 
-        self.kill_process_btn = ft.ElevatedButton(
+        self.kill_pos_btn = ft.ElevatedButton(
             "结束POS",
             on_click=lambda e: self.kill_pos_process(),
+            # disabled=True,
+            color="red"
+        )
+
+        self.kill_offline_btn = ft.ElevatedButton(
+            "结束离线",
+            on_click=lambda e: self.kill_offline_process(),
             # disabled=True,
             color="red"
         )
@@ -264,8 +340,20 @@ class PosHandler:
             logger.info(f"POS进程已结束")
             UiUtil.show_snackbar_success(self.page, "POS进程已结束")
         except Exception as e:
-            logger.error(f"结束进程失败: {e}")
-            UiUtil.show_snackbar_error(self.page, f"结束进程失败: {e}")
+            logger.error(f"POS结束进程失败: {e}")
+            UiUtil.show_snackbar_error(self.page, f"POS结束进程失败: {e}")
+
+    def kill_offline_process(self):
+        kill_process_name = ["java.exe"]
+        try:
+            for process_name in kill_process_name:
+                # logger.info(f"结束{process_name}进程")
+                kill_process_by_name(process_name)
+            logger.info(f"离线（java.exe）进程已结束")
+            UiUtil.show_snackbar_success(self.page, "离线（java.exe）进程已结束")
+        except Exception as e:
+            logger.error(f"离线（java.exe）结束进程失败: {e}")
+            UiUtil.show_snackbar_error(self.page, f"离线（java.exe）结束进程失败: {e}")
 
     def validate_inputs(self, e):
         self.search_btn.disabled = not self.file_pattern.value
@@ -463,6 +551,9 @@ class PosHandler:
         path = e.control.data
         logger.info(f"获取POS环境: {path}")
         try:
+            if not os.path.exists(path):
+                UiUtil.show_snackbar_error(self.page, f"文件路径不存在【{path}】")
+                return
             pos_env = PaymentMockConfig.get_pos_env(path)
             e.control.text = pos_env
             # if pos_env == "RTA":

@@ -6,6 +6,7 @@ import os
 from threading import Thread, Event
 
 import flet as ft
+import websockets
 from flet.core.alignment import bottom_right
 from loguru import logger
 
@@ -26,16 +27,17 @@ class AgentHandler:
         self.stop_event = Event()
         self.websocket_client = None
 
-        self.uri = "ws://localhost:9099/qtr/agent/ws/1111111"
+        self.uri = "ws://testautoapi.rta-os.com/qtr/agent/ws"
+        self.local_mac = get_active_mac()
         self.connect_status = False
         self.show_log = True
         # self.setup_ui()
         self.request_data_view = ft.TextField(
                         label="请求参数",
                         tooltip="匹配指定规则的文件名",
-                        hint_text="例如: *.txt 或 report*.docx",
+                        hint_text="",
                         # width=self.set_width,
-                        value="111111",
+                        value="",
                         multiline=True,
                         expand=True,
                         expand_loose=True,
@@ -43,9 +45,9 @@ class AgentHandler:
         self.response_data_view = ft.TextField(
                         label="响应信息",
                         tooltip="匹配指定规则的文件名",
-                        hint_text="例如: *.txt 或 report*.docx",
+                        hint_text="",
                         # width=self.set_width,
-                        value="33333",
+                        value="",
                         multiline=True,
                         expand=True
                     )
@@ -72,20 +74,22 @@ class AgentHandler:
                         key="disconnect_btn"
                     ),
                     ft.Text(
-                        get_active_mac(),
+                        self.local_mac,
                         tooltip="客户端mac地址",
                         on_tap=self.copy_mac,
-                        disabled=False
+                        disabled=False,
+                        selectable=True
                     ),
                     ft.Checkbox(
                         "显示日志",
                         tooltip="客户端是否显示请求参数和响应",
+                        value=self.show_log,
                         on_change=self.change_show_log,
                         disabled=False
                     ),
                     ft.TextField(
                         label="地址",
-                        value="ws://localhost:9099/qtr/agent/ws/1111111",
+                        value=self.uri,
                         tooltip="服务端websocket地址",
                         on_change=self.change_server_url,
                         disabled=False,
@@ -101,10 +105,15 @@ class AgentHandler:
         )
         return content
 
+    def get_websocket_url(self):
+        if self.uri.endswith("/"):
+            self.uri = self.uri[:-1]
+        return f"{self.uri}/{self.local_mac}"
+
     def before_request(self, data):
         if self.show_log:
             logger.info(f"请求数据： {json.dumps(data, ensure_ascii=True)}")
-            self.request_data_view.value = json.dumps(data, ensure_ascii=True)
+            self.request_data_view.value = json.dumps(data, ensure_ascii=True, indent=4)
             self.response_data_view.value = ""
             self.request_data_view.update()
             self.response_data_view.update()
@@ -112,13 +121,21 @@ class AgentHandler:
     def after_request(self, data):
         if self.show_log:
             logger.info(f"响应数据： {json.dumps(data, ensure_ascii=True)}")
-            self.response_data_view.value = json.dumps(data, ensure_ascii=True)
+            try:
+                result_data = json.dumps(json.loads(data["text"]), ensure_ascii=True, indent=4)
+            except Exception as e:
+                result_data = data.get("text") or json.dumps(data, ensure_ascii=True, indent=4)
+
+            self.response_data_view.value = result_data
             self.response_data_view.update()
 
 
-    async def start_connect(self, e: ft.ControlEvent):
+    async def start_connect(self, evt: ft.ControlEvent):
+        connect_url = self.get_websocket_url()
+        logger.info(f"开始连接服务器： {connect_url}")
+        UiUtil.show_snackbar_success(self.page, f"开始连接服务器：{connect_url}")
         self.connect_status = True
-        for element in e.control.parent.controls:
+        for element in evt.control.parent.controls:
             if element.key == "connect_btn":
                 element.disabled = self.connect_status
             elif element.key == "disconnect_btn":
@@ -127,11 +144,23 @@ class AgentHandler:
         # self.page.update()
         try:
             if not self.websocket_client:
-                self.websocket_client = WebSocketClient(self.uri, before_request_call=self.before_request, after_request_call=self.after_request)
-            await self.websocket_client.connect(self.uri)
+                self.websocket_client = WebSocketClient(connect_url, before_request_call=self.before_request, after_request_call=self.after_request)
+            await self.websocket_client.connect(connect_url)
+        except websockets.exceptions.ConnectionClosedError as e:
+            logger.error(f"连接异常关闭：{e}")
+            UiUtil.show_snackbar_error(self.page, f"连接异常关闭：{e}")
+        except websockets.exceptions.ConnectionClosedOK as e:
+            logger.info(f"连接关闭成功")
+            UiUtil.show_snackbar_success(self.page, f"连接关闭成功")
+        except TimeoutError as e:
+            logger.error(f"连接超时【{connect_url}】")
+            UiUtil.show_snackbar_error(self.page, f"连接超时【{connect_url}】")
         except Exception as er:
+            logger.error(f"服务器连接失败：{er}")
+            UiUtil.show_snackbar_error(self.page, f"服务链接失败：【{type(er)}】{er}")
+        finally:
             self.connect_status = False
-            for element in e.control.parent.controls:
+            for element in evt.control.parent.controls:
                 if element.key == "connect_btn":
                     element.disabled = self.connect_status
 
@@ -150,8 +179,9 @@ class AgentHandler:
             element.update()
         try:
             await self.websocket_client.send_close()
+            UiUtil.show_snackbar_success(self.page, f"成功断开连接")
         except Exception as e:
-            pass
+            UiUtil.show_snackbar_error(self.page, f"断开连接异常：{e}")
             # self.connect_status = True
             # for element in e.control.parent.controls:
             #     if element.key == "connect_btn":

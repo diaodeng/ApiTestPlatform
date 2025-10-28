@@ -8,11 +8,10 @@ pyperclip
 pyinstaller
 python-barcode
 pillow
+pydantic
 
 httpx
 
-fastapi
-uvicorn
 
 mitmproxy
 flet-desktop

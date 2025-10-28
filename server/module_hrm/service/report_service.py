@@ -41,7 +41,6 @@ class ReportService:
     @classmethod
     async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str|None = None) -> str:
         # 2. 渲染HTML模板
-        result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
         success_count = 0
         fail_count = 0
         skip_count = 0
@@ -49,8 +48,14 @@ class ReportService:
         max_time = 0
         min_time = 0
         avg_time = 0
+        total_count = 0
+        result = []
 
-        for item in result:
+        async for item in RunDetailDao.list_iter(query_db, query_info, data_scope_sql):
+            if total_count > 2000:  # 一个文件最多到出2000条，太多本地打开文件也会卡
+                break
+            result.append(item)
+            total_count += 1
             new_detail_data = ""
             run_detail_dict = json.loads(item["runDetail"])
             for step in run_detail_dict.get("teststeps", []):
@@ -80,17 +85,17 @@ class ReportService:
             elif run_status == CaseRunStatus.skipped.value:
                 skip_count += 1
 
-        if len(result) > 0:
-            avg_time = total_time / len(result)
+        if total_count > 0:
+            avg_time = total_time / total_count
 
         info = {
-            "count": len(result),
+            "count": total_count,
             "success": success_count,
-            "successPercent": f"{round(success_count / len(result) * 100, 2)}%",
+            "successPercent": f"{round(success_count / total_count * 100, 2)}%",
             "fail": fail_count,
-            "failPercent": f"{round(fail_count / len(result) * 100, 2)}%",
+            "failPercent": f"{round(fail_count / total_count * 100, 2)}%",
             "skip": skip_count,
-            "skipPercent": f"{round(skip_count / len(result) * 100, 2)}%",
+            "skipPercent": f"{round(skip_count / total_count * 100, 2)}%",
             "maxTime": format_duration(max_time),
             "minTime": format_duration(min_time),
             "avgTime": format_duration(avg_time),

@@ -1,3 +1,5 @@
+from typing import AsyncGenerator
+
 from sqlalchemy.orm import Session
 from sqlalchemy import insert
 from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
@@ -8,6 +10,7 @@ from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数�
 
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunListModel, HrmRunDetailModel
+from utils.common_util import CamelCaseUtil
 from utils.page_util import PageUtil, PageResponseModel
 from utils.log_util import logger
 
@@ -106,3 +109,43 @@ class RunDetailDao:
         result.rows = rows
         logger.info(f"执行历史数据组装完成: {len(result.rows)}")
         return result
+
+    @classmethod
+    async def list_iter(cls, db: Session, query_info: RunDetailQueryModel,
+                   data_scope_sql: str | None = None) -> AsyncGenerator[dict, None]:
+        batch_size = 500
+        offset = 0
+        query = db.query(HrmRunDetail)
+        if query_info.report_id:
+            query = query.filter(HrmRunDetail.report_id == query_info.report_id)
+
+        if query_info.only_self:
+            query = query.filter(HrmRunDetail.manager == query_info.manager)
+
+        if query_info.status:
+            query = query.filter(HrmRunDetail.status == query_info.status)
+
+        if query_info.run_id:
+            query = query.filter(HrmRunDetail.run_id == query_info.run_id)
+        if query_info.run_type:
+            query = query.filter(HrmRunDetail.run_type == query_info.run_type)
+
+        if query_info.run_name:
+            query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
+        if data_scope_sql:
+            query = query.filter(eval(data_scope_sql))
+
+        if query_info.report_id:
+            query = query.order_by(HrmRunDetail.run_start_time, HrmRunDetail.run_end_time)
+        elif query_info.run_id:
+            query = query.order_by(HrmRunDetail.run_start_time.desc(), HrmRunDetail.run_end_time.desc())
+
+
+
+        while True:
+            query_result = await run_in_threadpool(query.offset(offset).limit(batch_size).all)
+            if not query_result:
+                break
+            for row in CamelCaseUtil.transform_result(query_result):
+                yield row  # 逐条 yield（或者改成 yield batch）
+            offset += batch_size

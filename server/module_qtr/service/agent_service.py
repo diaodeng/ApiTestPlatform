@@ -60,17 +60,24 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
 
         # 等待Future对象的结果（即WebSocket客户端的响应）
         try:
-            response = await asyncio.wait_for(future, timeout=120)
-            logger.info(f"response={response}")
-            if response.get("request_type") == TstepTypeEnum.http.value:
-                response = AgentResponse(response)
-            elif response.get("request_type") == TstepTypeEnum.websocket.value:
-                response = AgentResponseWebSocket(response)
-                logger.info(f"ws响应数据：{response}")
+            response_data = await asyncio.wait_for(future, timeout=120)
+            logger.info(f"response={response_data}")
+            response = {}
+            if response_data.get("Error", None):
+                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, response_data, f"客户端中发生异常：{response_data.get('Error')}"))
+
+            if response_data.get("request_type") == TstepTypeEnum.http.value:
+                response = AgentResponse(response_data)
+            elif response_data.get("request_type") == TstepTypeEnum.websocket.value:
+                response = AgentResponseWebSocket(response_data)
+                # logger.info(f"ws响应数据：{response}")
+            else:
+                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, response_data, f"响应数据类型【{response_data.get('request_type')}】不支持"))
+
             response = handle_response((AgentResponseEnum.SUCCESS.value, response, "操作成功"))
             return response
         except asyncio.TimeoutError as e:
-            logger.error(f'wobsocket请求超时{e}，request_id：{request_id}')
+            logger.error(f'websocket请求超时{e}，request_id：{request_id}')
             # 如果超时，取消Future对象
             request_future: asyncio.Future|None = response_futures.get(request_id, {}).get("future", None)
             if request_future and not request_future.done():
@@ -102,7 +109,7 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
             return response
 
     else:
-        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value, None, "Agent not connected，request_id：{request_id}"))
+        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value, None, f"【{agent_code}】Agent not connected，request_id：{request_id}"))
         return response
 
 
@@ -133,28 +140,29 @@ class AgentResponse(httpx.Response):
         return self.message.get('status_code')
 
     @property
-    def elapsed(self) -> datetime.timedelta:
+    def elapsed(self) -> datetime.timedelta|None:
         # 正则表达式匹配字符串，提取天数、小时、分钟、秒和微秒（可选）
         s = self.message.get('elapsed', None)
-        if s is not None:
-            pattern = re.compile(r"(?:(\d+) days, )?(\d+):(\d+):(\d+)(?:\.(\d+))?")
-            match = pattern.match(s)
-            if not match:
-                raise ValueError("Invalid timedelta string format")
+        if s is None:
+            return None
+        pattern = re.compile(r"(?:(\d+) days, )?(\d+):(\d+):(\d+)(?:\.(\d+))?")
+        match = pattern.match(s)
+        if not match:
+            raise ValueError("Invalid timedelta string format")
 
-            # 提取匹配到的组（如果存在的话）
-            days, hours, minutes, seconds, microseconds = match.groups()
+        # 提取匹配到的组（如果存在的话）
+        days, hours, minutes, seconds, microseconds = match.groups()
 
-            # 将提取到的字符串转换为整数（如果存在的话），否则为0
-            days = int(days) if days else 0
-            hours = int(hours) if hours else 0
-            minutes = int(minutes) if minutes else 0
-            seconds = int(seconds) if seconds else 0
-            microseconds = int(microseconds) if microseconds else 0
+        # 将提取到的字符串转换为整数（如果存在的话），否则为0
+        days = int(days) if days else 0
+        hours = int(hours) if hours else 0
+        minutes = int(minutes) if minutes else 0
+        seconds = int(seconds) if seconds else 0
+        microseconds = int(microseconds) if microseconds else 0
 
-            # 根据提取到的信息创建timedelta对象
-            return datetime.timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds,
-                                      microseconds=microseconds * 1000)  # 注意：将毫秒转换回微秒
+        # 根据提取到的信息创建timedelta对象
+        return datetime.timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds,
+                                  microseconds=microseconds * 1000)  # 注意：将毫秒转换回微秒
 
     @property
     def request(self) -> Request:
@@ -231,6 +239,9 @@ class AgentResponse(httpx.Response):
     @property
     def num_bytes_downloaded(self) -> int:
         return self.message.get('num_bytes_downloaded')
+
+    def json(self):
+        return json.loads(self.text)
 
 
 class AgentResponseWebSocket(WebSocketClientProtocol):

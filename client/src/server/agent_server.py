@@ -1,5 +1,6 @@
 import asyncio
 import json
+import traceback
 from collections import defaultdict
 from enum import Enum
 
@@ -26,6 +27,7 @@ class RequestByInput:
     @classmethod
     async def forward_by_rules(cls, message_data_dict: dict, http_client: httpx.AsyncClient) -> (dict, bool):
         """根据入参转发请求"""
+        logger.info(f"请求数据：{json.dumps(message_data_dict, ensure_ascii=True)}")
         client_status = True
 
         request_type = message_data_dict.pop('requestType')
@@ -37,10 +39,11 @@ class RequestByInput:
                 res_data = cls.serialize_response(res_response)
             except HTTPError as e:
                 logger.error(e)
+                res_data["Error"] = f"HTTPError：【{type(e).__name__}】{e}"
                 # client_status = False
             except Exception as e:
                 logger.error(e)
-                res_data["Error"] = f'{e.args}'
+                res_data["Error"] = "".join(traceback.format_exception(e))
                 # client_status = False
             res_data['request_id'] = request_id
             res_data['request_type'] = request_type
@@ -52,11 +55,11 @@ class RequestByInput:
                 logger.info(f"ws响应数据：{res_data},ws响应headers:{response_headers}")
             except InvalidStatus as e:
                 logger.error(e.args)
-                res_data['Error'] = str(e)
+                res_data['Error'] = "".join(traceback.format_exception(e))
                 # client_status = False
             except Exception as e:
                 logger.error(e.args)
-                res_data['Error'] = f'{e.args}'
+                res_data['Error'] = "".join(traceback.format_exception(e))
                 # client_status = False
             res_data['request_id'] = request_id
             res_data['request_type'] = request_type
@@ -97,7 +100,7 @@ class RequestByInput:
             "headers": dict(response.headers),
             "cookies": dict(response.cookies),
             "text": response.text,
-            "json": response.json(),
+            # "json": json_data,
             "content": response.content.decode('utf-8'),
             "url": cls.serialize_url(response.url),
             "request": cls.serialize_request(response.request),
@@ -170,7 +173,8 @@ class WebSocketClient:
         self.running = True
         self.status = True
         try:
-            self.websocket = await websockets.connect(self.uri, origin="http://localhost")
+            self.websocket = await websockets.connect(self.uri)
+            logger.info(f"服务链接成功：{self.uri}")
             async with httpx.AsyncClient() as http_client:
                 while self.running:
                     # await self.send_heart()
@@ -183,27 +187,27 @@ class WebSocketClient:
                         # logger.info(msg.get('message'))
                     else:
                         asyncio.create_task(self.handle_message_chunk(msg, http_client))
-        except ConnectionRefusedError as e:
-            logger.error(e)
-            logger.info('连接异常断开，30秒后重新尝试连接')
-            # await self.reconnect(30)
-        except websockets.exceptions.ConnectionClosedError as e:
-            logger.error(e)
-            logger.info('服务端异常断开，5秒后重新尝试连接')
-            # await self.reconnect()
-        except websockets.exceptions.ConnectionClosedOK as e:
-            logger.error(e)
-            logger.info('连接异常断开，5秒后重新尝试连接')
-            # await self.reconnect()
-        except TypeError as e:
-            logger.error(e)
-            logger.info('客户端数据处理异常,5秒后重新建立连接')
-            # await self.reconnect()
-        except Exception as e:
-            self.status = False
-            logger.error(f'未知异常，连接中断：{e}')
-            logger.exception(e)
-            logger.info('未知异常,5秒后重新建立连接')
+        # except ConnectionRefusedError as e:
+        #     logger.error(e)
+        #     logger.info('连接异常断开，30秒后重新尝试连接')
+        #     # await self.reconnect(30)
+        # except websockets.exceptions.ConnectionClosedError as e:
+        #     logger.error(e)
+        #     logger.info('服务端异常断开，5秒后重新尝试连接')
+        #     # await self.reconnect()
+        # except websockets.exceptions.ConnectionClosedOK as e:
+        #     logger.error(e)
+        #     logger.info('连接异常断开，5秒后重新尝试连接')
+        #     # await self.reconnect()
+        # except TypeError as e:
+        #     logger.error(e)
+        #     logger.info('客户端数据处理异常,5秒后重新建立连接')
+        #     # await self.reconnect()
+        # except Exception as e:
+        #     self.status = False
+        #     logger.error(f'未知异常，连接中断：{e}')
+        #     logger.exception(e)
+        #     logger.info('未知异常,5秒后重新建立连接')
             # await self.reconnect()
         finally:
             # logger.info(f"我是finally")
