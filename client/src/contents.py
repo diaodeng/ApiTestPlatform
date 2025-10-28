@@ -15,9 +15,9 @@ class Contents(object):
         self.log = log
         self.page = page
 
-        self.home = Home(ft, page, log, **kwargs).home()
+        # self.home = Home(ft, page, log, **kwargs).home()
         self.settings = Settings(ft, page, log).settings()
-        self.shortcut = Shortcut(ft, page, log).shortcut()
+        # self.shortcut = Shortcut(ft, page, log).shortcut()
         self.about = About(ft).about()
         self.agent_handler = AgentHandler(ft, page).init_ui()
         self.pos_handler = PosHandler(ft, page).init_ui()
@@ -28,8 +28,8 @@ class Contents(object):
     # 内容区域函数
     def get_content(self, index):
         contents = [
-            self.home,
-            self.shortcut,
+            # self.home,
+            # self.shortcut,
             self.settings,
             self.goods,
             self.agent_handler,

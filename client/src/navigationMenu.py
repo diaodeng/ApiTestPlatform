@@ -8,12 +8,12 @@ class NavigationMenu:
         self.log = log
         # 当前选中索引
         self.selected_index = ft.Ref[int]()
-        self.selected_index.current = 0
+        self.selected_index.current = 3
         # 内容对象
         self.contents = Contents(ft, log, page, **kwargs)
         # 内容区域
         self.content_area = ft.Container(
-            content=self.contents.get_content(0),
+            content=self.contents.get_content(3),
             expand=True
         )
 
@@ -36,23 +36,23 @@ class NavigationMenu:
     def nav_rail_menu(self):
         # 构建导航栏
         nav_rail = self.ft.NavigationRail(
-            selected_index=0,
+            selected_index=3,
             label_type=self.ft.NavigationRailLabelType.ALL,
             min_width=100,
             min_extended_width=200,
 
             # group_alignment=-0.9,  # 控制上边距
             destinations=[
-                self.ft.NavigationRailDestination(
-                    icon=self.ft.Icons.HOME_OUTLINED,
-                    selected_icon=self.ft.Icons.HOME,
-                    label="首页"
-                ),
-                self.ft.NavigationRailDestination(
-                    icon=self.ft.Icons.DASHBOARD_OUTLINED,
-                    selected_icon=self.ft.Icons.DASHBOARD,
-                    label="快捷"
-                ),
+                # self.ft.NavigationRailDestination(
+                #     icon=self.ft.Icons.HOME_OUTLINED,
+                #     selected_icon=self.ft.Icons.HOME,
+                #     label="首页"
+                # ),
+                # self.ft.NavigationRailDestination(
+                #     icon=self.ft.Icons.DASHBOARD_OUTLINED,
+                #     selected_icon=self.ft.Icons.DASHBOARD,
+                #     label="快捷"
+                # ),
                 self.ft.NavigationRailDestination(
                     icon=self.ft.Icons.SETTINGS_OUTLINED,
                     selected_icon=self.ft.Icons.SETTINGS,
@@ -64,18 +64,18 @@ class NavigationMenu:
                     label="商品"
                 ),
                 self.ft.NavigationRailDestination(
-                    icon=self.ft.Icons.SEARCH_OUTLINED,
-                    selected_icon=self.ft.Icons.SEARCH,
+                    icon=self.ft.Icons.CAST_CONNECTED_OUTLINED,
+                    selected_icon=self.ft.Icons.CAST_CONNECTED_ROUNDED,
                     label="Agent"
                 ),
                 self.ft.NavigationRailDestination(
-                    icon=self.ft.Icons.SEARCH_OUTLINED,
-                    selected_icon=self.ft.Icons.SEARCH,
-                    label="POS快捷方式"
+                    icon=self.ft.Icons.REAL_ESTATE_AGENT_OUTLINED,
+                    selected_icon=self.ft.Icons.REAL_ESTATE_AGENT_ROUNDED,
+                    label="POS"
                 ),
                 self.ft.NavigationRailDestination(
-                    icon=self.ft.Icons.AIRPLAY,
-                    selected_icon=self.ft.Icons.AIRPLAY,
+                    icon=self.ft.Icons.NEAR_ME_OUTLINED,
+                    selected_icon=self.ft.Icons.NEAR_ME_ROUNDED,
                     label="mitmproxy"
                 ),
                 self.ft.NavigationRailDestination(

@@ -35,12 +35,13 @@ class ExitAlertDialog:
         page.update()
 
     def yes_click(self, e):
+        e.control.page.window.prevent_close = False
         e.control.page.close(self.confirm_dialog)
         # e.control.page.update()
         # 页面包含定时器，需要先关闭定时器，清理资源
         clear_all_timers()
-        e.control.page.window.destroy()
-        # e.control.page.window.close()
+        # e.control.page.window.destroy()
+        e.control.page.window.close()
         # sys.exit(0)  # 直接退出进程
 
     def no_click(self, e):
