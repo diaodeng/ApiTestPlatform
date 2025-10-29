@@ -5,15 +5,15 @@ from pydantic import BaseModel
 
 class SearchConfigModel(BaseModel):
     dir: list[str] = ["c:/"]
-    file_pattern: str = "*.exe"
-    dir_pattern: str = ""
+    file_pattern: str = "cpos-df.exe"
+    dir_pattern: str = "*"
     max_depth: str = "1"
 
 
 class MitmProxyConfigModel(BaseModel):
     """mitmproxy 配置"""
-    port: int = 8080
-    web_port: int = 8081
+    port: int = 9080
+    web_port: int = 9081
     web_open_browser: bool = False
     cert_path: str = ""
     script_path: str = ""
