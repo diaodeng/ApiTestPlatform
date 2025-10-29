@@ -32,7 +32,6 @@ class HrmRunDetail(Base, BaseModel):
     status: Mapped[int] = mapped_column(Integer, nullable=False, comment='用例执行状态：1-成功，2-失败，3-跳过')
 
     __table_args__ = (
-        Index("idx_report_user_status", "report_id", "manager", "status"),  # 联合索引
-        Index("idx_report_status", "report_id", "status"),  # 联合索引
-        Index("idx_run_type", "run_id", "run_type"),  # 联合索引
+        Index("idx_report_detail", "report_id", "status", "run_start_time", "run_end_time", "manager", "run_id"),  # 联合索引
+        Index("idx_case_detail", "run_id", "status","run_type",  "run_start_time", "run_end_time", "manager"),  # 联合索引
     )
