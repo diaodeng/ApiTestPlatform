@@ -45,12 +45,14 @@ class SearchConfig:
         """
         保存工作目录
         """
-        with open(cls.config_file, "r", encoding="utf-8") as f:
-            try:
-                old_config = json.load(f)
-            except json.JSONDecodeError:
-                logger.warning(f"读取工作目录文件失败:{cls.config_file}")
-                return False
+        old_config = {}
+        if os.path.exists(cls.config_file):
+            with open(cls.config_file, "r", encoding="utf-8") as f:
+                try:
+                    old_config = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning(f"读取工作目录文件失败:{cls.config_file}")
+                    return False
 
         old_config["dir"] = dirs or []
 
