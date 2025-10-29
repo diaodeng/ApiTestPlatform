@@ -10,6 +10,7 @@ from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数�
 
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunListModel, HrmRunDetailModel
+from module_hrm.enums.enums import CaseRunStatus, RunTypeEnum
 from utils.common_util import CamelCaseUtil
 from utils.page_util import PageUtil, PageResponseModel
 from utils.log_util import logger
@@ -70,33 +71,50 @@ class RunDetailDao:
         await run_in_threadpool(db.commit)
 
     @classmethod
-    async def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str|None = None) -> PageResponseModel|list:
+    async def list(cls, db: Session, query_info: RunDetailQueryModel, data_scope_sql: str|None = None) -> PageResponseModel|list|None:
         logger.info(f"开始查询执行历史：{query_info.model_dump()}")
+        if not query_info.report_id and not query_info.run_id:
+            logger.error(f"查询执行历史参数异常")
+            return None
         query = db.query(HrmRunDetail)
         if query_info.report_id:
             query = query.filter(HrmRunDetail.report_id == query_info.report_id)
 
-        if query_info.only_self:
-            query = query.filter(HrmRunDetail.manager == query_info.manager)
+            if query_info.status:
+                query = query.filter(HrmRunDetail.status == query_info.status)
+            else:
+                query = query.filter(HrmRunDetail.status.in_([e.value for e in CaseRunStatus]))
 
-        if query_info.status:
-            query = query.filter(HrmRunDetail.status == query_info.status)
+            query = query.order_by(HrmRunDetail.run_start_time, HrmRunDetail.run_end_time)
 
-        if query_info.run_id:
+            if query_info.only_self:
+                query = query.filter(HrmRunDetail.manager == query_info.manager)
+
+            if query_info.run_id:
+                query = query.filter(HrmRunDetail.run_id == query_info.run_id)
+
+        elif query_info.run_id:
             query = query.filter(HrmRunDetail.run_id == query_info.run_id)
-        if query_info.run_type:
-            query = query.filter(HrmRunDetail.run_type == query_info.run_type)
 
+            if query_info.status:
+                query = query.filter(HrmRunDetail.status == query_info.status)
+            else:
+                query = query.filter(HrmRunDetail.status.in_([e.value for e in CaseRunStatus]))
+
+            if query_info.run_type:
+                query = query.filter(HrmRunDetail.run_type == query_info.run_type)
+            else:
+                query = query.filter(HrmRunDetail.run_type.in_([e.value for e in RunTypeEnum]))
+            query = query.order_by(HrmRunDetail.run_start_time.desc(), HrmRunDetail.run_end_time.desc())
+
+            if query_info.only_self:
+                query = query.filter(HrmRunDetail.manager == query_info.manager)
 
         if query_info.run_name:
             query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
         if data_scope_sql:
             query = query.filter(eval(data_scope_sql))
 
-        if query_info.report_id:
-            query = query.order_by(HrmRunDetail.run_start_time, HrmRunDetail.run_end_time)
-        elif query_info.run_id:
-            query = query.order_by(HrmRunDetail.run_start_time.desc(), HrmRunDetail.run_end_time.desc())
 
         result = await run_in_threadpool(PageUtil.paginate, query, query_info.page_num, query_info.page_size, query_info.is_page)
         if not query_info.is_page:
