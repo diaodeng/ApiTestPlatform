@@ -28,6 +28,9 @@ class AppConfig:
         # 禁用title_bar
         self.page.window.title_bar_hidden = True
 
+        # 设置页面内边距
+        self.page.padding = ft.Padding(top=1, left=5, right=5, bottom=1)
+
         # 设置窗口圆角
         self.page.window.border_radius = 20
 
