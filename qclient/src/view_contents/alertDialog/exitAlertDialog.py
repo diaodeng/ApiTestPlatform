@@ -5,14 +5,14 @@ class ExitApplicationDialog(ft.AlertDialog):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
-        self.title = ft.Text("确认退出?")
+        self.title = ft.Text("确认退出?", size=16)
         self.actions = [ft.Column(alignment=ft.MainAxisAlignment.CENTER,
-                                  spacing=10,
+                                  spacing=5,
                                   controls=[ft.Column(alignment=ft.MainAxisAlignment.CENTER,
                                                       spacing=5,
                                                       controls=[ft.Text("确认退出系统？")]),
                                             ft.Row(alignment=ft.MainAxisAlignment.END,
-                                                   controls=[ft.OutlinedButton("No", on_click=self.no_click),
+                                                   controls=[ft.ElevatedButton("No", on_click=self.no_click),
                                                              ft.ElevatedButton("Yes", on_click=self.yes_click)
                                                              ])])]
         self.actions_alignment = ft.MainAxisAlignment.END
