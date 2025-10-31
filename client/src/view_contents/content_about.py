@@ -20,7 +20,8 @@ class About(object):
                     ft.Divider(),
                     ft.Column([
                         ft.Row([
-                            ft.Text("更新过程中不要离开当前tab！！！", color=ft.Colors.RED)
+                            ft.Text("更新过程中不要离开当前tab！！！", color=ft.Colors.RED),
+                            ft.Text("exe是更新包，更新包替换原来的exe；zip是全量包，zip解压使用。", color=ft.Colors.RED)
                         ]),
                         ft.Row([
                             ft.Text("QTRClient客户端"),
@@ -31,7 +32,7 @@ class About(object):
                             # ft.Button("Kill POS")
                         ]),
                         ft.Row([
-                            ft.Markdown(key="update_info"),
+                            ft.Markdown(key="update_info", selectable=True, auto_follow_links=True),
                         ],key="update_info")
                     ]),
                     # ft.Text("离线服务状态"),
@@ -76,7 +77,7 @@ class About(object):
         e.control.disabled = True
         e.control.update()
         try:
-            has_new = await check_app_has_new()
+            has_new, new_info = await check_app_has_new()
             if not has_new:
                 UiUtil.show_snackbar_success(e.control.page, f"当前版本{VERSION}已经是最新版本")
                 return

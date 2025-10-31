@@ -392,19 +392,19 @@ def get_all_process() -> list[dict]:
     return all_process
 
 
-async def check_app_has_new() -> tuple|bool:
+async def check_app_has_new() -> tuple[bool|str, str]:
     new_url = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
 
     async with aiohttp.ClientSession() as session:
         data = await session.get(new_url)
         data = await data.json()
         if not data:
-            return False
+            return False, ""
         new_version = data[0]['tag_name']
         new_version_info = data[0]['body']
         if VERSION < new_version:
             return new_version, new_version_info
-    return False
+    return False, f"当前版本：{VERSION}已经是最新版本。"
 
 
 async def download_new_app(download_process_call=None) -> str|None:
