@@ -18,7 +18,7 @@ class Contents(object):
         # self.home = Home(ft, page, log, **kwargs).home()
         self.settings = Settings(ft, page, log).settings()
         # self.shortcut = Shortcut(ft, page, log).shortcut()
-        self.about = About(ft).about()
+        self.about = About().about()
         self.agent_handler = AgentHandler(ft, page).init_ui()
         self.pos_handler = PosHandler(ft, page).init_ui()
         self.mitmproxy = MitmHandel(page).init()

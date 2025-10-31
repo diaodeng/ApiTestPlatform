@@ -7,14 +7,15 @@ from flet import Page
 
 from config import AppConfig
 from navigationMenu import NavigationMenu
+from utils import VERSION
 from utils.common import load_json, ensure_directory_exists, get_sys_info, get_memory_usage, get_process_by_name
 from utils.logger import log
 from utils.mytimers import ThreadPool, clear_all_timers
 
 ensure_directory_exists("logs")
 
-
 basepath = os.path.dirname(__file__)
+
 
 class ExitAlertDialog:
     def __init__(self, page, **kwargs):
@@ -48,6 +49,7 @@ class ExitAlertDialog:
         e.control.page.close(self.confirm_dialog)
         e.control.page.update()
 
+
 async def main(page: ft.Page):
     page.window.prevent_close = True
     page.window.on_event = lambda e: page.open(ExitAlertDialog(page).confirm_dialog) if e.data == "close" else None
@@ -73,7 +75,7 @@ async def main(page: ft.Page):
     nav_menu = NavigationMenu(ft, page, log, **config)
     # 主布局
     page.add(
-        ft.Column( 
+        ft.Column(
             [
                 ft.Row(
                     [
@@ -88,7 +90,7 @@ async def main(page: ft.Page):
                     controls=[
                         sys_show_view,
                         ft.Text(
-                            f"当前版本: {app.version}",
+                            f"当前版本: {VERSION}",
                             size=16,
                             text_align=ft.TextAlign.END
                         )
@@ -99,7 +101,6 @@ async def main(page: ft.Page):
             # spacing=0  # 垂直分割线与水平分割线是否相接
         )
     )
-
 
     def close_dlg(e):
         dlg_modal.open = False
@@ -138,7 +139,6 @@ async def main(page: ft.Page):
             log.error(f"获取系统信息异常:{e}")
             sys_show_view.value = f"获取系统信息异常:{e}"
         sys_show_view.update()
-
 
     # add_timer_and_start(10, get_sys_info_view)
     ThreadPool.add_task(get_sys_info_view, 10)

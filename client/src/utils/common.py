@@ -11,10 +11,15 @@ import signal
 import shutil
 from typing import Any, Optional
 
+import aiohttp
 import psutil
 import requests
 import subprocess
+
+from httpx import stream
 from loguru import logger
+
+from utils import VERSION
 
 
 class DBHelper:
@@ -387,25 +392,288 @@ def get_all_process() -> list[dict]:
     return all_process
 
 
-def update_app(new_url):
-    new_path = "update_new.exe"
-    app_name = "QTRClient.exe"
-    with requests.get(new_url, stream=True) as r:
-        with open(new_path, "wb") as f:
-            shutil.copyfileobj(r.raw, f)
+async def check_app_has_new() -> tuple|bool:
+    new_url = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
 
-    bat_script = f"""
-@echo off
-ping 127.0.0.1 -n 2 > nul
-del "{app_name}"
-move "{new_path}" "{app_name}"
-start "" "{app_name}"
-del "%~f0"
-"""
-    with open("update_temp.bat", "w") as f:
-        f.write(bat_script)
-    subprocess.Popen("update_temp.bat", shell=True)
-    sys.exit(0)
+    async with aiohttp.ClientSession() as session:
+        data = await session.get(new_url)
+        data = await data.json()
+        if not data:
+            return False
+        new_version = data[0]['tag_name']
+        new_version_info = data[0]['body']
+        if VERSION < new_version:
+            return new_version, new_version_info
+    return False
+
+
+async def download_new_app(download_process_call=None) -> str|None:
+    new_url = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
+    async with aiohttp.ClientSession() as session:
+        data = await session.get(new_url)
+        data = await data.json()
+        if not data:
+            return None
+        new_version = data[0]['tag_name']
+        if VERSION < new_version:
+            exe_url = ""
+            zip_url = ""
+            for item in data[0]["assets"]:
+                if item["name"] == "QTRClient.exe":
+                    exe_url = item["browser_download_url"]
+                elif item["name"] == "QTRClient.zip":
+                    zip_url = item["browser_download_url"]
+
+            new_app_path = "QTRClient_new.exe" if exe_url else "QTRClient_new.zip"
+            if os.path.exists(new_app_path):
+                return new_app_path
+
+            async with session.get(exe_url or zip_url) as response:
+                total_size = int(response.headers.get('content-length', 0))
+                logger.info(f"开始下载，更新包文件大小：{total_size/1024/1024} MB")
+                downloaded = 0
+                with open(new_app_path, "wb") as f:
+                    async for chunk in response.content.iter_chunked(1024 * 1024):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                        # 可选：打印进度
+                        if total_size:
+                            percent = downloaded / total_size * 100
+                            if download_process_call:
+                                download_process_call(f"新包大小：{total_size/1024/1024:.2f}MB,下载进度: {percent:.2f}%")
+                            # logger.info(f"下载进度: {percent:.2f}%")
+                    logger.info(f"更新包下载完成")
+                    return new_app_path
+        return None
+
+
+def create_powershell_update_script_new():
+
+    ps_script = f'''param(
+    [string]$CurrentDir,
+    [string]$NewFile
+)
+$LogPath = "update.log"
+Start-Transcript -Path $LogPath -Append
+# $LogPath = Join-Path $PSScriptRoot "update.log"
+# Start-Transcript -Path $LogPath -Append
+
+
+$MainExeName = "QTRClient.exe"
+$ProcessName = "QTRClient"
+
+Write-Host "=== QTRClient Update ==="
+Write-Host "Target directory: $CurrentDir"
+Write-Host "New file: $NewFile"
+
+Write-Host "Wait for program $ProcessName to exit..."
+
+$WaitCount = 0
+$MaxWait = 30
+
+while ($WaitCount -lt $MaxWait) {{
+    $process = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue
+    if (-not $process) {{
+        Write-Host "Program exited"
+        break
+    }}
+    $WaitCount++
+    Write-Host "Waiting... ($WaitCount/$MaxWait)"
+    Start-Sleep -Seconds 1
+}}
+
+if ($WaitCount -ge $MaxWait) {{
+    Write-Host "Timeout! Please manually close QTRClient program"
+    Read-Host "Press Enter to exit"
+    exit 1
+}}
+
+Write-Host "Start updating..."
+
+try {{
+    if (-not (Test-Path $NewFile)) {{
+        throw "Cannot find new file: $NewFile"
+    }}
+
+    $FileExtension = [System.IO.Path]::GetExtension($NewFile).ToLower()
+    Write-Host "File type: $FileExtension"
+
+    if ($FileExtension -eq ".exe") {{
+        Write-Host "Replacing EXE file only..."
+        
+        $CurrentExePath = Join-Path $CurrentDir $MainExeName
+        $BackupExePath = "$CurrentExePath.backup"
+        
+        if (Test-Path $CurrentExePath) {{
+            if (Test-Path $BackupExePath) {{
+                Remove-Item $BackupExePath -Force
+            }}
+            Rename-Item -Path $CurrentExePath -NewName $BackupExePath -Force
+            Write-Host "EXE backup created: $BackupExePath"
+        }}
+        
+        Copy-Item -Path $NewFile -Destination $CurrentExePath -Force
+        Write-Host "EXE file replaced"
+        
+    }} elseif ($FileExtension -eq ".zip") {{
+        Write-Host "Replacing EXE and _internal directory..."
+        
+        $TempDir = "$CurrentDir.temp"
+        if (Test-Path $TempDir) {{
+            Remove-Item $TempDir -Recurse -Force
+        }}
+        New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+
+        Write-Host "Extracting ZIP package..."
+        Expand-Archive -Path $NewFile -DestinationPath $TempDir -Force
+
+        $SourceDir = $TempDir
+        $UnzippedItems = Get-ChildItem -Path $TempDir -Directory
+        if ($UnzippedItems.Count -eq 1) {{
+            $SourceDir = $UnzippedItems[0].FullName
+            Write-Host "Found subdirectory: $SourceDir"
+        }}
+
+        $CurrentExePath = Join-Path $CurrentDir $MainExeName
+        $NewExePath = Join-Path $SourceDir $MainExeName
+        
+        if (Test-Path $NewExePath) {{
+            $BackupExePath = "$CurrentExePath.backup"
+            if (Test-Path $CurrentExePath) {{
+                if (Test-Path $BackupExePath) {{
+                    Remove-Item $BackupExePath -Force
+                }}
+                Rename-Item -Path $CurrentExePath -NewName $BackupExePath -Force
+                Write-Host "EXE backup created"
+            }}
+            Copy-Item -Path $NewExePath -Destination $CurrentExePath -Force
+            Write-Host "EXE file replaced"
+        }}
+
+        $CurrentInternalDir = Join-Path $CurrentDir "_internal"
+        $NewInternalDir = Join-Path $SourceDir "_internal"
+        
+        if (Test-Path $NewInternalDir) {{
+            $BackupInternalDir = "$CurrentInternalDir.backup"
+            if (Test-Path $CurrentInternalDir) {{
+                if (Test-Path $BackupInternalDir) {{
+                    Remove-Item $BackupInternalDir -Recurse -Force
+                }}
+                Rename-Item -Path $CurrentInternalDir -NewName $BackupInternalDir -Force
+                Write-Host "_internal backup created"
+            }}
+            Copy-Item -Path $NewInternalDir -Destination $CurrentInternalDir -Recurse -Force
+            Write-Host "_internal directory replaced"
+        }}
+
+        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "ZIP update completed"
+        
+    }} else {{
+        throw "Unsupported file type: $FileExtension. Only .exe and .zip are supported."
+    }}
+
+    $MainExePath = Join-Path $CurrentDir $MainExeName
+    if (-not (Test-Path $MainExePath)) {{
+        throw "Cannot find main program after update: $MainExePath"
+    }}
+
+    Write-Host "File update complete"
+
+    Write-Host "Starting new version..."
+    $Process = Start-Process -FilePath $MainExePath -PassThru
+
+    if ($Process) {{
+        Write-Host "New version started (PID: $($Process.Id))"
+    }} else {{
+        Write-Host "Start command sent, but process status unknown"
+    }}
+
+}} catch {{
+    Write-Host "Update failed: $($_.Exception.Message)"
+
+    $CurrentExePath = Join-Path $CurrentDir $MainExeName
+    $BackupExePath = "$CurrentExePath.backup"
+    $CurrentInternalDir = Join-Path $CurrentDir "_internal"
+    $BackupInternalDir = "$CurrentInternalDir.backup"
+    
+    if (Test-Path $BackupExePath) {{
+        Write-Host "Restoring EXE from backup..."
+        if (Test-Path $CurrentExePath) {{
+            Remove-Item $CurrentExePath -Force -ErrorAction SilentlyContinue
+        }}
+        Rename-Item -Path $BackupExePath -NewName $CurrentExePath -Force
+        Write-Host "EXE restored from backup"
+    }}
+    
+    if (Test-Path $BackupInternalDir) {{
+        Write-Host "Restoring _internal from backup..."
+        if (Test-Path $CurrentInternalDir) {{
+            Remove-Item $CurrentInternalDir -Recurse -Force -ErrorAction SilentlyContinue
+        }}
+        Rename-Item -Path $BackupInternalDir -NewName $CurrentInternalDir -Force
+        Write-Host "_internal restored from backup"
+    }}
+
+    Read-Host "Press Enter to exit"
+    exit 1
+}}
+
+Write-Host "Update complete!"
+Write-Host "Window will close in 5 seconds..."
+Start-Sleep -Seconds 5
+
+Stop-Transcript
+'''
+    # encoded_script = base64.b64encode(ps_script.encode('utf-16le')).decode()
+    try:
+        with open("update_powershell.ps1", "w", encoding="gbk") as f:
+            f.write(ps_script)
+    except UnicodeEncodeError:
+        with open("update_powershell.ps1", "w", encoding="ascii", errors='ignore') as f:
+            f.write(ps_script)
+    return os.path.abspath("update_powershell.ps1")
+    # return encoded_script
+
+async def perform_update_with_powershell(download_process_call=None):
+    """使用 PowerShell 执行更新"""
+    current_exe = sys.executable
+    current_dir = os.path.dirname(current_exe)
+
+    app_name = "QTRClient.exe"
+    current_exe = os.path.abspath(app_name)
+    current_dir = os.path.dirname(current_exe)
+
+    logger.info(f"current_exe: {current_exe}")
+
+    # 下载新版本（这里需要你实现下载逻辑）
+    new_app_path = await download_new_app(download_process_call)
+    new_app_path = os.path.abspath(new_app_path)
+
+    # 创建 PowerShell 脚本
+    encoded_script = create_powershell_update_script_new()
+
+    try:
+        # 执行 PowerShell 脚本
+        subprocess.Popen([
+            'powershell.exe',
+            # '-NoExit',
+            '-WindowStyle', 'Hidden',
+            '-ExecutionPolicy', 'Bypass',
+            # '-EncodedCommand', encoded_script,
+            '-File', encoded_script,
+            '-CurrentDir', current_dir,
+            '-NewFile', new_app_path
+        ])
+
+        logger.info("更新程序已启动，即将退出...")
+        return True
+
+    except Exception as e:
+        logger.info(f"启动更新失败: {e}")
+        return False
+
 
 
 if __name__ == "__main__":
