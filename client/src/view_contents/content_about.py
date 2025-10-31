@@ -52,6 +52,7 @@ class About(object):
             if has_new:
                 check_info = f"当前版本：{VERSION}  新版本：{has_new}"
         except Exception as ex:
+            logger.exception(ex)
             check_info = f"检查新版本异常：{str(ex)}"
 
         for i in e.control.parent.controls:
@@ -85,7 +86,9 @@ class About(object):
             e.control.page.window.close()
             # sys.exit(0)
         except Exception as ex:
+            logger.exception(ex)
             UiUtil.show_snackbar_error(e.control.page, f"更新异常：{str(ex)}")
+        finally:
             e.control.disabled = False
             e.control.update()
 
