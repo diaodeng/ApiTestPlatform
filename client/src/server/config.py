@@ -280,18 +280,14 @@ class PosConfig:
         return old_env
 
     @classmethod
-    def change_pos_local_env(cls, pos_file, env: str) -> tuple[bool, str]:
+    def change_pos_local_env(cls, pos_file, target_env_key: str) -> tuple[bool, str]:
+        """
+        要切换到对应环境的key：env_vendorId_store
+        """
 
         if not os.path.exists(pos_file):
             logger.warning(f"POS文件不存在:{pos_file}")
             return False, "POS文件不存在"
-        if env not in ["RTA_TEST", "RTA_UAT", "RTA"]:
-            logger.warning(f"环境参数错误:{env}")
-            return False, "环境参数错误"
-
-        pos_params = PosConfig.read_pos_params(pos_file)
-        if pos_params is None:
-            logger.warning(f"当前环境商家未知，将直接删除对应环境文件:{pos_file}")
 
         # 修改pos.ini
         pos_dir = os.path.dirname(pos_file)
@@ -301,60 +297,60 @@ class PosConfig:
             return False, "pos.ini文件不存在"
         ini_file_handle = IniFileHandel(pos_ini_file)
         old_env = ini_file_handle.get_value("PosClient", "pos_env")
-        # if old_env == env:
-        #     logger.warning(f"原环境就是【{env}】不用切换: old_env: {old_env}")
-        #     return False, "原环境就是【{env}】不用切换"
+        if "test" in target_env_key.lower():
+            env = "RTA_TEST"
+        elif "uat" in target_env_key.lower():
+            env = "RTA_UAT"
+        else:
+            env = "RTA"
         ini_file_handle.set_value("PosClient", "pos_env", env)
         ini_file_handle.write()
 
-        def change_dir_env(pos_path: str, file_name: str, old_env: str, env: str):
+        pos_params = PosConfig.read_pos_params(pos_file)
+        if pos_params is None:
+            logger.warning(f"当前环境商家未知，将直接删除对应环境文件:{pos_file}")
+            old_env = f"{old_env}"
+        else:
+            old_env = f"{old_env}_{pos_params.venderNo}_{pos_params.orgNo}"
+
+        def copy_any_file(current_file, target_file):
+            if os.path.exists(target_file):
+                logger.warning(f"{target_file}文件已存在，将直接覆盖")
+
+            if not os.path.exists(current_file):
+                logger.warning(f"{current_file}文件不存在")
+                return
+
+            if os.path.isfile(current_file):
+                copyfile(current_file, target_file)
+                os.remove(current_file)
+            else:
+                copytree(current_file, target_file, dirs_exist_ok=True)
+                rmtree(current_file)
+
+        def backup_pos_env_file(pos_path: str, file_name: str, old_env_key: str, env_key: str):
             db_file = os.path.join(pos_path, file_name)
-            if not os.path.exists(db_file):
-                logger.warning(f"{file_name}文件不存在:{db_file}")
-            else:
-                # 备份老环境
-                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}_{pos_params.venderNo}_{pos_params.orgNo}")
-                if os.path.exists(db_old_env_file):
-                    logger.warning(f"{db_old_env_file}文件已存在，将直接覆盖")
-                copytree(db_file, db_old_env_file, dirs_exist_ok=True)
-                # 备份后删除
-                rmtree(db_file)
+            # 备份当前数据
+            db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env_key}")
+            copy_any_file(db_file, db_old_env_file)
             # 恢复备份数据
-            db_env_file = os.path.join(pos_path, f"{file_name}_{env}_{pos_params.venderNo}_{pos_params.orgNo}")
-            if not os.path.exists(db_env_file):
-                logger.warning(f"{db_env_file}文件不存在")
-            else:
-                copytree(db_env_file, db_file, dirs_exist_ok=True)
+            db_env_file = os.path.join(pos_path, f"{file_name}_{env_key}")
+            copy_any_file(db_env_file, db_file)
+        # 切换
+        env_files = cls.read_pos_config().env_files
+        for file in env_files:
+            backup_pos_env_file(pos_dir, file, old_env, target_env_key)
 
-        def change_file_env(pos_path: str, file_name: str, old_env: str, env: str):
-            db_file = os.path.join(pos_path, file_name)
-            if not os.path.exists(db_file):
-                logger.warning(f"{file_name}文件不存在:{db_file}")
-            else:
-                # 备份老环境
-                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}_{pos_params.venderNo}_{pos_params.orgNo}")
-                if os.path.exists(db_old_env_file):
-                    logger.warning(f"{db_old_env_file}文件已存在，将直接覆盖")
-                copyfile(db_file, db_old_env_file)
-                # 备份后删除
-                os.remove(db_file)
-            # 恢复备份数据
-            db_env_file = os.path.join(pos_path, f"{file_name}_{env}_{pos_params.venderNo}_{pos_params.orgNo}")
-            if not os.path.exists(db_env_file):
-                logger.warning(f"{file_name}_env文件不存在:{db_env_file}")
-            else:
-                copyfile(db_env_file, db_file)
-
-        # 切换database
-        change_dir_env(pos_dir, "database", old_env, env)
-
-        # 切换log
-        change_dir_env(pos_dir, "log", old_env, env)
-
-        # 切换缓存
-        cache_files = cls.read_pos_config().cache_files
-        for file in cache_files:
-            change_file_env(pos_dir, file, old_env, env)
+        config_data = PosConfig.read_pos_config()
+        # 更新当前备份过的环境key
+        logger.info(f"{old_env}")
+        logger.info(f"{target_env_key}")
+        logger.info(f"{config_data.backup_envs}")
+        if old_env not in config_data.backup_envs and old_env not in ["RTA_TEST", "RTA_UAT", "RTA"]:
+            config_data.backup_envs.append(old_env)
+        if target_env_key not in ["RTA_TEST", "RTA_UAT", "RTA"]:
+            config_data.backup_envs.remove(target_env_key)
+        PosConfig.save_pos_config(config_data)
         return True, "切换成功"
 
     @classmethod
@@ -595,4 +591,4 @@ class PosToolConfig:
 
 
 if __name__ == "__main__":
-    PosConfig.read_pos_params("C:\\CPOS-DF-SM-1.0.0.0\\pos_params")
+    rmtree("C:\\myself\\tmp\\folder1\\111111.txt")

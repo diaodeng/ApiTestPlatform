@@ -415,3 +415,100 @@ class PosAccountManagerUi(ft.AlertDialog):
                 cont.options = sorted(cont.options, key=lambda x:x.key)
                 # cont.value = cont.options[0].key if cont.options else None
                 cont.update()
+
+
+class ChangeLocalPosUi(ft.AlertDialog):
+    def __init__(self, page: Page = None, pos_path=None):
+        logger.info(f"打开本地POS切换页面：{pos_path}")
+        super().__init__()
+        # self.pos_tool_config_data = PosToolConfig.read_pos_tool_config()
+        self.page = page
+        # self.config_data: PosConfigModel = PosConfig.read_pos_config()
+        self.modal = True
+        self.title = ft.Text("在线切换POS")
+        self.target_env = None
+
+        env_group , vendor_id, store, pos_group, pos_type = None, None, None, None, None
+        self.pos_path = pos_path
+
+        self.content = ft.Container(content=ft.Row(controls=[
+            ft.Column(controls=[
+                ft.TextField(value=self.get_current_env_info(), label="当前环境", data="current_env"),
+                ft.Dropdown(label="已备份环境",
+                            value=None,
+                            options=[ft.DropdownOption(item, item) for item in self.get_backed_env()],
+                            # editable=True,
+                            on_change=self.change_target_env,
+                            data="backed_env",
+                            expand=True
+                            )
+
+            ], expand=True)
+        ], expand=True), expand=True, width=1000)
+        self.actions = [
+            ft.TextButton("关闭", on_click=self.close_dlg),
+            ft.TextButton("切换", on_click=self.change_local_pos, data=pos_path),
+        ]
+        self.actions_alignment = ft.MainAxisAlignment.END
+        self.scrollable = True
+        self.open = True
+        self.page.update()
+
+
+    def close_dlg(self, event: ft.ControlEvent):
+        self.open = False
+        # event.control.page.overlay.remove(self)
+        event.control.page.update()
+
+    def get_current_env_info(self):
+        local_pos_env = PosConfig.get_local_pos_env(self.pos_path)
+        pos_params: PosParamsModel = PosConfig.read_pos_params(self.pos_path)
+        if pos_params:
+            current_env_info = f"环境：{local_pos_env}，商家：{pos_params.venderNo}，门店：{pos_params.orgNo}"
+        else:
+            current_env_info = f"环境：{local_pos_env}，商家：无，门店：无"
+        return current_env_info
+
+    def get_backed_env(self) -> list:
+        config_data: PosConfigModel = PosConfig.read_pos_config()
+        backed_env = ["RTA_TEST", "RTA_UAT", "RTA"]
+        backed_env.extend(config_data.backup_envs)
+        return backed_env
+
+    async def change_local_pos(self, event: ft.ControlEvent):
+        event.control.disabled = True
+        event.control.update()
+        pos_path = event.control.data
+        try:
+            target_env = None
+            for item in event.control.parent.content.content.controls[0].controls:
+                if item.data == "backed_env":
+                    target_env = item.value
+            logger.info(f"切换本地POS：{target_env} --> {pos_path}")
+
+            success, msg = PosConfig.change_pos_local_env(pos_path, target_env)
+            if not success:
+                UiUtil.show_snackbar_error(self.page, msg)
+            else:
+                UiUtil.show_snackbar_success(self.page, "POS切换成功")
+
+            for item in event.control.parent.content.content.controls[0].controls:
+                if item.data == "backed_env":
+                    item.options.clear()
+                    item.options = [ft.DropdownOption(item, item) for item in self.get_backed_env()]
+                    item.value = None
+                    item.update()
+                elif item.data == "current_env":
+                    item.value = self.get_current_env_info()
+                    item.update()
+
+        except Exception as e:
+            logger.exception(e)
+            UiUtil.show_snackbar_error(self.page, f"POS配置保存失败：{str(e)}")
+        finally:
+            event.control.disabled = False
+            event.control.update()
+
+    def change_target_env(self, event: ft.ControlEvent):
+        self.target_env = event.control.value
+
