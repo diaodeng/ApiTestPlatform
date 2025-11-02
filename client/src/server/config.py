@@ -354,11 +354,11 @@ class PosConfig:
         return True, "切换成功"
 
     @classmethod
-    async def change_pos_on_network(cls, pos_path: str) -> bool:
+    async def change_pos_on_network(cls, pos_path: str) -> tuple[bool, str]:
         env = PosConfig.get_local_pos_env(pos_path)
         if not env:
             logger.warning(f"获取pos环境失败:{pos_path}")
-            return False
+            return False, f"获取pos环境失败:{pos_path}"
         if env == "RTA_TEST":
             new_env = "rta-test"
         elif env == "RTA_UAT":
@@ -370,12 +370,12 @@ class PosConfig:
         pos_info = cls.read_pos_params(pos_path)
         if not pos_info:
             logger.warning(f"获取pos_params参数失败:{pos_path}")
-            return False
+            return False, f"获取pos_params参数失败:{pos_path}"
 
         pos_group, account = cls.get_pos_group(pos_info.venderNo, env)
         if not pos_group:
             logger.warning(f"获取pos分组失败:{pos_path}")
-            return False
+            return False, f"获取pos分组失败:{pos_path}"
         mac = get_active_mac()
         ip = get_local_ip()
         data = PosChangeParamsModel()
@@ -390,7 +390,7 @@ class PosConfig:
         # data.pos_skin = pos_info.pos_skin
         # data.pos_no = pos_info.pos_no
         change_status, message_info = await change_pos_from_network(data)
-        return change_status
+        return change_status, message_info
 
     @classmethod
     def get_pos_group(cls, vendor_id: str, env: str) -> tuple[Optional[str], Optional[str]]:
