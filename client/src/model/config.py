@@ -118,6 +118,9 @@ class PosConfigModel(BaseModel):
     pos_params: PosParamsModel = PosParamsModel()
     pos_start_params: PosParamsModel = PosParamsModel()
     running_pos_path: str = ""
+    change_pos_params: PosChangeParamsModel = PosChangeParamsModel()
+    account_logout_params: str = ""
+    backup_envs: list[str] = []  # 备份过的环境
 
 
 class SetupConfigModel(BaseModel):

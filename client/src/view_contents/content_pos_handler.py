@@ -521,6 +521,7 @@ class PosHandler:
         path = e.control.parent.data
         env = e.control.text
         logger.info(f"切换环境: {path}, {env}")
+        PosConfig.read_pos_config()
         success, msg = PosConfig.change_pos_local_env(path, env)
         if success:
             UiUtil.show_snackbar_success(self.page, msg)
