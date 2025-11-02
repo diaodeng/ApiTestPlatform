@@ -289,6 +289,10 @@ class PosConfig:
             logger.warning(f"环境参数错误:{env}")
             return False, "环境参数错误"
 
+        pos_params = PosConfig.read_pos_params(pos_file)
+        if pos_params is None:
+            logger.warning(f"当前环境商家未知，将直接删除对应环境文件:{pos_file}")
+
         # 修改pos.ini
         pos_dir = os.path.dirname(pos_file)
         pos_ini_file = os.path.join(pos_dir, "pos.ini")
@@ -297,9 +301,9 @@ class PosConfig:
             return False, "pos.ini文件不存在"
         ini_file_handle = IniFileHandel(pos_ini_file)
         old_env = ini_file_handle.get_value("PosClient", "pos_env")
-        if old_env == env:
-            logger.warning(f"原环境就是【{env}】不用切换: old_env: {old_env}")
-            return False, "原环境就是【{env}】不用切换"
+        # if old_env == env:
+        #     logger.warning(f"原环境就是【{env}】不用切换: old_env: {old_env}")
+        #     return False, "原环境就是【{env}】不用切换"
         ini_file_handle.set_value("PosClient", "pos_env", env)
         ini_file_handle.write()
 
@@ -309,16 +313,16 @@ class PosConfig:
                 logger.warning(f"{file_name}文件不存在:{db_file}")
             else:
                 # 备份老环境
-                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}")
+                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}_{pos_params.venderNo}_{pos_params.orgNo}")
                 if os.path.exists(db_old_env_file):
-                    logger.warning(f"{file_name}_env文件已存在，将直接覆盖:{db_old_env_file}")
+                    logger.warning(f"{db_old_env_file}文件已存在，将直接覆盖")
                 copytree(db_file, db_old_env_file, dirs_exist_ok=True)
                 # 备份后删除
                 rmtree(db_file)
             # 恢复备份数据
-            db_env_file = os.path.join(pos_path, f"{file_name}_{env}")
+            db_env_file = os.path.join(pos_path, f"{file_name}_{env}_{pos_params.venderNo}_{pos_params.orgNo}")
             if not os.path.exists(db_env_file):
-                logger.warning(f"{file_name}_env文件不存在:{db_env_file}")
+                logger.warning(f"{db_env_file}文件不存在")
             else:
                 copytree(db_env_file, db_file, dirs_exist_ok=True)
 
@@ -328,14 +332,14 @@ class PosConfig:
                 logger.warning(f"{file_name}文件不存在:{db_file}")
             else:
                 # 备份老环境
-                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}")
+                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}_{pos_params.venderNo}_{pos_params.orgNo}")
                 if os.path.exists(db_old_env_file):
-                    logger.warning(f"{file_name}_{old_env}文件已存在，将直接覆盖:{db_old_env_file}")
+                    logger.warning(f"{db_old_env_file}文件已存在，将直接覆盖")
                 copyfile(db_file, db_old_env_file)
                 # 备份后删除
                 os.remove(db_file)
             # 恢复备份数据
-            db_env_file = os.path.join(pos_path, f"{file_name}_{env}")
+            db_env_file = os.path.join(pos_path, f"{file_name}_{env}_{pos_params.venderNo}_{pos_params.orgNo}")
             if not os.path.exists(db_env_file):
                 logger.warning(f"{file_name}_env文件不存在:{db_env_file}")
             else:
