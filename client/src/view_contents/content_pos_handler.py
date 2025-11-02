@@ -12,7 +12,7 @@ from model.pos_network_model import PosLogoutModel
 from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig
 from utils import file_handle, pos_network
 from utils.common import kill_process_by_name, get_all_process, kill_process_by_id, ExeVersionReader
-from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi, PosAccountManagerUi
+from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi, PosAccountManagerUi, ChangeLocalPosUi
 
 
 class PosHandler:
@@ -521,12 +521,13 @@ class PosHandler:
         path = e.control.parent.data
         env = e.control.text
         logger.info(f"切换环境: {path}, {env}")
-        PosConfig.read_pos_config()
-        success, msg = PosConfig.change_pos_local_env(path, env)
-        if success:
-            UiUtil.show_snackbar_success(self.page, msg)
-        else:
-            UiUtil.show_snackbar_error(self.page, msg)
+        self.page.add(ChangeLocalPosUi(self.page, path))
+        # PosConfig.read_pos_config()
+        # success, msg = PosConfig.change_pos_local_env(path, env)
+        # if success:
+        #     UiUtil.show_snackbar_success(self.page, msg)
+        # else:
+        #     UiUtil.show_snackbar_error(self.page, msg)
         self.page.update()
 
     def clean_cache(self, e: ft.ControlEvent):
@@ -695,18 +696,11 @@ class PosHandler:
                         icon=ft.Icons.MORE_VERT,
                         tooltip="更多操作",
                         items=[
-                            ft.PopupMenuItem(text="切换环境",
-                                             content=ft.PopupMenuButton(
-                                                 data=pos_path,
-                                                 tooltip="切换本地环境，修改pos.ini、切换database、logs、缓存等",
-                                                 padding=0,
-                                                 content=ft.Row([ft.Text("切换本地环境")]),
-                                                 items=[
-                                                     ft.PopupMenuItem(text="RTA_TEST", on_click=self.change_env),
-                                                     ft.PopupMenuItem(text="RTA_UAT", on_click=self.change_env),
-                                                     ft.PopupMenuItem(text="RTA", on_click=self.change_env)
-                                                 ]
-                                             )
+
+                            ft.PopupMenuItem(text="切换本地环境",
+                                             data=pos_path,
+                                             tooltip="切换本地环境，修改pos.ini、切换database、logs、缓存等",
+                                             on_click=self.change_env,
                                              ),
                             ft.PopupMenuItem(text="备份支付驱动",
                                              data=pos_path,
