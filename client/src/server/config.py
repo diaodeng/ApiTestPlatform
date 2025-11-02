@@ -270,7 +270,6 @@ class PosConfig:
             logger.warning(f"POS文件不存在:{pos_file}")
             return None
 
-        # 修改pos.ini
         pos_dir = os.path.dirname(pos_file)
         pos_ini_file = os.path.join(pos_dir, "pos.ini")
         if not os.path.exists(pos_ini_file):
@@ -355,7 +354,7 @@ class PosConfig:
         return True, "切换成功"
 
     @classmethod
-    def change_pos_on_network(cls, pos_path: str) -> bool:
+    async def change_pos_on_network(cls, pos_path: str) -> bool:
         env = PosConfig.get_local_pos_env(pos_path)
         if not env:
             logger.warning(f"获取pos环境失败:{pos_path}")
@@ -390,18 +389,24 @@ class PosConfig:
 
         # data.pos_skin = pos_info.pos_skin
         # data.pos_no = pos_info.pos_no
-        return change_pos_from_network(data)
+        change_status, message_info = await change_pos_from_network(data)
+        return change_status
 
     @classmethod
-    def get_pos_group(cls, vender_id: str, env: str) -> tuple[Optional[str], Optional[str]]:
+    def get_pos_group(cls, vendor_id: str, env: str) -> tuple[Optional[str], Optional[str]]:
+        """
+        根据商家和环境获取，环境分组和对应账号
+        """
         pos_config = cls.read_pos_config()
-        account = pos_config.vendor_account.get(int(vender_id), None)
+        account = pos_config.vendor_account.get(int(vendor_id), None)
+        if account and type(account) is list:
+            account = account[0]
         if "test" in env.lower():
             return "rta-test", account
         for k, v in pos_config.env_group_vendor.items():
-            if int(vender_id) in v:
+            if int(vendor_id) in v:
                 return k, account
-        return None, None
+        return None, account
 
     @classmethod
     def clean_cache(cls, path) -> tuple[bool, str]:
