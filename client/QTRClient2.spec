@@ -1,6 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
     ['src\\main.py'],
     pathex=['src'],
@@ -33,6 +32,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=['src\\assets\\favicon.ico'],
+    version='file_version_info.txt'
 )
 coll = COLLECT(
     exe,

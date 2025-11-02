@@ -6,8 +6,8 @@ VSVersionInfo(
   ffi=FixedFileInfo(
     # filevers and prodvers should be always a tuple with four items: (1, 2, 3, 4)
     # Set not needed items to zero 0.
-    filevers=(3, 12, 2150, 1013),
-    prodvers=(3, 12, 2150, 1013),
+    filevers=(1, 0, 2, 3),
+    prodvers=(1, 0, 2, 3),
     # Contains a bitmask that specifies the valid bits 'flags'r
     mask=0x3f,
     # Contains a bitmask that specifies the Boolean attributes of the file.
@@ -29,14 +29,14 @@ VSVersionInfo(
       [
       StringTable(
         '000004b0',
-        [StringStruct('CompanyName', 'Python Software Foundation'),
-        StringStruct('FileDescription', 'Python'),
-        StringStruct('FileVersion', '3.12.2'),
-        StringStruct('InternalName', 'Python Console'),
-        StringStruct('LegalCopyright', 'Copyright © 2001-2023 Python Software Foundation. Copyright © 2000 BeOpen.com. Copyright © 1995-2001 CNRI. Copyright © 1991-1995 SMC.'),
-        StringStruct('OriginalFilename', 'python.exe'),
-        StringStruct('ProductName', 'Python'),
-        StringStruct('ProductVersion', '3.12.2')])
+        [StringStruct('CompanyName', 'QTRClient'),
+        StringStruct('FileDescription', 'QTRClient'),
+        StringStruct('FileVersion', '1.0.2.3'),
+        StringStruct('InternalName', 'QTRClient'),
+        StringStruct('LegalCopyright', ''),
+        StringStruct('OriginalFilename', 'QTRClient.exe'),
+        StringStruct('ProductName', 'QTRClient'),
+        StringStruct('ProductVersion', '1.0.2.3')])
       ]), 
     VarFileInfo([VarStruct('Translation', [0, 1200])])
   ]
