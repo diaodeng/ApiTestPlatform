@@ -144,55 +144,55 @@ class ChangePosUi(ft.AlertDialog):
                 ft.Dropdown(label="环境",
                             value=env_group,
                             options=[ft.DropdownOption(item.env_code, item.env_name) for item in self.pos_tool_config_data.data.env_list],
-                            editable=True,
+                            # editable=True,
                             on_change=self.change_env,
-                            key="env",
+                            data="env",
                             expand=True
                             ),
                 ft.Dropdown(label="商家",
                             value=vendor_id,
                             options=[],
-                            editable=True,
+                            # editable=True,
                             on_change=self.change_vendor,
-                            key="venderId",
+                            data="venderId",
                             expand=True
                             ),
                 ft.Dropdown(label="门店",
                             value=store,
                             options=[],
-                            editable=True,
+                            # editable=True,
                             on_change=self.change_store,
-                            key="orgNo",
+                            data="orgNo",
                             expand=True
                             ),
                 ft.Dropdown(label="切换模式",
                             value="1",
                             options=[ft.DropdownOption("1", "指定MAC"),
                                      ft.DropdownOption("2", "指定POS_ID")],
-                            editable=True,
+                            # editable=True,
                             on_change=self.change_switch_model,
-                            key="switchMode",
+                            data="switchMode",
                             expand=True
                             ),
-                ft.TextField(value=mac, label="mac", key="pos_mac", on_change=lambda e: print(e),visible=True),
-                ft.TextField(value="", label="pos_id", key="pos_no", on_change=lambda e: print(e), visible=False),
-                ft.TextField(value=ip, label="ip", key="pos_ip", on_change=lambda e: print(e)),
+                ft.TextField(value=mac, label="mac", data="pos_mac", visible=True, on_blur=lambda e: print(e)),
+                ft.TextField(value="", label="pos_id", data="pos_no", visible=False),
+                ft.TextField(value=ip, label="ip", data="pos_ip"),
                 ft.Dropdown(label="POS类型",
                             value=pos_type or "1",
                             options=[ft.DropdownOption("1", "人工收银"),
                                      ft.DropdownOption("2", "SCO"),
                                      ft.DropdownOption("4", "Combined")],
-                            editable=True,
+                            # editable=True,
                             # on_change=self.change_store,
-                            key="pos_type",
+                            data="pos_type",
                             expand=True
                             ),
                 ft.Dropdown(label="POS机台组",
                             value=pos_group,
                             options=[],
-                            editable=True,
+                            # editable=True,
                             # on_change=self.change_store,
-                            key="pos_group",
+                            data="pos_group",
                             expand=True
                             ),
 
@@ -219,7 +219,7 @@ class ChangePosUi(ft.AlertDialog):
         try:
             data = {}
             for item in event.control.parent.content.content.controls[0].controls:
-                data[item.key] = item.value
+                data[item.data] = item.value
             logger.info(f"切换POS请求参数：{json.dumps(data)}")
             request_data = PosChangeParamsModel.model_validate(data)
             change_status, message_info = await change_pos_from_network(request_data)
@@ -238,11 +238,11 @@ class ChangePosUi(ft.AlertDialog):
     def change_env(self, event: ft.ControlEvent):
         env_group = event.control.value
         for cont in event.control.parent.controls:
-            if cont.key == "orgNo":
+            if cont.data == "orgNo":
                 cont.options.clear()
                 cont.value = None
                 cont.update()
-            if cont.key == "venderId":
+            if cont.data == "venderId":
                 cont.options.clear()
                 cont.value = None
                 cont.update()
@@ -259,11 +259,11 @@ class ChangePosUi(ft.AlertDialog):
     def change_vendor(self, event: ft.ControlEvent):
         current_env = ""
         for cont in event.control.parent.controls:
-            if cont.key == "env":
+            if cont.data == "env":
                 current_env = cont.value
         current_vendor = event.control.value
         for cont in event.control.parent.controls:
-            if cont.key == "orgNo":
+            if cont.data == "orgNo":
                 cont.options.clear()
                 cont.value = None
                 cont.update()
@@ -282,10 +282,10 @@ class ChangePosUi(ft.AlertDialog):
         """
         switch_model = event.control.value
         for cont in event.control.parent.controls:
-            if cont.key == "pos_mac":
+            if cont.data == "pos_mac":
                 cont.visible = switch_model == "1"  # 按mac切换
                 cont.update()
-            elif cont.key == "pos_no":
+            elif cont.data == "pos_no":
                 cont.visible = switch_model != "1"  # 按posId切换
                 cont.update()
 
@@ -307,7 +307,7 @@ class PosAccountManagerUi(ft.AlertDialog):
         except Exception as e:
             logger.error(e)
             pass
-        self.modal = True
+        self.modal = False
         self.title = ft.Text("POS账号管理")
         self.content = ft.Container(content=ft.Row(controls=[
             ft.Column(controls=[
@@ -316,10 +316,10 @@ class PosAccountManagerUi(ft.AlertDialog):
                             options=[ft.DropdownOption(item.env_code, item.env_name) for item in self.pos_tool_config_data.data.env_list],
                             editable=True,
                             on_change=self.change_env,
-                            key="env",
+                            data="env",
                             expand=True
                             ),
-                ft.TextField(value=account, label="收银员账号", key="cashierNo", on_change=lambda e: print(e),visible=True),
+                ft.TextField(value=account, label="收银员账号", data="cashierNo", on_change=lambda e: print(e),visible=True),
                 ft.Row(controls=[
                     ft.ElevatedButton("踢出登录", on_click=self.tick_out),
                     ft.ElevatedButton("重置密码", on_click=self.reset_password)
@@ -347,12 +347,12 @@ class PosAccountManagerUi(ft.AlertDialog):
             env_group = ""
             account = ""
             for cont in event.control.parent.parent.controls:
-                if cont.key == "cashierNo":
+                if cont.data == "cashierNo":
                     if not cont.value:
                         UiUtil.show_snackbar_error(self.page, "参数异常")
                         return
                     account = cont.value
-                elif cont.key == "env":
+                elif cont.data == "env":
                     if not cont.value:
                         UiUtil.show_snackbar_error(self.page, "参数异常")
                         return
@@ -361,6 +361,8 @@ class PosAccountManagerUi(ft.AlertDialog):
             status, message_info = await pos_account_logout(data)
             if not status:
                 UiUtil.show_snackbar_error(self.page, message_info)
+            else:
+                UiUtil.show_snackbar_success(self.page, message_info)
         except Exception as e:
             UiUtil.show_snackbar_error(self.page, f"重置密码失败：{str(e)}")
         finally:
@@ -373,12 +375,12 @@ class PosAccountManagerUi(ft.AlertDialog):
         try:
             data = PosResetAccountRequestModel()
             for cont in event.control.parent.parent.controls:
-                if cont.key == "cashierNo":
+                if cont.data == "cashierNo":
                     if not cont.value:
                         UiUtil.show_snackbar_error(self.page, "参数异常")
                         return
                     data.cashierNo = cont.value
-                elif cont.key == "env":
+                elif cont.data == "env":
                     if not cont.value:
                         UiUtil.show_snackbar_error(self.page, "参数异常")
                         return
@@ -397,11 +399,11 @@ class PosAccountManagerUi(ft.AlertDialog):
     def change_env(self, event: ft.ControlEvent):
         env_group = event.control.value
         for cont in event.control.parent.controls:
-            if cont.key == "orgNo":
+            if cont.data == "orgNo":
                 cont.options.clear()
                 cont.value = None
                 cont.update()
-            if cont.key == "venderId":
+            if cont.data == "venderId":
                 cont.options.clear()
                 cont.value = None
                 cont.update()

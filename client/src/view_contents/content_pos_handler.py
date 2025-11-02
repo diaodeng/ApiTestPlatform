@@ -55,7 +55,7 @@ class PosHandler:
             content=ft.Container(
                 content=ft.Column([
                     ft.Row([
-                        ft.TextField(key="filter_key"),
+                        ft.TextField(data="filter_key"),
                         ft.ElevatedButton("查询", on_click=self.filter_process),
                         ft.ElevatedButton("更新", on_click=self.update_all_process),
                     ]),
@@ -65,7 +65,7 @@ class PosHandler:
                             ft.Text("子进程", color=ft.Colors.GREEN_100, visible=item.get('is_current_child', False)),
                             ft.ElevatedButton("停止", on_click=self.kill_p_by_id, data=item['pid']),
                         ], expand=True) for item in self.all_p
-                    ], expand=True, key="filter_result"),
+                    ], expand=True, data="filter_result"),
                 ]),
 
                 expand=True,
@@ -84,11 +84,11 @@ class PosHandler:
     def filter_process(self, e:ft.ControlEvent):
         filter_data = ""
         for i  in e.control.parent.controls:
-            if i.key == "filter_key":
+            if i.data == "filter_key":
                 filter_data = i.value
         filter_data = filter_data.lower()
         for item_view in e.control.parent.parent.controls:
-            if item_view.key == "filter_result":
+            if item_view.data == "filter_result":
                 item_view.controls.clear()
                 item_view.update()
                 for item in self.all_p:
