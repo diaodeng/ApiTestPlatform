@@ -11,8 +11,8 @@ from loguru import logger
 from model.pos_network_model import PosLogoutModel
 from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig
 from utils import file_handle, pos_network
-from utils.common import kill_process_by_name, get_all_process, kill_process_by_id
-from common.ui_utils.ui_util import UiUtil
+from utils.common import kill_process_by_name, get_all_process, kill_process_by_id, ExeVersionReader
+from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi
 
 
 class PosHandler:
@@ -138,6 +138,8 @@ class PosHandler:
                     self.kill_pos_btn,
                     self.kill_offline_btn,
                     ft.Button("结束进程", tooltip="查看并结束进程", on_click=self.open_process_list_dialog),
+                    ft.ElevatedButton("设置", tooltip="POS工具相关设置",on_click=lambda e:self.page.open(PosSettingUi(self.page))),
+                    ft.ElevatedButton("切换POS", tooltip="调用接口切换POS",on_click=lambda e:self.page.open(ChangePosUi(self.page)))
                 ]),
                 ft.Row([
                     self.file_pattern,
@@ -424,7 +426,7 @@ class PosHandler:
         if self.start_config.change_pos:
             logger.info(f"切换在线POS环境")
             try:
-                if PosConfig.change_pos(path):
+                if PosConfig.change_pos_on_network(path):
                     UiUtil.show_snackbar_success(self.page, "切换POS成功")
                 else:
                     UiUtil.show_snackbar_error(self.page, "切换POS失败")
@@ -436,7 +438,7 @@ class PosHandler:
         if self.start_config.account_logout:
             pos_config = PosConfig.read_pos_params(path)
             if pos_config:
-                pos_env = PaymentMockConfig.get_pos_env(path)
+                pos_env = PosConfig.get_local_pos_env(path)
                 pos_group, account = PosConfig.get_pos_group(pos_config.venderNo, pos_env)
                 if pos_group and account:
                     logout_model = PosLogoutModel(
@@ -456,7 +458,7 @@ class PosHandler:
 
         if self.start_config.replace_mitm_cert:
             logger.info(f"替换mitm证书")
-            success, msg = PaymentMockConfig.replace_mitm_cert(path)
+            success, msg = PosConfig.replace_mitm_cert(path)
             if not success:
                 UiUtil.show_snackbar_error(self.page, msg)
                 return
@@ -466,7 +468,7 @@ class PosHandler:
         if self.start_config.backup:
             logger.info(f"备份支付驱动")
             try:
-                PaymentMockConfig.backup_payment_driver(path)
+                PosConfig.backup_payment_driver(path)
             except Exception as e:
                 UiUtil.show_snackbar_error(self.page, f"备份支付驱动失败: {e}")
                 return
@@ -474,7 +476,7 @@ class PosHandler:
         if self.start_config.cover_payment_driver:
             logger.info(f"覆盖支付驱动")
             try:
-                success, msg = PaymentMockConfig.cover_payment_driver(path)
+                success, msg = PosConfig.cover_payment_driver(path)
                 if not success:
                     UiUtil.show_snackbar_error(self.page, msg)
                     return
@@ -488,7 +490,7 @@ class PosHandler:
         if self.start_config.remove_cache:
             logger.info(f"清理缓存")
             try:
-                PaymentMockConfig.clean_cache(path)
+                PosConfig.clean_cache(path)
             except Exception as e:
                 UiUtil.show_snackbar_error(self.page, f"清理缓存失败: {e}")
                 return
@@ -510,7 +512,7 @@ class PosHandler:
         path = e.control.parent.data
         env = e.control.text
         logger.info(f"切换环境: {path}, {env}")
-        success, msg = PaymentMockConfig.change_env(path, env)
+        success, msg = PosConfig.change_pos_local_env(path, env)
         if success:
             UiUtil.show_snackbar_success(self.page, msg)
         else:
@@ -520,7 +522,7 @@ class PosHandler:
     def clean_cache(self, e: ft.ControlEvent):
         path = e.control.data
         logger.info(f"清理缓存: {path}")
-        success, msg = PaymentMockConfig.clean_cache(path)
+        success, msg = PosConfig.clean_cache(path)
         if success:
             UiUtil.show_snackbar_success(self.page, msg)
         else:
@@ -530,19 +532,19 @@ class PosHandler:
     def backup_payment_driver(self, e: ft.ControlEvent):
         path = e.control.data
         logger.info(f"备份支付驱动: {path}")
-        PaymentMockConfig.backup_payment_driver(path)
+        PosConfig.backup_payment_driver(path)
         self.page.update()
 
     def cover_payment_driver(self, e: ft.ControlEvent):
         path = e.control.data
         logger.info(f"使用mock支付驱动: {path}")
-        PaymentMockConfig.cover_payment_driver(path)
+        PosConfig.cover_payment_driver(path)
         self.page.update()
 
     def restore_payment_driver(self, e: ft.ControlEvent):
         path = e.control.data
         logger.info(f"恢复支付驱动: {path}")
-        PaymentMockConfig.restore_payment_driver(path)
+        PosConfig.restore_payment_driver(path)
         self.page.update()
 
     def get_pos_env(self, e: ft.ControlEvent):
@@ -554,13 +556,14 @@ class PosHandler:
             if not os.path.exists(path):
                 UiUtil.show_snackbar_error(self.page, f"文件路径不存在【{path}】")
                 return
-            pos_env = PaymentMockConfig.get_pos_env(path)
+            pos_env = PosConfig.get_local_pos_env(path)
             e.control.text = pos_env
             # if pos_env == "RTA":
             #     UiUtil.show_snackbar_error(self.page, "生产环境【RTA】不支持获取POS环境")
             #     return
 
             vender_id, org_no, store_list, env_list = PosToolConfig.get_store_list(path)
+            pos_version = ExeVersionReader(path).get_exe_file_version()
             for child in e.control.parent.controls:
                 if isinstance(child, ft.Text) and child.key == "store":
                     child.value = f" 门店:{org_no}"
@@ -572,7 +575,7 @@ class PosHandler:
                     child.update()
 
                 if isinstance(child, ft.Text) and child.key == "env":
-                    child.value = f" 环境:{store_list[0].env if store_list else pos_env}"
+                    child.value = f" 环境:{store_list[0].env if store_list else pos_env} 版本：{pos_version}"
                     child.data = store_list[0].env if store_list else pos_env
                     child.update()
 
@@ -589,7 +592,7 @@ class PosHandler:
         path = e.control.data
         try:
             logger.info(f"切换POS环境: {path}")
-            if PosConfig.change_pos(path):
+            if PosConfig.change_pos_on_network(path):
                 UiUtil.show_snackbar_success(self.page, "切换POS环境成功")
             else:
                 UiUtil.show_snackbar_error(self.page, "切换POS环境失败")
@@ -601,7 +604,7 @@ class PosHandler:
     def clear_pos_env_file(self, e: ft.ControlEvent):
         path = e.control.data
         logger.info(f"清理POS环境文件: {path}")
-        PaymentMockConfig.clear_env(path)
+        PosConfig.clear_env(path)
         e.page.open(ft.SnackBar(
             content=ft.Text("清理成功"),
             action="知道了",

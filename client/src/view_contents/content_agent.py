@@ -221,7 +221,7 @@ class AgentHandler:
     def clean_cache(self, e: ft.ControlEvent):
         path = e.control.data
         logger.info(f"清理缓存: {path}")
-        success, msg = PaymentMockConfig.clean_cache(path)
+        success, msg = PosConfig.clean_cache(path)
         if success:
             UiUtil.show_snackbar_success(self.page, msg)
         else:

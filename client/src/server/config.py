@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+from collections import defaultdict
 from shutil import copytree, copyfile, rmtree
 from typing import Optional
 
@@ -10,7 +11,7 @@ from mitmproxy.net.dns.domain_names import cache
 
 from model.config import SearchConfigModel, MitmProxyConfigModel, PaymentMockConfigModel, StartConfigModel, \
     SetupConfigModel, PosParamsModel, PosConfigModel, PosChangeParamsModel
-from model.pos_network_model import PosInitRespStoreModel, PosInitRespEnvModel
+from model.pos_network_model import PosInitRespStoreModel, PosInitRespEnvModel, PosInitRespModel
 from utils.common import get_active_mac, get_local_ip
 from utils.file_handle import IniFileHandel
 from utils.pos_network import change_pos_from_network, pos_tool_init
@@ -161,249 +162,6 @@ class PaymentMockConfig:
         with open(cls.config_file, "w") as f:
             f.write(json.dumps(data, indent=4, ensure_ascii=False))
 
-    @classmethod
-    def clean_cache(cls, path) -> tuple[bool, str]:
-        """
-        清理缓存
-        """
-        if not os.path.exists(path):
-            logger.info(f"pos文件不存在:{path}")
-            return False, "pos文件不存在"
-
-        cache_files = ['pos_params', "init_config.data", "charge_db"]
-        success = True
-        msg = ""
-        for cache_file in cache_files:
-            cache_file = os.path.join(os.path.dirname(path), cache_file)
-            if os.path.exists(cache_file):
-                logger.info(f"清理缓存文件:{cache_file}")
-                try:
-                    os.remove(cache_file)
-                except Exception as e:
-                    logger.error(f"删除缓存文件失败:{cache_file}, 错误信息:{e}")
-                    success = False
-                    msg += f"删除缓存文件失败:{cache_file}, 错误信息:{e}\n"
-        if success:
-            msg = "清理缓存成功"
-        return success, msg
-
-    @classmethod
-    def replace_mitm_cert(cls, pos_file) -> tuple[bool, str]:
-        """
-        替换mitm证书
-        """
-        file_dir = os.path.dirname(pos_file)
-
-        # mitm_config = StartConfig.read()
-        # if not mitm_config.replace_mitm_cert:
-        #     return
-        mitm_dir = MitmproxyConfig.read().mitmproxy_config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy")
-        cert_file = mitm_dir + "/mitmproxy-ca-cert.pem"
-        if not os.path.exists(cert_file):
-            logger.error(f"mitmproxy-ca-cert.pem 不存在")
-            return False, "mitmproxy-ca-cert.pem 不存在"
-        with open(cert_file, "r", encoding="utf-8") as f:
-            cert_content = f.read()
-        with open(os.path.join(file_dir, "certifi/cacert.pem"), "r", encoding="utf-8") as f:
-            old_content = f.read()
-        if cert_content not in old_content:
-            with open(os.path.join(file_dir, "certifi/cacert.pem"), "a+", encoding="utf-8") as f:
-                f.write(f"\n\n# mitmproxy \n{cert_content}")
-            return True, "替换mitm证书成功"
-        return True, "mitm证书已存在，不用替换"
-
-    @classmethod
-    def backup_payment_driver(cls, pos_file):
-        """
-        备份支付驱动
-        """
-        mock_dirver_dir = os.path.abspath('drive')
-        if not os.path.exists(mock_dirver_dir):
-            logger.error(f"支付mock驱动不存在:{mock_dirver_dir}")
-            return
-
-        pos_dir = os.path.dirname(pos_file)
-        backup_dir = os.path.join(pos_dir, 'drive_backup')
-        if not os.path.exists(backup_dir):
-            os.makedirs(backup_dir)
-
-        for root, dirs, files in os.walk(mock_dirver_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                rel_path = os.path.relpath(os.path.dirname(file_path), mock_dirver_dir)
-                backup_path = os.path.join(backup_dir, rel_path)
-                old_payment_driver_dir = os.path.join(pos_dir, 'drive', rel_path)
-                if not os.path.exists(backup_path):
-                    os.makedirs(backup_path)
-                # copytree(file_path, backup_path, dirs_exist_ok=True)
-                old_driver_file = os.path.join(old_payment_driver_dir, file)
-                if os.path.exists(old_driver_file):
-                    copyfile(old_driver_file, os.path.join(backup_path, file))
-                # os.makedirs(os.path.dirname(backup_path), exist_ok=True)
-                # copytree(file_path, backup_path, dirs_exist_ok=True)
-
-        # if not os.path.exists(cls.config_file):
-        #     return
-        # pos_key = hashlib.md5(pos_file.encode('utf-8')).hexdigest()
-
-    @classmethod
-    def restore_payment_driver(cls, pos_file):
-        """
-        恢复支付驱动
-        """
-        pos_dir = os.path.dirname(pos_file)
-        backup_dir = os.path.join(pos_dir, 'drive_backup')
-        if not os.path.exists(backup_dir):
-            logger.warning(f"备份目录不存在:{backup_dir}")
-            return
-        copytree(backup_dir, os.path.join(pos_dir, 'drive'), dirs_exist_ok=True)
-
-    @classmethod
-    def cover_payment_driver(cls, pos_file):
-        if not os.path.exists(pos_file):
-            logger.warning(f"POS文件不存在:{pos_file}")
-            return False, "POS文件不存在"
-        drive_file = os.path.join(os.path.dirname(pos_file), 'drive')
-
-        mock_file = os.path.abspath('drive')
-        if not os.path.exists(mock_file):
-            logger.warning(f"支付mock驱动不存在:{mock_file}")
-            return False, "支付mock驱动不存在"
-        logger.info(f"用mock驱动【{mock_file}】覆盖支付驱动:{drive_file}")
-        # pos_key = hashlib.md5(pos_file.encode('utf-8')).hexdigest()
-        copytree(mock_file, drive_file, dirs_exist_ok=True)
-        return True, "覆盖支付驱动成功"
-
-    @classmethod
-    def get_pos_env(cls, pos_file) -> str | None:
-        if not os.path.exists(pos_file):
-            logger.warning(f"POS文件不存在:{pos_file}")
-            return None
-
-        # 修改pos.ini
-        pos_dir = os.path.dirname(pos_file)
-        pos_ini_file = os.path.join(pos_dir, "pos.ini")
-        if not os.path.exists(pos_ini_file):
-            logger.warning(f"pos.ini文件不存在:{pos_ini_file}")
-            return None
-        ini_file_handle = IniFileHandel(pos_ini_file)
-        old_env = ini_file_handle.get_value("PosClient", "pos_env")
-        return old_env
-
-    @classmethod
-    def clear_env(cls, pos_path: str):
-        env_files = [
-            "database",
-            "log",
-            "pos_params",
-            "init_config.data",
-            "charge_db"
-        ]
-        if not os.path.exists(pos_path):
-            logger.warning(f"POS文件不存在:{pos_path}")
-            return
-        pos_dir = os.path.dirname(pos_path)
-        for env_file in env_files:
-            env_file = os.path.join(pos_dir, env_file)
-            if os.path.exists(env_file):
-                logger.info(f"清理缓存文件:{env_file}")
-                try:
-                    if os.path.isfile(env_file):
-                        os.remove(env_file)
-                    else:
-                        rmtree(env_file)
-                except Exception as e:
-                    logger.error(f"删除缓存文件失败:{env_file}, 错误信息:{e}")
-
-    @classmethod
-    def change_env(cls, pos_file, env: str) -> tuple[bool, str]:
-
-        if not os.path.exists(pos_file):
-            logger.warning(f"POS文件不存在:{pos_file}")
-            return False, "POS文件不存在"
-        if env not in ["RTA_TEST", "RTA_UAT", "RTA"]:
-            logger.warning(f"环境参数错误:{env}")
-            return False, "环境参数错误"
-
-        # 修改pos.ini
-        pos_dir = os.path.dirname(pos_file)
-        pos_ini_file = os.path.join(pos_dir, "pos.ini")
-        if not os.path.exists(pos_ini_file):
-            logger.warning(f"pos.ini文件不存在:{pos_ini_file}")
-            return False, "pos.ini文件不存在"
-        ini_file_handle = IniFileHandel(pos_ini_file)
-        old_env = ini_file_handle.get_value("PosClient", "pos_env")
-        if old_env == env:
-            logger.warning(f"原环境就是【{env}】不用切换: old_env: {old_env}")
-            return False, "原环境就是【{env}】不用切换"
-        ini_file_handle.set_value("PosClient", "pos_env", env)
-        ini_file_handle.write()
-
-        def change_dir_env(pos_path: str, file_name: str, old_env: str, env: str):
-            db_file = os.path.join(pos_path, file_name)
-            if not os.path.exists(db_file):
-                logger.warning(f"{file_name}文件不存在:{db_file}")
-            else:
-                # 备份老环境
-                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}")
-                if os.path.exists(db_old_env_file):
-                    logger.warning(f"{file_name}_env文件已存在，将直接覆盖:{db_old_env_file}")
-                copytree(db_file, db_old_env_file, dirs_exist_ok=True)
-                # 备份后删除
-                rmtree(db_file)
-            # 恢复备份数据
-            db_env_file = os.path.join(pos_path, f"{file_name}_{env}")
-            if not os.path.exists(db_env_file):
-                logger.warning(f"{file_name}_env文件不存在:{db_env_file}")
-            else:
-                copytree(db_env_file, db_file, dirs_exist_ok=True)
-
-        def change_file_env(pos_path: str, file_name: str, old_env: str, env: str):
-            db_file = os.path.join(pos_path, file_name)
-            if not os.path.exists(db_file):
-                logger.warning(f"{file_name}文件不存在:{db_file}")
-            else:
-                # 备份老环境
-                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}")
-                if os.path.exists(db_old_env_file):
-                    logger.warning(f"{file_name}_{old_env}文件已存在，将直接覆盖:{db_old_env_file}")
-                copyfile(db_file, db_old_env_file)
-                # 备份后删除
-                os.remove(db_file)
-            # 恢复备份数据
-            db_env_file = os.path.join(pos_path, f"{file_name}_{env}")
-            if not os.path.exists(db_env_file):
-                logger.warning(f"{file_name}_env文件不存在:{db_env_file}")
-            else:
-                copyfile(db_env_file, db_file)
-
-        # 切换database
-        change_dir_env(pos_dir, "database", old_env, env)
-
-        # 切换log
-        change_dir_env(pos_dir, "log", old_env, env)
-
-        # 切换缓存
-        cache_files = ['pos_params', "init_config.data", "charge_db"]
-        for file in cache_files:
-            change_file_env(pos_dir, file, old_env, env)
-        return True, "切换成功"
-
-    @classmethod
-    def restore(cls, pos_file):
-        if not os.path.exists(cls.config_file):
-            return
-        with open(cls.config_file) as f:
-            config = json.load(f)
-            if "back_data" not in config:
-                return
-            if pos_file not in config["back_data"]:
-                return
-            config = config["back_data"][pos_file]
-            with open(cls.config_file, "w") as f:
-                f.write(json.dumps(config, indent=4, ensure_ascii=False))
-
-
 class StartConfig:
     config_file = "storage/data/config_pos_start.json"
 
@@ -476,18 +234,129 @@ class PosConfig:
             return PosParamsModel.model_validate(content)
 
     @classmethod
-    def read_pos_config(cls, pos_path: str) -> PosConfigModel:
-        data = PosConfigModel()
-        if not os.path.exists(pos_path):
-            return data
-        params = cls.read_pos_params(pos_path)
-        if params:
-            data.pos_params = params
+    def read_pos_config(cls) -> PosConfigModel:
+        if not os.path.exists(cls.pos_path):
+            data = PosConfigModel()
+            with open(cls.pos_path, "w") as f:
+                f.write(data.model_dump_json())
+        else:
+            with open(cls.pos_path, "r") as f:
+                data = f.read()
+                try:
+                    data = json.loads(data)
+                    data = PosConfigModel.model_validate(data)
+                except Exception as e:
+                    data = PosConfigModel()
         return data
 
+        # if not os.path.exists(pos_path):
+        #     return data
+        # params = cls.read_pos_params(pos_path)
+        # if params:
+        #     data.pos_params = params
+        # return data
+
     @classmethod
-    def change_pos(cls, pos_path: str) -> bool:
-        env = PaymentMockConfig.get_pos_env(pos_path)
+    def save_pos_config(cls, config: PosConfigModel):
+        with open(cls.pos_path, "w") as f:
+            f.write(config.model_dump_json())
+
+    @classmethod
+    def get_local_pos_env(cls, pos_file) -> str | None:
+        """
+        从本地pos.ini获取pos当前环境
+        """
+        if not os.path.exists(pos_file):
+            logger.warning(f"POS文件不存在:{pos_file}")
+            return None
+
+        # 修改pos.ini
+        pos_dir = os.path.dirname(pos_file)
+        pos_ini_file = os.path.join(pos_dir, "pos.ini")
+        if not os.path.exists(pos_ini_file):
+            logger.warning(f"pos.ini文件不存在:{pos_ini_file}")
+            return None
+        ini_file_handle = IniFileHandel(pos_ini_file)
+        old_env = ini_file_handle.get_value("PosClient", "pos_env")
+        return old_env
+
+    @classmethod
+    def change_pos_local_env(cls, pos_file, env: str) -> tuple[bool, str]:
+
+        if not os.path.exists(pos_file):
+            logger.warning(f"POS文件不存在:{pos_file}")
+            return False, "POS文件不存在"
+        if env not in ["RTA_TEST", "RTA_UAT", "RTA"]:
+            logger.warning(f"环境参数错误:{env}")
+            return False, "环境参数错误"
+
+        # 修改pos.ini
+        pos_dir = os.path.dirname(pos_file)
+        pos_ini_file = os.path.join(pos_dir, "pos.ini")
+        if not os.path.exists(pos_ini_file):
+            logger.warning(f"pos.ini文件不存在:{pos_ini_file}")
+            return False, "pos.ini文件不存在"
+        ini_file_handle = IniFileHandel(pos_ini_file)
+        old_env = ini_file_handle.get_value("PosClient", "pos_env")
+        if old_env == env:
+            logger.warning(f"原环境就是【{env}】不用切换: old_env: {old_env}")
+            return False, "原环境就是【{env}】不用切换"
+        ini_file_handle.set_value("PosClient", "pos_env", env)
+        ini_file_handle.write()
+
+        def change_dir_env(pos_path: str, file_name: str, old_env: str, env: str):
+            db_file = os.path.join(pos_path, file_name)
+            if not os.path.exists(db_file):
+                logger.warning(f"{file_name}文件不存在:{db_file}")
+            else:
+                # 备份老环境
+                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}")
+                if os.path.exists(db_old_env_file):
+                    logger.warning(f"{file_name}_env文件已存在，将直接覆盖:{db_old_env_file}")
+                copytree(db_file, db_old_env_file, dirs_exist_ok=True)
+                # 备份后删除
+                rmtree(db_file)
+            # 恢复备份数据
+            db_env_file = os.path.join(pos_path, f"{file_name}_{env}")
+            if not os.path.exists(db_env_file):
+                logger.warning(f"{file_name}_env文件不存在:{db_env_file}")
+            else:
+                copytree(db_env_file, db_file, dirs_exist_ok=True)
+
+        def change_file_env(pos_path: str, file_name: str, old_env: str, env: str):
+            db_file = os.path.join(pos_path, file_name)
+            if not os.path.exists(db_file):
+                logger.warning(f"{file_name}文件不存在:{db_file}")
+            else:
+                # 备份老环境
+                db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env}")
+                if os.path.exists(db_old_env_file):
+                    logger.warning(f"{file_name}_{old_env}文件已存在，将直接覆盖:{db_old_env_file}")
+                copyfile(db_file, db_old_env_file)
+                # 备份后删除
+                os.remove(db_file)
+            # 恢复备份数据
+            db_env_file = os.path.join(pos_path, f"{file_name}_{env}")
+            if not os.path.exists(db_env_file):
+                logger.warning(f"{file_name}_env文件不存在:{db_env_file}")
+            else:
+                copyfile(db_env_file, db_file)
+
+        # 切换database
+        change_dir_env(pos_dir, "database", old_env, env)
+
+        # 切换log
+        change_dir_env(pos_dir, "log", old_env, env)
+
+        # 切换缓存
+        cache_files = cls.read_pos_config().cache_files
+        for file in cache_files:
+            change_file_env(pos_dir, file, old_env, env)
+        return True, "切换成功"
+
+    @classmethod
+    def change_pos_on_network(cls, pos_path: str) -> bool:
+        env = PosConfig.get_local_pos_env(pos_path)
         if not env:
             logger.warning(f"获取pos环境失败:{pos_path}")
             return False
@@ -525,54 +394,165 @@ class PosConfig:
 
     @classmethod
     def get_pos_group(cls, vender_id: str, env: str) -> tuple[Optional[str], Optional[str]]:
-        data = {
-            "vendor_group": {
-                "rta-uat": [7, 9, 11],
-                "rta-uat-gray03": [3, 50],
-                "rta-uat-gray06": [12, 58949, 58959, 58984, 58969, 58989, 58964],
-                "rta-uat-gray07": [],
-                "rta-uat-gray08": [5, 10, 58938],
-                "rta-test": [1],
-            },
-            "vendor_account": {
-                3: "30000789",
-                5: "50000789",
-                7: "70000789",
-                8: "80000789",
-                9: "90000789",
-                10: "10000789",
-                11: "11000789",
-                12: "12000789",
-                13: "13000789",
-                50: "50000789",
-                58949: "58949789",
-                58959: "58959789",
-                58984: "58984789",
-                58969: "58969789",
-                58989: "58989789",
-                58964: "58964789",
-                58938: "58938789",
-                1: "10000789",
-            }
-        }
-        account = data["vendor_account"].get(int(vender_id), None)
+        pos_config = cls.read_pos_config()
+        account = pos_config.vendor_account.get(int(vender_id), None)
         if "test" in env.lower():
             return "rta-test", account
-        for k, v in data["vendor_group"].items():
+        for k, v in pos_config.env_group_vendor.items():
             if int(vender_id) in v:
                 return k, account
         return None, None
 
+    @classmethod
+    def clean_cache(cls, path) -> tuple[bool, str]:
+        """
+        清理缓存
+        """
+        if not os.path.exists(path):
+            logger.info(f"pos文件不存在:{path}")
+            return False, "pos文件不存在"
+
+        cache_files = cls.read_pos_config().cache_files
+        success = True
+        msg = ""
+        for cache_file in cache_files:
+            cache_file = os.path.join(os.path.dirname(path), cache_file)
+            if os.path.exists(cache_file):
+                logger.info(f"清理缓存文件:{cache_file}")
+                try:
+                    os.remove(cache_file)
+                except Exception as e:
+                    logger.error(f"删除缓存文件失败:{cache_file}, 错误信息:{e}")
+                    success = False
+                    msg += f"删除缓存文件失败:{cache_file}, 错误信息:{e}\n"
+        if success:
+            msg = "清理缓存成功"
+        return success, msg
+
+    @classmethod
+    def replace_mitm_cert(cls, pos_file) -> tuple[bool, str]:
+        """
+        替换mitm证书
+        """
+        file_dir = os.path.dirname(pos_file)
+
+        # mitm_config = StartConfig.read()
+        # if not mitm_config.replace_mitm_cert:
+        #     return
+        mitm_dir = MitmproxyConfig.read().mitmproxy_config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy")
+        cert_file = mitm_dir + "/mitmproxy-ca-cert.pem"
+        if not os.path.exists(cert_file):
+            logger.error(f"mitmproxy-ca-cert.pem 不存在")
+            return False, "mitmproxy-ca-cert.pem 不存在"
+        with open(cert_file, "r", encoding="utf-8") as f:
+            cert_content = f.read()
+        with open(os.path.join(file_dir, "certifi/cacert.pem"), "r", encoding="utf-8") as f:
+            old_content = f.read()
+        if cert_content not in old_content:
+            with open(os.path.join(file_dir, "certifi/cacert.pem"), "a+", encoding="utf-8") as f:
+                f.write(f"\n\n# mitmproxy \n{cert_content}")
+            return True, "替换mitm证书成功"
+        return True, "mitm证书已存在，不用替换"
+
+    @classmethod
+    def backup_payment_driver(cls, pos_file):
+        """
+        备份支付驱动
+        """
+        pos_config = cls.read_pos_config()
+        mock_dirver_dir = pos_config.payment_mock_driver_path
+        if not os.path.exists(mock_dirver_dir):
+            logger.error(f"支付mock驱动不存在:{mock_dirver_dir}，请设置支付mock驱动的目录")
+            return
+        backup_dir = pos_config.payment_mock_driver_backup_dir
+        if not os.path.exists(backup_dir):
+            pos_dir = os.path.dirname(pos_file)
+            backup_dir = os.path.join(pos_dir, 'drive_backup')
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+
+        for root, dirs, files in os.walk(mock_dirver_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(os.path.dirname(file_path), mock_dirver_dir)
+                backup_path = os.path.join(backup_dir, rel_path)
+                old_payment_driver_dir = os.path.join(pos_dir, 'drive', rel_path)
+                if not os.path.exists(backup_path):
+                    os.makedirs(backup_path)
+                # copytree(file_path, backup_path, dirs_exist_ok=True)
+                old_driver_file = os.path.join(old_payment_driver_dir, file)
+                if os.path.exists(old_driver_file):
+                    copyfile(old_driver_file, os.path.join(backup_path, file))
+                # os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+                # copytree(file_path, backup_path, dirs_exist_ok=True)
+
+        # if not os.path.exists(cls.config_file):
+        #     return
+        # pos_key = hashlib.md5(pos_file.encode('utf-8')).hexdigest()
+
+    @classmethod
+    def restore_payment_driver(cls, pos_file):
+        """
+        恢复支付驱动
+        """
+        pos_dir = os.path.dirname(pos_file)
+        backup_dir = os.path.join(pos_dir, 'drive_backup')
+        if not os.path.exists(backup_dir):
+            logger.warning(f"备份目录不存在:{backup_dir}")
+            return
+        copytree(backup_dir, os.path.join(pos_dir, 'drive'), dirs_exist_ok=True)
+
+    @classmethod
+    def cover_payment_driver(cls, pos_file):
+        if not os.path.exists(pos_file):
+            logger.warning(f"POS文件不存在:{pos_file}")
+            return False, "POS文件不存在"
+        drive_file = os.path.join(os.path.dirname(pos_file), 'drive')
+
+        mock_file = os.path.abspath('drive')
+        if not os.path.exists(mock_file):
+            logger.warning(f"支付mock驱动不存在:{mock_file}")
+            return False, "支付mock驱动不存在"
+        logger.info(f"用mock驱动【{mock_file}】覆盖支付驱动:{drive_file}")
+        # pos_key = hashlib.md5(pos_file.encode('utf-8')).hexdigest()
+        copytree(mock_file, drive_file, dirs_exist_ok=True)
+        return True, "覆盖支付驱动成功"
+
+    @classmethod
+    def clear_env(cls, pos_path: str):
+        env_files = [
+            "database",
+            "log",
+            "pos_params",
+            "init_config.data",
+            "charge_db"
+        ]
+        if not os.path.exists(pos_path):
+            logger.warning(f"POS文件不存在:{pos_path}")
+            return
+        pos_dir = os.path.dirname(pos_path)
+        for env_file in env_files:
+            env_file = os.path.join(pos_dir, env_file)
+            if os.path.exists(env_file):
+                logger.info(f"清理缓存文件:{env_file}")
+                try:
+                    if os.path.isfile(env_file):
+                        os.remove(env_file)
+                    else:
+                        rmtree(env_file)
+                except Exception as e:
+                    logger.error(f"删除缓存文件失败:{env_file}, 错误信息:{e}")
+
 
 class PosToolConfig:
+    config_file = "storage/data/pos_tool_ini_data.json"
     @classmethod
-    def read_pos_tool_config(cls, pos_path: str):
+    def read_pos_tool_config(cls) -> PosInitRespModel:
+        if os.path.exists(cls.config_file):
+            with open(cls.config_file, "r", encoding="utf-8") as f:
+                data = f.read()
+                return PosInitRespModel.model_validate(json.loads(data))
         data = pos_tool_init()
-        if not os.path.exists(pos_path):
-            return data
-        params = PosConfig.read_pos_params(pos_path)
-        if params:
-            data.pos_params = params
         return data
 
     @classmethod
@@ -581,7 +561,7 @@ class PosToolConfig:
         if not os.path.exists(pos_path):
             return res_data
 
-        data = pos_tool_init()
+        data = cls.read_pos_tool_config()
         if data:
             res_data[3] = data.data.env_list
 
@@ -592,7 +572,7 @@ class PosToolConfig:
 
         # 只获取当前环境的store_list
         store_list = []
-        env = PaymentMockConfig.get_pos_env(pos_path)
+        env = PosConfig.get_local_pos_env(pos_path)
         group, account = PosConfig.get_pos_group(params.venderNo, env)
         if group:
             for store in data.data.store_list:
@@ -600,6 +580,9 @@ class PosToolConfig:
                     store_list.append(store)
         res_data[2] = store_list
         return res_data
+
+
+
 
 
 if __name__ == "__main__":
