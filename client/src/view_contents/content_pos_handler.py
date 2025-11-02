@@ -415,6 +415,41 @@ class PosHandler:
         self.status_text.value = "正在停止搜索..."
         self.page.update()
 
+    async def logout_pos_account_for_view(self, evt: ft.ControlEvent):
+        path = evt.control.data
+        await self._logout_pos_account(path)
+
+    async def _logout_pos_account(self, pos_path) -> bool:
+        logger.info(f"开始退出账号：{pos_path}")
+        pos_config = PosConfig.read_pos_params(pos_path)
+        if not pos_config:
+            UiUtil.show_snackbar_error(self.page, f"获取POS缓存失败， 无法注销POS账号: pos_config={pos_config}")
+            return False
+        pos_env = PosConfig.get_local_pos_env(pos_path)
+        pos_group, account = PosConfig.get_pos_group(pos_config.venderNo, pos_env)
+        if not pos_group or not account:
+            UiUtil.show_snackbar_error(self.page,
+                                       f"获取POS账号失败， 无法注销POS账号: pos_group={pos_group}, account={account}")
+            return False
+        logout_model = PosLogoutModel(
+            env=pos_group,
+            cashierNo=account
+        )
+        try:
+            status, message_info = await pos_network.pos_account_logout(logout_model)
+            if not status:
+                UiUtil.show_snackbar_error(self.page, message_info)
+                return False
+            else:
+                UiUtil.show_snackbar_success(self.page, message_info)
+                return True
+        except Exception as e:
+            UiUtil.show_snackbar_error(self.page, f"注销POS账号失败: {e}")
+            return False
+
+
+
+
     async def open_pos_file(self,e:ft.ControlEvent):
         """打开文件"""
         path = e.control.data
@@ -424,42 +459,11 @@ class PosHandler:
         UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
         await asyncio.sleep(2)
 
-        if self.start_config.change_pos:
-            logger.info(f"切换在线POS环境")
-            try:
-                change_result = await PosConfig.change_pos_on_network(path)
-                if change_result:
-                    UiUtil.show_snackbar_success(self.page, "切换POS成功")
-                else:
-                    UiUtil.show_snackbar_error(self.page, "切换POS失败")
-                    return
-            except ValueError as e:
-                UiUtil.show_snackbar_error(self.page, f"切换POS失败: {e}")
-                return
+        if self.start_config.change_pos and not self._change_pos(path):
+            return
 
-        if self.start_config.account_logout:
-            pos_config = PosConfig.read_pos_params(path)
-            if pos_config:
-                pos_env = PosConfig.get_local_pos_env(path)
-                pos_group, account = PosConfig.get_pos_group(pos_config.venderNo, pos_env)
-                if pos_group and account:
-                    logout_model = PosLogoutModel(
-                        env=pos_group,
-                        cashierNo=account
-                    )
-                    try:
-                        status, message_info = await pos_network.pos_account_logout(logout_model)
-                        if not status:
-                            UiUtil.show_snackbar_error(self.page, message_info)
-                            return
-                    except Exception as e:
-                        UiUtil.show_snackbar_error(self.page, f"注销POS账号失败: {e}")
-                        return
-                else:
-                    UiUtil.show_snackbar_error(self.page, f"获取POS账号失败， 无法注销POS账号: pos_group={pos_group}, account={account}")
-            else:
-                UiUtil.show_snackbar_error(self.page, f"获取POS缓存失败， 无法注销POS账号: pos_config={pos_config}")
-
+        if self.start_config.account_logout and not self._logout_pos_account(path):
+            return
 
         if self.start_config.replace_mitm_cert:
             logger.info(f"替换mitm证书")
@@ -592,20 +596,25 @@ class PosHandler:
             e.control.disabled = False
             e.control.update()
 
-
-    async def change_pos_env(self, e: ft.ControlEvent):
-        path = e.control.data
+    async def _change_pos(self, pos_path:str) -> bool:
         try:
-            logger.info(f"切换POS环境: {path}")
-            change_status = await PosConfig.change_pos_on_network(path)
+            logger.info(f"切换POS环境: {pos_path}")
+            change_status, message_info = await PosConfig.change_pos_on_network(pos_path)
             if change_status:
                 UiUtil.show_snackbar_success(self.page, "切换POS环境成功")
+                return True
             else:
-                UiUtil.show_snackbar_error(self.page, "切换POS环境失败")
+                UiUtil.show_snackbar_error(self.page, f"切换POS环境失败：{message_info}")
+                return False
         except Exception as e:
             logger.error(f"切换POS环境失败: {e}")
             UiUtil.show_snackbar_error(self.page, f"切换POS环境失败: {e}")
-        # self.page.update()
+            return False
+
+
+    async def change_pos_env(self, e: ft.ControlEvent):
+        path = e.control.data
+        await self._change_pos(path)
 
     def clear_pos_env_file(self, e: ft.ControlEvent):
         path = e.control.data
@@ -713,6 +722,9 @@ class PosHandler:
                             ft.PopupMenuItem(text="清理当前环境文件",
                                              data=pos_path,
                                              on_click=self.clear_pos_env_file),
+                            ft.PopupMenuItem(text="退出账号",
+                                             data=pos_path,
+                                             on_click=self.logout_pos_account_for_view),
                         ]
                     )
 
