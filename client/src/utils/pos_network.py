@@ -64,3 +64,7 @@ def pos_tool_init() -> PosInitRespModel | bool:
         if content["code"] == 20000:
             return PosInitRespModel(**content)
         return False
+
+
+def reset_account_password(env_group:str, account:str|int):
+    pass

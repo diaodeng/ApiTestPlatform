@@ -11,7 +11,7 @@ class PosChangeModel(BaseModel):
 
 
 class PosLogoutModel(BaseModel):
-    env: str
+    env: str  # 环境分组
     cashierNo: str
     userid: Optional[str] = None
     username: Optional[str] = None

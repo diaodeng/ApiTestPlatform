@@ -78,8 +78,42 @@ class PosConfigModel(BaseModel):
     pos_path: str = ""
     payment_driver_back_up_path: str = ""
     payment_mock_driver_path: str = ""
-    env_files: list[str] = []
-    cache_files: list[str] = []
+    env_files: list[str] = [
+            "database",
+            "log",
+            "pos_params",
+            "init_config.data",
+            "charge_db"
+        ]
+    cache_files: list[str] = ['pos_params', "init_config.data", "charge_db"]
+    env_group_vendor: dict[str, list] = {
+                "rta-uat": [7, 9, 11],
+                "rta-uat-gray03": [3, 50],
+                "rta-uat-gray06": [12, 58949, 58959, 58984, 58969, 58989, 58964],
+                "rta-uat-gray07": [],
+                "rta-uat-gray08": [5, 10, 58938],
+                "rta-test": [1],
+            }
+    vendor_account: dict[int, list] = {
+                3: ["30000789"],
+                5: ["50000789"],
+                7: ["70000789"],
+                8: ["80000789"],
+                9: ["90000789"],
+                10: ["10000789"],
+                11: ["11000789"],
+                12: ["12000789"],
+                13: ["13000789"],
+                50: ["50000789"],
+                58949: ["58949789"],
+                58959: ["58959789"],
+                58984: ["58984789"],
+                58969: ["58969789"],
+                58989: ["58989789"],
+                58964: ["58964789"],
+                58938: ["58938789"],
+                1: ["10000789"],
+            }
     pos_params: PosParamsModel = PosParamsModel()
     pos_start_params: PosParamsModel = PosParamsModel()
     running_pos_path: str = ""

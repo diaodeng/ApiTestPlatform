@@ -9,6 +9,8 @@ import re
 import zlib
 import signal
 import shutil
+import win32api
+import os
 from typing import Any, Optional
 
 import aiohttp
@@ -676,8 +678,70 @@ async def perform_update_with_powershell(download_process_call=None):
 
 
 
+
+class ExeVersionReader:
+    def __init__(self, exe_path):
+        self.exe_path = exe_path
+        self.version_info = {}
+
+    def get_basic_version(self):
+        """获取基本版本号"""
+        try:
+            info = win32api.GetFileVersionInfo(self.exe_path, '\\')
+            ms = info['FileVersionMS']
+            ls = info['FileVersionLS']
+            return f"{win32api.HIWORD(ms)}.{win32api.LOWORD(ms)}.{win32api.HIWORD(ls)}.{win32api.LOWORD(ls)}"
+        except Exception as e:
+            return None
+
+    def get_all_version_info(self):
+        """获取所有版本信息"""
+        try:
+            language_codepage = win32api.GetFileVersionInfo(self.exe_path, '\\VarFileInfo\\Translation')
+            if not language_codepage:
+                return {}
+
+            lang, codepage = language_codepage[0]
+
+            fields = [
+                'CompanyName', 'FileDescription', 'FileVersion',
+                'InternalName', 'LegalCopyright', 'OriginalFilename',
+                'ProductName', 'ProductVersion'
+            ]
+
+            for field in fields:
+                try:
+                    string_path = f'\\StringFileInfo\\{lang:04X}{codepage:04X}\\{field}'
+                    value = win32api.GetFileVersionInfo(self.exe_path, string_path)
+                    self.version_info[field] = value
+                except:
+                    self.version_info[field] = None
+
+            return self.version_info
+        except Exception as e:
+            return {}
+
+    def print_version_info(self):
+        """打印版本信息"""
+        if not self.version_info:
+            self.get_all_version_info()
+
+        print(f"文件: {os.path.basename(self.exe_path)}")
+        print("=" * 50)
+        for key, value in self.version_info.items():
+            if value:
+                print(f"{key}: {value}")
+
+    def get_exe_file_version(self) -> str|None:
+        if not self.version_info:
+            self.get_all_version_info()
+        return self.version_info.get('FileVersion', None)
+
+
+
 if __name__ == "__main__":
     # 示例用法
     # test_dir = "./test_folder"
     # ensure_directory_exists(test_dir)
-    get_sys_info()
+    # get_sys_info()
+    ExeVersionReader("C:\\POS\\client\\CPOS-DF-SG711-PRO\\CPOS-DF.exe").print_version_info()
