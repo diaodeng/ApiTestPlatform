@@ -1,4 +1,5 @@
 import os.path
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -63,12 +64,12 @@ class PosParamsModel(BaseModel):
 class PosChangeParamsModel(BaseModel):
     env: str = ""
     orgNo: str = ""  # 门店ID
-    pos_group: int = 1  # 收银台组
+    pos_group: Optional[str] = ""  # 收银台组
     pos_ip: str = ""
     pos_mac: str = ""
     pos_no: str = ""  # POS编号
     pos_skin: str = ""  # POS皮肤
-    pos_type:str = ""  # POS类型
+    pos_type:str = ""  # POS类型:1POS,2SCO,4Combined
     switchMode: str = "1"  # 切换模式，1mac，2posno
     venderId: str = ""  # 厂商ID
 

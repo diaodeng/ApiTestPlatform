@@ -45,4 +45,17 @@ class PosInitRespModel(BaseModel):
     data: PosInitRespDataModel
 
 
+class PosResetAccountRequestModel(BaseModel):
+    cashierNo: str|None = None  # 收银员账号
+    env: str|None = None  # 环境分组
+    userid: str|None = None  # 用户ID
+    username: str|None = None  # 用户名称
+    orgNo: str|None = None  # 门店ID
+    venderId: str|None = None  # 商家ID
+
+
+class PosUserInfoRespModel(BaseModel):
+    user_id: str
+    user_name: str
+
 

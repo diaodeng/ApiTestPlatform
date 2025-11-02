@@ -12,7 +12,7 @@ from model.pos_network_model import PosLogoutModel
 from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig
 from utils import file_handle, pos_network
 from utils.common import kill_process_by_name, get_all_process, kill_process_by_id, ExeVersionReader
-from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi
+from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi, PosAccountManagerUi
 
 
 class PosHandler:
@@ -139,7 +139,8 @@ class PosHandler:
                     self.kill_offline_btn,
                     ft.Button("结束进程", tooltip="查看并结束进程", on_click=self.open_process_list_dialog),
                     ft.ElevatedButton("设置", tooltip="POS工具相关设置",on_click=lambda e:self.page.open(PosSettingUi(self.page))),
-                    ft.ElevatedButton("切换POS", tooltip="调用接口切换POS",on_click=lambda e:self.page.open(ChangePosUi(self.page)))
+                    ft.ElevatedButton("切换POS", tooltip="调用接口切换POS",on_click=lambda e:self.page.open(ChangePosUi(self.page))),
+                    ft.ElevatedButton("POS账号处理", tooltip="调用接口踢出POS账号或重置密码",on_click=lambda e:self.page.open(PosAccountManagerUi(self.page)))
                 ]),
                 ft.Row([
                     self.file_pattern,
@@ -426,7 +427,8 @@ class PosHandler:
         if self.start_config.change_pos:
             logger.info(f"切换在线POS环境")
             try:
-                if PosConfig.change_pos_on_network(path):
+                change_result = await PosConfig.change_pos_on_network(path)
+                if change_result:
                     UiUtil.show_snackbar_success(self.page, "切换POS成功")
                 else:
                     UiUtil.show_snackbar_error(self.page, "切换POS失败")
@@ -446,7 +448,10 @@ class PosHandler:
                         cashierNo=account
                     )
                     try:
-                        pos_network.pos_account_logout(logout_model)
+                        status, message_info = await pos_network.pos_account_logout(logout_model)
+                        if not status:
+                            UiUtil.show_snackbar_error(self.page, message_info)
+                            return
                     except Exception as e:
                         UiUtil.show_snackbar_error(self.page, f"注销POS账号失败: {e}")
                         return
@@ -588,11 +593,12 @@ class PosHandler:
             e.control.update()
 
 
-    def change_pos_env(self, e: ft.ControlEvent):
+    async def change_pos_env(self, e: ft.ControlEvent):
         path = e.control.data
         try:
             logger.info(f"切换POS环境: {path}")
-            if PosConfig.change_pos_on_network(path):
+            change_status = await PosConfig.change_pos_on_network(path)
+            if change_status:
                 UiUtil.show_snackbar_success(self.page, "切换POS环境成功")
             else:
                 UiUtil.show_snackbar_error(self.page, "切换POS环境失败")
@@ -653,6 +659,7 @@ class PosHandler:
                         text="切换POS",
                         tooltip="调用接口切换对应环境的POS为当前POS",
                         on_click=self.change_pos_env,
+                        on_long_press=lambda e: ChangePosUi(self.page, pos_path),
                     ),
                     ft.ElevatedButton(
                         data=pos_path,
