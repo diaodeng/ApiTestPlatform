@@ -112,19 +112,19 @@ class AgentHandler:
 
     def before_request(self, data):
         if self.show_log:
-            logger.info(f"请求数据： {json.dumps(data, ensure_ascii=True)}")
-            self.request_data_view.value = json.dumps(data, ensure_ascii=True, indent=4)
+            logger.info(f"请求数据： {json.dumps(data, ensure_ascii=False)}")
+            self.request_data_view.value = json.dumps(data, ensure_ascii=False, indent=4)
             self.response_data_view.value = ""
             self.request_data_view.update()
             self.response_data_view.update()
 
     def after_request(self, data):
         if self.show_log:
-            logger.info(f"响应数据： {json.dumps(data, ensure_ascii=True)}")
+            logger.info(f"响应数据： {json.dumps(data, ensure_ascii=False)}")
             try:
-                result_data = json.dumps(json.loads(data["text"]), ensure_ascii=True, indent=4)
+                result_data = json.dumps(json.loads(data["text"]), ensure_ascii=False, indent=4)
             except Exception as e:
-                result_data = data.get("text") or json.dumps(data, ensure_ascii=True, indent=4)
+                result_data = data.get("text") or json.dumps(data, ensure_ascii=False, indent=4)
 
             self.response_data_view.value = result_data
             self.response_data_view.update()
