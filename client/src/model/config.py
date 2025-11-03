@@ -1,4 +1,5 @@
 import os.path
+from collections import defaultdict
 from typing import Optional
 
 from pydantic import BaseModel
@@ -96,31 +97,31 @@ class PosConfigModel(BaseModel):
                 "rta-test": [1],
             }
     vendor_account: dict[int, list] = {
-                3: ["30000789"],
-                5: ["50000789"],
-                7: ["70000789"],
-                8: ["80000789"],
-                9: ["90000789"],
-                10: ["10000789"],
-                11: ["11000789"],
-                12: ["12000789"],
-                13: ["13000789"],
-                50: ["50000789"],
-                58949: ["58949789"],
-                58959: ["58959789"],
-                58984: ["58984789"],
-                58969: ["58969789"],
-                58989: ["58989789"],
-                58964: ["58964789"],
-                58938: ["58938789"],
-                1: ["10000789"],
+                3: [],
+                5: [],
+                7: [],
+                8: [],
+                9: [],
+                10: [],
+                11: [],
+                12: [],
+                13: [],
+                50: [],
+                58949: [],
+                58959: [],
+                58984: [],
+                58969: [],
+                58989: [],
+                58964: [],
+                58938: [],
+                1: [],
             }
     pos_params: PosParamsModel = PosParamsModel()
     pos_start_params: PosParamsModel = PosParamsModel()
     running_pos_path: str = ""
     change_pos_params: PosChangeParamsModel = PosChangeParamsModel()
     account_logout_params: str = ""
-    backup_envs: list[str] = []  # 备份过的环境
+    backup_envs: dict[str, list[str]] = defaultdict(list)  # 备份过的环境
 
 
 class SetupConfigModel(BaseModel):

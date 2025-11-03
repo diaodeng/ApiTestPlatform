@@ -1,6 +1,7 @@
 from flet import SnackBar, Text, Colors, Page
 import flet as ft
 import json
+
 from loguru import logger
 
 
@@ -63,9 +64,8 @@ class StorageInMemory:
 
 
 class PosSettingUi(ft.AlertDialog):
-    def __init__(self, page: Page):
+    def __init__(self):
         super().__init__()
-        self.page = page
         self.config_data: PosConfigModel = PosConfig.read_pos_config()
         self.modal = False
         self.title = ft.Text("POS设置")
@@ -86,7 +86,6 @@ class PosSettingUi(ft.AlertDialog):
         self.actions_alignment = ft.MainAxisAlignment.END
         self.scrollable = True
         self.open = True
-        self.page.update()
 
 
     def close_dlg(self, event: ft.ControlEvent):
@@ -112,16 +111,18 @@ class PosSettingUi(ft.AlertDialog):
 
 
 class ChangePosUi(ft.AlertDialog):
-    def __init__(self, page: Page, pos_path = None):
+    def __init__(self, pos_path = None):
         logger.info(f"打开切换POS页面：{pos_path}")
         super().__init__()
         self.pos_tool_config_data = PosToolConfig.read_pos_tool_config()
         mac = get_active_mac()
         ip = get_local_ip()
-        self.page = page
         # self.config_data: PosConfigModel = PosConfig.read_pos_config()
         self.modal = True
         self.title = ft.Text("在线切换POS")
+
+        self.vender_potions = {}
+        self.store_potions = {}
 
         env_group , vendor_id, store, pos_group, pos_type = None, None, None, None, None
         try:
@@ -135,6 +136,14 @@ class ChangePosUi(ft.AlertDialog):
 
                 pos_env = PosConfig.get_local_pos_env(pos_path)
                 env_group, account = PosConfig.get_pos_group(vendor_id, pos_env)
+
+                for store_potion in self.pos_tool_config_data.data.store_list:
+                    if env_group and env_group == store_potion.env:
+                        self.vender_potions[store_potion.vender_id] =store_potion.vender_name
+                        if vendor_id and store_potion.vender_id == vendor_id:
+                            self.store_potions[store_potion.store_id] = store_potion.store_name
+
+
         except Exception as e:
             logger.error(e)
             pass
@@ -151,7 +160,7 @@ class ChangePosUi(ft.AlertDialog):
                             ),
                 ft.Dropdown(label="商家",
                             value=vendor_id,
-                            options=[],
+                            options=[ft.DropdownOption(key, name) for key,name in self.vender_potions.items()],
                             # editable=True,
                             on_change=self.change_vendor,
                             data="venderId",
@@ -159,7 +168,7 @@ class ChangePosUi(ft.AlertDialog):
                             ),
                 ft.Dropdown(label="门店",
                             value=store,
-                            options=[],
+                            options=[ft.DropdownOption(key, name) for key,name in self.store_potions.items()],
                             # editable=True,
                             on_change=self.change_store,
                             data="orgNo",
@@ -205,7 +214,6 @@ class ChangePosUi(ft.AlertDialog):
         self.actions_alignment = ft.MainAxisAlignment.END
         self.scrollable = True
         self.open = True
-        self.page.update()
 
 
     def close_dlg(self, event: ft.ControlEvent):
@@ -291,10 +299,9 @@ class ChangePosUi(ft.AlertDialog):
 
 
 class PosAccountManagerUi(ft.AlertDialog):
-    def __init__(self, page: Page, pos_path=None):
+    def __init__(self, pos_path=None):
         super().__init__()
         self.pos_tool_config_data = PosToolConfig.read_pos_tool_config()
-        self.page = page
         # self.config_data: PosConfigModel = PosConfig.read_pos_config()
         env_group, account = None, None
         try:
@@ -333,7 +340,6 @@ class PosAccountManagerUi(ft.AlertDialog):
         self.actions_alignment = ft.MainAxisAlignment.END
         self.scrollable = True
         self.open = True
-        self.page.update()
 
 
     def close_dlg(self, event: ft.ControlEvent):
@@ -418,12 +424,10 @@ class PosAccountManagerUi(ft.AlertDialog):
 
 
 class ChangeLocalPosUi(ft.AlertDialog):
-    def __init__(self, page: Page = None, pos_path=None):
+    def __init__(self, pos_path=None):
         logger.info(f"打开本地POS切换页面：{pos_path}")
         super().__init__()
         # self.pos_tool_config_data = PosToolConfig.read_pos_tool_config()
-        self.page = page
-        # self.config_data: PosConfigModel = PosConfig.read_pos_config()
         self.modal = True
         self.title = ft.Text("在线切换POS")
         self.target_env = None
@@ -436,7 +440,7 @@ class ChangeLocalPosUi(ft.AlertDialog):
                 ft.TextField(value=self.get_current_env_info(), label="当前环境", data="current_env"),
                 ft.Dropdown(label="已备份环境",
                             value=None,
-                            options=[ft.DropdownOption(item, item) for item in self.get_backed_env()],
+                            options=[ft.DropdownOption(key, name) for key, name in self.get_backed_env().items()],
                             # editable=True,
                             on_change=self.change_target_env,
                             data="backed_env",
@@ -452,7 +456,6 @@ class ChangeLocalPosUi(ft.AlertDialog):
         self.actions_alignment = ft.MainAxisAlignment.END
         self.scrollable = True
         self.open = True
-        self.page.update()
 
 
     def close_dlg(self, event: ft.ControlEvent):
@@ -464,15 +467,44 @@ class ChangeLocalPosUi(ft.AlertDialog):
         local_pos_env = PosConfig.get_local_pos_env(self.pos_path)
         pos_params: PosParamsModel = PosConfig.read_pos_params(self.pos_path)
         if pos_params:
-            current_env_info = f"环境：{local_pos_env}，商家：{pos_params.venderNo}，门店：{pos_params.orgNo}"
+            env_group, account = PosConfig.get_pos_group(pos_params.venderNo, local_pos_env)
+            pos_tool_config_data = PosToolConfig.read_pos_tool_config()
+            for store_info in pos_tool_config_data.data.store_list:
+                if store_info.vender_id == pos_params.venderNo and store_info.env == env_group and store_info.store_id == pos_params.orgNo:
+                    return f"{local_pos_env} --> {store_info.vender_name} --> {store_info.store_name}"
+            return f"环境：{local_pos_env}，商家：{pos_params.venderNo}，门店：{pos_params.orgNo}"
         else:
-            current_env_info = f"环境：{local_pos_env}，商家：无，门店：无"
-        return current_env_info
+            return f"环境：{local_pos_env}，商家：无，门店：无"
 
-    def get_backed_env(self) -> list:
+    def get_backed_env(self) -> dict[str,str]:
         config_data: PosConfigModel = PosConfig.read_pos_config()
         backed_env = ["RTA_TEST", "RTA_UAT", "RTA"]
-        backed_env.extend(config_data.backup_envs)
+        backed_env.extend(config_data.backup_envs.get(self.pos_path, []))
+        backed_env = {e:e for e in backed_env}
+
+        local_pos_env = PosConfig.get_local_pos_env(self.pos_path)
+        if not local_pos_env:
+            return backed_env
+        pos_tool_config_data = PosToolConfig.read_pos_tool_config()
+
+        current_backed_env = {}
+        for local_backed_env, _ in backed_env.items():
+            backed_env_info = local_backed_env.split("_")
+            if len(backed_env_info) >2:
+                vender_id = backed_env_info[2]
+                store = backed_env_info[3]
+                env_group, account = PosConfig.get_pos_group(vender_id, local_pos_env)
+                for store_info in pos_tool_config_data.data.store_list:
+                    if store_info.vender_id == vender_id and store_info.env == env_group and store_info.store_id == store:
+                        current_backed_env[local_backed_env] = f"{local_backed_env} --> {store_info.vender_name} --> {store_info.store_name}"
+        backed_env.update(current_backed_env)
+        return backed_env
+
+
+        # pos_params: PosParamsModel = PosConfig.read_pos_params(self.pos_path)
+
+
+
         return backed_env
 
     async def change_local_pos(self, event: ft.ControlEvent):
@@ -495,7 +527,7 @@ class ChangeLocalPosUi(ft.AlertDialog):
             for item in event.control.parent.content.content.controls[0].controls:
                 if item.data == "backed_env":
                     item.options.clear()
-                    item.options = [ft.DropdownOption(item, item) for item in self.get_backed_env()]
+                    item.options = [ft.DropdownOption(key, name) for key,name in self.get_backed_env().items()]
                     item.value = None
                     item.update()
                 elif item.data == "current_env":

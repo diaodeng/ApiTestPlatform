@@ -345,11 +345,11 @@ class PosConfig:
         # 更新当前备份过的环境key
         logger.info(f"{old_env}")
         logger.info(f"{target_env_key}")
-        logger.info(f"{config_data.backup_envs}")
+        logger.info(f"{config_data.backup_envs.get(pos_file, [])}")
         if old_env not in config_data.backup_envs and old_env not in ["RTA_TEST", "RTA_UAT", "RTA"]:
-            config_data.backup_envs.append(old_env)
+            config_data.backup_envs[pos_file].append(old_env)
         if target_env_key not in ["RTA_TEST", "RTA_UAT", "RTA"]:
-            config_data.backup_envs.remove(target_env_key)
+            config_data.backup_envs[pos_file].remove(target_env_key)
         PosConfig.save_pos_config(config_data)
         return True, "切换成功"
 
@@ -401,6 +401,8 @@ class PosConfig:
         account = pos_config.vendor_account.get(int(vendor_id), None)
         if account and type(account) is list:
             account = account[0]
+        if not account:
+            account = ""
         if "test" in env.lower():
             return "rta-test", account
         for k, v in pos_config.env_group_vendor.items():
