@@ -491,9 +491,10 @@ class ChangeLocalPosUi(ft.AlertDialog):
         for local_backed_env, _ in backed_env.items():
             backed_env_info = local_backed_env.split("_")
             if len(backed_env_info) >2:
+                current_env = '_'.join(backed_env_info[:-2])
                 vender_id = backed_env_info[2]
                 store = backed_env_info[3]
-                env_group, account = PosConfig.get_pos_group(vender_id, local_pos_env)
+                env_group, account = PosConfig.get_pos_group(vender_id, current_env)
                 for store_info in pos_tool_config_data.data.store_list:
                     if store_info.vender_id == vender_id and store_info.env == env_group and store_info.store_id == store:
                         current_backed_env[local_backed_env] = f"{local_backed_env} --> {store_info.vender_name} --> {store_info.store_name}"
