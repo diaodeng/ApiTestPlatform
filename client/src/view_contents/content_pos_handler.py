@@ -459,11 +459,13 @@ class PosHandler:
         UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
         await asyncio.sleep(2)
 
-        if self.start_config.change_pos and not self._change_pos(path):
-            return
+        if self.start_config.change_pos:
+            if not self._change_pos(path):
+                return
 
-        if self.start_config.account_logout and not self._logout_pos_account(path):
-            return
+        if self.start_config.account_logout:
+            if not self._logout_pos_account(path):
+                return
 
         if self.start_config.replace_mitm_cert:
             logger.info(f"替换mitm证书")
