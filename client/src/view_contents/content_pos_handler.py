@@ -460,11 +460,13 @@ class PosHandler:
         await asyncio.sleep(2)
 
         if self.start_config.change_pos:
-            if not self._change_pos(path):
+            change_result = await self._change_pos(path)
+            if not change_result:
                 return
 
         if self.start_config.account_logout:
-            if not self._logout_pos_account(path):
+            logout_result = await self._logout_pos_account(path)
+            if not logout_result:
                 return
 
         if self.start_config.replace_mitm_cert:
