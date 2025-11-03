@@ -13,7 +13,7 @@ from websockets.exceptions import InvalidStatus
 from utils.common import compress_dict_to_str, decompress_str_to_dict
 
 # websocket发送数据分片大小
-MAX_MESSAGE_SIZE = 1024 * 16
+MAX_MESSAGE_SIZE = 1024
 # 心跳间隔（秒）
 HEARTBEAT_INTERVAL = 30
 
