@@ -138,9 +138,9 @@ class PosHandler:
                     self.kill_pos_btn,
                     self.kill_offline_btn,
                     ft.Button("结束进程", tooltip="查看并结束进程", on_click=self.open_process_list_dialog),
-                    ft.ElevatedButton("设置", tooltip="POS工具相关设置",on_click=lambda e:self.page.open(PosSettingUi(self.page))),
-                    ft.ElevatedButton("切换POS", tooltip="调用接口切换POS",on_click=lambda e:self.page.open(ChangePosUi(self.page))),
-                    ft.ElevatedButton("POS账号处理", tooltip="调用接口踢出POS账号或重置密码",on_click=lambda e:self.page.open(PosAccountManagerUi(self.page)))
+                    ft.ElevatedButton("设置", tooltip="POS工具相关设置",on_click=lambda e:self.page.open(PosSettingUi())),
+                    ft.ElevatedButton("切换POS", tooltip="调用接口切换POS",on_click=self.change_env_from_network),
+                    ft.ElevatedButton("POS账号处理", tooltip="调用接口踢出POS账号或重置密码",on_click=lambda e:self.page.open(PosAccountManagerUi()))
                 ]),
                 ft.Row([
                     self.file_pattern,
@@ -521,17 +521,15 @@ class PosHandler:
             self.status_text.value = f"打开:{path} 所在目录失败"
             self.page.update()
 
+    def change_env_from_network(self, e: ft.ControlEvent):
+        pos_path = e.control.data
+        self.page.open(ChangePosUi(pos_path))
+
     def change_env(self, e: ft.ControlEvent):
-        path = e.control.parent.data
-        env = e.control.text
-        logger.info(f"切换环境: {path}, {env}")
-        self.page.add(ChangeLocalPosUi(self.page, path))
-        # PosConfig.read_pos_config()
-        # success, msg = PosConfig.change_pos_local_env(path, env)
-        # if success:
-        #     UiUtil.show_snackbar_success(self.page, msg)
-        # else:
-        #     UiUtil.show_snackbar_error(self.page, msg)
+        path = e.control.data
+        self.page.open(ChangeLocalPosUi(path))
+
+
         self.page.update()
 
     def clean_cache(self, e: ft.ControlEvent):
@@ -674,7 +672,7 @@ class PosHandler:
                         text="切换POS",
                         tooltip="调用接口切换对应环境的POS为当前POS",
                         on_click=self.change_pos_env,
-                        on_long_press=lambda e: ChangePosUi(self.page, pos_path),
+                        on_long_press=self.change_env_from_network,
                     ),
                     ft.ElevatedButton(
                         data=pos_path,
