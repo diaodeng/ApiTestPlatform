@@ -13,7 +13,7 @@ from websockets.exceptions import InvalidStatus
 from utils.common import compress_dict_to_str, decompress_str_to_dict
 
 # websocket发送数据分片大小
-MAX_MESSAGE_SIZE = 1024 * 16
+MAX_MESSAGE_SIZE = 1024
 # 心跳间隔（秒）
 HEARTBEAT_INTERVAL = 30
 
@@ -229,6 +229,7 @@ class WebSocketClient:
         # 如果响应不是None，则发送它回去
         if response is not None:
             # 分片发送
+            logger.info(f"分片大小:{MAX_MESSAGE_SIZE}")
             response_chunks = [response[i:i + MAX_MESSAGE_SIZE] for i in range(0, len(response), MAX_MESSAGE_SIZE)]
             total_size = len(response_chunks) or 1
             for idx, chunk in enumerate(response_chunks):

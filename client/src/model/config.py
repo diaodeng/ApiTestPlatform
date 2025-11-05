@@ -134,3 +134,4 @@ class AgentConfigModel(BaseModel):
     current_server: str = ""
     server_list: dict[str, str] = {}
     show_logs: bool = False
+    max_send_size: int = 1024

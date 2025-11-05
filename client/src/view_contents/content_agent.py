@@ -12,6 +12,7 @@ from loguru import logger
 
 from model.pos_network_model import PosLogoutModel
 from server.agent_server import WebSocketClient
+from server import agent_server
 from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig, \
     AgentConfig
 from utils import file_handle, pos_network
@@ -28,6 +29,7 @@ class AgentHandler:
         self.stop_event = Event()
         self.websocket_client = None
         self.agent_config = AgentConfig.read_config()
+        agent_server.MAX_MESSAGE_SIZE = self.agent_config.max_send_size
 
         self.local_mac = get_active_mac()
         self.connect_status = False
@@ -82,13 +84,18 @@ class AgentHandler:
                         disabled=not self.connect_status,
                         data="disconnect_btn"
                     ),
-                    ft.Text(
-                        self.local_mac,
-                        tooltip="客户端mac地址",
-                        on_tap=self.copy_mac,
-                        disabled=False,
-                        selectable=True
-                    ),
+                    ft.TextField(label="发消息最大内容（KB）",
+                                 value=f"{agent_server.MAX_MESSAGE_SIZE/1024}",
+                                 on_change=self._max_message_view_change,
+                                 width=160
+                                 ),
+                    # ft.Text(
+                    #     self.local_mac,
+                    #     tooltip="客户端mac地址",
+                    #     on_tap=self.copy_mac,
+                    #     disabled=False,
+                    #     selectable=True
+                    # ),
                     ft.Checkbox(
                         "显示日志",
                         tooltip="客户端是否显示请求参数和响应",
@@ -107,6 +114,14 @@ class AgentHandler:
             alignment=self.ft.alignment.center_left
         )
         return content
+
+    def _max_message_view_change(self, evt:ft.ControlEvent):
+        data = evt.control.value or 1
+        data = eval(data) if isinstance(data, str) else data
+        data = data * 1024
+        self.agent_config.max_send_size = data
+        agent_server.MAX_MESSAGE_SIZE = data
+        AgentConfig.save_config(self.agent_config)
 
     def get_websocket_url(self):
         uri = self.agent_config.current_server
