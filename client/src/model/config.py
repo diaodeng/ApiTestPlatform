@@ -128,3 +128,9 @@ class SetupConfigModel(BaseModel):
     """启动配置"""
     setup_mitmproxy: bool = False
     setup_pos: bool = False
+
+
+class AgentConfigModel(BaseModel):
+    current_server: str = ""
+    server_list: dict[str, str] = {}
+    show_logs: bool = False
