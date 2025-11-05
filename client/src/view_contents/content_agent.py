@@ -231,7 +231,8 @@ class AgentHandler:
         pass
 
     def change_show_log(self, e: ft.ControlEvent):
-        self.agent_config.show_logs = not self.agent_config.show_logs
+        self.show_log = e.control.value
+        self.agent_config.show_logs = e.control.value
         AgentConfig.save_config(self.agent_config)
 
     def change_server_url(self, e: ft.ControlEvent):
