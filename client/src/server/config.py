@@ -10,7 +10,7 @@ from loguru import logger
 from mitmproxy.net.dns.domain_names import cache
 
 from model.config import SearchConfigModel, MitmProxyConfigModel, PaymentMockConfigModel, StartConfigModel, \
-    SetupConfigModel, PosParamsModel, PosConfigModel, PosChangeParamsModel
+    SetupConfigModel, PosParamsModel, PosConfigModel, PosChangeParamsModel, AgentConfigModel
 from model.pos_network_model import PosInitRespStoreModel, PosInitRespEnvModel, PosInitRespModel
 from utils.common import get_active_mac, get_local_ip
 from utils.file_handle import IniFileHandel
@@ -587,6 +587,34 @@ class PosToolConfig:
                     store_list.append(store)
         res_data[2] = store_list
         return res_data
+
+
+class AgentConfig:
+    config_path = "storage/data/agent_config.json"
+
+    @classmethod
+    def read_config(cls) -> AgentConfigModel:
+        if not os.path.exists(cls.config_path):
+            config = AgentConfigModel()
+            with open(cls.config_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+            return config
+
+        with open(cls.config_path, "r", encoding="utf-8") as f:
+            data = f.read()
+            if not data:
+                config = AgentConfigModel()
+                with open(cls.config_path, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+                return config
+
+            return AgentConfigModel.model_validate(json.loads(data))
+
+    @classmethod
+    def save_config(cls, config_data: AgentConfigModel):
+        with open(cls.config_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(config_data.model_dump(), ensure_ascii=False))
+
 
 
 
