@@ -55,6 +55,83 @@ class MitmHandel:
                                               on_click=self.test_proxy
                                               )
 
+        self.request_delay_view = ft.TextField(value=f"{self.config.request_delay.delay}",
+                                               label="请求延时s",
+                                               on_change=self._request_delay_change,
+                                               visible=self.config.request_delay.enabled)
+        self.request_delay_path_view = ft.TextField(value=f"{'\n'.join(self.config.request_delay.delay_path)}",
+                                               label="请求延时的地址",
+                                               on_change=self._request_delay_path_change,
+                                               visible=self.config.request_delay.enabled)
+        self.response_delay_view = ft.TextField(value=f"{self.config.response_delay.delay}",
+                                                label="响应延时s",
+                                                on_change=self._response_delay_change,
+                                                visible=self.config.response_delay.enabled)
+        self.response_delay_path_view = ft.TextField(value=f"{'\n'.join(self.config.response_delay.delay_path)}",
+                                                label="响应延时的地址",
+                                                on_change=self._response_delay_path_change,
+                                                visible=self.config.response_delay.enabled)
+
+    def _request_delay_enable_change(self, evt: ft.ControlEvent):
+        data = evt.control.value
+        self.config.request_delay.enabled = data
+        self.request_delay_view.visible = data
+        self.request_delay_path_view.visible = data
+        MitmproxyConfig.write(self.config)
+        self.page.update()
+
+    def _response_delay_enable_change(self, evt: ft.ControlEvent):
+        data = evt.control.value
+        self.config.response_delay.enabled = data
+        self.response_delay_view.visible = data
+        self.response_delay_path_view.visible = data
+        MitmproxyConfig.write(self.config)
+        self.page.update()
+
+    def _request_delay_change(self, evt: ft.ControlEvent):
+        data = evt.control.value
+        data = eval(str(data))
+        self.config.request_delay.delay = data
+        MitmproxyConfig.write(self.config)
+        self.page.update()
+
+    def _response_delay_change(self, evt: ft.ControlEvent):
+        data = evt.control.value
+        data = eval(str(data))
+        self.config.response_delay.delay = data
+        MitmproxyConfig.write(self.config)
+        self.page.update()
+
+    def _request_delay_path_change(self, evt: ft.ControlEvent):
+        data = evt.control.value
+        if data:
+            new_data = []
+            data = [line for line in data.split("\n") if line.strip()]
+            for line in data:
+                new_data.extend([i for i in line.split(",") if i.strip()])
+            data = new_data
+        else:
+            return
+
+        self.config.request_delay.delay_path = data
+        MitmproxyConfig.write(self.config)
+        self.page.update()
+
+    def _response_delay_path_change(self, evt: ft.ControlEvent):
+        data = evt.control.value
+        if data:
+            new_data = []
+            data = [line for line in data.split("\n") if line.strip()]
+            for line in data:
+                new_data.extend([i for i in line.split(",") if i.strip()])
+            data = new_data
+        else:
+            return
+
+        self.config.response_delay.delay_path = data
+        MitmproxyConfig.write(self.config)
+        self.page.update()
+
     def use_include_change(self, e:ControlEvent):
         self.include_field.visible = e.control.value
         self.page.update()
@@ -119,16 +196,22 @@ class MitmHandel:
                     self.open_include,
                     self.open_exclude,
                     self.web_open_browser,
+                    ft.Checkbox(label="请求延时", value=self.config.request_delay.enabled, on_change=self._request_delay_enable_change),
+                    ft.Checkbox(label="响应", value=self.config.response_delay.enabled, on_change=self._response_delay_enable_change),
                 ]),
                 ft.Row([
                     self.port_field,
                     self.web_port_field,
                     self.mitmproxy_config_dir
                 ]),
-                # ft.Row([
-                #     self.proxy_model_view,
-                #     self.proxy_model_value_view,
-                # ]),
+                ft.Row([
+                    self.request_delay_view,
+                    self.request_delay_path_view,
+                ]),
+                ft.Row([
+                    self.response_delay_view,
+                    self.response_delay_path_view,
+                ]),
                 self.include_field,
                 self.exclude_field,
                 self.add_headers_field,
