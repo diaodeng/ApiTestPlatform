@@ -66,6 +66,7 @@ class MockHandle:
     def __init__(self):
         # self.client = httpx.AsyncClient(timeout=5)
         config = MitmproxyConfig.read()
+        self.custom_config = config
 
         if config.add_headers:
             lines = config.add_headers.split("\n")
@@ -136,6 +137,9 @@ class MockHandle:
     async def request(self, flow: HTTPFlow):
         logger.info(f"request: {flow.request.path}")
         logger.info(f"is_mock: {MockHandle.is_mock}, include: {MockHandle.include}, exclude: {MockHandle.exclude}")
+        if self.custom_config.request_delay.enabled and flow.request.path in self.custom_config.request_delay.delay_path:
+            logger.info(f"request: {flow.request.path}， 模拟请求延时：{self.custom_config.request_delay.delay}s")
+            await asyncio.sleep(self.custom_config.request_delay.delay)
 
         if not MockHandle.is_mock:
             logger.info(f"not mock: {flow.request.path}")
@@ -180,7 +184,10 @@ class MockHandle:
             logger.error(f"request mock error[{flow.request.path}]: {e}")
 
     async def response(self, flow: HTTPFlow):
-        pass
+        if self.custom_config.response_delay.enabled and flow.request.path in self.custom_config.response_delay.delay_path:
+            logger.info(f"response: {flow.request.path}， 模拟响应延时1：{self.custom_config.response_delay.delay}s")
+            await asyncio.sleep(self.custom_config.response_delay.delay)
+            logger.info(f"response: {flow.request.path}， 模拟响应延时2：{self.custom_config.response_delay.delay}s")
 
 
 class ProxyCore:

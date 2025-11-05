@@ -11,6 +11,10 @@ class SearchConfigModel(BaseModel):
     dir_pattern: str = "*"
     max_depth: str = "1"
 
+class ProxyDelayConfigModel(BaseModel):
+    enabled: bool = False
+    delay: float = 0.0
+    delay_path: list[str] = []
 
 class MitmProxyConfigModel(BaseModel):
     """mitmproxy 配置"""
@@ -24,6 +28,9 @@ class MitmProxyConfigModel(BaseModel):
     proxy_client: str = ""
     proxy_model: str = "local"
     proxy_model_value: str = "CPOS-DF.exe"
+
+    request_delay: ProxyDelayConfigModel = ProxyDelayConfigModel()
+    response_delay: ProxyDelayConfigModel = ProxyDelayConfigModel()
 
     add_headers: str = ""
     add_body: str = ""
