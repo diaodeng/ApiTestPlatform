@@ -406,7 +406,7 @@ class PosConfig:
         if "test" in env.lower():
             return "rta-test", account
         for k, v in pos_config.env_group_vendor.items():
-            if int(vendor_id) in v:
+            if vendor_id and int(vendor_id) in v:
                 return k, account
         return None, account
 

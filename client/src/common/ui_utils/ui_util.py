@@ -128,22 +128,20 @@ class ChangePosUi(ft.AlertDialog):
         try:
             if pos_path:
                 pos_params: PosParamsModel = PosConfig.read_pos_params(pos_path)
+                pos_env = PosConfig.get_local_pos_env(pos_path)
                 if pos_params:
                     vendor_id = pos_params.venderNo
                     store = pos_params.orgNo
                     pos_group = pos_params.posGroupNo
                     pos_type = pos_params.posType
 
-                pos_env = PosConfig.get_local_pos_env(pos_path)
-                env_group, account = PosConfig.get_pos_group(vendor_id, pos_env)
+                    env_group, account = PosConfig.get_pos_group(vendor_id, pos_env)
 
-                for store_potion in self.pos_tool_config_data.data.store_list:
-                    if env_group and env_group == store_potion.env:
-                        self.vender_potions[store_potion.vender_id] =store_potion.vender_name
-                        if vendor_id and store_potion.vender_id == vendor_id:
-                            self.store_potions[store_potion.store_id] = store_potion.store_name
-
-
+                    for store_potion in self.pos_tool_config_data.data.store_list:
+                        if env_group and env_group == store_potion.env:
+                            self.vender_potions[store_potion.vender_id] =store_potion.vender_name
+                            if vendor_id and store_potion.vender_id == vendor_id:
+                                self.store_potions[store_potion.store_id] = store_potion.store_name
         except Exception as e:
             logger.error(e)
             pass
