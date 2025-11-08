@@ -509,7 +509,14 @@ class PosHandler:
                 return
 
         UiUtil.show_snackbar_success(self.page, "正在启动POS。。。")
-        if not file_handle.open_file(path):
+        # if not file_handle.open_file(path):
+        envs = {
+            "width": "1366",
+            "height": "768",
+            "c_width": "1024",
+            "c_height": "768",
+        }
+        if not file_handle.start_file_independent(path, envs):
             UiUtil.show_snackbar_error(self.page, f"打开文件:{path} 失败")
         else:
             UiUtil.show_snackbar_success(self.page, "启动POS成功")
@@ -595,6 +602,7 @@ class PosHandler:
             UiUtil.show_snackbar_success(self.page, "获取POS环境成功")
         except Exception as ex:
             logger.error(f"获取POS环境失败: {ex}")
+            logger.exception(ex)
             UiUtil.show_snackbar_error(self.page, f"获取POS环境失败: {ex}")
         finally:
             e.control.disabled = False

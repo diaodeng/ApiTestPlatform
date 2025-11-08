@@ -124,6 +124,34 @@ def open_file(path: str) -> bool:
         return False
 
 
+def start_file_independent(file_path, env_vars=None):
+    """
+    独立启动文件，主程序终止后子进程继续运行
+    """
+    # 合并环境变量
+    env = os.environ.copy()
+    if env_vars:
+        env.update(env_vars)
+
+    # 使用 CREATE_NEW_PROCESS_GROUP 和 DETACHED_PROCESS
+    creation_flags = (
+            subprocess.DETACHED_PROCESS |
+            subprocess.CREATE_NEW_PROCESS_GROUP
+            # subprocess.CREATE_BREAKAWAY_FROM_JOB
+    )
+    # ['cmd', '/c', 'start', '', file_path],
+    logger.info(f"启动的应用路径：{file_path}")
+    process = subprocess.Popen(
+        file_path,
+        cwd=os.path.dirname(file_path),
+        env=env,
+        creationflags=creation_flags,
+        close_fds=True
+    )
+    return process
+
+
+
 def open_file_location(path: str) -> bool:
     """打开文件所在目录"""
     dir_path = os.path.dirname(path)
