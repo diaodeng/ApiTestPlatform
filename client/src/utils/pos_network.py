@@ -4,8 +4,13 @@ import httpx
 from loguru import logger
 
 from model.config import PosChangeParamsModel
+from server.config import PosConfig
 from model.pos_network_model import PosInitRespModel, PosInitModel, PosLogoutModel, PosResetAccountRequestModel, \
     PosUserInfoRespModel
+
+pos_config_data = PosConfig.read_pos_config()
+uat_host = pos_config_data.pos_tool_uat_host
+test_host = pos_config_data.pos_tool_test_host
 
 
 async def change_pos_from_network(data: PosChangeParamsModel) -> tuple[bool, str]:
@@ -22,9 +27,9 @@ async def change_pos_from_network(data: PosChangeParamsModel) -> tuple[bool, str
                 "pos_no": data.pos_no}
         logger.info(f"POS切换参数： {json.dumps(data)}")
         if "uat" in data["env"].lower():
-            resp = await client.post("https://uattoolserver.rta-os.com/tools/posChange", json=data)
+            resp = await client.post(f"{uat_host}/tools/posChange", json=data)
         else:
-            resp = await client.post("https://testtoolserver.rta-os.com/tools/posChange", json=data)
+            resp = await client.post(f"{test_host}/tools/posChange", json=data)
         if resp.status_code != 200:
             logger.error(f"POS切换失败，状态码： {resp.status_code}")
             return False, f"POS切换失败，状态码： {resp.status_code}"
@@ -40,9 +45,9 @@ async def pos_account_logout(data: PosLogoutModel) -> tuple[bool, str]:
         data = data.model_dump()
         logger.info(f"POS账号注销参数： {json.dumps(data)}")
         if "uat" in data["env"].lower():
-            resp = await client.post("https://uattoolserver.rta-os.com/tools/kickOut", json=data)
+            resp = await client.post(f"{uat_host}/tools/kickOut", json=data)
         else:
-            resp = await client.post("https://testtoolserver.rta-os.com/tools/kickOut", json=data)
+            resp = await client.post(f"{test_host}/tools/kickOut", json=data)
         if resp.status_code != 200:
             logger.error(f"POS切换失败，状态码： {resp.status_code}")
             return False, f"POS切换失败，状态码： {resp.status_code}"
@@ -56,7 +61,7 @@ async def pos_account_logout(data: PosLogoutModel) -> tuple[bool, str]:
 def pos_tool_init() -> PosInitRespModel | bool:
     with httpx.Client(verify=False) as client:
 
-        resp = client.get("https://testtoolserver.rta-os.com/tools/init")
+        resp = client.get(f"{test_host}/tools/init")
         if resp.status_code != 200:
             logger.error(f"POS初始化失败，状态码： {resp.status_code}")
             return False
@@ -72,9 +77,9 @@ async def get_user_info(data: PosResetAccountRequestModel) -> PosUserInfoRespMod
         data = data.model_dump()
         logger.info(f"查询POS账号信息： {json.dumps(data)}")
         if "uat" in data["env"].lower():
-            resp = await client.post("https://uattoolserver.rta-os.com/tools/getuserinfo", json=data)
+            resp = await client.post(f"{uat_host}/tools/getuserinfo", json=data)
         else:
-            resp = await client.post("https://testtoolserver.rta-os.com/tools/getuserinfo", json=data)
+            resp = await client.post(f"{test_host}/tools/getuserinfo", json=data)
         if resp.status_code != 200:
             logger.error(f"查询POS账号信息失败，状态码： {resp.status_code}")
             return None
@@ -95,9 +100,9 @@ async def reset_account_password(data: PosResetAccountRequestModel) -> tuple[boo
         data = data.model_dump()
         logger.info(f"重置POS账号密码： {json.dumps(data, ensure_ascii=False)}")
         if "uat" in data["env"].lower():
-            resp = await client.post("https://uattoolserver.rta-os.com/tools/resetpwd", json=data)
+            resp = await client.post(f"{uat_host}/tools/resetpwd", json=data)
         else:
-            resp = await client.post("https://testtoolserver.rta-os.com/tools/resetpwd", json=data)
+            resp = await client.post(f"{test_host}/tools/resetpwd", json=data)
         if resp.status_code != 200:
             logger.error(f"重置POS账号密码失败，状态码： {resp.status_code}")
             return False, f"重置密码失败: {resp.status_code}"
