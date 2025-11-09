@@ -8,6 +8,7 @@ import flet as ft
 from flet.core.alignment import bottom_right
 from loguru import logger
 
+from model.config import ResolutionModel
 from model.pos_network_model import PosLogoutModel
 from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig
 from utils import file_handle, pos_network
@@ -459,6 +460,8 @@ class PosHandler:
         UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
         await asyncio.sleep(2)
 
+        pos_params = PosConfig.read_pos_params(path)
+
         if self.start_config.change_pos:
             change_result = await self._change_pos(path)
             if not change_result:
@@ -510,12 +513,16 @@ class PosHandler:
 
         UiUtil.show_snackbar_success(self.page, "正在启动POS。。。")
         # if not file_handle.open_file(path):
-        envs = {
-            "width": "1366",
-            "height": "768",
-            "c_width": "1024",
-            "c_height": "768",
-        }
+        vendor_id = None
+        if pos_params:
+            vendor_id = pos_params.venderNo
+            pos_resolution = PosConfig.get_vendor_config(vendor_id=vendor_id).resolution
+            if str(pos_params.posType) == "2":
+                envs = pos_resolution.sco.model_dump()
+            else:
+                envs = pos_resolution.pos.model_dump()
+        else:
+            envs = ResolutionModel().model_dump()
         if not file_handle.start_file_independent(path, envs):
             UiUtil.show_snackbar_error(self.page, f"打开文件:{path} 失败")
         else:

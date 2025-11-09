@@ -5,7 +5,7 @@ import json
 from loguru import logger
 
 
-from model.config import PosConfigModel, PosParamsModel, PosChangeParamsModel
+from model.config import PosConfigModel, PosParamsModel, PosChangeParamsModel, VendorConfigModel
 from server.config import PosConfig, PosToolConfig
 
 from model.pos_network_model import PosInitRespModel, PosResetAccountRequestModel, PosLogoutModel
@@ -76,7 +76,7 @@ class PosSettingUi(ft.AlertDialog):
                 ft.TextField(value=json.dumps(self.config_data.env_files, indent=4, ensure_ascii=False), label="环境文件：", on_blur=self.update_config_data, data="env_files", multiline=True),
                 ft.TextField(value=json.dumps(self.config_data.cache_files, indent=4, ensure_ascii=False), label="缓存文件:", on_blur=self.update_config_data, data="cache_files", multiline=True),
                 ft.TextField(value=json.dumps(self.config_data.env_group_vendor, indent=4, ensure_ascii=False), label="商家分组:", on_blur=self.update_config_data, data="env_group_vendor", multiline=True),
-                ft.TextField(value=json.dumps(self.config_data.vendor_account, indent=4, ensure_ascii=False), label="商家POS账号:", on_blur=self.update_config_data, data="vendor_account", multiline=True),
+                ft.TextField(value=json.dumps([i.model_dump() for i in self.config_data.vendor_config], indent=4, ensure_ascii=False), label="商家POS账号:", on_blur=self.update_config_data, data="vendor_config", multiline=True),
             ], expand=True)
         ], expand=True), expand=True, width=1000)
         self.actions = [
@@ -106,6 +106,11 @@ class PosSettingUi(ft.AlertDialog):
         config_key = event.control.data
         if config_key in ["payment_mock_driver_path", "payment_driver_back_up_path"]:
             setattr(self.config_data, config_key, config_value)
+        elif config_key == "vendor_account":
+            if not config_value:
+                self.config_data.vendor_config = []
+                return
+            setattr(self.config_data, config_key, [VendorConfigModel.model_validate(j) for j in json.loads(config_value)])
         else:
             setattr(self.config_data, config_key, json.loads(config_value))
 
