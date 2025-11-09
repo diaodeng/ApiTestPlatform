@@ -10,7 +10,7 @@ from loguru import logger
 from mitmproxy.net.dns.domain_names import cache
 
 from model.config import SearchConfigModel, MitmProxyConfigModel, PaymentMockConfigModel, StartConfigModel, \
-    SetupConfigModel, PosParamsModel, PosConfigModel, PosChangeParamsModel, AgentConfigModel
+    SetupConfigModel, PosParamsModel, PosConfigModel, PosChangeParamsModel, AgentConfigModel, VendorConfigModel
 from model.pos_network_model import PosInitRespStoreModel, PosInitRespEnvModel, PosInitRespModel
 from utils.common import get_active_mac, get_local_ip
 from utils.file_handle import IniFileHandel
@@ -262,6 +262,15 @@ class PosConfig:
             f.write(config.model_dump_json())
 
     @classmethod
+    def get_vendor_config(cls, vendor_id) -> VendorConfigModel:
+        if not vendor_id:
+            return VendorConfigModel()
+        for i in cls.read_pos_config().vendor_config:
+            if str(i.vendor_id) == str(vendor_id):
+                return i
+        return VendorConfigModel()
+
+    @classmethod
     def get_local_pos_env(cls, pos_file) -> str | None:
         """
         从本地pos.ini获取pos当前环境
@@ -398,7 +407,12 @@ class PosConfig:
         根据商家和环境获取，环境分组和对应账号
         """
         pos_config = cls.read_pos_config()
-        account = pos_config.vendor_account.get(int(vendor_id), None)
+        account = ""
+        for i in pos_config.vendor_config:
+            if vendor_id and str(i.vendor_id) == str(vendor_id):
+                account = i.account
+                break
+
         if account and type(account) is list:
             account = account[0]
         if not account:

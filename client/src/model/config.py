@@ -82,6 +82,26 @@ class PosChangeParamsModel(BaseModel):
     venderId: str = ""  # 厂商ID
 
 
+class ResolutionModel(BaseModel):
+    width: int = 1366
+    height: int = 768
+    c_width: int = 1366
+    c_height: int = 768
+    c_x: int = 1366
+
+
+class PosResolutionModel(BaseModel):
+    pos: ResolutionModel = ResolutionModel()
+    sco: ResolutionModel = ResolutionModel()
+    scan: ResolutionModel = ResolutionModel()
+
+
+class VendorConfigModel(BaseModel):
+    vendor_id: int|str = ""
+    account: str|int = ""
+    resolution: PosResolutionModel = PosResolutionModel()
+
+
 class PosConfigModel(BaseModel):
     """POS配置"""
     pos_path: str = ""
@@ -103,26 +123,26 @@ class PosConfigModel(BaseModel):
                 "rta-uat-gray08": [5, 10, 58938],
                 "rta-test": [1],
             }
-    vendor_account: dict[int, list] = {
-                3: [],
-                5: [],
-                7: [],
-                8: [],
-                9: [],
-                10: [],
-                11: [],
-                12: [],
-                13: [],
-                50: [],
-                58949: [],
-                58959: [],
-                58984: [],
-                58969: [],
-                58989: [],
-                58964: [],
-                58938: [],
-                1: [],
-            }
+    vendor_config: list[VendorConfigModel] = [
+                VendorConfigModel(vendor_id=3),
+                VendorConfigModel(vendor_id=5),
+                VendorConfigModel(vendor_id=7),
+                VendorConfigModel(vendor_id=8),
+                VendorConfigModel(vendor_id=9),
+                VendorConfigModel(vendor_id=10),
+                VendorConfigModel(vendor_id=11),
+                VendorConfigModel(vendor_id=12),
+                VendorConfigModel(vendor_id=13),
+                VendorConfigModel(vendor_id=50),
+                VendorConfigModel(vendor_id=58949),
+                VendorConfigModel(vendor_id=58959),
+                VendorConfigModel(vendor_id=58984),
+                VendorConfigModel(vendor_id=58969),
+                VendorConfigModel(vendor_id=58989),
+                VendorConfigModel(vendor_id=58964),
+                VendorConfigModel(vendor_id=58938),
+                VendorConfigModel(vendor_id=1)
+            ]
     pos_params: PosParamsModel = PosParamsModel()
     pos_start_params: PosParamsModel = PosParamsModel()
     running_pos_path: str = ""
