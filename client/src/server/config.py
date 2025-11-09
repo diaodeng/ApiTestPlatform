@@ -1,20 +1,15 @@
 import base64
-import hashlib
 import json
 import os
-from collections import defaultdict
 from shutil import copytree, copyfile, rmtree
 from typing import Optional
 
 from loguru import logger
-from mitmproxy.net.dns.domain_names import cache
 
 from model.config import SearchConfigModel, MitmProxyConfigModel, PaymentMockConfigModel, StartConfigModel, \
-    SetupConfigModel, PosParamsModel, PosConfigModel, PosChangeParamsModel, AgentConfigModel, VendorConfigModel
-from model.pos_network_model import PosInitRespStoreModel, PosInitRespEnvModel, PosInitRespModel
-from utils.common import get_active_mac, get_local_ip
+    SetupConfigModel, PosParamsModel, PosConfigModel, AgentConfigModel, VendorConfigModel
+from model.pos_network_model import PosInitRespModel
 from utils.file_handle import IniFileHandel
-from utils.pos_network import change_pos_from_network, pos_tool_init
 
 if not os.path.exists("storage/data"):
     os.makedirs("storage/data")
@@ -161,6 +156,7 @@ class PaymentMockConfig:
         data = data.model_dump()
         with open(cls.config_file, "w") as f:
             f.write(json.dumps(data, indent=4, ensure_ascii=False))
+
 
 class StartConfig:
     config_file = "storage/data/config_pos_start.json"
@@ -345,6 +341,7 @@ class PosConfig:
             # 恢复备份数据
             db_env_file = os.path.join(pos_path, f"{file_name}_{env_key}")
             copy_any_file(db_env_file, db_file)
+
         # 切换
         env_files = cls.read_pos_config().env_files
         for file in env_files:
@@ -361,45 +358,6 @@ class PosConfig:
             config_data.backup_envs[pos_file].remove(target_env_key)
         PosConfig.save_pos_config(config_data)
         return True, "切换成功"
-
-    @classmethod
-    async def change_pos_on_network(cls, pos_path: str) -> tuple[bool, str]:
-        env = PosConfig.get_local_pos_env(pos_path)
-        if not env:
-            logger.warning(f"获取pos环境失败:{pos_path}")
-            return False, f"获取pos环境失败:{pos_path}"
-        if env == "RTA_TEST":
-            new_env = "rta-test"
-        elif env == "RTA_UAT":
-            new_env = "rta-uat"
-        else:
-            logger.warning(f"pos环境错误:{pos_path}")
-            raise ValueError(f"pos环境错误:{env}")
-
-        pos_info = cls.read_pos_params(pos_path)
-        if not pos_info:
-            logger.warning(f"获取pos_params参数失败:{pos_path}")
-            return False, f"获取pos_params参数失败:{pos_path}"
-
-        pos_group, account = cls.get_pos_group(pos_info.venderNo, env)
-        if not pos_group:
-            logger.warning(f"获取pos分组失败:{pos_path}")
-            return False, f"获取pos分组失败:{pos_path}"
-        mac = get_active_mac()
-        ip = get_local_ip()
-        data = PosChangeParamsModel()
-        data.pos_mac = mac
-        data.pos_ip = ip
-        data.pos_type = pos_info.posType
-        data.pos_group = int(pos_info.posGroupNo)
-        data.venderId = pos_info.venderNo
-        data.orgNo = pos_info.orgNo
-        data.env = pos_group.lower()
-
-        # data.pos_skin = pos_info.pos_skin
-        # data.pos_no = pos_info.pos_no
-        change_status, message_info = await change_pos_from_network(data)
-        return change_status, message_info
 
     @classmethod
     def get_pos_group(cls, vendor_id: str, env: str) -> tuple[Optional[str], Optional[str]]:
@@ -567,40 +525,18 @@ class PosConfig:
 
 class PosToolConfig:
     config_file = "storage/data/pos_tool_ini_data.json"
+
     @classmethod
-    def read_pos_tool_config(cls) -> PosInitRespModel:
+    def read_local_pos_tool_config(cls) -> PosInitRespModel | None:
         if os.path.exists(cls.config_file):
             with open(cls.config_file, "r", encoding="utf-8") as f:
                 data = f.read()
                 return PosInitRespModel.model_validate(json.loads(data))
-        data = pos_tool_init()
-        return data
 
     @classmethod
-    def get_store_list(cls, pos_path: str) -> (str, str, list[PosInitRespStoreModel], list[PosInitRespEnvModel]):
-        res_data = ["", "", [], []]
-        if not os.path.exists(pos_path):
-            return res_data
-
-        data = cls.read_pos_tool_config()
-        if data:
-            res_data[3] = data.data.env_list
-
-        params = PosConfig.read_pos_params(pos_path)
-        if params:
-            res_data[0] = params.venderNo
-            res_data[1] = params.orgNo
-
-        # 只获取当前环境的store_list
-        store_list = []
-        env = PosConfig.get_local_pos_env(pos_path)
-        group, account = PosConfig.get_pos_group(params.venderNo, env)
-        if group:
-            for store in data.data.store_list:
-                if store.env == group and store.vender_id == params.venderNo:
-                    store_list.append(store)
-        res_data[2] = store_list
-        return res_data
+    def save_local_pos_tool_config(cls, data: PosInitRespModel) -> None:
+        with open(cls.config_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data.model_dump(), indent=4, ensure_ascii=False))
 
 
 class AgentConfig:
@@ -628,10 +564,6 @@ class AgentConfig:
     def save_config(cls, config_data: AgentConfigModel):
         with open(cls.config_path, "w", encoding="utf-8") as f:
             f.write(json.dumps(config_data.model_dump(), ensure_ascii=False))
-
-
-
-
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ from loguru import logger
 from model.config import ResolutionModel
 from model.pos_network_model import PosLogoutModel
 from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig
+from server.pos_config_server import PosConfigServer
+from server.pos_tool_config_server import PosToolConfigServer
 from utils import file_handle, pos_network
 from utils.common import kill_process_by_name, get_all_process, kill_process_by_id, ExeVersionReader
 from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi, PosAccountManagerUi, ChangeLocalPosUi
@@ -589,7 +591,7 @@ class PosHandler:
             #     UiUtil.show_snackbar_error(self.page, "生产环境【RTA】不支持获取POS环境")
             #     return
 
-            vender_id, org_no, store_list, env_list = PosToolConfig.get_store_list(path)
+            vender_id, org_no, store_list, env_list = PosToolConfigServer.get_store_list(path)
             pos_version = ExeVersionReader(path).get_exe_file_version()
             for child in e.control.parent.controls:
                 if isinstance(child, ft.Text) and child.key == "store":
@@ -618,7 +620,7 @@ class PosHandler:
     async def _change_pos(self, pos_path:str) -> bool:
         try:
             logger.info(f"切换POS环境: {pos_path}")
-            change_status, message_info = await PosConfig.change_pos_on_network(pos_path)
+            change_status, message_info = await PosConfigServer.change_pos_on_network(pos_path)
             if change_status:
                 UiUtil.show_snackbar_success(self.page, "切换POS环境成功")
                 return True

@@ -107,6 +107,8 @@ class PosConfigModel(BaseModel):
     pos_path: str = ""
     payment_driver_back_up_path: str = ""
     payment_mock_driver_path: str = ""
+    pos_tool_test_host: str = ""
+    pos_tool_uat_host: str = ""
     env_files: list[str] = [
             "database",
             "log",
