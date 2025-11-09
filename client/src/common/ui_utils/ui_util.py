@@ -527,23 +527,22 @@ class ChangeLocalPosUi(ft.AlertDialog):
 
             success, msg = PosConfig.change_pos_local_env(pos_path, target_env)
             if not success:
-                UiUtil.show_snackbar_error(self.page, msg)
+                UiUtil.show_snackbar_error(self.page, f"本地POS切换: {msg}")
             else:
+                for item in event.control.parent.content.content.controls[0].controls:
+                    if item.data == "backed_env":
+                        item.options.clear()
+                        item.options = [ft.DropdownOption(key, name) for key, name in self.get_backed_env().items()]
+                        item.value = None
+                        item.update()
+                    elif item.data == "current_env":
+                        item.value = self.get_current_env_info()
+                        item.update()
                 UiUtil.show_snackbar_success(self.page, "POS切换成功")
-
-            for item in event.control.parent.content.content.controls[0].controls:
-                if item.data == "backed_env":
-                    item.options.clear()
-                    item.options = [ft.DropdownOption(key, name) for key,name in self.get_backed_env().items()]
-                    item.value = None
-                    item.update()
-                elif item.data == "current_env":
-                    item.value = self.get_current_env_info()
-                    item.update()
 
         except Exception as e:
             logger.exception(e)
-            UiUtil.show_snackbar_error(self.page, f"POS配置保存失败：{str(e)}")
+            UiUtil.show_snackbar_error(self.page, f"本地POS切换失败：{str(e)}")
         finally:
             event.control.disabled = False
             event.control.update()
