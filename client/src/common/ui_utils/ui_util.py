@@ -109,7 +109,7 @@ class PosSettingUi(ft.AlertDialog):
         config_key = event.control.data
         if config_key in ["payment_mock_driver_path", "payment_driver_back_up_path", "pos_tool_test_host", "pos_tool_uat_host"]:
             setattr(self.config_data, config_key, config_value)
-        elif config_key == "vendor_account":
+        elif config_key == "vendor_config":
             if not config_value:
                 self.config_data.vendor_config = []
                 return
