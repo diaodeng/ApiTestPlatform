@@ -4,6 +4,7 @@ import sys
 import socket
 import platform
 import re
+import uuid
 from typing import Any, Optional
 
 import psutil
@@ -301,10 +302,17 @@ def get_sys_info() -> dict:
 
     return info
 
+def get_mac_address():
+    """获取本机ip地址并去掉冒号转换为小写"""
+    node = uuid.getnode()
+    mac = uuid.UUID(int=node).hex[-12:]
+    mac_lower = mac.replace(':', '').lower()
+    return mac_lower
 
 
 if __name__ == "__main__":
     # 示例用法
     # test_dir = "./test_folder"
     # ensure_directory_exists(test_dir)
-    get_sys_info()
+    # get_sys_info()
+    print(get_mac_address())
