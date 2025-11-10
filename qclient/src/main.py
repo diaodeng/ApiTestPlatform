@@ -5,6 +5,7 @@ from config import AppConfig
 from navigationMenu import NavigationMenu
 from utils.common import load_json, ensure_directory_exists
 from utils.logger import log
+from utils.common import get_mac_address
 from view_contents.alertDialog.exitAlertDialog import ExitApplicationDialog
 
 ensure_directory_exists("logs")
@@ -15,7 +16,7 @@ async def main(page: ft.Page):
     config = load_json(app.tools_db)
     config["ToolsConfig"] = os.path.join(basepath, app.tools_db)
     sys_show_view = ft.Text("正在获取信息...")
-
+    log.info(f"testmac:{get_mac_address()}")
     def minimize_window(e):
         page.window.minimized = True
         page.update()

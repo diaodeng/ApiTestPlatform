@@ -1,3 +1,4 @@
+from utils.common import get_mac_address
 
 class Home(object):
     """关于"""
@@ -7,7 +8,8 @@ class Home(object):
         self.page = page
         self.log = log
         self.setup_ui()
-
+        self.mac = get_mac_address()
+        log.info(f"{self.mac}")
 
     def setup_ui(self):
         self.identity_code = self.ft.TextField(
@@ -19,8 +21,17 @@ class Home(object):
         self.btn_confirm = self.ft.ElevatedButton(
             text="验证",
 
-            on_click=None
+            on_click=self.click_get_mac()
         )
+
+        self.lab_local_mac = self.ft.Text("MAC地址：")
+
+        self.txt_local_mac = self.ft.TextField(
+            # text=self.mac,
+        )
+    def click_get_mac(self):
+        self.page.window.prevent_close = False
+        print(get_mac_address())
 
     def home(self):
         content = self.ft.Container(
@@ -28,7 +39,9 @@ class Home(object):
                 self.ft.Text("首页>", size=20),
                 self.ft.Divider(),
                 self.ft.Row([
-                    self.identity_code,
+                    self.lab_local_mac,
+                    self.txt_local_mac,
+                    # self.identity_code,
                     self.btn_confirm,
                 ]),
 
