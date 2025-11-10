@@ -531,6 +531,8 @@ class PosToolConfig:
         if os.path.exists(cls.config_file):
             with open(cls.config_file, "r", encoding="utf-8") as f:
                 data = f.read()
+                if not data:
+                    return None
                 return PosInitRespModel.model_validate(json.loads(data))
 
     @classmethod
