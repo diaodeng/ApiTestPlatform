@@ -131,6 +131,8 @@ def start_file_independent(file_path, env_vars=None):
     # 合并环境变量
     env = os.environ.copy()
     if env_vars:
+        for key, value in env_vars.items():
+            env_vars[key] = str(value)
         env.update(env_vars)
 
     # 使用 CREATE_NEW_PROCESS_GROUP 和 DETACHED_PROCESS

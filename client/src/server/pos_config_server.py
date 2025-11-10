@@ -21,12 +21,12 @@ class PosConfigServer:
             logger.warning(f"pos环境错误:{pos_path}")
             raise ValueError(f"pos环境错误:{env}")
 
-        pos_info = cls.read_pos_params(pos_path)
+        pos_info = PosConfig.read_pos_params(pos_path)
         if not pos_info:
             logger.warning(f"获取pos_params参数失败:{pos_path}")
             return False, f"获取pos_params参数失败:{pos_path}"
 
-        pos_group, account = cls.get_pos_group(pos_info.venderNo, env)
+        pos_group, account = PosConfig.get_pos_group(pos_info.venderNo, env)
         if not pos_group:
             logger.warning(f"获取pos分组失败:{pos_path}")
             return False, f"获取pos分组失败:{pos_path}"
