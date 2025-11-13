@@ -422,7 +422,7 @@ class ParametersHandler(object):
         将参数化后的数据存储在本地表格中
         """
         case_data.config.parameters.type = ParameterTypeEnum.local_table.value
-        case_data.config.parameters.is_compress = False
+        case_data.config.parameters.is_compress = True
         case_data.config.parameters.value = compress_text(json.dumps(param_data))
 
     @classmethod
