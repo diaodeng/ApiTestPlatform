@@ -200,6 +200,7 @@ class Include(BaseModel):
 class ParameterModel(BaseModel):
     type: int = ParameterTypeEnum.local_table.value
     value: Text = ""
+    is_compress: bool = True
 
 
 class TConfig(BaseModel):

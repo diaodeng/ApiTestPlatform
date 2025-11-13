@@ -16,7 +16,7 @@ from module_hrm.enums.enums import ParameterTypeEnum
 from module_hrm.service.case_service import CaseParamsService
 from module_hrm.utils.common import key_value_dict, dict2list, update_or_extend_list
 from module_hrm.utils.parser import parse_data
-from module_hrm.utils.util import decompress_text
+from module_hrm.utils.util import decompress_text, compress_text
 from utils.log_util import logger
 from utils.common_util import CamelCaseUtil
 from module_hrm.service.agent_service import AgentService
@@ -324,28 +324,31 @@ class ParametersHandler(object):
         pass
 
     @classmethod
-    async def get_parameters(cls, param_data) -> AsyncGenerator[dict|list[dict], None]:
+    async def get_parameters(cls, param_data) -> AsyncGenerator[dict | tuple[list[dict], dict], None]:
         param_tmp_data = param_data
         param_index = 1
         if param_tmp_data.type == ParameterTypeEnum.local_table.value:
-            parameter_source = decompress_text(param_tmp_data.value)
+            parameter_source = param_tmp_data.value
+            if param_tmp_data.is_compress:
+                parameter_source = decompress_text(parameter_source)
             parameter_obj = json.loads(parameter_source)
+
             # headers = parameter_obj.get("tableHeaders", [])
             datas = parameter_obj.get("tableDatas", [])
 
-            for data in datas:
+            for row_data in datas:
                 # 只使用可用的数据
-                enable = data.get("__enable", True)
+                enable = row_data.get("__enable", True)
                 if not enable or not enable["content"]:
                     continue
                 param = []
-                for item in data:
+                for item in row_data:
                     # 排除状态字段
                     if item in ("__enable", "__row_key"):
                         continue
                     param.append({
                         "key": item,
-                        "value": data[item].get("content", ""),
+                        "value": row_data[item].get("content", ""),
                         "enable": True,
                         "type": "string",
                     })
@@ -355,11 +358,20 @@ class ParametersHandler(object):
                     "enable": True,
                     "type": "int",
                 })
-                yield param
+
+                current_param = {
+                    "tableHeaders": parameter_obj.get("tableHeaders", []),
+                    "tableDatas": [row_data]
+                }
+
+                yield param, current_param
                 param_index += 1
         elif param_tmp_data.type == ParameterTypeEnum.sql.value:
+
             async for data in CaseParamsService.load_case_params_iter(param_data.value):
                 line_data = []
+                param_table_headers = []
+                row_data = {}
                 for item in data:
                     if item in ("__enable", "__row_key"):
                         continue
@@ -370,14 +382,48 @@ class ParametersHandler(object):
                         "type": "string",
                         "index": param_index
                     })
+                    param_table_headers.append({
+                        "label": item,
+                        "prop": item,
+                        "show": True,
+                        "enable": True,
+                        "type": 2
+                    })
+
+                    row_data[item] = {
+                        "content": data[item],
+                        "edie": False
+                    }
+
+                row_data["__enable"] = {
+                "content": True,
+                "edit": False
+                }
+                row_data["__row_key"] = "1"
+
                 line_data.append({
                     "key": "__index",
                     "value": param_index,
                     "enable": True,
                     "type": "int",
                 })
-                yield line_data
+
+                current_param = {
+                    "tableHeaders": param_table_headers,
+                    "tableDatas": [row_data]
+                }
+
+                yield line_data, current_param
                 param_index += 1
+
+    @classmethod
+    def param_to_parameter(cls, case_data: TestCase, param_data: list[dict]):
+        """
+        将参数化后的数据存储在本地表格中
+        """
+        case_data.config.parameters.type = ParameterTypeEnum.local_table.value
+        case_data.config.parameters.is_compress = False
+        case_data.config.parameters.value = compress_text(json.dumps(param_data))
 
     @classmethod
     async def get_parameters_case(cls, case_datas: list[TestCase]) -> AsyncGenerator[TestCase, None]:
@@ -395,7 +441,7 @@ class ParametersHandler(object):
             if parameters.type == ParameterTypeEnum.sql.value:
                 parameters.value = test_case.case_id
 
-            async for param in cls.get_parameters(parameters):
+            async for param, current_param in cls.get_parameters(parameters):
                 tmp_case_data = copy.deepcopy(test_case)
                 old_variables: list[dict] = tmp_case_data.config.variables
                 update_or_extend_list(old_variables, param)
@@ -412,6 +458,7 @@ class ParametersHandler(object):
                 else:
                     tmp_case_data.config.name = f"{name}[{tmp_param['__index']}]"
                     tmp_case_data.case_name = f"{name}[{tmp_param['__index']}]"
+                cls.param_to_parameter(tmp_case_data, current_param)  # 保存本次参数化数据
                 yield tmp_case_data
                 # all_data.append(tmp_case_data)
         # return all_data
@@ -421,6 +468,7 @@ class ForwardRulesHandler(object):
     """
     转发规则处理
     """
+
     @classmethod
     def transform(cls, db, run_info: CaseRunModel):
         if run_info.forward_config.agent_id:
@@ -448,7 +496,8 @@ class ConfigHandle:
         return old_config
 
     @classmethod
-    def parse_data_for_run(cls, data: str | dict, not_found_exception = True, debug_talk_map: dict = None, globals_var: dict | list = None, *args):
+    def parse_data_for_run(cls, data: str | dict, not_found_exception=True, debug_talk_map: dict = None,
+                           globals_var: dict | list = None, *args):
         if globals_var is None:
             globals_var = []
         if debug_talk_map is None:
@@ -468,7 +517,6 @@ class ConfigHandle:
                               not_found_exception
                               )
         return new_data
-
 
     @classmethod
     def can_run(cls, step_obj: TStep):

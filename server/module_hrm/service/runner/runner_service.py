@@ -46,7 +46,7 @@ def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel|None:
         # 保存前清空不必要的信息，减少数据存储
         case_data.config.variables = []
         case_data.config.headers = []
-        case_data.config.parameters = None
+        # case_data.config.parameters = None
 
         for step in case_data.teststeps:
             step.variables = []
@@ -203,6 +203,7 @@ async def run_by_batch(run_info: CaseRunModel,
                 failed_count += res_data[2]
     except Exception as e:
         logger.error(f"运行用例失败，错误信息：{e}")
+        logger.exception(e)
         success = False
         # ReportDao.update(query_db, run_info.report_id, 0, total_count, CaseRunStatus.failed)
         # raise e
