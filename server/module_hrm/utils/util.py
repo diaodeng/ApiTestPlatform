@@ -143,7 +143,7 @@ def compress_text(text: str) -> str:
     """
     压缩文本内容
     """
-    logger.debug(f"压缩前大小：{len(text)}")
+    # logger.debug(f"压缩前大小：{len(text)}")
     # logger.debug(f"压缩前数据：{text}")
     # 压缩文本
     compressed_data = gzip.compress(text.encode('utf-8'))
@@ -152,7 +152,7 @@ def compress_text(text: str) -> str:
     # 使用 base64 编码
     encoded_data = base64.b64encode(compressed_data).decode('utf8')
     # logger.info(f"编码后的数据：{encoded_data}")
-    logger.debug(f"压缩后大小：{len(encoded_data)}")
+    # logger.debug(f"压缩后大小：{len(encoded_data)}")
     return encoded_data
 
 
