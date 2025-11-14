@@ -121,6 +121,15 @@
             box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
         }
 
+        .page-input {
+            width: 60px;
+            padding: 5px 0px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.3s;
+        }
+
         .status-filters {
             display: flex;
             gap: 15px;
@@ -539,7 +548,7 @@
                 <i class="fas fa-table"></i> 详细测试结果
             </div>
             <div class="card-body">
-                <div class="pagination" style="display: none">
+                <div class="pagination">
                     <button id="prev-page">上一页</button>
                     <span id="page-info">第 1 页，共 109 页</span>
                     <button id="next-page">下一页</button>
@@ -548,53 +557,29 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>用例ID</th>
+<!--                            <th>用例ID</th>-->
                             <th>用例名称</th>
                             <th>状态</th>
-                            <th>执行时间</th>
+                            <th width="120px">执行时间</th>
 <!--                            <th>执行人</th>-->
-                            <th width="150px">操作</th>
+                            <th width="130px">操作</th>
                         </tr>
                     </thead>
                     <tbody id="case-list">
-                        {% for line in data %}
-                            <tr class="case-row">
-                                <td>{{ line.runId }}</td>
-                                <td class="case-row-name">{{ line.runName }}</td>
-                                <td class="case-row-status">
-                                    {% if line.status == 1 %}
-                                    <span class="status-badge badge-success">通过</span>
-                                    {% elif line.status == 2 %}
-                                    <span class="status-badge badge-failed">失败</span>
-                                    {% elif line.status == 3 %}
-                                    <span class="status-badge badge-warning">跳过</span>
-                                    {% elif line.status == 4 %}
-                                    <span class="status-badge badge-skipped">阻塞</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ line.runDuration }}</td>
-<!--                                <td>{{ line.manager }}</td>-->
-                                <td>
-                                    <span class="toggle-detail" data-id="{{line.detailId}}">查看详情</span>
-                                </td>
-                            </tr>
-                            <tr class="detail-row" style="display: none" id="detail-{{line.detailId}}">
-                                <td colspan="6">
-                                    <div class="detail-content">
-                                        <h4>用例详情:{{line.runName}} 详情ID：{{line.detailId}}</h4>
-                                        <pre logdata="{{line.runDetail}}" log-is-compressed="true"></pre>
-                                    </div>
-                                </td>
-                            </tr>
-                        {% endfor %}
 
                     </tbody>
                 </table>
 
-                <div class="pagination" style="display: none">
+                <div class="pagination">
                     <button id="prev-page-bottom">上一页</button>
                     <span id="page-info-bottom">第 1 页，共 109 页</span>
                     <button id="next-page-bottom">下一页</button>
+                    <span>每页</span>
+                    <input id="page-size" value="10" type="number" class="page-input">
+                    <span>条</span>
+                    <span>前往第</span>
+                    <input id="jump-page-num" value="1" type="number" class="page-input">
+                    <span>页</span>
                 </div>
             </div>
         </div>
@@ -611,19 +596,39 @@
         </div>
     </div>
 
+    <script id="report-data" type="application/json">
+    {{ data_json | safe }}
+    </script>
+<!--    <script id="report-info" type="application/json">-->
+<!--        {{ info_json | safe }}-->
+<!--    </script>-->
+
     <script>
+        let all_data = [];
+        let filter_results = [];
         // 分页配置
-        // const config = {
-        //     currentPage: 1,
-        //     itemsPerPage: 10,
-        //     totalPages: Math.ceil(data.length / 10)
-        // };
+        const config = {
+            currentPage: 1,
+            itemsPerPage: 10,
+            totalPages: Math.ceil(filter_results.length / 10),
+            totalCount: 0
+        };
+
+        let current_page_data = [];
+
+        const statusMap = {
+            1: {text: '通过', cls: 'badge-success'},
+            2: {text: '失败', cls: 'badge-failed'},
+            3: {text: '跳过', cls: 'badge-warning'},
+            4: {text: '阻塞', cls: 'badge-skipped'}
+        };
 
         // DOM元素
         const caseList = document.getElementById('case-list');
         const pageInfo = document.getElementById('page-info');
         const pageInfoBottom = document.getElementById('page-info-bottom');
         const dataSize = document.getElementById('data-size');
+        const jumpPageNum = document.getElementById('jump-page-num');
 
         const searchInput = document.getElementById('search-input');
         const statusFilters = document.querySelectorAll('.status-filter');
@@ -635,6 +640,7 @@
         let currentStatusFilter = 'all';
 
         function decompressText(compressedText) {
+            if (compressedText === null ||  compressedText.length <= 0) {return ""}
             let strData = atob(compressedText);
             let charData = strData.split('').map(function (x) {
                 return x.charCodeAt(0);
@@ -744,30 +750,24 @@
 
             const startIndex = (config.currentPage - 1) * config.itemsPerPage;
             const endIndex = startIndex + config.itemsPerPage;
-            const pageCases = testCases.slice(startIndex, endIndex);
+            const pageCases = filter_results.slice(startIndex, endIndex);
 
             // 计算数据大小（模拟）
-            const size = (JSON.stringify(pageCases).length / 1024).toFixed(2);
-            dataSize.textContent = size + ' KB';
+            // const size = (JSON.stringify(pageCases).length / 1024).toFixed(2);
+            // dataSize.textContent = size + ' KB';
 
             pageCases.forEach((testCase, index) => {
                 const row = document.createElement('tr');
+                const s = statusMap[testCase.status] || {text: '未知', cls: 'badge-warning'};
 
                 // 状态标记
-                let badgeClass = '';
-                switch(testCase.status) {
-                    case '通过': badgeClass = 'badge-success'; break;
-                    case '失败': badgeClass = 'badge-failed'; break;
-                    case '阻塞': badgeClass = 'badge-warning'; break;
-                    case '跳过': badgeClass = 'badge-skipped'; break;
-                }
 
                 row.innerHTML = `
-                    <td>${testCase.id}</td>
-                    <td>${testCase.module}</td>
-                    <td>${testCase.name}</td>
-                    <td><span class="status-badge ${badgeClass}">${testCase.status}</span></td>
-                    <td>${testCase.execTime}</td>
+<!--                    <td>${testCase.id}</td>-->
+<!--                    <td>${testCase.module}</td>-->
+                    <td>${testCase.run_name}</td>
+                    <td><span class="status-badge ${s.cls}">${s.text}</span></td>
+                    <td>${testCase.run_duration} s</td>
                     <td>
                         <span class="toggle-detail" data-id="${testCase.id}">查看详情</span>
                     </td>
@@ -783,8 +783,8 @@
                 detailRow.innerHTML = `
                     <td colspan="6">
                         <div class="detail-content">
-                            <h4>用例详情: ${testCase.name}</h4>
-                            <pre>${testCase.details}</pre>
+                            <h4>用例详情: ${testCase.run_name}</h4>
+                            <pre log-is-compressed="true" logData="${testCase.run_detail}">${testCase.run_detail}</pre>
                         </div>
                     </td>
                 `;
@@ -799,6 +799,8 @@
 
         // 切换详情显示
         function setupDetailToggles() {
+            // 表格按钮事件委托（性能高）
+
             caseList.addEventListener('click', function(e) {
                 if (e.target.classList.contains('toggle-detail')) {
                     const caseId = e.target.getAttribute('data-id');
@@ -825,6 +827,7 @@
             document.getElementById('prev-page').addEventListener('click', function() {
                 if (config.currentPage > 1) {
                     config.currentPage--;
+                    jumpPageNum.value = config.currentPage;
                     renderCases();
                 }
             });
@@ -832,6 +835,7 @@
             document.getElementById('next-page').addEventListener('click', function() {
                 if (config.currentPage < config.totalPages) {
                     config.currentPage++;
+                    jumpPageNum.value = config.currentPage;
                     renderCases();
                 }
             });
@@ -839,6 +843,7 @@
             document.getElementById('prev-page-bottom').addEventListener('click', function() {
                 if (config.currentPage > 1) {
                     config.currentPage--;
+                    jumpPageNum.value = config.currentPage;
                     renderCases();
                 }
             });
@@ -846,18 +851,28 @@
             document.getElementById('next-page-bottom').addEventListener('click', function() {
                 if (config.currentPage < config.totalPages) {
                     config.currentPage++;
+                    jumpPageNum.value = config.currentPage;
                     renderCases();
                 }
+            });
+
+            document.getElementById('page-size').addEventListener('input', function() {
+                config.itemsPerPage = this.value;
+                renderCases();
+            });
+
+            jumpPageNum.addEventListener('input', function() {
+                config.currentPage = this.value;
+                renderCases();
             });
         }
 
         // 过滤表格数据
         function filterTableData() {
-            const allCaseRow = document.querySelectorAll("tr.case-row");
             // 过滤用例
-            const filteredCases = Array.from(allCaseRow).filter(testCase => {
-                const caseName = testCase.querySelector("td.case-row-name").textContent;
-                const caseStatus = testCase.querySelector("td.case-row-status").textContent.trim();
+            filter_results = Array.from(all_data).filter(testCase => {
+                const caseName = testCase.run_name;
+                const caseStatus = testCase.status;
 
                 // 名称搜索过滤
                 let nameMatch = false;
@@ -875,48 +890,39 @@
                         statusMatch = true;
                         break;
                     case 'passed':
-                        statusMatch = caseStatus === '通过';
+                        statusMatch = caseStatus === 1;
                         break;
                     case 'failed':
-                        statusMatch = caseStatus === '失败';
+                        statusMatch = caseStatus === 2;
                         break;
                     case 'blocked':
-                        statusMatch = caseStatus === '阻塞';
+                        statusMatch = caseStatus === 4;
                         break;
                     case 'skipped':
-                        statusMatch = caseStatus === '跳过';
+                        statusMatch = caseStatus === 3;
                         break;
                 }
-
-                if (nameMatch && statusMatch){
-                    testCase.style.display = '';
-                }else {
-                    testCase.style.display = 'none';
-                }
-
                 return nameMatch && statusMatch;
             });
 
-            const detailRows = document.querySelectorAll('tr.detail-row[style*="display: table-row"]');
-            for (let detailRow of detailRows) {
-                detailRow.style.display = "none";
-            }
-
             // 更新结果计数
-            resultsCount.innerHTML = `找到 ${filteredCases.length} 个测试用例 (共 ${Array.from(allCaseRow).length} 个用例)`;
+            resultsCount.innerHTML = `找到 ${filter_results.length} 个测试用例 (共 ${Array.from(all_data).length} 个用例)`;
+            config.currentPage = 1;
+            config.totalPages = Math.ceil(filter_results.length / config.itemsPerPage);
+            renderCases();
 
-            // if (filteredCases.length === 0) {
-            //     testCasesTable.innerHTML = `
-            //         <tr class="no-results">
-            //             <td colspan="6">
-            //                 <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px;"></i>
-            //                 <h3>没有找到匹配的测试用例</h3>
-            //                 <p>请尝试其他搜索关键词或状态筛选</p>
-            //             </td>
-            //         </tr>
-            //     `;
-            //     return;
-            // }
+            if (filter_results.length === 0) {
+                caseList.innerHTML = `
+                    <tr class="no-results">
+                        <td colspan="6">
+                            <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px;"></i>
+                            <h3>没有找到匹配的测试用例</h3>
+                            <p>请尝试其他搜索关键词或状态筛选</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
         }
 
         // 设置状态过滤器
@@ -964,12 +970,16 @@
 
         // 初始化
         window.onload = function() {
+            all_data = JSON.parse(document.getElementById("report-data").textContent);
+            filter_results = all_data
+            config.totalPages = Math.ceil(filter_results.length / config.itemsPerPage);
             // initCharts();
-            // renderCases();
+            renderCases();
+            setupPagination();
             setupDetailToggles();
             setupStatusFilters();
             setupSearch();
-            filterTableData();
+            // filterTableData();
             // setupPagination();
         };
     </script>

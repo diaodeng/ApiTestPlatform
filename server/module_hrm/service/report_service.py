@@ -1,18 +1,17 @@
 import datetime
 import json
 import os
+from typing import AsyncGenerator
 
+from jinja2 import Template
 from sqlalchemy.orm import Session
-from module_admin.entity.vo.user_vo import CurrentUserModel
+
 from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.report_do import HrmReport
-from jinja2 import Environment, FileSystemLoader
-
-from module_hrm.entity.vo.report_vo import ReportQueryModel
-from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel
-from module_hrm.enums.enums import CaseRunStatus
-from module_hrm.utils.util import format_duration, decompress_text, compress_text
+from module_hrm.entity.vo.case_vo_detail_for_run import StepLogs
+from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunDetailModel
+from module_hrm.utils.util import decompress_text, compress_text
 from utils.jinja_template import TemplateHandler
 
 
@@ -39,86 +38,44 @@ class ReportService:
         report = HrmReport(report_name=report_name, **kwargs)
 
     @classmethod
-    async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str|None = None) -> str:
+    async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str|None = None) -> AsyncGenerator[str, None]:
+        count_info = await RunDetailDao.get_report_count_info(query_db, query_info, data_scope_sql)
+        report = await ReportDao.get_by_id(query_db, query_info.report_id)
+        data = {
+            "title": f"{report.report_name}",
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "report_name": report.report_name,
+            "start_time": report.start_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "info": count_info,
+        }
+        yield StreamingHTMLGenerator.generate_html_header(data)
         # 2. 渲染HTML模板
-        success_count = 0
-        fail_count = 0
-        skip_count = 0
-        total_time = 0
-        max_time = 0
-        min_time = 0
-        avg_time = 0
-        total_count = 0
-        result = []
+        result = "["
+        batch_size = 1024*1024
 
         async for item in RunDetailDao.list_iter(query_db, query_info, data_scope_sql):
-            if total_count > 2000:  # 一个文件最多到出2000条，太多本地打开文件也会卡
-                break
-            result.append(item)
-            total_count += 1
+            item:HrmRunDetailModel = HrmRunDetailModel.model_validate(item)
             new_detail_data = ""
-            run_detail_dict = json.loads(item["runDetail"])
-            for step in run_detail_dict.get("teststeps", []):
-                logs = step.get("result", {}).get("logs", {})
+            all_error_log = ""
+            for step in item.run_detail.teststeps:
+                logs:StepLogs = step.result.logs
+                e_log = ''
                 if type(logs) is str:
-                    try:
-                        logs = json.loads(decompress_text(logs))
-                    except:
-                        logs = {}
-                new_detail_data += "\n".join(logs.values())
+                    decode_log = decompress_text(logs)
+                    json_log = json.loads(decode_log)
+                    e_log = "\n".join(json_log.values())
+                all_error_log += f"\n{e_log}"
+            item.run_detail = compress_text(all_error_log) if all_error_log else all_error_log
+            result += f"{item.model_dump_json()},"
+            if len(result) > batch_size:
+                yield result
+                result = ""
+        if result.endswith(","):
+            result = result[:-1]
+        yield f"{result}]"
 
+        yield StreamingHTMLGenerator.generate_html_footer()
 
-            item["runDetail"] = compress_text(new_detail_data)
-
-            run_time = round(item["runDuration"], 2)
-            if run_time > max_time:
-                max_time = run_time
-            if run_time < min_time:
-                min_time = run_time
-            total_time += run_time
-
-            run_status = item["status"]
-            if run_status == CaseRunStatus.passed.value:
-                success_count += 1
-            elif run_status == CaseRunStatus.failed.value:
-                fail_count += 1
-            elif run_status == CaseRunStatus.skipped.value:
-                skip_count += 1
-
-        if total_count > 0:
-            avg_time = total_time / total_count
-
-        info = {
-            "count": total_count,
-            "success": success_count,
-            "successPercent": f"{round(success_count / total_count * 100, 2)}%",
-            "fail": fail_count,
-            "failPercent": f"{round(fail_count / total_count * 100, 2)}%",
-            "skip": skip_count,
-            "skipPercent": f"{round(skip_count / total_count * 100, 2)}%",
-            "maxTime": format_duration(max_time),
-            "minTime": format_duration(min_time),
-            "avgTime": format_duration(avg_time),
-            "totalTime": format_duration(total_time),
-        }
-
-        curren_dir = os.path.dirname(__file__)
-        template_dir = os.path.join(os.path.dirname(curren_dir), 'templates')
-
-        report = await ReportDao.get_by_id(query_db, query_info.report_id)
-
-
-        html_content = TemplateHandler(template_dir).generate_html(
-            template_file="report.html",
-            data={
-                "title": f"{report.report_name}",
-                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "report_name": report.report_name,
-                "start_time": report.start_at.strftime("%Y-%m-%d %H:%M:%S"),
-                "data": result,
-                "info": info,
-            })
-        return html_content
 
     @classmethod
     async def generate_pdf_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str|None = None) -> bytes|bool:
@@ -135,3 +92,1049 @@ class ReportService:
                 "data": result,
             })
         return pdf_content
+
+
+class StreamingHTMLGenerator:
+    def __init__(self):
+        self.template_str = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>大数据表格</title>
+    <style>
+        .table-container { height: 600px; overflow: auto; border: 1px solid #ccc; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #f5f5f5; position: sticky; top: 0; }
+        .search-form { margin: 10px 0; padding: 10px; background: #f9f9f9; }
+    </style>
+</head>
+<body>
+    <div class="search-form">
+        <input type="text" id="searchInput" placeholder="搜索...">
+        <button onclick="handleSearch()">搜索</button>
+        <span id="resultCount"></span>
+    </div>
+
+    <div id="tableContainer" class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    {% for column in columns %}
+                    <th>{{ column }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+"""
+    @classmethod
+    def generate_html_header(cls, info: dict) -> str:
+        """生成HTML头部"""
+        header_temp = """
+        <!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+
+    <style>
+        :root {
+            --primary: #3498db;
+            --success: #2ecc71;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --info: #9b59b6;
+            --dark: #2c3e50;
+            --light: #ecf0f1;
+            --gray: #95a5a6;
+            --border: #ddd;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary), #1a5276);
+            color: white;
+            padding: 30px 0;
+            text-align: center;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .logo i {
+            margin-right: 10px;
+        }
+
+        .report-title {
+            font-size: 32px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .report-meta {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .meta-item {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+
+        .search-controls {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 5px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .search-group {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .search-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+        }
+
+        .page-input {
+            width: 60px;
+            padding: 5px 0px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.3s;
+        }
+
+        .status-filters {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .status-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 500;
+            transition: all 0.3s;
+            user-select: none;
+        }
+
+        .filter-badge {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+        }
+
+        .status-success-bg { background-color: var(--success); }
+        .status-failed-bg { background-color: var(--danger); }
+        .status-warning-bg { background-color: var(--warning); }
+        .status-skipped-bg { background-color: var(--info); }
+
+        .status-filter.active {
+            background-color: rgba(52, 152, 219, 0.1);
+            color: var(--primary);
+        }
+
+        .search-results-info {
+            background: rgba(52, 152, 219, 0.1);
+            padding: 5px 20px;
+            border-radius: 8px;
+            font-size: 15px;
+            margin-top: 5px;
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-header {
+            padding: 15px 20px;
+            background: var(--light);
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+
+        .card-header i {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .kpi-container {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .kpi-item {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 120px;
+        }
+
+        .kpi-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .kpi-label {
+            font-size: 14px;
+            color: var(--gray);
+        }
+
+        .chart-container {
+            height: 250px;
+            position: relative;
+        }
+
+        .status-success { background-color: rgba(46, 204, 113, 0.1); color: var(--success); }
+        .status-failed { background-color: rgba(231, 76, 60, 0.1); color: var(--danger); }
+        .status-warning { background-color: rgba(243, 156, 18, 0.1); color: var(--warning); }
+        .status-skipped { background-color: rgba(155, 89, 182, 0.1); color: var(--info); }
+
+        .test-results {
+            margin: 30px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--light);
+            font-weight: 600;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: rgba(52, 152, 219, 0.03);
+        }
+
+        .status-badge {
+            display: inline-block;
+            white-space: nowrap;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-success { background-color: rgba(46, 204, 113, 0.15); color: var(--success); }
+        .badge-failed { background-color: rgba(231, 76, 60, 0.15); color: var(--danger); }
+        .badge-warning { background-color: rgba(243, 156, 18, 0.15); color: var(--warning); }
+        .badge-skipped { background-color: rgba(155, 89, 182, 0.15); color: var(--info); }
+
+        .detail-row {
+            background-color: #fafafa;
+        }
+
+        .detail-content {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #eee;
+            display: grid;
+        }
+
+        .detail-content pre {
+            white-space: pre-wrap;
+            font-family: monospace;
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .toggle-detail {
+            cursor: pointer;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 30px;
+            color: var(--gray);
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray);
+            font-size: 14px;
+            border-top: 1px solid var(--border);
+            margin-top: 30px;
+        }
+
+        .export-btn {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 12px 25px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: 600;
+            /*margin-top: 20px;*/
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .export-btn:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray);
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            gap: 10px;
+        }
+
+        .pagination button {
+            padding: 8px 16px;
+            background: var(--light);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .pagination button.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+
+            .report-meta {
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .search-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-group {
+                min-width: 100%;
+            }
+
+            th, td {
+                padding: 8px 10px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-laptop-code"></i>QTR测试平台
+            </div>
+            <h1 class="report-title">{{ report_name }}</h1>
+            <div class="report-meta">
+                <div class="meta-item"><i class="fas fa-calendar"></i> 生成日期: {{ timestamp }}</div>
+<!--                <div class="meta-item" style="display: none"><i class="fas fa-user"></i> 测试负责人: 张工程师</div>-->
+<!--                <div class="meta-item"><i class="fas fa-tag"></i> 版本: v2.5.0</div>-->
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- 搜索控制栏 -->
+        <div class="search-controls">
+            <div class="search-group">
+                <label for="search-input"><i class="fas fa-search"></i> 搜索用例名称</label>
+                <input type="text" id="search-input" class="search-input" placeholder="输入用例名称关键字...">
+            </div>
+
+            <div>
+                <label>状态筛选</label>
+                <div class="status-filters">
+                    <div class="status-filter active" data-status="all">
+                        <span class="filter-badge" style="background: linear-gradient(135deg, #2ecc71, #3498db);"></span>
+                        <span>全部状态</span>
+                    </div>
+                    <div class="status-filter" data-status="passed">
+                        <span class="filter-badge status-success-bg"></span>
+                        <span>通过</span>
+                    </div>
+                    <div class="status-filter" data-status="failed">
+                        <span class="filter-badge status-failed-bg"></span>
+                        <span>失败</span>
+                    </div>
+                    <div class="status-filter" data-status="blocked">
+                        <span class="filter-badge status-warning-bg"></span>
+                        <span>阻塞</span>
+                    </div>
+                    <div class="status-filter" data-status="skipped">
+                        <span class="filter-badge status-skipped-bg"></span>
+                        <span>跳过</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="search-results-info">
+            <div>
+                <i class="fas fa-info-circle"></i>
+                <span id="results-count"></span>
+            </div>
+            <div>
+                <button id="reset-search" class="export-btn" style="padding: 8px 15px; font-size: 14px;">
+                    <i class="fas fa-sync-alt"></i> 重置搜索
+                </button>
+            </div>
+        </div>
+
+        <div class="dashboard">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-chart-pie"></i> 测试结果概览
+                </div>
+                <div class="card-body">
+                    <div class="kpi-container">
+                        <div class="kpi-item status-success">
+                            <div class="kpi-value">{{ info.success }}</div>
+                            <div class="kpi-label">通过用例({{ info.successPercent }})</div>
+                        </div>
+                        <div class="kpi-item status-failed">
+                            <div class="kpi-value">{{ info.fail }}</div>
+                            <div class="kpi-label">失败用例({{ info.failPercent }})</div>
+                        </div>
+                        <div class="kpi-item status-warning" style="display: none">
+                            <div class="kpi-value">{{ info.success }}</div>
+                            <div class="kpi-label">阻塞用例</div>
+                        </div>
+                        <div class="kpi-item status-skipped">
+                            <div class="kpi-value">{{ info.skip }}</div>
+                            <div class="kpi-label">跳过用例({{ info.skipPercent }})</div>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="display: none">
+                        <canvas id="resultsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-stopwatch"></i> 执行时间分析
+                </div>
+                <div class="card-body">
+                    <div class="kpi-container">
+                        <div class="kpi-item">
+                            <div class="kpi-value">{{ info.totalTime }}</div>
+                            <div class="kpi-label">总执行时间</div>
+                        </div>
+                        <div class="kpi-item">
+                            <div class="kpi-value">{{ info.avgTime }}</div>
+                            <div class="kpi-label">平均用例时间</div>
+                        </div>
+                        <div class="kpi-item">
+                            <div class="kpi-value">{{ info.maxTime }}</div>
+                            <div class="kpi-label">最长用例时间</div>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="display: none">
+                        <canvas id="timeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="display: none">
+                <div class="card-header">
+                    <i class="fas fa-layer-group"></i> 模块通过率
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="moduleChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card test-results">
+            <div class="card-header">
+                <i class="fas fa-table"></i> 详细测试结果
+            </div>
+            <div class="card-body">
+                <div class="pagination">
+                    <button id="prev-page">上一页</button>
+                    <span id="page-info">第 1 页，共 109 页</span>
+                    <button id="next-page">下一页</button>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+<!--                            <th>用例ID</th>-->
+                            <th>用例名称</th>
+                            <th>状态</th>
+                            <th width="120px">执行时间</th>
+<!--                            <th>执行人</th>-->
+                            <th width="130px">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="case-list">
+
+                    </tbody>
+                </table>
+
+                <div class="pagination">
+                    <button id="prev-page-bottom">上一页</button>
+                    <span id="page-info-bottom">第 1 页，共 109 页</span>
+                    <button id="next-page-bottom">下一页</button>
+                    <span>每页</span>
+                    <input id="page-size" value="10" type="number" class="page-input">
+                    <span>条</span>
+                    <span>前往第</span>
+                    <input id="jump-page-num" value="1" type="number" class="page-input">
+                    <span>页</span>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin: 30px 0; display: none">
+            <button class="export-btn">
+                <i class="fas fa-download"></i> 导出PDF报告
+            </button>
+        </div>
+
+        <div class="footer">
+            <p>© 2023 QTR测试平台 | 本报告由系统自动生成，数据更新时间: {{ timestamp }}</p>
+            <p style="display: none">测试环境: Linux 5.15, Chrome 117, MySQL 8.0, Python 3.10</p>
+        </div>
+    </div>
+
+    <script id="report-data" type="application/json">
+        """
+        template = Template(header_temp)
+        return template.render(**info)
+
+    @classmethod
+    def generate_table_row(cls, row_data: dict) -> str:
+        """生成单行HTML"""
+        row_html = "<tr>"
+        for value in row_data.values():
+            # 转义HTML特殊字符
+            safe_value = str(value).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"',
+                                                                                                            '&quot;')
+            row_html += f"<td>{safe_value}</td>"
+        row_html += "</tr>"
+        return row_html
+
+    @classmethod
+    def generate_html_footer(cls) -> str:
+        """生成HTML尾部"""
+        return """
+            </script>
+<!--    <script id="report-info" type="application/json">-->
+<!--        {{ info_json | safe }}-->
+<!--    </script>-->
+
+    <script>
+        let all_data = [];
+        let filter_results = [];
+        // 分页配置
+        const config = {
+            currentPage: 1,
+            itemsPerPage: 10,
+            totalPages: Math.ceil(filter_results.length / 10),
+            totalCount: 0
+        };
+
+        let current_page_data = [];
+
+        const statusMap = {
+            1: {text: '通过', cls: 'badge-success'},
+            2: {text: '失败', cls: 'badge-failed'},
+            3: {text: '跳过', cls: 'badge-warning'},
+            4: {text: '阻塞', cls: 'badge-skipped'}
+        };
+
+        // DOM元素
+        const caseList = document.getElementById('case-list');
+        const pageInfo = document.getElementById('page-info');
+        const pageInfoBottom = document.getElementById('page-info-bottom');
+        const dataSize = document.getElementById('data-size');
+        const jumpPageNum = document.getElementById('jump-page-num');
+
+        const searchInput = document.getElementById('search-input');
+        const statusFilters = document.querySelectorAll('.status-filter');
+        const resultsCount = document.getElementById('results-count');
+        const resetSearchBtn = document.getElementById('reset-search');
+
+        // 当前过滤状态
+        let currentSearchTerm = '';
+        let currentStatusFilter = 'all';
+
+        function decompressText(compressedText) {
+            if (compressedText === null ||  compressedText.length <= 0) {return ""}
+            let strData = atob(compressedText);
+            let charData = strData.split('').map(function (x) {
+                return x.charCodeAt(0);
+            });
+            let binData = new Uint8Array(charData);
+            const data = pako.inflate(binData, {"to": "string"});
+            return data;
+        }
+
+        // 初始化图表
+        function initCharts() {
+            // 测试结果饼图
+            const resultsCtx = document.getElementById('resultsChart').getContext('2d');
+            const resultsChart = new Chart(resultsCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['通过', '失败', '阻塞', '跳过'],
+                    datasets: [{
+                        data: [142, 8, 5, 15],
+                        backgroundColor: [
+                            '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 20,
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 执行时间柱状图
+            const timeCtx = document.getElementById('timeChart').getContext('2d');
+            const timeChart = new Chart(timeCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                    datasets: [{
+                        label: '执行时间 (分钟)',
+                        data: [12.5, 25.3, 18.2, 15.7, 9.8, 6.5],
+                        backgroundColor: '#3498db',
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '分钟'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 模块通过率水平条形图
+            const moduleCtx = document.getElementById('moduleChart').getContext('2d');
+            const moduleChart = new Chart(moduleCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['用户管理', '订单管理', '支付管理', '库存管理', '报表管理', '系统设置'],
+                    datasets: [{
+                        label: '通过率 (%)',
+                        data: [98, 87, 92, 85, 96, 100],
+                        backgroundColor: [
+                            '#2ecc71', '#f39c12', '#2ecc71', '#f39c12', '#2ecc71', '#2ecc71'
+                        ],
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 渲染测试用例列表
+        function renderCases() {
+            caseList.innerHTML = '';
+
+            const startIndex = (config.currentPage - 1) * config.itemsPerPage;
+            const endIndex = startIndex + config.itemsPerPage;
+            const pageCases = filter_results.slice(startIndex, endIndex);
+
+            // 计算数据大小（模拟）
+            // const size = (JSON.stringify(pageCases).length / 1024).toFixed(2);
+            // dataSize.textContent = size + ' KB';
+
+            pageCases.forEach((testCase, index) => {
+                const row = document.createElement('tr');
+                const s = statusMap[testCase.status] || {text: '未知', cls: 'badge-warning'};
+
+                // 状态标记
+
+                row.innerHTML = `
+<!--                    <td>${testCase.id}</td>-->
+<!--                    <td>${testCase.module}</td>-->
+                    <td>${testCase.run_name}</td>
+                    <td><span class="status-badge ${s.cls}">${s.text}</span></td>
+                    <td>${testCase.run_duration} s</td>
+                    <td>
+                        <span class="toggle-detail" data-id="${testCase.id}">查看详情</span>
+                    </td>
+                `;
+
+                caseList.appendChild(row);
+
+                // 添加详情行（初始隐藏）
+                const detailRow = document.createElement('tr');
+                detailRow.className = 'detail-row';
+                detailRow.style.display = 'none';
+                detailRow.id = `detail-${testCase.id}`;
+                detailRow.innerHTML = `
+                    <td colspan="6">
+                        <div class="detail-content">
+                            <h4>用例详情: ${testCase.run_name}</h4>
+                            <pre log-is-compressed="true" logData="${testCase.run_detail}">${testCase.run_detail}</pre>
+                        </div>
+                    </td>
+                `;
+
+                caseList.appendChild(detailRow);
+            });
+
+            // 更新分页信息
+            pageInfo.textContent = `第 ${config.currentPage} 页，共 ${config.totalPages} 页`;
+            pageInfoBottom.textContent = `第 ${config.currentPage} 页，共 ${config.totalPages} 页`;
+        }
+
+        // 切换详情显示
+        function setupDetailToggles() {
+            // 表格按钮事件委托（性能高）
+
+            caseList.addEventListener('click', function(e) {
+                if (e.target.classList.contains('toggle-detail')) {
+                    const caseId = e.target.getAttribute('data-id');
+                    const detailRow = document.getElementById(`detail-${caseId}`);
+                    const preElement = detailRow.querySelector("pre");
+                    if (preElement.getAttribute("log-is-compressed") === "true"){
+                        preElement.textContent = decompressText(preElement.getAttribute("logdata"));
+                        preElement.setAttribute("log-is-compressed", "false");
+                    }
+
+                    if (detailRow.style.display === 'none') {
+                        detailRow.style.display = 'table-row';
+                        e.target.textContent = '隐藏详情';
+                    } else {
+                        detailRow.style.display = 'none';
+                        e.target.textContent = '查看详情';
+                    }
+                }
+            });
+        }
+
+        // 分页控制
+        function setupPagination() {
+            document.getElementById('prev-page').addEventListener('click', function() {
+                if (config.currentPage > 1) {
+                    config.currentPage--;
+                    jumpPageNum.value = config.currentPage;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('next-page').addEventListener('click', function() {
+                if (config.currentPage < config.totalPages) {
+                    config.currentPage++;
+                    jumpPageNum.value = config.currentPage;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('prev-page-bottom').addEventListener('click', function() {
+                if (config.currentPage > 1) {
+                    config.currentPage--;
+                    jumpPageNum.value = config.currentPage;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('next-page-bottom').addEventListener('click', function() {
+                if (config.currentPage < config.totalPages) {
+                    config.currentPage++;
+                    jumpPageNum.value = config.currentPage;
+                    renderCases();
+                }
+            });
+
+            document.getElementById('page-size').addEventListener('input', function() {
+                config.itemsPerPage = this.value;
+                renderCases();
+            });
+
+            jumpPageNum.addEventListener('input', function() {
+                config.currentPage = this.value;
+                renderCases();
+            });
+        }
+
+        // 过滤表格数据
+        function filterTableData() {
+            // 过滤用例
+            filter_results = Array.from(all_data).filter(testCase => {
+                const caseName = testCase.run_name;
+                const caseStatus = testCase.status;
+
+                // 名称搜索过滤
+                let nameMatch = false;
+
+                if (currentSearchTerm === undefined && currentSearchTerm === ''){
+                    nameMatch = true;
+                }else {
+                    nameMatch = caseName.toLowerCase().includes(currentSearchTerm.toLowerCase());
+                }
+
+                // 状态过滤
+                let statusMatch = false;
+                switch(currentStatusFilter) {
+                    case 'all':
+                        statusMatch = true;
+                        break;
+                    case 'passed':
+                        statusMatch = caseStatus === 1;
+                        break;
+                    case 'failed':
+                        statusMatch = caseStatus === 2;
+                        break;
+                    case 'blocked':
+                        statusMatch = caseStatus === 4;
+                        break;
+                    case 'skipped':
+                        statusMatch = caseStatus === 3;
+                        break;
+                }
+                return nameMatch && statusMatch;
+            });
+
+            // 更新结果计数
+            resultsCount.innerHTML = `找到 ${filter_results.length} 个测试用例 (共 ${Array.from(all_data).length} 个用例)`;
+            config.currentPage = 1;
+            config.totalPages = Math.ceil(filter_results.length / config.itemsPerPage);
+            renderCases();
+
+            if (filter_results.length === 0) {
+                caseList.innerHTML = `
+                    <tr class="no-results">
+                        <td colspan="6">
+                            <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px;"></i>
+                            <h3>没有找到匹配的测试用例</h3>
+                            <p>请尝试其他搜索关键词或状态筛选</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+        }
+
+        // 设置状态过滤器
+        function setupStatusFilters() {
+            statusFilters.forEach(filter => {
+                filter.addEventListener('click', function() {
+                    // 移除所有active类
+                    statusFilters.forEach(f => f.classList.remove('active'));
+
+                    // 添加active类到当前点击的过滤器
+                    this.classList.add('active');
+
+                    // 更新当前状态过滤器
+                    currentStatusFilter = this.getAttribute('data-status');
+
+                    // 重新渲染用例
+                    filterTableData();
+                });
+            });
+        }
+
+        // 设置搜索功能
+        function setupSearch() {
+            // 搜索框输入事件
+            searchInput.addEventListener('input', function() {
+                currentSearchTerm = this.value;
+                filterTableData();
+            });
+
+            // 重置搜索按钮
+            resetSearchBtn.addEventListener('click', function() {
+                // 重置搜索状态
+                currentSearchTerm = '';
+                currentStatusFilter = 'all';
+
+                // 重置UI
+                searchInput.value = '';
+                statusFilters.forEach(f => f.classList.remove('active'));
+                document.querySelector('.status-filter[data-status="all"]').classList.add('active');
+
+                // 重新渲染
+                filterTableData();
+            });
+        }
+
+        // 初始化
+        window.onload = function() {
+            all_data = JSON.parse(document.getElementById("report-data").textContent);
+            filter_results = all_data
+            config.totalPages = Math.ceil(filter_results.length / config.itemsPerPage);
+            // initCharts();
+            renderCases();
+            setupPagination();
+            setupDetailToggles();
+            setupStatusFilters();
+            setupSearch();
+            // filterTableData();
+            // setupPagination();
+        };
+    </script>
+</body>
+</html>
+        """
