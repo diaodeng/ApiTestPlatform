@@ -187,9 +187,9 @@ class RunDetailDao:
             elif run_status == CaseRunStatus.skipped.value:
                 count_result["skip"] = count
         total_count = count_result["success"] + count_result["fail"] + count_result["skip"]
-        count_result["successPercent"] = f"{round(count_result["success"] / total_count * 100, 2)}%"
-        count_result["failPercent"] = f"{round(count_result["fail"] / total_count * 100, 2)}%"
-        count_result["skipPercent"] = f"{round(count_result["skip"] / total_count * 100, 2)}%"
+        count_result["successPercent"] = f"{round(count_result['success'] / total_count * 100, 2)}%"
+        count_result["failPercent"] = f"{round(count_result['fail'] / total_count * 100, 2)}%"
+        count_result["skipPercent"] = f"{round(count_result['skip'] / total_count * 100, 2)}%"
 
         query = db.query(
             func.max(HrmRunDetail.run_duration).label('maxTime'),
