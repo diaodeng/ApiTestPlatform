@@ -634,7 +634,7 @@ class RequestRunner(object):
                 self.format_time(start_time, end_time)
                 if agent_res_obj.status_code != AgentResponseEnum.SUCCESS.value:
                     self.logger.error(f"客户端响应内容： {agent_res_obj.response}")
-                    raise AgentForwardError("", f"客户机异常： {agent_res_obj.message}")
+                    raise AgentForwardError(f"客户机异常： {agent_res_obj.message}")
 
                 res_response: AgentResponse = agent_res_obj.response
 
@@ -882,7 +882,7 @@ class Websocket(RequestRunner):
                                                                     request_data
                                                                     )
                 if agent_res_data.status_code != AgentResponseEnum.SUCCESS.value:
-                    raise AgentForwardError("", f"客户机异常： {agent_res_data.message}")
+                    raise AgentForwardError(f"客户机异常： {agent_res_data.message}")
 
                 res_response: AgentResponseWebSocket = agent_res_data.response
                 res_content = res_response.websocket_data
@@ -1015,7 +1015,7 @@ class TestRunner(object):
             self.logger.reset()
             logger.error(f"测试用例执行失败：{e}")
             logger.exception(e)
-            raise TestFailError(f"测试用例执行失败: {e}")
+            raise TestFailError(f"测试用例执行失败: {e}", original_exception=e)
 
 
 def formate_response_body(response: requests.Response | None) -> dict | str:
