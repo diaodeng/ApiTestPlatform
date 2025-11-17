@@ -78,11 +78,6 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
             return response
         except asyncio.TimeoutError as e:
             logger.error(f'websocket请求超时{e}，request_id：{request_id}')
-            # 如果超时，取消Future对象
-            request_future: asyncio.Future|None = response_futures.get(request_id, {}).get("future", None)
-            if request_future and not request_future.done():
-                request_future.cancel()
-                del request_future
             if request_type == TstepTypeEnum.http.value:
                 response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value, None, f'wobsocket请求超时{e}，request_id：{request_id}'))
                 return response
@@ -91,22 +86,16 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
                 return response
         except asyncio.CancelledError as e:
             logger.error(e)
-            # 如果超时，取消Future对象
-            request_future: asyncio.Future | None = response_futures.get(request_id, {}).get("future", None)
-            if request_future and not request_future.done():
-                request_future.cancel()
-                del request_future
             response = handle_response((AgentResponseEnum.TASK_CANCELLED.value, None, str(e.args)))
             return response
         except Exception as e:
             logger.error(e)
-            # 如果超时，取消Future对象
-            request_future: asyncio.Future | None = response_futures.get(request_id, {}).get("future", None)
-            if request_future and not request_future.done():
-                request_future.cancel()
-                del request_future
             response = handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, str(e.args)))
             return response
+        finally:
+            if future and not future.done():
+                future.cancel()
+
 
     else:
         response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value, None, f"【{agent_code}】Agent not connected，request_id：{request_id}"))

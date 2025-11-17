@@ -173,21 +173,21 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                 logger.debug(f"收到消息： {message_data}")
                 if message_data["finished"]:
                     # 重新组装消息
-                    complete_message = ''.join(response_futures[request_id]['chunks'])
-                    response_data = decompress_str_to_dict(complete_message)
+                    current_finished_request = response_futures.pop(request_id)
+                    try:
+                        complete_message = ''.join(current_finished_request['chunks'])
+                        response_data = decompress_str_to_dict(complete_message)
 
-                    # 检查是否有等待这个响应的Future对象
-                    # 假设response_data中包含一个"request_id"字段来标识是哪个HTTP请求发送的消息
-                    request_id = response_data.get("request_id")
-                    response_future = response_futures[request_id]["future"]
-                    logger.debug(f"response_future状态： {response_future.done()}")
-                    if response_future and not response_future.done():
-                        # 设置Future对象的结果
-                        response_future.set_result(response_data)
-                        # 从字典中移除这个Future对象，因为它已经被设置了结果
-                        # del response_futures[agent_code][request_id]
-                    # 从字典中移除已处理的分片
-                    # del response_futures[agent_code][agent_code]
+                        # 检查是否有等待这个响应的Future对象
+                        response_future = current_finished_request["future"]
+                        logger.debug(f"response_future状态： {response_future.done()}")
+                        if response_future and not response_future.done():
+                            # 设置Future对象的结果
+                            response_future.set_result(response_data)
+                        del complete_message
+                        del response_data
+                    finally:
+                        del current_finished_request['chunks']
             else:
                 # 如果不是分片消息，则直接处理（这里可以根据需要添加逻辑）
                 pass
