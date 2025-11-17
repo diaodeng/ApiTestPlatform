@@ -251,7 +251,7 @@ class AgentResponseWebSocket(WebSocketClientProtocol):
 class HandleResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, arbitrary_types_allowed=True)
     status_code: int = 200
-    response: AgentResponse | AgentResponseWebSocket | None = None
+    response: AgentResponse | AgentResponseWebSocket | dict | None = None
     message: str = None
 
 

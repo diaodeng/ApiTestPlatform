@@ -581,8 +581,8 @@ class RequestRunner(object):
             new_rules = [ForwardRulesForRunModel(**parsed_rule_dict) for parsed_rule_dict in parsed_rules_dict]
             new_url = self.get_forward_url(new_rules)
             request_data["url"] = new_url
-            self.logger.info(f"需要转发， 转发规则：{parsed_rules_dict}")
-            self.logger.info(f"需要转发， 转发地址：{new_url}")
+            self.logger.debug(f"需要转发， 转发规则：{parsed_rules_dict}")
+            self.logger.debug(f"需要转发， 转发地址：{new_url}")
 
     async def request(self):
         """
@@ -591,7 +591,7 @@ class RequestRunner(object):
 
         request_data = self.step_data.request.model_dump(by_alias=True)
 
-        self.logger.info(f"method: {self.step_data.request.method}")
+        self.logger.debug(f"method: {self.step_data.request.method}")
 
         try:
             self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
@@ -603,7 +603,7 @@ class RequestRunner(object):
             if not request_data.get("json"):
                 request_data.pop("json")
 
-            self.logger.debug(f"Request: {json.dumps(request_data, ensure_ascii=False)}")
+            self.logger.info(f"Request: {json.dumps(request_data, ensure_ascii=False)}")
 
             start_request_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
             self.logger.debug(
@@ -633,6 +633,7 @@ class RequestRunner(object):
                 end_time = time.time()
                 self.format_time(start_time, end_time)
                 if agent_res_obj.status_code != AgentResponseEnum.SUCCESS.value:
+                    self.logger.error(f"客户端响应内容： {agent_res_obj.response}")
                     raise AgentForwardError("", f"客户机异常： {agent_res_obj.message}")
 
                 res_response: AgentResponse = agent_res_obj.response
