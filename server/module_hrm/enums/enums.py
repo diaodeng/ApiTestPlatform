@@ -192,6 +192,17 @@ class MockTypeEnum(Enum):
     not_mock = 4
 
 
+class UrlContentEnum(Enum):
+    """
+    代表url各个部分的枚举
+    """
+    URL = 1
+    HOST = 2
+    PATH = 4
+    QUERY = 8
+    ORIGIN = 16
+
+
 if __name__ == "__main__":
 
     eval("print")
