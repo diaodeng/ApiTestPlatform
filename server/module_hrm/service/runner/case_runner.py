@@ -23,7 +23,7 @@ from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep as TStep
     TWebsocket, ResponseData, \
     Result, StepLogs
 from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum, ForwardRuleMatchTypeEnum, AgentResponseEnum, \
-    CodeTypeEnum, ScopeEnum, AssertOriginalEnum, DataType
+    CodeTypeEnum, ScopeEnum, AssertOriginalEnum, DataType, UrlContentEnum
 from module_hrm.exceptions import TestFailError
 from module_hrm.service.runner.case_data_handler import ConfigHandle
 from module_hrm.utils import comparators
@@ -493,7 +493,28 @@ class RequestRunner(object):
         else:
             self.step_data.request.timeout = None
 
-    def get_forward_url(self, forward_rules: list):
+    def replace_forward_content(self, new_content: ForwardRulesForRunModel) -> str:
+        replace_content = new_content.target_url
+        replace_type = new_content.replace_content
+        old_url = self.step_data.request.url
+        parsed_url = urllib.parse.urlparse(old_url)
+        if replace_type == UrlContentEnum.URL.value:
+            return old_url
+        elif replace_type == UrlContentEnum.HOST.value:
+            new_parsed_url = parsed_url._replace(netloc=replace_content)
+            return urllib.parse.urlunparse(new_parsed_url)
+        elif replace_type == UrlContentEnum.PATH.value:
+            new_parsed_url = parsed_url._replace(path=replace_content)
+            return urllib.parse.urlunparse(new_parsed_url)
+        elif replace_type == UrlContentEnum.ORIGIN.value:
+            parsed_new_url = urllib.parse.urlparse(replace_content)
+            new_parsed_url = parsed_url._replace(scheme=parsed_new_url.scheme)._replace(netloc=parsed_new_url.netloc)
+            return urllib.parse.urlunparse(new_parsed_url)
+        else:
+            logger.warning(f"不支持的替换类型：{replace_type}")
+        return old_url
+
+    def get_forward_url(self, forward_rules: list[ForwardRulesForRunModel]) -> str|None:
         """
         根据不同的转发规则判断是否需要转发，并返回对应的url
         """
@@ -512,20 +533,22 @@ class RequestRunner(object):
             elif match_type == ForwardRuleMatchTypeEnum.url_contain.value:
                 matched = new_url in old_url
             elif match_type == ForwardRuleMatchTypeEnum.host_equal.value:
-                matched = urllib.parse.urlparse(old_url).hostname == urllib.parse.urlparse(new_url).hostname
+                matched = urllib.parse.urlparse(old_url).hostname == new_url
             elif match_type == ForwardRuleMatchTypeEnum.host_not_equal.value:
-                matched = urllib.parse.urlparse(old_url).hostname != urllib.parse.urlparse(new_url).hostname
+                matched = urllib.parse.urlparse(old_url).hostname != new_url
             elif match_type == ForwardRuleMatchTypeEnum.host_contain.value:
-                matched = urllib.parse.urlparse(new_url).hostname in urllib.parse.urlparse(old_url).hostname
+                if new_url and new_url in urllib.parse.urlparse(old_url).hostname:
+                    matched = True
             elif match_type == ForwardRuleMatchTypeEnum.path_equal.value:
-                matched = urllib.parse.urlparse(old_url).path == urllib.parse.urlparse(new_url).path
+                matched = urllib.parse.urlparse(old_url).path == new_url
             elif match_type == ForwardRuleMatchTypeEnum.path_not_equal.value:
-                matched = urllib.parse.urlparse(old_url).path != urllib.parse.urlparse(new_url).path
+                matched = urllib.parse.urlparse(old_url).path != new_url
             elif match_type == ForwardRuleMatchTypeEnum.path_contain.value:
-                matched = urllib.parse.urlparse(new_url).path in urllib.parse.urlparse(old_url).path
+                if new_url and new_url in urllib.parse.urlparse(old_url).path:
+                    matched = True
 
             if matched:
-                return rule.target_url
+                return self.replace_forward_content(rule)
 
         return old_url
 
@@ -609,21 +632,10 @@ class RequestRunner(object):
             self.logger.debug(
                 f"发起请求，请求时间:{start_request_time} >> {self.case_runner.case_data.config.name}")
 
-            self.handler_forward_url(request_data)
-
             res_response: AgentResponse | httpx.Response = None
 
-            timings = {}
-
-            async def on_request(request):
-                timings[request] = time.perf_counter()
-
-            async def on_response(response):
-                start = timings.pop(response.request)
-                elapsed = time.perf_counter() - start
-                # print(f"{response.request.url} -> {elapsed:.2f}s")
-
             if self.case_runner.run_info.forward_config.forward and self.case_runner.run_info.forward_config.agent_code:
+                self.handler_forward_url(request_data)
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
                 request_data["requestType"] = self.step_data.step_type
                 start_time = time.time()
@@ -656,7 +668,7 @@ class RequestRunner(object):
                 await asyncio.sleep(self.step_data.think_time.limit)
 
             self.logger.info(f'{"<<<请求结束:" + self.step_data.name:=^100}')
-            self.logger.info(f'实际请求Url: {res_response.request.url}')
+            self.logger.info(f'实际请求Url: {request_data.get("url")}')
             self.logger.info(f'status_code: {res_response.status_code}')
             self.logger.info(
                 f'response.headers: {json.dumps(dict(res_response.headers), ensure_ascii=False)}')

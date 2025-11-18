@@ -10,7 +10,7 @@ from pydantic.alias_generators import to_camel
 from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
-from module_hrm.enums.enums import RunTypeEnum, DataType
+from module_hrm.enums.enums import RunTypeEnum, DataType, UrlContentEnum
 from utils.common_util import CamelCaseUtil
 
 
@@ -82,6 +82,7 @@ class ForwardRulesForRunModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
     match_type: Optional[int] = None  # module_hrm.enums.enums.ForwardRuleMatchTypeEnum
     origin_url: str | None = None
+    replace_content: Optional[int] = UrlContentEnum.URL.value
     target_url: Optional[str] = None
 
 

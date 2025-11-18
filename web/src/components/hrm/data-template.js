@@ -186,7 +186,8 @@ export const initForwardRulesDetailFormData = {
     status: 2,
     simpleDesc: undefined,
     delFlag: 1,
-    matchType: 1
+    matchType: 1,
+    replaceContent: 1
 }
 
 /*

@@ -156,6 +156,12 @@
             <el-form-item label="待转地址：">
               <el-input v-model="form.originUrl"></el-input>
             </el-form-item>
+            <el-form-item label="替换内容：">
+              <TagSelector v-model:selected-value="form.replaceContent"
+                           :options="Object.values(ForwardReplaceContentEnum)"
+                           selector-width="130px"
+              ></TagSelector>
+            </el-form-item>
             <el-form-item label="目标地址：">
               <el-input v-model="form.targetUrl"></el-input>
             </el-form-item>
@@ -196,7 +202,7 @@ import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import {initForwardRulesDetailFormData} from "@/components/hrm/data-template";
 import {ElMessage, ElMessageBox} from "element-plus";
 import {Remove} from "@element-plus/icons-vue";
-import {ForwardRuleMatchTypeEnum, StatusNewEnum} from "@/components/hrm/enum.js";
+import {ForwardReplaceContentEnum, ForwardRuleMatchTypeEnum, StatusNewEnum} from "@/components/hrm/enum.js";
 import DictTag from "@/components/DictTag/index.vue";
 import TagEnum from "@/components/hrm/common/tag-enum.vue"
 
