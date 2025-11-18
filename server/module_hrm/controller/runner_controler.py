@@ -88,7 +88,7 @@ async def for_debug(request: Request,
                                                                 case_id=case_data["caseId"] or int(
                                                                     datetime.now().timestamp() * 1000000),
                                                                 run_info=debug_info)
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=False) as client:
             debug_info.http_client = client
             test_runner = TestRunner(case_obj, debugtalk_info, debug_info)
             all_case_res = await test_runner.start()
