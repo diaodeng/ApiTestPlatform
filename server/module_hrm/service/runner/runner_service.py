@@ -313,6 +313,7 @@ async def run_by_async(run_info: CaseRunModel,
     test_start_time = time.time()
     start_time  =datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
             timezone(timedelta(hours=8)))
+    report_id = None
     try:
         # query_db = SessionLocal()
 
@@ -330,6 +331,7 @@ async def run_by_async(run_info: CaseRunModel,
         with SessionLocal() as query_db:
             report_info = await ReportDao.create(query_db, report_data)
             run_info.report_id = report_info.report_id
+            report_id = report_info.report_id
 
         success, total_count, success_count, failed_count = await run_by_batch(run_info,
                                         user=current_user.user.user_id)
@@ -343,7 +345,6 @@ async def run_by_async(run_info: CaseRunModel,
             report_info.success = success_count
             await run_in_threadpool(query_db.commit)
 
-
         message_handler = MessageHandler(run_info)
         if message_handler.can_push():
             message_handler.feishu().push(
@@ -353,6 +354,13 @@ async def run_by_async(run_info: CaseRunModel,
         return f"执行成功，执行了{run_info.repeat_num}次，请前往报告查看"
     except Exception as e:
         logger.error(f"用例:{run_info.report_name}[{run_info.report_id}]执行失败，异常信息：{e}", exc_info=True)
+        if report_id:
+            with SessionLocal() as query_db:
+                report_info = await ReportDao.get_by_id(query_db, report_id)
+                report_info.test_duration = time.time() - test_start_time
+                report_info.status = CaseRunStatus.failed.value
+                await run_in_threadpool(query_db.commit)
+
         message_handler = MessageHandler(run_info)
         if message_handler.can_push():
             message_handler.feishu().push(
