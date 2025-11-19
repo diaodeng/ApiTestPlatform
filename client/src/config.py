@@ -22,7 +22,7 @@ class AppConfig:
         logger.info(f"config_path: {config_path}")
         self.page: ft.Page = page
         self.page.title = "QTRClient"
-        self.version = "1.0.0"
+        self.version = "1.0.3.0"
         self.tools_db = config_path
         self.page.theme_mode = ft.ThemeMode.LIGHT # 亮色主题
         self.page.theme = ft.Theme(color_scheme_seed=ft.Colors.WHITE,font_family="微软雅黑")

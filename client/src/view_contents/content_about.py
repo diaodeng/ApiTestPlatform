@@ -10,39 +10,41 @@ from utils.common import check_app_has_new, perform_update_with_powershell
 
 class About(object):
     """关于"""
+
     def __init__(self):
         self.download_progress_view = ft.Text(key="upload_process")
 
     def about(self):
         content = ft.Container(
-                content=ft.Column([
-                    ft.Text("关于>", size=20),
-                    ft.Divider(),
-                    ft.Column([
-                        ft.Row([
-                            ft.Text("更新过程中不要离开当前tab！！！", color=ft.Colors.RED),
-                            ft.Text("exe是更新包，更新包替换原来的exe；zip是全量包，zip解压使用。", color=ft.Colors.RED)
-                        ]),
-                        ft.Row([
-                            ft.Text("QTRClient客户端"),
-                            ft.ElevatedButton("检查更新", on_click=self.check_new_version),
-                            ft.ElevatedButton("更新", on_click=self.get_sys_info_view),
-                            self.download_progress_view,
-                            ft.Text(key="version_tip")
-                            # ft.Button("Kill POS")
-                        ]),
-                        ft.Row([
-                            ft.Markdown(key="update_info", selectable=True, auto_follow_links=True),
-                        ],key="update_info")
+            content=ft.Column([
+                ft.Text("关于>", size=20),
+                ft.Divider(),
+                ft.Column([
+                    ft.Row([
+                        ft.Text("更新过程中不要离开当前tab！！！", color=ft.Colors.RED),
+                        ft.Text("exe是更新包，更新包替换原来的exe；zip是全量包，zip解压使用。", color=ft.Colors.RED)
                     ]),
-                    # ft.Text("离线服务状态"),
-                    # ft.FilledButton("示例按钮")
-                ], alignment=ft.MainAxisAlignment.START),
-                alignment=ft.alignment.center_left
-            )
+                    ft.Row([
+                        ft.Text("QTRClient客户端"),
+                        ft.ElevatedButton("检查更新", on_click=self.check_new_version),
+                        ft.ElevatedButton("更新", on_click=self.get_sys_info_view),
+                        self.download_progress_view,
+                        ft.Text(key="version_tip")
+                        # ft.Button("Kill POS")
+                    ]),
+                ]),
+                ft.ListView([ft.Markdown(key="update_info",
+                                         selectable=True,
+                                         auto_follow_links=True)],
+                            expand=True, auto_scroll=True, key="update_info")
+                # ft.Text("离线服务状态"),
+                # ft.FilledButton("示例按钮")
+            ], alignment=ft.MainAxisAlignment.START),
+            alignment=ft.alignment.center_left
+        )
         return content
 
-    async def check_new_version(self, e:ft.ControlEvent):
+    async def check_new_version(self, e: ft.ControlEvent):
         e.control.disabled = True
         e.control.update()
         check_info = ""
@@ -62,8 +64,8 @@ class About(object):
                 i.update()
                 break
 
-        for i in e.control.parent.parent.controls:
-            if i.key == "update_info":
+        for i in e.control.parent.parent.parent.controls:
+            if type(i) == ft.ListView and i.key == "update_info":
                 for j in i.controls:
                     if j.key == "update_info":
                         j.value = new_info
@@ -73,7 +75,7 @@ class About(object):
         e.control.disabled = False
         e.control.update()
 
-    async def get_sys_info_view(self, e:ft.ControlEvent):
+    async def get_sys_info_view(self, e: ft.ControlEvent):
         e.control.disabled = True
         e.control.update()
         try:
@@ -93,10 +95,6 @@ class About(object):
             e.control.disabled = False
             e.control.update()
 
-
-
     def show_load_process(self, content: str):
         self.download_progress_view.value = content
         self.download_progress_view.update()
-
-        
