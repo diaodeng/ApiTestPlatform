@@ -65,11 +65,11 @@ class AgentHandler:
                         editable=True
                     )
 
-        content = self.ft.Container(
-            content=self.ft.Column([
-                self.ft.Text("Agent功能>", size=20),
-                self.ft.Divider(),
-                self.ft.Row([
+        content = ft.Container(
+            content=ft.Column([
+                ft.Text("Agent功能>", size=20),
+                ft.Divider(),
+                ft.Row([
                     ft.ElevatedButton(
                         "链接服务器",
                         tooltip="按规则索引工作目录中的文件",
@@ -101,6 +101,33 @@ class AgentHandler:
                         tooltip="客户端是否显示请求参数和响应",
                         value=self.agent_config.show_logs,
                         on_change=self.change_show_log,
+                        data="show_log",
+                        disabled=False
+                    ),
+                    ft.Checkbox(
+                        "是否重试",
+                        tooltip="链接异常后是否重试",
+                        value=self.agent_config.retry,
+                        on_change=self.change_show_log,
+                        data="retry",
+                        disabled=False
+                    ),
+                    ft.TextField(
+                        label="重试次数",
+                        tooltip="最大重试次数",
+                        value=f"{self.agent_config.retry_times}",
+                        on_change=self.change_show_log,
+                        data="retry_times",
+                        width=100,
+                        disabled=False
+                    ),
+                    ft.TextField(
+                        label="重试间隔S",
+                        tooltip="每次重试间隔",
+                        value=f"{self.agent_config.retry_interval}",
+                        on_change=self.change_show_log,
+                        data="retry_interval",
+                        width=100,
                         disabled=False
                     ),
                     self.server_dropdown_ui,
@@ -148,7 +175,6 @@ class AgentHandler:
             self.response_data_view.value = result_data
             self.response_data_view.update()
 
-
     async def start_connect(self, evt: ft.ControlEvent):
         connect_url = self.get_websocket_url()
         logger.info(f"开始连接服务器： {connect_url}")
@@ -165,7 +191,12 @@ class AgentHandler:
         try:
             if not self.websocket_client:
                 self.websocket_client = WebSocketClient(connect_url, before_request_call=self.before_request, after_request_call=self.after_request)
-            await self.websocket_client.connect(connect_url)
+            await self.websocket_client.connect(
+                connect_url,
+                retry=self.agent_config.retry,
+                retry_num=self.agent_config.retry_times,
+                interval_time=self.agent_config.retry_interval,
+            )
         except websockets.exceptions.ConnectionClosedError as e:
             logger.error(f"连接异常关闭：{e}")
             UiUtil.show_snackbar_error(self.page, f"连接异常关闭：{e}")
@@ -187,6 +218,8 @@ class AgentHandler:
                 elif element.data == "disconnect_btn":
                     element.disabled = not self.connect_status
                 element.update()
+            self.server_dropdown_ui.disabled = self.connect_status
+            self.server_dropdown_ui.update()
             # self.page.update()
 
     def _save_new_server(self, evt: ft.ControlEvent):
@@ -233,58 +266,26 @@ class AgentHandler:
             UiUtil.show_snackbar_success(self.page, f"成功断开连接")
         except Exception as e:
             UiUtil.show_snackbar_error(self.page, f"断开连接异常：{e}")
-            # self.connect_status = True
-            # for element in e.control.parent.controls:
-            #     if element.data == "connect_btn":
-            #         element.disabled = self.connect_status
-            #     elif element.data == "disconnect_btn":
-            #         element.disabled = not self.connect_status
-            #     element.update()
-
-    def copy_mac(self, e: ft.ControlEvent):
-        local_mac = get_active_mac()
-        pass
 
     def change_show_log(self, e: ft.ControlEvent):
-        self.show_log = e.control.value
-        self.agent_config.show_logs = e.control.value
-        AgentConfig.save_config(self.agent_config)
+        try:
+
+            if e.control.data == "show_log":
+                self.show_log = e.control.value
+                self.agent_config.show_logs = e.control.value
+            elif e.control.data == "retry":
+                self.agent_config.retry = e.control.value
+            elif e.control.data == "retry_times":
+                self.agent_config.retry_times = int(e.control.value)
+            elif e.control.data == "retry_interval":
+                self.agent_config.retry_interval = int(e.control.value)
+            AgentConfig.save_config(self.agent_config)
+            UiUtil.show_snackbar_success(self.page, "配置保存成功")
+        except Exception as e:
+            logger.error(f"配置保存失败：{e}")
+            logger.exception(e)
+            UiUtil.show_snackbar_error(self.page, f"配置保存失败：{e}")
 
     def change_server_url(self, e: ft.ControlEvent):
         self.agent_config.current_server = e.control.value
         AgentConfig.save_config(self.agent_config)
-
-
-    def update_start_config(self, e):
-        logger.info(f"更新启动配置")
-        self.start_config.backup = self.before_start_back_view.value
-        self.start_config.replace_mitm_cert = self.before_start_replace_mitm_cert_view.value
-        self.start_config.change_env = self.before_start_change_env_view.value
-        self.start_config.change_pos = self.before_start_change_pos_view.value
-        self.start_config.account_logout = self.before_start_logout_view.value
-        self.start_config.remove_cache = self.before_start_remove_cache_view.value
-        self.start_config.cover_payment_driver = self.before_start_cover_payment_driver_view.value
-        StartConfig.write(self.start_config)
-
-    def start_search(self, e: ft.ControlEvent):
-        path = e.control.data
-        logger.info(f"清理缓存: {path}")
-
-
-
-    def clean_cache(self, e: ft.ControlEvent):
-        path = e.control.data
-        logger.info(f"清理缓存: {path}")
-        success, msg = PosConfig.clean_cache(path)
-        if success:
-            UiUtil.show_snackbar_success(self.page, msg)
-        else:
-            UiUtil.show_snackbar_error(self.page, msg)
-        self.page.update()
-
-    def update_ui(self, message, searching, progress=0):
-        self.status_text.value = message
-        self.progress_bar.value = progress
-        self.search_btn.disabled = searching
-        self.stop_btn.disabled = not searching
-        self.page.update()
