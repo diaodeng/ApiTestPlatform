@@ -1,4 +1,5 @@
 import datetime
+from loguru import logger
 
 from fastapi import APIRouter, Request
 from fastapi import Depends
@@ -12,6 +13,7 @@ from module_hrm.entity.do.suite_do import QtrSuite
 from module_hrm.entity.vo.report_vo import ReportQueryModel
 from module_hrm.enums.enums import CaseRunStatus, DataType, RunTypeEnum
 from module_hrm.service.case_service import Session, HrmCase
+from module_hrm.service.common import get_base_counts_optimized, get_run_statistics, get_base_counts_subquery
 from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
 from module_hrm.utils import comparators, util
 from utils.response_util import ResponseUtil
@@ -55,56 +57,23 @@ async def functions_dict(request: Request, case_id: int | None = None, query_db:
 
 @hrmCommonController.get("/countInfo")
 async def count_info(request: Request, query_db: Session = Depends(get_db)):
-    project_count = query_db.query(HrmProject).count()
-    module_count = query_db.query(HrmModule).count()
-    suite_count = query_db.query(QtrSuite).count()
-    case_count = query_db.query(HrmCase).filter(HrmCase.type == DataType.case.value).count()
+    data = {}
+    try:
+        # 并行执行基础统计和运行统计
 
-    def get_total_values():
-        total = {
-            'pass': [],
-            'fail': [],
-            'percent': []
+        base_counts = await get_base_counts_subquery(query_db)
+        run_stats = await get_run_statistics(query_db)
+
+        data =  {
+            'project_count': base_counts['project'],
+            'module_count': base_counts['module'],
+            'suite_count': base_counts['suite'],
+            'case_count': base_counts['case'],
+            'total': run_stats
         }
-        today = datetime.date.today()
-        for i in range(-11, 1):
-            begin = today + datetime.timedelta(days=i)
-            end = begin + datetime.timedelta(days=1)
+    except Exception as e:
+        logger.error(f"统计信息查询失败: {e}")
+        # 返回默认值或缓存数据
+        # return get_default_count_info()
 
-            total_run = query_db.query(HrmRunDetail).filter(HrmRunDetail.create_time.between(begin, end),
-                                                            HrmRunDetail.run_type.in_([RunTypeEnum.case.value,
-                                                                                       RunTypeEnum.model.value,
-                                                                                       RunTypeEnum.suite.value,
-                                                                                       RunTypeEnum.project.value,
-                                                                                       ])).count()
-            total_success = query_db.query(HrmRunDetail).filter(HrmRunDetail.create_time.between(begin, end),
-                                                                HrmRunDetail.status == CaseRunStatus.passed.value,
-                                                                HrmRunDetail.run_type.in_([RunTypeEnum.case.value,
-                                                                                           RunTypeEnum.model.value,
-                                                                                           RunTypeEnum.suite.value,
-                                                                                           RunTypeEnum.project.value,
-                                                                                           ])).count()
-
-            if not total_run:
-                total_run = 0
-            if not total_success:
-                total_success = 0
-
-            total_percent = round(total_success / total_run * 100, 2) if total_run != 0 else 0.00
-            total['pass'].append(total_success)
-            total['fail'].append(total_run - total_success)
-            total['percent'].append(total_percent)
-
-        return total
-
-    total = get_total_values()
-
-    data = {
-        'projectCount': project_count,
-        'moduleCount': module_count,
-        'caseCount': case_count,
-        'suiteCount': suite_count,
-        # 'account': request.session.get("now_account", 'test'),
-        'total': total
-    }
     return ResponseUtil.success(data=data)
