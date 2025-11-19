@@ -425,6 +425,9 @@ async def download_new_app(download_process_call=None) -> str|None:
                     exe_url = item["browser_download_url"]
                 elif item["name"] == "QTRClient.zip":
                     zip_url = item["browser_download_url"]
+                else:
+                    logger.info("没有找到升级文件")
+                    return None
 
             new_app_path = "QTRClient_new.exe" if exe_url else "QTRClient_new.zip"
             if os.path.exists(new_app_path):
@@ -651,6 +654,8 @@ async def perform_update_with_powershell(download_process_call=None):
 
     # 下载新版本（这里需要你实现下载逻辑）
     new_app_path = await download_new_app(download_process_call)
+    if not new_app_path:
+        return False
     new_app_path = os.path.abspath(new_app_path)
 
     # 创建 PowerShell 脚本
