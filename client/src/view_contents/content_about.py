@@ -36,7 +36,7 @@ class About(object):
                 ft.ListView([ft.Markdown(key="update_info",
                                          selectable=True,
                                          auto_follow_links=True)],
-                            expand=True, auto_scroll=True, key="update_info")
+                            expand=True, key="update_info")
                 # ft.Text("离线服务状态"),
                 # ft.FilledButton("示例按钮")
             ], alignment=ft.MainAxisAlignment.START),

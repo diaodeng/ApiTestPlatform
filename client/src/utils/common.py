@@ -403,9 +403,16 @@ async def check_app_has_new() -> tuple[bool|str, str]:
         if not data:
             return False, ""
         new_version = data[0]['tag_name']
-        new_version_info = data[0]['body']
-        if VERSION < new_version:
-            return new_version, new_version_info
+        new_version_info = ""
+        if VERSION > new_version:
+            new_version = None
+        num = 0
+        for info in data:
+            if num > 5:
+                break
+            new_version_info += f"# {info['tag_name']}\n{info['body']}"
+            num += 1
+        return new_version, new_version_info
     return False, f"当前版本：{VERSION}已经是最新版本。"
 
 
