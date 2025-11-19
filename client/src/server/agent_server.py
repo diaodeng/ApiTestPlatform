@@ -159,6 +159,10 @@ class WebSocketClient:
         self.agent_code = self.uri.split('/')[-1]
         # self.on_message = on_message
         # 客户端websocket是否已启动
+        self.retry_num = 0
+        self.max_retry_num = 0
+        self.retry = False
+        self.interval_time = 5
         self.running = False
         self.websocket = None
         self.status = False
@@ -168,14 +172,19 @@ class WebSocketClient:
         self.before_request_call = before_request_call
         self.after_request_call = after_request_call
 
-    async def connect(self, uri=None):
+    async def connect(self, uri=None, retry_num=None, retry=None, interval_time=None,is_retry=False):
+        if not is_retry:
+            self.retry_num = 0
         self.uri = uri or self.uri
+        self.max_retry_num = retry_num if retry_num is not None else self.max_retry_num
+        self.retry = retry if retry is not None else self.retry
+        self.interval_time = interval_time if interval_time is not None else self.interval_time
         self.running = True
         self.status = True
         try:
             self.websocket = await websockets.connect(self.uri)
             logger.info(f"服务链接成功：{self.uri}")
-            async with httpx.AsyncClient() as http_client:
+            async with httpx.AsyncClient(verify=False) as http_client:
                 while self.running:
                     # await self.send_heart()
                     message = await self.websocket.recv()
@@ -187,18 +196,18 @@ class WebSocketClient:
                         # logger.info(msg.get('message'))
                     else:
                         asyncio.create_task(self.handle_message_chunk(msg, http_client))
-        # except ConnectionRefusedError as e:
-        #     logger.error(e)
-        #     logger.info('连接异常断开，30秒后重新尝试连接')
-        #     # await self.reconnect(30)
-        # except websockets.exceptions.ConnectionClosedError as e:
-        #     logger.error(e)
-        #     logger.info('服务端异常断开，5秒后重新尝试连接')
-        #     # await self.reconnect()
-        # except websockets.exceptions.ConnectionClosedOK as e:
-        #     logger.error(e)
-        #     logger.info('连接异常断开，5秒后重新尝试连接')
-        #     # await self.reconnect()
+        except ConnectionRefusedError as e:
+            logger.error(e)
+            logger.info(f'连接异常断开，需要重试：{self.retry and self.max_retry_num>self.retry_num}，{self.interval_time}秒后重新尝试连接, f{self.uri}')
+            await self.reconnect()
+        except websockets.exceptions.ConnectionClosedError as e:
+            logger.error(e)
+            logger.info(f'服务端异常断开，需要重试：{self.retry and self.max_retry_num>self.retry_num},{self.interval_time}秒后重新尝试连接, f{self.uri}')
+            await self.reconnect()
+        except websockets.exceptions.ConnectionClosedOK as e:
+            logger.error(e)
+            logger.info(f'连接异常断开，需要重试：{self.retry and self.max_retry_num>self.retry_num},{self.interval_time}秒后重新尝试连接, f{self.uri}')
+            await self.reconnect()
         # except TypeError as e:
         #     logger.error(e)
         #     logger.info('客户端数据处理异常,5秒后重新建立连接')
@@ -244,18 +253,17 @@ class WebSocketClient:
                 # 发送分片消息
                 await self.send_message(chunk_message)
 
-    async def reconnect(self, interval_time=5):
+    async def reconnect(self):
         """
         重新建立连接
         :param interval_time: 时间间隔,默认5秒
         """
-        try:
+        if self.retry and self.max_retry_num > self.retry_num:
+            self.retry_num += 1
             self.update_status(False)
-            await asyncio.sleep(interval_time)
-            await self.connect()
-        except ConnectionRefusedError as e:
-            logger.info('远程计算机拒绝网络连接，30秒后重新尝试连接')
-            await self.reconnect(30)
+            await asyncio.sleep(self.interval_time)
+            await self.connect(is_retry=True)
+
 
     async def send_message(self, message):
         """

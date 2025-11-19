@@ -164,3 +164,6 @@ class AgentConfigModel(BaseModel):
     server_list: dict[str, str] = {}
     show_logs: bool = False
     max_send_size: int = 1024
+    retry_times: int = 0
+    retry_interval: float = 5
+    retry: bool = False
