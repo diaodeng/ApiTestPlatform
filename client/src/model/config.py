@@ -167,3 +167,16 @@ class AgentConfigModel(BaseModel):
     retry_times: int = 0
     retry_interval: float = 5
     retry: bool = False
+
+
+class FtpConfigModel(BaseModel):
+    host: str = ""
+    port: int = 21
+    username: str = ""
+    password: str = ""
+    ftp_root: str = ""  # 根目录
+    max_connections: int = 50
+    max_per_ip: int = 20
+    enable_anonymous: bool = False  # 启用匿名访问
+    upload_speed: int = 1024 * 10  # KB
+    download_speed: int = 1024 * 10

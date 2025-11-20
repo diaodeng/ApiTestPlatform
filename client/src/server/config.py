@@ -7,7 +7,7 @@ from typing import Optional
 from loguru import logger
 
 from model.config import SearchConfigModel, MitmProxyConfigModel, PaymentMockConfigModel, StartConfigModel, \
-    SetupConfigModel, PosParamsModel, PosConfigModel, AgentConfigModel, VendorConfigModel
+    SetupConfigModel, PosParamsModel, PosConfigModel, AgentConfigModel, VendorConfigModel, FtpConfigModel
 from model.pos_network_model import PosInitRespModel
 from utils.file_handle import IniFileHandel
 
@@ -564,6 +564,33 @@ class AgentConfig:
 
     @classmethod
     def save_config(cls, config_data: AgentConfigModel):
+        with open(cls.config_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(config_data.model_dump(), ensure_ascii=False))
+
+
+class FtpConfig:
+    config_path = "storage/data/ftp_config.json"
+
+    @classmethod
+    def read_config(cls) -> FtpConfigModel:
+        if not os.path.exists(cls.config_path):
+            config = FtpConfigModel()
+            with open(cls.config_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+            return config
+
+        with open(cls.config_path, "r", encoding="utf-8") as f:
+            data = f.read()
+            if not data:
+                config = FtpConfigModel()
+                with open(cls.config_path, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+                return config
+
+            return FtpConfigModel.model_validate(json.loads(data))
+
+    @classmethod
+    def save_config(cls, config_data: FtpConfigModel):
         with open(cls.config_path, "w", encoding="utf-8") as f:
             f.write(json.dumps(config_data.model_dump(), ensure_ascii=False))
 

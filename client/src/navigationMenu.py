@@ -79,6 +79,11 @@ class NavigationMenu:
                     label="mitmproxy"
                 ),
                 self.ft.NavigationRailDestination(
+                    icon=self.ft.Icons.NEAR_ME_OUTLINED,
+                    selected_icon=self.ft.Icons.NEAR_ME_ROUNDED,
+                    label="FTP"
+                ),
+                self.ft.NavigationRailDestination(
                     icon=self.ft.Icons.TERMINAL,
                     selected_icon=self.ft.Icons.TERMINAL,
                     label="日志"

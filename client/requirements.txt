@@ -10,6 +10,7 @@ python-barcode
 pillow
 pydantic
 pywin32
+pyftpdlib
 
 httpx
 

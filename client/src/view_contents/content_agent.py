@@ -1,23 +1,18 @@
-import asyncio
 import json
-import os
-import fnmatch
-import os
-from threading import Thread, Event
+from threading import Event
+
+import json
+from threading import Event
 
 import flet as ft
 import websockets
-from flet.core.alignment import bottom_right
 from loguru import logger
 
-from model.pos_network_model import PosLogoutModel
-from server.agent_server import WebSocketClient
-from server import agent_server
-from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig, \
-    AgentConfig
-from utils import file_handle, pos_network
-from utils.common import kill_process_by_name, get_active_mac
 from common.ui_utils.ui_util import UiUtil
+from server import agent_server
+from server.agent_server import WebSocketClient
+from server.config import StartConfig, AgentConfig
+from utils.common import get_active_mac
 
 
 class AgentHandler:
