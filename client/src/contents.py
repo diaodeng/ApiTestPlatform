@@ -7,6 +7,7 @@ from view_contents.content_about import About
 from view_contents.content_pos_handler import PosHandler
 from view_contents.content_goods import Goods
 from view_contents.content_agent import AgentHandler
+from view_contents.content_ftp import FtpHandler
 
 
 class Contents(object):
@@ -23,6 +24,7 @@ class Contents(object):
         self.pos_handler = PosHandler(ft, page).init_ui()
         self.mitmproxy = MitmHandel(page).init()
         self.log_view = LogViewerApp(page).init_ui()
+        self.ftp_view = FtpHandler(page).init_ui()
         self.goods = Goods(ft, page, log, **kwargs).goods()
 
     # 内容区域函数
@@ -35,6 +37,7 @@ class Contents(object):
             self.agent_handler,
             self.pos_handler,
             self.mitmproxy,
+            self.ftp_view,
             self.log_view,
             self.about
 
