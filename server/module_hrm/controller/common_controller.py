@@ -65,10 +65,10 @@ async def count_info(request: Request, query_db: Session = Depends(get_db)):
         run_stats = await get_run_statistics(query_db)
 
         data =  {
-            'project_count': base_counts['project'],
-            'module_count': base_counts['module'],
-            'suite_count': base_counts['suite'],
-            'case_count': base_counts['case'],
+            'projectCount': base_counts['project'],
+            'moduleCount': base_counts['module'],
+            'suiteCount': base_counts['suite'],
+            'caseCount': base_counts['case'],
             'total': run_stats
         }
     except Exception as e:
