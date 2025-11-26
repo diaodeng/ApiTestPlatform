@@ -67,6 +67,9 @@ class PosParamsModel(BaseModel):
     posType: str = ""
     orgNo: str = ""
     venderNo: str = ""
+    sapOrgNo: str = ""
+    posId: str = ""
+    is_local: bool = True
 
 
 class PosChangeParamsModel(BaseModel):
@@ -109,6 +112,9 @@ class PosConfigModel(BaseModel):
     payment_mock_driver_path: str = ""
     pos_tool_test_host: str = ""
     pos_tool_uat_host: str = ""
+    pos_test_host: str = ""
+    pos_uat_host: str = ""
+    pos_pro_host: str = ""
     env_files: list[str] = [
             "database",
             "log",
@@ -151,6 +157,7 @@ class PosConfigModel(BaseModel):
     change_pos_params: PosChangeParamsModel = PosChangeParamsModel()
     account_logout_params: str = ""
     backup_envs: dict[str, list[str]] = defaultdict(list)  # 备份过的环境
+    backup_status: int = 3  # 备份状态，1备份现有数据，2恢复原备份数据，3备份完成
 
 
 class SetupConfigModel(BaseModel):
