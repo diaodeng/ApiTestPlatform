@@ -1,21 +1,19 @@
 import asyncio
-import os
 import fnmatch
 import os
 from threading import Thread, Event
 
 import flet as ft
-from flet.core.alignment import bottom_right
 from loguru import logger
 
-from model.config import ResolutionModel
+from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi, PosAccountManagerUi, ChangeLocalPosUi
+from model.config import ResolutionModel, PosParamsModel
 from model.pos_network_model import PosLogoutModel
-from server.config import SearchConfig, StartConfig, PaymentMockConfig, MitmproxyConfig, PosConfig, PosToolConfig
+from server.config import SearchConfig, StartConfig, PosConfig
 from server.pos_config_server import PosConfigServer
 from server.pos_tool_config_server import PosToolConfigServer
 from utils import file_handle, pos_network
 from utils.common import kill_process_by_name, get_all_process, kill_process_by_id, ExeVersionReader
-from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi, PosAccountManagerUi, ChangeLocalPosUi
 
 
 class PosHandler:
@@ -393,25 +391,28 @@ class PosHandler:
         # directory_dialog.pick_files(allow_multiple=True)
 
     def start_search(self, e):
-        work_dirs = SearchConfig.read_work_dir()
-        if not work_dirs:
-            logger.info("请先添加工作目录")
-            return
+        try:
+            work_dirs = SearchConfig.read_work_dir()
+            if not work_dirs:
+                logger.info("请先添加工作目录")
+                return
 
-        # 重置状态
-        self.stop_event.clear()
-        self.results_view.controls.clear()
-        self.search_btn.disabled = True
-        self.stop_btn.disabled = False
-        self.progress_bar.visible = True
-        self.progress_bar.value = 0
-        self.page.update()
+            # 重置状态
+            self.stop_event.clear()
+            self.results_view.controls.clear()
+            self.search_btn.disabled = True
+            self.stop_btn.disabled = False
+            self.progress_bar.visible = True
+            self.progress_bar.value = 0
+            self.page.update()
 
-        # 启动搜索线程
-        Thread(
-            target=self.search_files,
-            daemon=True
-        ).start()
+            # 启动搜索线程
+            Thread(
+                target=self.search_files,
+                daemon=True
+            ).start()
+        except Exception as e:
+            UiUtil.show_snackbar_error(self.page, f"搜索异常：{e}")
 
     def stop_search(self, e):
         self.stop_event.set()
@@ -420,115 +421,89 @@ class PosHandler:
 
     async def logout_pos_account_for_view(self, evt: ft.ControlEvent):
         path = evt.control.data
-        await self._logout_pos_account(path)
-
-    async def _logout_pos_account(self, pos_path) -> bool:
-        logger.info(f"开始退出账号：{pos_path}")
-        pos_config = PosConfig.read_pos_params(pos_path)
-        if not pos_config:
-            UiUtil.show_snackbar_error(self.page, f"获取POS缓存失败， 无法注销POS账号: pos_config={pos_config}")
-            return False
-        pos_env = PosConfig.get_local_pos_env(pos_path)
-        pos_group, account = PosConfig.get_pos_group(pos_config.venderNo, pos_env)
-        if not pos_group or not account:
-            UiUtil.show_snackbar_error(self.page,
-                                       f"获取POS账号失败， 无法注销POS账号: pos_group={pos_group}, account={account}")
-            return False
-        logout_model = PosLogoutModel(
-            env=pos_group,
-            cashierNo=account
-        )
         try:
-            status, message_info = await pos_network.pos_account_logout(logout_model)
-            if not status:
-                UiUtil.show_snackbar_error(self.page, message_info)
-                return False
-            else:
-                UiUtil.show_snackbar_success(self.page, message_info)
-                return True
+            await PosConfigServer.logout_pos_account(path)
+            UiUtil.show_snackbar_success(self.page, f"账号登出成功")
         except Exception as e:
-            UiUtil.show_snackbar_error(self.page, f"注销POS账号失败: {e}")
-            return False
-
-
+            UiUtil.show_snackbar_error(self.page, f"账号登出失败：{e}")
 
 
     async def open_pos_file(self,e:ft.ControlEvent):
         """打开文件"""
-        path = e.control.data
-        logger.info(f"启动POS文件: {path}")
-        logger.debug(f"启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
-        kill_process_by_name("CPOS-DF.exe")
-        UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
-        await asyncio.sleep(2)
+        try:
+            path = e.control.data
+            logger.info(f"启动POS文件: {path}")
+            logger.debug(f"启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
+            kill_process_by_name("CPOS-DF.exe")
+            UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
+            await asyncio.sleep(2)
 
-        pos_params = PosConfig.read_pos_params(path)
+            pos_params = PosConfig.read_pos_params(path)
 
-        if self.start_config.change_pos:
-            change_result = await self._change_pos(path)
-            if not change_result:
-                return
+            if self.start_config.change_pos:
+                await PosConfigServer.change_pos_on_network(path)
 
-        if self.start_config.account_logout:
-            logout_result = await self._logout_pos_account(path)
-            if not logout_result:
-                return
+            if self.start_config.account_logout:
+                await PosConfigServer.logout_pos_account(path)
 
-        if self.start_config.replace_mitm_cert:
-            logger.info(f"替换mitm证书")
-            success, msg = PosConfig.replace_mitm_cert(path)
-            if not success:
-                UiUtil.show_snackbar_error(self.page, msg)
-                return
-            else:
-                UiUtil.show_snackbar_success(self.page, msg)
-
-        if self.start_config.backup:
-            logger.info(f"备份支付驱动")
-            try:
-                PosConfig.backup_payment_driver(path)
-            except Exception as e:
-                UiUtil.show_snackbar_error(self.page, f"备份支付驱动失败: {e}")
-                return
-
-        if self.start_config.cover_payment_driver:
-            logger.info(f"覆盖支付驱动")
-            try:
-                success, msg = PosConfig.cover_payment_driver(path)
+            if self.start_config.replace_mitm_cert:
+                logger.info(f"替换mitm证书")
+                success, msg = PosConfig.replace_mitm_cert(path)
                 if not success:
                     UiUtil.show_snackbar_error(self.page, msg)
                     return
                 else:
                     UiUtil.show_snackbar_success(self.page, msg)
-            except Exception as e:
-                logger.error(f"覆盖支付驱动失败: {e}")
-                UiUtil.show_snackbar_error(self.page, f"覆盖支付驱动失败: {e}")
-                return
 
-        if self.start_config.remove_cache:
-            logger.info(f"清理缓存")
-            try:
-                PosConfig.clean_cache(path)
-            except Exception as e:
-                UiUtil.show_snackbar_error(self.page, f"清理缓存失败: {e}")
-                return
+            if self.start_config.backup:
+                logger.info(f"备份支付驱动")
+                try:
+                    PosConfig.backup_payment_driver(path)
+                except Exception as e:
+                    UiUtil.show_snackbar_error(self.page, f"备份支付驱动失败: {e}")
+                    return
 
-        UiUtil.show_snackbar_success(self.page, "正在启动POS。。。")
-        # if not file_handle.open_file(path):
-        vendor_id = None
-        if pos_params:
-            vendor_id = pos_params.venderNo
-            pos_resolution = PosConfig.get_vendor_config(vendor_id=vendor_id).resolution
-            if str(pos_params.posType) == "2":
-                envs = pos_resolution.sco.model_dump()
+            if self.start_config.cover_payment_driver:
+                logger.info(f"覆盖支付驱动")
+                try:
+                    success, msg = PosConfig.cover_payment_driver(path)
+                    if not success:
+                        UiUtil.show_snackbar_error(self.page, msg)
+                        return
+                    else:
+                        UiUtil.show_snackbar_success(self.page, msg)
+                except Exception as e:
+                    logger.error(f"覆盖支付驱动失败: {e}")
+                    UiUtil.show_snackbar_error(self.page, f"覆盖支付驱动失败: {e}")
+                    return
+
+            if self.start_config.remove_cache:
+                logger.info(f"清理缓存")
+                try:
+                    PosConfig.clean_cache(path)
+                except Exception as e:
+                    UiUtil.show_snackbar_error(self.page, f"清理缓存失败: {e}")
+                    return
+
+            UiUtil.show_snackbar_success(self.page, "正在启动POS。。。")
+            # if not file_handle.open_file(path):
+            vendor_id = None
+            if pos_params:
+                vendor_id = pos_params.venderNo
+                pos_resolution = PosConfig.get_vendor_config(vendor_id=vendor_id).resolution
+                if str(pos_params.posType) == "2":
+                    envs = pos_resolution.sco.model_dump()
+                else:
+                    envs = pos_resolution.pos.model_dump()
             else:
-                envs = pos_resolution.pos.model_dump()
-        else:
-            envs = ResolutionModel().model_dump()
-        if not file_handle.start_file_independent(path, envs):
-            UiUtil.show_snackbar_error(self.page, f"打开文件:{path} 失败")
-        else:
-            UiUtil.show_snackbar_success(self.page, "启动POS成功")
+                envs = ResolutionModel().model_dump()
+            if not file_handle.start_file_independent(path, envs):
+                UiUtil.show_snackbar_error(self.page, f"打开文件:{path} 失败")
+            else:
+                UiUtil.show_snackbar_success(self.page, "启动POS成功")
+        except Exception as e:
+            logger.exception(e)
+            UiUtil.show_snackbar_error(self.page, f"POS启动失败：{e}")
 
     def open_pos_file_location(self, e: ft.ControlEvent):
         """打开文件所在目录"""
@@ -591,20 +566,22 @@ class PosHandler:
             #     UiUtil.show_snackbar_error(self.page, "生产环境【RTA】不支持获取POS环境")
             #     return
 
-            vender_id, org_no, store_list, env_list = PosToolConfigServer.get_store_list(path)
+            pos_params, store_list, env_list = PosToolConfigServer.get_store_list(path)
+            pos_params: PosParamsModel = pos_params
+            is_local = "本地" if pos_params.is_local else "远端"
             pos_version = ExeVersionReader(path).get_exe_file_version()
             for child in e.control.parent.controls:
                 if isinstance(child, ft.Text) and child.key == "store":
-                    child.value = f" 门店:{org_no}"
-                    child.data = org_no
+                    child.value = f" 门店:{pos_params.sapOrgNo}"
+                    child.data = pos_params.sapOrgNo
                     child.update()
                 if isinstance(child, ft.Text) and child.key == "vendor":
-                    child.value = f"商家:{vender_id}"
-                    child.data = vender_id
+                    child.value = f"{is_local} 商家:{pos_params.venderNo}"
+                    child.data = pos_params.venderNo
                     child.update()
 
                 if isinstance(child, ft.Text) and child.key == "env":
-                    child.value = f" 环境:{store_list[0].env if store_list else pos_env} 版本：{pos_version}"
+                    child.value = f" 环境:{store_list[0].env if store_list else pos_env} 版本：{pos_version} posId:{pos_params.posId}"
                     child.data = store_list[0].env if store_list else pos_env
                     child.update()
 
@@ -617,35 +594,26 @@ class PosHandler:
             e.control.disabled = False
             e.control.update()
 
-    async def _change_pos(self, pos_path:str) -> bool:
-        try:
-            logger.info(f"切换POS环境: {pos_path}")
-            change_status, message_info = await PosConfigServer.change_pos_on_network(pos_path)
-            if change_status:
-                UiUtil.show_snackbar_success(self.page, "切换POS环境成功")
-                return True
-            else:
-                UiUtil.show_snackbar_error(self.page, f"切换POS环境失败：{message_info}")
-                return False
-        except Exception as e:
-            logger.error(f"切换POS环境失败: {e}")
-            UiUtil.show_snackbar_error(self.page, f"切换POS环境失败: {e}")
-            return False
-
-
     async def change_pos_env(self, e: ft.ControlEvent):
         path = e.control.data
-        await self._change_pos(path)
+        try:
+            await PosConfigServer.change_pos_on_network(path)
+            UiUtil.show_snackbar_success(self.page, f"POS切换成功")
+        except Exception as e:
+            UiUtil.show_snackbar_error(self.page, f"POS切换失败：{e}")
 
     def clear_pos_env_file(self, e: ft.ControlEvent):
         path = e.control.data
-        logger.info(f"清理POS环境文件: {path}")
-        PosConfig.clear_env(path)
-        e.page.open(ft.SnackBar(
-            content=ft.Text("清理成功"),
-            action="知道了",
-        ))
-        self.page.update()
+        try:
+            logger.info(f"清理POS环境文件: {path}")
+            PosConfig.clear_env(path)
+            e.page.open(ft.SnackBar(
+                content=ft.Text("清理成功"),
+                action="知道了",
+            ))
+            self.page.update()
+        except Exception as e:
+            UiUtil.show_snackbar_error(self.page, f"环境清理失败： {e}")
 
 
     def row_item(self, pos_path):
@@ -662,28 +630,6 @@ class PosHandler:
                     ft.Text("商家", key="vendor", bgcolor=ft.Colors.YELLOW_50),
                     ft.Text("门店", key="store", bgcolor=ft.Colors.YELLOW_100),
                     ft.Text("环境", key="env", bgcolor=ft.Colors.YELLOW_200),
-                    # ft.Dropdown(
-                    #     editable=True,
-                    #     label="门店",
-                    #     key="store",
-                    #     options=[
-                    #         ft.dropdown.Option(i) for i in ["111", "222", "333"]
-                    #     ],
-                    #     padding=0,
-                    #     border_width=1,
-                    #     border_color=ft.Colors.GREY_300,
-                    # ),
-                    # ft.Dropdown(
-                    #     editable=True,
-                    #     label="环境",
-                    #     key="env",
-                    #     options=[
-                    #         ft.dropdown.Option("")
-                    #     ],
-                    #     padding=0,
-                    #     border_width=1,
-                    #     border_color=ft.Colors.GREY_300,
-                    # ),
                     ft.ElevatedButton(
                         data=pos_path,
                         text="切换POS",
@@ -814,64 +760,10 @@ class PosHandler:
         except Exception as e:
             pass
 
-        depth = 0
-        # 预计算文件总数
-        # total_files = 0
-        # for root, dirs, files in os.walk(directory):
-        #     if self.stop_event.is_set():
-        #         break
-        #     total_files += len(files)
-        #
-        # if total_files == 0:
-        #     self.update_ui("未找到可搜索的文件", False)
-        #     return
-
-        # 开始搜索
-        found_files = 0
-        processed = 0
-        depth = 0
-
         result = self.__find_files(directory, file_pattern=pattern, dir_pattern=self.dir_pattern.value,
                                    max_depth=max_depth)
         SearchConfig.save_search_result(result)
         found_files = len(result)
-
-        # for root, dirs, files in os.walk(directory):
-        #     if self.stop_event.is_set():
-        #         break
-        #
-        #     for filename in files:
-        #         if fnmatch.fnmatch(filename.lower(), pattern.lower()):
-        #             full_path = os.path.join(root, filename)
-        #
-        #             # 创建结果项
-        #             result_item = ft.Row(
-        #                 controls=[
-        #                     ft.Text(full_path, expand=True),
-        #                     ft.IconButton(
-        #                         icon=ft.Icons.FOLDER_OPEN,
-        #                         tooltip="打开所在目录",
-        #                         on_click=lambda e, path=full_path: self.open_file_location(path)
-        #                     ),
-        #                     ft.IconButton(
-        #                         icon=ft.Icons.INSERT_DRIVE_FILE,
-        #                         tooltip="打开文件",
-        #                         on_click=lambda e, path=full_path: self.open_file(path)
-        #                     )
-        #                 ],
-        #                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-        #             )
-        #
-        #             self.results_view.controls.append(result_item)
-        #             found_files += 1
-        #
-        #         processed += 1
-        #         progress = processed / total_files
-        #         self.update_ui(
-        #             f"已扫描 {processed}/{total_files} | 找到 {found_files} 个",
-        #             True,
-        #             progress
-        #         )
 
         # 搜索完成
         msg = "搜索已停止" if self.stop_event.is_set() else f"完成! 共找到 {found_files} 个文件"

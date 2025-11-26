@@ -1,12 +1,14 @@
-import json
 import os
 import fnmatch
-import flet as ft
-import subprocess
+import os
 import platform
+import subprocess
 from threading import Thread, Event
+
+import flet as ft
 from loguru import logger
-from server.config import SearchConfig, StartConfig, PaymentMockConfig, PosConfig
+
+from server.config import SearchConfig, StartConfig, PosConfig
 
 
 class FileSearcher:

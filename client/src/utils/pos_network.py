@@ -3,17 +3,39 @@ import json
 import httpx
 from loguru import logger
 
-from model.config import PosChangeParamsModel
-from server.config import PosConfig
+from common.excptions import PosHandleException
+from model.config import PosChangeParamsModel, PosConfigModel, PosParamsModel
+from do.config import PosConfig
 from model.pos_network_model import PosInitRespModel, PosInitModel, PosLogoutModel, PosResetAccountRequestModel, \
     PosUserInfoRespModel
+from utils.common import get_local_ip, get_active_mac
 
 pos_config_data = PosConfig.read_pos_config()
 uat_host = pos_config_data.pos_tool_uat_host
 test_host = pos_config_data.pos_tool_test_host
+pos_test_host = pos_config_data.pos_test_host
+pos_uat_host = pos_config_data.pos_uat_host
+pos_pro_host = pos_config_data.pos_pro_host
 
 
-async def change_pos_from_network(data: PosChangeParamsModel) -> tuple[bool, str]:
+def update_network_host(data:PosConfigModel):
+    # pos_config_data = PosConfig.read_pos_config()
+    pos_config_data = data
+    global uat_host
+    global test_host
+    global pos_test_host
+    global pos_uat_host
+    global pos_pro_host
+
+    uat_host = pos_config_data.pos_tool_uat_host
+    test_host = pos_config_data.pos_tool_test_host
+    pos_test_host = pos_config_data.pos_test_host
+    pos_uat_host = pos_config_data.pos_uat_host
+    pos_pro_host = pos_config_data.pos_pro_host
+
+
+
+async def change_pos_from_network(data: PosChangeParamsModel) -> None:
     async with httpx.AsyncClient(verify=False) as client:
         data = {"env": data.env,
                 "venderId": data.venderId,
@@ -32,12 +54,12 @@ async def change_pos_from_network(data: PosChangeParamsModel) -> tuple[bool, str
             resp = await client.post(f"{test_host}/tools/posChange", json=data)
         if resp.status_code != 200:
             logger.error(f"POS切换失败，状态码： {resp.status_code}")
-            return False, f"POS切换失败，状态码： {resp.status_code}"
+            raise PosHandleException(f"POS切换失败，状态码： {resp.status_code}")
         content = resp.json()
         logger.info(f"POS切换结果： {json.dumps(content, ensure_ascii=False)}")
-        if content["code"] == 20000:
-            return True, "切换成功"
-        return False, f"POS切换失败: {content['message']}"
+        if content["code"] != 20000:
+            raise PosHandleException(f"POS切换失败: {content['message']}")
+
 
 
 async def pos_account_logout(data: PosLogoutModel) -> tuple[bool, str]:
@@ -72,7 +94,7 @@ def pos_tool_init() -> PosInitRespModel | bool:
         return False
 
 
-async def get_user_info(data: PosResetAccountRequestModel) -> PosUserInfoRespModel|None:
+async def get_user_info(data: PosResetAccountRequestModel) -> PosUserInfoRespModel | None:
     async with httpx.AsyncClient(verify=False) as client:
         data = data.model_dump()
         logger.info(f"查询POS账号信息： {json.dumps(data)}")
@@ -88,6 +110,7 @@ async def get_user_info(data: PosResetAccountRequestModel) -> PosUserInfoRespMod
         if content["code"] == 20000:
             return PosUserInfoRespModel.model_validate(content["data"][0])
         return None
+
 
 async def reset_account_password(data: PosResetAccountRequestModel) -> tuple[bool, str]:
     user_info = await get_user_info(data)
@@ -111,3 +134,46 @@ async def reset_account_password(data: PosResetAccountRequestModel) -> tuple[boo
         if content["code"] == 20000:
             return True, "重置密码成功"
         return False, f"重置密码失败: {json.dumps(content, ensure_ascii=False)}"
+
+
+def pos_init(pos_path:str, version:str=None) -> PosParamsModel:
+    ip = get_local_ip()
+    mac = get_active_mac()
+    with httpx.Client(verify=False) as client:
+        data = {
+            "configTypeList": [
+            ],
+            "extParams": {
+                "picType": "base64"
+            },
+            "posIP": [
+                ip
+            ],
+            "posMacList": [
+                mac
+            ],
+
+            "versionType": "1"
+        }
+        if version:
+            data["posVersion"] = version
+        env = PosConfig.get_local_pos_env(pos_path)
+
+        logger.info(f"pos/init参数： {json.dumps(data, ensure_ascii=False)}")
+        if "uat" in env.lower():
+            resp = client.post(f"{pos_uat_host}/pos/init", json=data)
+        elif "test" in env.lower():
+            resp = client.post(f"{pos_test_host}/pos/init", json=data)
+        else:
+            resp = client.post(f"{pos_pro_host}/pos/init", json=data)
+        if resp.status_code != 200:
+            logger.error(f"获取pos初始配置（pos/init）失败，状态码： {resp.status_code}")
+            raise PosHandleException(f"获取pos初始配置（pos/init）失败: {resp.status_code}")
+        content = resp.json()
+        logger.info(f"获取pos初始配置（pos/init）结果： {json.dumps(content, ensure_ascii=False)}")
+        if content["code"] != "0000":
+            raise PosHandleException(f"从网络获取pos/init失败: {json.dumps(content, ensure_ascii=False)}")
+        res_data = content.get("data", {})
+        res_model = PosParamsModel.model_validate(res_data)
+        res_model.is_local = False
+        return res_model

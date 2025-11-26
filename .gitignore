@@ -19,6 +19,7 @@ server/node_modules
 server/temp_test
 server/app
 server/.vscode
+temp
 
 web/vite.config.js.timestamp*.mjs
 pyrightconfig.json

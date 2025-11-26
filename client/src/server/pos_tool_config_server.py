@@ -1,6 +1,7 @@
 import json
 import os
 
+from model.config import PosParamsModel
 from model.pos_network_model import PosInitRespModel, PosInitRespStoreModel, PosInitRespEnvModel
 from server.config import PosConfig
 from utils.pos_network import pos_tool_init
@@ -18,19 +19,18 @@ class PosToolConfigServer:
         return data
 
     @classmethod
-    def get_store_list(cls, pos_path: str) -> (str, str, list[PosInitRespStoreModel], list[PosInitRespEnvModel]):
-        res_data = ["", "", [], []]
+    def get_store_list(cls, pos_path: str) -> (PosParamsModel, list[PosInitRespStoreModel], list[PosInitRespEnvModel]):
+        res_data = [None, [], []]
         if not os.path.exists(pos_path):
             return res_data
 
         data = cls.read_pos_tool_config()
         if data:
-            res_data[3] = data.data.env_list
+            res_data[2] = data.data.env_list
 
         params = PosConfig.read_pos_params(pos_path)
         if params:
-            res_data[0] = params.venderNo
-            res_data[1] = params.orgNo
+            res_data[0] = params
 
         # 只获取当前环境的store_list
         store_list = []
@@ -40,5 +40,5 @@ class PosToolConfigServer:
             for store in data.data.store_list:
                 if store.env == group and store.vender_id == params.venderNo:
                     store_list.append(store)
-        res_data[2] = store_list
+        res_data[1] = store_list
         return res_data

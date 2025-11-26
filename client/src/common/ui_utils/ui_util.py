@@ -10,8 +10,8 @@ from server.config import PosConfig, PosToolConfig
 from server.pos_tool_config_server import PosToolConfigServer
 
 from model.pos_network_model import PosInitRespModel, PosResetAccountRequestModel, PosLogoutModel
-from utils.common import get_active_mac, get_local_ip
-from utils.pos_network import pos_tool_init, reset_account_password, pos_account_logout, change_pos_from_network
+from utils.common import get_active_mac, get_local_ip, kill_process_by_name
+from utils.pos_network import pos_tool_init, reset_account_password, pos_account_logout, change_pos_from_network, update_network_host
 
 
 class UiUtil:
@@ -74,6 +74,9 @@ class PosSettingUi(ft.AlertDialog):
             ft.Column(controls=[
                 ft.TextField(value=self.config_data.pos_tool_test_host, label="Tbox测试环境host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_tool_test_host"),
                 ft.TextField(value=self.config_data.pos_tool_uat_host, label="Tbox UAT host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_tool_uat_host"),
+                ft.TextField(value=self.config_data.pos_test_host, label="POS TEST接口host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_test_host"),
+                ft.TextField(value=self.config_data.pos_uat_host, label="POS UAT接口host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_uat_host"),
+                ft.TextField(value=self.config_data.pos_pro_host, label="POS PRO接口host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_pro_host"),
                 ft.TextField(value=self.config_data.payment_mock_driver_path, label="支付MOCK驱动目录", on_blur=self.update_config_data, data="payment_mock_driver_path"),
                 ft.TextField(value=self.config_data.payment_driver_back_up_path, label="支付驱动备份目录", on_blur=self.update_config_data, data="payment_driver_back_up_path"),
                 ft.TextField(value=json.dumps(self.config_data.env_files, indent=4, ensure_ascii=False), label="环境文件：", on_blur=self.update_config_data, data="env_files", multiline=True),
@@ -99,6 +102,7 @@ class PosSettingUi(ft.AlertDialog):
     def save_config(self, event: ft.ControlEvent):
         try:
             PosConfig.save_pos_config(self.config_data)
+            update_network_host(self.config_data)
             UiUtil.show_snackbar_success(self.page, "POS配置保存成功")
         except Exception as e:
             logger.exception(e)
@@ -107,7 +111,15 @@ class PosSettingUi(ft.AlertDialog):
     def update_config_data(self, event: ft.ControlEvent):
         config_value = event.control.value
         config_key = event.control.data
-        if config_key in ["payment_mock_driver_path", "payment_driver_back_up_path", "pos_tool_test_host", "pos_tool_uat_host"]:
+        if config_key in [
+            "payment_mock_driver_path",
+            "payment_driver_back_up_path",
+            "pos_tool_test_host",
+            "pos_tool_uat_host",
+            "pos_test_host",
+            "pos_uat_host",
+            "pos_pro_host",
+        ]:
             setattr(self.config_data, config_key, config_value)
         elif config_key == "vendor_config":
             if not config_value:
@@ -236,10 +248,7 @@ class ChangePosUi(ft.AlertDialog):
                 data[item.data] = item.value
             logger.info(f"切换POS请求参数：{json.dumps(data)}")
             request_data = PosChangeParamsModel.model_validate(data)
-            change_status, message_info = await change_pos_from_network(request_data)
-            if not change_status:
-                UiUtil.show_snackbar_error(self.page, message_info)
-                return
+            await change_pos_from_network(request_data)
 
             UiUtil.show_snackbar_success(self.page, "POS切换成功")
         except Exception as e:
@@ -306,19 +315,21 @@ class ChangePosUi(ft.AlertDialog):
 
 class PosAccountManagerUi(ft.AlertDialog):
     def __init__(self, pos_path=None):
+        logger.info(f"打开POS账号管理弹窗")
         super().__init__()
         self.pos_tool_config_data = PosToolConfigServer.read_pos_tool_config()
         # self.config_data: PosConfigModel = PosConfig.read_pos_config()
         env_group, account = None, None
         try:
-            pos_params: PosParamsModel = PosConfig.read_pos_params(pos_path)
-            vendor_id = None
-            if pos_params:
-                vendor_id = pos_params.venderNo
-            pos_env = PosConfig.get_local_pos_env(pos_path)
-            env_group, account = PosConfig.get_pos_group(vendor_id, pos_env)
+            if pos_path:
+                pos_params: PosParamsModel = PosConfig.read_pos_params(pos_path)
+                vendor_id = None
+                if pos_params:
+                    vendor_id = pos_params.venderNo
+                pos_env = PosConfig.get_local_pos_env(pos_path)
+                env_group, account = PosConfig.get_pos_group(vendor_id, pos_env)
         except Exception as e:
-            logger.error(e)
+            logger.exception(e)
             pass
         self.modal = False
         self.title = ft.Text("POS账号管理")
@@ -435,7 +446,7 @@ class ChangeLocalPosUi(ft.AlertDialog):
         super().__init__()
         # self.pos_tool_config_data = PosToolConfig.read_pos_tool_config()
         self.modal = True
-        self.title = ft.Text("在线切换POS")
+        self.title = ft.Text("本地切换POS")
         self.target_env = None
 
         env_group , vendor_id, store, pos_group, pos_type = None, None, None, None, None
@@ -473,12 +484,14 @@ class ChangeLocalPosUi(ft.AlertDialog):
         local_pos_env = PosConfig.get_local_pos_env(self.pos_path)
         pos_params: PosParamsModel = PosConfig.read_pos_params(self.pos_path)
         if pos_params:
+            env_local = "本地环境" if pos_params.is_local else "远端环境"
             env_group, account = PosConfig.get_pos_group(pos_params.venderNo, local_pos_env)
             pos_tool_config_data = PosToolConfigServer.read_pos_tool_config()
             for store_info in pos_tool_config_data.data.store_list:
                 if store_info.vender_id == pos_params.venderNo and store_info.env == env_group and store_info.store_id == pos_params.orgNo:
-                    return f"{local_pos_env} --> {store_info.vender_name} --> {store_info.store_name}"
-            return f"环境：{local_pos_env}，商家：{pos_params.venderNo}，门店：{pos_params.orgNo}"
+                    return f"{env_local} {local_pos_env} --> {store_info.vender_name} --> {store_info.store_name} --> POS:{pos_params.posId}"
+
+            return f"{env_local} 环境：{local_pos_env}，商家：{pos_params.venderNo}，门店：{pos_params.orgNo}，POS：{pos_params.posId}"
         else:
             return f"环境：{local_pos_env}，商家：无，门店：无"
 
@@ -498,8 +511,8 @@ class ChangeLocalPosUi(ft.AlertDialog):
             backed_env_info = local_backed_env.split("_")
             if len(backed_env_info) >2:
                 current_env = '_'.join(backed_env_info[:-2])
-                vender_id = backed_env_info[2]
-                store = backed_env_info[3]
+                vender_id = backed_env_info[-2]
+                store = backed_env_info[-1]
                 env_group, account = PosConfig.get_pos_group(vender_id, current_env)
                 for store_info in pos_tool_config_data.data.store_list:
                     if store_info.vender_id == vender_id and store_info.env == env_group and store_info.store_id == store:
@@ -519,6 +532,7 @@ class ChangeLocalPosUi(ft.AlertDialog):
         event.control.update()
         pos_path = event.control.data
         try:
+            kill_process_by_name("CPOS-DF.exe")
             target_env = None
             for item in event.control.parent.content.content.controls[0].controls:
                 if item.data == "backed_env":
