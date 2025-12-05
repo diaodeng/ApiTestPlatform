@@ -363,11 +363,27 @@ class LogViewerApp:
         """添加日志到显示区域"""
         # 过滤逻辑
         filter_text = self.filter_input.value
+        log_entry = ft.Text("", selectable=True, spans=[])
         if filter_text:
             if filter_text.lower() not in message.lower():
                 return
+            else:
+                message_data = message.lower()
+                while True:
+                    matched = re.match(filter_text, message_data, re.IGNORECASE)
+                    if matched:
+                        log_entry.spans.append(ft.TextSpan(f"{message[:matched.start()]}"))
+                        log_entry.spans.append(ft.TextSpan(f"{message[matched.start():matched.end()]}", style=ft.TextStyle(color=ft.Colors.RED)))
+                        message = message[matched.end():]
+                        if not message:
+                            break
+                        message_data = message_data[matched.end():]
+                    else:
+                        log_entry.spans.append(ft.TextSpan(message))
+                        break
+        else:
+            log_entry.spans.append(ft.TextSpan(message))
 
-        log_entry = ft.Text(f"{message}")
 
         # 添加到缓冲区
         self.log_buffer.append(log_entry)
@@ -441,4 +457,7 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    print(re.fullmatch("qw", "qw22qw44qw22", re.IGNORECASE))
+
+    print(re.match("qw222", "qw22qw44qw22", re.IGNORECASE))
+    # ft.app(target=main)
