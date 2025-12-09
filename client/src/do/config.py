@@ -3,6 +3,7 @@ import base64
 import json
 import os
 from shutil import copytree, copyfile, rmtree
+import shutil
 from typing import Optional
 
 from loguru import logger
@@ -287,20 +288,26 @@ class PosConfig:
 
         pos_params = PosConfig.read_pos_params(pos_file)
         if pos_params is None:
-            logger.warning(f"当前环境商家未知，将直接删除对应环境文件:{pos_file}")
+            logger.warning(f"当前环境商家未知，将直接删除对应环境文件:{pos_dir}")
             old_env = f"{old_env}"
         else:
             old_env = f"{old_env}_{pos_params.venderNo}_{pos_params.orgNo}"
 
         def copy_any_file(current_file, target_file):
+            if not os.path.exists(os.path.dirname(target_file)):
+                os.makedirs(os.path.dirname(target_file))
             if os.path.exists(target_file):
                 logger.warning(f"{target_file}文件已存在，将直接删除")
-                if os.path.isfile(current_file):
+                if os.path.isfile(target_file):
                     # copyfile(current_file, target_file)
-                    os.remove(current_file)
+                    os.remove(target_file)
                 else:
                     # copytree(current_file, target_file, dirs_exist_ok=True)
-                    rmtree(current_file)
+                    rmtree(target_file)
+            if not os.path.exists(os.path.dirname(current_file)):
+                os.makedirs(os.path.dirname(current_file))
+                logger.warning(f"{current_file}文件不存在")
+                return
             if not os.path.exists(current_file):
                 logger.warning(f"{current_file}文件不存在")
                 return
@@ -311,19 +318,23 @@ class PosConfig:
         def backup_pos_env_file(pos_path: str, file_name: str, old_env_key: str):
             db_file = os.path.join(pos_path, file_name)
             # 备份当前数据
-            db_old_env_file = os.path.join(pos_path, f"{file_name}_{old_env_key}")
+            db_old_env_file = os.path.join(pos_path, "pos_env_back", f"{old_env_key}", f"{file_name}")
             copy_any_file(db_file, db_old_env_file)
 
         def restore_pos_env_file(pos_path: str, file_name: str, env_key: str):
             db_file = os.path.join(pos_path, file_name)
             # 恢复备份数据
-            db_env_file = os.path.join(pos_path, f"{file_name}_{env_key}")
+            db_env_file = os.path.join(pos_path,"pos_env_back", f"{env_key}", f"{file_name}")
             copy_any_file(db_env_file, db_file)
 
         # 切换
         env_files = cls.read_pos_config().env_files
         logger.info(f"开始备份文件")
         pos_config_data = cls.read_pos_config()
+        if len(old_env.split("_")) <= 2:
+            pos_config_data.backup_status = 2
+            logger.info(f"环境位置不备份：{old_env}")
+
         if pos_config_data.backup_status != 2:
             pos_config_data.backup_status = 1
             cls.save_pos_config(pos_config_data)
@@ -334,7 +345,7 @@ class PosConfig:
             cls.save_pos_config(pos_config_data)
 
         logger.info(f"开始恢复原备份文件")
-        if pos_config_data.backup_envs == 2:
+        if pos_config_data.backup_status == 2:
             for file in env_files:
                 restore_pos_env_file(pos_dir, file, target_env_key)
 
@@ -356,13 +367,13 @@ class PosConfig:
         # 更新当前备份过的环境key
         logger.info(f"{old_env}")
         logger.info(f"{target_env_key}")
-        logger.info(f"{config_data.backup_envs.get(pos_file, [])}")
-        if old_env not in config_data.backup_envs and old_env not in ["RTA_TEST", "RTA_UAT", "RTA"]:
-            if pos_file not in config_data.backup_envs:
-                config_data.backup_envs[pos_file] = []
-            config_data.backup_envs[pos_file].append(old_env)
-        if target_env_key not in ["RTA_TEST", "RTA_UAT", "RTA"]:
-            config_data.backup_envs[pos_file].remove(target_env_key)
+        # logger.info(f"{config_data.backup_envs.get(pos_file, [])}")
+        # if old_env not in config_data.backup_envs and old_env not in ["RTA_TEST", "RTA_UAT", "RTA"]:
+        #     if pos_file not in config_data.backup_envs:
+        #         config_data.backup_envs[pos_file] = []
+        #     config_data.backup_envs[pos_file].append(old_env)
+        # if target_env_key not in ["RTA_TEST", "RTA_UAT", "RTA"]:
+        #     config_data.backup_envs[pos_file].remove(target_env_key)
         PosConfig.save_pos_config(config_data)
         return True, "切换成功"
 
