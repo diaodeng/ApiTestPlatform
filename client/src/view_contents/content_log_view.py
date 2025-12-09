@@ -1,4 +1,5 @@
 import flet as ft
+import os
 import asyncio
 import threading
 import time
@@ -331,18 +332,39 @@ class LogViewerApp:
 
         # 在后台线程中监控文件变化
         def watch_file():
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                f.seek(0, 2)  # 移动到文件末尾
-                while True:
-                    if self.stop_watch:
-                        break
-                    line = f.readline()
-                    if not line:
-                        time.sleep(0.5)  # 没有新内容就等待
+
+            last_size = 0
+            logger.info(f"self.enable_watch_file_checkbox.value:{self.enable_watch_file_checkbox.value}")
+            while not self.stop_watch:
+                try:
+                    if not os.path.exists(self.file_path):
+                        time.sleep(1)
                         continue
-                    # print("更新内容:", line.strip())
-                    if self.enable_watch_file_checkbox.value:
-                        self.add_log(line.strip())
+
+                    current_size = os.path.getsize(self.file_path)
+
+                    if current_size < last_size:
+                        last_size = 0
+
+                    if current_size > last_size:
+
+                        with open(self.file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            if last_size > 0:
+                                f.seek(last_size)
+                            new_content = f.readline(current_size - last_size)
+                            last_size = current_size
+                            if not new_content:
+                                time.sleep(0.5)
+                                continue
+
+                            if self.enable_watch_file_checkbox.value:
+                                for line in new_content.splitlines():
+                                    line = line.strip()
+                                    if line:
+                                        self.add_log(line.strip())
+                except Exception as e:
+                    logger.error(f"文件监控异常: {str(e)}")
+                    time.sleep(1)
 
         self.current_thread = threading.Thread(target=watch_file, daemon=True)
         self.current_thread.start()
@@ -368,19 +390,24 @@ class LogViewerApp:
             if filter_text.lower() not in message.lower():
                 return
             else:
-                message_data = message.lower()
-                while True:
-                    matched = re.match(filter_text, message_data, re.IGNORECASE)
-                    if matched:
-                        log_entry.spans.append(ft.TextSpan(f"{message[:matched.start()]}"))
-                        log_entry.spans.append(ft.TextSpan(f"{message[matched.start():matched.end()]}", style=ft.TextStyle(color=ft.Colors.RED)))
-                        message = message[matched.end():]
-                        if not message:
-                            break
-                        message_data = message_data[matched.end():]
-                    else:
-                        log_entry.spans.append(ft.TextSpan(message))
-                        break
+                pattern = re.compile(filter_text, re.IGNORECASE)
+                last_end = 0
+                for m in pattern.finditer(message):
+                    # 未匹配部分
+                    if m.start() > last_end:
+                        log_entry.spans.append(ft.TextSpan(message[last_end:m.start()]))
+
+                    # 高亮部分
+                    log_entry.spans.append(ft.TextSpan(
+                        message[m.start():m.end()],
+                        style=ft.TextStyle(color=ft.Colors.RED)
+                    ))
+
+                    last_end = m.end()
+
+                # 追加最后剩余部分
+                if last_end < len(message):
+                    log_entry.spans.append(ft.TextSpan(message[last_end:]))
         else:
             log_entry.spans.append(ft.TextSpan(message))
 
@@ -459,5 +486,5 @@ def main(page: ft.Page):
 if __name__ == "__main__":
     print(re.fullmatch("qw", "qw22qw44qw22", re.IGNORECASE))
 
-    print(re.match("qw222", "qw22qw44qw22", re.IGNORECASE))
+    print(re.match("testserver", "2025-12-09 12:47:51,069 -[I] Scheduler_0: http_interface@344   [de78dcff3c834dc7b6c22ffe2d8b0ee0] get: https://testserver-cpos.rta-os.com/health? timeout:3.00 params:", re.IGNORECASE))
     # ft.app(target=main)
