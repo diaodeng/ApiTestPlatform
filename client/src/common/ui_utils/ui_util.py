@@ -1,6 +1,7 @@
 from flet import SnackBar, Text, Colors, Page
 import flet as ft
 import json
+import os
 
 from loguru import logger
 
@@ -498,7 +499,18 @@ class ChangeLocalPosUi(ft.AlertDialog):
     def get_backed_env(self) -> dict[str,str]:
         config_data: PosConfigModel = PosConfig.read_pos_config()
         backed_env = ["RTA_TEST", "RTA_UAT", "RTA"]
-        backed_env.extend(config_data.backup_envs.get(self.pos_path, []))
+        # backed_env.extend(config_data.backup_envs.get(self.pos_path, []))
+
+        back_dir = os.path.join(os.path.dirname(self.pos_path), "pos_env_back")
+        if os.path.exists(back_dir):
+            subdirs = []
+            for item in os.listdir(back_dir):
+                item_path = os.path.join(back_dir, item)
+                if os.path.isdir(item_path):
+                    subdirs.append(item)
+            subdirs.sort()
+            backed_env.extend(subdirs)
+
         backed_env = {e:e for e in backed_env}
 
         local_pos_env = PosConfig.get_local_pos_env(self.pos_path)
