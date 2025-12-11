@@ -379,7 +379,7 @@
             <el-form-item label="位置参数：">{{ form.jobArgs }}</el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item label="关键字参数：">{{ form.jobKwargs }}</el-form-item>
+            <el-form-item label="关键字参数：" style="line-break: anywhere">{{ form.jobKwargs }}</el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="任务状态：">

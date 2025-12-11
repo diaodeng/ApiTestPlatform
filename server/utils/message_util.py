@@ -3,8 +3,11 @@ from functools import wraps
 
 import requests
 
+from module_hrm.enums.enums import PushTypeEnum
 from config.env import FeishuBotConfig
-from module_hrm.entity.vo.case_vo import CaseRunModel, FeishuRobotModel
+from module_hrm.entity.vo.case_vo import CaseRunModel
+from module_hrm.entity.vo.push_vo import FeishuRobotModel, PushModel
+from module_hrm.utils.parser import parse_string
 from utils.log_util import logger
 
 
@@ -140,13 +143,19 @@ class FeiShuHandler:
 
 
 class MessageHandler:
-    def __init__(self, run_info: CaseRunModel):
-        logger.info(f"用例执行信息：{run_info.model_dump()}")
-        self.is_push = run_info.push
-        self.run_info = run_info
+    def __init__(self, push_info: PushModel = None, push_obj: dict = None):
+        self.push_info = push_info
+        self.push_obj = push_obj
+        self.default_test_push_temp = "[${user}]于${start_at}开始执行的测试完成。\n总共：${total_count}条用例，成功：${success_count}条，失败：${failed_count};\n报告：【${report_id}】${report_name}"
 
-    def can_push(self):
-        return self.run_info.push
+    def _push_content_parse(self, content):
+        return parse_string(content or self.default_test_push_temp, self.push_obj, {}, False)
 
-    def feishu(self):
-        return FeiShuHandler(self.run_info.feishu_robot)
+    def push(self, content=None):
+        if self.push_info.type == PushTypeEnum.feishu_bot.value:
+            feishu_push_config = FeishuRobotModel(**self.push_info.config_content or {})
+            FeiShuHandler(feishu_push_config).push(
+                self._push_content_parse(content) if content else self._push_content_parse(feishu_push_config.content)
+            )
+        else:
+            logger.warning(f"暂不支持推送类型：{self.push_info.type}")

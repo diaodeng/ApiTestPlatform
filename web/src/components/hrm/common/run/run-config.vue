@@ -1,6 +1,7 @@
 <script setup>
 import EnvSelector from "@/components/hrm/common/env-selector.vue";
 import {all as getAllForwardRules} from "@/api/hrm/forward";
+import {allPushConfig as getAllPushRules} from "@/api/hrm/push.js";
 import {all as getAllAgent} from "@/api/hrm/agent.js";
 import {initRunConfig} from "@/components/hrm/data-template.js";
 
@@ -9,11 +10,18 @@ const emits = defineEmits(['update']);
 const form = ref(JSON.parse(JSON.stringify(initRunConfig)));
 
 const allForwardRules = ref([]);
+const allPushRules = ref([]);
 const allAgent = ref([]);
 
 function getForwardRule() {
   getAllForwardRules().then(response => {
     allForwardRules.value = response.data;
+  });
+}
+
+function getPushRule() {
+  getAllPushRules().then(response => {
+    allPushRules.value = response.data;
   });
 }
 
@@ -44,9 +52,11 @@ watch(() => form.value, (newValue) => {
 onMounted(() => {
   if (configData.value) {
     form.value = configData.value;
+    console.log(form.value);
   }
   nextTick(() => {
     getForwardRule();
+    getPushRule();
     getAgent();
   });
 
@@ -130,8 +140,24 @@ const runConfigRules = ref({
       <el-checkbox v-model="form.runBySort"></el-checkbox>
     </el-form-item>
     <el-form-item label="结果通知">
-      <!--        <el-input v-model="form.push" type="checkbox"></el-input>-->
-      <el-checkbox v-model="form.push"></el-checkbox>
+      <div style="display: flex;flex-direction: row;flex-grow: 1">
+        <el-checkbox v-model="form.push" style="margin-right: 20px"></el-checkbox>
+        <el-row style="flex-grow: 1" :gutter="10">
+          <el-col :span="12">
+            <el-select multiple
+                       placeholder="请选择推送对象"
+                       v-model="form.pushConfig.pushIds"
+            >
+              <el-option
+                  v-for="item in allPushRules"
+                  :key="item.pushId"
+                  :label="item.name"
+                  :value=item.pushId*1
+              />
+            </el-select>
+          </el-col>
+        </el-row>
+      </div>
     </el-form-item>
 
 

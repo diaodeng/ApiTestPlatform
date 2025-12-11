@@ -329,13 +329,14 @@ class PosConfig:
 
         # 切换
         env_files = cls.read_pos_config().env_files
-        logger.info(f"开始备份文件")
+
         pos_config_data = cls.read_pos_config()
         if len(old_env.split("_")) <= 2:
             pos_config_data.backup_status = 2
             logger.info(f"环境位置不备份：{old_env}")
-
+        logger.info(f"当前备份状态：{pos_config_data.backup_status}")
         if pos_config_data.backup_status != 2:
+            logger.info(f"开始备份文件")
             pos_config_data.backup_status = 1
             cls.save_pos_config(pos_config_data)
             for file in env_files:
@@ -344,8 +345,9 @@ class PosConfig:
             pos_config_data.backup_status = 2
             cls.save_pos_config(pos_config_data)
 
-        logger.info(f"开始恢复原备份文件")
+
         if pos_config_data.backup_status == 2:
+            logger.info(f"开始恢复原备份文件")
             for file in env_files:
                 restore_pos_env_file(pos_dir, file, target_env_key)
 

@@ -21,6 +21,6 @@ export function delJobLog(jobLogId) {
 export function cleanJobLog() {
   return request({
     url: '/qtr/jobLog/clean',
-    method: 'delete'
+    method: 'post'
   })
 }

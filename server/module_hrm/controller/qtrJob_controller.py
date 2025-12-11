@@ -89,7 +89,9 @@ async def add_qtr_job(request: Request, add_job: JobModel, query_db: Session = D
 
 @qtrJobController.put("/job", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:edit'))])
 @log_decorator(title='定时任务管理', business_type=2)
-async def edit_qtr_job(request: Request, edit_job: EditJobModel, query_db: Session = Depends(get_db),
+async def edit_qtr_job(request: Request,
+                       edit_job: EditJobModel,
+                       query_db: Session = Depends(get_db),
                        current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
         edit_job.update_by = current_user.user.user_name
@@ -207,7 +209,8 @@ async def export_qtr_job_list(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@qtrJobController.get("/jobLog/list", response_model=PageResponseModel,
+@qtrJobController.get("/jobLog/list",
+                      response_model=PageResponseModel,
                       dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:list'))])
 async def get_qtr_job_log_list(request: Request,
                                job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_query),

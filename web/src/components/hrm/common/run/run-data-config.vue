@@ -15,18 +15,18 @@ const dialogVisible = ref(false);
 const caseDataDialog = ref(false);
 
 const dataTableRef = ref(null);
-const tipsContent = computed(()=>{
-  return runIds.value ? runIds.value.join(","): "";
+const tipsContent = computed(() => {
+  return runIds.value ? runIds.value.join(",") : "";
 });
 
-const dialogTitle = computed(()=>{
-  if(runType.value === RunTypeEnum.case){
+const dialogTitle = computed(() => {
+  if (runType.value === RunTypeEnum.case) {
     return "配置用例数据";
-  }else if (runType.value === RunTypeEnum.module){
+  } else if (runType.value === RunTypeEnum.module) {
     return "配置模块数据";
-  }else if(runType.value === RunTypeEnum.project){
+  } else if (runType.value === RunTypeEnum.project) {
     return "配置项目数据";
-  }else if(runType.value === RunTypeEnum.suite){
+  } else if (runType.value === RunTypeEnum.suite) {
     return "配置套件数据";
   }
   return ""
@@ -85,32 +85,29 @@ function dataChange() {
              :title="dialogTitle"
              width="90%"
              destroy-on-close>
-    <el-container style="display: flex;overflow-x: auto">
-      <template v-if="runType === RunTypeEnum.case">
-        <CaseTableQuery ref="dataTableRef" :checked-ids="runIds"></CaseTableQuery>
-      </template>
-      <template v-else-if="runType === RunTypeEnum.module">
-        <ModuleTableQuery ref="dataTableRef" :checked-ids="runIds"></ModuleTableQuery>
-      </template>
-      <template v-else-if="runType === RunTypeEnum.project">
-        <ProjectTableQuery ref="dataTableRef" :checked-ids="runIds"></ProjectTableQuery>
-      </template>
-      <template v-else-if="runType === RunTypeEnum.suite">
-        <SuiteTableQuery ref="dataTableRef" :checked-ids="runIds"></SuiteTableQuery>
-      </template>
-    </el-container>
+    <template v-if="runType === RunTypeEnum.case">
+      <CaseTableQuery ref="dataTableRef" :checked-ids="runIds"></CaseTableQuery>
+    </template>
+    <template v-else-if="runType === RunTypeEnum.module">
+      <ModuleTableQuery ref="dataTableRef" :checked-ids="runIds"></ModuleTableQuery>
+    </template>
+    <template v-else-if="runType === RunTypeEnum.project">
+      <ProjectTableQuery ref="dataTableRef" :checked-ids="runIds"></ProjectTableQuery>
+    </template>
+    <template v-else-if="runType === RunTypeEnum.suite">
+      <SuiteTableQuery ref="dataTableRef" :checked-ids="runIds"></SuiteTableQuery>
+    </template>
     <template #footer>
       <div class="dialog-footer">
         <el-button type="primary" @click="dataChange">确定</el-button>
       </div>
     </template>
-    <el-footer>
-
-    </el-footer>
   </el-dialog>
 
 </template>
 
 <style scoped lang="scss">
-
+:deep(.pagination-container){
+  position: relative !important;
+}
 </style>

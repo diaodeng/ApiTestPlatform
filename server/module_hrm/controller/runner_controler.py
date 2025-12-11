@@ -14,9 +14,11 @@ from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from module_hrm.dao.push_dao import PushDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import CaseModel, CaseRunModel
+from module_hrm.entity.vo.push_vo import PushModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel
 from module_hrm.service.debugtalk_service import DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler, ForwardRulesHandler
@@ -52,9 +54,11 @@ async def run_test(request: Request,
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
         logger.exception(e)
-        message_handler = MessageHandler(run_info)
-        if message_handler.can_push():
-            message_handler.feishu().push(f"[{current_user.user.user_name}]于{datetime.now()}开始的测试异常了")
+        if run_info.push and run_info.push_config.push_ids:
+            for push_id in run_info.push_config.push_ids:
+                push_config_data = PushDao.get(query_db, push_id)
+                message_handler = MessageHandler(PushModel.model_validate(push_config_data), {})
+                message_handler.push(f"[{current_user.user.user_name}]于{datetime.now()}开始的测试异常了")
         return ResponseUtil.error(msg=str(e))
 
 
