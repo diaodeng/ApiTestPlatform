@@ -17,6 +17,7 @@ from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.case_dao import CaseDao
 from module_hrm.dao.env_dao import EnvDao
+from module_hrm.dao.push_dao import PushDao
 from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.case_do import HrmCase
@@ -25,10 +26,12 @@ from module_hrm.entity.do.suite_do import QtrSuiteDetail, QtrSuite
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
+from module_hrm.entity.vo.push_vo import PushModel
 from module_hrm.entity.vo.report_vo import ReportCreatModel
 from module_hrm.entity.vo.run_detail_vo import HrmRunDetailModel
 from module_hrm.enums.enums import DataType, CaseRunStatus, CaseStatusEnum, RunTypeEnum, QtrDataStatusEnum
 from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkService
+from module_hrm.service.push_service import PushService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler
 from module_hrm.service.runner.case_runner import TestRunner
 from utils.common_util import CamelCaseUtil
@@ -314,11 +317,8 @@ async def run_by_async(run_info: CaseRunModel,
     start_time  =datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
             timezone(timedelta(hours=8)))
     report_id = None
+    report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        # query_db = SessionLocal()
-
-        report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
         report_data = ReportCreatModel(**{"reportName": report_name,
                                           "status": CaseRunStatus.running.value,
                                           })
@@ -345,30 +345,51 @@ async def run_by_async(run_info: CaseRunModel,
             report_info.success = success_count
             await run_in_threadpool(query_db.commit)
 
-        message_handler = MessageHandler(run_info)
-        if message_handler.can_push():
-            message_handler.feishu().push(
-                f"[{current_user.user.user_name}]于{report_data.start_at}开始执行的测试完成。"
-                f"\n总共：{total_count}条用例，成功：{success_count}条，失败：{total_count - success_count};"
-                f"\n报告：【{run_info.report_id}】{report_name}")
+            if run_info.push:
+                logger.debug("开始推送结果")
+
+                push_obj = {
+                    "user": current_user.user.user_name,
+                    "start_at": report_data.start_at,
+                    "total_count": total_count,
+                    "success_count": success_count,
+                    "failed_count": failed_count,
+                    "report_id": run_info.report_id,
+                    "report_name": report_name,
+                }
+
+                for push_id in run_info.push_config.push_ids:
+                    detail = PushDao.get(query_db, push_id)
+                    if detail:
+                        MessageHandler(PushModel.model_validate(detail), push_obj).push()
+                    else:
+                        logger.warning(f"用例执行成功，推送配置【{push_id}】不存在，不会推送消息")
         return f"执行成功，执行了{run_info.repeat_num}次，请前往报告查看"
     except Exception as e:
         logger.error(f"用例:{run_info.report_name}[{run_info.report_id}]执行失败，异常信息：{e}", exc_info=True)
-        if report_id:
+        if report_id:  # 如果报告创建成功则更新报告状态
             with SessionLocal() as query_db:
                 report_info = await ReportDao.get_by_id(query_db, report_id)
                 report_info.test_duration = time.time() - test_start_time
                 report_info.status = CaseRunStatus.failed.value
                 await run_in_threadpool(query_db.commit)
 
-        message_handler = MessageHandler(run_info)
-        if message_handler.can_push():
-            message_handler.feishu().push(
-                f"[{current_user.user.user_name}]于{start_time}执行的测试失败。"
-                f"\n异常信息：{e}")
+        if run_info.push:
+            for push_id in run_info.push_config.push_ids:
+                with SessionLocal() as query_db:
+                    detail = PushDao.get(query_db, push_id)
+                if detail:
+                    push_obj = {
+                        "user": current_user.user.user_name,
+                        "start_at": start_time,
+                        "report_id": run_info.report_id,
+                        "report_name": report_name,
+                    }
+                    MessageHandler(PushModel.model_validate(detail), push_obj).push()
+                else:
+                    logger.warning(f"用例执行失败，推送配置【{push_id}】不存在，不会推送消息")
     finally:
         pass
-        # query_db.close()
 
 
 def get_report_content(report_path):

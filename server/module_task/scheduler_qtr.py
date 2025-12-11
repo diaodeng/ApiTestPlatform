@@ -12,7 +12,8 @@ from utils.log_util import logger
 
 from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel, UserInfoModel
-from module_hrm.entity.vo.case_vo import CaseRunModel, FeishuRobotModel
+from module_hrm.entity.vo.case_vo import CaseRunModel
+from module_hrm.entity.vo.push_vo import FeishuRobotModel
 from module_hrm.service.runner.runner_service import run_by_async, run_test_in_background
 
 
@@ -69,29 +70,21 @@ def job_run_test(*args, **kwargs):
     }
     """
     logger.debug(f"定时任务调用了测试方法：{__name__}.{inspect.currentframe().f_back.f_code.co_name}")
+    logger.info(f"任务执行参数: {args}  {kwargs}")
     try:
         logger.info("测试任务执行开始")
-        in_data = kwargs
+        data = CaseRunModel(**kwargs)
         new_data_format = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         user_info_module = UserInfoModel()
-        user_info_module.user_name = in_data["userName"]
-        user_info_module.user_id = in_data["userId"]
-        user_info_module.dept_id = in_data.get("deptId", None)
+        user_info_module.user_name = data.user_name
+        user_info_module.user_id = data.runner
+        user_info_module.dept_id = data.dept_id
         user_info = user_info_module.model_dump(by_alias=True)
         logger.info(f"用户信息：{user_info}")
         user_module = CurrentUserModel(
             **{"permissions": [], "roles": [], "user": user_info})
 
-        data = CaseRunModel(env=1)
-        data.ids = in_data.get("ids", [])
-        data.run_type = in_data.get("runType", 1)
-        data.report_name = f'{in_data.get("reportName", "")}{new_data_format}'
-        data.log_level = in_data.get("logLevel", logging.INFO)
-        data.repeat_num = in_data.get("repeatNum", 1)
-        data.env = in_data["env"]
-        data.concurrent = in_data.get("concurrent", 1)
-        data.runner = in_data["userId"]
-        data.push = in_data.get("push", True)
+        data.report_name = f'{data.report_name}{new_data_format}'
 
         if kwargs.get("feishuRobot"):
             feishu_bot_config = FeishuRobotModel(**kwargs.get("feishuRobot"))

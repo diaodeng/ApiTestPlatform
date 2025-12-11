@@ -40,12 +40,9 @@ class JobService:
             result = dict(is_success=False, message='定时任务已存在')
         else:
             try:
-                job_kw = json.loads(page_object.job_kwargs)
-                job_kw["userName"] = user_info.user.user_name if not job_kw.get("userName", "") else job_kw[
-                    "userName"]
-                job_kw["userId"] = user_info.user.user_id if not job_kw.get("userId", "") else job_kw["userId"]
-                job_kw["deptId"] = user_info.user.dept_id if not job_kw.get("deptId", "") else job_kw["deptId"]
-                page_object.job_kwargs = json.dumps(job_kw)
+                page_object.job_kwargs.user_name =  page_object.job_kwargs.user_name or user_info.user.user_name
+                page_object.job_kwargs.runner = page_object.job_kwargs.runner or user_info.user.user_id
+                page_object.job_kwargs.dept_id = page_object.job_kwargs.dept_id or user_info.user.dept_id
 
                 JobDao.add_job_dao(query_db, page_object)
                 job_info = JobDao.get_job_detail_by_info(query_db, page_object)
@@ -72,15 +69,13 @@ class JobService:
 
         job_info = cls.job_detail_services(query_db, page_object.job_id)
         if job_info:
-            job_kw = json.loads(page_object.job_kwargs or "{}")
-            if not job_kw.get('userName') and not job_kw.get('userId'):
-                job_kw['userName'] = user_info.user.user_name
-                job_kw['userId'] = user_info.user.user_id
+            if not page_object.job_kwargs.user_name and not page_object.job_kwargs.runner:
+                page_object.job_kwargs.user_name = user_info.user.user_name
+                page_object.job_kwargs.runner = user_info.user.user_id
 
-            if not job_kw.get('deptId') and user_info.user.user_id == job_kw['userId'] :
-                job_kw['deptId'] = user_info.user.dept_id
+            if not page_object.job_kwargs.dept_id and user_info.user.user_id == page_object.job_kwargs.runner :
+                page_object.job_kwargs.dept_id = user_info.user.dept_id
 
-            page_object.job_kwargs = json.dumps(job_kw, ensure_ascii=False)
             edit_job = page_object.model_dump(exclude_unset=True)
 
             try:

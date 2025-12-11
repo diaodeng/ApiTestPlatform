@@ -54,7 +54,10 @@ class CommonDataModel(BaseModel):
     """
     通用数据模型（包含数据库对应的通用字段）
     """
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    model_config = ConfigDict(alias_generator=to_camel,
+                              from_attributes=True,
+                              populate_by_name=True
+                              )
     id: int | None = None
     dept_id: int | None = None
     create_by: Optional[str | Any] = None
