@@ -48,8 +48,10 @@ class JobModel(JobModelBase):
     def convert_address(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # values = CamelCaseUtil.transform_result(values)
         request_data = values.get('jobKwargs')
-        if isinstance(request_data, str):
+        if request_data and isinstance(request_data, str):
             values["jobKwargs"] = CaseRunModel(**json.loads(request_data))
+        elif not request_data:
+            values["jobKwargs"] = CaseRunModel()
 
         return values
 

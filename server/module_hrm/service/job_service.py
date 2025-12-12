@@ -1,5 +1,7 @@
 import json
 
+from loguru import logger
+
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.job_dao import *
 from module_admin.service.dict_service import Request, DictDataService
@@ -69,9 +71,9 @@ class JobService:
 
         job_info = cls.job_detail_services(query_db, page_object.job_id)
         if job_info:
-            if not page_object.job_kwargs.user_name and not page_object.job_kwargs.runner:
-                page_object.job_kwargs.user_name = user_info.user.user_name
-                page_object.job_kwargs.runner = user_info.user.user_id
+            if page_object.job_kwargs:
+                page_object.job_kwargs.user_name = page_object.job_kwargs.user_name or user_info.user.user_name
+                page_object.job_kwargs.runner = page_object.job_kwargs.runner or user_info.user.user_id
 
             if not page_object.job_kwargs.dept_id and user_info.user.user_id == page_object.job_kwargs.runner :
                 page_object.job_kwargs.dept_id = user_info.user.dept_id
@@ -95,6 +97,28 @@ class JobService:
             result = dict(is_success=False, message='定时任务不存在')
 
         return CrudResponseModel(**result)
+
+
+    @classmethod
+    def change_status(cls, query_db: Session, page_object: EditJobModel):
+        job_info = cls.job_detail_services(query_db, page_object.job_id)
+        if job_info:
+            edit_job = page_object.model_dump(exclude_unset=True)
+            edit_job.pop("job_kwargs")
+            try:
+                JobDao.edit_job_dao(query_db, edit_job)
+                query_job = QtrSchedulerUtil.get_scheduler_job(job_id=edit_job.get('job_id'))
+                if query_job:
+                    QtrSchedulerUtil.remove_scheduler_job(job_id=edit_job.get('job_id'))
+                if edit_job.get('status') == '0':
+                    job_info = cls.job_detail_services(query_db, edit_job.get('job_id'))
+                    QtrSchedulerUtil.add_scheduler_job(job_info=job_info)
+                query_db.commit()
+            except Exception as e:
+                query_db.rollback()
+                raise e
+        else:
+            logger.warning(f"定时任务不存在:{page_object.job_id}")
 
     @classmethod
     def execute_job_once_services(cls, query_db: Session, page_object: JobModel):
