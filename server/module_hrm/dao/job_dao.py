@@ -106,6 +106,28 @@ class JobDao:
             .update(job)
 
     @classmethod
+    def change_run_status(cls, db: Session, job_id: int, run_status: str):
+        """
+        编辑定时任务数据库操作
+        :param db: orm对象
+        :param job: 需要更新的定时任务字典
+        :return:
+        """
+        db.query(QtrJob) \
+            .filter(QtrJob.job_id == job_id) \
+            .update({'run_status': run_status})
+
+    @classmethod
+    def change_status(cls, db: Session, job_id, status):
+        db.query(QtrJob) \
+            .filter(QtrJob.job_id == job_id) .update({'status': status})
+
+    @classmethod
+    def change_run_status(cls, db: Session, job_id, run_status):
+        db.query(QtrJob) \
+            .filter(QtrJob.job_id == job_id).update({'run_status': run_status})
+
+    @classmethod
     def delete_job_dao(cls, db: Session, job: JobModel):
         """
         删除定时任务数据库操作

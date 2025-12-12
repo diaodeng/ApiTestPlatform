@@ -184,6 +184,7 @@ class CaseInfoToRun(object):
 
     def __ensure_env_obj(self, env) -> EnvModelForApi:
         if not env:
+            return EnvModelForApi()
             raise AttributeError("请选择执行环境")
         if isinstance(env, (str, int)):
             env = EnvModelForApi(**CamelCaseUtil.transform_result(EnvDao.get_env_by_id(self.query_db, env)))
@@ -254,14 +255,13 @@ class CaseInfoToRun(object):
 
     def run_data(self) -> TestCase:
         """
-        这里会创建目录和保存case数据为文件
+        把数据转换成可以执行的用例数据
         """
-        # self._ensure_case_dir()
-
         env_varables = []
         # 获取环境变量
-        for env_group in self.env_obj.env_config.variables:
-            update_or_extend_list(env_varables, env_group.get("value", []))
+        if self.env_obj and self.env_obj.env_config and self.env_obj.env_config.variables:
+            for env_group in self.env_obj.env_config.variables:
+                update_or_extend_list(env_varables, env_group.get("value", []))
 
         include_config_obj = self.__include_handle()
 

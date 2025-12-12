@@ -47,7 +47,7 @@
             plain
             icon="Plus"
             @click="handleAdd"
-            v-hasPermi="['qtr:forwardPush:add']"
+            v-hasPermi="['hrm:push:add']"
         >新增
         </el-button>
       </el-col>
@@ -58,7 +58,7 @@
             icon="Delete"
             :disabled="multiple"
             @click="handleDelete"
-            v-hasPermi="['qtr:forwardPush:remove']"
+            v-hasPermi="['hrm:push:delete']"
         >删除
         </el-button>
       </el-col>
@@ -97,10 +97,10 @@
       <el-table-column label="操作" width="170" align="center" class-name="small-padding fixed-width" fixed="right">
         <template #default="scope">
           <el-button link type="warning" icon="Edit" :loading="loading.edite" @click="handleUpdate(scope.row)"
-                     v-hasPermi="['qtr:forwardPush:edit']" title="编辑">
+                     v-hasPermi="['hrm:push:edite']" title="编辑">
           </el-button>
           <el-button link type="danger" icon="Delete" @click="handleDelete(scope.row)"
-                     v-hasPermi="['qtr:forwardPush:remove']" title="删除">
+                     v-hasPermi="['hrm:push:delete']" title="删除">
           </el-button>
         </template>
       </el-table-column>

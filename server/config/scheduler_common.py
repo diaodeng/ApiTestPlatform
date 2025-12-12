@@ -231,11 +231,16 @@ class SchedulerUtil:
             if hasJob:
                 logger.info("已经存在相同的job")
                 return
+            kw = None
+            if isinstance(job_info.job_kwargs, str):
+                kw = json.loads(job_info.job_kwargs) if job_info.job_kwargs else {}
+            else:
+                kw = job_info.job_kwargs.model_dump()  if job_info.job_kwargs else {}
             self.scheduler.add_job(
                 func=eval(job_info.invoke_target),
                 trigger=self.cron_trigger_from_crontab(job_info.cron_expression),
                 args=job_info.job_args.split(',') if job_info.job_args else None,
-                kwargs=job_info.job_kwargs.model_dump(),
+                kwargs=kw,
                 id=str(job_info.job_id),
                 name=job_info.job_name,
                 misfire_grace_time=1000000000000 if job_info.misfire_policy == '3' else None,
@@ -259,6 +264,7 @@ class SchedulerUtil:
         """
         # if not self.acquire_lock():return
         try:
+            print(job_info.job_kwargs)
             self.scheduler.add_job(
                 func=eval(job_info.invoke_target),
                 trigger='date',

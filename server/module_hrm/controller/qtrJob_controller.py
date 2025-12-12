@@ -108,7 +108,7 @@ async def edit_qtr_job(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@qtrJobController.put("/job/changeStatus", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:changeStatus'))])
+@qtrJobController.put("/job/changeStatus", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:edit'))])
 @log_decorator(title='定时任务管理', business_type=2)
 async def change_status_qtr_job(request: Request, edit_job: EditJobModel, query_db: Session = Depends(get_db),
                                 current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
@@ -119,19 +119,16 @@ async def change_status_qtr_job(request: Request, edit_job: EditJobModel, query_
         job_info.job_id = edit_job.job_id
         job_info.update_by = current_user.user.user_name
         job_info.update_time = datetime.now()
-        edit_job_result = JobService.edit_job_services(query_db, job_info, current_user)
-        if edit_job_result.is_success:
-            logger.info(edit_job_result.message)
-            return ResponseUtil.success(msg=edit_job_result.message)
-        else:
-            logger.warning(edit_job_result.message)
-            return ResponseUtil.failure(msg=edit_job_result.message)
+        JobService.change_status(query_db, job_info)
+
+        return ResponseUtil.success(msg="JOB状态修改成功")
+
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
 
-@qtrJobController.put("/job/run", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:changeStatus'))])
+@qtrJobController.put("/job/run", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:run'))])
 @log_decorator(title='定时任务管理', business_type=2)
 async def execute_qtr_job(request: Request, execute_job: JobModel, query_db: Session = Depends(get_db)):
     try:

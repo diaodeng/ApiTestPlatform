@@ -45,13 +45,8 @@ class QtrSchedulerUtil(SchedulerUtil):
 
             session = SessionLocal()
 
-            job_info = EditJobModel()
-            job_info.run_status = run_status
-            job_info.job_id = event.job_id
             logger.debug(f"任务【{event.job_id}】,status:{run_status}")
-            # JobService.edit_job_services(session, job_info)
-            JobDao.edit_job_dao(session, job_info.model_dump(exclude_unset=True))
-            session.commit()
+            JobDao.change_run_status(session, event.job_id, run_status)
 
             status = '0'
             exception_info = f"【{message}】"
@@ -97,8 +92,8 @@ class QtrSchedulerUtil(SchedulerUtil):
                 JobLogService.add_job_log_services(session, job_log)
 
         except Exception as e:
+            logger.error(f"任务回调异常了哦：{event.code}")
             logger.exception(e)
-            logger.error(f"任务回到异常了哦：{event.code}")
         finally:
             try:
                 session.close()

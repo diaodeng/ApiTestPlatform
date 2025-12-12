@@ -138,7 +138,7 @@
           </el-tooltip>
           <el-tooltip content="执行一次" placement="top">
             <el-button link type="primary" icon="CaretRight" @click="handleRun(scope.row)"
-                       v-hasPermi="['qtr:job:changeStatus']"></el-button>
+                       v-hasPermi="['qtr:job:run']"></el-button>
           </el-tooltip>
           <el-tooltip content="任务详细" placement="top">
             <el-button link type="primary" icon="View" @click="handleView(scope.row)"

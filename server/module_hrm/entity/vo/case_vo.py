@@ -120,7 +120,7 @@ class CaseRunModel(BaseModel):
     is_async: Optional[bool] = False  # 本次执行同步或异步
     log_level: Optional[int] = logging.INFO  # 日志级别
     repeat_num: int = 1  # 用例重复执行次数
-    env: int = None  # 环境id
+    env: int|None = None  # 环境id
     concurrent: int = 1  # 并发数(同时执行的用例数)
     run_by_sort: Optional[bool] = False
     case_data: Optional[CaseModel | dict | None] = None  # 用例数据

@@ -112,14 +112,6 @@ async def run_by_single(case_data,
             case_res_datas = await runner.start()
     return case_res_datas
 
-    # all_result = []
-    # for case_res_data in case_res_datas:
-        # all_result.append(case_res_data)
-        # await save_run_detail(query_db, case_res_data, run_info)
-        # await run_in_threadpool(save_run_detail, query_db, case_res_data, run_info)
-
-    # return all_result
-
 
 async def run_by_batch(run_info: CaseRunModel,
                        user=None
@@ -190,8 +182,7 @@ async def run_by_batch(run_info: CaseRunModel,
         else:
             await get_case_data(query_db, all_cases, run_info.run_type, run_info.ids)
         env_orm = await run_in_threadpool(EnvDao.get_env_by_id, query_db, run_info.env)
-    env_data = CamelCaseUtil.transform_result(env_orm)
-    env_obj = EnvModel.from_orm(env_data)
+    env_obj = EnvModel.model_validate(env_orm)
 
     try:
         limit = httpx.Limits(max_connections=100, max_keepalive_connections=50)
@@ -350,7 +341,7 @@ async def run_by_async(run_info: CaseRunModel,
 
                 push_obj = {
                     "user": current_user.user.user_name,
-                    "start_at": report_data.start_at,
+                    "start_at": report_data.start_at.strftime("%Y-%m-%d %H:%M:%S"),
                     "total_count": total_count,
                     "success_count": success_count,
                     "failed_count": failed_count,
@@ -381,7 +372,7 @@ async def run_by_async(run_info: CaseRunModel,
                 if detail:
                     push_obj = {
                         "user": current_user.user.user_name,
-                        "start_at": start_time,
+                        "start_at": start_time.strftime("%Y-%m-%d %H:%M:%S"),
                         "report_id": run_info.report_id,
                         "report_name": report_name,
                     }

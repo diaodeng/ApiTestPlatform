@@ -21,7 +21,10 @@ class EnvModel(CommonDataModel):
     """
     环境表对应pydantic模型
     """
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    model_config = ConfigDict(alias_generator=to_camel,
+                              from_attributes=True,
+                              populate_by_name=True
+                              )
 
     env_id: Optional[int] = None
     env_name: Optional[str] = None

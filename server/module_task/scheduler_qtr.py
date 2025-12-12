@@ -50,31 +50,14 @@ def test_error2(*args, **kwargs):
 def job_run_test(*args, **kwargs):
     """
     执行测试任务
-    参数
-     {
-      "userName": "panda", # 用户名
-      "userId": 4, # 用户ID
-      "ids": [], # 数据id
-      "runType": 1, # RunTypeEnum
-      "reportName": "定时执行", # 报告名称，可选
-      "repeatNum": 1, # 重复执行次数， 默认1
-      "env": 20, # 环境ID。必填
-      "concurrent": 1, # 并发数，默认1
-      "feishuRobot": {
-            "url": "51946e38-bf5d-40ee-9142-c97b55b67b1d",  # 飞书机器人token（url的最后一节）
-            "keywords": [], # 关键字
-            "secret": "openwrt-312209",
-            "atUserId": [],
-            "push": true # 是否推送，默认false
-        }
-    }
+    参数CaseRunModel
     """
     logger.debug(f"定时任务调用了测试方法：{__name__}.{inspect.currentframe().f_back.f_code.co_name}")
-    logger.info(f"任务执行参数: {args}  {kwargs}")
+    logger.debug(f"任务执行参数: {args}  {kwargs}")
     try:
         logger.info("测试任务执行开始")
         data = CaseRunModel(**kwargs)
-        new_data_format = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        new_data_format = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         user_info_module = UserInfoModel()
         user_info_module.user_name = data.user_name
         user_info_module.user_id = data.runner
@@ -95,7 +78,6 @@ def job_run_test(*args, **kwargs):
 
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
-        # with SessionLocal() as db_session:
         task = asyncio.ensure_future(run_by_async(data, user_module))
         new_loop.run_until_complete(task)
         new_loop.stop()

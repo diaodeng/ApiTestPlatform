@@ -4,6 +4,7 @@ import re
 from typing import Any, Callable, Dict, List, Set, Text
 from urllib.parse import urlparse
 
+from module_hrm.exceptions import VariableNotFound
 from utils.log_util import logger
 
 from module_hrm import exceptions
@@ -361,7 +362,7 @@ def parse_string(
                 parsed_kwargs = parse_data(kwargs, variables_mapping, functions_mapping)
             except (exceptions.VariableNotFound, exceptions.FunctionNotFound) as ef:
                 if not_found_exception:
-                    raise ef
+                    raise VariableNotFound("变量或者方法匹配失败", ef) from ef
                 else:
                     func_eval_value = raw_string[func_match.start():func_match.end()]
             else:
@@ -395,7 +396,7 @@ def parse_string(
                 var_value = get_mapping_variable(var_name, variables_mapping)
             except exceptions.VariableNotFound as ex:
                 if not_found_exception:
-                    raise ex
+                    raise VariableNotFound("变量匹配失败", ex) from ex
                 else:
                     var_value = raw_string[var_match.start():var_match.end()]
 

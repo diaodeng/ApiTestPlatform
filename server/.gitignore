@@ -18,6 +18,7 @@ temp_test
 app
 .vscode
 
+pricetag_test.py
 package.json
 package-lock.json
 test_file.py

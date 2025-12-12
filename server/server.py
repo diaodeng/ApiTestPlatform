@@ -1,3 +1,4 @@
+import traceback
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -51,20 +52,24 @@ from utils.common_util import worship
 # 生命周期事件
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"{AppConfig.app_name}开始启动")
-    worship()
-    await init_create_table()
-    app.state.redis = await RedisUtil.create_redis_pool()
-    await RedisUtil.init_sys_dict(app.state.redis)
-    await RedisUtil.init_sys_config(app.state.redis)
-    await SysSchedulerUtil.init_system_scheduler()
-    await QtrSchedulerUtil.init_qtr_scheduler()
-    await startup_handler()
-    logger.info(f"{AppConfig.app_name}启动成功")
-    yield
-    await SysSchedulerUtil.close_scheduler()
-    await QtrSchedulerUtil.close_scheduler()
-    await RedisUtil.close_redis_pool(app)
+    try:
+        logger.info(f"{AppConfig.app_name}开始启动")
+        worship()
+        await init_create_table()
+        app.state.redis = await RedisUtil.create_redis_pool()
+        await RedisUtil.init_sys_dict(app.state.redis)
+        await RedisUtil.init_sys_config(app.state.redis)
+        await SysSchedulerUtil.init_system_scheduler()
+        await QtrSchedulerUtil.init_qtr_scheduler()
+        await startup_handler()
+        logger.info(f"{AppConfig.app_name}启动成功")
+        yield
+        await SysSchedulerUtil.close_scheduler()
+        await QtrSchedulerUtil.close_scheduler()
+        await RedisUtil.close_redis_pool(app)
+    except Exception:
+        err = traceback.format_exc()
+        print("应用有异常", err)
 
 
 # 初始化FastAPI对象

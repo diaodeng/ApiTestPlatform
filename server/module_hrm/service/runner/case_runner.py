@@ -5,6 +5,7 @@ import logging
 import re
 import threading
 import time
+import traceback
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from typing import Callable
@@ -261,11 +262,14 @@ class CaseRunner(object):
 
                 log_content = self.handler.get_log()
                 step_data.result.logs.after_response += log_content
-
                 if not isinstance(e, AssertionError):
                     self.logger.error(f"测试步骤【{step.name}】执行失败")
                     self.logger.exception(e)
-                step_data.result.logs.error += self.handler.get_log()
+                    log_content = self.handler.get_log()
+                    step_data.result.logs.after_response += log_content
+
+                    log_content += traceback.format_exc()
+                    step_data.result.logs.error += log_content
 
             finally:
                 new_steps.append(step_data)
@@ -1026,7 +1030,6 @@ class TestRunner(object):
         except Exception as e:
             self.logger.reset()
             logger.error(f"测试用例执行失败：{e}")
-            logger.exception(e)
             raise TestFailError(f"测试用例执行失败: {e}", original_exception=e)
 
 
