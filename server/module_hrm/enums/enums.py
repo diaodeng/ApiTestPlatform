@@ -5,6 +5,15 @@ class PushTypeEnum(Enum):
     feishu_application = 2
     email = 3
 
+class PushReminderEnum(Enum):
+    no_reminder = 1  # 不提醒
+    reminder_all = 2  # @提醒所有人
+
+class AllowPushEnum(Enum):
+    not_push = 0  # 不通知
+    always_push = 1  # 始终通知
+    only_failed = 2  # 仅失败通知
+
 class PageType(Enum):
     case = 1
     api = 2

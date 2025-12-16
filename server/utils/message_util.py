@@ -3,7 +3,7 @@ from functools import wraps
 
 import requests
 
-from module_hrm.enums.enums import PushTypeEnum
+from module_hrm.enums.enums import PushTypeEnum, PushReminderEnum
 from config.env import FeishuBotConfig
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.push_vo import FeishuRobotModel, PushModel
@@ -42,7 +42,8 @@ class FeiShuHandler:
             for user_id in self.config.at_user_id:
                 at_info += f"<at id={user_id}>所有人</at> "
         else:
-            at_info = "<at id=all>所有人</at>"
+            if self.config.at_reminder == PushReminderEnum.reminder_all.value:
+                at_info = "<at id=all>所有人</at>"
 
         param = {
             "msg_type": "interactive",
@@ -151,9 +152,10 @@ class MessageHandler:
     def _push_content_parse(self, content):
         return parse_string(content or self.default_test_push_temp, self.push_obj, {}, False)
 
-    def push(self, content=None):
+    def push(self, content=None, at_reminder: int = None):
         if self.push_info.type == PushTypeEnum.feishu_bot.value:
             feishu_push_config = FeishuRobotModel(**self.push_info.config_content or {})
+            feishu_push_config.at_reminder = at_reminder
             FeiShuHandler(feishu_push_config).push(
                 self._push_content_parse(content) if content else self._push_content_parse(feishu_push_config.content)
             )

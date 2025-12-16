@@ -233,8 +233,9 @@ export const initRunConfig = {
     isAsync: false,
     repeatNum: 1,
     concurrent: 1,
-    push: false,
+    push: 0,
     pushConfig: {
+        atReminderConfig: 1,
         allow_push: false,
         pushIds:[]
     },
