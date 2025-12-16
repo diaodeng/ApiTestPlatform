@@ -20,6 +20,7 @@ from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import CaseModel, CaseRunModel
 from module_hrm.entity.vo.push_vo import PushModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel
+from module_hrm.enums.enums import AllowPushEnum
 from module_hrm.service.debugtalk_service import DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler, ForwardRulesHandler
 from module_hrm.service.runner.case_runner import TestRunner
@@ -54,7 +55,7 @@ async def run_test(request: Request,
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
         logger.exception(e)
-        if run_info.push and run_info.push_config.push_ids:
+        if run_info.push != AllowPushEnum.not_push.value and run_info.push_config.push_ids:
             for push_id in run_info.push_config.push_ids:
                 push_config_data = PushDao.get(query_db, push_id)
                 message_handler = MessageHandler(PushModel.model_validate(push_config_data), {})

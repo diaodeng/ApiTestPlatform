@@ -140,9 +140,16 @@ const runConfigRules = ref({
       <el-checkbox v-model="form.runBySort"></el-checkbox>
     </el-form-item>
     <el-form-item label="结果通知">
-      <div style="display: flex;flex-direction: row;flex-grow: 1">
-        <el-checkbox v-model="form.push" style="margin-right: 20px"></el-checkbox>
-        <el-row style="flex-grow: 1" :gutter="10">
+      <div style="display: flex;flex-direction: column;flex-grow: 1">
+        <el-row>
+          <el-radio-group v-model="form.push">
+          <el-radio :value="0">不通知</el-radio>
+          <el-radio :value="1">始终通知</el-radio>
+          <el-radio :value="2">仅失败通知</el-radio>
+        </el-radio-group>
+        </el-row>
+        <!--        <el-checkbox v-model="form.push" style="margin-right: 20px"></el-checkbox>-->
+        <el-row style="flex-grow: 1" :gutter="10" v-if="form.push !== 0">
           <el-col :span="12">
             <el-select multiple
                        placeholder="请选择推送对象"
@@ -155,7 +162,12 @@ const runConfigRules = ref({
                   :value=item.pushId*1
               />
             </el-select>
+            <el-radio-group v-model="form.pushConfig.atReminderConfig">
+              <el-radio :value="1">不@提醒</el-radio>
+              <el-radio :value="2">@提醒所有人</el-radio>
+            </el-radio-group>
           </el-col>
+
         </el-row>
       </div>
     </el-form-item>

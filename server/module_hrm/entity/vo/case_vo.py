@@ -11,7 +11,7 @@ from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from module_hrm.entity.vo.push_vo import FeishuRobotModel
-from module_hrm.enums.enums import RunTypeEnum, DataType, UrlContentEnum
+from module_hrm.enums.enums import RunTypeEnum, DataType, UrlContentEnum, PushReminderEnum, AllowPushEnum
 from utils.common_util import CamelCaseUtil
 
 
@@ -98,8 +98,9 @@ class RunCasePushInfoModel(BaseModel):
                               arbitrary_types_allowed=True,
                               populate_by_name=True
                               )
+    at_reminder_config: int = Field(default_factory=lambda: PushReminderEnum.no_reminder.value)
     push_ids: list[int|str] = Field(default_factory=lambda: [])
-    allow_push: bool = False
+    allow_push: int = AllowPushEnum.not_push.value
 
 
 class CaseRunModel(BaseModel):
@@ -129,7 +130,7 @@ class CaseRunModel(BaseModel):
 
     forward_config: Optional[ForwardConfigModel] = ForwardConfigModel()
 
-    push: bool = False
+    push: int = AllowPushEnum.not_push.value
     push_config: Optional[RunCasePushInfoModel] = RunCasePushInfoModel()
     feishu_robot: Optional[FeishuRobotModel] = FeishuRobotModel()
 

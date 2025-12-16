@@ -7,6 +7,7 @@ from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.common_vo import CommonDataModel
+from module_hrm.enums.enums import PushReminderEnum
 from utils.common_util import CamelCaseUtil
 
 
@@ -20,6 +21,7 @@ class FeishuRobotModel(BaseModel):
     keywords: Optional[list] = Field(default_factory=lambda: [])
     at_user_id: Optional[list] = Field(default_factory=lambda: [])
     push: bool = False
+    at_reminder: int = Field(default_factory=lambda: PushReminderEnum.no_reminder.value)
 
 class AllPushModel(CommonDataModel):
     """
