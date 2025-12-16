@@ -39,6 +39,7 @@ from module_hrm.controller.forward_rules_controller import forwardRulesControlle
 from module_hrm.controller.test_controller import mockController
 from module_hrm.controller.agent_controller import agentController as agentManagerController
 from module_hrm.controller.push_controller import pushController
+from module_hrm.controller.tools_controller import toolsController
 # from module_hrm.controller.celery_controller import celeryController
 
 from config.env import AppConfig
@@ -124,6 +125,7 @@ controller_list = [
     {'router': forwardRulesController, 'tags': ['QTR-转发规则管理']},
     {'router': agentManagerController, 'tags': ['QTR-agent后台管理']},
     {'router': pushController, 'tags': ['推送配置管理']},
+    {'router': toolsController, 'tags': ['工具']},
     # {'router': celeryController, 'tags': ['celery']},
 ]
 
