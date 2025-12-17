@@ -27,7 +27,7 @@ from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
 from module_hrm.entity.vo.push_vo import PushModel
-from module_hrm.entity.vo.report_vo import ReportCreatModel
+from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportListModel
 from module_hrm.entity.vo.run_detail_vo import HrmRunDetailModel
 from module_hrm.enums.enums import DataType, CaseRunStatus, CaseStatusEnum, RunTypeEnum, QtrDataStatusEnum, \
     AllowPushEnum
@@ -37,7 +37,7 @@ from module_hrm.service.runner.case_data_handler import CaseInfoHandle, Paramete
 from module_hrm.service.runner.case_runner import TestRunner
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
-from utils.message_util import MessageHandler
+from utils.message_util import MessageHandler, TestResultPushHandler
 
 logger.info(f"平台信息：{platform.platform()}")
 if "WSL" in str(platform.platform()):
@@ -337,28 +337,9 @@ async def run_by_async(run_info: CaseRunModel,
             report_info.success = success_count
             await run_in_threadpool(query_db.commit)
 
-            if run_info.push != AllowPushEnum.not_push.value and (
-                    run_info.push == AllowPushEnum.always_push.value or
-                    (run_info.push == AllowPushEnum.only_failed.value and report_info.status == CaseRunStatus.failed.value)
-            ):
-                logger.debug("开始推送结果")
+            logger.debug("开始推送结果")
 
-                push_obj = {
-                    "user": current_user.user.user_name,
-                    "start_at": report_data.start_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "total_count": total_count,
-                    "success_count": success_count,
-                    "failed_count": failed_count,
-                    "report_id": run_info.report_id,
-                    "report_name": report_name,
-                }
-
-                for push_id in run_info.push_config.push_ids:
-                    detail = PushDao.get(query_db, push_id)
-                    if detail:
-                        MessageHandler(PushModel.model_validate(detail), push_obj).push(at_reminder=run_info.push_config.at_reminder_config)
-                    else:
-                        logger.warning(f"用例执行成功，推送配置【{push_id}】不存在，不会推送消息")
+            TestResultPushHandler(run_info, report_info).push()
         return f"执行成功，执行了{run_info.repeat_num}次，请前往报告查看"
     except Exception as e:
         logger.error(f"用例:{run_info.report_name}[{run_info.report_id}]执行失败，异常信息：{e}", exc_info=True)
@@ -368,21 +349,13 @@ async def run_by_async(run_info: CaseRunModel,
                 report_info.test_duration = time.time() - test_start_time
                 report_info.status = CaseRunStatus.failed.value
                 await run_in_threadpool(query_db.commit)
+        else:
+            report_info = ReportListModel()
+            report_info.status = CaseRunStatus.failed.value
+            report_info.report_name = report_name
+            report_info.start_at = start_time
+        TestResultPushHandler(run_info, report_info).push()
 
-        if run_info.push != AllowPushEnum.not_push.value:
-            for push_id in run_info.push_config.push_ids:
-                with SessionLocal() as query_db:
-                    detail = PushDao.get(query_db, push_id)
-                if detail:
-                    push_obj = {
-                        "user": current_user.user.user_name,
-                        "start_at": start_time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "report_id": run_info.report_id,
-                        "report_name": report_name,
-                    }
-                    MessageHandler(PushModel.model_validate(detail), push_obj).push(at_reminder=run_info.push_config.at_reminder_config)
-                else:
-                    logger.warning(f"用例执行失败，推送配置【{push_id}】不存在，不会推送消息")
     finally:
         pass
 
