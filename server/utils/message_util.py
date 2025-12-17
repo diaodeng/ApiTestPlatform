@@ -135,7 +135,11 @@ class FeiShuHandler:
             headers = {"content_type": "application/json"}
             json_str = self.content_text(content)
             logger.info("飞书机器人发送的内容：{}".format(json_str))
-            res = requests.post(url="https://open.feishu.cn/open-apis/bot/v2/hook/{}".format(self._token),
+            if self._token.startswith("https:"):
+                url = self._token
+            else:
+                url = "https://open.feishu.cn/open-apis/bot/v2/hook/{}".format(self._token)
+            res = requests.post(url=url,
                                 headers=headers,
                                 data=json.dumps(json_str),
                                 verify=False)
