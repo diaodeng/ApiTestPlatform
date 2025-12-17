@@ -22,7 +22,7 @@ class ReportListModel(CommonDataModel):
 
 
 @as_query
-class ReportQueryModel(QueryModel, ReportListModel):
+class  ReportQueryModel(QueryModel, ReportListModel):
     """
     报告查询模型
     """
