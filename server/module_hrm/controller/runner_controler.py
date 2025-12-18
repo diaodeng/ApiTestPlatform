@@ -58,6 +58,7 @@ async def run_test(request: Request,
         logger.exception(e)
         report_info = ReportListModel()
         report_info.status = CaseRunStatus.failed.value
+        report_info.create_by = current_user.user.user_name
         TestResultPushHandler(run_info, report_info).push(
             f"【{current_user.user.user_name}】于{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}开始的测试【{run_info.report_name}】失败了!\n{e}")
         return ResponseUtil.error(msg=str(e))

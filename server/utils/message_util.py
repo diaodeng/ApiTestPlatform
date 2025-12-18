@@ -181,7 +181,7 @@ class TestResultPushHandler:
         self.run_info = run_info
         self.report_info = report_info
         self.push_obj = {
-            "user": user_name,
+            "user": report_info.create_by,
             "start_at": self.report_info.start_at.strftime("%Y-%m-%d %H:%M:%S") if self.report_info.start_at else None,
             "total_count": self.report_info.total,
             "success_count": self.report_info.success,
