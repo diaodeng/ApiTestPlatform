@@ -354,6 +354,7 @@ async def run_by_async(run_info: CaseRunModel,
             report_info.status = CaseRunStatus.failed.value
             report_info.report_name = report_name
             report_info.start_at = start_time
+            report_info.create_by = current_user.user.user_name
         TestResultPushHandler(run_info, report_info).push()
 
     finally:
