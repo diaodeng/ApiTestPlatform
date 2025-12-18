@@ -69,7 +69,7 @@ async def main(page: ft.Page):
     #         )
     #     ],
     # )
-    sys_show_view = ft.Text("正在获取信息...")
+    sys_show_view = ft.Text("正在获取信息...", selectable=True)
 
     # 加载菜单及应用资源
     nav_menu = NavigationMenu(ft, page, log, **config)
