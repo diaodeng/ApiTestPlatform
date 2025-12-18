@@ -626,7 +626,7 @@ class PosHandler:
             bgcolor=ft.Colors.WHITE,
             content=ft.Row(
                 controls=[
-                    ft.Text(pos_path, expand=True),
+                    ft.Text(pos_path, expand=True, selectable=True),
                     ft.Text("商家", key="vendor", bgcolor=ft.Colors.YELLOW_50),
                     ft.Text("门店", key="store", bgcolor=ft.Colors.YELLOW_100),
                     ft.Text("环境", key="env", bgcolor=ft.Colors.YELLOW_200),
