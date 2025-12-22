@@ -458,6 +458,7 @@ class RequestRunner(object):
             # 处理json变量，如果整体都是变量直接替换后再json.loads会报错
             old_json = self.step_data.request.req_json
             if old_json and isinstance(old_json, str):
+                self.logger.debug(f"self.step_data.request.req_json： {old_json}")
                 self.step_data.request.req_json = json.loads(old_json)
         self.logger.debug("替换请求信息中的变量替换完成")
 
