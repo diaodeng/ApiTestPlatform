@@ -593,7 +593,7 @@ class ConditionMatcher:
             return self.request.headers.get(key)
         elif source == 'path':
             # 路径参数处理（如 /users/<id>）
-            return self.request.path_params.get(key)
+            return self.request.path_params.get("mock_path")
         elif source == 'body':
             try:
                 if hasattr(self.request, "body_data"):
