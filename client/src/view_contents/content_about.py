@@ -54,6 +54,8 @@ class About(object):
             logger.info(f"has_new: {has_new}")
             if has_new:
                 check_info = f"当前版本：{VERSION}  新版本：{has_new}"
+            else:
+                check_info = f"当前版本：{VERSION}，已经是最新版本"
         except Exception as ex:
             logger.exception(ex)
             check_info = f"检查新版本异常：{str(ex)}"
@@ -84,9 +86,10 @@ class About(object):
                 UiUtil.show_snackbar_success(e.control.page, f"当前版本{VERSION}已经是最新版本")
                 return
 
-            await perform_update_with_powershell(self.show_load_process)
-            e.control.page.window.prevent_close = False
-            e.control.page.window.close()
+            update_success = await perform_update_with_powershell(self.show_load_process)
+            if update_success:
+                e.control.page.window.prevent_close = False
+                e.control.page.window.close()
             # sys.exit(0)
         except Exception as ex:
             logger.exception(ex)
