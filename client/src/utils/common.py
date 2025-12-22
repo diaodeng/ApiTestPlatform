@@ -420,7 +420,7 @@ async def check_app_has_new() -> tuple[bool|str, str]:
         return False, str(e)
 
 
-async def download_new_app(download_process_call=None) -> str|None:
+async def download_new_app(download_process_call=None, force: bool=False) -> str|None:
     logger.info(f"开始下载新包")
     try:
         new_url = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
@@ -430,7 +430,7 @@ async def download_new_app(download_process_call=None) -> str|None:
             if not data:
                 return None
             new_version = data[0]['tag_name']
-            if VERSION < new_version:
+            if force or VERSION < new_version:
                 exe_url = ""
                 zip_url = ""
                 for item in data[0]["assets"]:
@@ -672,7 +672,7 @@ async def perform_update_with_powershell(download_process_call=None):
     logger.info(f"current_exe: {current_exe}")
 
     # 下载新版本
-    new_app_path = await download_new_app(download_process_call)
+    new_app_path = await download_new_app(download_process_call, force=True)
     if not new_app_path:
         return False
     new_app_path = os.path.abspath(new_app_path)
