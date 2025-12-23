@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: fastapi-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=dev
+      - REDIS_URL=redis://redis:6379/0
+      - DB_URL=mysql://user:pwd@db:3306/app
+    depends_on:
+      - redis
+      - db
+    restart: always
+
+  worker:
+    build: .
+    container_name: celery-worker
+    command: celery -A worker.celery_app worker -l info --concurrency=4
+    environment:
+      - ENV=dev
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: always
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  db:
+    image: mysql:8
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: app
+    ports:
+      - "3306:3306"
