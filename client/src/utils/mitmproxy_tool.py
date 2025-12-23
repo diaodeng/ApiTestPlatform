@@ -244,6 +244,7 @@ class ProxyCore:
                            confdir=config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy"),
                            # confdir="C:\\Users\\Administrator\\.mitmproxy",
                            mode=mode,
+                           ssl_insecure=True
                            )
 
             # self.master = DumpMaster(opts, with_termlog=False, with_dumper=False)

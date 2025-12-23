@@ -53,9 +53,9 @@ def ensure_directory_exists(dir_path):
     """
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
-        print(f"目录 {dir_path} 已创建")
+        logger.info(f"目录 {dir_path} 已创建")
     else:
-        print(f"目录 {dir_path} 已存在")
+        logger.info(f"目录 {dir_path} 已存在")
 
 
 def kill_process_by_id(process_id) -> bool:
@@ -395,68 +395,78 @@ def get_all_process() -> list[dict]:
 
 
 async def check_app_has_new() -> tuple[bool|str, str]:
-    new_url = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
+    try:
+        new_url = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
 
-    async with aiohttp.ClientSession() as session:
-        data = await session.get(new_url)
-        data = await data.json()
-        if not data:
-            return False, ""
-        new_version = data[0]['tag_name']
-        new_version_info = ""
-        if VERSION > new_version:
-            new_version = None
-        num = 0
-        for info in data:
-            if num > 5:
-                break
-            new_version_info += f"# {info['tag_name']}\n{info['body']}"
-            num += 1
-        return new_version, new_version_info
-    return False, f"当前版本：{VERSION}已经是最新版本。"
+        async with aiohttp.ClientSession() as session:
+            data = await session.get(new_url)
+            data = await data.json()
+            if not data:
+                return False, ""
+            new_version = data[0]['tag_name']
+            new_version_info = ""
+            if VERSION >= new_version:
+                new_version = None
+            num = 0
+            for info in data:
+                if num > 5:
+                    break
+                new_version_info += f"# {info['tag_name']}\n{info['body']}"
+                num += 1
+            return new_version, new_version_info
+        return False, f"当前版本：{VERSION}已经是最新版本。"
+    except Exception as e:
+        logger.error(f"检查版本信息异常：{e}")
+        return False, str(e)
 
 
-async def download_new_app(download_process_call=None) -> str|None:
-    new_url = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
-    async with aiohttp.ClientSession() as session:
-        data = await session.get(new_url)
-        data = await data.json()
-        if not data:
-            return None
-        new_version = data[0]['tag_name']
-        if VERSION < new_version:
-            exe_url = ""
-            zip_url = ""
-            for item in data[0]["assets"]:
-                if item["name"] == "QTRClient.exe":
-                    exe_url = item["browser_download_url"]
-                elif item["name"] == "QTRClient.zip":
-                    zip_url = item["browser_download_url"]
-                else:
+async def download_new_app(download_process_call=None, force: bool=False) -> str|None:
+    logger.info(f"开始下载新包")
+    try:
+        new_url = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
+        async with aiohttp.ClientSession() as session:
+            data = await session.get(new_url)
+            data = await data.json()
+            if not data:
+                return None
+            new_version = data[0]['tag_name']
+            if force or VERSION < new_version:
+                exe_url = ""
+                zip_url = ""
+                for item in data[0]["assets"]:
+                    if item["name"] == "QTRClient.exe":
+                        exe_url = item["browser_download_url"]
+                    elif item["name"] == "QTRClient.zip":
+                        zip_url = item["browser_download_url"]
+                if not exe_url and not zip_url:
                     logger.info("没有找到升级文件")
                     return None
 
-            new_app_path = "QTRClient_new.exe" if exe_url else "QTRClient_new.zip"
-            if os.path.exists(new_app_path):
-                return new_app_path
+                new_app_path = "QTRClient_new.exe" if exe_url else "QTRClient_new.zip"
+                if os.path.exists(new_app_path):
+                    os.remove(new_app_path)
+                    # return new_app_path
 
-            async with session.get(exe_url or zip_url) as response:
-                total_size = int(response.headers.get('content-length', 0))
-                logger.info(f"开始下载，更新包文件大小：{total_size/1024/1024} MB")
-                downloaded = 0
-                with open(new_app_path, "wb") as f:
-                    async for chunk in response.content.iter_chunked(1024 * 1024):
-                        f.write(chunk)
-                        downloaded += len(chunk)
+                async with session.get(exe_url or zip_url) as response:
+                    total_size = int(response.headers.get('content-length', 0))
+                    logger.info(f"开始下载，更新包文件大小：{total_size/1024/1024} MB")
+                    downloaded = 0
+                    with open(new_app_path, "wb") as f:
+                        async for chunk in response.content.iter_chunked(1024 * 1024):
+                            f.write(chunk)
+                            downloaded += len(chunk)
 
-                        # 可选：打印进度
-                        if total_size:
-                            percent = downloaded / total_size * 100
-                            if download_process_call:
-                                download_process_call(f"新包大小：{total_size/1024/1024:.2f}MB,下载进度: {percent:.2f}%")
-                            # logger.info(f"下载进度: {percent:.2f}%")
-                    logger.info(f"更新包下载完成")
-                    return new_app_path
+                            # 可选：打印进度
+                            if total_size:
+                                percent = downloaded / total_size * 100
+                                if download_process_call:
+                                    download_process_call(f"新包大小：{total_size/1024/1024:.2f}MB,下载进度: {percent:.2f}%")
+                                # logger.info(f"下载进度: {percent:.2f}%")
+                        logger.info(f"更新包下载完成")
+                        return new_app_path
+            return None
+    except Exception as e:
+        logger.error(f"新包下载失败：{e}")
         return None
 
 
@@ -530,7 +540,7 @@ try {{
         
     }} elseif ($FileExtension -eq ".zip") {{
         Write-Host "Replacing EXE and _internal directory..."
-        
+
         $TempDir = "$CurrentDir.temp"
         if (Test-Path $TempDir) {{
             Remove-Item $TempDir -Recurse -Force
@@ -549,7 +559,7 @@ try {{
 
         $CurrentExePath = Join-Path $CurrentDir $MainExeName
         $NewExePath = Join-Path $SourceDir $MainExeName
-        
+
         if (Test-Path $NewExePath) {{
             $BackupExePath = "$CurrentExePath.backup"
             if (Test-Path $CurrentExePath) {{
@@ -585,6 +595,8 @@ try {{
     }} else {{
         throw "Unsupported file type: $FileExtension. Only .exe and .zip are supported."
     }}
+    
+    Remove-Item $NewFile -Force
 
     $MainExePath = Join-Path $CurrentDir $MainExeName
     if (-not (Test-Path $MainExePath)) {{
@@ -659,8 +671,8 @@ async def perform_update_with_powershell(download_process_call=None):
 
     logger.info(f"current_exe: {current_exe}")
 
-    # 下载新版本（这里需要你实现下载逻辑）
-    new_app_path = await download_new_app(download_process_call)
+    # 下载新版本
+    new_app_path = await download_new_app(download_process_call, force=True)
     if not new_app_path:
         return False
     new_app_path = os.path.abspath(new_app_path)
