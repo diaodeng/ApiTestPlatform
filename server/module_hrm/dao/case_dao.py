@@ -401,18 +401,23 @@ class CaseParamsDao:
             cls._reorder_all(db, use_case_id)
 
     @classmethod
-    def update_table_row(cls, db: Session, use_case_id, row_id, row_data: dict):
+    async def update_table_row(cls, db: Session, use_case_id, rows_data: list[dict]):
         """
         更新某行数据
         :param use_case_id: 用例 ID
-        :param row_id: 行 ID
-        :param row_data: 行数据
+        :param rows_data: 行数据
         """
-        query = db.query(HrmCaseParams).filter_by(case_id=use_case_id, row_id=row_id).all()
+        def _update_row_data():
 
-        for q in query:
-            q.update(col_value=row_data[q.col_name])
-        db.commit()
+            for row in rows_data:
+                row_id = row.pop("_row_id")
+                for k, v in row.items():
+                    db.query(HrmCaseParams).filter(
+                        HrmCaseParams.case_id == use_case_id,
+                        HrmCaseParams.row_id == row_id,
+                        HrmCaseParams.params_name == k
+                    ).update({"col_value": v})
+        await run_in_threadpool(_update_row_data)
 
     @classmethod
     async def load_table_page(cls, use_case_id, page=1, page_size=1000, enabled=-1) -> list[dict]:
@@ -454,6 +459,7 @@ class CaseParamsDao:
         table = defaultdict(dict)
         sort_keys = {}
         for r in rows:
+            table[r.row_id]["_row_id"] = r.row_id
             table[r.row_id][r.col_name] = r.col_value
             sort_keys[r.row_id] = r.sort_key
 
@@ -468,6 +474,7 @@ class CaseParamsDao:
             if not datas:
                 break
             for data in datas:
+                data.pop("_row_id", None)
                 yield data
             page += 1
 
