@@ -412,6 +412,7 @@ class PosHandler:
                 daemon=True
             ).start()
         except Exception as e:
+            logger.exception(e)
             UiUtil.show_snackbar_error(self.page, f"搜索异常：{e}")
 
     def stop_search(self, e):
