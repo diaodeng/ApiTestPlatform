@@ -53,6 +53,9 @@ def _collect_v1() -> Dict[str, float]:
 
     cache = stat.get("cache", 0)
     rss = stat.get("rss", 0)
+    slab_unrec = stat.get("slab_unreclaimable", 0)
+    hard_used = rss + slab_unrec
+    can_usage = limit - hard_used
 
     available = max(limit - usage, 0) if limit > 0 else 0
 
@@ -60,9 +63,11 @@ def _collect_v1() -> Dict[str, float]:
         "cgroup_version": 1,
         "memory_limit_mb": limit / 1024 / 1024 if limit > 0 else -1,
         "memory_usage_mb": usage / 1024 / 1024,
+        "memory_hard_usage_mb": hard_used / 1024 / 1024,
         "memory_cache_mb": cache / 1024 / 1024,
         "memory_rss_mb": rss / 1024 / 1024,
         "memory_available_mb": available / 1024 / 1024,
+        "memory_actual_available_mb": can_usage / 1024 / 1024,
         "memory_pressure": usage / limit if limit > 0 else 0,
     }
 
