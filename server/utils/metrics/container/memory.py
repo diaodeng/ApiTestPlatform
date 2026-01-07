@@ -1,108 +1,142 @@
 import os
 from typing import Dict
+from typing import Optional
+
+import psutil
+from .utils import is_linux,is_windows,file_exists
+from .enums import ModeEnum
 
 CGROUP_ROOT = "/sys/fs/cgroup"
 
 
-def _read_int(path: str) -> int:
-    try:
-        with open(path, "r") as f:
-            v = f.read().strip()
-            if v == "max":
-                return -1
-            return int(v)
-    except Exception:
-        return 0
+class MemoryCollector:
+    def __init__(self):
+        self.mode = self._detect_mode()
 
+    def _detect_mode(self):
+        if is_linux():
+            if file_exists("/sys/fs/cgroup/cgroup.controllers"):
+                return ModeEnum.CGROUP_2
+            if file_exists("/sys/fs/cgroup/memory"):
+                return ModeEnum.CGROUP_1
+            return ModeEnum.LINUX
+        if is_windows():
+            return ModeEnum.WINDOWS
+        return "unknown"
 
-def _detect_cgroup_version() -> int:
-    """
-    return 1 or 2
-    """
-    if os.path.exists(os.path.join(CGROUP_ROOT, "cgroup.controllers")):
-        return 2
-    return 1
+    # ---------- limits ----------
 
+    def memory_limit_bytes(self) -> Optional[int]:
+        if self.mode == ModeEnum.CGROUP_2:
+            return self._mem_limit_v2()
+        if self.mode == ModeEnum.CGROUP_1:
+            return self._mem_limit_v1()
+        return psutil.virtual_memory().total
 
-def collect_memory() -> Dict[str, float]:
-    """
-    返回单位：MB
-    """
-    version = _detect_cgroup_version()
+    def _mem_limit_v2(self) -> Optional[int]:
+        try:
+            val = open("/sys/fs/cgroup/memory.max").read().strip()
+            if val == "max":
+                return psutil.virtual_memory().total
+            return int(val)
+        except Exception:
+            return psutil.virtual_memory().total
 
-    if version == 1:
-        return _collect_v1()
-    else:
-        return _collect_v2()
+    def _mem_limit_v1(self) -> Optional[int]:
+        try:
+            return int(open("/sys/fs/cgroup/memory/memory.limit_in_bytes").read())
+        except Exception:
+            return psutil.virtual_memory().total
 
+    # ---------- usage ----------
 
-def _collect_v1() -> Dict[str, float]:
-    base = os.path.join(CGROUP_ROOT, "memory")
+    def memory_used_bytes(self) -> int:
+        """
+        统一语义：主要工作集（RSS）
+        """
+        if self.mode == ModeEnum.CGROUP_2:
+            return self._mem_used_v2_bytes()
+        elif self.mode == ModeEnum.CGROUP_1:
+            return self._mem_used_v1_bytes()
+        else:
+            return psutil.Process(os.getpid()).memory_info().rss
 
-    usage = _read_int(f"{base}/memory.usage_in_bytes")
-    limit = _read_int(f"{base}/memory.limit_in_bytes")
+    def _mem_used_v2_bytes(self) -> Optional[int]:
+        base = CGROUP_ROOT
 
-    stat = {}
-    try:
-        with open(f"{base}/memory.stat") as f:
-            for line in f:
-                k, v = line.split()
-                stat[k] = int(v)
-    except Exception:
-        pass
+        # usage = 0
+        # try:
+        #     with open(f"{base}/memory.current", "r") as f:
+        #         v = f.read().strip()
+        #         if v == "max":
+        #             usage = -1
+        #         usage = int(v)
+        # except Exception:
+        #     pass
 
-    cache = stat.get("cache", 0)
-    rss = stat.get("rss", 0)
-    slab_unrec = stat.get("slab_unreclaimable", 0)
-    hard_used = rss + slab_unrec
-    can_usage = limit - hard_used
+        stat = {}
+        try:
+            with open(f"{base}/memory.stat") as f:
+                for line in f:
+                    k, v = line.split()
+                    stat[k] = int(v)
+        except Exception:
+            pass
 
-    available = max(limit - usage, 0) if limit > 0 else 0
+        cache = stat.get("file", 0)
+        rss = stat.get("anon", 0)
 
-    return {
-        "cgroup_version": 1,
-        "memory_limit_mb": limit / 1024 / 1024 if limit > 0 else -1,
-        "memory_usage_mb": usage / 1024 / 1024,
-        "memory_hard_usage_mb": hard_used / 1024 / 1024,
-        "memory_cache_mb": cache / 1024 / 1024,
-        "memory_rss_mb": rss / 1024 / 1024,
-        "memory_available_mb": available / 1024 / 1024,
-        "memory_actual_available_mb": can_usage / 1024 / 1024,
-        "memory_pressure": usage / limit if limit > 0 else 0,
-    }
+        return rss
 
+    def _mem_used_v1_bytes(self) -> Optional[int]:
+        base = os.path.join(CGROUP_ROOT, "memory")
+        stat = {}
+        try:
+            with open(f"{base}/memory.stat") as f:
+                for line in f:
+                    k, v = line.split()
+                    stat[k] = int(v)
+        except Exception:
+            pass
 
-def _collect_v2() -> Dict[str, float]:
-    base = CGROUP_ROOT
+        cache = stat.get("cache", 0)
+        rss = stat.get("rss", 0)
+        slab_unrec = stat.get("slab_unreclaimable", 0)
+        hard_used = rss + slab_unrec
 
-    usage = _read_int(f"{base}/memory.current")
-    limit = _read_int(f"{base}/memory.max")
+        return hard_used
 
-    stat = {}
-    try:
-        with open(f"{base}/memory.stat") as f:
-            for line in f:
-                k, v = line.split()
-                stat[k] = int(v)
-    except Exception:
-        pass
+    def memory_available_bytes(self) -> int:
+        limit = self.memory_limit_bytes()
+        used = self.memory_used_bytes()
+        return max(0, limit - used)
 
-    cache = stat.get("file", 0)
-    rss = stat.get("anon", 0)
+    # ---------- summary ----------
 
-    available = max(limit - usage, 0) if limit > 0 else 0
+    def snapshot(self) -> dict:
+        limit = self.memory_limit_bytes()
+        used = self.memory_used_bytes()
+        avail = max(0, limit - used)
 
-    return {
-        "cgroup_version": 2,
-        "memory_limit_mb": limit / 1024 / 1024 if limit > 0 else -1,
-        "memory_usage_mb": usage / 1024 / 1024,
-        "memory_cache_mb": cache / 1024 / 1024,
-        "memory_rss_mb": rss / 1024 / 1024,
-        "memory_available_mb": available / 1024 / 1024,
-        "memory_pressure": usage / limit if limit > 0 else 0,
-    }
+        pressure = used / limit * 100 if limit else 0
+
+        # status = "SAFE"
+        # if pressure > 70:
+        #     status = "WARN"
+        # if pressure > 85:
+        #     status = "DANGER"
+
+        return {
+            "mode": self.mode,
+            "memory_limit_mb": round(limit / 1024 / 1024),
+            "memory_used_mb": round(used / 1024 / 1024),
+            # "memory_cache_mb": cache / 1024 / 1024,
+            "memory_actual_available_mb": round(avail / 1024 / 1024),
+            "memory_pressure": round(pressure, 2),
+            # "status": status,
+        }
 
 
 if __name__ == "__main__":
     import json
-    print(json.dumps(collect_memory(), indent=2))
+    print(json.dumps(MemoryCollector.snapshot(), indent=2))
