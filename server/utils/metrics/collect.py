@@ -2,8 +2,8 @@ import threading
 import requests
 import time
 import random
-from .container.memory import collect_memory
-from .container.cpu import CgroupCPU
+from .container import MemoryCollector
+from .container import CgroupCPU
 
 from loguru import logger
 
@@ -26,6 +26,7 @@ class PushDataToServer(threading.Thread):
         self.daemon = True
         self.stopped = False
         self.cpu_info = CgroupCPU()
+        self.mem_info = MemoryCollector()
 
     def run(self):
         logger.info(f"开始采集信息")
@@ -64,7 +65,7 @@ class PushDataToServer(threading.Thread):
 
         data = {}
         data.update(self.cpu_info.cpu_status())
-        data.update(collect_memory())
+        data.update(self.mem_info.snapshot())
         for key,value in data.items():
             labels = {
                 "job": MetricsConfig.vm_job or "QTR",  # 标识这是一个来自Python应用的任务
