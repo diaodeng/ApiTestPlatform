@@ -1,3 +1,4 @@
+import os
 import threading
 import requests
 import time
@@ -27,6 +28,7 @@ class PushDataToServer(threading.Thread):
         self.stopped = False
         self.cpu_info = CgroupCPU()
         self.mem_info = MemoryCollector()
+        self.group = os.environ.get("SYM_GROUP", "stable")
 
     def run(self):
         logger.info(f"开始采集信息")
@@ -70,7 +72,7 @@ class PushDataToServer(threading.Thread):
             labels = {
                 "job": MetricsConfig.vm_job or "QTR",  # 标识这是一个来自Python应用的任务
                 "instance": MetricsConfig.vm_instance or "TEST_ENV",  # 标识这是哪个具体的应用实例（主机:端口）
-                "machine": MetricsConfig.vm_merchant or "gray04",  # 您的业务标签
+                "machine": MetricsConfig.vm_merchant or self.group,  # 您的业务标签
                 "sensor": key  # 您的业务标签
             }
             timestamp = int(time.time() * 1000)
