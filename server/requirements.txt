@@ -27,3 +27,5 @@ jinja2
 pdfkit
 wkhtmltopdf
 locust
+celery
+celery-redbeat

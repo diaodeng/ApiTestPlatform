@@ -1,0 +1,24 @@
+from locust import HttpUser, task, between
+from runtime.csv_loader import CSVDataSource
+
+class User(HttpUser):
+    host = "{{ base_url }}"
+    wait_time = between(1, 2)
+
+    def on_start(self):
+        self.context = {}
+        {% for name, ds in data_sources.items() %}
+        self.context["{{ name }}"] = CSVDataSource("data/{{ ds.file }}")
+        {% endfor %}
+
+    {% for task in tasks %}
+    @task({{ task.weight }})
+    def {{ task.name }}(self):
+        {% for name in data_sources.keys() %}
+        {{ name }} = self.context["{{ name }}"].next()
+        {% endfor %}
+        self.client.{{ task.request.method | lower }}(
+            "{{ task.request.path }}",
+            json={{ task.request.json | tojson }}
+        )
+    {% endfor %}
