@@ -147,7 +147,7 @@ class CaseRunModel(BaseModel):
     project_debugtalk_set: dict[str | int, ProjectDebugtalkInfoModel] = Field(default_factory=lambda: {})  # 当前加载的所有debugtalk
     http_client: httpx.AsyncClient = Field(default=None, exclude=True)
 
-    semaphore: asyncio.Semaphore = None  # 并发限制
+    semaphore: Optional[asyncio.Semaphore] = None  # 并发限制
 
 
 class CaseModuleProjectModel(BaseModel):
