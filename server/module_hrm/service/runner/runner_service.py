@@ -105,12 +105,12 @@ async def run_by_single(case_data,
             step.result.logs.before_request = f"用例状态为[{status.name}]不执行"
         case_res_datas = [test_case]
     else:
-        async with semaphore:
-            with SessionLocal() as db:
-                debugtalk_info = await DebugTalkService.project_debugtalk_map(db, case_data.project_id, run_info=run_info)
-            # func_map = debugtalk_info.func_map
-            runner = TestRunner(test_case, debugtalk_info, run_info)
-            case_res_datas = await runner.start()
+        # async with semaphore:
+        with SessionLocal() as db:
+            debugtalk_info = await DebugTalkService.project_debugtalk_map(db, case_data.project_id, run_info=run_info)
+        # func_map = debugtalk_info.func_map
+        runner = TestRunner(test_case, debugtalk_info, run_info)
+        case_res_datas = await runner.start()
     return case_res_datas
 
 
@@ -234,6 +234,7 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
     if run_info.run_by_sort:
         run_info.concurrent = 1
     semaphore = asyncio.Semaphore(run_info.concurrent)
+    run_info.semaphore = semaphore
     # case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
     # case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
     #                    range(0, len(case_data_list), run_info.concurrent)]
@@ -278,7 +279,8 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
                     await RunDetailDao.create_bulk(db, buffer)
                     await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
 
-    tasks = [asyncio.create_task(worker(queue, semaphore, stats=stats, lock=lock)) for i in range(run_info.concurrent)]
+    concurrent = int(run_info.concurrent * 1.5)
+    tasks = [asyncio.create_task(worker(queue, semaphore, stats=stats, lock=lock)) for i in range(concurrent)]
 
     async for case_data in get_case_info_batch(case_ids, env_obj):
         await queue.put(case_data)

@@ -644,7 +644,8 @@ class RequestRunner(object):
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
                 request_data["requestType"] = self.step_data.step_type
                 start_time = time.time()
-                agent_res_obj: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
+                async with self.case_runner.run_info.semaphore:
+                    agent_res_obj: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
                                                                    request_data
                                                                    )
                 end_time = time.time()
@@ -659,7 +660,8 @@ class RequestRunner(object):
                 # async with httpx.AsyncClient(verify=False, event_hooks={"request": [on_request], "response": [on_response]}) as client:
                 # request_client = self.case_runner.run_info.http_client
                 start_time = time.time()
-                res_response = await self.case_runner.run_info.http_client.request(**request_data)
+                async with self.case_runner.run_info.semaphore:
+                    res_response = await self.case_runner.run_info.http_client.request(**request_data)
                 end_time = time.time()
                 total_time = res_response.elapsed.total_seconds()
                 self.format_time(start_time, end_time, total_time)
@@ -895,9 +897,10 @@ class Websocket(RequestRunner):
             if self.case_runner.run_info.forward_config.forward and self.case_runner.run_info.forward_config.agent_code:
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
                 request_data["requestType"] = self.step_data.step_type
-                agent_res_data: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
-                                                                    request_data
-                                                                    )
+                async with self.case_runner.run_info.semaphore:
+                    agent_res_data: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
+                                                                        request_data
+                                                                        )
                 if agent_res_data.status_code != AgentResponseEnum.SUCCESS.value:
                     raise AgentForwardError(f"客户机异常： {agent_res_data.message}")
 
@@ -909,7 +912,8 @@ class Websocket(RequestRunner):
                 async with websockets.connect(request_data["url"]) as websocket:
                     self.logger.info(f'{self.step_data.name} 连接成功')
                     res_headers = dict(websocket.response_headers) if hasattr(websocket, "response_headers") else {}
-                    await websocket.send(request_data["data"])
+                    async with self.case_runner.run_info.semaphore:
+                        await websocket.send(request_data["data"])
                     self.logger.info(f'{self.step_data.name} 发送数据成功')
 
                     res_content = []
