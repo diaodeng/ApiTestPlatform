@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional, List, Any, Dict
+import asyncio
 
 import httpx
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
@@ -145,6 +146,8 @@ class CaseRunModel(BaseModel):
     global_vars: dict = Field(default_factory=lambda: {})
     project_debugtalk_set: dict[str | int, ProjectDebugtalkInfoModel] = Field(default_factory=lambda: {})  # 当前加载的所有debugtalk
     http_client: httpx.AsyncClient = Field(default=None, exclude=True)
+
+    semaphore: asyncio.Semaphore = None  # 并发限制
 
 
 class CaseModuleProjectModel(BaseModel):
