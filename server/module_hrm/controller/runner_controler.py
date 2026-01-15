@@ -75,6 +75,7 @@ async def for_debug(request: Request,
     debugtalk_obj = None
     try:
         ForwardRulesHandler.transform(query_db, debug_info)
+        debug_info.semaphore = asyncio.Semaphore(1)
         debug_info.runner = current_user.user.user_id
         debug_info.log_level = logging.DEBUG
         case_data = debug_info.case_data
