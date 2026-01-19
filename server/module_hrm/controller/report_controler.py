@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
 from fastapi import Depends
 from sqlalchemy.orm import Session
+from loguru import logger
 from jinja2 import Environment, FileSystemLoader
 import datetime
 import pdfkit
@@ -16,7 +17,7 @@ from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.vo.report_vo import ReportQueryModel, ReportDelModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel
 from module_hrm.service.case_service import CurrentUserModel
-from module_hrm.service.report_service import ReportService
+from module_hrm.service.report_service import ReportService, StreamingHTMLGenerator
 from utils.page_util import PageResponseModel
 from utils.response_util import ResponseUtil
 
@@ -59,7 +60,7 @@ async def report_del(request: Request, query_info: ReportDelModel, query_db: Ses
     return ResponseUtil.success(dict_content={"msg": "删除成功"})
 
 
-@reportController.get("/export/html",
+@reportController.get("/export/htmlold",
                       response_class=HTMLResponse,
                       dependencies=[Depends(CheckUserInterfaceAuth(['hrm:report:downloadHtml']))]
                       )
@@ -78,11 +79,42 @@ async def export_html(request: Request,
 
         # 3. 设置下载头
         headers = {
-            "Content-Disposition": "attachment; filename=report.html"
+            "Content-Disposition": f"attachment; filename=report_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.html"
         }
         return HTMLResponse(content=html_content, headers=headers)
 
     except Exception as e:
+        logger.exception(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@reportController.get("/export/html",
+                      response_class=HTMLResponse,
+                      dependencies=[Depends(CheckUserInterfaceAuth(['hrm:report:downloadHtml']))]
+                      )
+async def export_html(request: Request,
+                      query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
+                      query_db: Session = Depends(get_db),
+                      current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+                      # data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager'))
+                      ):
+    try:
+        # 1. 从数据库获取数据 (示例使用伪代码)
+        query_info.manager = current_user.user.user_id
+        query_info.is_page = False
+
+        # 3. 设置下载头
+        headers = {
+            "Content-Disposition": f"attachment; filename=report_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.html"
+        }
+        return StreamingResponse(
+            ReportService.generate_html_report(query_db, query_info),
+            media_type="text/html",
+            headers=headers
+        )
+
+    except Exception as e:
+        logger.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

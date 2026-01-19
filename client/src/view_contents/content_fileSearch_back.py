@@ -1,12 +1,14 @@
-import json
 import os
 import fnmatch
-import flet as ft
-import subprocess
+import os
 import platform
+import subprocess
 from threading import Thread, Event
+
+import flet as ft
 from loguru import logger
-from server.config import SearchConfig, StartConfig, PaymentMockConfig
+
+from server.config import SearchConfig, StartConfig, PosConfig
 
 
 class FileSearcher:
@@ -254,7 +256,7 @@ class FileSearcher:
 
         if self.start_config.cover_payment_driver:
             logger.info(f"覆盖支付驱动")
-            PaymentMockConfig.cover_payment_driver(path)
+            PosConfig.cover_payment_driver(path)
 
         try:
             if platform.system() == "Windows":

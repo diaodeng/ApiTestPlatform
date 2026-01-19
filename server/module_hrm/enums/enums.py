@@ -1,5 +1,18 @@
 from enum import Enum
 
+class PushTypeEnum(Enum):
+    feishu_bot = 1
+    feishu_application = 2
+    email = 3
+
+class PushReminderEnum(Enum):
+    no_reminder = 1  # 不提醒
+    reminder_all = 2  # @提醒所有人
+
+class AllowPushEnum(Enum):
+    not_push = 0  # 不通知
+    always_push = 1  # 始终通知
+    only_failed = 2  # 仅失败通知
 
 class PageType(Enum):
     case = 1
@@ -190,6 +203,17 @@ class MockTypeEnum(Enum):
     only_request = 2
     request_and_response = 3
     not_mock = 4
+
+
+class UrlContentEnum(Enum):
+    """
+    代表url各个部分的枚举
+    """
+    URL = 1
+    HOST = 2
+    PATH = 4
+    QUERY = 8
+    ORIGIN = 16
 
 
 if __name__ == "__main__":

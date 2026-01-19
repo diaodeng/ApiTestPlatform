@@ -7,6 +7,8 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Type, AsyncGenerator
+
+import httpx
 from fastapi.concurrency import run_in_threadpool
 
 from sqlalchemy.orm import Session
@@ -15,6 +17,7 @@ from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.case_dao import CaseDao
 from module_hrm.dao.env_dao import EnvDao
+from module_hrm.dao.push_dao import PushDao
 from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.case_do import HrmCase
@@ -23,15 +26,18 @@ from module_hrm.entity.do.suite_do import QtrSuiteDetail, QtrSuite
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
-from module_hrm.entity.vo.report_vo import ReportCreatModel
+from module_hrm.entity.vo.push_vo import PushModel
+from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportListModel
 from module_hrm.entity.vo.run_detail_vo import HrmRunDetailModel
-from module_hrm.enums.enums import DataType, CaseRunStatus, CaseStatusEnum, RunTypeEnum, QtrDataStatusEnum
+from module_hrm.enums.enums import DataType, CaseRunStatus, CaseStatusEnum, RunTypeEnum, QtrDataStatusEnum, \
+    AllowPushEnum
 from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkService
+from module_hrm.service.push_service import PushService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler
 from module_hrm.service.runner.case_runner import TestRunner
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
-from utils.message_util import MessageHandler
+from utils.message_util import MessageHandler, TestResultPushHandler
 
 logger.info(f"平台信息：{platform.platform()}")
 if "WSL" in str(platform.platform()):
@@ -44,7 +50,7 @@ def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel|None:
         # 保存前清空不必要的信息，减少数据存储
         case_data.config.variables = []
         case_data.config.headers = []
-        case_data.config.parameters = None
+        # case_data.config.parameters = None
 
         for step in case_data.teststeps:
             step.variables = []
@@ -99,21 +105,13 @@ async def run_by_single(case_data,
             step.result.logs.before_request = f"用例状态为[{status.name}]不执行"
         case_res_datas = [test_case]
     else:
-        async with semaphore:
-            with SessionLocal() as db:
-                debugtalk_info = await DebugTalkService.project_debugtalk_map(db, case_data.project_id, run_info=run_info)
-            # func_map = debugtalk_info.func_map
-            runner = TestRunner(test_case, debugtalk_info, run_info)
-            case_res_datas = await runner.start()
+        # async with semaphore:
+        with SessionLocal() as db:
+            debugtalk_info = await DebugTalkService.project_debugtalk_map(db, case_data.project_id, run_info=run_info)
+        # func_map = debugtalk_info.func_map
+        runner = TestRunner(test_case, debugtalk_info, run_info)
+        case_res_datas = await runner.start()
     return case_res_datas
-
-    # all_result = []
-    # for case_res_data in case_res_datas:
-        # all_result.append(case_res_data)
-        # await save_run_detail(query_db, case_res_data, run_info)
-        # await run_in_threadpool(save_run_detail, query_db, case_res_data, run_info)
-
-    # return all_result
 
 
 async def run_by_batch(run_info: CaseRunModel,
@@ -185,20 +183,22 @@ async def run_by_batch(run_info: CaseRunModel,
         else:
             await get_case_data(query_db, all_cases, run_info.run_type, run_info.ids)
         env_orm = await run_in_threadpool(EnvDao.get_env_by_id, query_db, run_info.env)
-    env_data = CamelCaseUtil.transform_result(env_orm)
-    env_obj = EnvModel.from_orm(env_data)
+    env_obj = EnvModel.model_validate(env_orm)
 
     try:
+        limit = httpx.Limits(max_connections=100, max_keepalive_connections=50)
+        async with httpx.AsyncClient(limits=limit, http2=True) as client:
+            run_info.http_client = client
+            for project_id, ids in all_cases.items():  # 按项目执行
+                if not ids: continue
 
-        for project_id, ids in all_cases.items():  # 按项目执行
-            if not ids: continue
-
-            res_data = await run_by_concurrent(list(ids), env_obj, run_info)
-            total_count += res_data[0]
-            success_count += res_data[1]
-            failed_count += res_data[2]
+                res_data = await run_by_concurrent(list(ids), env_obj, run_info)
+                total_count += res_data[0]
+                success_count += res_data[1]
+                failed_count += res_data[2]
     except Exception as e:
         logger.error(f"运行用例失败，错误信息：{e}")
+        logger.exception(e)
         success = False
         # ReportDao.update(query_db, run_info.report_id, 0, total_count, CaseRunStatus.failed)
         # raise e
@@ -234,6 +234,7 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
     if run_info.run_by_sort:
         run_info.concurrent = 1
     semaphore = asyncio.Semaphore(run_info.concurrent)
+    run_info.semaphore = semaphore
     # case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
     # case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
     #                    range(0, len(case_data_list), run_info.concurrent)]
@@ -278,7 +279,8 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
                     await RunDetailDao.create_bulk(db, buffer)
                     await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
 
-    tasks = [asyncio.create_task(worker(queue, semaphore, stats=stats, lock=lock)) for i in range(run_info.concurrent)]
+    concurrent = int(run_info.concurrent * 1.5)
+    tasks = [asyncio.create_task(worker(queue, semaphore, stats=stats, lock=lock)) for i in range(concurrent)]
 
     async for case_data in get_case_info_batch(case_ids, env_obj):
         await queue.put(case_data)
@@ -308,11 +310,9 @@ async def run_by_async(run_info: CaseRunModel,
     test_start_time = time.time()
     start_time  =datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
             timezone(timedelta(hours=8)))
+    report_id = None
+    report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        # query_db = SessionLocal()
-
-        report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
         report_data = ReportCreatModel(**{"reportName": report_name,
                                           "status": CaseRunStatus.running.value,
                                           })
@@ -325,6 +325,7 @@ async def run_by_async(run_info: CaseRunModel,
         with SessionLocal() as query_db:
             report_info = await ReportDao.create(query_db, report_data)
             run_info.report_id = report_info.report_id
+            report_id = report_info.report_id
 
         success, total_count, success_count, failed_count = await run_by_batch(run_info,
                                         user=current_user.user.user_id)
@@ -338,24 +339,28 @@ async def run_by_async(run_info: CaseRunModel,
             report_info.success = success_count
             await run_in_threadpool(query_db.commit)
 
+            logger.debug("开始推送结果")
 
-        message_handler = MessageHandler(run_info)
-        if message_handler.can_push():
-            message_handler.feishu().push(
-                f"[{current_user.user.user_name}]于{report_data.start_at}开始执行的测试完成。"
-                f"\n总共：{total_count}条用例，成功：{success_count}条，失败：{total_count - success_count};"
-                f"\n报告：【{run_info.report_id}】{report_name}")
+            TestResultPushHandler(run_info, report_info).push()
         return f"执行成功，执行了{run_info.repeat_num}次，请前往报告查看"
     except Exception as e:
         logger.error(f"用例:{run_info.report_name}[{run_info.report_id}]执行失败，异常信息：{e}", exc_info=True)
-        message_handler = MessageHandler(run_info)
-        if message_handler.can_push():
-            message_handler.feishu().push(
-                f"[{current_user.user.user_name}]于{start_time}执行的测试失败。"
-                f"\n异常信息：{e}")
+        if report_id:  # 如果报告创建成功则更新报告状态
+            with SessionLocal() as query_db:
+                report_info = await ReportDao.get_by_id(query_db, report_id)
+                report_info.test_duration = time.time() - test_start_time
+                report_info.status = CaseRunStatus.failed.value
+                await run_in_threadpool(query_db.commit)
+        else:
+            report_info = ReportListModel()
+            report_info.status = CaseRunStatus.failed.value
+            report_info.report_name = report_name
+            report_info.start_at = start_time
+            report_info.create_by = current_user.user.user_name
+        TestResultPushHandler(run_info, report_info).push()
+
     finally:
         pass
-        # query_db.close()
 
 
 def get_report_content(report_path):

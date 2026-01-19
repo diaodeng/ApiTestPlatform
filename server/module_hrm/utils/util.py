@@ -143,7 +143,7 @@ def compress_text(text: str) -> str:
     """
     压缩文本内容
     """
-    logger.debug(f"压缩前大小：{len(text)}")
+    # logger.debug(f"压缩前大小：{len(text)}")
     # logger.debug(f"压缩前数据：{text}")
     # 压缩文本
     compressed_data = gzip.compress(text.encode('utf-8'))
@@ -152,7 +152,7 @@ def compress_text(text: str) -> str:
     # 使用 base64 编码
     encoded_data = base64.b64encode(compressed_data).decode('utf8')
     # logger.info(f"编码后的数据：{encoded_data}")
-    logger.debug(f"压缩后大小：{len(encoded_data)}")
+    # logger.debug(f"压缩后大小：{len(encoded_data)}")
     return encoded_data
 
 
@@ -444,3 +444,33 @@ def format_duration(seconds, show_days=True):
     parts.append(f"{s}s")
 
     return ' '.join(parts)
+
+
+def compress_dict_to_str(data: dict) -> str:
+    message = json.dumps(data)
+    # 将字符串转换为字节
+    string_bytes = message.encode('utf-8')
+
+    # 使用 base64 模块进行编码
+    encoded_bytes = base64.b64encode(string_bytes)
+
+    # 将编码后的字节转换回字符串
+    message = encoded_bytes.decode('utf-8')
+
+    # 压缩数据
+    return compress_text(message)
+
+
+def decompress_str_to_dict(data: str) -> dict:
+    data = decompress_text(data)
+
+    # 将字符串转换为字节
+    string_bytes = data.encode('utf-8')
+
+    # 使用 base64 模块进行解码
+    encoded_bytes = base64.b64decode(string_bytes)
+
+    # 将编码后的字节转换回字符串
+    data = encoded_bytes.decode('utf-8')
+
+    return json.loads(data)

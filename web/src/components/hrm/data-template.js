@@ -186,7 +186,8 @@ export const initForwardRulesDetailFormData = {
     status: 2,
     simpleDesc: undefined,
     delFlag: 1,
-    matchType: 1
+    matchType: 1,
+    replaceContent: 1
 }
 
 /*
@@ -223,6 +224,7 @@ export const initDebugTalkFormData = {
 export const initRunConfig = {
     userName: "",
     userId: null,
+    runner:null,
     env: null,
     ids: [],
     runType: RunTypeEnum.case,
@@ -232,12 +234,37 @@ export const initRunConfig = {
     repeatNum: 1,
     concurrent: 1,
     push: false,
+    pushConfig: {
+        allow_push: false,
+        pushIds:[],
+        success: {
+            push: false,
+            reminder: 1
+        },
+        failed: {
+            push: false,
+            reminder: 2
+        }
+    },
     forwardConfig: {
         forward: false,
         agentId: undefined,
         forwardRuleIds: [],
     },
     runBySort: false
+}
+
+export const initPushConfig = {
+    pushId: null,
+    name: null,
+    allowPush: 0,
+    configContent: {
+        url:null,
+        secret:null,
+        content:null
+    },
+    desc: "",
+    type: 1
 }
 
 

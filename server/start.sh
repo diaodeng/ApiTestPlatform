@@ -16,4 +16,4 @@ echo "应用依赖安装完成。。。"
 
 # 启动fastapi应用
 echo "开始启动。。。"
-python app.py --env=prod > app.log 2>&1
+python app.py --env=prod

@@ -64,6 +64,7 @@ class ForwardRulesDetailModel(CommonDataModel):
     match_type: Optional[int] = None  # module_hrm.enums.enums.ForwardRuleMatchTypeEnum
     rule_detail_name: Optional[str] = None
     origin_url: str | None = None
+    replace_content: Optional[int] = None
     target_url: Optional[str] = None
     order_num: Optional[int] = None
     simple_desc: Optional[str] = None

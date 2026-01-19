@@ -6,6 +6,8 @@ from view_contents.content_shortcut import Shortcut
 from view_contents.content_about import About
 from view_contents.content_pos_handler import PosHandler
 from view_contents.content_goods import Goods
+from view_contents.content_agent import AgentHandler
+from view_contents.content_ftp import FtpHandler
 
 
 class Contents(object):
@@ -14,24 +16,28 @@ class Contents(object):
         self.log = log
         self.page = page
 
-        self.home = Home(ft, page, log, **kwargs).home()
+        # self.home = Home(ft, page, log, **kwargs).home()
         self.settings = Settings(ft, page, log).settings()
-        self.shortcut = Shortcut(ft, page, log).shortcut()
-        self.about = About(ft).about()
+        # self.shortcut = Shortcut(ft, page, log).shortcut()
+        self.about = About().about()
+        self.agent_handler = AgentHandler(ft, page).init_ui()
         self.pos_handler = PosHandler(ft, page).init_ui()
         self.mitmproxy = MitmHandel(page).init()
         self.log_view = LogViewerApp(page).init_ui()
+        self.ftp_view = FtpHandler(page).init_ui()
         self.goods = Goods(ft, page, log, **kwargs).goods()
 
     # 内容区域函数
     def get_content(self, index):
         contents = [
-            self.home,
-            self.shortcut,
+            # self.home,
+            # self.shortcut,
             self.settings,
             self.goods,
+            self.agent_handler,
             self.pos_handler,
             self.mitmproxy,
+            self.ftp_view,
             self.log_view,
             self.about
 

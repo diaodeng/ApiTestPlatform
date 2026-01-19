@@ -1,9 +1,11 @@
+import traceback
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from sub_applications.handle import handle_sub_applications
 from middlewares.handle import handle_middleware
 from exceptions.handle import handle_exception
+from utils.metrics import PushMetrics
 from module_admin.controller.login_controller import loginController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.user_controller import userController
@@ -37,6 +39,8 @@ from module_qtr.controller.agent_controller import agentController, startup_hand
 from module_hrm.controller.forward_rules_controller import forwardRulesController
 from module_hrm.controller.test_controller import mockController
 from module_hrm.controller.agent_controller import agentController as agentManagerController
+from module_hrm.controller.push_controller import pushController
+from module_hrm.controller.tools_controller import toolsController
 # from module_hrm.controller.celery_controller import celeryController
 
 from config.env import AppConfig
@@ -50,20 +54,31 @@ from utils.common_util import worship
 # 生命周期事件
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"{AppConfig.app_name}开始启动")
-    worship()
-    await init_create_table()
-    app.state.redis = await RedisUtil.create_redis_pool()
-    await RedisUtil.init_sys_dict(app.state.redis)
-    await RedisUtil.init_sys_config(app.state.redis)
-    await SysSchedulerUtil.init_system_scheduler()
-    await QtrSchedulerUtil.init_qtr_scheduler()
-    await startup_handler()
-    logger.info(f"{AppConfig.app_name}启动成功")
-    yield
-    await SysSchedulerUtil.close_scheduler()
-    await QtrSchedulerUtil.close_scheduler()
-    await RedisUtil.close_redis_pool(app)
+    try:
+        logger.info(f"{AppConfig.app_name}开始启动")
+        worship()
+        await init_create_table()
+        app.state.redis = await RedisUtil.create_redis_pool()
+        await RedisUtil.init_sys_dict(app.state.redis)
+        await RedisUtil.init_sys_config(app.state.redis)
+        await SysSchedulerUtil.init_system_scheduler()
+        await QtrSchedulerUtil.init_qtr_scheduler()
+        await startup_handler()
+        metrics_thread = PushMetrics()
+        metrics_thread.start()
+        logger.info(f"{AppConfig.app_name}启动成功")
+        yield
+        try:
+            metrics_thread.stop()
+        except Exception:
+            pass
+        await SysSchedulerUtil.close_scheduler()
+        await QtrSchedulerUtil.close_scheduler()
+        await RedisUtil.close_redis_pool(app)
+
+    except Exception:
+        err = traceback.format_exc()
+        print("应用有异常", err)
 
 
 # 初始化FastAPI对象
@@ -117,6 +132,8 @@ controller_list = [
     {'router': mockController, 'tags': ['QTR-mock管理']},
     {'router': forwardRulesController, 'tags': ['QTR-转发规则管理']},
     {'router': agentManagerController, 'tags': ['QTR-agent后台管理']},
+    {'router': pushController, 'tags': ['推送配置管理']},
+    {'router': toolsController, 'tags': ['工具']},
     # {'router': celeryController, 'tags': ['celery']},
 ]
 

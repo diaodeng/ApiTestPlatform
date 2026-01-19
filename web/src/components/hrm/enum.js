@@ -61,14 +61,21 @@ export const EditTableContextMenuEnum = {
 
 export const ForwardRuleMatchTypeEnum = {
     urlEqual: {label: "URL相等", value:1},
-    urlNotEqual: {label: "Url不相等", value:2},
-    urlContain: {label: "Url包含", value:4},
+    urlNotEqual: {label: "URL不相等", value:2},
+    urlContain: {label: "URL包含", value:4},
     hostEqual: {label: "HOST相等", value:8},
     hostNotEqual: {label: "HOST不相等", value:16},
     hostContain: {label: "HOST包含", value:32},
     pathEqual: {label: "PATH相等", value:64},
     pathNotEqual: {label: "PATH不相等", value:128},
     pathContain: {label: "PATH包含", value:256}
+}
+
+export const ForwardReplaceContentEnum = {
+    url: {label: "URL", value:1},
+    host: {label: "HOST", value:2},
+    PATH: {label: "PATH", value:4},
+    ORIGIN: {label: "ORIGIN", value:8},
 }
 
 

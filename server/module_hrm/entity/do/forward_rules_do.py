@@ -3,6 +3,7 @@ from sqlalchemy.orm import mapped_column, Mapped
 
 from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel
+from module_hrm.enums.enums import UrlContentEnum
 from utils.snowflake import snowIdWorker
 
 
@@ -47,6 +48,7 @@ class QtrForwardRulesDetail(Base, BaseModel):
     match_type: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1,
                                             comment='规则匹配类型,module_hrm.enums.enums.ForwardRuleMatchTypeEnum')
     origin_url: Mapped[str] = mapped_column(String(500), nullable=True, default='', comment='原始url')
+    replace_content: Mapped[int] = mapped_column(Integer, default=UrlContentEnum.URL.value, comment='替换内容')
     target_url: Mapped[str] = mapped_column(String(500), nullable=True, default=None, comment='目标URL')
     order_num: Mapped[int] = mapped_column(Integer, default=1, comment='显示顺序')
     simple_desc: Mapped[str] = mapped_column(Text, nullable=True, comment='备注')

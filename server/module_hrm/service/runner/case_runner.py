@@ -5,6 +5,7 @@ import logging
 import re
 import threading
 import time
+import traceback
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from typing import Callable
@@ -23,7 +24,7 @@ from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep as TStep
     TWebsocket, ResponseData, \
     Result, StepLogs
 from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum, ForwardRuleMatchTypeEnum, AgentResponseEnum, \
-    CodeTypeEnum, ScopeEnum, AssertOriginalEnum, DataType
+    CodeTypeEnum, ScopeEnum, AssertOriginalEnum, DataType, UrlContentEnum
 from module_hrm.exceptions import TestFailError
 from module_hrm.service.runner.case_data_handler import ConfigHandle
 from module_hrm.utils import comparators
@@ -261,11 +262,14 @@ class CaseRunner(object):
 
                 log_content = self.handler.get_log()
                 step_data.result.logs.after_response += log_content
-
                 if not isinstance(e, AssertionError):
                     self.logger.error(f"测试步骤【{step.name}】执行失败")
                     self.logger.exception(e)
-                step_data.result.logs.error += self.handler.get_log()
+                    log_content = self.handler.get_log()
+                    step_data.result.logs.after_response += log_content
+
+                    log_content += traceback.format_exc()
+                    step_data.result.logs.error += log_content
 
             finally:
                 new_steps.append(step_data)
@@ -454,6 +458,7 @@ class RequestRunner(object):
             # 处理json变量，如果整体都是变量直接替换后再json.loads会报错
             old_json = self.step_data.request.req_json
             if old_json and isinstance(old_json, str):
+                self.logger.debug(f"self.step_data.request.req_json： {old_json}")
                 self.step_data.request.req_json = json.loads(old_json)
         self.logger.debug("替换请求信息中的变量替换完成")
 
@@ -493,7 +498,28 @@ class RequestRunner(object):
         else:
             self.step_data.request.timeout = None
 
-    def get_forward_url(self, forward_rules: list):
+    def replace_forward_content(self, new_content: ForwardRulesForRunModel) -> str:
+        replace_content = new_content.target_url
+        replace_type = new_content.replace_content
+        old_url = self.step_data.request.url
+        parsed_url = urllib.parse.urlparse(old_url)
+        if replace_type == UrlContentEnum.URL.value:
+            return old_url
+        elif replace_type == UrlContentEnum.HOST.value:
+            new_parsed_url = parsed_url._replace(netloc=replace_content)
+            return urllib.parse.urlunparse(new_parsed_url)
+        elif replace_type == UrlContentEnum.PATH.value:
+            new_parsed_url = parsed_url._replace(path=replace_content)
+            return urllib.parse.urlunparse(new_parsed_url)
+        elif replace_type == UrlContentEnum.ORIGIN.value:
+            parsed_new_url = urllib.parse.urlparse(replace_content)
+            new_parsed_url = parsed_url._replace(scheme=parsed_new_url.scheme)._replace(netloc=parsed_new_url.netloc)
+            return urllib.parse.urlunparse(new_parsed_url)
+        else:
+            logger.warning(f"不支持的替换类型：{replace_type}")
+        return old_url
+
+    def get_forward_url(self, forward_rules: list[ForwardRulesForRunModel]) -> str|None:
         """
         根据不同的转发规则判断是否需要转发，并返回对应的url
         """
@@ -512,20 +538,22 @@ class RequestRunner(object):
             elif match_type == ForwardRuleMatchTypeEnum.url_contain.value:
                 matched = new_url in old_url
             elif match_type == ForwardRuleMatchTypeEnum.host_equal.value:
-                matched = urllib.parse.urlparse(old_url).hostname == urllib.parse.urlparse(new_url).hostname
+                matched = urllib.parse.urlparse(old_url).hostname == new_url
             elif match_type == ForwardRuleMatchTypeEnum.host_not_equal.value:
-                matched = urllib.parse.urlparse(old_url).hostname != urllib.parse.urlparse(new_url).hostname
+                matched = urllib.parse.urlparse(old_url).hostname != new_url
             elif match_type == ForwardRuleMatchTypeEnum.host_contain.value:
-                matched = urllib.parse.urlparse(new_url).hostname in urllib.parse.urlparse(old_url).hostname
+                if new_url and new_url in urllib.parse.urlparse(old_url).hostname:
+                    matched = True
             elif match_type == ForwardRuleMatchTypeEnum.path_equal.value:
-                matched = urllib.parse.urlparse(old_url).path == urllib.parse.urlparse(new_url).path
+                matched = urllib.parse.urlparse(old_url).path == new_url
             elif match_type == ForwardRuleMatchTypeEnum.path_not_equal.value:
-                matched = urllib.parse.urlparse(old_url).path != urllib.parse.urlparse(new_url).path
+                matched = urllib.parse.urlparse(old_url).path != new_url
             elif match_type == ForwardRuleMatchTypeEnum.path_contain.value:
-                matched = urllib.parse.urlparse(new_url).path in urllib.parse.urlparse(old_url).path
+                if new_url and new_url in urllib.parse.urlparse(old_url).path:
+                    matched = True
 
             if matched:
-                return rule.target_url
+                return self.replace_forward_content(rule)
 
         return old_url
 
@@ -581,8 +609,8 @@ class RequestRunner(object):
             new_rules = [ForwardRulesForRunModel(**parsed_rule_dict) for parsed_rule_dict in parsed_rules_dict]
             new_url = self.get_forward_url(new_rules)
             request_data["url"] = new_url
-            self.logger.info(f"需要转发， 转发规则：{parsed_rules_dict}")
-            self.logger.info(f"需要转发， 转发地址：{new_url}")
+            self.logger.debug(f"需要转发， 转发规则：{parsed_rules_dict}")
+            self.logger.debug(f"需要转发， 转发地址：{new_url}")
 
     async def request(self):
         """
@@ -591,7 +619,7 @@ class RequestRunner(object):
 
         request_data = self.step_data.request.model_dump(by_alias=True)
 
-        self.logger.info(f"method: {self.step_data.request.method}")
+        self.logger.debug(f"method: {self.step_data.request.method}")
 
         try:
             self.step_data.result.logs.before_request += self.case_runner.handler.get_log()
@@ -603,47 +631,40 @@ class RequestRunner(object):
             if not request_data.get("json"):
                 request_data.pop("json")
 
-            self.logger.debug(f"Request: {json.dumps(request_data, ensure_ascii=False)}")
+            self.logger.info(f"Request: {json.dumps(request_data, ensure_ascii=False)}")
 
             start_request_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
             self.logger.debug(
                 f"发起请求，请求时间:{start_request_time} >> {self.case_runner.case_data.config.name}")
 
-            self.handler_forward_url(request_data)
-
             res_response: AgentResponse | httpx.Response = None
 
-            timings = {}
-
-            async def on_request(request):
-                timings[request] = time.perf_counter()
-
-            async def on_response(response):
-                start = timings.pop(response.request)
-                elapsed = time.perf_counter() - start
-                # print(f"{response.request.url} -> {elapsed:.2f}s")
-
             if self.case_runner.run_info.forward_config.forward and self.case_runner.run_info.forward_config.agent_code:
+                self.handler_forward_url(request_data)
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
                 request_data["requestType"] = self.step_data.step_type
                 start_time = time.time()
-                agent_res_obj: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
+                async with self.case_runner.run_info.semaphore:
+                    agent_res_obj: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
                                                                    request_data
                                                                    )
                 end_time = time.time()
                 self.format_time(start_time, end_time)
                 if agent_res_obj.status_code != AgentResponseEnum.SUCCESS.value:
-                    raise AgentForwardError("", f"客户机异常： {agent_res_obj.message}")
+                    self.logger.error(f"客户端响应内容： {agent_res_obj.response}")
+                    raise AgentForwardError(f"客户机异常： {agent_res_obj.message}")
 
                 res_response: AgentResponse = agent_res_obj.response
 
             else:
-                async with httpx.AsyncClient(verify=False, event_hooks={"request": [on_request], "response": [on_response]}) as client:
-                    start_time = time.time()
-                    res_response = await client.request(**request_data)
-                    end_time = time.time()
-                    total_time = res_response.elapsed.total_seconds()
-                    self.format_time(start_time, end_time, total_time)
+                # async with httpx.AsyncClient(verify=False, event_hooks={"request": [on_request], "response": [on_response]}) as client:
+                # request_client = self.case_runner.run_info.http_client
+                start_time = time.time()
+                async with self.case_runner.run_info.semaphore:
+                    res_response = await self.case_runner.run_info.http_client.request(**request_data)
+                end_time = time.time()
+                total_time = res_response.elapsed.total_seconds()
+                self.format_time(start_time, end_time, total_time)
 
             self.logger.debug(f"请求响应结果：{res_response.status_code}")
             self.logger.debug(f"请求总耗时时间：{res_response.elapsed.total_seconds()}")
@@ -654,7 +675,7 @@ class RequestRunner(object):
                 await asyncio.sleep(self.step_data.think_time.limit)
 
             self.logger.info(f'{"<<<请求结束:" + self.step_data.name:=^100}')
-            self.logger.info(f'实际请求Url: {res_response.request.url}')
+            self.logger.info(f'实际请求Url: {request_data.get("url")}')
             self.logger.info(f'status_code: {res_response.status_code}')
             self.logger.info(
                 f'response.headers: {json.dumps(dict(res_response.headers), ensure_ascii=False)}')
@@ -876,11 +897,12 @@ class Websocket(RequestRunner):
             if self.case_runner.run_info.forward_config.forward and self.case_runner.run_info.forward_config.agent_code:
                 self.logger.info(f"通过调用客户机转发， 客户机：{self.case_runner.run_info.forward_config.agent_code}")
                 request_data["requestType"] = self.step_data.step_type
-                agent_res_data: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
-                                                                    request_data
-                                                                    )
+                async with self.case_runner.run_info.semaphore:
+                    agent_res_data: HandleResponse = await send_message(self.case_runner.run_info.forward_config.agent_code,
+                                                                        request_data
+                                                                        )
                 if agent_res_data.status_code != AgentResponseEnum.SUCCESS.value:
-                    raise AgentForwardError("", f"客户机异常： {agent_res_data.message}")
+                    raise AgentForwardError(f"客户机异常： {agent_res_data.message}")
 
                 res_response: AgentResponseWebSocket = agent_res_data.response
                 res_content = res_response.websocket_data
@@ -890,7 +912,8 @@ class Websocket(RequestRunner):
                 async with websockets.connect(request_data["url"]) as websocket:
                     self.logger.info(f'{self.step_data.name} 连接成功')
                     res_headers = dict(websocket.response_headers) if hasattr(websocket, "response_headers") else {}
-                    await websocket.send(request_data["data"])
+                    async with self.case_runner.run_info.semaphore:
+                        await websocket.send(request_data["data"])
                     self.logger.info(f'{self.step_data.name} 发送数据成功')
 
                     res_content = []
@@ -1012,8 +1035,7 @@ class TestRunner(object):
         except Exception as e:
             self.logger.reset()
             logger.error(f"测试用例执行失败：{e}")
-            logger.exception(e)
-            raise TestFailError(f"测试用例执行失败: {e}")
+            raise TestFailError(f"测试用例执行失败: {e}", original_exception=e)
 
 
 def formate_response_body(response: requests.Response | None) -> dict | str:
