@@ -25,7 +25,7 @@
       <el-form-item :label="dataName+'ID'" prop="caseId">
         <el-input
             v-model="queryParams.caseId"
-            :placeholder="'请输入'+dataName+'名称'"
+            :placeholder="'请输入'+dataName+'ID'"
             clearable
             style="width: 200px"
             @keyup.enter="handleQuery"

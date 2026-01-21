@@ -2,14 +2,17 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional, List, Any, Dict
+import asyncio
 
+import httpx
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query, as_form
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
-from module_hrm.enums.enums import RunTypeEnum, DataType
+from module_hrm.entity.vo.push_vo import FeishuRobotModel
+from module_hrm.enums.enums import RunTypeEnum, DataType, UrlContentEnum, PushReminderEnum, AllowPushEnum
 from utils.common_util import CamelCaseUtil
 
 
@@ -68,19 +71,11 @@ class CaseModel(CommonDataModel):
             return include
 
 
-class FeishuRobotModel(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
-    url: Optional[str] = None
-    secret: Optional[str] = None
-    keywords: Optional[list] = Field(default_factory=lambda: [])
-    at_user_id: Optional[list] = Field(default_factory=lambda: [])
-    push: bool = False
-
-
 class ForwardRulesForRunModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
     match_type: Optional[int] = None  # module_hrm.enums.enums.ForwardRuleMatchTypeEnum
     origin_url: str | None = None
+    replace_content: Optional[int] = UrlContentEnum.URL.value
     target_url: Optional[str] = None
 
 
@@ -99,12 +94,34 @@ class ProjectDebugtalkInfoModel(BaseModel):
     module_instance: list[Any] = Field(default_factory=lambda: [])
 
 
+class PushReminderModel(BaseModel):
+    push: bool = Field(default_factory=lambda: False)
+    reminder: int = Field(default_factory=lambda: PushReminderEnum.no_reminder.value)
+
+
+class RunCasePushInfoModel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel,
+                              from_attributes=True,
+                              arbitrary_types_allowed=True,
+                              populate_by_name=True
+                              )
+    at_reminder_config: int = Field(default_factory=lambda: PushReminderEnum.no_reminder.value)
+    push_ids: list[int|str] = Field(default_factory=lambda: [])
+    allow_push: int = AllowPushEnum.not_push.value
+    success: PushReminderModel = PushReminderModel()
+    failed: PushReminderModel = PushReminderModel()
+
+
 class CaseRunModel(BaseModel):
     """
     用于用例运行前的序列化
     """
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
-
+    model_config = ConfigDict(alias_generator=to_camel,
+                              from_attributes=True,
+                              arbitrary_types_allowed=True,
+                              populate_by_name=True
+                              )
+    user_name: Optional[str] = None
     ids: Optional[int | List | None] = None  # 执行的数据源的ID
     run_type: Optional[int] = RunTypeEnum.case.value  # 用例执行数据源，项目、模块、套件、用例
     run_model: Optional[int | None] = None  # 执行方式，1手动，2定时任务
@@ -113,19 +130,24 @@ class CaseRunModel(BaseModel):
     is_async: Optional[bool] = False  # 本次执行同步或异步
     log_level: Optional[int] = logging.INFO  # 日志级别
     repeat_num: int = 1  # 用例重复执行次数
-    env: int  # 环境id
+    env: int|None = None  # 环境id
     concurrent: int = 1  # 并发数(同时执行的用例数)
     run_by_sort: Optional[bool] = False
     case_data: Optional[CaseModel | dict | None] = None  # 用例数据
     runner: Any = None
+    dept_id: Optional[int|str] = None
 
     forward_config: Optional[ForwardConfigModel] = ForwardConfigModel()
 
     push: bool = False
+    push_config: Optional[RunCasePushInfoModel] = RunCasePushInfoModel()
     feishu_robot: Optional[FeishuRobotModel] = FeishuRobotModel()
 
     global_vars: dict = Field(default_factory=lambda: {})
     project_debugtalk_set: dict[str | int, ProjectDebugtalkInfoModel] = Field(default_factory=lambda: {})  # 当前加载的所有debugtalk
+    http_client: httpx.AsyncClient = Field(default=None, exclude=True)
+
+    semaphore: Optional[asyncio.Semaphore] = None  # 并发限制
 
 
 class CaseModuleProjectModel(BaseModel):

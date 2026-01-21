@@ -667,11 +667,11 @@ onMounted(() => {
               <el-switch v-model="row[col.prop].content"></el-switch>
             </template>
             <template v-else>
-              <el-text v-show="!row[col.prop].edit"
+              <el-text v-if="!row[col.prop].edit"
                        style="white-space: nowrap;overflow: hidden;text-overflow: ellipsis;display: inline-block;max-width: 100%"
               >{{ row[col.prop].content }}
               </el-text>
-              <el-input v-show="row[col.prop].edit"
+              <el-input v-else-if="row[col.prop].edit"
                         type="textarea" size="small"
                         v-model="row[col.prop].content"
                         @blur="row[col.prop].edit = false"

@@ -280,13 +280,8 @@ async def add_case_params(
     data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
 ):
     try:
-        # 获取全量数据
-        query_result = CaseService.get_case_list_services(
-            query_db, page_query, is_page=False, data_scope_sql=data_scope_sql
-        )
-        export_result = CaseService.export_case_list_services(query_result)
-        logger.info("导出成功")
-        return ResponseUtil.streaming(data=bytes2file_response(export_result))
+        pass
+        return ResponseUtil.success(msg="新增成功")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -298,18 +293,16 @@ async def add_case_params(
 @log_decorator(title="编辑用例参数", business_type=2)
 async def edite_case_params(
     request: Request,
-    page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
+    caseId: str|int,
+    rowsData: list[dict],
     query_db: Session = Depends(get_db),
     data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
 ):
     try:
-        # 获取全量数据
-        query_result = CaseService.get_case_list_services(
-            query_db, page_query, is_page=False, data_scope_sql=data_scope_sql
+        await CaseParamsService.update_case_params_services(
+            query_db, caseId, rowsData
         )
-        export_result = CaseService.export_case_list_services(query_result)
-        logger.info("导出成功")
-        return ResponseUtil.streaming(data=bytes2file_response(export_result))
+        return ResponseUtil.success(msg="更新成功")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

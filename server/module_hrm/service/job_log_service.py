@@ -1,3 +1,5 @@
+from loguru import logger
+
 from module_hrm.dao.job_log_dao import JobLogDao, JobLogPageQueryModel, JobLogModel, DeleteJobLogModel
 from sqlalchemy.orm import Session
 from module_admin.service.dict_service import Request, DictDataService
@@ -35,8 +37,10 @@ class JobLogService:
         try:
             JobLogDao.add_job_log_dao(query_db, page_object)
             query_db.commit()
+            logger.info(f"任务调度日志记录成功")
             result = dict(is_success=True, message='新增成功')
         except Exception as e:
+            logger.error(f'add_job_log_services error: {e}')
             query_db.rollback()
             result = dict(is_success=False, message=str(e))
 

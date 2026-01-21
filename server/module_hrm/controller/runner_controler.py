@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 
+import httpx
 from fastapi import APIRouter, Request
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -13,16 +14,20 @@ from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from module_hrm.dao.push_dao import PushDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import CaseModel, CaseRunModel
+from module_hrm.entity.vo.push_vo import PushModel
+from module_hrm.entity.vo.report_vo import ReportListModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel
+from module_hrm.enums.enums import AllowPushEnum, CaseRunStatus
 from module_hrm.service.debugtalk_service import DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler, ForwardRulesHandler
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_async, save_run_detail, run_test_in_background
 from utils.log_util import logger
-from utils.message_util import MessageHandler
+from utils.message_util import TestResultPushHandler
 from utils.page_util import PageResponseModel
 from utils.response_util import ResponseUtil
 
@@ -51,9 +56,11 @@ async def run_test(request: Request,
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
         logger.exception(e)
-        message_handler = MessageHandler(run_info)
-        if message_handler.can_push():
-            message_handler.feishu().push(f"[{current_user.user.user_name}]于{datetime.now()}开始的测试异常了")
+        report_info = ReportListModel()
+        report_info.status = CaseRunStatus.failed.value
+        report_info.create_by = current_user.user.user_name
+        TestResultPushHandler(run_info, report_info).push(
+            f"【{current_user.user.user_name}】于{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}开始的测试【{run_info.report_name}】失败了!\n{e}")
         return ResponseUtil.error(msg=str(e))
 
 
@@ -68,6 +75,7 @@ async def for_debug(request: Request,
     debugtalk_obj = None
     try:
         ForwardRulesHandler.transform(query_db, debug_info)
+        debug_info.semaphore = asyncio.Semaphore(1)
         debug_info.runner = current_user.user.user_id
         debug_info.log_level = logging.DEBUG
         case_data = debug_info.case_data
@@ -87,9 +95,10 @@ async def for_debug(request: Request,
                                                                 case_id=case_data["caseId"] or int(
                                                                     datetime.now().timestamp() * 1000000),
                                                                 run_info=debug_info)
-
-        test_runner = TestRunner(case_obj, debugtalk_info, debug_info)
-        all_case_res = await test_runner.start()
+        async with httpx.AsyncClient(verify=False) as client:
+            debug_info.http_client = client
+            test_runner = TestRunner(case_obj, debugtalk_info, debug_info)
+            all_case_res = await test_runner.start()
         logger.info('执行成功')
         all_log = []
         steps_result = {}

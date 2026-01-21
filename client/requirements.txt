@@ -8,13 +8,16 @@ pyperclip
 pyinstaller
 python-barcode
 pillow
+pydantic
+pywin32
+pyftpdlib
 
 httpx
 
-fastapi
-uvicorn
 
 mitmproxy
 flet-desktop
 
 watchfiles
+
+websockets==12.0

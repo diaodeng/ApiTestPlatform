@@ -66,6 +66,7 @@ class MockHandle:
     def __init__(self):
         # self.client = httpx.AsyncClient(timeout=5)
         config = MitmproxyConfig.read()
+        self.custom_config = config
 
         if config.add_headers:
             lines = config.add_headers.split("\n")
@@ -136,6 +137,9 @@ class MockHandle:
     async def request(self, flow: HTTPFlow):
         logger.info(f"request: {flow.request.path}")
         logger.info(f"is_mock: {MockHandle.is_mock}, include: {MockHandle.include}, exclude: {MockHandle.exclude}")
+        if self.custom_config.request_delay.enabled and flow.request.path in self.custom_config.request_delay.delay_path:
+            logger.info(f"request: {flow.request.path}， 模拟请求延时：{self.custom_config.request_delay.delay}s")
+            await asyncio.sleep(self.custom_config.request_delay.delay)
 
         if not MockHandle.is_mock:
             logger.info(f"not mock: {flow.request.path}")
@@ -180,7 +184,10 @@ class MockHandle:
             logger.error(f"request mock error[{flow.request.path}]: {e}")
 
     async def response(self, flow: HTTPFlow):
-        pass
+        if self.custom_config.response_delay.enabled and flow.request.path in self.custom_config.response_delay.delay_path:
+            logger.info(f"response: {flow.request.path}， 模拟响应延时1：{self.custom_config.response_delay.delay}s")
+            await asyncio.sleep(self.custom_config.response_delay.delay)
+            logger.info(f"response: {flow.request.path}， 模拟响应延时2：{self.custom_config.response_delay.delay}s")
 
 
 class ProxyCore:
@@ -237,6 +244,7 @@ class ProxyCore:
                            confdir=config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy"),
                            # confdir="C:\\Users\\Administrator\\.mitmproxy",
                            mode=mode,
+                           ssl_insecure=True
                            )
 
             # self.master = DumpMaster(opts, with_termlog=False, with_dumper=False)
@@ -333,7 +341,7 @@ class ProxyCore:
         for d in descendants:
             logger.info(f"后代 PID={d.pid}, 名称={d.name()}， 状态={d.status()}， 信息：{d.exe()}")
         logger.info(f"mitmproxy 后代进程获取完毕")
-        return
+        # return
 
         current_pid = os.getpid()
         children = []
@@ -341,16 +349,16 @@ class ProxyCore:
         # 查找所有子进程
         for proc in psutil.process_iter(['pid', 'ppid', 'name', "exe"]):
             try:
-                logger.debug(f"进程： {proc.info['name']}")
+                logger.info(f"进程： {proc.info['name']}  路径:{proc.info["exe"]}")
                 if "mitm" in proc.info["name"].lower():
                     logger.info(f"这是啥：{proc}")
 
-                if proc.info['ppid'] == current_pid:
-                    # 查找当前进程的所有线程
-                    parent = psutil.Process(current_pid)
-                    threads.extend(parent.threads())
-                    logger.info(proc)
-                    logger.info(f"{proc.info['pid']}  mitmproxy threads: {[thread.id for thread in threads]}")
+                # if proc.info['ppid'] == current_pid:
+                #     # 查找当前进程的所有线程
+                #     parent = psutil.Process(current_pid)
+                #     threads.extend(parent.threads())
+                #     logger.info(proc)
+                #     logger.info(f"{proc.info['pid']}  mitmproxy threads: {[thread.id for thread in threads]}")
 
                     # if proc.info['name'] != "flet.exe":
                     #     proc.terminate()
