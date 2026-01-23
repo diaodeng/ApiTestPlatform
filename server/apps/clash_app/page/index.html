@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>Clash 管理台</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; }
+    .container { display: flex; height: 100vh; }
+    .panel { padding: 16px; border-right: 1px solid #ddd; width: 300px; }
+    .panel h2 { margin-top: 0; }
+    .item { cursor: pointer; padding: 6px; }
+    .item:hover { background: #f0f0f0; }
+    button { margin-top: 12px; width: 100%; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="panel">
+    <h2>Clash 实例</h2>
+    <div id="clashes"></div>
+  </div>
+
+  <div class="panel">
+    <h2>订阅</h2>
+    <div id="subs"></div>
+    <button onclick="switchSub()">切换订阅</button>
+    <button onclick="openYacd()">打开 Yacd</button>
+  </div>
+</div>
+
+<script>
+let selectedClash = null;
+let selectedSub = null;
+
+async function loadData() {
+  const clashes = await fetch('/api/clashes').then(r => r.json());
+  const subs = await fetch('/api/subscriptions').then(r => r.json());
+
+  const clashDiv = document.getElementById('clashes');
+  const subDiv = document.getElementById('subs');
+
+  clashDiv.innerHTML = '';
+  subDiv.innerHTML = '';
+
+  Object.keys(clashes).forEach(id => {
+    const d = document.createElement('div');
+    d.className = 'item';
+    d.innerText = id;
+    d.onclick = () => selectedClash = id;
+    clashDiv.appendChild(d);
+  });
+
+  Object.keys(subs).forEach(id => {
+    const d = document.createElement('div');
+    d.className = 'item';
+    d.innerText = id;
+    d.onclick = () => selectedSub = id;
+    subDiv.appendChild(d);
+  });
+}
+
+async function switchSub() {
+  if (!selectedClash || !selectedSub) {
+    alert('请选择 Clash 和订阅');
+    return;
+  }
+  await fetch(`/api/clash/${selectedClash}/use/${selectedSub}`, { method: 'POST' });
+  alert('切换完成');
+}
+
+function openYacd() {
+  if (!selectedClash) return;
+  window.open(`/yacd?clash=${selectedClash}`, '_blank');
+}
+
+loadData();
+</script>
+</body>
+</html>

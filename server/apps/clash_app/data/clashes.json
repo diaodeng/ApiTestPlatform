@@ -1,0 +1,14 @@
+{
+  "clash-a": {
+    "clash_id": 11111,
+    "api": "http://127.0.0.1:9091",
+    "secret": "aaa",
+    "config": "current/clash-a.yaml"
+  },
+  "clash-b": {
+    "clash_id": 11112,
+    "api": "http://127.0.0.1:9092",
+    "secret": "bbb",
+    "config": "current/clash-b.yaml"
+  }
+}
