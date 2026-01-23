@@ -43,6 +43,8 @@ from module_hrm.controller.push_controller import pushController
 from module_hrm.controller.tools_controller import toolsController
 # from module_hrm.controller.celery_controller import celeryController
 
+from apps.clash_app.app import clash_admin_app
+
 from config.env import AppConfig
 from config.get_redis import RedisUtil
 from config.get_db import init_create_table
@@ -139,3 +141,5 @@ controller_list = [
 
 for controller in controller_list:
     app.include_router(router=controller.get('router'), tags=controller.get('tags'))
+
+app.mount("clash-admin", clash_admin_app)

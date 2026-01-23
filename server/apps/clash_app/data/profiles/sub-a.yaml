@@ -1,0 +1,13 @@
+external-controller: 0.0.0.0:9091
+secret: aaa
+allow-lan: true
+
+proxy-providers:
+  sub:
+    type: http
+    url: https://example.com/sub-a
+    interval: 3600
+    path: ./providers/sub.yaml
+
+rules:
+  - MATCH,DIRECT

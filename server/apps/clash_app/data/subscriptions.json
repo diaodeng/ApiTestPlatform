@@ -1,0 +1,14 @@
+{
+  "sub-a": {
+    "name": "测试",
+    "sub_id": 111,
+    "type": 1,
+    "url": "https://example.com/sub-a"
+  },
+  "sub-b": {
+    "name": "测试2",
+    "sub_id": 112,
+    "type": 1,
+    "url": "https://example.com/sub-b"
+  }
+}

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from middlewares.cors_middleware import add_cors_middleware
+from middlewares.auth_middleware import AuthMiddleware
 
 
 def handle_middleware(app: FastAPI):
@@ -8,3 +9,4 @@ def handle_middleware(app: FastAPI):
     """
     # 加载跨域中间件
     add_cors_middleware(app)
+    app.add_middleware(AuthMiddleware)
