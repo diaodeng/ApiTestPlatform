@@ -1,6 +1,7 @@
 import asyncio
 from shutil import rmtree
 from typing import Optional
+from loguru import logger
 
 from do import config as do_config
 from model.config import SearchConfigModel, MitmProxyConfigModel, StartConfigModel, \
@@ -117,10 +118,22 @@ class PosConfig:
         pass
 
     @classmethod
-    def read_pos_params(cls, pos_path: str) -> PosParamsModel | None:
-        local_params = do_config.PosConfig.read_pos_params(pos_path)
-        if pos_path and not local_params:
-            return pos_network.pos_init(pos_path)
+    def read_pos_params(cls, pos_path: str, local: int=0) -> PosParamsModel | None:
+        """
+        local: 0优先取本地数据，没有就取服务端，1只取本地，2只取服务端
+        """
+        local_params = None
+        if local in (0, 1):
+            local_params = do_config.PosConfig.read_pos_params(pos_path)
+            if local == 1:
+                return local_params
+
+        if local == 2 or (pos_path and not local_params):
+            try:
+                return pos_network.pos_init(pos_path)
+            except Exception as e:
+                logger.error(f"网络和本地都没有对应pos的配置：{e}")
+                return None
         return local_params
 
 
