@@ -19,13 +19,14 @@ redlock==1.2.0
 jmespath==1.0.1
 httpx==0.27.0
 httpx[http2]
-PyExecJS==1.5.1
+# PyExecJS==1.5.1
+py-mini-racer
 autopep8==2.3.1
 pydantic==2.7.1
 jsonpath==0.82.2
 jinja2
-pdfkit
-wkhtmltopdf
+# pdfkit
+# wkhtmltopdf
 locust
 celery
 celery-redbeat
