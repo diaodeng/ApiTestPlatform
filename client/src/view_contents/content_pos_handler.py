@@ -14,6 +14,7 @@ from server.pos_config_server import PosConfigServer
 from server.pos_tool_config_server import PosToolConfigServer
 from utils import file_handle, pos_network
 from utils.common import kill_process_by_name, get_all_process, kill_process_by_id, ExeVersionReader
+from view_contents.dialog.registerDialog import FeatureDialog
 
 
 class PosHandler:
@@ -431,68 +432,25 @@ class PosHandler:
             UiUtil.show_snackbar_error(self.page, f"账号登出失败：{e}")
 
     async def __confirm_dialog(self, title, content_data):
-        loop = asyncio.get_event_loop()
-        future = loop.create_future()
-
-        def yes(e):
-            dlg.open = False
-            self.page.update()
-            future.set_result(True)
-
-        def no(e):
-            dlg.open = False
-            self.page.update()
-            future.set_result(False)
-
-        dlg = ft.AlertDialog(
-            title=ft.Text(title),
-            modal=True,
-            content=ft.Text(content_data),
+        return await FeatureDialog(
+            page=self.page,
+            tile=title,
+            content=content_data,
             actions=[
-                ft.TextButton("取消", on_click=no),
-                ft.TextButton("确定", on_click=yes),
-            ]
-        )
-
-        self.page.open(dlg)
-        self.page.update()
-
-        return await future  # 等待点击
+                ("取消", False),
+                ("确定", True)
+            ]).show()
 
     async def __choice_start_type_dialog(self, title, content_data):
-        loop = asyncio.get_event_loop()
-        future = loop.create_future()
-
-        def yes(e):
-            dlg.open = False
-            self.page.update()
-            future.set_result(1)
-
-        def no(e):
-            dlg.open = False
-            self.page.update()
-            future.set_result(0)
-
-        def other(e):
-            dlg.open = False
-            self.page.update()
-            future.set_result(2)
-
-        dlg = ft.AlertDialog(
-            title=ft.Text(title),
-            modal=True,
-            content=ft.Text(content_data),
+        return await FeatureDialog(
+            page=self.page,
+            tile=title,
+            content=content_data,
             actions=[
-                ft.TextButton("取消", on_click=no),
-                ft.TextButton("确定", on_click=yes),
-                ft.TextButton("切换后启动", on_click=other),
-            ]
-        )
-
-        self.page.open(dlg)
-        self.page.update()
-
-        return await future  # 等待点击
+                ("取消", 0),
+                ("确定", 1),
+                ("切换后启动", 2)
+            ]).show()
 
     async def open_pos_file(self, e: ft.ControlEvent):
         """打开文件"""
@@ -516,7 +474,8 @@ class PosHandler:
                 logger.info(f"没有本地POS配置文件")
                 ok = await self.__confirm_dialog(
                     "POS启动提示",
-                    f"本地配置为空，将启动服务端对应机台：商家：{remote_pos_params.venderNo}，门店：{remote_pos_params.orgNo}，POS：{remote_pos_params.posId}")
+                    f"本地配置为空，将启动服务端对应机台：\n"
+                    f"服务端：商家：{remote_pos_params.venderNo}，门店：{remote_pos_params.orgNo}，POS：{remote_pos_params.posId}")
                 if not ok:
                     return
             else:
@@ -524,7 +483,11 @@ class PosHandler:
                                                          or local_pos_params.orgNo != remote_pos_params.orgNo \
                                                          or local_pos_params.posId != remote_pos_params.posId):
 
-                    open_type = await self.__choice_start_type_dialog("POS启动提示", f"配置不一致，将启动服务端对应机台：\n云端：商家：{remote_pos_params.venderNo}，门店：{remote_pos_params.orgNo}，POS：{remote_pos_params.posId}；\n本地：商家：{local_pos_params.venderNo}，门店：{local_pos_params.orgNo}，POS：{local_pos_params.posId}；")
+                    open_type = await self.__choice_start_type_dialog(
+                        "POS启动提示",
+                        f"配置不一致，将启动服务端对应机台："
+                        f"\n云端：商家：{remote_pos_params.venderNo}，门店：{remote_pos_params.orgNo}，POS：{remote_pos_params.posId}；"
+                        f"\n本地：商家：{local_pos_params.venderNo}，门店：{local_pos_params.orgNo}，POS：{local_pos_params.posId}；")
                     if open_type == 0:
                         return
                     elif open_type == 2:
