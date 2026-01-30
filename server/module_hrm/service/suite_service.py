@@ -1,3 +1,4 @@
+from loguru import logger
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -101,18 +102,23 @@ class SuiteService:
         :param page_object: 删除测试套件对象
         :return: 删除测试套件校验结果
         """
-        if page_object.suite_ids.split(','):
-            suite_id_list = page_object.suite_ids.split(',')
-            try:
-                for suite_id in suite_id_list:
-                    SuiteDao.delete_suite_dao(query_db, SuiteModel(suiteId=suite_id), user)
-                query_db.commit()
-                result = dict(is_success=True, message='删除成功')
-            except Exception as e:
-                query_db.rollback()
-                raise e
-        else:
-            result = dict(is_success=False, message='传入测试套件id为空')
+        if not page_object.suite_ids:
+            return CrudResponseModel(is_success=False, message='传入测试套件id为空')
+
+        suite_id_list = str(page_object.suite_ids).split(',')
+
+        if not suite_id_list:
+            return CrudResponseModel(is_success=False, message='传入测试套件id为空')
+
+        try:
+            for suite_id in suite_id_list:
+                SuiteDao.delete_suite_dao(query_db, SuiteModel(suiteId=suite_id), user)
+            query_db.commit()
+            result = dict(is_success=True, message='删除成功')
+        except Exception as e:
+            query_db.rollback()
+            raise e
+
         return CrudResponseModel(**result)
 
 
@@ -203,7 +209,9 @@ class SuiteDetailService:
         :param suite_object: 编辑测试套件详细对象
         :return: 编辑测试套件详细校验结果
         """
+        logger.debug(f"data:{suite_detail_object.model_dump()}")
         edit_suite_detail = suite_detail_object.model_dump(exclude_unset=True)
+        logger.debug(f"edit_suite_detail:{edit_suite_detail}")
         suite_info = cls.get_suite_detail_services(query_db, edit_suite_detail.get('suite_detail_id'))
         if suite_info:
             try:
@@ -264,3 +272,7 @@ class SuiteDetailService:
         suite_detail_list_result = SuiteDetailDao.get_suite_detail_list_by_suite_id_dao(query_db, query_obj)
 
         return suite_detail_list_result
+
+    @classmethod
+    async def delete_suite_detail(cls, session: Session, suite_id:str|int, detail_ids: list[str|int]):
+        await SuiteDetailDao.del_suite_detail_batch(session, suite_id, detail_ids)
