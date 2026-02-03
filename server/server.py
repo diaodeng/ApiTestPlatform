@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from sub_applications.handle import handle_sub_applications
 from middlewares.handle import handle_middleware
 from exceptions.handle import handle_exception
+from utils.metrics import PushMetrics
 from module_admin.controller.login_controller import loginController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.user_controller import userController
@@ -63,11 +64,18 @@ async def lifespan(app: FastAPI):
         await SysSchedulerUtil.init_system_scheduler()
         await QtrSchedulerUtil.init_qtr_scheduler()
         await startup_handler()
+        metrics_thread = PushMetrics()
+        metrics_thread.start()
         logger.info(f"{AppConfig.app_name}启动成功")
         yield
+        try:
+            metrics_thread.stop()
+        except Exception:
+            pass
         await SysSchedulerUtil.close_scheduler()
         await QtrSchedulerUtil.close_scheduler()
         await RedisUtil.close_redis_pool(app)
+
     except Exception:
         err = traceback.format_exc()
         print("应用有异常", err)

@@ -166,20 +166,27 @@
             <el-form-item label="消息内容：" prop="configContent.content">
 
               <template #label>
-                <el-text>消息内容：</el-text>
+                <el-text>消息内容</el-text>
                 <el-popover
                     title="可以使用的变量"
                     placement="right-start"
+                    :width="500"
                 >
-                  <el-text>变量格式：${变量名}
-                    可使用变量：user，start_at，total_count，success_count，failed_count，report_id,report_name
-                  </el-text>
+                  <el-text>变量使用格式：${变量名}</el-text>
+                  <el-table :data="gridData">
+                    <el-table-column width="150" property="name" label="变量名" />
+                    <el-table-column width="150" property="desc" label="描述" />
+                    <el-table-column width="200" property="example" label="示例" />
+                  </el-table>
                   <template #reference>
-                    <el-icon>
-                      <View/>
-                    </el-icon>
+                    <el-text>
+                      <el-icon>
+                        <View/>
+                      </el-icon>
+                    </el-text>
                   </template>
                 </el-popover>
+                <el-text>：</el-text>
               </template>
               <el-input type="textarea" v-model="form.configContent.content"></el-input>
             </el-form-item>
@@ -263,7 +270,39 @@ const rules = reactive({
       {required: true, message: '请输入推送内容', trigger: 'blur'}
     ]
   }
-})
+});
+
+const gridData = [
+  {
+    example: '管理员',
+    name: 'user',
+    desc: '用户名，执行账号',
+  },{
+    example: '2026-01-04 01:00:00',
+    name: 'start_at',
+    desc: '测试开始时间',
+  },{
+    example: '100',
+    name: 'total_count',
+    desc: '执行的总用例数',
+  },{
+    example: '99',
+    name: 'success_count',
+    desc: '成功用例数',
+  },{
+    example: '1',
+    name: 'failed_count',
+    desc: '失败用例数',
+  },{
+    example: '1960446465473536',
+    name: 'report_id',
+    desc: '报告ID',
+  },{
+    example: '测试报告名称',
+    name: 'report_name',
+    desc: '报告名',
+  },
+]
 
 
 /*

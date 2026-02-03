@@ -306,10 +306,10 @@ class ChangePosUi(ft.AlertDialog):
         """
         switch_model = event.control.value
         for cont in event.control.parent.controls:
-            if cont.data == "pos_mac":
-                cont.visible = switch_model == "1"  # 按mac切换
-                cont.update()
-            elif cont.data == "pos_no":
+            # if cont.data == "pos_mac":
+            #     cont.visible = switch_model == "1"  # 按mac切换
+            #     cont.update()
+            if cont.data == "pos_no":
                 cont.visible = switch_model != "1"  # 按posId切换
                 cont.update()
 

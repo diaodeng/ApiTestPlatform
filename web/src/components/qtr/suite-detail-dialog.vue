@@ -32,7 +32,6 @@
             </el-option>
           </el-select>
         </el-form-item>
-        、
         <el-form-item label="数据ID" prop="dataId">
           <el-input
               v-model="queryParams.dataId"
@@ -143,6 +142,7 @@
 
     <!--  配置套件数据  -->
     <ConfigSuiteDataDialog
+        v-if="openConfigSuiteDataDialog"
         :form-datas="form"
         :suiteId="configSuiteId"
         @closeDialog="getList"
@@ -153,11 +153,18 @@
 </template>
 
 <script setup name="SuiteDetail">
-import {changeContentOrder, getSuiteDetail, listDetailSuite, updateSuiteDetail} from "@/api/qtr/suite.js";
+import {
+  changeContentOrder,
+  delSuiteDetailRequest,
+  getSuiteDetail,
+  listDetailSuite,
+  updateSuiteDetail
+} from "@/api/qtr/suite.js";
 import {listProject} from "@/api/hrm/project.js";
 import {selectModulList} from "@/api/hrm/module.js";
-import ConfigSuiteDataDialog from "@/components/qtr/config-suite-data-dialog.vue";
+// import ConfigSuiteDataDialog from "@/components/qtr/config-suite-data-dialog.vue";
 import {ElMessage} from "element-plus";
+import { defineAsyncComponent } from 'vue';
 
 const suiteId = defineModel("suiteId")
 const {proxy} = getCurrentInstance();
@@ -195,6 +202,10 @@ const data = reactive({
 const openSuiteDetailDialog = defineModel("openSuiteDetailDialog");
 const {queryParams, form} = toRefs(data);
 
+const ConfigSuiteDataDialog = defineAsyncComponent(() =>
+  import('@/components/qtr/config-suite-data-dialog.vue')
+);
+
 /** 展开/折叠操作 */
 function toggleExpandAll() {
   refreshTable.value = false;
@@ -207,7 +218,6 @@ function toggleExpandAll() {
 function handleSelectionChange(selection) {
   suiteDetailIds.value = selection.map(item => item.suiteDetailId);
 }
-
 
 
 /** 表单重置 */
@@ -243,7 +253,7 @@ function handleSelectCase() {
 
 /** 查询项目列表 */
 function getProjectSelect() {
-  listProject(null).then(response => {
+  listProject({"isPage": false}).then(response => {
     projectOptions.value = response.data;
   });
 }
@@ -309,32 +319,36 @@ function clearData() {
 // 启用或停用套件中的数据
 function handleStatusChange(row) {
   loadingSwitch.value = true;
-  getSuiteDetail(row.suiteDetailId).then(response => {
-    if (!response.data || Object.keys(response.data).length === 0) {
-      alert("未查到对应数据！");
-      return;
-    }
-    response.data.status = row.status
-    updateSuiteDetail(response.data).then(response => {
+
+    updateSuiteDetail(row).then(response => {
       proxy.$modal.msgSuccess("修改成功");
 
+    }).finally(()=>{
+      loadingSwitch.value = false;
     });
-  }).finally(() => {
-    loadingSwitch.value = false;
-  });
-
 }
 
 function changeOrder(row) {
-  changeContentOrder({"suiteId": row.suiteId, "orderNum": row.orderNum, "dataId": row.dataId}).then(response =>{
+  changeContentOrder({"suiteId": row.suiteId, "orderNum": row.orderNum, "dataId": row.dataId}).then(response => {
     ElMessage.success(response.msg);
-  }).catch(reason=>{
+  }).catch(reason => {
     ElMessage.error("操作失败");
   });
 }
 
-getProjectSelect();
-getList();
+function handleDelete(row) {
+  delSuiteDetailRequest({"suiteId": row.suiteId, "suiteDetailIds": [row.suiteDetailId]}).then(response => {
+    ElMessage.success(response.msg);
+  }).catch(reason => {
+    ElMessage.error("操作失败");
+  });
+}
+
+onMounted(() => {
+  getProjectSelect();
+  getList();
+})
+
 
 </script>
 

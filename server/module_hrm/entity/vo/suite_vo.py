@@ -37,7 +37,7 @@ class DeleteSuiteModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    suite_ids: str
+    suite_ids: str|int
     update_by: Optional[str] = None
     update_time: Optional[str] = None
 
@@ -97,6 +97,7 @@ class DeleteDetailSuiteModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    suite_detail_ids: str
+    suite_id: str|int
+    suite_detail_ids: list[str|int]
     update_by: Optional[str] = None
     update_time: Optional[str] = None

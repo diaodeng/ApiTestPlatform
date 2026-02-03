@@ -13,6 +13,7 @@ class About(object):
 
     def __init__(self):
         self.download_progress_view = ft.Text(key="upload_process")
+        self.force_update_ui = ft.Checkbox(label="强制更新", value=False, data="force_update")
 
     def about(self):
         content = ft.Container(
@@ -28,6 +29,7 @@ class About(object):
                         ft.Text("QTRClient客户端"),
                         ft.ElevatedButton("检查更新", on_click=self.check_new_version),
                         ft.ElevatedButton("更新", on_click=self.get_sys_info_view),
+                        self.force_update_ui,
                         self.download_progress_view,
                         ft.Text(key="version_tip")
                         # ft.Button("Kill POS")
@@ -54,6 +56,8 @@ class About(object):
             logger.info(f"has_new: {has_new}")
             if has_new:
                 check_info = f"当前版本：{VERSION}  新版本：{has_new}"
+            else:
+                check_info = f"当前版本：{VERSION}，已经是最新版本"
         except Exception as ex:
             logger.exception(ex)
             check_info = f"检查新版本异常：{str(ex)}"
@@ -79,14 +83,17 @@ class About(object):
         e.control.disabled = True
         e.control.update()
         try:
-            has_new, new_info = await check_app_has_new()
-            if not has_new:
-                UiUtil.show_snackbar_success(e.control.page, f"当前版本{VERSION}已经是最新版本")
-                return
+            fource_update = self.force_update_ui.value
+            if not fource_update:
+                has_new, new_info = await check_app_has_new()
+                if not has_new:
+                    UiUtil.show_snackbar_success(e.control.page, f"当前版本{VERSION}已经是最新版本")
+                    return
 
-            await perform_update_with_powershell(self.show_load_process)
-            e.control.page.window.prevent_close = False
-            e.control.page.window.close()
+            update_success = await perform_update_with_powershell(self.show_load_process)
+            if update_success:
+                e.control.page.window.prevent_close = False
+                e.control.page.window.close()
             # sys.exit(0)
         except Exception as ex:
             logger.exception(ex)

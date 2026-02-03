@@ -10,7 +10,7 @@ from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import LoginService, CurrentUserModel
 from module_hrm.entity.vo.suite_vo import SuiteModel, SuitePageQueryModel, SuiteDetailModel, SuiteDetailPageQueryModel, \
-    DeleteSuiteModel
+    DeleteSuiteModel, DeleteDetailSuiteModel
 from module_hrm.service.suite_service import SuiteService, SuiteDetailService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
@@ -187,14 +187,14 @@ async def query_detail_suite_detail(request: Request, suiteDetailId: int, query_
         return ResponseUtil.error(msg=str(e))
 
 
-@suiteController.delete("/{suiteIds}", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:remove'))])
+@suiteController.delete("", dependencies=[Depends(CheckUserInterfaceAuth('qtr:suite:remove'))])
 @log_decorator(title='测试套件', business_type=3)
 async def delete_qtr_suite(request: Request,
-                           suiteIds: str,
+                           suite_del_model: DeleteSuiteModel,
                            query_db: Session = Depends(get_db),
                            current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        delete_suite = DeleteSuiteModel(suiteIds=suiteIds)
+        delete_suite = suite_del_model
         delete_suite_result = SuiteService.delete_suite_services(query_db, delete_suite, current_user)
         if delete_suite_result.is_success:
             logger.info(delete_suite_result.message)
@@ -207,12 +207,29 @@ async def delete_qtr_suite(request: Request,
         return ResponseUtil.error(msg=str(e))
 
 
-@suiteController.get("/{suiteId}", response_model=SuiteModel,
+@suiteController.get("", response_model=SuiteModel,
                      dependencies=[Depends(CheckUserInterfaceAuth(['qtr:suite:detail', "qtr:suite:edit"], False))])
-async def query_detail_suite(request: Request, suiteId: int, query_db: Session = Depends(get_db)):
+async def query_detail_suite(request: Request, suiteId: int | str, query_db: Session = Depends(get_db)):
     try:
         detail_suite_result = SuiteService.get_suite_services(query_db, suiteId)
         logger.info(f'获取suite_id为{suiteId}的信息成功')
+        return ResponseUtil.success(data=detail_suite_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@suiteController.delete("/detail", response_model=SuiteModel,
+                        # dependencies=[Depends(CheckUserInterfaceAuth(['qtr:suite:detail:delete'], False))]
+                        )
+async def delete_detail_suite(request: Request,
+                              suite_del_model: DeleteDetailSuiteModel,
+                              query_db: Session = Depends(get_db)):
+    try:
+        detail_suite_result = await SuiteDetailService.delete_suite_detail(query_db,
+                                                                     suite_del_model.suite_id,
+                                                                     suite_del_model.suite_detail_ids)
+        logger.info(f'删除套件详情成功：suiteId:{suite_del_model.suite_id}, detailIds:{suite_del_model.suite_detail_ids}')
         return ResponseUtil.success(data=detail_suite_result)
     except Exception as e:
         logger.exception(e)

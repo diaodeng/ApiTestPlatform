@@ -242,11 +242,18 @@ class CaseParamsService:
                                                     page_size=query_info.page_size,
                                                     enabled=query_info.enabled,
                                                     )
+        columns_name = []
+        if case_params and len(case_params) > 0:
+            cols = list(case_params[0].keys())
+            cols.remove("_row_id")
+            columns_name = cols
         page_info = {
             'total': count,
             'page_num': query_info.page_num,
             'page_size': query_info.page_size,
             # 'total_page': math.ceil(count / query_info.page_size),
+            "case_id": query_info.case_id,
+            "columns": columns_name,
             'rows': case_params,
         }
         return page_info
@@ -285,7 +292,7 @@ class CaseParamsService:
 
 
     @classmethod
-    def update_case_params_services(cls, query_db: Session, case_id: int, params: dict):
+    async def update_case_params_services(cls, query_db: Session, case_id: int, rows_data: list[dict]):
 
         """
         更新用例参数信息service
@@ -294,7 +301,7 @@ class CaseParamsService:
         :param params: 用例参数信息
         :return: 用例参数信息
         """
-        CaseParamsDao.update_table_row(query_db, use_case_id=case_id, row_data=params)
+        await CaseParamsDao.update_table_row(query_db, use_case_id=case_id, rows_data=rows_data)
 
     @classmethod
     async def delete_case_params_services(cls, query_db: Session, delete_data: CaseParamsDeleteModel):

@@ -14,6 +14,7 @@ from server.pos_config_server import PosConfigServer
 from server.pos_tool_config_server import PosToolConfigServer
 from utils import file_handle, pos_network
 from utils.common import kill_process_by_name, get_all_process, kill_process_by_id, ExeVersionReader
+from view_contents.dialog.registerDialog import FeatureDialog
 
 
 class PosHandler:
@@ -82,9 +83,9 @@ class PosHandler:
         self.page.open(dialog)
         self.page.update()
 
-    def filter_process(self, e:ft.ControlEvent):
+    def filter_process(self, e: ft.ControlEvent):
         filter_data = ""
-        for i  in e.control.parent.controls:
+        for i in e.control.parent.controls:
             if i.data == "filter_key":
                 filter_data = i.value
         filter_data = filter_data.lower()
@@ -104,7 +105,7 @@ class PosHandler:
                         )
                         item_view.update()
 
-    def update_all_process(self, e:ft.ControlEvent):
+    def update_all_process(self, e: ft.ControlEvent):
         self.all_p = get_all_process()
 
     def kill_p_by_id(self, e):
@@ -133,15 +134,18 @@ class PosHandler:
                         tooltip="添加工作目录，索引时会递归搜索",
                         on_click=self.open_directory_dialog
                     ),
-                    ft.Button("查看工作目录", tooltip="查看已经添加的工作目录", on_click=lambda e: self.open_work_dir_list_dialog(e)),
+                    ft.Button("查看工作目录", tooltip="查看已经添加的工作目录",
+                              on_click=lambda e: self.open_work_dir_list_dialog(e)),
                     self.search_btn,
                     self.stop_btn,
                     self.kill_pos_btn,
                     self.kill_offline_btn,
                     ft.Button("结束进程", tooltip="查看并结束进程", on_click=self.open_process_list_dialog),
-                    ft.ElevatedButton("设置", tooltip="POS工具相关设置",on_click=lambda e:self.page.open(PosSettingUi())),
-                    ft.ElevatedButton("切换POS", tooltip="调用接口切换POS",on_click=self.change_env_from_network),
-                    ft.ElevatedButton("POS账号处理", tooltip="调用接口踢出POS账号或重置密码",on_click=lambda e:self.page.open(PosAccountManagerUi()))
+                    ft.ElevatedButton("设置", tooltip="POS工具相关设置",
+                                      on_click=lambda e: self.page.open(PosSettingUi())),
+                    ft.ElevatedButton("切换POS", tooltip="调用接口切换POS", on_click=self.change_env_from_network),
+                    ft.ElevatedButton("POS账号处理", tooltip="调用接口踢出POS账号或重置密码",
+                                      on_click=lambda e: self.page.open(PosAccountManagerUi()))
                 ]),
                 ft.Row([
                     self.file_pattern,
@@ -322,7 +326,6 @@ class PosHandler:
         for i in SearchConfig.read_search_result():
             self.results_view.controls.append(self.row_item(i))
 
-
     def search_result(self, e):
         keyword = (e.control.value or "").strip()
         self.results_view.controls.clear()
@@ -412,6 +415,7 @@ class PosHandler:
                 daemon=True
             ).start()
         except Exception as e:
+            logger.exception(e)
             UiUtil.show_snackbar_error(self.page, f"搜索异常：{e}")
 
     def stop_search(self, e):
@@ -427,9 +431,30 @@ class PosHandler:
         except Exception as e:
             UiUtil.show_snackbar_error(self.page, f"账号登出失败：{e}")
 
+    async def __confirm_dialog(self, title, content_data):
+        return await FeatureDialog(
+            page=self.page,
+            tile=title,
+            content=content_data,
+            actions=[
+                ("取消", False),
+                ("确定", True)
+            ]).show()
 
-    async def open_pos_file(self,e:ft.ControlEvent):
+    async def __choice_start_type_dialog(self, title, content_data):
+        return await FeatureDialog(
+            page=self.page,
+            tile=title,
+            content=content_data,
+            actions=[
+                ("取消", 0),
+                ("确定", 1),
+                ("切换后启动", 2)
+            ]).show()
+
+    async def open_pos_file(self, e: ft.ControlEvent):
         """打开文件"""
+        cancel = False
         try:
             path = e.control.data
             logger.info(f"启动POS文件: {path}")
@@ -438,7 +463,35 @@ class PosHandler:
             UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
             await asyncio.sleep(2)
 
-            pos_params = PosConfig.read_pos_params(path)
+            local_pos_params = PosConfig.read_pos_params(path, 1)
+            remote_pos_params = PosConfig.read_pos_params(path, 2)
+
+            if not remote_pos_params:
+                UiUtil.show_snackbar_error(self.page, f"服务端没有当前机台信息，无法启动")
+                return
+
+            if not local_pos_params:
+                logger.info(f"没有本地POS配置文件")
+                ok = await self.__confirm_dialog(
+                    "POS启动提示",
+                    f"本地配置为空，将启动服务端对应机台：\n"
+                    f"服务端：商家：{remote_pos_params.venderNo}，门店：{remote_pos_params.orgNo}，POS：{remote_pos_params.posId}")
+                if not ok:
+                    return
+            else:
+                if not self.start_config.change_pos and (local_pos_params.venderNo != remote_pos_params.venderNo \
+                                                         or local_pos_params.orgNo != remote_pos_params.orgNo \
+                                                         or local_pos_params.posId != remote_pos_params.posId):
+
+                    open_type = await self.__choice_start_type_dialog(
+                        "POS启动提示",
+                        f"配置不一致，将启动服务端对应机台："
+                        f"\n云端：商家：{remote_pos_params.venderNo}，门店：{remote_pos_params.orgNo}，POS：{remote_pos_params.posId}；"
+                        f"\n本地：商家：{local_pos_params.venderNo}，门店：{local_pos_params.orgNo}，POS：{local_pos_params.posId}；")
+                    if open_type == 0:
+                        return
+                    elif open_type == 2:
+                        await PosConfigServer.change_pos_on_network(path)
 
             if self.start_config.change_pos:
                 await PosConfigServer.change_pos_on_network(path)
@@ -488,16 +541,17 @@ class PosHandler:
             UiUtil.show_snackbar_success(self.page, "正在启动POS。。。")
             # if not file_handle.open_file(path):
             vendor_id = None
+            pos_params = PosConfig.read_pos_params(path, 2)
             if pos_params:
                 vendor_id = pos_params.venderNo
                 pos_resolution = PosConfig.get_vendor_config(vendor_id=vendor_id).resolution
                 if str(pos_params.posType) == "2":
-                    envs = pos_resolution.sco.model_dump()
+                    env_vars = pos_resolution.sco.model_dump()
                 else:
-                    envs = pos_resolution.pos.model_dump()
+                    env_vars = pos_resolution.pos.model_dump()
             else:
-                envs = ResolutionModel().model_dump()
-            if not file_handle.start_file_independent(path, envs):
+                env_vars = ResolutionModel().model_dump()
+            if not file_handle.start_file_independent(path, env_vars):
                 UiUtil.show_snackbar_error(self.page, f"打开文件:{path} 失败")
             else:
                 UiUtil.show_snackbar_success(self.page, "启动POS成功")
@@ -518,8 +572,10 @@ class PosHandler:
 
     def change_env(self, e: ft.ControlEvent):
         path = e.control.data
-        self.page.open(ChangeLocalPosUi(path))
-
+        try:
+            self.page.open(ChangeLocalPosUi(path))
+        except Exception as e:
+            UiUtil.show_snackbar_error(self.page, f"打开环境切换窗口失败：{e}")
 
         self.page.update()
 
@@ -615,7 +671,6 @@ class PosHandler:
         except Exception as e:
             UiUtil.show_snackbar_error(self.page, f"环境清理失败： {e}")
 
-
     def row_item(self, pos_path):
         result_item = ft.Container(
             border_radius=15,
@@ -626,7 +681,7 @@ class PosHandler:
             bgcolor=ft.Colors.WHITE,
             content=ft.Row(
                 controls=[
-                    ft.Text(pos_path, expand=True),
+                    ft.Text(pos_path, expand=True, selectable=True),
                     ft.Text("商家", key="vendor", bgcolor=ft.Colors.YELLOW_50),
                     ft.Text("门店", key="store", bgcolor=ft.Colors.YELLOW_100),
                     ft.Text("环境", key="env", bgcolor=ft.Colors.YELLOW_200),

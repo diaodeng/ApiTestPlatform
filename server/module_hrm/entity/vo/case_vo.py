@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional, List, Any, Dict
+import asyncio
 
 import httpx
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
@@ -92,6 +93,12 @@ class ProjectDebugtalkInfoModel(BaseModel):
     func_map: dict[str, Any] = Field(default_factory=lambda: {})
     module_instance: list[Any] = Field(default_factory=lambda: [])
 
+
+class PushReminderModel(BaseModel):
+    push: bool = Field(default_factory=lambda: False)
+    reminder: int = Field(default_factory=lambda: PushReminderEnum.no_reminder.value)
+
+
 class RunCasePushInfoModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel,
                               from_attributes=True,
@@ -101,6 +108,8 @@ class RunCasePushInfoModel(BaseModel):
     at_reminder_config: int = Field(default_factory=lambda: PushReminderEnum.no_reminder.value)
     push_ids: list[int|str] = Field(default_factory=lambda: [])
     allow_push: int = AllowPushEnum.not_push.value
+    success: PushReminderModel = PushReminderModel()
+    failed: PushReminderModel = PushReminderModel()
 
 
 class CaseRunModel(BaseModel):
@@ -130,13 +139,15 @@ class CaseRunModel(BaseModel):
 
     forward_config: Optional[ForwardConfigModel] = ForwardConfigModel()
 
-    push: int = AllowPushEnum.not_push.value
+    push: bool = False
     push_config: Optional[RunCasePushInfoModel] = RunCasePushInfoModel()
     feishu_robot: Optional[FeishuRobotModel] = FeishuRobotModel()
 
     global_vars: dict = Field(default_factory=lambda: {})
     project_debugtalk_set: dict[str | int, ProjectDebugtalkInfoModel] = Field(default_factory=lambda: {})  # 当前加载的所有debugtalk
     http_client: httpx.AsyncClient = Field(default=None, exclude=True)
+
+    semaphore: Optional[asyncio.Semaphore] = None  # 并发限制
 
 
 class CaseModuleProjectModel(BaseModel):

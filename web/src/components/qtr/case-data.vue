@@ -202,7 +202,7 @@ function getList() {
 
 /** 查询项目列表 */
 function getProjectSelect() {
-  listProject(null).then(response => {
+  listProject({"isPage": false}).then(response => {
     projectOptions.value = response.data;
   });
 }

@@ -251,6 +251,49 @@
             </el-form-item>
 
             <el-form-item label="响应体模板">
+              <template #label>
+                <el-text>响应体模板</el-text>
+                <el-popover
+                    title="可以使用的变量"
+                    placement="right-start"
+                    :width="700"
+                >
+                  <el-text><div v-pre>变量使用格式：{{变量名}}</div></el-text>
+                  <el-table :data="gridData">
+                    <el-table-column width="300" property="name" label="变量名" />
+                    <el-table-column width="150" property="desc" label="描述" />
+                    <el-table-column width="200" property="example" label="示例" />
+                  </el-table>
+                  <pre>
+{
+    'request': {
+        'path': self.request.path_params,
+        'method': self.request.method,
+        'args': dict(self.request.query_params),
+        'headers': dict(self.request.headers),
+        "body": getattr(self.request, "body_data", None),
+    },
+    'random': {
+        'int': lambda a, b: random.randint(a, b),
+        'string': lambda l: ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=l))
+    },
+    'time': {
+        'now': time.time(),
+        'iso': datetime.datetime.now().isoformat(),
+        'format': lambda format: datetime.datetime.now().strftime(format)
+    },
+    'uuid': str(uuid.uuid4())
+}
+                  </pre>
+                  <template #reference>
+                    <el-text>
+                      <el-icon>
+                        <View/>
+                      </el-icon>
+                    </el-text>
+                  </template>
+                </el-popover>
+              </template>
               <el-alert type="info" show-icon style="margin-bottom: 10px;">
                 <div v-pre>
                   支持模板语法： "{{ request.args.id }}" | "{{ random.int(1,100) }}" | "{{ time.iso }}"
@@ -320,6 +363,7 @@ import {
 } from "@/api/hrm/mock.js"
 import {ElMessage, ElMessageBox} from "element-plus";
 import {initMockRuleFormData} from "@/components/hrm/data-template.js";
+import {View} from "@element-plus/icons-vue";
 
 // 初始表单结构
 const initialForm = () => (JSON.parse(JSON.stringify(initMockRuleFormData)));
@@ -346,6 +390,34 @@ const selectResponseData = () => {
   console.log(ruleForm.response.ruleResponseId);
   return typeof ruleForm.response.ruleResponseId;
 };
+
+const gridData = [
+  {
+    example: '/test',
+    name: 'request.path',
+    desc: '请求路径',
+  },{
+    example: '6',
+    name: 'random.int(1,100)',
+    desc: '随机数',
+  },{
+    example: 'ak',
+    name: 'random.string(2)',
+    desc: '随机字符串',
+  },{
+    example: '1767496712',
+    name: 'time.now',
+    desc: '当前时间',
+  },{
+    example: '20251230 121212',
+    name: 'time.format("%y%m%d %H%M%S")',
+    desc: '自定义时间格式',
+  },{
+    example: '1960446465473536',
+    name: 'uuid',
+    desc: 'uuid',
+  },
+];
 
 function beforeCloseDialog(done) {
   // if (props.dataType === HrmDataTypeEnum.run_detail || !dataChange.value) {
