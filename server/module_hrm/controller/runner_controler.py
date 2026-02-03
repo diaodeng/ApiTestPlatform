@@ -19,14 +19,15 @@ from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.dto.case_dto import CaseModelForApi
 from module_hrm.entity.vo.case_vo import CaseModel, CaseRunModel
 from module_hrm.entity.vo.push_vo import PushModel
+from module_hrm.entity.vo.report_vo import ReportListModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, RunDetailDelModel
-from module_hrm.enums.enums import AllowPushEnum
+from module_hrm.enums.enums import AllowPushEnum, CaseRunStatus
 from module_hrm.service.debugtalk_service import DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler, ForwardRulesHandler
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_async, save_run_detail, run_test_in_background
 from utils.log_util import logger
-from utils.message_util import MessageHandler
+from utils.message_util import TestResultPushHandler
 from utils.page_util import PageResponseModel
 from utils.response_util import ResponseUtil
 
@@ -55,11 +56,11 @@ async def run_test(request: Request,
         return ResponseUtil.success(data=data, msg=data)
     except Exception as e:
         logger.exception(e)
-        if run_info.push != AllowPushEnum.not_push.value and run_info.push_config.push_ids:
-            for push_id in run_info.push_config.push_ids:
-                push_config_data = PushDao.get(query_db, push_id)
-                message_handler = MessageHandler(PushModel.model_validate(push_config_data), {})
-                message_handler.push(f"[{current_user.user.user_name}]于{datetime.now()}开始的测试异常了")
+        report_info = ReportListModel()
+        report_info.status = CaseRunStatus.failed.value
+        report_info.create_by = current_user.user.user_name
+        TestResultPushHandler(run_info, report_info).push(
+            f"【{current_user.user.user_name}】于{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}开始的测试【{run_info.report_name}】失败了!\n{e}")
         return ResponseUtil.error(msg=str(e))
 
 
@@ -74,6 +75,7 @@ async def for_debug(request: Request,
     debugtalk_obj = None
     try:
         ForwardRulesHandler.transform(query_db, debug_info)
+        debug_info.semaphore = asyncio.Semaphore(1)
         debug_info.runner = current_user.user.user_id
         debug_info.log_level = logging.DEBUG
         case_data = debug_info.case_data

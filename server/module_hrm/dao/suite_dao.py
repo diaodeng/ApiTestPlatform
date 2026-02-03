@@ -146,7 +146,6 @@ class SuiteDetailDao:
         :param is_page: 是否开启分页
         :return: 套件详细信息对象列表
         """
-        print("###############", DataType.case.value, QtrSuiteDetail.data_id)
         query = db.query(QtrSuiteDetail,
                          HrmCase.status.label("caseStatus"),
                          HrmProject.status.label("projectStatus"),
@@ -227,3 +226,10 @@ class SuiteDetailDao:
     @classmethod
     async def del_suite_detail_by_id(cls, db: Session, detail_id):
         await run_in_threadpool(db.query(QtrSuiteDetail).filter(QtrSuiteDetail.suite_detail_id == detail_id).delete)
+
+    @classmethod
+    async def del_suite_detail_batch(cls, db: Session, suite_id:str|int, detail_ids: list[str|int]):
+        await run_in_threadpool(db.query(QtrSuiteDetail).
+                                filter(QtrSuiteDetail.suite_id == suite_id,
+                                                                QtrSuiteDetail.suite_detail_id.in_(detail_ids))
+                                .delete)

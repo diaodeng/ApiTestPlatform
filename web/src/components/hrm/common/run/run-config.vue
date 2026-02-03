@@ -141,16 +141,18 @@ const runConfigRules = ref({
     </el-form-item>
     <el-form-item label="结果通知">
       <div style="display: flex;flex-direction: column;flex-grow: 1">
-        <el-row>
-          <el-radio-group v-model="form.push">
-          <el-radio :value="0">不通知</el-radio>
-          <el-radio :value="1">始终通知</el-radio>
-          <el-radio :value="2">仅失败通知</el-radio>
-        </el-radio-group>
-        </el-row>
+
+        <!--        <el-row>-->
+        <!--          <el-radio-group v-model="form.push">-->
+        <!--          <el-radio :value="0">不通知</el-radio>-->
+        <!--          <el-radio :value="1">始终通知</el-radio>-->
+        <!--          <el-radio :value="2">仅失败通知</el-radio>-->
+        <!--        </el-radio-group>-->
+        <!--        </el-row>-->
         <!--        <el-checkbox v-model="form.push" style="margin-right: 20px"></el-checkbox>-->
-        <el-row style="flex-grow: 1" :gutter="10" v-if="form.push !== 0">
-          <el-col :span="12">
+        <el-row style="flex-grow: 1" :gutter="10" >
+          <el-checkbox v-model="form.push"></el-checkbox>
+          <el-col :span="18" v-if="form.push">
             <el-select multiple
                        placeholder="请选择推送对象"
                        v-model="form.pushConfig.pushIds"
@@ -162,10 +164,34 @@ const runConfigRules = ref({
                   :value=item.pushId*1
               />
             </el-select>
-            <el-radio-group v-model="form.pushConfig.atReminderConfig">
-              <el-radio :value="1">不@提醒</el-radio>
-              <el-radio :value="2">@提醒所有人</el-radio>
-            </el-radio-group>
+
+          </el-col>
+
+        </el-row>
+        <el-row v-if="form.push">
+          <el-col>
+            <el-row>
+              <el-col :span="5">
+                <el-checkbox v-model="form.pushConfig.success.push">成功</el-checkbox>
+              </el-col>
+              <el-col :span="19">
+                <el-radio-group v-model="form.pushConfig.success.reminder" :disabled="!form.pushConfig.success.push">
+                  <el-radio :value="1">不@提醒</el-radio>
+                  <el-radio :value="2">@提醒所有人</el-radio>
+                </el-radio-group>
+              </el-col>
+            </el-row>
+            <el-row>
+              <el-col :span="5">
+                <el-checkbox v-model="form.pushConfig.failed.push">失败</el-checkbox>
+              </el-col>
+              <el-col :span="19">
+                <el-radio-group v-model="form.pushConfig.failed.reminder" :disabled="!form.pushConfig.failed.push">
+                  <el-radio :value="1">不@提醒</el-radio>
+                  <el-radio :value="2">@提醒所有人</el-radio>
+                </el-radio-group>
+              </el-col>
+            </el-row>
           </el-col>
 
         </el-row>

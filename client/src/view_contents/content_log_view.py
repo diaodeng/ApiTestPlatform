@@ -19,6 +19,7 @@ class LogViewerApp:
         # self.page.window.height = 700
         self.current_log_file_path = None
         self.current_thread = None
+        self.current_app_thread = None
         self.stop_watch = False
 
         # 日志缓冲区
@@ -33,7 +34,7 @@ class LogViewerApp:
         self.create_ui()
 
         # 启动内存日志记录
-        self.start_memory_logger()
+        # self.start_memory_logger()
 
     def init_ui(self):
         self.tabs = ft.Container(
@@ -111,6 +112,7 @@ class LogViewerApp:
             width=100)
 
         # 日志显示区域
+        self.enable_watch_app_file_checkbox = ft.Checkbox(label="监控日志", value=False, on_change=self.start_memory_app_logger)
         self.file_log_display = ft.Column(
             [ft.Text("日志内容将在这里显示...")],
             scroll=ft.ScrollMode.AUTO,
@@ -207,6 +209,9 @@ class LogViewerApp:
 
         return ft.Container(
             content=ft.Column([
+                ft.Row([
+                    self.enable_watch_app_file_checkbox
+                ]),
                 ft.Container(
                     content=self.app_log_display,
                     border=ft.border.all(1, ft.Colors.GREY_300),
@@ -305,6 +310,12 @@ class LogViewerApp:
             # 开始监控选中的文件
             # await self.log_watcher()
 
+    async def start_memory_app_logger(self, evt:ft.ControlEvent):
+        if evt.control.value:
+            self.monitor_app_log()
+        else:
+            logger.info(f"停止监控程序日志文件")
+
     async def log_watcher(self):
         file_path = self.file_path_input.value
         if not file_path:
@@ -370,6 +381,60 @@ class LogViewerApp:
         self.current_thread.start()
         self.add_log(f"开始监控文件: {self.file_path}")
 
+    def monitor_app_log(self):
+        """监控本地日志文件"""
+        file_path = f"logs/{time.strftime("%Y-%m-%d", time.localtime())}.log"
+        if not file_path:
+            return
+        if self.current_app_thread:
+            self.stop_watch = True
+            self.current_app_thread.join()
+            self.current_app_thread = None
+            self.stop_watch = False
+
+        # 在后台线程中监控文件变化
+        def watch_file():
+
+            last_size = 0
+            logger.info(f"开始监控程序日志文件：{file_path}")
+            while True:
+                try:
+                    if not os.path.exists(file_path):
+                        time.sleep(1)
+                        continue
+
+                    current_size = os.path.getsize(file_path)
+
+                    if current_size < last_size:
+                        last_size = 0
+
+                    if current_size > last_size:
+
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            if last_size > 0:
+                                f.seek(last_size)
+                            new_content = f.readline(current_size - last_size)
+                            last_size = current_size
+                            if not new_content:
+                                time.sleep(0.5)
+                                continue
+
+                            if self.enable_watch_app_file_checkbox.value:
+                                for line in new_content.splitlines():
+                                    line = line.strip()
+                                    if line:
+                                        self.add_app_log(line.strip())
+                            else:
+                                self.add_app_log(f"停止监控程序日志文件：{file_path}")
+                                break
+                except Exception as e:
+                    logger.error(f"程序日志文件监控异常: {str(e)}")
+                    time.sleep(1)
+
+        self.current_app_thread = threading.Thread(target=watch_file, daemon=True)
+        self.current_app_thread.start()
+        self.add_app_log(f"开始监控程序日志文件: {file_path}")
+
     async def apply_filter(self, e):
         """应用过滤条件"""
         filter_text = self.filter_input.value
@@ -432,8 +497,8 @@ class LogViewerApp:
 
     def add_app_log(self, message):
         """添加日志到程序日志区域"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        log_entry = ft.Text(f"[{timestamp}] {message}")
+        # timestamp = datetime.now().strftime("%H:%M:%S")
+        log_entry = ft.Text(f"{message}", selectable=True, spans=[])
 
         # 更新程序日志显示
         if hasattr(self, 'app_log_display'):
