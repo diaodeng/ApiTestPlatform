@@ -1,0 +1,24 @@
+[project]
+name = "server"
+version = "1.0.4.2"
+description = "一款现代化的多功能测试管理平台"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.0",
+]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["README.md"]
+
+[tool.ruff.lint]
+select = ["C4", "E", "F", "I", "PERF", "UP"]
+ignore = ["PERF203"]
