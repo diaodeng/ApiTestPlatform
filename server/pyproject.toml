@@ -3,7 +3,7 @@ name = "server"
 version = "1.0.4.2"
 description = "一款现代化的多功能测试管理平台"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "apscheduler==3.10.4",
     "autopep8==2.3.1",
