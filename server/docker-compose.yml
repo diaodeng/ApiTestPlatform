@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  qtr-api:
+    image: qtr-api
+    build: .
+    container_name: qtr-api
+    ports:
+      - "9099:9099"
+    environment:
+      - ENV=dev
+      - TZ=Asia/Shanghai
+#      - REDIS_URL=redis://redis:6380/4
+#      - DB_URL=mysql://user:pwd@mysql:59408/app
+#    depends_on:
+#      - redis
+#      - mysql
+    volumes:
+      - ./.env.dev:/app/.env.dev
+    restart: always
+
+#  worker:
+#    build: .
+#    container_name: qtr-celery-worker
+#    command: celery -A background.celery_app.celery_app worker -l info --concurrency=4
+#    environment:
+#      - ENV=dev
+#      - REDIS_URL=redis://redis:6380/4
+#    depends_on:
+#      - redis
+#    restart: always

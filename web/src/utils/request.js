@@ -15,13 +15,17 @@ axios.defaults.headers['Content-Type'] = 'application/json;charset=utf-8'
 // 创建axios实例
 const service = axios.create({
   // axios中请求配置有baseURL选项，表示请求URL公共部分
-  baseURL: import.meta.env.VITE_APP_BASE_API,
+  // baseURL: window.BASE_API,
   // 超时
   timeout: 10*60*1000
 })
 
 // request拦截器
 service.interceptors.request.use(config => {
+  config.baseURL =
+    window.__APP_CONFIG__?.BASE_API ||
+    import.meta.env.VITE_APP_BASE_API ||
+    ""
   // 是否需要设置 token
   const isToken = (config.headers || {}).isToken === false
   // 是否需要防止数据重复提交

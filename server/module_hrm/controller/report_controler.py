@@ -3,9 +3,9 @@ from fastapi.responses import HTMLResponse, StreamingResponse, Response
 from fastapi import Depends
 from sqlalchemy.orm import Session
 from loguru import logger
-from jinja2 import Environment, FileSystemLoader
+# from jinja2 import Environment, FileSystemLoader
 import datetime
-import pdfkit
+# import pdfkit
 
 
 from config.get_db import get_db

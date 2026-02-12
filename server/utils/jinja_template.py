@@ -1,5 +1,5 @@
 import os
-import pdfkit
+# import pdfkit
 from jinja2 import Environment, FileSystemLoader
 
 
@@ -14,6 +14,7 @@ class TemplateHandler:
         return html_content
 
     def generate_pdf(self, template_file: str, data: dict) -> bytes|bool:
+        return
         html = self.generate_html(template_file, data)
 
         path_wk = r'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe'

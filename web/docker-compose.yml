@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  qtr-web:
+    image: qtr-web
+    build:
+      context: .
+      args:
+        VITE_APP_BASE_API: ${VITE_APP_BASE_API}
+    container_name: qtr-web
+    ports:
+      - "3001:80"
+    environment:
+      - ENV=dev
+      - TZ=Asia/Shanghai
+      - BASE_API=http://127.0.0.1:9099  # 后端地址
+    restart: always

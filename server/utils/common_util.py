@@ -1,13 +1,11 @@
 import io
-import json
 import os
-import re
 from functools import lru_cache
 from typing import Any, Set
 from typing import List
 from loguru import logger
+from io import BytesIO
 
-import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
@@ -134,12 +132,30 @@ def export_list2excel(list_data: List):
     :param list_data: 数据列表
     :return: 字典信息对应excel的二进制数据
     """
-    df = pd.DataFrame(list_data)
-    binary_data = io.BytesIO()
-    df.to_excel(binary_data, index=False, engine='openpyxl')
-    binary_data = binary_data.getvalue()
+    if not list_data:
+        return b""
 
-    return binary_data
+    wb = Workbook()
+    ws = wb.active
+
+    # 表头 = dict key
+    headers = list(list_data[0].keys())
+    ws.append(headers)
+
+    # 数据行
+    for row in list_data:
+        ws.append([row.get(h) for h in headers])
+
+    bio = BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+    # df = pd.DataFrame(list_data)
+    # binary_data = io.BytesIO()
+    # df.to_excel(binary_data, index=False, engine='openpyxl')
+    # binary_data = binary_data.getvalue()
+    #
+    # return binary_data
 
 
 def load_excel2data():
