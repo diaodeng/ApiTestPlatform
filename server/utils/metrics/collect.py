@@ -1,14 +1,13 @@
 import os
 import threading
-import requests
 import time
-import random
-from .container import MemoryCollector
-from .container import CgroupCPU
 
+import requests
 from loguru import logger
 
 from config.env import MetricsConfig
+
+from .container import CgroupCPU, MemoryCollector
 
 
 class PushDataToServer(threading.Thread):
@@ -23,7 +22,7 @@ class PushDataToServer(threading.Thread):
         self.current_time = time.time()
         self.vm_url = MetricsConfig.vm_url
         if not self.vm_url:
-            logger.warning(f"vm_url未配置，不推送统计数据")
+            logger.warning("vm_url未配置，不推送统计数据")
         self.daemon = True
         self.stopped = False
         self.cpu_info = CgroupCPU()
@@ -31,12 +30,12 @@ class PushDataToServer(threading.Thread):
         self.group = os.environ.get("SYM_GROUP", "stable")
 
     def run(self):
-        logger.info(f"开始采集信息")
+        logger.info("开始采集信息")
         while self.vm_url and not self.stopped:
             try:
                 self.push_machine_metrics()
                 time.sleep(1)
-            except Exception as e:
+            except Exception:
                 pass
 
     def stop(self):

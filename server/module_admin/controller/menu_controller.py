@@ -1,13 +1,12 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Request
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.entity.vo.menu_vo import MenuModel, MenuQueryModel, DeleteMenuModel
+from module_admin.entity.vo.menu_vo import DeleteMenuModel, MenuModel, MenuQueryModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_admin.service.menu_service import MenuService

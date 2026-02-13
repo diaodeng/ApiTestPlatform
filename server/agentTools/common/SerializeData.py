@@ -1,6 +1,7 @@
 
 import httpx
 
+
 def serialize_url(url: httpx.URL):
     """httpx.URL对象转字典"""
     url_property = {

@@ -1,11 +1,18 @@
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.forward_rules_dao import ForwardRulesDao, ForwardRulesDetailDao
 from module_hrm.entity.dto.forward_rules_dto import ForwardRulesModelForApi
 from module_hrm.entity.vo.case_vo import ForwardRulesForRunModel
-from module_hrm.entity.vo.forward_rules_vo import ForwardRulesModel, ForwardRulesQueryModel, ForwardRulesDeleteModel, \
-    ForwardRulesDetailModel, ForwardRulesDetailQueryModel, ForwardRulesDetailDeleteModel
+from module_hrm.entity.vo.forward_rules_vo import (
+    ForwardRulesDeleteModel,
+    ForwardRulesDetailDeleteModel,
+    ForwardRulesDetailModel,
+    ForwardRulesDetailQueryModel,
+    ForwardRulesModel,
+    ForwardRulesQueryModel,
+)
 from utils.common_util import CamelCaseUtil
 
 
@@ -46,11 +53,11 @@ class ForwardRulesService:
         return datas
 
     @classmethod
-    def query_all(cls, db: Session, data_scope_sql: str) -> list[ForwardRulesModel]:
+    def query_all(cls, db: Session, data_scope_sql: DataScopeExpr) -> list[ForwardRulesModel]:
         return ForwardRulesDao.get_list_all(db, data_scope_sql=data_scope_sql)
 
     @classmethod
-    def query_list(cls, db: Session, query_info: ForwardRulesQueryModel, data_scope_sql:str) -> list[ForwardRulesModel]:
+    def query_list(cls, db: Session, query_info: ForwardRulesQueryModel, data_scope_sql:DataScopeExpr) -> list[ForwardRulesModel]:
         return ForwardRulesDao.get_list_by_page(db, query_info, data_scope_sql=data_scope_sql)
 
     @classmethod
@@ -63,7 +70,7 @@ class ForwardRulesService:
         ForwardRulesDao.update(db, data, user)
 
     @classmethod
-    def get_forward_rules_for_run(cls, db: Session, data_ids: list[int]) -> list[ForwardRulesDetailModel]:
+    def get_forward_rules_for_run(cls, db: Session, data_ids: list[int]) -> list[ForwardRulesForRunModel]:
         # rules = {}
         # for detail in ForwardRulesDetailService.detail_by_rule_id(db, data_ids):
         #     rules[detail.origin_url] = {"matchType": detail.match_type, "targetUrl": detail.target_url}
@@ -107,7 +114,10 @@ class ForwardRulesDetailService:
         return datas
 
     @classmethod
-    def query_list(cls, db: Session, query_info: ForwardRulesDetailQueryModel, data_scope_sql: str|None = None) -> list[ForwardRulesDetailModel]:
+    def query_list(cls,
+                   db: Session,
+                   query_info: ForwardRulesDetailQueryModel,
+                   data_scope_sql: DataScopeExpr|None = None) -> list[ForwardRulesDetailModel]:
         return ForwardRulesDetailDao.get_list_by_page(db, query_info, data_scope_sql=data_scope_sql)
 
     @classmethod

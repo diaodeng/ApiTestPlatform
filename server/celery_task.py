@@ -1,10 +1,11 @@
+import asyncio
+import time
+
+from app1 import app
 from config.get_db import get_db
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.service.runner.runner_service import run_by_async
-from app1 import app
-import time
-import asyncio
 
 
 @app.task(name="run_test")

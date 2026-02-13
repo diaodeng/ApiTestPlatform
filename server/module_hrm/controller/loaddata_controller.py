@@ -1,7 +1,6 @@
 import json
 
-from fastapi import APIRouter, Request
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -14,7 +13,7 @@ from module_hrm.dao.project_dao import ProjectDao
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
 from module_hrm.enums.enums import TstepTypeEnum
-from module_hrm.service.load_data_service import OldDatabase, CoverData
+from module_hrm.service.load_data_service import CoverData, OldDatabase
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 

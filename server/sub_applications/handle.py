@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+
 from sub_applications.staticfiles import mount_staticfiles
 
 

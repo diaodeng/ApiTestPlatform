@@ -5,39 +5,38 @@ import os
 import platform
 import time
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
-from typing import Type, AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi.concurrency import run_in_threadpool
-
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.case_dao import CaseDao
 from module_hrm.dao.env_dao import EnvDao
-from module_hrm.dao.push_dao import PushDao
 from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.case_do import HrmCase
-from module_hrm.entity.do.module_do import HrmModule
-from module_hrm.entity.do.suite_do import QtrSuiteDetail, QtrSuite
+from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
-from module_hrm.entity.vo.push_vo import PushModel
 from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportListModel
 from module_hrm.entity.vo.run_detail_vo import HrmRunDetailModel
-from module_hrm.enums.enums import DataType, CaseRunStatus, CaseStatusEnum, RunTypeEnum, QtrDataStatusEnum, \
-    AllowPushEnum
+from module_hrm.enums.enums import (
+    CaseRunStatus,
+    CaseStatusEnum,
+    DataType,
+    QtrDataStatusEnum,
+    RunTypeEnum,
+)
 from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkService
-from module_hrm.service.push_service import PushService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler
 from module_hrm.service.runner.case_runner import TestRunner
-from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
-from utils.message_util import MessageHandler, TestResultPushHandler
+from utils.message_util import TestResultPushHandler
 
 logger.info(f"平台信息：{platform.platform()}")
 if "WSL" in str(platform.platform()):
@@ -137,7 +136,7 @@ async def run_by_batch(run_info: CaseRunModel,
         else:
             tmp_case_info_query = tmp_case_info_query.filter(HrmCase.case_id.in_(ids))
         tmp_case_info_query = await run_in_threadpool(tmp_case_info_query.all)
-        for project_id, module_id, case_id in tmp_case_info_query:
+        for project_id, _module_id, case_id in tmp_case_info_query:
             all_cases[project_id].append(case_id)
 
     success = True
@@ -168,7 +167,7 @@ async def run_by_batch(run_info: CaseRunModel,
                                      all)
                     await get_case_data(query_db, all_cases, RunTypeEnum.case.value, [case_item[0] for case_item in all_case_item])
 
-                    all_not_case_item: list[Type[QtrSuiteDetail]] = await run_in_threadpool(query_db.query(QtrSuiteDetail).
+                    all_not_case_item: list[type[QtrSuiteDetail]] = await run_in_threadpool(query_db.query(QtrSuiteDetail).
                                                                      filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
                                                                      filter(
                         QtrSuiteDetail.data_type != DataType.case.value).
@@ -189,7 +188,7 @@ async def run_by_batch(run_info: CaseRunModel,
         limit = httpx.Limits(max_connections=100, max_keepalive_connections=50)
         async with httpx.AsyncClient(limits=limit, http2=True) as client:
             run_info.http_client = client
-            for project_id, ids in all_cases.items():  # 按项目执行
+            for _project_id, ids in all_cases.items():  # 按项目执行
                 if not ids: continue
 
                 res_data = await run_by_concurrent(list(ids), env_obj, run_info)
@@ -254,7 +253,9 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
             for res_data in res_list:
                 async with lock:
                     data: TestCase = res_data
-                    if data.config.result.status in [CaseRunStatus.passed.value, CaseRunStatus.skipped.value, CaseRunStatus.xpassed.value]:
+                    if data.config.result.status in [CaseRunStatus.passed.value,
+                                                     CaseRunStatus.skipped.value,
+                                                     CaseRunStatus.xpassed.value]:
                         stats["success"] += 1
                     elif data.config.result.status == CaseRunStatus.failed.value:
                         stats["failed"] += 1
@@ -268,7 +269,11 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
                 async with lock:
                     with SessionLocal() as db:
                         await RunDetailDao.create_bulk(db, buffer)
-                        await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
+                        await ReportDao.update(db,
+                                               run_info.report_id,
+                                               stats["success"],
+                                               stats["total"],
+                                               CaseRunStatus.running)
                 buffer = []
             queue.task_done()
 
@@ -371,7 +376,7 @@ def get_report_content(report_path):
         return f"没有找到对应的测试报告：{report_path}"
 
     report_content = "未生成测试报告"
-    with open(report_path, 'r', encoding="utf8") as rf:
+    with open(report_path, encoding="utf8") as rf:
         report_content = rf.read()
 
     return report_content

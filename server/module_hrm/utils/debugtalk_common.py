@@ -1,6 +1,4 @@
-import json
 import urllib.parse
-import requests
 
 
 def get_host_from_url(url):

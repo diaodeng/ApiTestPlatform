@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime, LargeBinary
-from config.database import Base
 from datetime import datetime
+
+from sqlalchemy import Column, DateTime, Integer, LargeBinary, String
+
+from config.database import Base
 
 
 class SysNotice(Base):

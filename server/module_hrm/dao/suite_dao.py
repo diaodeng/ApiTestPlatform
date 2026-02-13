@@ -1,19 +1,17 @@
-from sqlalchemy.orm import Session, aliased
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import or_
 from starlette.concurrency import run_in_threadpool
 
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
-
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
-from module_hrm.entity.do.project_do import HrmProject
-from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.case_do import HrmCase
-from module_hrm.entity.vo.suite_vo import *
+from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.entity.do.project_do import HrmProject
+from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
+from module_hrm.entity.vo.suite_vo import SuiteDetailModel, SuiteDetailPageQueryModel, SuiteModel, SuitePageQueryModel
+from module_hrm.enums.enums import DataType
 from module_hrm.utils.util import PermissionHandler
 from utils.page_util import PageUtil
-from module_hrm.enums.enums import DataType
 
 
 class SuiteDao:
@@ -37,7 +35,11 @@ class SuiteDao:
         return suite_info
 
     @classmethod
-    def get_suite_list(cls, db: Session, page_object: SuitePageQueryModel, data_scope_sql: str, is_page: bool = False):
+    def get_suite_list(cls,
+                       db: Session,
+                       page_object: SuitePageQueryModel,
+                       data_scope_sql: DataScopeExpr,
+                       is_page: bool = False):
         """
         根据查询参数获取套件列表信息
         :param db: orm对象
@@ -50,10 +52,12 @@ class SuiteDao:
             .filter(QtrSuite.del_flag == 0,
                     QtrSuite.status == page_object.status if page_object.status else True,
                     QtrSuite.suite_name.like(f'%{page_object.suite_name}%') if page_object.suite_name else True,
-                    eval(data_scope_sql))
+                    data_scope_sql)
         if page_object.only_self:
             suite_result = suite_result.filter(QtrSuite.manager == page_object.manager)
-        suite_result = suite_result.order_by(QtrSuite.order_num, QtrSuite.create_time.desc(),QtrSuite.update_time.desc()) \
+        suite_result = suite_result.order_by(QtrSuite.order_num,
+                                             QtrSuite.create_time.desc(),
+                                             QtrSuite.update_time.desc()) \
             .distinct()
         suite_list = PageUtil.paginate(suite_result, page_object.page_num, page_object.page_size, is_page)
 
@@ -136,7 +140,10 @@ class SuiteDetailDao:
         return suite_detail_list
 
     @classmethod
-    def get_suite_detail_list_dao(cls, db: Session, query_object: SuiteDetailPageQueryModel, data_scope_sql: str,
+    def get_suite_detail_list_dao(cls,
+                                  db: Session,
+                                  query_object: SuiteDetailPageQueryModel,
+                                  data_scope_sql: DataScopeExpr,
                                   is_page: bool = False):
         """
         根据条件获取套件详细信息列表
@@ -170,7 +177,7 @@ class SuiteDetailDao:
                                      HrmModule.status == query_object.status,
                                      HrmProject.status == query_object.status))
 
-        query = query.filter(eval(data_scope_sql))
+        query = query.filter(data_scope_sql)
         query = query.filter(QtrSuiteDetail.data_id == query_object.data_id if query_object.data_id else True)
 
         # query = query.filter(HrmCase.case_name == query_object.data_name if query_object.data_name else True)

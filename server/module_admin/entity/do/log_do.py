@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, BigInteger, Index
-from config.database import Base
 from datetime import datetime
+
+from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String
+
+from config.database import Base
 
 
 class SysLogininfor(Base):

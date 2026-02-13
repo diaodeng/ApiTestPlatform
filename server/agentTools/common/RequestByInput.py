@@ -4,10 +4,10 @@ import httpx
 import websockets
 from httpx import HTTPError
 from loguru import logger
+from websockets.exceptions import InvalidStatus
 
 from common.enums import RequestTypeEnum, get_enum_name
 from common.SerializeData import serialize_response
-from websockets.exceptions import InvalidStatus
 
 
 class RequestByInput:

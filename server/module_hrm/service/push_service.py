@@ -1,9 +1,9 @@
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.dao.push_dao import PushDao
-from module_hrm.entity.vo.push_vo import PushPageQueryModel, PushModel, DeletePushModel, AllPushModel
-from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.entity.vo.push_vo import AllPushModel, DeletePushModel, PushModel, PushPageQueryModel
 from utils.common_util import CamelCaseUtil
 from utils.page_util import PageResponseModel
 
@@ -14,7 +14,10 @@ class PushService:
     """
 
     @classmethod
-    async def get_push_list(cls, query_db: Session, page_object: PushPageQueryModel, data_scope_sql: str|None = None) -> PageResponseModel|list|None:
+    async def get_push_list(cls,
+                            query_db: Session,
+                            page_object: PushPageQueryModel,
+                            data_scope_sql: DataScopeExpr|None = None) -> PageResponseModel|list|None:
         """
         获取push列表信息service
         :param query_db: orm对象
@@ -27,7 +30,10 @@ class PushService:
         return push_list_result
 
     @classmethod
-    async def get_all(cls, query_db: Session, page_object: PushPageQueryModel, data_scope_sql: str | None = None) ->list[dict]:
+    async def get_all(cls,
+                      query_db: Session,
+                      page_object: PushPageQueryModel,
+                      data_scope_sql: DataScopeExpr | None = None) ->list[dict]:
         """
         获取push列表信息service
         :param query_db: orm对象
@@ -68,7 +74,7 @@ class PushService:
         except Exception as e:
             query_db.rollback()
             logger.error(f"增加推送配置异常:{e}")
-            raise Exception(f"增加推送配置异常:{e}")
+            raise Exception(f"增加推送配置异常:{e}") from e
 
 
     @classmethod
@@ -87,7 +93,7 @@ class PushService:
             except Exception as e:
                 query_db.rollback()
                 logger.error(f"修改推送配置异常：{e}")
-                raise Exception(f"修改推送配置异常：{e}")
+                raise Exception(f"修改推送配置异常：{e}") from e
         else:
             raise Exception(f"推送配置{push_object.push_id}不存在")
 
@@ -107,5 +113,5 @@ class PushService:
             query_db.commit()
         except Exception as e:
             query_db.rollback()
-            raise Exception(f"删除推送配置异常")
+            raise Exception("删除推送配置异常") from e
 

@@ -1,11 +1,13 @@
+from datetime import datetime
+from typing import Optional, Union
+
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
-from typing import Union, Optional, List
-from datetime import datetime
-from module_admin.entity.vo.role_vo import RoleModel
+
+from module_admin.annotation.pydantic_annotation import as_form, as_query
 from module_admin.entity.vo.dept_vo import DeptModel
 from module_admin.entity.vo.post_vo import PostModel
-from module_admin.annotation.pydantic_annotation import as_query, as_form
+from module_admin.entity.vo.role_vo import RoleModel
 
 
 class TokenData(BaseModel):
@@ -75,14 +77,14 @@ class UserInfoModel(UserModel):
     post_ids: Optional[Union[str, None]] = None
     role_ids: Optional[Union[str, None]] = None
     dept: Optional[Union[DeptModel, None]] = None
-    role: Optional[List[Union[RoleModel, None]]] = []
+    role: Optional[list[Union[RoleModel, None]]] = []
 
 
 class CurrentUserModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel)
 
-    permissions: List
-    roles: List
+    permissions: list
+    roles: list
     user: Union[UserInfoModel, None]
 
 
@@ -93,10 +95,10 @@ class UserDetailModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel)
 
     data: Optional[Union[UserInfoModel, None]] = None
-    post_ids: Optional[List] = None
-    posts: List[Union[PostModel, None]]
-    role_ids: Optional[List] = None
-    roles: List[Union[RoleModel, None]]
+    post_ids: Optional[list] = None
+    posts: list[Union[PostModel, None]]
+    role_ids: Optional[list] = None
+    roles: list[Union[RoleModel, None]]
 
 
 class UserProfileModel(BaseModel):
@@ -132,8 +134,8 @@ class AddUserModel(UserModel):
     """
     新增用户模型
     """
-    role_ids: Optional[List] = []
-    post_ids: Optional[List] = []
+    role_ids: Optional[list] = []
+    post_ids: Optional[list] = []
     type: Optional[str] = None
 
 
@@ -141,7 +143,7 @@ class EditUserModel(AddUserModel):
     """
     编辑用户模型
     """
-    role: Optional[List] = []
+    role: Optional[list] = []
 
 
 class ResetUserModel(UserModel):
@@ -193,7 +195,7 @@ class UserRoleResponseModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    roles: List[Union[SelectedRoleModel, None]] = []
+    roles: list[Union[SelectedRoleModel, None]] = []
     user: UserInfoModel
 
 

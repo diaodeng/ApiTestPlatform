@@ -1,9 +1,8 @@
+import asyncio
 import logging
 import os
 import sys
 import time
-import asyncio
-import datetime
 from os import environ
 
 from loguru import logger

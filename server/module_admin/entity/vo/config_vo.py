@@ -1,8 +1,10 @@
+from datetime import datetime
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
-from typing import Union, Optional, List
-from datetime import datetime
-from module_admin.annotation.pydantic_annotation import as_query, as_form
+
+from module_admin.annotation.pydantic_annotation import as_form, as_query
 
 
 class ConfigModel(BaseModel):

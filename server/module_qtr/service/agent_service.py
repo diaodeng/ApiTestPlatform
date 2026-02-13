@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import datetime
 import json
 import re
@@ -8,13 +7,12 @@ from collections import defaultdict
 from typing import Any
 
 import httpx
-from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from websockets import WebSocketClientProtocol
 
-from module_hrm.enums.enums import TstepTypeEnum, AgentResponseEnum
-from module_hrm.utils.util import compress_dict_to_str, decompress_str_to_dict
+from module_hrm.enums.enums import AgentResponseEnum, TstepTypeEnum
+from module_hrm.utils.util import compress_dict_to_str
 from utils.log_util import logger
 
 # 存储agent的WebSocket连接和Future对象（用于HTTP请求等待WebSocket响应）
@@ -64,7 +62,9 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
             logger.info(f"response={response_data}")
             response = {}
             if response_data.get("Error", None):
-                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, response_data, f"客户端中发生异常：{response_data.get('Error')}"))
+                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
+                                        response_data,
+                                        f"客户端中发生异常：{response_data.get('Error')}"))
 
             if response_data.get("request_type") == TstepTypeEnum.http.value:
                 response = AgentResponse(response_data)
@@ -72,17 +72,23 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
                 response = AgentResponseWebSocket(response_data)
                 # logger.info(f"ws响应数据：{response}")
             else:
-                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, response_data, f"响应数据类型【{response_data.get('request_type')}】不支持"))
+                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
+                                        response_data,
+                                        f"响应数据类型【{response_data.get('request_type')}】不支持"))
 
             response = handle_response((AgentResponseEnum.SUCCESS.value, response, "操作成功"))
             return response
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             logger.error(f'websocket请求超时{e}，request_id：{request_id}')
             if request_type == TstepTypeEnum.http.value:
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value, None, f'wobsocket请求超时{e}，request_id：{request_id}'))
+                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
+                                            None,
+                                            f'wobsocket请求超时{e}，request_id：{request_id}'))
                 return response
             elif request_type == TstepTypeEnum.websocket.value:
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value, None, f'wobsocket请求超时{e}，request_id：{request_id}'))
+                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
+                                            None,
+                                            f'wobsocket请求超时{e}，request_id：{request_id}'))
                 return response
         except asyncio.CancelledError as e:
             logger.error(e)
@@ -98,7 +104,9 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
 
 
     else:
-        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value, None, f"【{agent_code}】Agent not connected，request_id：{request_id}"))
+        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                                    None,
+                                    f"【{agent_code}】Agent not connected，request_id：{request_id}"))
         return response
 
 

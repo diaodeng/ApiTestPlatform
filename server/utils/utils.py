@@ -4,20 +4,19 @@ import os
 import platform
 import time
 import uuid
-from utils.log_util import logger
+
 from redlock import RedLock, RedLockError
+
 from config.env import RedisConfig
+from utils.log_util import logger
 
 
 def get_platform() -> dict:
     return {
-        "httprunner_version": f"Httprunner None",
-        "python_version": "{} {}".format(
-            platform.python_implementation(),
-            platform.python_version()
-        ),
+        "httprunner_version": "Httprunner None",
+        "python_version": f"{platform.python_implementation()} {platform.python_version()}",
         "platform": platform.platform(),
-        "pytest_version": f"pytest None",
+        "pytest_version": "pytest None",
     }
 
 
@@ -75,7 +74,7 @@ def red_lock(key):
 
     def decorator(func):
         if asyncio.iscoroutinefunction(func):
-            logger.info(f"执行了")
+            logger.info("执行了")
 
             @functools.wraps(func)
             async def wrapper(*args, **kwargs):
@@ -92,7 +91,7 @@ def red_lock(key):
                     )
 
         else:
-            logger.info(f"else执行了")
+            logger.info("else执行了")
 
             @functools.wraps(func)
             def wrapper(*args, **kwargs):

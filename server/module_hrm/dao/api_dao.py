@@ -1,14 +1,14 @@
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_hrm.entity.do.api_do import ApiInfo
+from module_hrm.entity.vo.api_vo import ApiModel, ApiModelForApi, ApiQueryModel
 from module_hrm.enums.enums import DataType
 from module_hrm.utils.util import PermissionHandler
 from utils.log_util import logger
-from module_hrm.entity.do.api_do import ApiInfo
-from module_hrm.entity.vo.api_vo import ApiModelForApi, ApiQueryModel, ApiModel
 
 
-class ApiOperation(object):
+class ApiOperation:
     def __init__(self):
         pass
 
@@ -27,7 +27,7 @@ class ApiOperation(object):
         except Exception as e:
             logger.error(f"删除API失败：{ids}")
             logger.error(e, exc_info=True)
-            raise TypeError(f"删除API失败：{e}")
+            raise TypeError(f"删除API失败：{e}") from e
         return "删除成功"
 
     @staticmethod
@@ -48,7 +48,7 @@ class ApiOperation(object):
         except Exception as e:
             logger.error(f"删除API失败：{ids}")
             logger.error(e, exc_info=True)
-            raise TypeError(f"删除API失败：{e}")
+            raise TypeError(f"删除API失败：{e}") from e
         return "删除成功"
 
     @staticmethod
@@ -104,7 +104,7 @@ class ApiOperation(object):
             api.name = name
             query_db.add(api)
             datas.append(api.api_id)
-            logger.info('{name}API复制成功'.format(name=name))
+            logger.info(f'{name}API复制成功')
         query_db.commit()
         return datas
 

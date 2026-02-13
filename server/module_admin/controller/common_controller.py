@@ -1,9 +1,9 @@
-from fastapi import APIRouter
-from fastapi import Depends, File, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, UploadFile
+
+from module_admin.service.common_service import CommonService
 from module_admin.service.login_service import LoginService
-from module_admin.service.common_service import *
-from utils.response_util import *
 from utils.log_util import logger
+from utils.response_util import ResponseUtil
 
 commonController = APIRouter(prefix='/common', dependencies=[Depends(LoginService.get_current_user)])
 
@@ -24,7 +24,10 @@ async def common_upload(request: Request, file: UploadFile = File(...)):
 
 
 @commonController.get("/download")
-async def common_download(request: Request, background_tasks: BackgroundTasks, file_name: str = Query(alias='fileName'), delete: bool = Query()):
+async def common_download(request: Request,
+                          background_tasks: BackgroundTasks,
+                          file_name: str = Query(alias='fileName'),
+                          delete: bool = Query()):
     try:
         download_result = CommonService.download_services(background_tasks, file_name, delete)
         if download_result.is_success:

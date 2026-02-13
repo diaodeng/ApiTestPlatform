@@ -1,16 +1,15 @@
-import json
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_hrm.entity.do.push_do import PushTarget
+from module_hrm.entity.vo.push_vo import PushModel, PushPageQueryModel
 from module_hrm.utils.util import PermissionHandler
 from utils.log_util import logger
-from module_hrm.entity.do.push_do import PushTarget
-from module_hrm.entity.vo.push_vo import PushModel,PushPageQueryModel
 from utils.page_util import PageUtil
 
 
-class PushDao(object):
+class PushDao:
     def __init__(self):
         pass
 
@@ -70,7 +69,7 @@ class PushDao(object):
         push.push_id = None
         push.name = push_info.name
         query_db.add(push)
-        logger.info('{name}推送配置复制成功'.format(name=push_info.name))
+        logger.info(f'{push_info.name}推送配置复制成功')
         query_db.commit()
 
     @staticmethod

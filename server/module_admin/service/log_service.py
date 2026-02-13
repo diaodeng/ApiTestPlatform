@@ -1,9 +1,24 @@
 import logging
 
-from module_admin.dao.log_dao import *
-from module_admin.service.dict_service import Request, DictDataService
+from sqlalchemy.orm import Session
+
+from module_admin.dao.log_dao import LoginLogDao, OperationLogDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from utils.common_util import export_list2excel, CamelCaseUtil
+from module_admin.entity.vo.log_vo import (
+    DeleteLoginLogModel,
+    DeleteOperLogModel,
+    LogininforModel,
+    LoginLogPageQueryModel,
+    LoginLogQueryModel,
+    OperLogModel,
+    OperLogPageQueryModel,
+    OperLogQueryModel,
+    QueryLoggerModel,
+    SetLoggerLevelModel,
+    UnlockUser,
+)
+from module_admin.service.dict_service import DictDataService, Request
+from utils.common_util import export_list2excel
 
 
 class OperationLogService:
@@ -35,10 +50,10 @@ class OperationLogService:
         try:
             OperationLogDao.add_operation_log_dao(query_db, page_object)
             query_db.commit()
-            result = dict(is_success=True, message='新增成功')
+            result = {'is_success': True, 'message': '新增成功'}
         except Exception as e:
             query_db.rollback()
-            result = dict(is_success=False, message=str(e))
+            result = {'is_success': False, 'message': str(e)}
 
         return CrudResponseModel(**result)
 
@@ -56,12 +71,12 @@ class OperationLogService:
                 for oper_id in oper_id_list:
                     OperationLogDao.delete_operation_log_dao(query_db, OperLogModel(operId=oper_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入操作日志id为空')
+            result = {'is_success': False, 'message': '传入操作日志id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -74,7 +89,7 @@ class OperationLogService:
         try:
             OperationLogDao.clear_operation_log_dao(query_db)
             query_db.commit()
-            result = dict(is_success=True, message='清除成功')
+            result = {'is_success': True, 'message': '清除成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -82,7 +97,7 @@ class OperationLogService:
         return CrudResponseModel(**result)
 
     @classmethod
-    async def export_operation_log_list_services(cls, request: Request, operation_log_list: List):
+    async def export_operation_log_list_services(cls, request: Request, operation_log_list: list):
         """
         导出操作日志信息service
         :param request: Request对象
@@ -110,8 +125,9 @@ class OperationLogService:
         }
 
         data = operation_log_list
-        operation_type_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis, dict_type='sys_oper_type')
-        operation_type_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in operation_type_list]
+        operation_type_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
+                                                                                             dict_type='sys_oper_type')
+        operation_type_option = [{'label': item.get('dictLabel'), 'value': item.get('dictValue')} for item in operation_type_list]
         operation_type_option_dict = {item.get('value'): item for item in operation_type_option}
 
         for item in data:
@@ -134,7 +150,10 @@ class LoginLogService:
     """
 
     @classmethod
-    def get_login_log_list_services(cls, query_db: Session, query_object: LoginLogPageQueryModel, is_page: bool = False):
+    def get_login_log_list_services(cls,
+                                    query_db: Session,
+                                    query_object: LoginLogPageQueryModel,
+                                    is_page: bool = False):
         """
         获取登录日志列表信息service
         :param query_db: orm对象
@@ -157,10 +176,10 @@ class LoginLogService:
         try:
             LoginLogDao.add_login_log_dao(query_db, page_object)
             query_db.commit()
-            result = dict(is_success=True, message='新增成功')
+            result = {'is_success': True, 'message': '新增成功'}
         except Exception as e:
             query_db.rollback()
-            result = dict(is_success=False, message=str(e))
+            result = {'is_success': False, 'message': str(e)}
 
         return CrudResponseModel(**result)
 
@@ -178,12 +197,12 @@ class LoginLogService:
                 for info_id in info_id_list:
                     LoginLogDao.delete_login_log_dao(query_db, LogininforModel(infoId=info_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入登录日志id为空')
+            result = {'is_success': False, 'message': '传入登录日志id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -196,7 +215,7 @@ class LoginLogService:
         try:
             LoginLogDao.clear_login_log_dao(query_db)
             query_db.commit()
-            result = dict(is_success=True, message='清除成功')
+            result = {'is_success': True, 'message': '清除成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -208,13 +227,13 @@ class LoginLogService:
         locked_user = await request.app.state.redis.get(f"account_lock:{unlock_user.user_name}")
         if locked_user:
             await request.app.state.redis.delete(f"account_lock:{unlock_user.user_name}")
-            result = dict(is_success=True, message='解锁成功')
+            result = {'is_success': True, 'message': '解锁成功'}
         else:
-            result = dict(is_success=False, message='该用户未锁定')
+            result = {'is_success': False, 'message': '该用户未锁定'}
         return CrudResponseModel(**result)
 
     @staticmethod
-    def export_login_log_list_services(login_log_list: List):
+    def export_login_log_list_services(login_log_list: list):
         """
         导出登录日志信息service
         :param login_log_list: 登录日志信息列表

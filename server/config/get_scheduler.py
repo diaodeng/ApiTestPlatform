@@ -1,16 +1,18 @@
-from apscheduler.events import EVENT_ALL, EVENT_JOB_EXECUTED, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_SUBMITTED, \
-    EVENT_JOB_ERROR, EVENT_JOB_MISSED
 import json
 from datetime import datetime
-from config.database import SessionLocal
-from module_admin.entity.vo.job_vo import EditJobModel
-from module_admin.service.job_log_service import JobLogService, JobLogModel
-from module_admin.dao.job_dao import Session, JobDao
-from utils.log_util import logger
-from config.scheduler_common import SchedulerUtil
-import module_task
-from module_hrm.enums.enums import TaskStatusEnum
 
+from apscheduler.events import (
+    EVENT_JOB_ERROR,
+    EVENT_JOB_MAX_INSTANCES,
+    EVENT_JOB_MISSED,
+)
+
+from config.database import SessionLocal
+from config.scheduler_common import SchedulerUtil
+from module_admin.dao.job_dao import JobDao, Session
+from module_admin.entity.vo.job_vo import EditJobModel
+from module_admin.service.job_log_service import JobLogModel, JobLogService
+from utils.log_util import logger
 
 # 重写Cron定时
 
@@ -85,7 +87,10 @@ class SysSchedulerUtil(SchedulerUtil):
                 # 获取任务触发器
                 job_trigger = str(query_job_info.get('trigger'))
                 # 构造日志消息
-                job_message = f"事件类型: {event_type}, 任务ID: {job_id}, 任务名称: {job_name}, 执行于{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                job_message = (f"事件类型: {event_type},"
+                               f" 任务ID: {job_id}, "
+                               f"任务名称: {job_name}, "
+                               f"执行于{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 job_log = JobLogModel(
                     jobName=job_name,
                     jobGroup=job_group,

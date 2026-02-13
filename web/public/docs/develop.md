@@ -76,3 +76,12 @@ npm run build:prod 或 yarn build:prod
 # 运行后端
 python3 app.py --env=prod
 ```
+#### uv管理依赖
+```bash
+# 老项目，激活python虚拟环境后
+uv pip compile requirements.txt -o uv.lock # 生成lock文件,然后根据lock文件反推pyproject.toml
+uv pip compile pyproject.toml -o uv.lock  # 正式环境
+uv pip compile pyproject.toml --group dev -o uv.lock  # 开发环境
+uv pip sync uv.lock # 同步依赖
+
+```

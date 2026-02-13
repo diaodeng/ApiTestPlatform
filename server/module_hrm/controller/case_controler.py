@@ -1,29 +1,28 @@
 import asyncio
-import csv
-import io
 from datetime import datetime
 
-from fastapi import APIRouter, Request, UploadFile, BackgroundTasks, HTTPException, Form
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Form, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.entity.vo.user_vo import CurrentUserModel, UserInfoModel
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from module_hrm.entity.do.case_do import HrmCase, HrmCaseParams
+from module_hrm.entity.vo.case_params_vo import (
+    CaseParamsDeleteModel,
+    CaseParamsQueryModel,
+)
 from module_hrm.entity.vo.case_vo import (
-    CasePageQueryModel,
     AddCaseModel,
     CaseModel,
+    CasePageQueryModel,
     DeleteCaseModel,
 )
-from module_hrm.entity.vo.case_params_vo import (
-    CaseParamsQueryModel,
-    CaseParamsDeleteModel,
-)
-from module_hrm.service.case_service import CaseService, CaseParamsService
+from module_hrm.service.case_service import CaseParamsService, CaseService
 from utils.common_util import bytes2file_response
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -44,7 +43,7 @@ async def get_hrm_case_list(
     page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
     query_db: Session = Depends(get_db),
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-    data_scope_sql: str = Depends(GetDataScope("HrmCase", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCase, user_alias="manager")),
 ):
     try:
         # 获取分页数据
@@ -231,7 +230,7 @@ async def export_hrm_case_list(
     request: Request,
     page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCase", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCase, user_alias="manager")),
 ):
     try:
         # 获取全量数据
@@ -255,7 +254,7 @@ async def get_case_params_list(
     request: Request,
     page_query: CaseParamsQueryModel,
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
 ):
     try:
         # 获取全量数据
@@ -277,7 +276,7 @@ async def add_case_params(
     request: Request,
     page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
 ):
     try:
         pass
@@ -296,7 +295,7 @@ async def edite_case_params(
     caseId: str|int,
     rowsData: list[dict],
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
 ):
     try:
         await CaseParamsService.update_case_params_services(
@@ -317,7 +316,7 @@ async def delete_case_params(
     request: Request,
     delete_data: CaseParamsDeleteModel,
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
 ):
     try:
         # 获取全量数据

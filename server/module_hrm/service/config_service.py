@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from module_hrm.dao.config_dao import ConfigDao
 from module_hrm.entity.vo.case_vo import CasePageQueryModel
 from utils.page_util import PageResponseModel
+from module_admin.entity.vo.common_vo import DataScopeExpr
 
 
 class ConfigService:
@@ -11,7 +12,11 @@ class ConfigService:
     """
 
     @classmethod
-    def get_config_select(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False, data_scope_sql:str='true'):
+    def get_config_select(cls,
+                          query_db: Session,
+                          query_object: CasePageQueryModel,
+                          is_page: bool = False,
+                          data_scope_sql:DataScopeExpr=True):
         """
         获取用例列表信息service
         :param query_db: orm对象

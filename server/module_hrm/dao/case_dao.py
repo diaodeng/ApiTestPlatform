@@ -1,23 +1,22 @@
 import uuid
 from collections import defaultdict
-from typing import Type, Generator, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
-from sqlalchemy import select, case, Sequence
+from sqlalchemy import Sequence, case, select
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+from sqlalchemy.sql import func
 from starlette.concurrency import run_in_threadpool
 
 from config.database import SessionLocal
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
-
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseModuleProject, HrmCaseParams
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.dto.case_dto import CaseModelForApi
-from module_hrm.entity.vo.case_vo import *
+from module_hrm.entity.vo.case_vo import CaseModel, CaseModuleProjectModel, CasePageQueryModel, CaseQuery
 from module_hrm.utils.util import PermissionHandler
 from utils.page_util import PageUtil
 
@@ -66,9 +65,6 @@ class CaseDao:
                 yield row  # 逐条 yield（或者改成 yield batch）
             offset += batch_size
 
-        # ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)], else_=len(case_ids))
-        # info = db.execute(select(HrmCase).where(HrmCase.case_id.in_(case_ids)).order_by(ordering_case).offset(offset).limit(batch_size)).scalars().all()
-        # return info
 
     @classmethod
     def get_case_by_ids(cls, db: Session, case_ids: list[int]) -> Sequence[HrmCase]:
@@ -78,7 +74,8 @@ class CaseDao:
         :param case_ids: 用例id
         :return: 在用用例信息对象
         """
-        ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)], else_=len(case_ids))
+        ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)],
+                             else_=len(case_ids))
         # info = db.query(HrmCase).filter(HrmCase.case_id.in_(case_ids)).order_by(ordering_case).all()
 
         info = db.execute(select(HrmCase).where(HrmCase.case_id.in_(case_ids)).order_by(ordering_case)).scalars().all()
@@ -110,7 +107,11 @@ class CaseDao:
         return info
 
     @classmethod
-    def get_case_list(cls, db: Session, query_object: CasePageQueryModel, is_page: bool = False, data_scope_sql:str='true'):
+    def get_case_list(cls,
+                      db: Session,
+                      query_object: CasePageQueryModel,
+                      is_page: bool = False,
+                      data_scope_sql:DataScopeExpr = True):
         """
         根据查询参数获取用例列表信息
         :param db: orm对象
@@ -125,7 +126,7 @@ class CaseDao:
                          ).outerjoin(HrmProject,
                                      HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
                                                                                             HrmCase.module_id == HrmModule.module_id)
-        query = query.filter(eval(data_scope_sql))
+        query = query.filter(data_scope_sql)
         if query_object.suite_id:
             # 查询条件中增加需要排除部分caseId
             query_obj = {"suite_id": query_object.suite_id, "data_type": query_object.data_type}

@@ -1,13 +1,13 @@
 from datetime import datetime
-from random import choices
-import ttkbootstrap as ttk
-from ttkbootstrap.style import Bootstyle
-from tkinter.filedialog import askdirectory
-from ttkbootstrap.dialogs import Messagebox
-from ttkbootstrap.constants import *
-from tkinter.scrolledtext import ScrolledText
 from pathlib import Path
+from random import choices
+from tkinter.filedialog import askdirectory
+from tkinter.scrolledtext import ScrolledText
 
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from ttkbootstrap.dialogs import Messagebox
+from ttkbootstrap.style import Bootstyle
 
 PATH = Path(__file__).parent / 'assets'
 

@@ -1,9 +1,10 @@
-from fastapi import status
-from fastapi.responses import JSONResponse, Response, StreamingResponse
-from fastapi.encoders import jsonable_encoder
-from typing import Any, Dict, Optional
-from pydantic import BaseModel
 from datetime import datetime
+from typing import Any
+
+from fastapi import status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 
 class ResponseUtil:
@@ -12,8 +13,8 @@ class ResponseUtil:
     """
 
     @classmethod
-    def success(cls, msg: str = '操作成功', data: Optional[Any] = None, rows: Optional[Any] = None,
-                dict_content: Optional[Dict] = None, model_content: Optional[BaseModel] = None) -> Response:
+    def success(cls, msg: str = '操作成功', data: Any | None = None, rows: Any | None = None,
+                dict_content: dict | None = None, model_content: BaseModel | None = None) -> Response:
         """
         成功响应方法
         :param msg: 可选，自定义成功响应信息
@@ -45,8 +46,8 @@ class ResponseUtil:
         )
 
     @classmethod
-    def failure(cls, msg: str = '操作失败', data: Optional[Any] = None, rows: Optional[Any] = None,
-                dict_content: Optional[Dict] = None, model_content: Optional[BaseModel] = None) -> Response:
+    def failure(cls, msg: str = '操作失败', data: Any | None = None, rows: Any | None = None,
+                dict_content: dict | None = None, model_content: BaseModel | None = None) -> Response:
         """
         失败响应方法
         :param msg: 可选，自定义失败响应信息
@@ -78,8 +79,12 @@ class ResponseUtil:
         )
 
     @classmethod
-    def unauthorized(cls, msg: str = '登录信息已过期，访问系统资源失败', data: Optional[Any] = None, rows: Optional[Any] = None,
-                     dict_content: Optional[Dict] = None, model_content: Optional[BaseModel] = None) -> Response:
+    def unauthorized(cls,
+                     msg: str = '登录信息已过期，访问系统资源失败',
+                     data: Any | None = None,
+                     rows: Any | None = None,
+                     dict_content: dict | None = None,
+                     model_content: BaseModel | None = None) -> Response:
         """
         未认证响应方法
         :param msg: 可选，自定义未认证响应信息
@@ -111,8 +116,8 @@ class ResponseUtil:
         )
 
     @classmethod
-    def forbidden(cls, msg: str = '该用户无此接口权限', data: Optional[Any] = None, rows: Optional[Any] = None,
-                  dict_content: Optional[Dict] = None, model_content: Optional[BaseModel] = None) -> Response:
+    def forbidden(cls, msg: str = '该用户无此接口权限', data: Any | None = None, rows: Any | None = None,
+                  dict_content: dict | None = None, model_content: BaseModel | None = None) -> Response:
         """
         未认证响应方法
         :param msg: 可选，自定义未认证响应信息
@@ -144,8 +149,8 @@ class ResponseUtil:
         )
 
     @classmethod
-    def error(cls, msg: str = '接口异常', data: Optional[Any] = None, rows: Optional[Any] = None,
-              dict_content: Optional[Dict] = None, model_content: Optional[BaseModel] = None) -> Response:
+    def error(cls, msg: str = '接口异常', data: Any | None = None, rows: Any | None = None,
+              dict_content: dict | None = None, model_content: BaseModel | None = None) -> Response:
         """
         错误响应方法
         :param msg: 可选，自定义错误响应信息

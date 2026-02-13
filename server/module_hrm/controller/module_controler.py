@@ -1,16 +1,22 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Request
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.entity.vo.module_vo import ModulePageQueryModel, ModuleModel, ModuleQueryModel, AddModuleModel, \
-    DeleteModuleModel
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_admin.service.login_service import CurrentUserModel, LoginService
+from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.entity.vo.module_vo import (
+    AddModuleModel,
+    DeleteModuleModel,
+    ModuleModel,
+    ModulePageQueryModel,
+    ModuleQueryModel,
+)
 from module_hrm.service.module_service import ModuleService
 from utils.common_util import bytes2file_response
 from utils.log_util import logger
@@ -26,7 +32,7 @@ moduleController = APIRouter(prefix='/hrm/module', dependencies=[Depends(LoginSe
 async def get_hrm_module_list(request: Request,
                               page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_query),
                               query_db: Session = Depends(get_db),
-                              data_scope_sql: str = Depends(GetDataScope('HrmModule', user_alias='manager'))
+                              data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmModule, user_alias='manager'))
                               ):
     try:
         # 获取分页数据
@@ -43,7 +49,7 @@ async def get_hrm_module_list(request: Request,
 async def get_hrm_module_list_all(request: Request,
                                   query: ModuleQueryModel = Depends(ModuleQueryModel),
                                   query_db: Session = Depends(get_db),
-                                  data_scope_sql: str = Depends(GetDataScope('HrmModule', user_alias='manager'))
+                                  data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmModule, user_alias='manager'))
                                   ):
     try:
         query_result = ModuleService.get_module_list_services_all(query_db, query, data_scope_sql)
@@ -59,7 +65,8 @@ async def get_hrm_module_list_all(request: Request,
 async def get_hrm_module_list_show(request: Request,
                                    query: ModuleQueryModel = Depends(ModuleQueryModel),
                                    query_db: Session = Depends(get_db),
-                                   data_scope_sql: str = Depends(GetDataScope('HrmModule', user_alias='manager'))
+                                   data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmModule,
+                                                                                        user_alias='manager'))
                                    ):
     try:
         query_result = ModuleService.get_module_list_services_show(query_db, query, data_scope_sql)
@@ -150,7 +157,7 @@ async def query_detail_hrm_module(request: Request, module_id: int, query_db: Se
 async def export_hrm_module_list(request: Request,
                                  page_query: ModulePageQueryModel = Depends(ModulePageQueryModel.as_form),
                                  query_db: Session = Depends(get_db),
-                                 data_scope_sql: str = Depends(GetDataScope('HrmModule', user_alias='manager'))
+                                 data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmModule, user_alias='manager'))
                                  ):
     try:
         # 获取全量数据

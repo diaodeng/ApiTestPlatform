@@ -1,55 +1,56 @@
 import traceback
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from sub_applications.handle import handle_sub_applications
-from middlewares.handle import handle_middleware
-from exceptions.handle import handle_exception
-from utils.metrics import PushMetrics
-from module_admin.controller.login_controller import loginController
-from module_admin.controller.captcha_controller import captchaController
-from module_admin.controller.user_controller import userController
-from module_admin.controller.menu_controller import menuController
-from module_admin.controller.dept_controller import deptController
-from module_admin.controller.role_controller import roleController
-from module_admin.controller.post_controler import postController
-from module_admin.controller.dict_controller import dictController
-from module_admin.controller.config_controller import configController
-from module_admin.controller.notice_controller import noticeController
-from module_admin.controller.log_controller import logController
-from module_admin.controller.online_controller import onlineController
-from module_admin.controller.job_controller import jobController
-from module_admin.controller.server_controller import serverController
-from module_admin.controller.cache_controller import cacheController
-from module_admin.controller.common_controller import commonController
-from module_hrm.controller.project_controller import projectController
-from module_hrm.controller.debugtalk_controller import debugtalkController
-from module_hrm.controller.module_controler import moduleController
-from module_hrm.controller.env_controller import envController
-from module_hrm.controller.case_controler import caseController
-from module_hrm.controller.runner_controler import runnerController
-from module_hrm.controller.report_controler import reportController
-from module_hrm.controller.config_controller import hrmConfigController
-from module_hrm.controller.common_controller import hrmCommonController
-from module_hrm.controller.api_controler import hrmApiController
-from module_hrm.controller.qtrJob_controller import qtrJobController
-from module_hrm.controller.suite_controller import suiteController
-from module_hrm.controller.checkStatus_controler import qtrServiceStatusController
-from module_qtr.controller.agent_controller import agentController, startup_handler
-from module_hrm.controller.forward_rules_controller import forwardRulesController
-from module_hrm.controller.test_controller import mockController
-from module_hrm.controller.agent_controller import agentController as agentManagerController
-from module_hrm.controller.push_controller import pushController
-from module_hrm.controller.tools_controller import toolsController
-# from module_hrm.controller.celery_controller import celeryController
 
+from fastapi import FastAPI
+
+# from module_hrm.controller.celery_controller import celeryController
 from config.env import AppConfig
-from config.get_redis import RedisUtil
 from config.get_db import init_create_table
-from config.get_scheduler import sys_scheduler_util as SysSchedulerUtil
 from config.get_qtr_scheduler import qtr_scheduler_util as QtrSchedulerUtil
-from utils.log_util import logger
+from config.get_redis import RedisUtil
+from config.get_scheduler import sys_scheduler_util as SysSchedulerUtil
+from exceptions.handle import handle_exception
+from middlewares.handle import handle_middleware
+from module_admin.controller.cache_controller import cacheController
+from module_admin.controller.captcha_controller import captchaController
+from module_admin.controller.common_controller import commonController
+from module_admin.controller.config_controller import configController
+from module_admin.controller.dept_controller import deptController
+from module_admin.controller.dict_controller import dictController
+from module_admin.controller.job_controller import jobController
+from module_admin.controller.log_controller import logController
+from module_admin.controller.login_controller import loginController
+from module_admin.controller.menu_controller import menuController
+from module_admin.controller.notice_controller import noticeController
+from module_admin.controller.online_controller import onlineController
+from module_admin.controller.post_controler import postController
+from module_admin.controller.role_controller import roleController
+from module_admin.controller.server_controller import serverController
+from module_admin.controller.user_controller import userController
+from module_hrm.controller.agent_controller import agentController as agentManagerController
+from module_hrm.controller.api_controler import hrmApiController
+from module_hrm.controller.case_controler import caseController
+from module_hrm.controller.checkStatus_controler import qtrServiceStatusController
+from module_hrm.controller.common_controller import hrmCommonController
+from module_hrm.controller.config_controller import hrmConfigController
+from module_hrm.controller.debugtalk_controller import debugtalkController
+from module_hrm.controller.env_controller import envController
+from module_hrm.controller.forward_rules_controller import forwardRulesController
+from module_hrm.controller.module_controler import moduleController
+from module_hrm.controller.project_controller import projectController
+from module_hrm.controller.push_controller import pushController
+from module_hrm.controller.qtrJob_controller import qtrJobController
+from module_hrm.controller.report_controler import reportController
+from module_hrm.controller.runner_controler import runnerController
+from module_hrm.controller.suite_controller import suiteController
+from module_hrm.controller.test_controller import mockController
+from module_hrm.controller.tools_controller import toolsController
+from module_qtr.controller.agent_controller import agentController, startup_handler
+from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
+from utils.log_util import logger
+from utils.metrics import PushMetrics
+
 
 # 生命周期事件
 @asynccontextmanager

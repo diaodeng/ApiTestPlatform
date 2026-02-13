@@ -2,12 +2,18 @@ from loguru import logger
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.suite_dao import SuiteDao, SuiteDetailDao
 from module_hrm.entity.do.suite_do import QtrSuiteDetail
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.entity.vo.suite_vo import SuiteModel, SuitePageQueryModel, DeleteSuiteModel, SuiteDetailModel, \
-    SuiteDetailPageQueryModel
+from module_hrm.entity.vo.suite_vo import (
+    DeleteSuiteModel,
+    SuiteDetailModel,
+    SuiteDetailPageQueryModel,
+    SuiteModel,
+    SuitePageQueryModel,
+)
 from utils.common_util import CamelCaseUtil
 from utils.page_util import PageResponseModel
 
@@ -31,7 +37,7 @@ class SuiteService:
         return result
 
     @classmethod
-    def get_suite_list_services(cls, query_db: Session, page_object: SuitePageQueryModel, data_scope_sql: str,
+    def get_suite_list_services(cls, query_db: Session, page_object: SuitePageQueryModel, data_scope_sql: DataScopeExpr,
                                 is_page: bool = False):
         """
         获取测试套件列表信息service
@@ -54,12 +60,12 @@ class SuiteService:
         """
         suite = SuiteDao.get_suite_by_info(query_db, SuiteModel(suiteName=page_object.suite_name))
         if suite:
-            result = dict(is_success=False, message='套件名称已存在')
+            result = {'is_success': False, 'message': '套件名称已存在'}
         else:
             try:
                 SuiteDao.add_suite_dao(query_db, page_object)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -80,17 +86,17 @@ class SuiteService:
             if suite_info.suite_name != suite_object.suite_name:
                 suite = SuiteDao.get_suite_by_info(query_db, SuiteModel(suiteName=suite_object.suite_name))
                 if suite:
-                    result = dict(is_success=False, message='测试套件名称不能重复')
+                    result = {'is_success': False, 'message': '测试套件名称不能重复'}
                     return CrudResponseModel(**result)
             try:
                 SuiteDao.edit_suite_dao(query_db, edit_suite)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='测试套件不存在')
+            result = {'is_success': False, 'message': '测试套件不存在'}
 
         return CrudResponseModel(**result)
 
@@ -114,7 +120,7 @@ class SuiteService:
             for suite_id in suite_id_list:
                 SuiteDao.delete_suite_dao(query_db, SuiteModel(suiteId=suite_id), user)
             query_db.commit()
-            result = dict(is_success=True, message='删除成功')
+            result = {'is_success': True, 'message': '删除成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -142,7 +148,7 @@ class SuiteDetailService:
 
     @classmethod
     def get_suite_detail_list_services(cls, query_db: Session, page_object: SuiteDetailPageQueryModel,
-                                       data_scope_sql: str,
+                                       data_scope_sql: DataScopeExpr,
                                        is_page: bool = False):
         """
         获取测试套件列表信息service
@@ -194,7 +200,7 @@ class SuiteDetailService:
         try:
             SuiteDetailDao.add_suite_detail_dao(query_db, page_objects)
             query_db.commit()
-            result = dict(is_success=True, message='新增成功')
+            result = {'is_success': True, 'message': '新增成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -217,12 +223,12 @@ class SuiteDetailService:
             try:
                 SuiteDetailDao.edit_suite_detail_status_by_id(query_db, edit_suite_detail)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='数据不存在')
+            result = {'is_success': False, 'message': '数据不存在'}
 
         return CrudResponseModel(**result)
 

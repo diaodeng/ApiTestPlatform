@@ -1,13 +1,13 @@
-from apscheduler.events import EVENT_ALL, EVENT_JOB_ERROR, EVENT_JOB_MISSED, EVENT_JOB_MAX_INSTANCES
 import json
 from datetime import datetime
+
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
+
 from config.database import SessionLocal
-from module_hrm.entity.vo.job_vo import EditJobModel
-from module_hrm.service.job_log_service import JobLogService, JobLogModel
-from module_hrm.dao.job_dao import Session, JobDao
-from config.scheduler_common import SchedulerUtil, MyCronTrigger as QtrCronTrigger
+from config.scheduler_common import SchedulerUtil
+from module_hrm.dao.job_dao import JobDao, Session
+from module_hrm.service.job_log_service import JobLogModel, JobLogService
 from utils.log_util import logger
-import module_task
 
 
 class QtrSchedulerUtil(SchedulerUtil):
@@ -75,7 +75,10 @@ class QtrSchedulerUtil(SchedulerUtil):
                 # 获取任务触发器
                 job_trigger = str(query_job_info.get('trigger'))
                 # 构造日志消息
-                job_message = f"事件类型: {event_type}, 任务ID: {job_id}, 任务名称: {job_name}, 执行于{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                job_message = (f"事件类型: {event_type}, "
+                               f"任务ID: {job_id}, "
+                               f"任务名称: {job_name}, "
+                               f"执行于{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 job_log = JobLogModel(
                     jobName=job_name,
                     jobGroup=job_group,
@@ -97,7 +100,7 @@ class QtrSchedulerUtil(SchedulerUtil):
         finally:
             try:
                 session.close()
-            except:
+            except Exception:
                 pass
 
 

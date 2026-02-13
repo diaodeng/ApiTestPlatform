@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Integer, String, DateTime, BigInteger
+from sqlalchemy import BigInteger, DateTime, Integer, String
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 

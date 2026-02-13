@@ -1,22 +1,21 @@
 import random
 import uuid
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
 from typing import Optional, Union
 
-from fastapi import Depends
-from fastapi import Request, Form
+from fastapi import Depends, Form, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from config.env import AppConfig, JwtConfig, RedisInitKeyConfig
 from config.get_db import get_db
-from exceptions.exception import LoginException, AuthException
+from exceptions.exception import AuthException, LoginException
 from module_admin.dao.login_dao import login_by_account
 from module_admin.dao.user_dao import UserDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.entity.vo.login_vo import UserLogin, UserRegister, SmsCode
-from module_admin.entity.vo.user_vo import TokenData, CurrentUserModel, UserInfoModel, AddUserModel, ResetUserModel
+from module_admin.entity.vo.login_vo import SmsCode, UserLogin, UserRegister
+from module_admin.entity.vo.user_vo import AddUserModel, CurrentUserModel, ResetUserModel, TokenData, UserInfoModel
 from module_admin.service.user_service import UserService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -333,9 +332,9 @@ class LoginService:
                 result = UserService.add_user_services(query_db, add_user)
                 return result
             else:
-                result = dict(is_success=False, message='注册程序已关闭，禁止注册')
+                result = {"is_success": False, "message": '注册程序已关闭，禁止注册'}
         else:
-            result = dict(is_success=False, message='两次输入的密码不一致')
+            result = {"is_success": False, "message": '两次输入的密码不一致'}
 
         return CrudResponseModel(**result)
 
@@ -351,7 +350,7 @@ class LoginService:
         redis_sms_result = await request.app.state.redis.get(
             f"{RedisInitKeyConfig.SMS_CODE.get('key')}:{user.session_id}")
         if redis_sms_result:
-            return SmsCode(**dict(is_success=False, sms_code='', session_id='', message='短信验证码仍在有效期内'))
+            return SmsCode(**{"is_success": False, "sms_code": '', "session_id": '', "message": '短信验证码仍在有效期内'})
         is_user = UserDao.get_user_by_name(query_db, user.user_name)
         if is_user:
             sms_code = str(random.randint(100000, 999999))
@@ -361,9 +360,9 @@ class LoginService:
             # 此处模拟调用短信服务
             message_service(sms_code)
 
-            return SmsCode(**dict(is_success=True, sms_code=sms_code, session_id=session_id, message='获取成功'))
+            return SmsCode(**{"is_success": True, "sms_code": sms_code, "session_id": session_id, "message": '获取成功'})
 
-        return SmsCode(**dict(is_success=False, sms_code='', session_id='', message='用户不存在'))
+        return SmsCode(**{"is_success": False, "sms_code": '', "session_id": '', "message": '用户不存在'})
 
     @classmethod
     async def forget_user_services(cls, request: Request, query_db: Session, forget_user: ResetUserModel):
@@ -382,10 +381,10 @@ class LoginService:
             edit_result = UserService.reset_user_services(query_db, forget_user)
             result = edit_result.dict()
         elif not redis_sms_result:
-            result = dict(is_success=False, message='短信验证码已过期')
+            result = {"is_success": False, "message": '短信验证码已过期'}
         else:
             await request.app.state.redis.delete(f"{RedisInitKeyConfig.SMS_CODE.get('key')}:{forget_user.session_id}")
-            result = dict(is_success=False, message='短信验证码不正确')
+            result = {"is_success": False, "message": '短信验证码不正确'}
 
         return CrudResponseModel(**result)
 

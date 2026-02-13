@@ -3,9 +3,9 @@
 """
 雪花id
 """
+import time
 
-from utils.log_util import *
-
+from utils.log_util import logger
 
 # 64位ID的划分
 WORKER_ID_BITS = 1
@@ -35,7 +35,7 @@ class InvalidSystemClock(Exception):
     pass
 
 
-class IdWorker(object):
+class IdWorker:
     """
     用于生成IDs
     """
@@ -76,7 +76,7 @@ class IdWorker(object):
 
         # 时钟回拨
         if timestamp < self.last_timestamp:
-            logger.error('clock is moving backwards. Rejecting requests until {}'.format(self.last_timestamp))
+            logger.error(f'clock is moving backwards. Rejecting requests until {self.last_timestamp}')
             raise InvalidSystemClock
 
         if timestamp == self.last_timestamp:

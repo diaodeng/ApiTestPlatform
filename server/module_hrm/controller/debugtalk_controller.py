@@ -1,15 +1,16 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Request
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.entity.vo.debugtalk_vo import DeleteDebugTalkModel, DebugTalkModel, DebugTalkQueryModel
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_admin.service.login_service import CurrentUserModel, LoginService
+from module_hrm.entity.do.debugtalk_do import HrmDebugTalk
+from module_hrm.entity.vo.debugtalk_vo import DebugTalkModel, DebugTalkQueryModel, DeleteDebugTalkModel
 from module_hrm.service.debugtalk_service import DebugTalkService
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -24,7 +25,8 @@ debugtalkController = APIRouter(prefix='/hrm/debugtalk', dependencies=[Depends(L
 async def get_hrm_debugtalk_list(request: Request,
                                  query: DebugTalkQueryModel = Depends(DebugTalkQueryModel.as_query),
                                  query_db: Session = Depends(get_db),
-                                 data_scope_sql: str = Depends(GetDataScope('HrmDebugTalk', user_alias='manager'))):
+                                 data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmDebugTalk,
+                                                                                      user_alias='manager'))):
     try:
         query_result = DebugTalkService.get_debugtalk_list_services(query_db, query, data_scope_sql)
         if query.is_page:

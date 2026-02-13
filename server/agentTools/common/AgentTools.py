@@ -2,9 +2,10 @@ import json
 import socket
 import threading
 import time
-from loguru import logger
+from urllib.parse import parse_qs, unquote
+
 import requests
-from urllib.parse import urlparse, parse_qs, unquote
+from loguru import logger
 
 # 配置信息
 CONFIG = {
@@ -26,7 +27,7 @@ class AgentTools:
         method, path, _ = '', '', ''
         header_flag = False
         headers = {}
-        logger.info(f'开始接收数据')
+        logger.info('开始接收数据')
         starttime = time.time()
         while True:
             res = client_socket.recv(1024)

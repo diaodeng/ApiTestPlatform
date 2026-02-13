@@ -1,13 +1,14 @@
-import json
-
 from loguru import logger
+from sqlalchemy.orm import Session
 
-from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_hrm.dao.job_dao import *
-from module_admin.service.dict_service import Request, DictDataService
-from module_hrm.entity.vo.common_vo import CrudResponseModel
-from utils.common_util import export_list2excel, CamelCaseUtil
 from config.get_qtr_scheduler import qtr_scheduler_util as QtrSchedulerUtil
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_admin.service.dict_service import DictDataService, Request
+from module_hrm.dao.job_dao import JobDao, JobPageQueryModel
+from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.entity.vo.job_vo import DeleteJobModel, EditJobModel, JobModel
+from utils.common_util import CamelCaseUtil, export_list2excel
 
 
 class JobService:
@@ -16,7 +17,11 @@ class JobService:
     """
 
     @classmethod
-    def get_job_list_services(cls, query_db: Session, query_object: JobPageQueryModel, data_scope_sql: str, is_page: bool = False):
+    def get_job_list_services(cls,
+                              query_db: Session,
+                              query_object: JobPageQueryModel,
+                              data_scope_sql: DataScopeExpr,
+                              is_page: bool = False):
         """
         获取定时任务列表信息service
         :param query_db: orm对象
@@ -39,7 +44,7 @@ class JobService:
         """
         job = JobDao.get_job_detail_by_info(query_db, page_object)
         if job:
-            result = dict(is_success=False, message='定时任务已存在')
+            result = {'is_success': False, 'message': '定时任务已存在'}
         else:
             try:
                 page_object.job_kwargs.user_name =  page_object.job_kwargs.user_name or user_info.user.user_name
@@ -51,7 +56,7 @@ class JobService:
                 if job_info.status == '0':
                     QtrSchedulerUtil.add_scheduler_job(job_info=job_info)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -89,12 +94,12 @@ class JobService:
                     job_info = cls.job_detail_services(query_db, edit_job.get('job_id'))
                     QtrSchedulerUtil.add_scheduler_job(job_info=job_info)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='定时任务不存在')
+            result = {'is_success': False, 'message': '定时任务不存在'}
 
         return CrudResponseModel(**result)
 
@@ -136,9 +141,9 @@ class JobService:
         if job_info:
             job_info.job_id = once_job_id
             QtrSchedulerUtil.execute_scheduler_job_once(job_info=job_info)
-            result = dict(is_success=True, message='执行成功')
+            result = {'is_success': True, 'message': '执行成功'}
         else:
-            result = dict(is_success=False, message='定时任务不存在')
+            result = {'is_success': False, 'message': '定时任务不存在'}
 
         return CrudResponseModel(**result)
 
@@ -157,12 +162,12 @@ class JobService:
                     QtrSchedulerUtil.remove_scheduler_job(job_id)
                     JobDao.delete_job_dao(query_db, JobModel(jobId=job_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入定时任务id为空')
+            result = {'is_success': False, 'message': '传入定时任务id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -209,11 +214,11 @@ class JobService:
         data = job_list
         job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
                                                                                         dict_type='qtr_job_group')
-        job_group_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in job_group_list]
+        job_group_option = [{'label': item.get('dictLabel'), 'value': item.get('dictValue')} for item in job_group_list]
         job_group_option_dict = {item.get('value'): item for item in job_group_option}
         job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
                                                                                            dict_type='qtr_job_executor')
-        job_executor_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in
+        job_executor_option = [{'label': item.get('dictLabel'), 'value': item.get('dictValue')} for item in
                                job_executor_list]
         job_executor_option_dict = {item.get('value'): item for item in job_executor_option}
 

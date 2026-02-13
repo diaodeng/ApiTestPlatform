@@ -4,7 +4,7 @@ from jose import jwt
 
 from config.env import JwtConfig, RedisInitKeyConfig
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.entity.vo.online_vo import OnlineQueryModel, DeleteOnlineModel
+from module_admin.entity.vo.online_vo import DeleteOnlineModel, OnlineQueryModel
 from utils.common_util import CamelCaseUtil
 from utils.redis_util import scan_keys
 
@@ -31,19 +31,19 @@ class OnlineService:
         for key,value in access_token_values_list:
             try:
                 payload = jwt.decode(value, JwtConfig.jwt_secret_key, algorithms=[JwtConfig.jwt_algorithm])
-            except jose.exceptions.ExpiredSignatureError as e:
+            except jose.exceptions.ExpiredSignatureError:
                 await request.app.state.redis.delete(f"{key}")  # 过期的token删除掉
                 continue
-            online_dict = dict(
-                token_id=payload.get('session_id'),
-                user_name=payload.get('user_name'),
-                dept_name=payload.get('dept_name'),
-                ipaddr=payload.get('login_info').get('ipaddr'),
-                login_location=payload.get('login_info').get('loginLocation'),
-                browser=payload.get('login_info').get('browser'),
-                os=payload.get('login_info').get('os'),
-                login_time=payload.get('login_info').get('loginTime')
-            )
+            online_dict = {
+                "token_id": payload.get('session_id'),
+                "user_name": payload.get('user_name'),
+                "dept_name": payload.get('dept_name'),
+                "ipaddr": payload.get('login_info').get('ipaddr'),
+                "login_location": payload.get('login_info').get('loginLocation'),
+                "browser": payload.get('login_info').get('browser'),
+                "os": payload.get('login_info').get('os'),
+                "login_time": payload.get('login_info').get('loginTime')
+            }
             if query_object.user_name and not query_object.ipaddr:
                 if query_object.user_name == payload.get('login_info').get('ipaddr'):
                     online_info_list = [online_dict]
@@ -74,7 +74,7 @@ class OnlineService:
             token_id_list = page_object.token_ids.split(',')
             for token_id in token_id_list:
                 await request.app.state.redis.delete(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{token_id}")
-            result = dict(is_success=True, message='强退成功')
+            result = {"is_success": True, "message": '强退成功'}
         else:
-            result = dict(is_success=False, message='传入session_id为空')
+            result = {"is_success": False, "message": '传入session_id为空'}
         return CrudResponseModel(**result)

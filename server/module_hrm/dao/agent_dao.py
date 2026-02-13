@@ -1,10 +1,8 @@
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
 
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.entity.do.agent_do import QtrAgent
-from module_hrm.entity.vo.agent_vo import *
+from module_hrm.entity.vo.agent_vo import AgentModel, AgentQueryModel
 from utils.page_util import PageUtil
 
 
@@ -74,7 +72,7 @@ class AgentDao:
         return agent_info
 
     @classmethod
-    def get_agent_list(cls, db: Session, page_object: AgentQueryModel, data_scope_sql: str):
+    def get_agent_list(cls, db: Session, page_object: AgentQueryModel, data_scope_sql: DataScopeExpr):
         """
         用于获取Agent列表的工具方法
         :param db: orm对象
@@ -86,7 +84,7 @@ class AgentDao:
                                                QtrAgent.status == page_object.status if page_object.status else True
                                                )
         if data_scope_sql:
-            agent_list = agent_list.filter(eval(data_scope_sql))
+            agent_list = agent_list.filter(data_scope_sql)
 
         agent_list = agent_list.order_by(QtrAgent.agent_id)
 

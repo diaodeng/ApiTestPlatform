@@ -11,7 +11,7 @@ from module_hrm.entity.vo.project_vo import ProjectModel
 from module_hrm.utils.common import dict2list, list_dict2list
 
 
-class OldDatabase():
+class OldDatabase:
     def __init__(self):
         self.host = "1882q56p71.51mypc.cn"
         self.port = 8723
@@ -62,7 +62,7 @@ class OldDatabase():
         return self.__select("select * from TestSuiteDetail")
 
 
-class NewDatabase():
+class NewDatabase:
     def __init__(self):
         self.host = "1882q56p71.51mypc.cn"
         self.port = 59306
@@ -105,7 +105,7 @@ class NewDatabase():
         self.connect.close()
 
 
-class CoverData():
+class CoverData:
     def __init__(self):
         pass
 
@@ -200,7 +200,7 @@ class CoverData():
                                     new_json["params"].append(new_param)
                                 else:
                                     new_json["params"].append(param)
-                            except Exception as e:
+                            except Exception:
                                 new_json["params"].append(param)
                         step["request"]["json"] = json.dumps(new_json, ensure_ascii=False, indent=4)
                     elif api_model.path == "https://${env}mockserver.rta-os.com/dubboJump":
@@ -465,7 +465,7 @@ class CoverData():
                                     new_json["params"].append(new_param)
                                 else:
                                     new_json["params"].append(param)
-                            except Exception as e:
+                            except Exception:
                                 new_json["params"].append(param)
                         step["request"]["json"] = json.dumps(new_json, ensure_ascii=False, indent=4)
                     elif step["request"]["url"] == "https://${env}mockserver.rta-os.com/dubboJump":

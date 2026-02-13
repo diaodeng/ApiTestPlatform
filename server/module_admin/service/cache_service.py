@@ -1,7 +1,8 @@
 from fastapi import Request
-from module_admin.entity.vo.cache_vo import *
+
 from config.env import RedisInitKeyConfig
 from config.get_redis import RedisUtil
+from module_admin.entity.vo.cache_vo import CacheInfoModel, CacheMonitorModel
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from utils.redis_util import scan_keys
 
@@ -21,7 +22,7 @@ class CacheService:
         info = await request.app.state.redis.info()
         db_size = await request.app.state.redis.dbsize()
         command_stats_dict = await request.app.state.redis.info('commandstats')
-        command_stats = [dict(name=key.split('_')[1], value=str(value.get('calls'))) for key, value in
+        command_stats = [{'name': key.split('_')[1], 'value': str(value.get('calls'))} for key, value in
                          command_stats_dict.items()]
         result = CacheMonitorModel(
             commandStats=command_stats,
@@ -88,7 +89,7 @@ class CacheService:
         cache_keys = await scan_keys(request.app.state.redis, f"{cache_name}*")
         if cache_keys:
             await request.app.state.redis.delete(*cache_keys)
-        result = dict(is_success=True, message=f"{cache_name}对应键值清除成功")
+        result = {'is_success': True, 'message': f"{cache_name}对应键值清除成功"}
 
         return CrudResponseModel(**result)
 
@@ -103,7 +104,7 @@ class CacheService:
         cache_keys = await scan_keys(request.app.state.redis, f"*{cache_key}")
         if cache_keys:
             await request.app.state.redis.delete(*cache_keys)
-        result = dict(is_success=True, message=f"{cache_key}清除成功")
+        result = {'is_success': True, 'message': f"{cache_key}清除成功"}
 
         return CrudResponseModel(**result)
 
@@ -118,7 +119,7 @@ class CacheService:
         if cache_keys:
             await request.app.state.redis.delete(*cache_keys)
 
-        result = dict(is_success=True, message="所有缓存清除成功")
+        result = {'is_success': True, 'message': "所有缓存清除成功"}
         await RedisUtil.init_sys_dict(request.app.state.redis)
         await RedisUtil.init_sys_config(request.app.state.redis)
 

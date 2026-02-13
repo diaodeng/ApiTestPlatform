@@ -1,5 +1,4 @@
 import importlib.util
-import importlib.util
 import sys
 from datetime import datetime
 
@@ -7,15 +6,16 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.dao.debugtalk_dao import DebugTalkDao
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.do.debugtalk_do import HrmDebugTalk
 from module_hrm.entity.vo.case_vo import CaseRunModel, ProjectDebugtalkInfoModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.entity.vo.debugtalk_vo import DebugTalkQueryModel, DeleteDebugTalkModel, DebugTalkModel
+from module_hrm.entity.vo.debugtalk_vo import DebugTalkModel, DebugTalkQueryModel, DeleteDebugTalkModel
 from module_hrm.exceptions import DebugtalkError
 from module_hrm.utils import debugtalk_common
-from module_hrm.utils.util import get_func_map, get_func_doc_map
+from module_hrm.utils.util import get_func_doc_map, get_func_map
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -28,7 +28,7 @@ class DebugTalkService:
     """
 
     @classmethod
-    def get_debugtalk_list_services(cls, query_db: Session, page_object: DebugTalkQueryModel, data_scope_sql: str):
+    def get_debugtalk_list_services(cls, query_db: Session, page_object: DebugTalkQueryModel, data_scope_sql: DataScopeExpr):
         """
         获取debugtalk列表信息service
         :param query_db: orm对象
@@ -63,7 +63,7 @@ class DebugTalkService:
             page_object.debugtalk_id = snowIdWorker.get_id()
             DebugTalkDao.add_debugtalk_dao(query_db, page_object)
             query_db.commit()
-            result = dict(is_success=True, message='新增成功')
+            result = {'is_success': True, 'message': '新增成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -84,12 +84,12 @@ class DebugTalkService:
             try:
                 DebugTalkDao.edit_debugtalk_dao(query_db, edit_debugtalk)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='DebugTalk不存在')
+            result = {'is_success': False, 'message': 'DebugTalk不存在'}
 
         return CrudResponseModel(**result)
 
@@ -109,12 +109,12 @@ class DebugTalkService:
                                                                                updateTime=page_object.update_time,
                                                                                updateBy=page_object.update_by))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入DebugTalkid为空')
+            result = {'is_success': False, 'message': '传入DebugTalkid为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -122,7 +122,7 @@ class DebugTalkService:
         """
         获取DebugTalk详细信息service
         :param query_db: orm对象
-        :param debugtalk_id: DebugTalkid / project_id
+        :param id: int
         :return: DebugTalkid对应的信息
         """
         debugtalk = DebugTalkDao.get_debugtalk_detail_by_id(query_db, id=id)
@@ -147,7 +147,9 @@ class DebugTalkService:
 
         common_debugtalk = await cls.commondebugtalk_source(query_db=query_db)
 
-        project_debugtalk = await cls.project_debugtalk_source(query_db=query_db, project_id=project_id, case_id=case_id)
+        project_debugtalk = await cls.project_debugtalk_source(query_db=query_db,
+                                                               project_id=project_id,
+                                                               case_id=case_id)
 
         return common_debugtalk, project_debugtalk
 
@@ -155,7 +157,7 @@ class DebugTalkService:
     async def commondebugtalk_source(cls, query_db: Session) -> str:
 
         common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id == None))
+            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id is None))
         common_debugtalk = await run_in_threadpool(common_debugtalk.first)
         common_debugtalk = common_debugtalk.debugtalk if common_debugtalk else ""
         return common_debugtalk
@@ -195,7 +197,7 @@ class DebugTalkService:
                 return pdm
             except Exception as e:
                 logger.error(f"debugtalk加载异常:{e}")
-                raise DebugtalkError(f"debugtalk加载异常:{e}")
+                raise DebugtalkError(f"debugtalk加载异常:{e}") from e
 
 
 class DebugTalkHandler:
@@ -228,7 +230,7 @@ class DebugTalkHandler:
         if debugtalk_source is None:
             debugtalk_source = ""
         exec(debugtalk_source, module.__dict__)
-        setattr(module, "logger", logger)
+        setattr(module, "logger", logger)  # noqa: B010
 
         # 将模块对象添加到 sys.modules 中，以便后续导入
         sys.modules[module_name] = module

@@ -1,10 +1,10 @@
+import base64
+import hashlib
+import hmac
 import json
 import time
-import requests
-import hashlib
-import base64
-import hmac
 
+import requests
 
 # 飞书通知机器人
 FeishuTalk_Robots = {
@@ -89,7 +89,7 @@ class Feishu:
 
     def gen_sign(self, timestamp, secret):
         # 拼接timestamp和secret
-        string_to_sign = '{}\n{}'.format(timestamp, secret)
+        string_to_sign = f'{timestamp}\n{secret}'
         hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
 
         # 对结果进行base64处理

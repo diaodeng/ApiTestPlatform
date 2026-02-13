@@ -4,24 +4,35 @@ import random
 import re
 import time
 import uuid
-from typing import List
 
 import jmespath
 from fastapi import Request
-from jinja2 import Environment, BaseLoader
+from jinja2 import BaseLoader, Environment
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_hrm.dao.mock_dao import MockRuleDao, MockResponseDao
+from module_hrm.dao.mock_dao import MockResponseDao, MockRuleDao
 from module_hrm.entity.do.mock_do import RuleResponse
-from module_hrm.entity.dto.mock_dto import MockModel, MockResponseModel, MockModelForDb, \
-    MockResponseModelForDb, MockConditionModel
+from module_hrm.entity.dto.mock_dto import (
+    MockConditionModel,
+    MockModel,
+    MockModelForDb,
+    MockResponseModel,
+    MockResponseModelForDb,
+)
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.entity.vo.mock_vo import MockPageQueryModel, MockResponsePageQueryModel, AddMockRuleModel, \
-    AddMockResponseModel, DeleteMockRuleModel, DeleteMockResponseModel
+from module_hrm.entity.vo.mock_vo import (
+    AddMockResponseModel,
+    AddMockRuleModel,
+    DeleteMockResponseModel,
+    DeleteMockRuleModel,
+    MockPageQueryModel,
+    MockResponsePageQueryModel,
+)
 from module_hrm.utils.common import db_dd_user_info
-from utils.common_util import export_list2excel, CamelCaseUtil
+from utils.common_util import CamelCaseUtil, export_list2excel
 from utils.log_util import logger_mock
 from utils.page_util import PageResponseModel
 
@@ -32,14 +43,14 @@ class MockService:
     """
 
     @classmethod
-    async def get_rule_for_mock(cls, query_db: Session, path: str, method: str) -> List[MockModel]:
+    async def get_rule_for_mock(cls, query_db: Session, path: str, method: str) -> list[MockModel]:
         rules = await MockRuleDao.get_list_for_mock(query_db, path, method)
         rules = CamelCaseUtil.transform_result(rules)
         return [MockModel(**data) for data in rules]
 
     @classmethod
     def get_mock_rule_list_services(cls, query_db: Session, query_object: MockPageQueryModel, is_page: bool = False,
-                                    data_scope_sql: str = 'true'):
+                                    data_scope_sql: DataScopeExpr = 'true'):
         """
         获取mock规则列表信息service
         :param query_db: orm对象
@@ -62,7 +73,10 @@ class MockService:
         return mock_rule_list_result
 
     @classmethod
-    async def add_mock_rule_services(cls, query_db: Session, add_mock_rule: AddMockRuleModel, user_info: CurrentUserModel):
+    async def add_mock_rule_services(cls,
+                                     query_db: Session,
+                                     add_mock_rule: AddMockRuleModel,
+                                     user_info: CurrentUserModel):
         """
         新增mock规则信息service
         :param query_db: orm对象
@@ -105,7 +119,7 @@ class MockService:
         result_data = result.model_dump(by_alias=True)
         result_data["response"] = add_response_result.result
 
-        return CrudResponseModel(is_success=True, message=f"mock规则添加成功", result=result_data)
+        return CrudResponseModel(is_success=True, message="mock规则添加成功", result=result_data)
 
     @classmethod
     def copy_mock_rule_services(cls, query_db: Session, page_object: AddMockRuleModel):
@@ -117,7 +131,7 @@ class MockService:
         """
         mock_rule = MockRuleDao.get_by_id(query_db, page_object.rule_id)
         if not mock_rule:
-            result = dict(is_success=False, message='原mock规则不存在')
+            result = {'is_success': False, 'message': '原mock规则不存在'}
         else:
             try:
                 new_data = mock_rule.__dict__.copy()
@@ -134,7 +148,8 @@ class MockService:
                 new_rule = MockRuleDao.add(query_db, MockModelForDb(**new_data))
 
                 # 复制mock响应
-                original_records = MockResponseDao.get_list(query_db, MockResponsePageQueryModel(rule_id=page_object.rule_id))
+                original_records = MockResponseDao.get_list(query_db,
+                                                            MockResponsePageQueryModel(rule_id=page_object.rule_id))
                 new_records = []
                 for record in original_records:
                     # 获取所有字段的字典表示（排除主键）
@@ -156,7 +171,7 @@ class MockService:
                 query_db.bulk_save_objects(new_records)
                 query_db.commit()
 
-                result = dict(is_success=True, message='复制成功')
+                result = {'is_success': True, 'message': '复制成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -164,7 +179,10 @@ class MockService:
         return CrudResponseModel(**result)
 
     @classmethod
-    async def edit_mock_rule_services(cls, query_db: Session, page_object: AddMockRuleModel, user: CurrentUserModel = None):
+    async def edit_mock_rule_services(cls,
+                                      query_db: Session,
+                                      page_object: AddMockRuleModel,
+                                      user: CurrentUserModel = None):
         """
         编辑mock规则信息service
         :param query_db: orm对象
@@ -182,16 +200,16 @@ class MockService:
             if page_object.name and info.name != page_object.name:
                 mock_rule = await MockRuleDao.get_detail_by_info(query_db, MockPageQueryModel(name=page_object.name))
                 if mock_rule:
-                    result = dict(is_success=False, message='mock规则名称已存在')
+                    result = {'is_success': False, 'message': 'mock规则名称已存在'}
                     return CrudResponseModel(**result)
             try:
                 MockRuleDao.edit(query_db, page_object, user)
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='mock规则不存在')
+            result = {'is_success': False, 'message': 'mock规则不存在'}
             return CrudResponseModel(**result)
         edit_response = page_object.response
         edit_response_res = await MockResponseService.edit_mock_response_services(query_db, edit_response, user)
@@ -224,12 +242,12 @@ class MockService:
         :return: 删除mock规则校验结果
         """
         if not page_object.rule_ids:
-            result = dict(is_success=False, message='传入mock规则id为空')
+            result = {'is_success': False, 'message': '传入mock规则id为空'}
             return CrudResponseModel(**result)
         try:
             MockResponseDao.delete_by_rule_id(query_db, page_object.rule_ids, user)
             MockRuleDao.delete(query_db, page_object, user)
-            result = dict(is_success=True, message='删除成功')
+            result = {'is_success': True, 'message': '删除成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -318,7 +336,7 @@ class MockResponseService:
         return False
 
     @classmethod
-    async def get_by_rule_id(cls, query_db: Session, rule_id: int, name: str = None) -> List[MockResponseModel]:
+    async def get_by_rule_id(cls, query_db: Session, rule_id: int, name: str = None) -> list[MockResponseModel]:
         """
         获取mock规则响应信息service
         :param rule_id: mock规则id
@@ -335,7 +353,7 @@ class MockResponseService:
     @classmethod
     def get_mock_response_list_services(cls, query_db: Session, query_object: MockResponsePageQueryModel,
                                         is_page: bool = False,
-                                        data_scope_sql: str = 'true'):
+                                        data_scope_sql: DataScopeExpr = 'true'):
         """
         获取mock规则列表信息service
         :param query_db: orm对象
@@ -366,9 +384,11 @@ class MockResponseService:
         :return: 新增mock规则校验结果
         """
 
-        mock_rule = await MockResponseDao.get_detail_by_info(query_db, MockResponsePageQueryModel(name=page_object.name, rule_id=page_object.rule_id))
+        mock_rule = await MockResponseDao.get_detail_by_info(query_db,
+                                                             MockResponsePageQueryModel(name=page_object.name,
+                                                                                        rule_id=page_object.rule_id))
         if mock_rule:
-            result = dict(is_success=False, message='当前mock规则中响应名称已存在')
+            result = {'is_success': False, 'message': '当前mock规则中响应名称已存在'}
         else:
             try:
                 if not await cls.has_default(query_db, page_object.rule_id):
@@ -377,9 +397,9 @@ class MockResponseService:
                     page_object.is_default = 0
                 add_mock_rule = MockResponseModelForDb(**page_object.model_dump(by_alias=True))
                 mock_rule_dao = await MockResponseDao.add(query_db, add_mock_rule)
-                result = dict(is_success=True,
-                              message='新增成功',
-                              result=MockResponseModel.model_validate(mock_rule_dao).model_dump(by_alias=True))
+                result = {'is_success': True,
+                              'message': '新增成功',
+                              'result': MockResponseModel.model_validate(mock_rule_dao).model_dump(by_alias=True)}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -397,7 +417,7 @@ class MockResponseService:
         mock_rule = await MockResponseDao.get_detail_by_info(query_db, MockResponsePageQueryModel(
             rule_response_id=page_object.rule_response_id))
         if not mock_rule:
-            result = dict(is_success=False, message='原mock规则响应不存在')
+            result = {'is_success': False, 'message': '原mock规则响应不存在'}
         else:
             try:
                 new_data = mock_rule.__dict__.copy()
@@ -413,7 +433,7 @@ class MockResponseService:
 
                 await MockResponseDao.add(query_db, MockResponseModelForDb(**new_data))
 
-                result = dict(is_success=True, message='复制成功')
+                result = {'is_success': True, 'message': '复制成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -439,14 +459,14 @@ class MockResponseService:
             mock_rule = await MockResponseDao.get_detail_by_info(query_db, AddMockResponseModel(name=page_object.name,
                                                                                           ruleId=page_object.rule_id))
             if mock_rule:
-                result = dict(is_success=False, message='mock规则名称已存在')
+                result = {'is_success': False, 'message': 'mock规则名称已存在'}
                 return CrudResponseModel(**result)
         try:
             page_object.manager = user.user.user_id
             page_object.update_by = user.user.user_name
             page_object.dept_id = user.user.dept_id
             MockResponseDao.edit(query_db, page_object, user)
-            result = dict(is_success=True, message='更新成功')
+            result = {'is_success': True, 'message': '更新成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -463,11 +483,11 @@ class MockResponseService:
         :return: 删除mock规则校验结果
         """
         if not page_object.rule_response_ids:
-            result = dict(is_success=False, message='传入mock规则id为空')
+            result = {'is_success': False, 'message': '传入mock规则id为空'}
             return CrudResponseModel(**result)
         try:
             MockResponseDao.delete(query_db, page_object, user)
-            result = dict(is_success=True, message='删除成功')
+            result = {'is_success': True, 'message': '删除成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -506,23 +526,28 @@ class MockResponseService:
         await run_in_threadpool(query_db.commit)
 
     @classmethod
-    async def get_by_response_condition(cls, query_db: Session, rule_response_info: AddMockResponseModel) -> List[MockResponseModel]:
+    async def get_by_response_condition(cls,
+                                        query_db: Session,
+                                        rule_response_info: AddMockResponseModel) -> list[MockResponseModel]:
         mock_rule = await MockResponseDao.get_by_rule_id(query_db, rule_id=rule_response_info.rule_id)
         matched_response = []
         for item in mock_rule:
             item_obj = AddMockResponseModel.model_validate(item)
-            if ConditionMatcher.condition_match_condition(rule_response_info.response_condition, item_obj.response_condition):
+            if ConditionMatcher.condition_match_condition(rule_response_info.response_condition,
+                                                          item_obj.response_condition):
                 matched_response.append(item_obj)
         return matched_response
 
 
 class ConditionMatcher:
-    def __init__(self, request: Request, conditions: List[MockConditionModel] | None = None):
+    def __init__(self, request: Request, conditions: list[MockConditionModel] | None = None):
         self.request = request
         self.conditions = conditions
 
     @classmethod
-    def condition_match_condition(cls, conditions: List[MockConditionModel], conditions_target: List[MockConditionModel]) -> bool:
+    def condition_match_condition(cls,
+                                  conditions: list[MockConditionModel],
+                                  conditions_target: list[MockConditionModel]) -> bool:
         """
         比较条件是否匹配，条件列表中的条件必须全部包含在目标列表的条件中
         :param conditions: 条件列表
@@ -542,7 +567,7 @@ class ConditionMatcher:
 
         return all(k in condition_obj and condition_obj[k] == v for k, v in target_condition_obj.items())
 
-    def match_condition(self, conditions: List[MockConditionModel]) -> bool:
+    def match_condition(self, conditions: list[MockConditionModel]) -> bool:
         """匹配请求条件"""
         c_conditions = conditions or self.conditions or []
         for condition in c_conditions:
@@ -609,7 +634,7 @@ class ConditionMatcher:
                     #         return None
                     # return value
                 return None
-            except:
+            except Exception:
                 return None
         return None
 
@@ -641,9 +666,9 @@ class RuleMatcher:
 
 
 class MockResponseMatcher:
-    def __init__(self, request: Request, mock_rule_response: List[MockResponseModel | RuleResponse]):
+    def __init__(self, request: Request, mock_rule_response: list[MockResponseModel | RuleResponse]):
         self.request: Request = request
-        self.mock_rule_response: List[MockResponseModel] = mock_rule_response
+        self.mock_rule_response: list[MockResponseModel] = mock_rule_response
         self.condition_matcher = ConditionMatcher(request)
 
     async def match_request(self) -> MockResponseModel | None:

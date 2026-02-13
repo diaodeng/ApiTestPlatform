@@ -1,8 +1,9 @@
 
-from ttkbootstrap import Bootstyle
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
 from pathlib import Path
+
+import ttkbootstrap as ttk
+from ttkbootstrap import Bootstyle
+from ttkbootstrap.constants import *
 
 PATH = Path(__file__).parent.parent / 'assets'
 

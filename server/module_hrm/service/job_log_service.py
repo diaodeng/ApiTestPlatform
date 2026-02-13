@@ -1,9 +1,10 @@
 from loguru import logger
-
-from module_hrm.dao.job_log_dao import JobLogDao, JobLogPageQueryModel, JobLogModel, DeleteJobLogModel
 from sqlalchemy.orm import Session
-from module_admin.service.dict_service import Request, DictDataService
+
+from module_admin.service.dict_service import DictDataService, Request
+from module_hrm.dao.job_log_dao import JobLogDao
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.entity.vo.job_vo import DeleteJobLogModel, JobLogModel, JobLogPageQueryModel
 from utils.common_util import export_list2excel
 
 
@@ -13,7 +14,11 @@ class JobLogService:
     """
 
     @classmethod
-    def get_job_log_list_services(cls, query_db: Session, query_object: JobLogPageQueryModel, data_scope_sql:str, is_page: bool = False):
+    def get_job_log_list_services(cls,
+                                  query_db: Session,
+                                  query_object: JobLogPageQueryModel,
+                                  data_scope_sql,
+                                  is_page: bool = False):
         """
         获取定时任务日志列表信息service
         :param query_db: orm对象
@@ -37,12 +42,12 @@ class JobLogService:
         try:
             JobLogDao.add_job_log_dao(query_db, page_object)
             query_db.commit()
-            logger.info(f"任务调度日志记录成功")
-            result = dict(is_success=True, message='新增成功')
+            logger.info("任务调度日志记录成功")
+            result = {"is_success": True, "message": '新增成功'}
         except Exception as e:
             logger.error(f'add_job_log_services error: {e}')
             query_db.rollback()
-            result = dict(is_success=False, message=str(e))
+            result = {"is_success": False, "message": str(e)}
 
         return CrudResponseModel(**result)
 
@@ -60,12 +65,12 @@ class JobLogService:
                 for job_log_id in job_log_id_list:
                     JobLogDao.delete_job_log_dao(query_db, JobLogModel(jobLogId=job_log_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {"is_success": True, "message": '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入定时任务日志id为空')
+            result = {"is_success": False, "message": '传入定时任务日志id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -78,7 +83,7 @@ class JobLogService:
         try:
             JobLogDao.clear_job_log_dao(query_db)
             query_db.commit()
-            result = dict(is_success=True, message='清除成功')
+            result = {"is_success": True, "message": '清除成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -110,11 +115,14 @@ class JobLogService:
         }
 
         data = job_log_list
-        job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis, dict_type='qtr_job_group')
-        job_group_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in job_group_list]
+        job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
+                                                                                        dict_type='qtr_job_group')
+        job_group_option = [{"label": item.get('dictLabel'), "value": item.get('dictValue')} for item in job_group_list]
         job_group_option_dict = {item.get('value'): item for item in job_group_option}
-        job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis, dict_type='qtr_job_executor')
-        job_executor_option = [dict(label=item.get('dictLabel'), value=item.get('dictValue')) for item in job_executor_list]
+        job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
+                                                                                           dict_type='qtr_job_executor')
+        job_executor_option = [{"label": item.get('dictLabel'), "value": item.get('dictValue')}
+                               for item in job_executor_list]
         job_executor_option_dict = {item.get('value'): item for item in job_executor_option}
 
         for item in data:

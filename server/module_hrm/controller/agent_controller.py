@@ -1,14 +1,12 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Request
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
-from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.service.login_service import LoginService, CurrentUserModel
+from module_admin.service.login_service import CurrentUserModel, LoginService
 from module_hrm.entity.vo.agent_vo import AgentModel, AgentQueryModel, DeleteAgentModel
 from module_hrm.entity.vo.debugtalk_vo import DebugTalkModel
 from module_hrm.service.agent_service import AgentService
@@ -25,7 +23,7 @@ agentController = APIRouter(prefix='/qtr/agent', dependencies=[Depends(LoginServ
 async def get_qtr_agent_list(request: Request,
                              query: AgentQueryModel = Depends(AgentQueryModel.as_query),
                              query_db: Session = Depends(get_db),
-                             # data_scope_sql: str = Depends(GetDataScope('QtrAgent', user_alias='manager'))
+                             # data_scope_sql = Depends(GetDataScope('QtrAgent', user_alias='manager'))
                              ):
     try:
         query_result = AgentService.get_agent_list_services(query_db, query)

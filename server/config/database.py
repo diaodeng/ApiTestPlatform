@@ -1,7 +1,7 @@
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy import MetaData, create_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from config.env import DataBaseConfig
 

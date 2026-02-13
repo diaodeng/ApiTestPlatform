@@ -1,7 +1,7 @@
 import json
-from typing import Optional, List, Dict, Text, Any
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
@@ -13,7 +13,7 @@ class EnvConfig(BaseModel):
     """
     环境配置模型
     """
-    variables: Optional[List[Dict[Text, List[Dict] | Text]]] = Field(
+    variables: Optional[List[Dict[str, List[Dict] | str]]] = Field(
         default_factory=lambda: [{"key": "default", "value": [], "desc": ""}])
 
 

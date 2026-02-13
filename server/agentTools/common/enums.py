@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class RequestTypeEnum(Enum):
     http = 1
     websocket = 2

@@ -1,7 +1,7 @@
 import datetime
 import json
 import os
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from jinja2 import Template
 from sqlalchemy.orm import Session
@@ -10,8 +10,9 @@ from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.report_do import HrmReport
 from module_hrm.entity.vo.case_vo_detail_for_run import StepLogs
-from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunDetailModel
-from module_hrm.utils.util import decompress_text, compress_text
+from module_hrm.entity.vo.run_detail_vo import HrmRunDetailModel, RunDetailQueryModel
+from module_hrm.utils.util import compress_text, decompress_text
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from utils.jinja_template import TemplateHandler
 
 
@@ -38,7 +39,7 @@ class ReportService:
         report = HrmReport(report_name=report_name, **kwargs)
 
     @classmethod
-    async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str|None = None) -> AsyncGenerator[str, None]:
+    async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:DataScopeExpr|None = None) -> AsyncGenerator[str, None]:
         count_info = await RunDetailDao.get_report_count_info(query_db, query_info, data_scope_sql)
         report = await ReportDao.get_by_id(query_db, query_info.report_id)
         data = {
@@ -78,7 +79,7 @@ class ReportService:
 
 
     @classmethod
-    async def generate_pdf_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:str|None = None) -> bytes|bool:
+    async def generate_pdf_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:DataScopeExpr|None = None) -> bytes|bool:
         result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
 
         curren_dir = os.path.dirname(__file__)

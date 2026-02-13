@@ -3,7 +3,6 @@ import json
 from collections import defaultdict
 
 import websockets
-
 from loguru import logger
 
 from common.utils import compress_dict_to_str, decompress_str_to_dict
@@ -104,7 +103,7 @@ class WebSocketClient:
             self.update_status(False)
             await asyncio.sleep(interval_time)
             await self.connect()
-        except ConnectionRefusedError as e:
+        except ConnectionRefusedError:
             logger.info('远程计算机拒绝网络连接，30秒后重新尝试连接')
             await self.reconnect(30)
 

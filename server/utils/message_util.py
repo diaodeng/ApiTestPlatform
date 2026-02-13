@@ -1,17 +1,15 @@
 import json
-from functools import wraps
 
 import requests
-from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
+from config.env import FeishuBotConfig
 from module_hrm.dao.push_dao import PushDao
 from module_hrm.entity.do.report_do import HrmReport
-from module_hrm.entity.vo.report_vo import ReportListModel
-from module_hrm.enums.enums import PushTypeEnum, PushReminderEnum, CaseRunStatus
-from config.env import FeishuBotConfig
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.push_vo import FeishuRobotModel, PushModel
+from module_hrm.entity.vo.report_vo import ReportListModel
+from module_hrm.enums.enums import CaseRunStatus, PushReminderEnum, PushTypeEnum
 from module_hrm.utils.parser import parse_string
 from utils.log_util import logger
 
@@ -77,7 +75,7 @@ class FeiShuHandler:
                     {
                         "elements": [
                             {
-                                "content": "{}【{}】".format(at_info, self._secret_key),
+                                "content": f"{at_info}【{self._secret_key}】",
                                 "tag": "lark_md"
                             }
                         ],
@@ -95,7 +93,7 @@ class FeiShuHandler:
             "content": {
                 "post": {
                     "zh_cn": {
-                        "title": "【{}】测试结果".format(self._secret_key),
+                        "title": f"【{self._secret_key}】测试结果",
                         "content": [
                             [
                                 {
@@ -134,16 +132,16 @@ class FeiShuHandler:
             # logger.info("飞书机器人推送参数：token:{}, key:{}".format(self._token, self._secret_key))
             headers = {"content_type": "application/json"}
             json_str = self.content_text(content)
-            logger.info("飞书机器人发送的内容：{}".format(json_str))
+            logger.info("飞书机器人发送的内容：{}".format(json_str))  # noqa: UP032
             if self._token.startswith("https:"):
                 url = self._token
             else:
-                url = "https://open.feishu.cn/open-apis/bot/v2/hook/{}".format(self._token)
+                url = f"https://open.feishu.cn/open-apis/bot/v2/hook/{self._token}"
             res = requests.post(url=url,
                                 headers=headers,
                                 data=json.dumps(json_str),
                                 verify=False)
-            logger.info("飞书推送结果 {}：{}".format(res.status_code, res.text))
+            logger.info(f"飞书推送结果 {res.status_code}：{res.text}")
         except Exception as e:
             logger.error("==============飞书推送异常===========")
             logger.error(e, exc_info=True)
@@ -156,7 +154,9 @@ class MessageHandler:
     def __init__(self, push_info: PushModel = None, push_obj: dict = None):
         self.push_info = push_info
         self.push_obj = push_obj
-        self.default_test_push_temp = "[${user}]于${start_at}开始执行的测试完成。\n总共：${total_count}条用例，成功：${success_count}条，失败：${failed_count};\n报告：【${report_id}】${report_name}"
+        self.default_test_push_temp = ("[${user}]于${start_at}开始执行的测试完成。\n"
+                                       "总共：${total_count}条用例，成功：${success_count}条，失败：${failed_count};\n"
+                                       "报告：【${report_id}】${report_name}")
 
     def _push_content_parse(self, content):
         return parse_string(content or self.default_test_push_temp, self.push_obj or {}, {}, False)

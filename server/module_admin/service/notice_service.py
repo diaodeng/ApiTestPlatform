@@ -1,6 +1,9 @@
-from module_admin.dao.notice_dao import *
+from sqlalchemy.orm import Session
+
+from module_admin.dao.notice_dao import NoticeDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from utils.common_util import export_list2excel, CamelCaseUtil
+from module_admin.entity.vo.notice_vo import DeleteNoticeModel, NoticeModel, NoticePageQueryModel
+from utils.common_util import CamelCaseUtil
 
 
 class NoticeService:
@@ -31,12 +34,12 @@ class NoticeService:
         """
         notice = NoticeDao.get_notice_detail_by_info(query_db, page_object)
         if notice:
-            result = dict(is_success=False, message='通知公告已存在')
+            result = {'is_success': False, 'message': '通知公告已存在'}
         else:
             try:
                 NoticeDao.add_notice_dao(query_db, page_object)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -54,20 +57,22 @@ class NoticeService:
         edit_notice = page_object.model_dump(exclude_unset=True)
         notice_info = cls.notice_detail_services(query_db, edit_notice.get('notice_id'))
         if notice_info:
-            if notice_info.notice_title != page_object.notice_title or notice_info.notice_type != page_object.notice_type or notice_info.notice_content != page_object.notice_content:
+            if (notice_info.notice_title != page_object.notice_title
+                    or notice_info.notice_type != page_object.notice_type
+                    or notice_info.notice_content != page_object.notice_content):
                 notice = NoticeDao.get_notice_detail_by_info(query_db, page_object)
                 if notice:
-                    result = dict(is_success=False, message='通知公告已存在')
+                    result = {'is_success': False, 'message': '通知公告已存在'}
                     return CrudResponseModel(**result)
             try:
                 NoticeDao.edit_notice_dao(query_db, edit_notice)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='通知公告不存在')
+            result = {'is_success': False, 'message': '通知公告不存在'}
 
         return CrudResponseModel(**result)
 
@@ -85,12 +90,12 @@ class NoticeService:
                 for notice_id in notice_id_list:
                     NoticeDao.delete_notice_dao(query_db, NoticeModel(noticeId=notice_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入通知公告id为空')
+            result = {'is_success': False, 'message': '传入通知公告id为空'}
         return CrudResponseModel(**result)
 
     @classmethod

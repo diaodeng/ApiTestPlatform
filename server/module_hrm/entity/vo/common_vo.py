@@ -1,6 +1,7 @@
+from typing import Any, Optional
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
-from typing import Optional, Any
 
 
 class ConfigDataModel(BaseModel):

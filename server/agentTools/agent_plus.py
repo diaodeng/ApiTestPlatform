@@ -1,30 +1,29 @@
 import asyncio
 import configparser
+import json
 import os
 import subprocess
 import sys
+import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 from tkinter import messagebox
+from tkinter.scrolledtext import ScrolledText
 from typing import Any
 
 import httpx
-from loguru import logger
-from ttkbootstrap import StringVar
-import threading
-import json
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
-from tkinter.scrolledtext import ScrolledText
-from pathlib import Path
 import pystray
-from pystray import MenuItem, Menu
-from PIL import Image
-from ttkbootstrap.dialogs import Messagebox
-
+import ttkbootstrap as ttk
 from common.AgentTools import AgentTools
-from common.utils import bs64_to_text, decompress_text, get_mac_address
 from common.RequestByInput import RequestByInput
+from common.utils import get_mac_address
 from common.WebSocketClient import WebSocketClient
+from loguru import logger
+from PIL import Image
+from pystray import Menu, MenuItem
+from ttkbootstrap import StringVar
+from ttkbootstrap.constants import *
+from ttkbootstrap.dialogs import Messagebox
 from view.CollapsingFrame import CollapsingFrame
 
 # 获取当前目录
@@ -289,7 +288,7 @@ class AgentToolsMain(ttk.Frame):
             self.client.websocket_client_thread.join(timeout=3)
             try:
                 asyncio.run(self.client.send_close())
-            except RuntimeError as e:
+            except RuntimeError:
                 pass
         self.setvar('status', '连接已断开')
 

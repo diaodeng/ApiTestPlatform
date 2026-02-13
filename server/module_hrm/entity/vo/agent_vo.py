@@ -1,8 +1,10 @@
-from pydantic import BaseModel, ConfigDict
-from pydantic.alias_generators import to_camel
-from typing import  Optional
 from datetime import datetime
-from module_admin.annotation.pydantic_annotation import as_query, as_form
+from typing import Optional
+
+from pydantic import ConfigDict
+from pydantic.alias_generators import to_camel
+
+from module_admin.annotation.pydantic_annotation import as_form, as_query
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 
 

@@ -1,15 +1,16 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Request
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.entity.vo.env_vo import EnvQueryModel, EnvModel, DeleteEnvModel
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_admin.service.login_service import CurrentUserModel, LoginService
+from module_hrm.entity.do.env_do import HrmEnv
+from module_hrm.entity.vo.env_vo import DeleteEnvModel, EnvModel, EnvQueryModel
 from module_hrm.service.env_service import EnvService
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -23,7 +24,7 @@ envController = APIRouter(prefix='/hrm/env', dependencies=[Depends(LoginService.
 async def get_hrm_env_list(request: Request,
                            env_query: EnvQueryModel = Depends(EnvQueryModel.as_query),
                            query_db: Session = Depends(get_db),
-                           data_scope_sql: str = Depends(GetDataScope('HrmEnv',user_alias='manager')),
+                           data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmEnv,user_alias='manager')),
                            current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                            ):
     try:
@@ -40,7 +41,7 @@ async def get_hrm_env_list(request: Request,
 async def get_hrm_env_all(request: Request,
                           env_query: EnvQueryModel = Depends(EnvQueryModel.as_query),
                           query_db: Session = Depends(get_db),
-                          data_scope_sql: str = Depends(GetDataScope('HrmEnv',user_alias='manager')),
+                          data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmEnv,user_alias='manager')),
                           current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                           ):
     try:

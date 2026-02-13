@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from module_admin.dao.menu_dao import MenuDao
 from module_admin.dao.role_dao import RoleDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.entity.vo.menu_vo import MenuQueryModel, MenuModel, DeleteMenuModel
+from module_admin.entity.vo.menu_vo import DeleteMenuModel, MenuModel, MenuQueryModel
 from module_admin.entity.vo.role_vo import RoleMenuQueryModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from utils.common_util import CamelCaseUtil
@@ -77,12 +77,12 @@ class MenuService:
                                                MenuModel(parentId=page_object.parent_id, menuName=page_object.menu_name,
                                                          menuType=page_object.menu_type))
         if menu:
-            result = dict(is_success=False, message='同一目录下不允许存在同名同类型的菜单')
+            result = {'is_success': False, 'message': '同一目录下不允许存在同名同类型的菜单'}
         else:
             try:
                 MenuDao.add_menu_dao(query_db, page_object)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -105,17 +105,17 @@ class MenuService:
                                                                            menuName=page_object.menu_name,
                                                                            menuType=page_object.menu_type))
                 if menu:
-                    result = dict(is_success=False, message='同一目录下不允许存在同名同类型的菜单')
+                    result = {'is_success': False, 'message': '同一目录下不允许存在同名同类型的菜单'}
                     return CrudResponseModel(**result)
             try:
                 MenuDao.edit_menu_dao(query_db, edit_menu)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='菜单不存在')
+            result = {'is_success': False, 'message': '菜单不存在'}
 
         return CrudResponseModel(**result)
 
@@ -133,12 +133,12 @@ class MenuService:
                 for menu_id in menu_id_list:
                     MenuDao.delete_menu_dao(query_db, MenuModel(menuId=menu_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入菜单id为空')
+            result = {'is_success': False, 'message': '传入菜单id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -161,7 +161,7 @@ class MenuService:
         :param permission_list: 菜单列表信息
         :return: 菜单树形嵌套数据
         """
-        permission_list = [dict(id=item.menu_id, label=item.menu_name, parentId=item.parent_id) for item in
+        permission_list = [{'id': item.menu_id, 'label': item.menu_name, 'parentId': item.parent_id} for item in
                            permission_list]
         # 转成id为key的字典
         mapping: dict = dict(zip([i['id'] for i in permission_list], permission_list))

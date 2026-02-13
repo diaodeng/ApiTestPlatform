@@ -1,5 +1,8 @@
-from module_admin.dao.dept_dao import *
-from module_admin.entity.vo.common_vo import CrudResponseModel
+from sqlalchemy.orm import Session
+
+from module_admin.dao.dept_dao import DeptDao
+from module_admin.entity.vo.common_vo import CrudResponseModel, DataScopeExpr
+from module_admin.entity.vo.dept_vo import DeleteDeptModel, DeptModel
 from utils.common_util import CamelCaseUtil
 
 
@@ -9,7 +12,7 @@ class DeptService:
     """
 
     @classmethod
-    def get_dept_tree_services(cls, query_db: Session, page_object: DeptModel, data_scope_sql: str):
+    def get_dept_tree_services(cls, query_db: Session, page_object: DeptModel, data_scope_sql: DataScopeExpr):
         """
         获取部门树信息service
         :param query_db: orm对象
@@ -23,7 +26,7 @@ class DeptService:
         return dept_tree_result
 
     @classmethod
-    def get_dept_for_edit_option_services(cls, query_db: Session, page_object: DeptModel, data_scope_sql: str):
+    def get_dept_for_edit_option_services(cls, query_db: Session, page_object: DeptModel, data_scope_sql: DataScopeExpr):
         """
         获取部门编辑部门树信息service
         :param query_db: orm对象
@@ -36,7 +39,7 @@ class DeptService:
         return CamelCaseUtil.transform_result(dept_list_result)
 
     @classmethod
-    def get_dept_list_services(cls, query_db: Session, page_object: DeptModel, data_scope_sql: str):
+    def get_dept_list_services(cls, query_db: Session, page_object: DeptModel, data_scope_sql: DataScopeExpr):
         """
         获取部门列表信息service
         :param query_db: orm对象
@@ -64,12 +67,12 @@ class DeptService:
         dept = DeptDao.get_dept_detail_by_info(query_db, DeptModel(parentId=page_object.parent_id,
                                                                    deptName=page_object.dept_name))
         if dept:
-            result = dict(is_success=False, message='同一部门下不允许存在同名的部门')
+            result = {'is_success': False, 'message': '同一部门下不允许存在同名的部门'}
         else:
             try:
                 DeptDao.add_dept_dao(query_db, page_object)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -96,7 +99,7 @@ class DeptService:
                 dept = DeptDao.get_dept_detail_by_info(query_db, DeptModel(parentId=page_object.parent_id,
                                                                            deptName=page_object.dept_name))
                 if dept:
-                    result = dict(is_success=False, message='同一部门下不允许存在同名的部门')
+                    result = {'is_success': False, 'message': '同一部门下不允许存在同名的部门'}
                     return CrudResponseModel(**result)
             try:
                 DeptDao.edit_dept_dao(query_db, edit_dept)
@@ -107,12 +110,12 @@ class DeptService:
                                                              )
                                          )
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='部门不存在')
+            result = {'is_success': False, 'message': '部门不存在'}
 
         return CrudResponseModel(**result)
 
@@ -131,18 +134,18 @@ class DeptService:
                 for dept_id in dept_id_list:
                     for ancestor in ancestors:
                         if dept_id in ancestor[0]:
-                            result = dict(is_success=False, message='该部门下有子部门，不允许删除')
+                            result = {'is_success': False, 'message': '该部门下有子部门，不允许删除'}
 
                             return CrudResponseModel(**result)
 
                     DeptDao.delete_dept_dao(query_db, DeptModel(deptId=dept_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入部门id为空')
+            result = {'is_success': False, 'message': '传入部门id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -165,7 +168,7 @@ class DeptService:
         :param permission_list: 部门列表信息
         :return: 部门树形嵌套数据
         """
-        permission_list = [dict(id=item.dept_id, label=item.dept_name, parentId=item.parent_id) for item in
+        permission_list = [{'id': item.dept_id, 'label': item.dept_name, 'parentId': item.parent_id} for item in
                            permission_list]
         # 转成id为key的字典
         mapping: dict = dict(zip([i['id'] for i in permission_list], permission_list))
@@ -200,11 +203,11 @@ class DeptService:
             for child in children_info:
                 child.ancestors = f'{page_object.ancestors},{page_object.dept_id}'
                 DeptDao.edit_dept_dao(query_db,
-                                      dict(dept_id=child.dept_id,
-                                           ancestors=child.ancestors,
-                                           update_by=page_object.update_by,
-                                           update_time=page_object.update_time
-                                           )
+                                      {'dept_id': child.dept_id,
+                                           'ancestors': child.ancestors,
+                                           'update_by': page_object.update_by,
+                                           'update_time': page_object.update_time
+                                           }
                                       )
                 cls.update_children_info(query_db, DeptModel(dept_id=child.dept_id,
                                                              ancestors=child.ancestors,

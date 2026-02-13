@@ -1,11 +1,11 @@
 import os
 import time
 from typing import Optional
-import platform
-import psutil
-from .enums import ModeEnum
-from .utils import is_linux,file_exists,is_windows
 
+import psutil
+
+from .enums import ModeEnum
+from .utils import file_exists, is_linux, is_windows
 
 
 class CgroupCPU:
@@ -63,7 +63,7 @@ class CgroupCPU:
                 if line.startswith("usage_usec"):
                     return int(line.split()[1]) * 1000
         elif self.mode == ModeEnum.CGROUP_1:
-            return int(open(f"/sys/fs/cgroup/cpu/cpuacct.usage").read())
+            return int(open("/sys/fs/cgroup/cpu/cpuacct.usage").read())
         return None
 
     def cpu_usage_percent(self, interval: float = 1.0) -> Optional[float]:

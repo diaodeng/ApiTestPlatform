@@ -1,20 +1,12 @@
-import datetime
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
-
-from fastapi import APIRouter, Request
-from fastapi import Depends
 
 from config.get_db import get_db
 from module_admin.service.login_service import LoginService
-from module_hrm.entity.do.module_do import HrmModule
-from module_hrm.entity.do.project_do import HrmProject
-from module_hrm.entity.do.run_detail_do import HrmRunDetail
-from module_hrm.entity.do.suite_do import QtrSuite
 from module_hrm.entity.vo.report_vo import ReportQueryModel
-from module_hrm.enums.enums import CaseRunStatus, DataType, RunTypeEnum
-from module_hrm.service.case_service import Session, HrmCase
-from module_hrm.service.common import get_base_counts_optimized, get_run_statistics, get_base_counts_subquery
-from module_hrm.service.debugtalk_service import DebugTalkService, DebugTalkHandler
+from module_hrm.service.case_service import Session
+from module_hrm.service.common import get_base_counts_subquery, get_run_statistics
+from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkService
 from module_hrm.utils import comparators, util
 from utils.response_util import ResponseUtil
 

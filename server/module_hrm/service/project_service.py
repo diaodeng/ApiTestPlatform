@@ -1,9 +1,10 @@
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.dao.debugtalk_dao import DebugTalkModel
 from module_hrm.dao.project_dao import ProjectDao
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.entity.vo.project_vo import ProjectQueryModel, ProjectModel, DeleteProjectModel
+from module_hrm.entity.vo.project_vo import DeleteProjectModel, ProjectModel, ProjectQueryModel
 from module_hrm.service.debugtalk_service import DebugTalkService
 from utils.common_util import CamelCaseUtil
 
@@ -17,7 +18,7 @@ class ProjectService:
     def get_project_list_services(cls,
                                   query_db: Session,
                                   page_object: ProjectQueryModel,
-                                  data_scope_sql: str):
+                                  data_scope_sql: DataScopeExpr):
         """
         获取部项目列表信息service
         :param query_db: orm对象
@@ -39,7 +40,7 @@ class ProjectService:
         """
         project = ProjectDao.get_project_detail_by_info(query_db, ProjectModel(project_name=page_object.project_name))
         if project:
-            result = dict(is_success=False, message='项目名称已存在')
+            result = {'is_success': False, 'message': '项目名称已存在'}
         else:
             try:
                 project = ProjectDao.add_project_dao(query_db, page_object)
@@ -52,7 +53,7 @@ class ProjectService:
                 debugtalk.update_time = project.update_time
                 DebugTalkService.add_debugtalk_services(query_db, debugtalk)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -74,17 +75,17 @@ class ProjectService:
                 project = ProjectDao.get_project_detail_by_info(query_db,
                                                                 ProjectModel(project_name=project_object.project_name))
                 if project:
-                    result = dict(is_success=False, message='项目名称不能重复')
+                    result = {'is_success': False, 'message': '项目名称不能重复'}
                     return CrudResponseModel(**result)
             try:
                 ProjectDao.edit_project_dao(query_db, edit_project)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='项目不存在')
+            result = {'is_success': False, 'message': '项目不存在'}
 
         return CrudResponseModel(**result)
 
@@ -105,12 +106,12 @@ class ProjectService:
                                                   ProjectModel(projectId=project_id, updateTime=page_object.update_time,
                                                                updateBy=page_object.update_by))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入项目id为空')
+            result = {'is_success': False, 'message': '传入项目id为空'}
         return CrudResponseModel(**result)
 
     @classmethod

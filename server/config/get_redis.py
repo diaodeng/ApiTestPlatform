@@ -1,9 +1,10 @@
 from redis import asyncio as aioredis
-from redis.exceptions import AuthenticationError, TimeoutError, RedisError
-from module_admin.service.dict_service import DictDataService
-from module_admin.service.config_service import ConfigService
-from config.env import RedisConfig
+from redis.exceptions import AuthenticationError, RedisError, TimeoutError
+
 from config.database import SessionLocal
+from config.env import RedisConfig
+from module_admin.service.config_service import ConfigService
+from module_admin.service.dict_service import DictDataService
 from utils.log_util import logger
 
 

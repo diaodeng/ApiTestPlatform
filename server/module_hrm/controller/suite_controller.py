@@ -1,17 +1,24 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Request
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.entity.vo.suite_vo import SuiteModel, SuitePageQueryModel, SuiteDetailModel, SuiteDetailPageQueryModel, \
-    DeleteSuiteModel, DeleteDetailSuiteModel
-from module_hrm.service.suite_service import SuiteService, SuiteDetailService
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_admin.service.login_service import CurrentUserModel, LoginService
+from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
+from module_hrm.entity.vo.suite_vo import (
+    DeleteDetailSuiteModel,
+    DeleteSuiteModel,
+    SuiteDetailModel,
+    SuiteDetailPageQueryModel,
+    SuiteModel,
+    SuitePageQueryModel,
+)
+from module_hrm.service.suite_service import SuiteDetailService, SuiteService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 from utils.snowflake import snowIdWorker
@@ -24,7 +31,7 @@ suiteController = APIRouter(prefix='/qtr/suite', dependencies=[Depends(LoginServ
 async def get_qtr_suite_list(request: Request,
                              suite_query: SuitePageQueryModel = Depends(SuitePageQueryModel.as_query),
                              query_db: Session = Depends(get_db),
-                             data_scope_sql: str = Depends(GetDataScope('QtrSuite', user_alias='manager')),
+                             data_scope_sql: DataScopeExpr = Depends(GetDataScope(QtrSuite, user_alias='manager')),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user),
                              ):
     try:
@@ -43,7 +50,8 @@ async def get_qtr_suite_detail_list(request: Request,
                                     suite_detail_query: SuiteDetailPageQueryModel = Depends(
                                         SuiteDetailPageQueryModel.as_query),
                                     query_db: Session = Depends(get_db),
-                                    data_scope_sql: str = Depends(GetDataScope('QtrSuiteDetail', user_alias='manager')),
+                                    data_scope_sql: DataScopeExpr = Depends(GetDataScope(QtrSuiteDetail,
+                                                                                         user_alias='manager')),
                                     current_user: CurrentUserModel = Depends(LoginService.get_current_user)
                                     ):
     try:

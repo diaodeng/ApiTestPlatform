@@ -1,25 +1,27 @@
-from typing import Type
-
-from sqlalchemy import select, case, Sequence
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func  # 不能把删掉，数据权限sql依赖
 from starlette.concurrency import run_in_threadpool
 
-from module_admin.entity.do.dept_do import SysDept  # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept  # 不能把删掉，数据权限sql依赖
-
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_hrm.dao.suite_dao import SuiteDetailDao
-from module_hrm.entity.do.mock_do import MockRules, RuleRequest, RuleResponse
+from module_hrm.entity.do.mock_do import MockRules, RuleResponse
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
-from module_hrm.entity.dto.mock_dto import MockModel, MockResponseModel, MockRequestModel, MockResponseModelForDb, \
-    MockModelForDb
-from module_hrm.entity.vo.mock_vo import MockPageQueryModel, DeleteMockRuleModel, MockResponsePageQueryModel, \
-    MockRequestPageQueryModel, DeleteMockResponseModel, AddMockResponseModel
+from module_hrm.entity.dto.mock_dto import (
+    MockModel,
+    MockModelForDb,
+    MockResponseModel,
+    MockResponseModelForDb,
+)
+from module_hrm.entity.vo.mock_vo import (
+    AddMockResponseModel,
+    DeleteMockResponseModel,
+    DeleteMockRuleModel,
+    MockPageQueryModel,
+    MockResponsePageQueryModel,
+)
 from module_hrm.enums.enums import QtrDataStatusEnum
 from module_hrm.utils.util import PermissionHandler
-from utils.page_util import PageUtil, PageResponseModel
+from utils.page_util import PageResponseModel, PageUtil
 
 
 class MockRuleDao:
@@ -81,7 +83,7 @@ class MockRuleDao:
     def get_list(cls, db: Session,
                  query_object: MockPageQueryModel,
                  is_page: bool = False,
-                 data_scope_sql: str = 'true') -> PageResponseModel | list[MockModel] | None:
+                 data_scope_sql: DataScopeExpr = True) -> PageResponseModel | list[MockModel] | None:
         """
         根据查询参数获取mock规则列表信息
         :param db: orm对象
@@ -97,7 +99,7 @@ class MockRuleDao:
                                      MockRules.project_id == HrmProject.project_id).outerjoin(HrmModule,
                                                                                               MockRules.module_id == HrmModule.module_id)
 
-        query = query.filter(eval(data_scope_sql))
+        query = query.filter(data_scope_sql)
 
         if query_object.path:
             query = query.filter(MockRules.path.like(f'%{query_object.path}%'))
@@ -194,7 +196,7 @@ class MockResponseDao:
     """
 
     @classmethod
-    async def get_by_rule_id(cls, db: Session, rule_id: int) -> list[Type[RuleResponse]]:
+    async def get_by_rule_id(cls, db: Session, rule_id: int) -> list[type[RuleResponse]]:
         """
         根据mock规则id获取mock响应列表
         :param db: orm对象
@@ -221,7 +223,8 @@ class MockResponseDao:
         return info
 
     @classmethod
-    async def get_detail_by_info(cls, db: Session, mock_rule: MockResponseModel|AddMockResponseModel) -> MockRules | None:
+    async def get_detail_by_info(cls,
+                                 db: Session, mock_rule: MockResponseModel|AddMockResponseModel) -> MockRules | None:
         """
         根据mock规则参数获取mock规则信息
         :param db: orm对象
@@ -250,7 +253,7 @@ class MockResponseDao:
     def get_list(cls, db: Session,
                  query_object: MockResponsePageQueryModel,
                  is_page: bool = False,
-                 data_scope_sql: str = 'true') -> PageResponseModel | list[MockModel] | None:
+                 data_scope_sql: DataScopeExpr = True) -> PageResponseModel | list[MockModel] | None:
         """
         根据查询参数获取mock规则列表信息
         :param db: orm对象
@@ -260,7 +263,7 @@ class MockResponseDao:
         """
         # 创建查询的基本部分
         query = db.query(RuleResponse)
-        # query = query.filter(eval(data_scope_sql))  # 业务都是基于mock规则查询，不需要校验权限
+        # query = query.filter(data_scope_sql)  # 业务都是基于mock规则查询，不需要校验权限
         if query_object.rule_id:
             query = query.filter(RuleResponse.rule_id == query_object.rule_id)
 
@@ -297,7 +300,10 @@ class MockResponseDao:
         return db_rule_response
 
     @classmethod
-    def edit(cls, db: Session, mock_rule_response: MockResponseModel|MockResponseModelForDb, user: CurrentUserModel = None):
+    def edit(cls,
+             db: Session,
+             mock_rule_response: MockResponseModel|MockResponseModelForDb,
+             user: CurrentUserModel = None):
         """
         编辑mock规则数据库操作
         :param db: orm对象
@@ -305,7 +311,8 @@ class MockResponseDao:
         :return:
         """
         if not isinstance(mock_rule_response, MockResponseModelForDb):
-            mock_rule_response = MockResponseModelForDb(**mock_rule_response.model_dump(exclude_unset=True, by_alias=True))
+            mock_rule_response = MockResponseModelForDb(**mock_rule_response.model_dump(exclude_unset=True,
+                                                                                        by_alias=True))
 
         rule_data = mock_rule_response.model_dump(exclude_unset=True)
         # PermissionHandler.check_is_self(user,

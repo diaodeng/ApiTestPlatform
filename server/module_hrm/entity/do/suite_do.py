@@ -1,10 +1,11 @@
-from sqlalchemy import String, BigInteger, Integer, Text
-from sqlalchemy.orm import mapped_column, Mapped
+from sqlalchemy import BigInteger, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
 from utils.snowflake import snowIdWorker
-from .common_do import BaseModel
+
 from ...enums.enums import QtrDataStatusEnum
+from .common_do import BaseModel
 
 
 class QtrSuite(Base, BaseModel):

@@ -1,18 +1,18 @@
+import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Optional, List, Any, Dict
-import asyncio
+from typing import Any, Dict, List, Optional
 
 import httpx
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 
-from module_admin.annotation.pydantic_annotation import as_query, as_form
+from module_admin.annotation.pydantic_annotation import as_form, as_query
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from module_hrm.entity.vo.push_vo import FeishuRobotModel
-from module_hrm.enums.enums import RunTypeEnum, DataType, UrlContentEnum, PushReminderEnum, AllowPushEnum
+from module_hrm.enums.enums import AllowPushEnum, DataType, PushReminderEnum, RunTypeEnum, UrlContentEnum
 from utils.common_util import CamelCaseUtil
 
 
