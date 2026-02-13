@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.dao.agent_dao import AgentDao
-from module_hrm.entity.vo.agent_vo import AgentQueryModel, AgentModel, DeleteAgentModel
+from module_hrm.entity.vo.agent_vo import AgentModel, AgentQueryModel, DeleteAgentModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import CamelCaseUtil
 
@@ -12,7 +13,9 @@ class AgentService:
     """
 
     @classmethod
-    def get_agent_list_services(cls, query_db: Session, page_object: AgentQueryModel, data_scope_sql: str|None = None):
+    def get_agent_list_services(
+        cls, query_db: Session, page_object: AgentQueryModel, data_scope_sql: DataScopeExpr | None = None
+    ):
         """
         获取agent列表信息service
         :param query_db: orm对象
@@ -36,11 +39,11 @@ class AgentService:
         try:
             agent_info = AgentDao.get_agent_by_code(query_db, page_object.agent_code)
             if agent_info:
-                result = dict(is_success=False, message='agent已存在')
+                result = {"is_success": False, "message": "agent已存在"}
             else:
                 AgentDao.add_agent_dao(query_db, page_object)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {"is_success": True, "message": "新增成功"}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -56,17 +59,17 @@ class AgentService:
         :return: 编辑Agent校验结果
         """
         edit_agent = agent_object.model_dump(exclude_unset=True)
-        info = cls.agent_detail_services(query_db, edit_agent.get('agent_id'))
+        info = cls.agent_detail_services(query_db, edit_agent.get("agent_id"))
         if info:
             try:
                 AgentDao.edit_agent_dao(query_db, edit_agent)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {"is_success": True, "message": "更新成功"}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='Agent不存在')
+            result = {"is_success": False, "message": "Agent不存在"}
 
         return CrudResponseModel(**result)
 
@@ -79,17 +82,17 @@ class AgentService:
         :return: 编辑Agent校验结果
         """
         edit_agent = agent_object.model_dump(exclude_unset=True)
-        info = cls.agent_detail_services_controller(query_db, edit_agent.get('agent_id'))
+        info = cls.agent_detail_services_controller(query_db, edit_agent.get("agent_id"))
         if info:
             try:
                 AgentDao.edit_agent_dao_controller(query_db, edit_agent)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {"is_success": True, "message": "更新成功"}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='Agent不存在')
+            result = {"is_success": False, "message": "Agent不存在"}
 
         return CrudResponseModel(**result)
 
@@ -104,11 +107,12 @@ class AgentService:
 
         try:
             for agent_id in page_object.agent_ids:
-                AgentDao.delete_agent_dao(query_db, AgentModel(agentId=agent_id,
-                                                               updateTime=page_object.update_time,
-                                                               updateBy=page_object.update_by))
+                AgentDao.delete_agent_dao(
+                    query_db,
+                    AgentModel(agentId=agent_id, updateTime=page_object.update_time, updateBy=page_object.update_by),
+                )
             query_db.commit()
-            result = dict(is_success=True, message='删除成功')
+            result = {"is_success": True, "message": "删除成功"}
         except Exception as e:
             query_db.rollback()
             raise e

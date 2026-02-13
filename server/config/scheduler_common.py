@@ -1,31 +1,39 @@
-import atexit
-import os
-import tempfile
-import platform
-import time
-
-from apscheduler.job import Job
-from apscheduler.jobstores.base import JobLookupError, ConflictingIdError
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from apscheduler.jobstores.memory import MemoryJobStore
-from apscheduler.jobstores.redis import RedisJobStore
-from apscheduler.executors.pool import ThreadPoolExecutor, ProcessPoolExecutor
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.events import EVENT_ALL, EVENT_SCHEDULER_STARTED, EVENT_SCHEDULER_SHUTDOWN, EVENT_SCHEDULER_PAUSED, \
-    EVENT_SCHEDULER_RESUMED, EVENT_EXECUTOR_ADDED, EVENT_EXECUTOR_REMOVED, EVENT_JOBSTORE_ADDED, EVENT_JOBSTORE_REMOVED, \
-    EVENT_ALL_JOBS_REMOVED, EVENT_JOB_ADDED, EVENT_JOB_REMOVED, EVENT_JOB_MODIFIED, EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, \
-    EVENT_JOB_MISSED, EVENT_JOB_SUBMITTED, EVENT_JOB_MAX_INSTANCES
 import json
+import os
+import platform
+import tempfile
+import time
 from datetime import datetime, timedelta
 
+from apscheduler.events import (
+    EVENT_ALL,
+    EVENT_EXECUTOR_ADDED,
+    EVENT_EXECUTOR_REMOVED,
+    EVENT_JOB_ADDED,
+    EVENT_JOB_ERROR,
+    EVENT_JOB_EXECUTED,
+    EVENT_JOB_MAX_INSTANCES,
+    EVENT_JOB_MISSED,
+    EVENT_JOB_MODIFIED,
+    EVENT_JOB_REMOVED,
+    EVENT_JOB_SUBMITTED,
+    EVENT_SCHEDULER_SHUTDOWN,
+    EVENT_SCHEDULER_STARTED,
+)
+from apscheduler.executors.pool import ProcessPoolExecutor, ThreadPoolExecutor
+from apscheduler.job import Job
+from apscheduler.jobstores.base import ConflictingIdError, JobLookupError
+from apscheduler.jobstores.redis import RedisJobStore
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
-from config.database import engine, SQLALCHEMY_DATABASE_URL
+from config.database import SQLALCHEMY_DATABASE_URL, engine
 from config.env import RedisConfig
 from module_hrm.entity.vo.job_vo import JobModel
-from utils.log_util import logger
-import module_task
 from module_hrm.enums.enums import TaskStatusEnum
+from module_task.task_register import JOB_REGISTRY
+from utils.log_util import logger
 
 
 # 重写Cron定时
@@ -34,7 +42,7 @@ class MyCronTrigger(CronTrigger):
     def from_crontab(cls, expr, timezone=None):
         values = expr.split()
         if len(values) != 6 and len(values) != 7:
-            raise ValueError('Wrong number of fields; got {}, expected 6 or 7'.format(len(values)))
+            raise ValueError(f'Wrong number of fields; got {len(values)}, expected 6 or 7')
 
         second = values[0]
         minute = values[1]
@@ -95,13 +103,13 @@ class SchedulerUtil:
             # 'default': MemoryJobStore(),
             'sqlalchemy': SQLAlchemyJobStore(url=SQLALCHEMY_DATABASE_URL, engine=engine, tablename=table_name),
             'redis': RedisJobStore(
-                **dict(
-                    host=RedisConfig.redis_host,
-                    port=RedisConfig.redis_port,
-                    username=RedisConfig.redis_username,
-                    password=RedisConfig.redis_password,
-                    db=redis_db or RedisConfig.redis_database
-                )
+                **{
+                    'host': RedisConfig.redis_host,
+                    'port': RedisConfig.redis_port,
+                    'username': RedisConfig.redis_username,
+                    'password': RedisConfig.redis_password,
+                    'db': redis_db or RedisConfig.redis_database
+                }
             )
         }
         executors = {
@@ -156,7 +164,7 @@ class SchedulerUtil:
             try:
                 fcntl.lockf(qtr_scheduler_lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return True
-            except IOError:
+            except OSError:
                 return False
 
         else:
@@ -164,7 +172,7 @@ class SchedulerUtil:
             try:
                 msvcrt.locking(qtr_scheduler_lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
                 return True
-            except IOError:
+            except OSError:
                 return False
 
     @classmethod
@@ -218,7 +226,7 @@ class SchedulerUtil:
 
             return query_job
         except JobLookupError as e:
-            logger.info(f"job {job_id} 不存在")
+            logger.info(f"job {job_id} 不存在, Error: {str(e)}")
 
     def add_scheduler_job(self, job_info: JobModel):
         """
@@ -236,8 +244,9 @@ class SchedulerUtil:
                 kw = json.loads(job_info.job_kwargs) if job_info.job_kwargs else {}
             else:
                 kw = job_info.job_kwargs.model_dump()  if job_info.job_kwargs else {}
+            logger.info(job_info.invoke_target)
             self.scheduler.add_job(
-                func=eval(job_info.invoke_target),
+                func=JOB_REGISTRY[job_info.invoke_target],
                 trigger=self.cron_trigger_from_crontab(job_info.cron_expression),
                 args=job_info.job_args.split(',') if job_info.job_args else None,
                 kwargs=kw,
@@ -251,7 +260,7 @@ class SchedulerUtil:
             )
             return True
         except ConflictingIdError as e:
-            logger.error(f"任务创建失败，已经存在id为：{job_info.job_id}的任务")
+            logger.error(f"任务创建失败，已经存在id为：{job_info.job_id}的任务, Error: {str(e)}")
             return False
         finally:
             pass
@@ -266,7 +275,7 @@ class SchedulerUtil:
         try:
             print(job_info.job_kwargs)
             self.scheduler.add_job(
-                func=eval(job_info.invoke_target),
+                func=JOB_REGISTRY[job_info.invoke_target],
                 trigger='date',
                 run_date=datetime.now() + timedelta(seconds=1),
                 args=job_info.job_args.split(',') if job_info.job_args else None,
@@ -280,7 +289,7 @@ class SchedulerUtil:
                 executor=job_info.job_executor
             )
         except ConflictingIdError as e:
-            logger.error(f"任务创建失败，已经存在id为：{job_info.job_id}的任务")
+            logger.error(f"任务创建失败，已经存在id为：{job_info.job_id}的任务, Error: {str(e)}")
         finally:
             pass
 
@@ -294,7 +303,7 @@ class SchedulerUtil:
         try:
             self.scheduler.remove_job(job_id=str(job_id))
         except JobLookupError as e:
-            logger.info(f"没有找到定时任务：{job_id}")
+            logger.info(f"没有找到定时任务：{job_id}, Error: {str(e)}")
 
     def get_job_list(self) -> list[Job]:
         return self.scheduler.get_jobs()

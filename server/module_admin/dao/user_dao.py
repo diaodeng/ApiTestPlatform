@@ -1,13 +1,23 @@
-from sqlalchemy import and_, or_, desc, func
-from sqlalchemy.orm import Session
-from module_admin.entity.do.user_do import SysUser, SysUserRole, SysUserPost
-from module_admin.entity.do.role_do import SysRole, SysRoleDept, SysRoleMenu
-from module_admin.entity.do.dept_do import SysDept
-from module_admin.entity.do.post_do import SysPost
-from module_admin.entity.do.menu_do import SysMenu
-from module_admin.entity.vo.user_vo import *
-from utils.page_util import PageUtil
 from datetime import datetime, time
+
+from sqlalchemy import and_, desc, func, or_
+from sqlalchemy.orm import Session
+
+from module_admin.entity.do.dept_do import SysDept
+from module_admin.entity.do.menu_do import SysMenu
+from module_admin.entity.do.post_do import SysPost
+from module_admin.entity.do.role_do import SysRole, SysRoleMenu
+from module_admin.entity.do.user_do import SysUser, SysUserPost, SysUserRole
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_admin.entity.vo.user_vo import (
+    UserModel,
+    UserPageQueryModel,
+    UserPostModel,
+    UserRoleModel,
+    UserRolePageQueryModel,
+    UserRoleQueryModel,
+)
+from utils.page_util import PageUtil
 
 
 class UserDao:
@@ -84,13 +94,13 @@ class UserDao:
                 .order_by(SysMenu.order_num) \
                 .distinct().all()
 
-        results = dict(
-            user_basic_info=query_user_basic_info,
-            user_dept_info=query_user_dept_info,
-            user_role_info=query_user_role_info,
-            user_post_info=query_user_post_info,
-            user_menu_info=query_user_menu_info
-        )
+        results = {
+            'user_basic_info': query_user_basic_info,
+            'user_dept_info': query_user_dept_info,
+            'user_role_info': query_user_role_info,
+            'user_post_info': query_user_post_info,
+            'user_menu_info': query_user_menu_info
+        }
 
         return results
 
@@ -126,18 +136,22 @@ class UserDao:
             .outerjoin(SysRoleMenu, SysRole.role_id == SysRoleMenu.role_id) \
             .join(SysMenu, and_(SysRoleMenu.menu_id == SysMenu.menu_id, SysMenu.status == 0)) \
             .distinct().all()
-        results = dict(
-            user_basic_info=query_user_basic_info,
-            user_dept_info=query_user_dept_info,
-            user_role_info=query_user_role_info,
-            user_post_info=query_user_post_info,
-            user_menu_info=query_user_menu_info
-        )
+        results = {
+            'user_basic_info': query_user_basic_info,
+            'user_dept_info': query_user_dept_info,
+            'user_role_info': query_user_role_info,
+            'user_post_info': query_user_post_info,
+            'user_menu_info': query_user_menu_info
+        }
 
         return results
 
     @classmethod
-    def get_user_list(cls, db: Session, query_object: UserPageQueryModel, data_scope_sql: str, is_page: bool = False):
+    def get_user_list(cls,
+                      db: Session,
+                      query_object: UserPageQueryModel,
+                      data_scope_sql: DataScopeExpr,
+                      is_page: bool = False):
         """
         根据查询参数获取用户列表信息
         :param db: orm对象
@@ -161,7 +175,7 @@ class UserDao:
                         datetime.combine(datetime.strptime(query_object.begin_time, '%Y-%m-%d'), time(00, 00, 00)),
                         datetime.combine(datetime.strptime(query_object.end_time, '%Y-%m-%d'), time(23, 59, 59)))
                     if query_object.begin_time and query_object.end_time else True,
-                    eval(data_scope_sql)
+                    data_scope_sql
                     ) \
             .outerjoin(SysDept, and_(SysUser.dept_id == SysDept.dept_id, SysDept.status == 0, SysDept.del_flag == 0)) \
             .distinct()
@@ -229,7 +243,10 @@ class UserDao:
         return allocated_role_list
 
     @classmethod
-    def get_user_role_allocated_list_by_role_id(cls, db: Session, query_object: UserRolePageQueryModel, is_page: bool = False):
+    def get_user_role_allocated_list_by_role_id(cls,
+                                                db: Session,
+                                                query_object: UserRolePageQueryModel,
+                                                is_page: bool = False):
         """
         根据角色id获取已分配的用户列表信息
         :param db: orm对象
@@ -252,7 +269,10 @@ class UserDao:
         return allocated_user_list
 
     @classmethod
-    def get_user_role_unallocated_list_by_role_id(cls, db: Session, query_object: UserRolePageQueryModel, is_page: bool = False):
+    def get_user_role_unallocated_list_by_role_id(cls,
+                                                  db: Session,
+                                                  query_object: UserRolePageQueryModel,
+                                                  is_page: bool = False):
         """
         根据角色id获取未分配的用户列表信息
         :param db: orm对象

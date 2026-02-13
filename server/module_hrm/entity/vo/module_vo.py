@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
-from module_admin.annotation.pydantic_annotation import as_query, as_form
+from module_admin.annotation.pydantic_annotation import as_form, as_query
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from module_hrm.enums.enums import QtrDataStatusEnum
 

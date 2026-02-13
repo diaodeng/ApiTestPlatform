@@ -1,8 +1,10 @@
 import math
-from typing import Optional, List
-from sqlalchemy.orm.query import Query
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
+from sqlalchemy.orm.query import Query
+
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 
@@ -13,7 +15,7 @@ class PageResponseModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    rows: List = Field(default_factory=lambda: [])
+    rows: list = Field(default_factory=lambda: [])
     page_num: Optional[int] = None
     page_size: Optional[int] = None
     total: int
@@ -26,7 +28,7 @@ class PageUtil:
     """
 
     @classmethod
-    def get_page_obj(cls, data_list: List, page_num: int, page_size: int):
+    def get_page_obj(cls, data_list: list, page_num: int, page_size: int):
         """
         输入数据列表data_list和分页信息，返回分页数据列表结果
         :param data_list: 原始数据列表
@@ -53,7 +55,11 @@ class PageUtil:
         return result
 
     @classmethod
-    def paginate(cls, query: Query, page_num: int, page_size: int, is_page: bool = False) -> PageResponseModel|List|None:
+    def paginate(cls,
+                 query: Query,
+                 page_num: int,
+                 page_size: int,
+                 is_page: bool = False) -> PageResponseModel|list|None:
         """
         输入查询语句和分页信息，返回分页数据列表结果
         :param query: sqlalchemy查询语句
@@ -66,7 +72,7 @@ class PageUtil:
             total = query.count()
             paginated_data = query.offset((page_num - 1) * page_size).limit(page_size).all()
             has_next = True if math.ceil(len(paginated_data) / page_size) > page_num else False
-            logger.info(f"分页查询结束")
+            logger.info("分页查询结束")
             result = PageResponseModel(
                 rows=CamelCaseUtil.transform_result(paginated_data),
                 pageNum=page_num,
@@ -81,7 +87,7 @@ class PageUtil:
         return result
 
 
-def get_page_obj(data_list: List, page_num: int, page_size: int):
+def get_page_obj(data_list: list, page_num: int, page_size: int):
     """
     输入数据列表data_list和分页信息，返回分页数据列表结果
     :param data_list: 原始数据列表

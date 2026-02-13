@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime
-from config.database import Base
 from datetime import datetime
+
+from sqlalchemy import Column, DateTime, Integer, String
+
+from config.database import Base
 
 
 class SysDept(Base):

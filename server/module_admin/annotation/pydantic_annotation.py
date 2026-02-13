@@ -1,7 +1,7 @@
 import inspect
 from typing import Type
 
-from fastapi import Query, Form
+from fastapi import Form, Query
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 

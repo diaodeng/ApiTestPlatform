@@ -1,7 +1,8 @@
-from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from module_admin.entity.do.user_do import SysUser
+from sqlalchemy.orm import Session
+
 from module_admin.entity.do.dept_do import SysDept
+from module_admin.entity.do.user_do import SysUser
 
 
 def login_by_account(db: Session, user_name: str):

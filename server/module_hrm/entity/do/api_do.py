@@ -1,5 +1,5 @@
-from sqlalchemy import Integer, String, Text, BigInteger
-from sqlalchemy.orm import mapped_column, Mapped
+from sqlalchemy import BigInteger, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
 from module_hrm.entity.do.common_do import BaseModel

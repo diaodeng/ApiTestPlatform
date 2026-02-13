@@ -1,27 +1,25 @@
-import json
-import io
 import csv
+import json
 import uuid
-from loguru import logger
-from typing import AsyncGenerator, List
+from collections.abc import AsyncGenerator
 
 from fastapi import UploadFile
 from fastapi.concurrency import run_in_threadpool
+from loguru import logger
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
-from config.get_db import get_db
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.case_dao import CaseDao, CaseParamsDao
 from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseParams
 from module_hrm.entity.dto.case_dto import CaseModelForApi
-from module_hrm.entity.vo.case_params_vo import CaseParamsQueryModel, CaseParamsDeleteModel
-from module_hrm.entity.vo.case_vo import CasePageQueryModel, CaseModel, CaseQuery, \
-    DeleteCaseModel, AddCaseModel
+from module_hrm.entity.vo.case_params_vo import CaseParamsDeleteModel, CaseParamsQueryModel
+from module_hrm.entity.vo.case_vo import AddCaseModel, CaseModel, CasePageQueryModel, CaseQuery, DeleteCaseModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from utils.common_util import export_list2excel, CamelCaseUtil
+from utils.common_util import CamelCaseUtil, export_list2excel
 from utils.page_util import PageResponseModel
 
 
@@ -31,8 +29,13 @@ class CaseService:
     """
 
     @classmethod
-    def get_case_list_services(cls, query_db: Session, query_object: CasePageQueryModel, is_page: bool = False,
-                               data_scope_sql: str = 'true'):
+    def get_case_list_services(
+            cls,
+            query_db: Session,
+            query_object: CasePageQueryModel,
+            is_page: bool = False,
+            data_scope_sql: DataScopeExpr = True
+    ):
         """
         获取用例列表信息service
         :param query_db: orm对象
@@ -45,7 +48,7 @@ class CaseService:
             case_list_result = PageResponseModel(
                 **{
                     **list_result.model_dump(by_alias=True),
-                    'rows': [{**row[0], **row[1], **row[2]} for row in list_result.rows]
+                    "rows": [{**row[0], **row[1], **row[2]} for row in list_result.rows],
                 }
             )
         else:
@@ -65,14 +68,16 @@ class CaseService:
         add_case = CaseModel(**page_object.model_dump(by_alias=True))
         case = CaseDao.get_case_detail_by_info(query_db, CaseQuery(caseName=page_object.case_name))
         if case:
-            result = dict(is_success=False, message='用例名称已存在')
+            result = {"is_success": False, "message": "用例名称已存在"}
         else:
             try:
                 case_dao = CaseDao.add_case_dao(query_db, add_case)
                 query_db.commit()
-                result = dict(is_success=True,
-                              message='新增成功',
-                              result=CaseModelForApi.model_validate(case_dao).model_dump(by_alias=True))
+                result = {
+                    "is_success": True,
+                    "message": "新增成功",
+                    "result": CaseModelForApi.model_validate(case_dao).model_dump(by_alias=True),
+                }
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -89,7 +94,7 @@ class CaseService:
         """
         case = CaseDao.get_case_detail_by_info(query_db, CaseQuery(caseId=page_object.case_id))
         if not case:
-            result = dict(is_success=False, message='原用例不存在')
+            result = {'is_success': False, 'message': "原用例不存在"}
         else:
             try:
                 new_data = case.__dict__.copy()
@@ -106,7 +111,7 @@ class CaseService:
                 new_case = HrmCase(**new_data)
                 query_db.add(new_case)
                 query_db.commit()
-                result = dict(is_success=True, message='复制成功')
+                result = {"is_success": True, "message": "复制成功"}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -127,17 +132,17 @@ class CaseService:
             if page_object.case_name and info.case_name != page_object.case_name:
                 case = CaseDao.get_case_detail_by_info(query_db, CaseModel(caseName=page_object.case_name))
                 if case:
-                    result = dict(is_success=False, message='用例名称已存在')
+                    result = {"is_success": False, "message": "用例名称已存在"}
                     return CrudResponseModel(**result)
             try:
                 CaseDao.edit_case_dao(query_db, page_object, user)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {"is_success": True, "message": "更新成功"}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='用例不存在')
+            result = {"is_success": False, "message": "用例不存在"}
 
         return CrudResponseModel(**result)
 
@@ -149,20 +154,20 @@ class CaseService:
         :param page_object: 删除用例对象
         :return: 删除用例校验结果
         """
-        if page_object.case_ids.split(','):
-            id_list = page_object.case_ids.split(',')
+        if page_object.case_ids.split(","):
+            id_list = page_object.case_ids.split(",")
             try:
                 for case_id in id_list:
                     await CaseParamsDao.delete_table(query_db, use_case_id=case_id)
                     await CaseDao.delete_case_dao(query_db, CaseModel(caseId=case_id), user)
                     await SuiteDetailDao.del_suite_detail_by_id(query_db, case_id)
                 await run_in_threadpool(query_db.commit)
-                result = dict(is_success=True, message='删除成功')
+                result = {"is_success": True, "message": "删除成功"}
             except Exception as e:
                 await run_in_threadpool(query_db.rollback)
                 raise e
         else:
-            result = dict(is_success=False, message='传入用例id为空')
+            result = {"is_success": False, "message": "传入用例id为空"}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -216,12 +221,13 @@ class CaseService:
         data = case_list
 
         for item in data:
-            if item.get('status') == '0':
-                item['status'] = '正常'
+            if item.get("status") == "0":
+                item["status"] = "正常"
             else:
-                item['status'] = '停用'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
-                    data]
+                item["status"] = "停用"
+        new_data = [
+            {mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in data
+        ]
         binary_data = export_list2excel(new_data)
 
         return binary_data
@@ -237,29 +243,30 @@ class CaseParamsService:
         :return: 用例参数信息
         """
         count = await CaseParamsDao.get_table_row_count(query_db, use_case_id=query_info.case_id)
-        case_params = await CaseParamsDao.load_table_page(use_case_id=query_info.case_id,
-                                                    page=query_info.page_num,
-                                                    page_size=query_info.page_size,
-                                                    enabled=query_info.enabled,
-                                                    )
+        case_params = await CaseParamsDao.load_table_page(
+            use_case_id=query_info.case_id,
+            page=query_info.page_num,
+            page_size=query_info.page_size,
+            enabled=query_info.enabled,
+        )
         columns_name = []
         if case_params and len(case_params) > 0:
             cols = list(case_params[0].keys())
             cols.remove("_row_id")
             columns_name = cols
         page_info = {
-            'total': count,
-            'page_num': query_info.page_num,
-            'page_size': query_info.page_size,
+            "total": count,
+            "page_num": query_info.page_num,
+            "page_size": query_info.page_size,
             # 'total_page': math.ceil(count / query_info.page_size),
             "case_id": query_info.case_id,
             "columns": columns_name,
-            'rows': case_params,
+            "rows": case_params,
         }
         return page_info
 
     @classmethod
-    def loadup_case_params_services(cls, query_db: Session, case_id: str|int, case_params: list[dict]):
+    def loadup_case_params_services(cls, query_db: Session, case_id: str | int, case_params: list[dict]):
         """
         获取用例参数信息service
         :param query_db: orm对象
@@ -290,10 +297,8 @@ class CaseParamsService:
         """
         CaseParamsDao.add_table_row(query_db, use_case_id=case_id, row_data=params)
 
-
     @classmethod
     async def update_case_params_services(cls, query_db: Session, case_id: int, rows_data: list[dict]):
-
         """
         更新用例参数信息service
         :param query_db: orm对象
@@ -315,7 +320,7 @@ class CaseParamsService:
         await CaseParamsDao.delete_table_row(query_db, use_case_id=delete_data.case_id, row_ids=delete_data.row_ids)
 
     @classmethod
-    def import_csv_to_db(cls, file: UploadFile, case_id: int|str, current_user: CurrentUserModel) -> dict:
+    def import_csv_to_db(cls, file: UploadFile, case_id: int | str, current_user: CurrentUserModel) -> dict:
         """
         导入用例参数信息service
         :param file: 上传文件
@@ -325,9 +330,9 @@ class CaseParamsService:
         """
         # 用文本流解析
         file_name = file.filename
-        logger.info(f'导入用例参数，用例id：{case_id}，文件名：{file_name}')
+        logger.info(f"导入用例参数，用例id：{case_id}，文件名：{file_name}")
         batch_size = 1000
-        buffer: List[dict] = []
+        buffer: list[dict] = []
         writed_line: int = 0
         sort_key = 100
         total = 0
@@ -339,38 +344,40 @@ class CaseParamsService:
 
         try:
             reader = csv.DictReader(line_iter())
-            logger.info(f'文件解析完成，导入用例参数，用例id：{case_id}，文件名：{file_name}')
+            logger.info(f"文件解析完成，导入用例参数，用例id：{case_id}，文件名：{file_name}")
             db = SessionLocal()
             for row in reader:
                 try:
                     total += 1
                     enabled = row.pop("__enable", 1)
                     row_id = str(uuid.uuid4())
-                    if enabled == '1' or enabled == 1:
+                    if enabled == "1" or enabled == 1:
                         enabled = True
                     else:
                         enabled = False
                     col_sort = 0
                     for key, value in row.items():
-                        if value == '':
+                        if value == "":
                             row[key] = None
-                        buffer.append({
-                            "dept_id": current_user.user.dept_id,
-                            "create_by": current_user.user.user_id,
-                            "update_by": current_user.user.user_id,
-                            "manager": current_user.user.user_id,
-                            "case_id": case_id,
-                            "row_id": row_id,
-                            "col_name": key,
-                            "params_name": key,
-                            "col_value": value,
-                            "params_type": 1,
-                            "enabled": enabled,
-                            "sort_key": sort_key,
-                            "col_sort": col_sort,
-                        })
+                        buffer.append(
+                            {
+                                "dept_id": current_user.user.dept_id,
+                                "create_by": current_user.user.user_id,
+                                "update_by": current_user.user.user_id,
+                                "manager": current_user.user.user_id,
+                                "case_id": case_id,
+                                "row_id": row_id,
+                                "col_name": key,
+                                "params_name": key,
+                                "col_value": value,
+                                "params_type": 1,
+                                "enabled": enabled,
+                                "sort_key": sort_key,
+                                "col_sort": col_sort,
+                            }
+                        )
                         col_sort += 1
-                except Exception as e:
+                except Exception:
                     error_count += 1
                     continue
 
@@ -379,14 +386,18 @@ class CaseParamsService:
                     writed_line += len(buffer)
                     db.execute(insert(HrmCaseParams), buffer)
                     db.commit()
-                    logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，已写入文件行数：{total}')
+                    logger.info(
+                        f"写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，已写入文件行数：{total}"
+                    )
                     buffer.clear()
                 sort_key += 100
             # 剩余的数据写入
             if buffer:
                 writed_line += len(buffer)
                 db.execute(insert(HrmCaseParams), buffer)
-                logger.info(f'写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，已写入文件行数：{total}')
+                logger.info(
+                    f"写入数据库，导入用例参数，用例id：{case_id}，文件名：{file_name}，已写入文件行数：{total}"
+                )
 
             db.commit()
         except Exception as e:

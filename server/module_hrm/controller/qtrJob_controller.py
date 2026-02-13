@@ -1,8 +1,6 @@
-import json
 from datetime import datetime
 
-from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import APIRouter, Depends
 from fastapi.requests import Request
 from sqlalchemy.orm import Session
 
@@ -11,9 +9,16 @@ from config.get_qtr_scheduler import qtr_scheduler_util
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.service.login_service import LoginService, CurrentUserModel
-from module_hrm.entity.vo.job_vo import JobModel, JobPageQueryModel, EditJobModel, DeleteJobModel, JobLogPageQueryModel, \
-    DeleteJobLogModel
+from module_admin.service.login_service import CurrentUserModel, LoginService
+from module_hrm.entity.do.job_do import QtrJob, QtrJobLog
+from module_hrm.entity.vo.job_vo import (
+    DeleteJobLogModel,
+    DeleteJobModel,
+    EditJobModel,
+    JobLogPageQueryModel,
+    JobModel,
+    JobPageQueryModel,
+)
 from module_hrm.service.job_log_service import JobLogService
 from module_hrm.service.job_service import JobService
 from utils.common_util import bytes2file_response
@@ -29,7 +34,7 @@ qtrJobController = APIRouter(prefix='/qtr', dependencies=[Depends(LoginService.g
 async def get_qtr_job_list(request: Request,
                            job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_query),
                            query_db: Session = Depends(get_db),
-                           data_scope_sql: str = Depends(GetDataScope('QtrJob', user_alias='manager'))
+                           data_scope_sql = Depends(GetDataScope(QtrJob, user_alias='manager'))
                            ):
     try:
         # 获取分页数据
@@ -193,7 +198,7 @@ async def query_detail_qtr_job(request: Request, job_id: int, query_db: Session 
 async def export_qtr_job_list(request: Request,
                               job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_form),
                               query_db: Session = Depends(get_db),
-                              data_scope_sql: str = Depends(GetDataScope('QtrJob', user_alias='manager'))
+                              data_scope_sql = Depends(GetDataScope(QtrJob, user_alias='manager'))
                               ):
     try:
         # 获取全量数据
@@ -212,12 +217,12 @@ async def export_qtr_job_list(request: Request,
 async def get_qtr_job_log_list(request: Request,
                                job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_query),
                                query_db: Session = Depends(get_db),
-                               data_scope_sql: str = Depends(GetDataScope(''))
+                               # data_scope_sql: DataScopeExpr = Depends(GetDataScope(''))
                                ):
     try:
         # 获取分页数据
         job_log_page_query_result = JobLogService.get_job_log_list_services(query_db, job_log_page_query,
-                                                                            data_scope_sql, is_page=True)
+                                                                            True, is_page=True)
         logger.info('获取成功')
         return ResponseUtil.success(model_content=job_log_page_query_result)
     except Exception as e:
@@ -263,11 +268,14 @@ async def clear_qtr_job_log(request: Request, query_db: Session = Depends(get_db
 async def export_qtr_job_log_list(request: Request,
                                   job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_form),
                                   query_db: Session = Depends(get_db),
-                                  data_scope_sql: str = Depends(GetDataScope('QtrJobLog', user_alias='manager'))
+                                  data_scope_sql = Depends(GetDataScope(QtrJobLog, user_alias='manager'))
                                   ):
     try:
         # 获取全量数据
-        job_log_query_result = JobLogService.get_job_log_list_services(query_db, job_log_page_query, data_scope_sql, is_page=False)
+        job_log_query_result = JobLogService.get_job_log_list_services(query_db,
+                                                                       job_log_page_query,
+                                                                       data_scope_sql,
+                                                                       is_page=False)
         job_log_export_result = await JobLogService.export_job_log_list_services(request, job_log_query_result)
         logger.info('导出成功')
         return ResponseUtil.streaming(data=bytes2file_response(job_log_export_result))

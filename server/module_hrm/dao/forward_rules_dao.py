@@ -1,14 +1,17 @@
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
 
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
-
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.do.forward_rules_do import QtrForwardRules, QtrForwardRulesDetail
 from module_hrm.entity.dto.forward_rules_dto import ForwardRulesModelForApi
-from module_hrm.entity.vo.forward_rules_vo import ForwardRulesModel, ForwardRulesQueryModel, ForwardRulesDeleteModel, \
-    ForwardRulesDetailQueryModel, ForwardRulesDetailModel, ForwardRulesDetailDeleteModel
+from module_hrm.entity.vo.forward_rules_vo import (
+    ForwardRulesDeleteModel,
+    ForwardRulesDetailDeleteModel,
+    ForwardRulesDetailModel,
+    ForwardRulesDetailQueryModel,
+    ForwardRulesModel,
+    ForwardRulesQueryModel,
+)
 from module_hrm.utils.util import PermissionHandler
 from utils.common_util import CamelCaseUtil
 from utils.page_util import PageUtil
@@ -40,8 +43,8 @@ class ForwardRulesDao:
         return info
 
     @classmethod
-    def get_list_by_page(cls, db: Session, query_object: ForwardRulesQueryModel, data_scope_sql:str, is_page=True):
-        query = db.query(QtrForwardRules).filter(eval(data_scope_sql))
+    def get_list_by_page(cls, db: Session, query_object: ForwardRulesQueryModel, data_scope_sql:DataScopeExpr, is_page=True):
+        query = db.query(QtrForwardRules).filter(data_scope_sql)
 
         if query_object.only_self:
             query = query.filter(QtrForwardRules.manager == query_object.manager)
@@ -68,8 +71,8 @@ class ForwardRulesDao:
         return post_list
 
     @classmethod
-    def get_list_all(cls, db: Session, data_scope_sql: str) -> list[ForwardRulesModel]:
-        query = db.query(QtrForwardRules).filter(eval(data_scope_sql))
+    def get_list_all(cls, db: Session, data_scope_sql: DataScopeExpr) -> list[ForwardRulesModel]:
+        query = db.query(QtrForwardRules).filter(data_scope_sql)
         all_data_orm = query.order_by(QtrForwardRules.create_time.desc()).order_by(
             QtrForwardRules.order_num).distinct().all()
         all_data = CamelCaseUtil.transform_result(all_data_orm)
@@ -132,10 +135,9 @@ class ForwardRulesDetailDao:
         return info
 
     @classmethod
-    def get_list_by_page(cls, db: Session, query_object: ForwardRulesDetailQueryModel, data_scope_sql:str|None = None, is_page=True):
+    def get_list_by_page(cls, db: Session, query_object: ForwardRulesDetailQueryModel, data_scope_sql:DataScopeExpr, is_page=True):
         query = db.query(QtrForwardRulesDetail)
-        if data_scope_sql:
-            query = query.filter(eval(data_scope_sql))
+        query = query.filter(data_scope_sql)
 
         if query_object.rule_id:
             query = query.filter(QtrForwardRulesDetail.rule_id == query_object.rule_id)

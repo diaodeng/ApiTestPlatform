@@ -1,14 +1,13 @@
 import asyncio
 import copy
 import json
-import logging
 import re
 import threading
 import time
 import traceback
 import urllib.parse
-from datetime import datetime, timezone, timedelta
-from typing import Callable
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import jmespath
@@ -18,23 +17,35 @@ import websockets
 
 from exceptions.exception import AgentForwardError
 from module_hrm.entity.vo.case_vo import CaseRunModel, ForwardRulesForRunModel, ProjectDebugtalkInfoModel
-from module_hrm.entity.vo.case_vo_detail_for_handle import ParameterModel, TStep as TStepForHandle, HooksModel, \
-    CustomHooksParams, StepRunCondition
-from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep as TStepForRun, TRequest as TRequestForRun, \
-    TWebsocket, ResponseData, \
-    Result, StepLogs
-from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum, ForwardRuleMatchTypeEnum, AgentResponseEnum, \
-    CodeTypeEnum, ScopeEnum, AssertOriginalEnum, DataType, UrlContentEnum
+from module_hrm.entity.vo.case_vo_detail_for_handle import (
+    HooksModel,
+    ParameterModel,
+    StepRunCondition,
+)
+from module_hrm.entity.vo.case_vo_detail_for_handle import TStep as TStepForHandle
+from module_hrm.entity.vo.case_vo_detail_for_run import ResponseData, Result, StepLogs, TestCase, TWebsocket
+from module_hrm.entity.vo.case_vo_detail_for_run import TRequest as TRequestForRun
+from module_hrm.entity.vo.case_vo_detail_for_run import TStep as TStepForRun
+from module_hrm.enums.enums import (
+    AgentResponseEnum,
+    AssertOriginalEnum,
+    CaseRunStatus,
+    CodeTypeEnum,
+    DataType,
+    ForwardRuleMatchTypeEnum,
+    ScopeEnum,
+    TstepTypeEnum,
+    UrlContentEnum,
+)
 from module_hrm.exceptions import TestFailError
 from module_hrm.service.runner.case_data_handler import ConfigHandle
-from module_hrm.utils import comparators
-from module_hrm.utils.CaseRunLogHandle import RunLogCaptureHandler, TestLog, CustomStackLevelLogger
-from module_hrm.utils.case_run_utils import exec_js, exec_python
-from module_hrm.utils import case_run_utils
-from module_hrm.utils.common import key_value_dict, update_or_extend_list, dict2list, type_change
-from module_hrm.utils.parser import parse_data, parse_function_set_default_params
-from module_hrm.utils.util import replace_variables, compress_text
-from module_qtr.service.agent_service import send_message, HandleResponse, AgentResponse, AgentResponseWebSocket
+from module_hrm.utils import case_run_utils, comparators
+from module_hrm.utils.case_run_utils import exec_js
+from module_hrm.utils.CaseRunLogHandle import CustomStackLevelLogger, RunLogCaptureHandler, TestLog
+from module_hrm.utils.common import dict2list, key_value_dict, type_change, update_or_extend_list
+from module_hrm.utils.parser import parse_function_set_default_params
+from module_hrm.utils.util import compress_text, replace_variables
+from module_qtr.service.agent_service import AgentResponse, AgentResponseWebSocket, HandleResponse, send_message
 from utils.log_util import logger
 
 # 忽略requests库https请求的警告
@@ -72,7 +83,7 @@ class Response:
             for i in json.loads(self.text):
                 new_data.append(json.loads(i))
             return new_data
-        except:
+        except Exception:
             return json.loads(self.text)
 
     # @property
@@ -89,7 +100,7 @@ class CaseRunUtil:
         exec_js()
 
 
-class CaseRunner(object):
+class CaseRunner:
     def __init__(self, case_data: TestCase,
                  debugtalk_func_map=None,
                  test_logging: TestLog = None,
@@ -149,7 +160,7 @@ class CaseRunner(object):
                 self.logger.error(f"{hook_name}处理失败：{e}")
                 self.logger.exception(e)
                 self.case_data.config.result.status = CaseRunStatus.failed.value
-                raise TestFailError(f"{hook_name}处理失败")
+                raise TestFailError(f"{hook_name}处理失败") from e
 
     def __custom_case_hook(self, hooks_info: HooksModel, hook_name: str = "case_setup", is_before=True):
         try:
@@ -314,7 +325,7 @@ class CaseRunner(object):
         return self
 
 
-class RequestConfig(object):
+class RequestConfig:
     def __init__(self, config_data):
         tem_config = json.dumps(config_data)
         tem_variables = config_data.get("variables", {})
@@ -325,7 +336,7 @@ class RequestConfig(object):
         self.case_name: str = new_config.get("name", "用例名")
 
 
-class RequestRunner(object):
+class RequestRunner:
     def __init__(self, case_runner: CaseRunner, step_data: TStepForHandle):
         self.logger = case_runner.logger
         self.case_runner = case_runner
@@ -348,9 +359,12 @@ class RequestRunner(object):
         self.step_data.result.start_time_iso = datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S")
         self.step_data.result.end_time_stamp = end_time
         self.step_data.result.end_time_iso = datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S")
-        self.logger.info(f"step耗时：{duration} -->> 用例[{self.case_runner.case_data.config.name}]--步骤【{self.step_data.name}】执行完成时间")
+        self.logger.info(f"step耗时：{duration} -->> "
+                         f"用例[{self.case_runner.case_data.config.name}]--"
+                         f"步骤【{self.step_data.name}】执行完成时间")
         self.logger.debug(
-            f"用例{self.case_runner.case_data.config.name}执行完成时间，step format：{datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')}")
+            f"用例{self.case_runner.case_data.config.name}执行完成时间，"
+            f"step format：{datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')}")
 
     def set_step_failed(self):
         logger.debug(f"全局变量： {self.case_runner.run_info.global_vars}")
@@ -415,7 +429,10 @@ class RequestRunner(object):
                     hook = teardown_hook.get("key", None)
                     if not hook: continue
                     var = key_value_dict(self.case_runner.case_data.config.variables)
-                    parse_function_set_default_params(hook, var, self.debugtalk_func_map, (self.step_data,))
+                    parse_function_set_default_params(hook,
+                                                      var,
+                                                      self.debugtalk_func_map,
+                                                      (self.step_data,))
                     self.logger.debug(
                         f"自定义{hook_name}回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
             if hooks_info.code_info.code_type != CodeTypeEnum.js.value:
@@ -448,7 +465,7 @@ class RequestRunner(object):
             if not urllib.parse.urlparse(request_data["url"]).scheme:
                 request_data["url"] = urllib.parse.urljoin(self.case_runner.case_data.config.base_url,
                                                            request_data["url"])
-        except:
+        except Exception:
             request_data["url"] = urllib.parse.urljoin(self.case_runner.case_data.config.base_url, request_data["url"])
 
         step_data["request"] = request_data
@@ -590,7 +607,7 @@ class RequestRunner(object):
 
             self.step_data = TStepForHandle(**self.step_data.model_dump(by_alias=True))  ## 数据转回原来的格式
             return self
-        except Exception as e:
+        except Exception:
             self.step_data.result.logs.after_response += self.case_runner.handler.get_log()
             raise
         # finally:
@@ -657,7 +674,9 @@ class RequestRunner(object):
                 res_response: AgentResponse = agent_res_obj.response
 
             else:
-                # async with httpx.AsyncClient(verify=False, event_hooks={"request": [on_request], "response": [on_response]}) as client:
+                # async with httpx.AsyncClient(verify=False,
+                #                              event_hooks={"request": [on_request],
+                #                                           "response": [on_response]}) as client:
                 # request_client = self.case_runner.run_info.http_client
                 start_time = time.time()
                 async with self.case_runner.run_info.semaphore:
@@ -669,7 +688,8 @@ class RequestRunner(object):
             self.logger.debug(f"请求响应结果：{res_response.status_code}")
             self.logger.debug(f"请求总耗时时间：{res_response.elapsed.total_seconds()}")
             self.logger.debug(
-                f"请求完成，完成时间:{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')} >> {self.case_runner.case_data.config.name}")
+                f"请求完成，完成时间:{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')} >> "
+                f"{self.case_runner.case_data.config.name}")
 
             if self.step_data.think_time.limit:
                 await asyncio.sleep(self.step_data.think_time.limit)
@@ -710,7 +730,7 @@ class RequestRunner(object):
         """
         self.logger.info(f"{self.step_data.name} 开始提取变量")
         try:
-            for index, item in enumerate(self.step_data.extract):
+            for _index, item in enumerate(self.step_data.extract):
                 if not item.get("enable", True): continue
                 val = self.__get_validate_key(item["value"])
                 self.extract_variable[item["key"]] = val
@@ -850,7 +870,7 @@ class RequestRunner(object):
             if isinstance(data, str):
                 try:
                     data = json.loads(data)
-                except:
+                except Exception:
                     data = data
 
             par_data = jmespath.search(key[5:], data)
@@ -877,7 +897,7 @@ class Websocket(RequestRunner):
     """
 
     def __init__(self, case_runner: CaseRunner, step_data: TStepForHandle):
-        super(Websocket, self).__init__(case_runner, step_data)
+        super().__init__(case_runner, step_data)
         self.response = None
 
     async def request(self):
@@ -992,7 +1012,7 @@ class WebSocketClient:
         await self.connection.close()
 
 
-class TestRunner(object):
+class TestRunner:
     """
     单个用例执行入口，但是执行结果可能是多个用例，例如使用的参数化的情况
     """
@@ -1035,7 +1055,7 @@ class TestRunner(object):
         except Exception as e:
             self.logger.reset()
             logger.error(f"测试用例执行失败：{e}")
-            raise TestFailError(f"测试用例执行失败: {e}", original_exception=e)
+            raise TestFailError(f"测试用例执行失败: {e}", original_exception=e) from e
 
 
 def formate_response_body(response: requests.Response | None) -> dict | str:

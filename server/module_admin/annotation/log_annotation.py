@@ -1,21 +1,22 @@
-from functools import wraps, lru_cache
-from fastapi import Request
-from fastapi.responses import JSONResponse, ORJSONResponse, UJSONResponse
 import inspect
-import os
 import json
+import os
 import time
 from datetime import datetime
+from functools import lru_cache, wraps
+
 import requests
+from fastapi import Request
+from fastapi.responses import JSONResponse, ORJSONResponse, UJSONResponse
 from user_agents import parse
-from typing import Optional
-from module_admin.service.login_service import LoginService
-from module_admin.service.log_service import OperationLogService, LoginLogService
-from module_admin.entity.vo.log_vo import OperLogModel, LogininforModel
+
 from config.env import AppConfig
+from module_admin.entity.vo.log_vo import LogininforModel, OperLogModel
+from module_admin.service.log_service import LoginLogService, OperationLogService
+from module_admin.service.login_service import LoginService
 
 
-def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'operation'):
+def log_decorator(title: str, business_type: int, log_type: str | None = 'operation'):
     """
     日志装饰器
     :param log_type: 日志类型（login表示登录日志，为空表示为操作日志）
@@ -55,7 +56,8 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
                 oper_location = get_ip_location(oper_ip)
             # 根据不同的请求类型使用不同的方法获取请求参数
             content_type = request.headers.get("Content-Type")
-            if content_type and ("multipart/form-data" in content_type or 'application/x-www-form-urlencoded' in content_type):
+            if (content_type and
+                    ("multipart/form-data" in content_type or 'application/x-www-form-urlencoded' in content_type)):
                 payload = await request.form()
                 oper_param = "\n".join([f"{key}: {value}" for key, value in payload.items()])
             else:
@@ -84,13 +86,13 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
                     browser += f' {user_agent_info.browser.version[0]}'
                 if user_agent_info.os.version != ():
                     system_os += f' {user_agent_info.os.version[0]}'
-                login_log = dict(
-                    ipaddr=oper_ip,
-                    loginLocation=oper_location,
-                    browser=browser,
-                    os=system_os,
-                    loginTime=oper_time.strftime('%Y-%m-%d %H:%M:%S')
-                )
+                login_log = {
+                    'ipaddr': oper_ip,
+                    'loginLocation': oper_location,
+                    'browser': browser,
+                    'os': system_os,
+                    'loginTime': oper_time.strftime('%Y-%m-%d %H:%M:%S')
+                }
                 kwargs['form_data'].login_info = login_log
             # 调用原始函数
             result = await func(*args, **kwargs)
@@ -163,7 +165,7 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
     return decorator
 
 
-@lru_cache()
+@lru_cache
 def get_ip_location(oper_ip: str):
     """
     查询ip归属区域

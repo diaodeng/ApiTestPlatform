@@ -1,8 +1,10 @@
+from typing import List, Union
+
 from fastapi import Depends
-from typing import Union, List
+
+from exceptions.exception import PermissionException
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
-from exceptions.exception import PermissionException
 
 
 class CheckUserInterfaceAuth:

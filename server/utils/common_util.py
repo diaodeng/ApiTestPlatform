@@ -1,11 +1,14 @@
+import ast
+import base64
 import io
+import json
 import os
+import re
 from functools import lru_cache
-from typing import Any, Set
-from typing import List
-from loguru import logger
 from io import BytesIO
+from typing import Any
 
+from loguru import logger
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
@@ -119,14 +122,14 @@ def bytes2human(n, format_str="%(value).1f%(symbol)s"):
         if n >= prefix[symbol]:
             value = float(n) / prefix[symbol]
             return format_str % locals()
-    return format_str % dict(symbol=symbols[0], value=n)
+    return format_str % {'symbol': symbols[0], 'value': n}
 
 
 def bytes2file_response(bytes_info):
     yield bytes_info
 
 
-def export_list2excel(list_data: List):
+def export_list2excel(list_data: list):
     """
     工具方法：将需要导出的list数据转化为对应excel的二进制数据
     :param list_data: 数据列表
@@ -162,7 +165,7 @@ def load_excel2data():
     pass
 
 
-def get_excel_template(header_list: List, selector_header_list: List, option_list: List[dict]):
+def get_excel_template(header_list: list, selector_header_list: list, option_list: list[dict]):
     """
     工具方法：将需要导出的list数据转化为对应excel的二进制数据
     :param header_list: 表头数据列表
@@ -239,7 +242,7 @@ def get_filepath_from_url(url: str):
 class WhitelistJsonParser:
     __slots__ = ("_cache", "_whitelist")
 
-    def __init__(self, whitelist: Set[str] = None):
+    def __init__(self, whitelist: set[str] = None):
         self._cache = set()
         self._whitelist = whitelist
 
@@ -302,13 +305,6 @@ class WhitelistJsonParser:
             return obj
 
         return obj
-
-
-import json
-import re
-import base64
-from typing import Any, Union, Dict, List, Optional
-import ast
 
 
 class SmartJsonParser:
@@ -670,7 +666,7 @@ class SmartJsonParser:
                 if result is not None:
                     logger.info(f"✓ 使用第 {i + 1} 种方法解析成功")
                     return result
-            except Exception as e:
+            except Exception:
                 continue
 
         logger.info("✗ 所有解析方法都失败了")
@@ -874,7 +870,7 @@ class AdvancedJsonParser(SmartJsonParser):
                 decoded = base64.b64decode(json_str).decode('utf-8')
                 logger.info("检测到 base64 编码，已自动解码")
                 json_str = decoded
-            except:
+            except:  # noqa: E722
                 pass
 
         # 3. 移除不可见字符

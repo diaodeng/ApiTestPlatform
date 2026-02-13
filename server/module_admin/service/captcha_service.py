@@ -48,10 +48,11 @@
 #         return [base64_string, result]
 
 
-import cairocffi as cairo
+import base64
 import io
 import random
-import base64
+
+import cairocffi as cairo
 
 
 class CaptchaService:

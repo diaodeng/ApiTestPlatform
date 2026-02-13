@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class PushTypeEnum(Enum):
     feishu_bot = 1
     feishu_application = 2

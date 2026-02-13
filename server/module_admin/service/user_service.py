@@ -1,11 +1,35 @@
+import io
+from typing import Union
+
 from fastapi import UploadFile
+from openpyxl import load_workbook
+from sqlalchemy.orm import Session
+
+from module_admin.dao.user_dao import UserDao
+from module_admin.entity.vo.common_vo import CrudResponseModel, DataScopeExpr
+from module_admin.entity.vo.user_vo import (
+    AddUserModel,
+    CrudUserRoleModel,
+    CurrentUserModel,
+    DeleteUserModel,
+    EditUserModel,
+    ResetUserModel,
+    SelectedRoleModel,
+    UserDetailModel,
+    UserInfoModel,
+    UserModel,
+    UserPageQueryModel,
+    UserPostModel,
+    UserProfileModel,
+    UserRoleModel,
+    UserRoleQueryModel,
+    UserRoleResponseModel,
+)
+from module_admin.service.post_service import PostPageQueryModel, PostService
 from module_admin.service.role_service import RoleService
-from module_admin.service.post_service import PostService, PostPageQueryModel
-from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.dao.user_dao import *
+from utils.common_util import CamelCaseUtil, export_list2excel, get_excel_template
 from utils.page_util import PageResponseModel
-from utils.pwd_util import *
-from utils.common_util import *
+from utils.pwd_util import PwdUtil
 
 
 class UserService:
@@ -14,7 +38,11 @@ class UserService:
     """
 
     @classmethod
-    def get_user_list_services(cls, query_db: Session, query_object: UserPageQueryModel, data_scope_sql: str, is_page: bool = False):
+    def get_user_list_services(cls,
+                               query_db: Session,
+                               query_object: UserPageQueryModel,
+                               data_scope_sql: DataScopeExpr,
+                               is_page: bool = False):
         """
         获取用户列表信息service
         :param query_db: orm对象
@@ -49,7 +77,7 @@ class UserService:
         add_user = UserModel(**page_object.model_dump(by_alias=True))
         user = UserDao.get_user_by_info(query_db, UserModel(userName=page_object.user_name))
         if user:
-            result = dict(is_success=False, message='用户名已存在')
+            result = {'is_success': False, 'message': '用户名已存在'}
         else:
             try:
                 add_result = UserDao.add_user_dao(query_db, add_user)
@@ -61,7 +89,7 @@ class UserService:
                     for post in page_object.post_ids:
                         UserDao.add_user_post_dao(query_db, UserPostModel(userId=user_id, postId=post))
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -85,10 +113,13 @@ class UserService:
             del edit_user['type']
         user_info = cls.user_detail_services(query_db, edit_user.get('user_id'))
         if user_info:
-            if page_object.type != 'status' and page_object.type != 'avatar' and page_object.type == 'pwd' and user_info.data.user_name != page_object.user_name:
+            if (page_object.type != 'status'
+                    and page_object.type != 'avatar'
+                    and page_object.type == 'pwd'
+                    and user_info.data.user_name != page_object.user_name):
                 user = UserDao.get_user_by_info(query_db, UserModel(userName=page_object.user_name))
                 if user:
-                    result = dict(is_success=False, message='用户名已存在')
+                    result = {'is_success': False, 'message': '用户名已存在'}
                     return CrudResponseModel(**result)
             try:
                 UserDao.edit_user_dao(query_db, edit_user)
@@ -102,12 +133,12 @@ class UserService:
                         for post in page_object.post_ids:
                             UserDao.add_user_post_dao(query_db, UserPostModel(userId=page_object.user_id, postId=post))
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='用户不存在')
+            result = {'is_success': False, 'message': '用户不存在'}
 
         return CrudResponseModel(**result)
 
@@ -123,17 +154,19 @@ class UserService:
             user_id_list = page_object.user_ids.split(',')
             try:
                 for user_id in user_id_list:
-                    user_id_dict = dict(userId=user_id, updateBy=page_object.update_by, updateTime=page_object.update_time)
+                    user_id_dict = {'userId': user_id, 
+                                    'updateBy': page_object.update_by, 
+                                    'updateTime': page_object.update_time}
                     UserDao.delete_user_role_dao(query_db, UserRoleModel(**user_id_dict))
                     UserDao.delete_user_post_dao(query_db, UserPostModel(**user_id_dict))
                     UserDao.delete_user_dao(query_db, UserModel(**user_id_dict))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入用户id为空')
+            result = {'is_success': False, 'message': '传入用户id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -210,7 +243,7 @@ class UserService:
         if page_object.old_password:
             user = UserDao.get_user_detail_by_id(query_db, user_id=page_object.user_id).get('user_basic_info')
             if not PwdUtil.verify_password(page_object.old_password, user.password):
-                result = dict(is_success=False, message='旧密码不正确')
+                result = {'is_success': False, 'message': '旧密码不正确'}
                 return CrudResponseModel(**result)
             else:
                 del reset_user['old_password']
@@ -220,7 +253,7 @@ class UserService:
         try:
             UserDao.edit_user_dao(query_db, reset_user)
             query_db.commit()
-            result = dict(is_success=True, message='重置成功')
+            result = {"is_success": True, "message": "重置成功"}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -228,15 +261,13 @@ class UserService:
         return CrudResponseModel(**result)
 
     @classmethod
-    async def batch_import_user_services(cls, query_db: Session, file: UploadFile, update_support: bool, current_user: CurrentUserModel):
+    async def batch_import_user_services(
+        cls, query_db: Session, file: UploadFile, update_support: bool, current_user: CurrentUserModel
+    ):
         """
         批量导入用户service
-        :param query_db: orm对象
-        :param file: 用户导入文件对象
-        :param update_support: 用户存在时是否更新
-        :param current_user: 当前用户对象
-        :return: 批量导入用户结果
         """
+
         header_dict = {
             "部门编号": "dept_id",
             "登录名称": "user_name",
@@ -244,65 +275,86 @@ class UserService:
             "用户邮箱": "email",
             "手机号码": "phonenumber",
             "用户性别": "sex",
-            "帐号状态": "status"
+            "帐号状态": "status",
         }
+
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
         await file.close()
-        df.rename(columns=header_dict, inplace=True)
+
+        wb = load_workbook(io.BytesIO(contents))
+        ws = wb.active  # 默认第一个sheet
+
+        # 读取表头
+        headers = [cell.value for cell in ws[1]]
+        mapped_headers = [header_dict.get(h) for h in headers]
+
         add_error_result = []
         count = 0
+
         try:
-            for index, row in df.iterrows():
-                count = count + 1
-                if row['sex'] == '男':
-                    row['sex'] = '0'
-                if row['sex'] == '女':
-                    row['sex'] = '1'
-                if row['sex'] == '未知':
-                    row['sex'] = '2'
-                if row['status'] == '正常':
-                    row['status'] = '0'
-                if row['status'] == '停用':
-                    row['status'] = '1'
-                add_user = UserModel(
-                    deptId=row['dept_id'],
-                    userName=row['user_name'],
-                    password=PwdUtil.get_password_hash('123456'),
-                    nickName=row['nick_name'],
-                    email=row['email'],
-                    phonenumber=str(row['phonenumber']),
-                    sex=row['sex'],
-                    status=row['status'],
-                    createBy=current_user.user.user_name,
-                    updateBy=current_user.user.user_name
-                )
-                user_info = UserDao.get_user_by_info(query_db, UserModel(userName=row['user_name']))
+            # 从第二行开始遍历
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                count += 1
+
+                row_dict = dict(zip(mapped_headers, row))
+
+                if not row_dict.get("user_name"):
+                    continue  # 跳过空行
+
+                # 数据转换
+                sex_map = {"男": "0", "女": "1", "未知": "2"}
+                status_map = {"正常": "0", "停用": "1"}
+
+                row_dict["sex"] = sex_map.get(row_dict.get("sex"))
+                row_dict["status"] = status_map.get(row_dict.get("status"))
+
+                user_info = UserDao.get_user_by_info(query_db, UserModel(userName=row_dict.get("user_name")))
+
                 if user_info:
                     if update_support:
                         edit_user = UserModel(
                             userId=user_info.user_id,
-                            deptId=row['dept_id'],
-                            userName=row['user_name'],
-                            nickName=row['nick_name'],
-                            email=row['email'],
-                            phonenumber=str(row['phonenumber']),
-                            sex=row['sex'],
-                            status=row['status'],
-                            updateBy=current_user.user.user_name
+                            deptId=row_dict.get("dept_id"),
+                            userName=row_dict.get("user_name"),
+                            nickName=row_dict.get("nick_name"),
+                            email=row_dict.get("email"),
+                            phonenumber=str(row_dict.get("phonenumber")),
+                            sex=row_dict.get("sex"),
+                            status=row_dict.get("status"),
+                            updateBy=current_user.user.user_name,
                         ).model_dump(exclude_unset=True)
+
                         UserDao.edit_user_dao(query_db, edit_user)
                     else:
-                        add_error_result.append(f"{count}.用户账号{row['user_name']}已存在")
+                        add_error_result.append(f"{count}.用户账号{row_dict.get('user_name')}已存在")
                 else:
+                    add_user = UserModel(
+                        deptId=row_dict.get("dept_id"),
+                        userName=row_dict.get("user_name"),
+                        password=PwdUtil.get_password_hash("123456"),
+                        nickName=row_dict.get("nick_name"),
+                        email=row_dict.get("email"),
+                        phonenumber=str(row_dict.get("phonenumber")),
+                        sex=row_dict.get("sex"),
+                        status=row_dict.get("status"),
+                        createBy=current_user.user.user_name,
+                        updateBy=current_user.user.user_name,
+                    )
                     UserDao.add_user_dao(query_db, add_user)
+
             query_db.commit()
-            result = dict(is_success=True, message='\n'.join(add_error_result))
+
+            result = {
+                "is_success": True,
+                "message": "\n".join(add_error_result)
+            }
+
         except Exception as e:
             query_db.rollback()
             raise e
 
         return CrudResponseModel(**result)
+
 
     @staticmethod
     def get_user_import_template_services():
@@ -313,12 +365,14 @@ class UserService:
         header_list = ["部门编号", "登录名称", "用户名称", "用户邮箱", "手机号码", "用户性别", "帐号状态"]
         selector_header_list = ["用户性别", "帐号状态"]
         option_list = [{"用户性别": ["男", "女", "未知"]}, {"帐号状态": ["正常", "停用"]}]
-        binary_data = get_excel_template(header_list=header_list, selector_header_list=selector_header_list, option_list=option_list)
+        binary_data = get_excel_template(header_list=header_list,
+                                         selector_header_list=selector_header_list,
+                                         option_list=option_list)
 
         return binary_data
 
     @staticmethod
-    def export_user_list_services(user_list: List):
+    def export_user_list_services(user_list: list):
         """
         导出用户信息service
         :param user_list: 用户信息列表
@@ -407,7 +461,7 @@ class UserService:
                     else:
                         UserDao.add_user_role_dao(query_db, UserRoleModel(userId=page_object.user_id, roleId=role_id))
                 query_db.commit()
-                result = dict(is_success=True, message='分配成功')
+                result = {'is_success': True, 'message': '分配成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -415,7 +469,7 @@ class UserService:
             try:
                 UserDao.delete_user_role_by_user_and_role_dao(query_db, UserRoleModel(userId=page_object.user_id))
                 query_db.commit()
-                result = dict(is_success=True, message='分配成功')
+                result = {'is_success': True, 'message': '分配成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -429,12 +483,12 @@ class UserService:
                     else:
                         UserDao.add_user_role_dao(query_db, UserRoleModel(userId=user_id, roleId=page_object.role_id))
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='不满足新增条件')
+            result = {'is_success': False, 'message': '不满足新增条件'}
 
         return CrudResponseModel(**result)
 
@@ -451,7 +505,7 @@ class UserService:
                 try:
                     UserDao.delete_user_role_by_user_and_role_dao(query_db, UserRoleModel(userId=page_object.user_id, roleId=page_object.role_id))
                     query_db.commit()
-                    result = dict(is_success=True, message='删除成功')
+                    result = {'is_success': True, 'message': '删除成功'}
                 except Exception as e:
                     query_db.rollback()
                     raise e
@@ -461,14 +515,14 @@ class UserService:
                     for user_id in user_id_list:
                         UserDao.delete_user_role_by_user_and_role_dao(query_db, UserRoleModel(userId=user_id, roleId=page_object.role_id))
                     query_db.commit()
-                    result = dict(is_success=True, message='删除成功')
+                    result = {'is_success': True, 'message': '删除成功'}
                 except Exception as e:
                     query_db.rollback()
                     raise e
             else:
-                result = dict(is_success=False, message='不满足删除条件')
+                result = {'is_success': False, 'message': '不满足删除条件'}
         else:
-            result = dict(is_success=False, message='传入用户角色关联信息为空')
+            result = {'is_success': False, 'message': '传入用户角色关联信息为空'}
 
         return CrudResponseModel(**result)
 

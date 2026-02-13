@@ -142,7 +142,7 @@ class GetConfig:
     def __init__(self):
         self.parse_cli_args()
 
-    @lru_cache()
+    @lru_cache
     def get_app_config(self):
         """
         获取应用配置
@@ -150,7 +150,7 @@ class GetConfig:
         # 实例化应用配置模型
         return AppSettings()
 
-    @lru_cache()
+    @lru_cache
     def get_jwt_config(self):
         """
         获取Jwt配置
@@ -158,7 +158,7 @@ class GetConfig:
         # 实例化Jwt配置模型
         return JwtSettings()
 
-    @lru_cache()
+    @lru_cache
     def get_database_config(self):
         """
         获取数据库配置
@@ -166,7 +166,7 @@ class GetConfig:
         # 实例化数据库配置模型
         return DataBaseSettings()
 
-    @lru_cache()
+    @lru_cache
     def get_redis_config(self):
         """
         获取Redis配置
@@ -174,7 +174,7 @@ class GetConfig:
         # 实例化Redis配置模型
         return RedisSettings()
 
-    @lru_cache()
+    @lru_cache
     def get_upload_config(self):
         """
         获取数据库配置
@@ -182,7 +182,7 @@ class GetConfig:
         # 实例上传配置
         return UploadSettings()
 
-    @lru_cache()
+    @lru_cache
     def get_feishu_config(self):
         """
         获取数据库配置
@@ -190,7 +190,7 @@ class GetConfig:
         # 实例上传配置
         return MessageFeishuBotSettings()
 
-    @lru_cache()
+    @lru_cache
     def get_metrics_config(self):
         """
         获取数据采集配置

@@ -1,52 +1,51 @@
 import asyncio
 import inspect
-import logging
-import sys
 import time
 from datetime import datetime
 
-from starlette.concurrency import run_in_threadpool
-
-from module_hrm.utils.util import get_system_stats
-from utils.log_util import logger
-
-from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel, UserInfoModel
 from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.push_vo import FeishuRobotModel
-from module_hrm.service.runner.runner_service import run_by_async, run_test_in_background
+from module_hrm.service.runner.runner_service import run_by_async
+from module_hrm.utils.util import get_system_stats
+from utils.log_util import logger
+
+from .task_register import register_job
 
 
+@register_job("module_task.scheduler_qtr.job_sys_info")
 def job_sys_info(*args, **kwargs):
     get_system_stats()
 
+@register_job("module_task.scheduler_qtr.job")
 def job(*args, **kwargs):
     # logger.info(args)
     # logger.info(kwargs)
     time.sleep(1)
     logger.info(f"执行了测试方法: {args}  {kwargs}")
 
+@register_job("module_task.scheduler_qtr.test_error")
 def test_error(*args, **kwargs):
     # logger.info(args)
     # logger.info(kwargs)
     try:
         raise TypeError("测试执行异常哈")
-    except:
+    except Exception:
 
         logger.info(f"执行了异常测试方法: {args}  {kwargs}")
 
-
+@register_job("module_task.scheduler_qtr.test_error2")
 def test_error2(*args, **kwargs):
     # logger.info(args)
     # logger.info(kwargs)
     try:
         time.sleep(5)
         raise TypeError("测试执行异常哈2")
-    except:
+    except Exception:
 
         logger.info(f"执行了异常测试方法2: {args}  {kwargs}")
 
-
+@register_job("module_task.scheduler_qtr.job_run_test")
 def job_run_test(*args, **kwargs):
     """
     执行测试任务

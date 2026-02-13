@@ -1,10 +1,10 @@
 import os
-from typing import Dict
 from typing import Optional
 
 import psutil
-from .utils import is_linux,is_windows,file_exists
+
 from .enums import ModeEnum
+from .utils import file_exists, is_linux, is_windows
 
 CGROUP_ROOT = "/sys/fs/cgroup"
 

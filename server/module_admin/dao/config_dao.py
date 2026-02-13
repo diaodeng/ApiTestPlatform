@@ -1,8 +1,10 @@
-from sqlalchemy.orm import Session
-from module_admin.entity.do.config_do import SysConfig
-from module_admin.entity.vo.config_vo import *
-from utils.page_util import PageUtil
 from datetime import datetime, time
+
+from sqlalchemy.orm import Session
+
+from module_admin.entity.do.config_do import SysConfig
+from module_admin.entity.vo.config_vo import ConfigModel, ConfigPageQueryModel
+from utils.page_util import PageUtil
 
 
 class ConfigDao:

@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from datetime import datetime
+
+from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from config.database import Base
-from datetime import datetime
 
 
 class SysJob(Base):

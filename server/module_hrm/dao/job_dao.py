@@ -1,10 +1,8 @@
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
 
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.entity.do.job_do import QtrJob
-from module_hrm.entity.vo.job_vo import *
+from module_hrm.entity.vo.job_vo import JobModel, JobPageQueryModel
 from utils.page_util import PageUtil
 
 
@@ -45,7 +43,10 @@ class JobDao:
         return job_info
 
     @classmethod
-    def get_job_list(cls, db: Session, query_object: JobPageQueryModel, data_scope_sql: str,  is_page: bool = False):
+    def get_job_list(cls, db: Session,
+                     query_object: JobPageQueryModel,
+                     data_scope_sql: DataScopeExpr,
+                     is_page: bool = False):
         """
         根据查询参数获取定时任务列表信息
         :param db: orm对象
@@ -58,7 +59,7 @@ class JobDao:
             .filter(QtrJob.job_name.like(f'%{query_object.job_name}%') if query_object.job_name else True,
                     QtrJob.job_group == query_object.job_group if query_object.job_group else True,
                     QtrJob.status == query_object.status if query_object.status else True,
-                    eval(data_scope_sql)
+                    data_scope_sql
                     ) \
             .order_by(QtrJob.create_time.desc(), QtrJob.update_time.desc()).distinct()
         job_list = PageUtil.paginate(query, query_object.page_num, query_object.page_size, is_page)
@@ -110,7 +111,8 @@ class JobDao:
         """
         编辑定时任务数据库操作
         :param db: orm对象
-        :param job: 需要更新的定时任务字典
+        :param job_id: int
+        :param run_status: 运行状态（可选）
         :return:
         """
         db.query(QtrJob) \

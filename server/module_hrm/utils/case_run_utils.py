@@ -1,21 +1,18 @@
-import traceback
-import textwrap
-import httpx
-
-import quickjs
-
-from module_hrm.entity.vo.case_vo_detail_for_handle import CustomHooksParams, HooksModel, TStep, StepLogs
-from module_hrm.entity.vo import case_vo_detail_for_run as caseVoForRun
-from module_hrm.enums.enums import CodeTypeEnum, DataType
-from module_hrm.exceptions import TestFailError
-from module_hrm.utils.CaseRunLogHandle import CustomStackLevelLogger
-from module_hrm.utils.common import key_value_dict, update_or_extend_list, dict2list
-from utils.log_util import logger
-import json
-import jmespath
 import datetime
+import json
+import textwrap
+import traceback
+
+import httpx
+import jmespath
+import quickjs
 from jsonpath import jsonpath
 
+from module_hrm.entity.vo import case_vo_detail_for_run as caseVoForRun
+from module_hrm.entity.vo.case_vo_detail_for_handle import CustomHooksParams, HooksModel, StepLogs, TStep
+from module_hrm.enums.enums import CodeTypeEnum, DataType
+from module_hrm.utils.CaseRunLogHandle import CustomStackLevelLogger
+from module_hrm.utils.common import dict2list, key_value_dict, update_or_extend_list
 
 # 初始化一个 JS 运行环境（默认是 Node.js）
 js_code = """
@@ -242,7 +239,7 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomS
         python_code_source = textwrap.dedent(python_code_source)
         code_obj = compile(python_code_source, "<custom-hook>", "exec")
         exec(code_obj, sandbox_globals, None)
-    except Exception as err:
+    except Exception:
         apt.failed = True
         raise
         # logger.error(f"自定义python执行异常： {err}")

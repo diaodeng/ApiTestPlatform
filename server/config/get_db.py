@@ -1,11 +1,11 @@
-from config.database import SessionLocal, Base, engine
-from utils.log_util import logger
+from collections.abc import Callable
+from typing import Any
 
-
-
-from typing import Any, Callable
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
+
+from config.database import Base, SessionLocal, engine
+from utils.log_util import logger
 
 
 class AsyncSessionProxy:
@@ -41,7 +41,7 @@ def get_db_pro():
     try:
         yield current_db
         current_db.commit()
-    except Exception as e:
+    except Exception:
         current_db.rollback()
         raise
     finally:

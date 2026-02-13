@@ -1,9 +1,9 @@
-import logging
-from io import StringIO
-import threading
-from utils.log_util import logger
 import asyncio
+import logging
+import threading
+from io import StringIO
 
+from utils.log_util import logger
 
 log_context = threading.local()
 

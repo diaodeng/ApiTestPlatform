@@ -1,6 +1,7 @@
+from typing import Any, Optional
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
-from typing import Optional, List, Any
 
 
 class CacheMonitorModel(BaseModel):
@@ -9,7 +10,7 @@ class CacheMonitorModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    command_stats: Optional[List] = []
+    command_stats: Optional[list] = []
     db_size: Optional[int] = None
     info: Optional[dict] = {}
 

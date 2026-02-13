@@ -3,7 +3,8 @@ name = "server"
 version = "1.0.4.2"
 description = "一款现代化的多功能测试管理平台"
 readme = "README.md"
-requires-python = ">=3.10"
+target-version = "py310"  # 目标版本，ruff语法检测使用
+requires-python = ">=3.10"  # 打包进入资源提示，最低版本要求  .python-version中是运行时版本切换（uv使用相关），这三个应该一致
 dependencies = [
     "apscheduler==3.10.4",
     "bcrypt==4.1.2",
@@ -44,6 +45,23 @@ line-length = 120
 target-version = "py311"
 extend-exclude = ["README.md"]
 
+
+
 [tool.ruff.lint]
-select = ["C4", "E", "F", "I", "PERF", "UP"]
-ignore = ["PERF203"]
+select = ["C4", "E", "F", "B", "I", "PERF", "UP"]
+ignore = ["PERF203","UP007","UP006","UP045", "B008"]
+
+fixable = [
+    "E",    # 基础风格
+    "F",    # pyflakes
+    "I",    # import排序
+    "C4",   # 简化推导式
+    "UP",   # pyupgrade（已排除不安全规则）
+]
+
+unfixable = [
+    "B",      # bugbear（可能改语义）
+    "PERF",   # 性能优化类规则（可能改逻辑）
+]
+
+

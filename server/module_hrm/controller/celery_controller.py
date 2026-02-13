@@ -1,16 +1,10 @@
 # main.py
-from fastapi import FastAPI, HTTPException, APIRouter, Depends
 from celery.result import AsyncResult
+from fastapi import APIRouter
+from pydantic import BaseModel
+
 from app1 import app  # 导入Celery实例
 from celery_task import process_task  # 导入任务函数
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-
-from config.get_db import get_db
-from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_admin.service.login_service import LoginService
-from module_hrm.entity.vo.case_vo import CaseRunModel
-from module_hrm.service.runner.runner_service import run_by_async
 
 celeryController = APIRouter(prefix='/hrm/celery')
 

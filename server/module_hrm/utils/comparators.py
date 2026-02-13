@@ -3,24 +3,24 @@ Built-in validate comparators.
 """
 import json
 import re
-from typing import Text, Any, Union
+from typing import Any, Union
 
 
-def equals(check_value: Any, expect_value: Any, message: Text = ""):
+def equals(check_value: Any, expect_value: Any, message: str = ""):
     """
     check_value == expect_value, message
     """
     assert check_value == expect_value, f"{message}:{check_value} == {expect_value}"
 
 
-def equals_as_int(check_value: Any, expect_value: Any, message: Text = ""):
+def equals_as_int(check_value: Any, expect_value: Any, message: str = ""):
     """
     int(check_value) == int(expect_value), message or f"{check_value} == {expect_value}"
     """
     assert int(check_value) == int(expect_value), f"{message}:{int(check_value)} == {int(expect_value)}"
 
 
-def equals_as_str(check_value: Text, expect_value: Any, message: Text = ""):
+def equals_as_str(check_value: str, expect_value: Any, message: str = ""):
     """
     if isinstance(check_value, (dict, list, tuple)):
         check_value = json.dumps(check_value, ensure_ascii=False)
@@ -40,7 +40,7 @@ def equals_as_str(check_value: Text, expect_value: Any, message: Text = ""):
 
 
 def greater_than(
-        check_value: Union[int, float], expect_value: Union[int, float], message: Text = ""
+        check_value: Union[int, float], expect_value: Union[int, float], message: str = ""
 ):
     """
     check_value > expect_value, message
@@ -49,7 +49,7 @@ def greater_than(
 
 
 def less_than(
-        check_value: Union[int, float], expect_value: Union[int, float], message: Text = ""
+        check_value: Union[int, float], expect_value: Union[int, float], message: str = ""
 ):
     """
     check_value < expect_value, message
@@ -58,7 +58,7 @@ def less_than(
 
 
 def greater_or_equals(
-        check_value: Union[int, float], expect_value: Union[int, float], message: Text = ""
+        check_value: Union[int, float], expect_value: Union[int, float], message: str = ""
 ):
     """
     check_value >= expect_value, message
@@ -67,7 +67,7 @@ def greater_or_equals(
 
 
 def less_or_equals(
-        check_value: Union[int, float], expect_value: Union[int, float], message: Text = ""
+        check_value: Union[int, float], expect_value: Union[int, float], message: str = ""
 ):
     """
     check_value <= expect_value, message
@@ -75,14 +75,14 @@ def less_or_equals(
     assert check_value <= expect_value, f"{message}:{check_value} <= {expect_value}"
 
 
-def not_equals(check_value: Any, expect_value: Any, message: Text = ""):
+def not_equals(check_value: Any, expect_value: Any, message: str = ""):
     """
     check_value != expect_value, message
     """
     assert check_value != expect_value, f"{message}:{check_value} != {expect_value}"
 
 
-def string_not_equals(check_value: Text, expect_value: Any, message: Text = ""):
+def string_not_equals(check_value: str, expect_value: Any, message: str = ""):
     """
     str(check_value) == str(expect_value), message
     """
@@ -90,7 +90,7 @@ def string_not_equals(check_value: Text, expect_value: Any, message: Text = ""):
         expect_value), f"{message}:{str(check_value)} != {str(expect_value)}"
 
 
-def length_equals(check_value: Text, expect_value: int, message: Text = ""):
+def length_equals(check_value: str, expect_value: int, message: str = ""):
     """
     len(check_value) == expect_value, message
     """
@@ -99,7 +99,7 @@ def length_equals(check_value: Text, expect_value: int, message: Text = ""):
 
 
 def length_greater_than(
-        check_value: Text, expect_value: Union[int, float], message: Text = ""
+        check_value: str, expect_value: Union[int, float], message: str = ""
 ):
     """
     len(check_value) > expect_value, message
@@ -111,7 +111,7 @@ def length_greater_than(
 
 
 def length_greater_or_equals(
-        check_value: Text, expect_value: Union[int, float], message: Text = ""
+        check_value: str, expect_value: Union[int, float], message: str = ""
 ):
     """
     len(check_value) >= expect_value, message
@@ -123,7 +123,7 @@ def length_greater_or_equals(
 
 
 def length_less_than(
-        check_value: Text, expect_value: Union[int, float], message: Text = ""
+        check_value: str, expect_value: Union[int, float], message: str = ""
 ):
     """
     len(check_value) < expect_value, message
@@ -135,7 +135,7 @@ def length_less_than(
 
 
 def length_less_or_equals(
-        check_value: Text, expect_value: Union[int, float], message: Text = ""
+        check_value: str, expect_value: Union[int, float], message: str = ""
 ):
     """
     len(check_value) <= expect_value, message
@@ -146,7 +146,7 @@ def length_less_or_equals(
     assert len(check_value) <= expect_value, f"{message}:{len(check_value)} <= {expect_value}"
 
 
-def contains(check_value: Any, expect_value: Any, message: Text = ""):
+def contains(check_value: Any, expect_value: Any, message: str = ""):
     """
     expect_value in check_value, message
     """
@@ -156,7 +156,7 @@ def contains(check_value: Any, expect_value: Any, message: Text = ""):
     assert expect_value in check_value, f"{message}:{expect_value} in {check_value}"
 
 
-def contained_by(check_value: Any, expect_value: Any, message: Text = ""):
+def contained_by(check_value: Any, expect_value: Any, message: str = ""):
     """
     check_value in expect_value, message
     """
@@ -166,7 +166,7 @@ def contained_by(check_value: Any, expect_value: Any, message: Text = ""):
     assert check_value in expect_value, f"{message}:{check_value} in {expect_value}"
 
 
-def type_match(check_value: Any, expect_value: Any, message: Text = ""):
+def type_match(check_value: Any, expect_value: Any, message: str = ""):
     """
     type(check_value) == get_type(expect_value), message
     """
@@ -188,7 +188,7 @@ def type_match(check_value: Any, expect_value: Any, message: Text = ""):
         assert type(check_value) == get_type(expect_value), message
 
 
-def regex_match(check_value: Text, expect_value: Any, message: Text = ""):
+def regex_match(check_value: str, expect_value: Any, message: str = ""):
     """
     re.match(expect_value, check_value), message
     """
@@ -197,21 +197,21 @@ def regex_match(check_value: Text, expect_value: Any, message: Text = ""):
     assert re.match(expect_value, check_value), message
 
 
-def startswith(check_value: Any, expect_value: Any, message: Text = ""):
+def startswith(check_value: Any, expect_value: Any, message: str = ""):
     """
     str(check_value).startswith(str(expect_value)), message
     """
     assert str(check_value).startswith(str(expect_value)), message
 
 
-def endswith(check_value: Text, expect_value: Any, message: Text = ""):
+def endswith(check_value: str, expect_value: Any, message: str = ""):
     """
     str(check_value).endswith(str(expect_value)), message
     """
     assert str(check_value).endswith(str(expect_value)), message
 
 
-def contain_any(check_value: Text, expect_value: list, message: Text = ""):
+def contain_any(check_value: str, expect_value: list, message: str = ""):
     """
     any([va in check_value for va in expect_value])
     """
@@ -219,7 +219,7 @@ def contain_any(check_value: Text, expect_value: list, message: Text = ""):
     assert any([va in check_value for va in expect_value]), f"{message}:{expect_value} not in {check_value}"
 
 
-def contain_all(check_value: Text, expect_value: list, message: Text = ""):
+def contain_all(check_value: str, expect_value: list, message: str = ""):
     """
     all([va in check_value for va in expect_value])
     """

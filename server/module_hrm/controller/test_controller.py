@@ -2,9 +2,7 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Request
-from fastapi import Depends
-from fastapi import Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
@@ -12,12 +10,20 @@ from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.mock_dao import MockRuleDao
-from module_hrm.entity.vo.mock_vo import MockPageQueryModel, MockModel, AddMockRuleModel, DeleteMockRuleModel, \
-    AddMockResponseModel, MockResponsePageQueryModel
-from module_hrm.service.mock_service import MockService, MockResponseService, RuleMatcher
+from module_hrm.entity.do.mock_do import MockRules
+from module_hrm.entity.vo.mock_vo import (
+    AddMockResponseModel,
+    AddMockRuleModel,
+    DeleteMockRuleModel,
+    MockModel,
+    MockPageQueryModel,
+    MockResponsePageQueryModel,
+)
+from module_hrm.service.mock_service import MockResponseService, MockService, RuleMatcher
 from utils.common_util import bytes2file_response
 from utils.log_util import logger, logger_mock
 from utils.page_util import PageResponseModel
@@ -38,15 +44,15 @@ async def mock_test(request: Request,
         try:
             try:
                 body_data = await request.json()
-            except:
+            except Exception:
                 try:
                     form = await request.form()
                     body_data = dict(form)
-                except:
+                except Exception:
                     body_data = await request.body()
 
             body_data = body_data.decode("utf-8") if isinstance(body_data, bytes) else body_data
-        except:
+        except Exception:
             body_data = None
         logger_mock.info(f"url: {request.url}, method: {request.method}")
         logger_mock.info(f"request.query_params: {dict(request.query_params)}")
@@ -120,19 +126,19 @@ async def get_hrm_test(request: Request, test_path: str):
                 }
         try:
             body_json = await request.json()
-        except:
+        except Exception:
             body_json = None
 
         try:
             body_form = await request.form()
             body_form = dict(body_form)
-        except:
+        except Exception:
             body_form = None
 
         try:
             body_data = await request.body()
             body_data = body_data.decode("utf-8") if isinstance(body_data, bytes) else body_data
-        except:
+        except Exception:
             body_data = None
 
         if method in ["POST", "PUT"]:
@@ -171,7 +177,7 @@ async def get_mock_rule_list(request: Request,
                              page_query: MockPageQueryModel = Depends(MockPageQueryModel.as_query),
                              query_db: Session = Depends(get_db),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                             data_scope_sql: str = Depends(GetDataScope('MockRules', user_alias='manager'))
+                             data_scope_sql: DataScopeExpr = Depends(GetDataScope(MockRules, user_alias='manager'))
                              ):
     try:
         # 获取分页数据
@@ -317,7 +323,8 @@ async def query_detail_hrm_mock_rule(request: Request, mock_rule_id: int, query_
 async def export_hrm_mock_rule_list(request: Request,
                                     page_query: MockPageQueryModel = Depends(MockPageQueryModel.as_form),
                                     query_db: Session = Depends(get_db),
-                                    data_scope_sql: str = Depends(GetDataScope('HrmCase', user_alias='manager'))
+                                    data_scope_sql: DataScopeExpr = Depends(GetDataScope(MockRules,
+                                                                                         user_alias='manager'))
                                     ):
     try:
         # 获取全量数据

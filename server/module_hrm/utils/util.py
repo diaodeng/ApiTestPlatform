@@ -253,10 +253,7 @@ def get_defined_symbols(source: str) -> set:
 
 def get_platform() -> dict:
     return {
-        "python_version": "{} {}".format(
-            platform.python_implementation(),
-            platform.python_version()
-        ),
+        "python_version": f"{platform.python_implementation()} {platform.python_version()}",
         "platform": platform.platform(),
     }
 
@@ -396,7 +393,7 @@ def get_local_ip():
     return local_ip if ("" != local_ip and None != local_ip) else socket.gethostbyname(socket.gethostname())
 
 
-class PermissionHandler(object):
+class PermissionHandler:
     """
     权限处理器
     """

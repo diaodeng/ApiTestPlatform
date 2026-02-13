@@ -1,11 +1,12 @@
 from datetime import datetime
 
-from sqlalchemy import String, BigInteger, DateTime, Float, Integer, Index
+from sqlalchemy import BigInteger, DateTime, Float, Index, Integer, String
 from sqlalchemy.dialects.mysql import LONGTEXT
-from sqlalchemy.orm import mapped_column, Mapped
+from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
 from utils.snowflake import snowIdWorker
+
 from .common_do import BaseModel
 
 

@@ -1,10 +1,10 @@
 from datetime import datetime
 
-from sqlalchemy import Integer, String, DateTime, BigInteger
-from sqlalchemy.orm import mapped_column, Mapped
+from sqlalchemy import BigInteger, DateTime, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 
-class BaseModel():
+class BaseModel:
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment='ID')
     dept_id: Mapped[int] = mapped_column(Integer, default=-1, comment='部门ID')
     create_by: Mapped[str] = mapped_column(String(100), nullable=True, default='', comment='创建者')

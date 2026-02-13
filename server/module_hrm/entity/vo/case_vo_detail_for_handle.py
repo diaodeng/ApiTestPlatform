@@ -2,26 +2,34 @@
 这个是用例数据详情的模型，不是对应于数据库用例表的数据模型，是对应于数据库用例表的request字段的模型
 """
 import json
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Dict, List, Text, Union, Annotated
+from typing import Annotated, Any, Dict, List, Union
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 
-from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum, ParameterTypeEnum, CodeTypeEnum, ScopeEnum, \
-    ConfigDataTypeEnum, AssertOriginalEnum
+from module_hrm.enums.enums import (
+    AssertOriginalEnum,
+    CaseRunStatus,
+    CodeTypeEnum,
+    ConfigDataTypeEnum,
+    ParameterTypeEnum,
+    ScopeEnum,
+    TstepTypeEnum,
+)
 from module_hrm.utils.common import dict2list
 
-Name = Text
-Url = Text
-BaseUrl = Union[HttpUrl, Text]
-VariablesMapping = Dict[Text, Any]
-FunctionsMapping = Dict[Text, Callable]
-Headers = Dict[Text, Text | bool | int | float]
-Cookies = Dict[Text, Text | bool | int | float]
+Name = str
+Url = str
+BaseUrl = Union[HttpUrl, str]
+VariablesMapping = Dict[str, Any]
+FunctionsMapping = Dict[str, Callable]
+Headers = Dict[str, str | bool | int | float]
+Cookies = Dict[str, str | bool | int | float]
 Verify = bool
-Hooks = List[Union[Text, Dict[Text, Any]]]
-Export = List[Text]
+Hooks = List[Union[str, Dict[str, Any]]]
+Export = List[str]
 Validators = List[Dict]
 
 
@@ -49,17 +57,17 @@ class ResponseData(BaseModel):
     status_code: int = 200
     headers: Dict = Field(default_factory=lambda: {})
     cookies: Cookies = Field(default_factory=lambda: {})
-    encoding: Union[Text, None] = None
-    content_type: Text = ""
-    body: Union[Text, bytes, List, Dict, None] = ""  # 默认不会有值，用于在回调中设置自己转换后的内容
-    content: Text | List = ""  # 响应内容为原始数据
-    text: Union[Text, None] = ""  # 响应的原始数据转成text的结果
+    encoding: Union[str, None] = None
+    content_type: str = ""
+    body: Union[str, bytes, List, Dict, None] = ""  # 默认不会有值，用于在回调中设置自己转换后的内容
+    content: str | List = ""  # 响应内容为原始数据
+    text: Union[str, None] = ""  # 响应的原始数据转成text的结果
 
 
 class StepLogs(BaseModel):
-    before_request: Text = ""
-    after_response: Text = ""
-    error: Text = ""
+    before_request: str = ""
+    after_response: str = ""
+    error: str = ""
 
 
 class Result(BaseModel):
@@ -70,11 +78,11 @@ class Result(BaseModel):
     end_time_iso: str = ""
     end_time_stamp: float = 0
     duration: float = 0
-    response: ResponseData | Text = ResponseData()  # text是用gzip压缩过的数据需要解压
-    logs: StepLogs | Text = StepLogs()  # text是用gzip压缩过的数据需要解压
+    response: ResponseData | str = ResponseData()  # text是用gzip压缩过的数据需要解压
+    logs: StepLogs | str = StepLogs()  # text是用gzip压缩过的数据需要解压
 
 
-class MethodEnum(Text, Enum):
+class MethodEnum(str, Enum):
     GET = "GET"
     POST = "POST"
     PUT = "PUT"
@@ -100,33 +108,33 @@ class TransType(Enum):
 
 # configs for thrift rpc
 class TConfigThrift(BaseModel):
-    psm: Text = None
-    env: Text = None
-    cluster: Text = None
-    target: Text = None
-    include_dirs: List[Text] = None
+    psm: str = None
+    env: str = None
+    cluster: str = None
+    target: str = None
+    include_dirs: List[str] = None
     thrift_client: Any = None
     timeout: int = 10
-    idl_path: Text = None
-    method: Text = None
-    ip: Text = "127.0.0.1"
+    idl_path: str = None
+    method: str = None
+    ip: str = "127.0.0.1"
     port: int = 9000
-    service_name: Text = None
+    service_name: str = None
     proto_type: ProtoType = ProtoType.Binary
     trans_type: TransType = TransType.Buffered
 
 
 # configs for db
 class TConfigDB(BaseModel):
-    psm: Text = ""
-    user: Text = ""
-    password: Text = ""
-    ip: Text = ""
+    psm: str = ""
+    user: str = ""
+    password: str = ""
+    ip: str = ""
     port: int = 3306
-    database: Text = ""
+    database: str = ""
 
 
-class TransportEnum(Text, Enum):
+class TransportEnum(str, Enum):
     BUFFERED = "buffered"
     FRAMED = "framed"
 
@@ -134,25 +142,25 @@ class TransportEnum(Text, Enum):
 class TThriftRequest(BaseModel):
     """rpc request model"""
 
-    method: Text = ""
+    method: str = ""
     params: Dict = Field(default_factory=lambda: {})
     thrift_client: Any = None
-    idl_path: Text = ""  # idl local path
+    idl_path: str = ""  # idl local path
     timeout: int = 10  # sec
     transport: TransportEnum = TransportEnum.BUFFERED
-    include_dirs: List[Union[Text, None]] = Field(default_factory=lambda: [])  # param of thriftpy2.load
-    target: Text = ""  # tcp://{ip}:{port} or sd://psm?cluster=xx&env=xx
-    env: Text = "prod"
-    cluster: Text = "default"
-    psm: Text = ""
-    service_name: Text = None
-    ip: Text = None
+    include_dirs: List[Union[str, None]] = Field(default_factory=lambda: [])  # param of thriftpy2.load
+    target: str = ""  # tcp://{ip}:{port} or sd://psm?cluster=xx&env=xx
+    env: str = "prod"
+    cluster: str = "default"
+    psm: str = ""
+    service_name: str = None
+    ip: str = None
     port: int = None
     proto_type: ProtoType = None
     trans_type: TransType = None
 
 
-class SqlMethodEnum(Text, Enum):
+class SqlMethodEnum(str, Enum):
     FETCHONE = "FETCHONE"
     FETCHMANY = "FETCHMANY"
     FETCHALL = "FETCHALL"
@@ -166,13 +174,13 @@ class TSqlRequest(BaseModel):
 
     db_config: TConfigDB = TConfigDB()
     method: SqlMethodEnum = None
-    sql: Text = None
+    sql: str = None
     size: int = 0  # limit nums of sql result
 
 
 class ThinkTime(BaseModel):
     enable: bool = False
-    strategy: Text | None = ""
+    strategy: str | None = ""
     limit: int | float = 0
 
 
@@ -188,8 +196,8 @@ class Retry(BaseModel):
 
 
 class IncludeConfig(BaseModel):
-    id: int | Text | None = None
-    name: Text | None = None
+    id: int | str | None = None
+    name: str | None = None
     allow_extend: bool = True
 
 
@@ -199,7 +207,7 @@ class Include(BaseModel):
 
 class ParameterModel(BaseModel):
     type: int = ParameterTypeEnum.local_table.value
-    value: Text = ""
+    value: str = ""
     is_compress: bool = True
 
 
@@ -208,13 +216,13 @@ class TConfig(BaseModel):
     verify: Verify = False
     base_url: BaseUrl = ""
     # Text: prepare variables in debugtalk.py, ${gen_variables()}
-    variables: List[VariablesMapping] | Text = Field(default_factory=lambda: [])
+    variables: List[VariablesMapping] | str = Field(default_factory=lambda: [])
     parameters: Annotated[Union[ParameterModel, List[VariablesMapping], None], Field(None, description="请求参数")] = None
     headers: List[Headers] = Field(default_factory=lambda: [])
     setup_hooks: HooksModel = HooksModel()
     teardown_hooks: HooksModel = HooksModel()
     export: Export = Field(default_factory=lambda: [])
-    path: Text = ""
+    path: str = ""
     # configs for other protocols
     # thrift: TConfigThrift|None = None
     db: TConfigDB = TConfigDB()
@@ -240,8 +248,8 @@ class TRequest(BaseModel):
     url: Url
     params: List[Headers] = Field(default_factory=lambda: [])
     headers: List[Headers] = Field(default_factory=lambda: [])
-    req_json: Union[Dict, List, Text, None] = Field(None, alias="json")
-    data: List[VariablesMapping] | Text | None = Field(default_factory=lambda: [])
+    req_json: Union[Dict, List, str, None] = Field(None, alias="json")
+    data: List[VariablesMapping] | str | None = Field(default_factory=lambda: [])
     cookies: List[Cookies] = Field(default_factory=lambda: [])
     timeout: float | None = 120
     allow_redirects: bool = False
@@ -270,7 +278,7 @@ class TWebsocket(BaseModel):
     url: Url
     params: List[Headers] = Field(default_factory=lambda: [])
     headers: List[Headers] = Field(default_factory=lambda: [])
-    data: Text | None = ""
+    data: str | None = ""
     cookies: List[Cookies] = Field(default_factory=lambda: [])
     timeout: float | None = 120
     allow_redirects: bool = False
@@ -303,9 +311,9 @@ class ConfigInfo(BaseModel):
 class StepRunConditionDetail(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
     enable: bool = False
-    condition_source: Text | int = ""
-    loop_var: Text = ""  # 循环过程中的临时变量名
-    source_type: Text = ""
+    condition_source: str | int = ""
+    loop_var: str = ""  # 循环过程中的临时变量名
+    source_type: str = ""
 
 
 class StepRunCondition(BaseModel):
@@ -317,21 +325,21 @@ class StepRunCondition(BaseModel):
 class TStep(BaseModel):
     name: Name
     step_type: int = TstepTypeEnum.http.value  # 1 api, 2 webUI
-    step_id: Text = ""
+    step_id: str = ""
     enable: bool = True
     run_condition: StepRunCondition = StepRunCondition()
     request: Annotated[Union[TRequest, TWebsocket, None], Field(None, description="请求信息")] = None
     include: Union[Include, None] = Include()
-    testcase: Union[Text, Callable, None] = None
-    variables: List[VariablesMapping] | Text = Field(default_factory=lambda: [])
+    testcase: Union[str, Callable, None] = None
+    variables: List[VariablesMapping] | str = Field(default_factory=lambda: [])
     setup_hooks: HooksModel = HooksModel()
     teardown_hooks: HooksModel = HooksModel()
     # used to extract request's response field
-    extract: List[VariablesMapping] | Text = Field(default_factory=lambda: [])
+    extract: List[VariablesMapping] | str = Field(default_factory=lambda: [])
     # used to export session variables from referenced testcase
     export: Export = Field(default_factory=lambda: [])
     validators: Validators = Field([], alias="validate")
-    validate_script: List[Text] = Field(default_factory=lambda: [])
+    validate_script: List[str] = Field(default_factory=lambda: [])
     retry_times: int = 0
     retry_interval: int = 0  # sec
     thrift_request: Union[TThriftRequest, None] = None
@@ -388,7 +396,7 @@ class TStep(BaseModel):
 
 
 class TestCase(BaseModel):
-    case_name: Union[Text, None] = None
+    case_name: Union[str, None] = None
     module_id: Union[int, None] = None
     project_id: Union[int, None] = None
     status: Union[int, None] = None  # CaseStatusEnum
