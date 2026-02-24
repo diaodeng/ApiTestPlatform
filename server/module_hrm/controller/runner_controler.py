@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 
 import httpx
@@ -17,7 +18,7 @@ from module_hrm.entity.vo.case_vo import CaseModel, CaseRunModel
 from module_hrm.entity.vo.report_vo import ReportListModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailDelModel, RunDetailQueryModel
 from module_hrm.enums.enums import CaseRunStatus
-from module_hrm.service.debugtalk_service import DebugTalkService
+from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ForwardRulesHandler, ParametersHandler
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.runner_service import run_by_async, save_run_detail
@@ -67,12 +68,12 @@ async def for_debug(request: Request,
                     debug_info: CaseRunModel,
                     query_db: Session = Depends(get_db),
                     current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
-    debugtalk_obj = None
     try:
         ForwardRulesHandler.transform(query_db, debug_info)
         debug_info.semaphore = asyncio.Semaphore(1)
         debug_info.runner = current_user.user.user_id
         debug_info.log_level = logging.DEBUG
+        debug_info.run_id = uuid.uuid4().hex
         case_data = debug_info.case_data
         if not isinstance(case_data, dict):
             case_data = case_data.model_dump(by_alias=True)
@@ -112,8 +113,7 @@ async def for_debug(request: Request,
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
     finally:
-        if debugtalk_obj:
-            debugtalk_obj.del_import()
+        DebugTalkHandler.del_run_module(debug_info.project_debugtalk_set.values())
 
 
 @runnerController.get("/runHistory/{detail_id}",

@@ -90,7 +90,7 @@ async def delete_hrm_debugtalk(request: Request,
                                query_db: Session = Depends(get_db),
                                current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        delete_debugtalk = DeleteDebugTalkModel(projectIds=project_ids)
+        delete_debugtalk = DeleteDebugTalkModel(project_ids=project_ids)
         delete_debugtalk.update_by = current_user.user.user_name
         delete_debugtalk.update_time = datetime.now()
         delete_debugtalk_result = DebugTalkService.delete_debugtalk_services(query_db, delete_debugtalk)

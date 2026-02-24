@@ -12,7 +12,7 @@ class DebugTalkModel(CommonDataModel):
     """
     DebugTalk表对应pydantic模型
     """
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
 
     debugtalk_id: Optional[int] = None
     project_id: Optional[int] = None
@@ -38,7 +38,7 @@ class DeleteDebugTalkModel(BaseModel):
     """
     删除DebugTalk模型
     """
-    model_config = ConfigDict(alias_generator=to_camel)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     project_ids: str
     update_by: Optional[str] = None

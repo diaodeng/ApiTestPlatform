@@ -4,6 +4,7 @@ import copy
 import csv
 import gzip
 import importlib
+import inspect
 import itertools
 import json
 import os
@@ -12,6 +13,7 @@ import re
 import socket
 import sys
 import zlib
+from collections.abc import Callable
 from datetime import datetime
 from itertools import combinations
 
@@ -182,41 +184,56 @@ def un_import(module_name):
         del sys.modules[module_name]
 
 
-def get_func_names(module_obj: object) -> list:
-    try:
-        all_func_name = module_obj.__all__
-    except AttributeError:
-        all_func_name = [name for name in dir(module_obj) if not name.startswith('_')]
-    return all_func_name
+def iter_debugtalk_functions(module_obj) -> dict[str, Callable]:
+    """
+    返回 DebugTalk 中可用的函数映射：
+    {
+        "func": func,
+        "Class.method": method,
+    }
+    """
+    results: dict[str, Callable] = {}
+
+    # === 模块级函数 ===
+    for name, fn in inspect.getmembers(module_obj, inspect.isfunction):
+        if fn.__module__ != module_obj.__name__:
+            continue
+        if name.startswith("_"):
+            continue
+        results[name] = fn
+
+    # === 类方法 ===
+    for cls_name, cls in inspect.getmembers(module_obj, inspect.isclass):
+        if cls.__module__ != module_obj.__name__:
+            continue
+
+        for meth_name, meth in inspect.getmembers(cls, inspect.isfunction):
+            if meth_name.startswith("_"):
+                continue
+            results[f"{cls_name}.{meth_name}"] = meth
+
+    return results
+
+
+def get_func_names(module_obj) -> list[str]:
+    return iter_debugtalk_functions(module_obj).keys()
 
 
 def get_func_map(module_obj: object) -> dict:
-    # all_func_name = module_obj.__dict__.keys()
-    func_map = {}
-    all_func_name = get_func_names(module_obj)
-
-    for func_name in all_func_name:
-        func_map[func_name] = getattr(module_obj, func_name)
-    return func_map
+    return iter_debugtalk_functions(module_obj)
 
 
 def get_func_doc_map(module_obj: object, filter=None) -> dict:
     """
-    从对象中获取包含的方法名及方法的注释
-    :param module_obj:
-    :param filter: 过滤函数，返回true/false
-    :return:
+    获取 DebugTalk 方法名 -> docstring
     """
     func_map = {}
-    all_func_name = get_func_names(module_obj)
-    for func_name in all_func_name:
-        filter_result = True
-        if filter:
-            filter_result = filter(func_name)
-        if not filter_result:
+
+    for name, fn in iter_debugtalk_functions(module_obj).items():
+        if filter and not filter(name):
             continue
-        get_obj = getattr(module_obj, func_name)
-        func_map[func_name] = get_obj.__doc__
+        func_map[name] = inspect.getdoc(fn)
+
     return func_map
 
 
