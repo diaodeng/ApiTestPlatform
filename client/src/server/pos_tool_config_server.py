@@ -1,6 +1,7 @@
 import json
 import os
 
+from common.excptions import PosParamsException
 from model.config import PosParamsModel
 from model.pos_network_model import PosInitRespModel, PosInitRespStoreModel, PosInitRespEnvModel
 from server.config import PosConfig
@@ -29,8 +30,10 @@ class PosToolConfigServer:
             res_data[2] = data.data.env_list
 
         params = PosConfig.read_pos_params(pos_path)
-        if params:
+        if params and isinstance(params, PosParamsModel):
             res_data[0] = params
+        else:
+            raise PosParamsException(f"从本机及服务端获取POS配置失败：{params}")
 
         # 只获取当前环境的store_list
         store_list = []

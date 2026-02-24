@@ -6,6 +6,7 @@ from threading import Thread, Event
 import flet as ft
 from loguru import logger
 
+from common.excptions import PosParamsException
 from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi, PosAccountManagerUi, ChangeLocalPosUi
 from model.config import ResolutionModel, PosParamsModel
 from model.pos_network_model import PosLogoutModel
@@ -465,28 +466,33 @@ class PosHandler:
 
             local_pos_params = PosConfig.read_pos_params(path, 1)
             remote_pos_params = PosConfig.read_pos_params(path, 2)
+            remote_info = PosConfig.remote_pos_info(remote_pos_params)
 
-            if not remote_pos_params:
-                UiUtil.show_snackbar_error(self.page, f"服务端没有当前机台信息，无法启动")
-                return
+            if not remote_pos_params or not isinstance(remote_pos_params, PosParamsModel):
+                logger.info(f"服务端没有当前机台信息，无法启动:{remote_pos_params}")
+                ok = await self.__confirm_dialog(
+                    "POS启动提示",
+                    f"服务端没有当前机台信息，继续启动？"
+                    f"{remote_pos_params}")
+                if not ok:
+                    return
 
-            if not local_pos_params:
+            if not local_pos_params or not isinstance(local_pos_params, PosParamsModel):
                 logger.info(f"没有本地POS配置文件")
                 ok = await self.__confirm_dialog(
                     "POS启动提示",
-                    f"本地配置为空，将启动服务端对应机台：\n"
-                    f"服务端：商家：{remote_pos_params.venderNo}，门店：{remote_pos_params.orgNo}，POS：{remote_pos_params.posId}")
+                    f"本地配置为空，将启动服务端对应机台：\n{remote_info}"
+                    )
                 if not ok:
                     return
             else:
                 if not self.start_config.change_pos and (local_pos_params.venderNo != remote_pos_params.venderNo \
                                                          or local_pos_params.orgNo != remote_pos_params.orgNo \
                                                          or local_pos_params.posId != remote_pos_params.posId):
-
                     open_type = await self.__choice_start_type_dialog(
                         "POS启动提示",
                         f"配置不一致，将启动服务端对应机台："
-                        f"\n云端：商家：{remote_pos_params.venderNo}，门店：{remote_pos_params.orgNo}，POS：{remote_pos_params.posId}；"
+                        f"\n{remote_info}""；"
                         f"\n本地：商家：{local_pos_params.venderNo}，门店：{local_pos_params.orgNo}，POS：{local_pos_params.posId}；")
                     if open_type == 0:
                         return
@@ -542,7 +548,7 @@ class PosHandler:
             # if not file_handle.open_file(path):
             vendor_id = None
             pos_params = PosConfig.read_pos_params(path, 2)
-            if pos_params:
+            if pos_params and isinstance(pos_params, PosParamsModel):
                 vendor_id = pos_params.venderNo
                 pos_resolution = PosConfig.get_vendor_config(vendor_id=vendor_id).resolution
                 if str(pos_params.posType) == "2":
@@ -642,6 +648,9 @@ class PosHandler:
                     child.update()
 
             UiUtil.show_snackbar_success(self.page, "获取POS环境成功")
+        except PosParamsException as pe:
+            logger.error(f"获取POS配置失败: {pe}")
+            UiUtil.show_snackbar_error(self.page, f"{pe}")
         except Exception as ex:
             logger.error(f"获取POS环境失败: {ex}")
             logger.exception(ex)

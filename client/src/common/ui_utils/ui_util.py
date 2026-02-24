@@ -150,7 +150,7 @@ class ChangePosUi(ft.AlertDialog):
             if pos_path:
                 pos_params: PosParamsModel = PosConfig.read_pos_params(pos_path)
                 pos_env = PosConfig.get_local_pos_env(pos_path)
-                if pos_params:
+                if pos_params and isinstance(pos_params, PosParamsModel):
                     vendor_id = pos_params.venderNo
                     store = pos_params.orgNo
                     pos_group = pos_params.posGroupNo
@@ -325,7 +325,7 @@ class PosAccountManagerUi(ft.AlertDialog):
             if pos_path:
                 pos_params: PosParamsModel = PosConfig.read_pos_params(pos_path)
                 vendor_id = None
-                if pos_params:
+                if pos_params and isinstance(pos_params, PosParamsModel):
                     vendor_id = pos_params.venderNo
                 pos_env = PosConfig.get_local_pos_env(pos_path)
                 env_group, account = PosConfig.get_pos_group(vendor_id, pos_env)
@@ -484,7 +484,7 @@ class ChangeLocalPosUi(ft.AlertDialog):
     def get_current_env_info(self):
         local_pos_env = PosConfig.get_local_pos_env(self.pos_path)
         pos_params: PosParamsModel = PosConfig.read_pos_params(self.pos_path)
-        if pos_params:
+        if pos_params and isinstance(pos_params, PosParamsModel):
             env_local = "本地环境" if pos_params.is_local else "远端环境"
             env_group, account = PosConfig.get_pos_group(pos_params.venderNo, local_pos_env)
             pos_tool_config_data = PosToolConfigServer.read_pos_tool_config()

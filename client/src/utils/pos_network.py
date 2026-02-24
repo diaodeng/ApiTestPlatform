@@ -168,7 +168,7 @@ def pos_init(pos_path:str, version:str=None) -> PosParamsModel:
             resp = client.post(f"{pos_pro_host}/pos/init", json=data)
         if resp.status_code != 200:
             logger.error(f"获取pos初始配置（pos/init）失败，状态码： {resp.status_code}")
-            raise PosHandleException(f"获取pos初始配置（pos/init）失败: {resp.status_code}")
+            raise ConnectionError(f"获取pos初始配置（pos/init）失败: {resp.status_code}")
         content = resp.json()
         logger.info(f"获取pos初始配置（pos/init）结果： {json.dumps(content, ensure_ascii=False)}")
         if content["code"] != "0000":
