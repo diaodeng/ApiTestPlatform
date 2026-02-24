@@ -87,12 +87,12 @@ async def edit_hrm_project(request: Request,
 async def delete_hrm_project(request: Request, project_ids: str, query_db: Session = Depends(get_db),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-        delete_project = DeleteProjectModel(projectIds=project_ids)
+        delete_project = DeleteProjectModel(project_ids=project_ids)
         delete_project.update_by = current_user.user.user_name
         delete_project.update_time = datetime.now()
         delete_project_result = ProjectService.delete_project_services(query_db, delete_project)
 
-        delete_debugtalk = DeleteDebugTalkModel(projectIds=project_ids)
+        delete_debugtalk = DeleteDebugTalkModel(project_ids=project_ids)
         delete_debugtalk.update_by = current_user.user.user_name
         delete_debugtalk.update_time = datetime.now()
         delete_debugtalk_result = DebugTalkService.delete_debugtalk_services(query_db, delete_debugtalk)

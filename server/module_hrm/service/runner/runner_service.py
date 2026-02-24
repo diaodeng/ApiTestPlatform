@@ -20,7 +20,7 @@ from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
-from module_hrm.entity.vo.case_vo import CaseRunModel
+from module_hrm.entity.vo.case_vo import CaseRunModel, ProjectDebugtalkInfoModel
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
 from module_hrm.entity.vo.env_vo import EnvModel
 from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportListModel
@@ -81,6 +81,7 @@ async def save_run_detail(query_db, case_data, run_info):
 async def run_by_single(case_data,
                         run_info: CaseRunModel = None,
                         semaphore: asyncio.Semaphore = None,
+                        debugtalk_info: ProjectDebugtalkInfoModel = None,
                         ) -> list[TestCase]:
     # test_case = CaseInfoHandle(query_db).from_db(index).toRun(env_obj).run_data()
     test_case = case_data
@@ -104,9 +105,6 @@ async def run_by_single(case_data,
             step.result.logs.before_request = f"用例状态为[{status.name}]不执行"
         case_res_datas = [test_case]
     else:
-        # async with semaphore:
-        with SessionLocal() as db:
-            debugtalk_info = await DebugTalkService.project_debugtalk_map(db, case_data.project_id, run_info=run_info)
         # func_map = debugtalk_info.func_map
         runner = TestRunner(test_case, debugtalk_info, run_info)
         case_res_datas = await runner.start()
@@ -188,10 +186,14 @@ async def run_by_batch(run_info: CaseRunModel,
         limit = httpx.Limits(max_connections=100, max_keepalive_connections=50)
         async with httpx.AsyncClient(limits=limit, http2=True) as client:
             run_info.http_client = client
-            for _project_id, ids in all_cases.items():  # 按项目执行
-                if not ids: continue
+            for project_id, ids in all_cases.items():  # 按项目执行
+                if not ids:
+                    continue
 
-                res_data = await run_by_concurrent(list(ids), env_obj, run_info)
+                with SessionLocal() as db:
+                    debugtalk_info = await DebugTalkService.project_debugtalk_map(db, project_id, run_info=run_info)
+
+                res_data = await run_by_concurrent(list(ids), env_obj, run_info, debugtalk_info)
                 total_count += res_data[0]
                 success_count += res_data[1]
                 failed_count += res_data[2]
@@ -203,9 +205,7 @@ async def run_by_batch(run_info: CaseRunModel,
         # raise e
 
     finally:
-        for pdi in run_info.project_debugtalk_set.values():
-            for mn in pdi.module_names:
-                DebugTalkHandler.del_module(mn)
+        DebugTalkHandler.del_run_module(run_info.project_debugtalk_set.values())
         gc.collect()
     return [success, total_count, success_count, failed_count]
 
@@ -222,8 +222,11 @@ async def get_case_info_batch(case_ids, env_obj) -> AsyncGenerator[TestCase, Non
     # return all_data
 
 
-async def run_by_concurrent(case_ids: list[int], env_obj,
-                            run_info: CaseRunModel = None) -> list[int]:
+async def run_by_concurrent(case_ids: list[int],
+                            env_obj,
+                            run_info: CaseRunModel = None,
+                            debugtalk_info: ProjectDebugtalkInfoModel = None
+                            ) -> list[int]:
     """
     并发执行多个用例
     """
@@ -238,7 +241,12 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
     # case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
     #                    range(0, len(case_data_list), run_info.concurrent)]
 
-    async def worker(queue: asyncio.Queue, semaphore: asyncio.Semaphore, stats: dict, lock: asyncio.Lock):
+    async def worker(queue: asyncio.Queue,
+                     semaphore: asyncio.Semaphore,
+                     stats: dict,
+                     lock: asyncio.Lock,
+                     debugtalk_info: ProjectDebugtalkInfoModel
+                     ):
         buffer = []
         batch_size = 50
 
@@ -247,7 +255,7 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
             if case_data is None:
                 queue.task_done()
                 break
-            res_list = await run_by_single(case_data, run_info, semaphore)
+            res_list = await run_by_single(case_data, run_info, semaphore, debugtalk_info=debugtalk_info)
             if not res_list:
                 continue
             for res_data in res_list:
@@ -285,7 +293,11 @@ async def run_by_concurrent(case_ids: list[int], env_obj,
                     await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
 
     concurrent = int(run_info.concurrent * 1.5)
-    tasks = [asyncio.create_task(worker(queue, semaphore, stats=stats, lock=lock)) for i in range(concurrent)]
+    tasks = [asyncio.create_task(worker(queue,
+                                        semaphore,
+                                        stats=stats,
+                                        lock=lock,
+                                        debugtalk_info=debugtalk_info)) for i in range(concurrent)]
 
     async for case_data in get_case_info_batch(case_ids, env_obj):
         await queue.put(case_data)
@@ -330,6 +342,7 @@ async def run_by_async(run_info: CaseRunModel,
         with SessionLocal() as query_db:
             report_info = await ReportDao.create(query_db, report_data)
             run_info.report_id = report_info.report_id
+            run_info.run_id = report_info.report_id
             report_id = report_info.report_id
 
         success, total_count, success_count, failed_count = await run_by_batch(run_info,

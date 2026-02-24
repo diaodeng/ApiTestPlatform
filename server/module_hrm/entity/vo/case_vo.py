@@ -127,6 +127,7 @@ class CaseRunModel(BaseModel):
     run_model: Optional[int | None] = None  # 执行方式，1手动，2定时任务
     report_name: Optional[str] = None  # 测试报告名称
     report_id: Optional[int] = -1  # 测试报告名称
+    run_id: Optional[str|int] = None  # 标识每次运行的唯一id
     is_async: Optional[bool] = False  # 本次执行同步或异步
     log_level: Optional[int] = logging.INFO  # 日志级别
     repeat_num: int = 1  # 用例重复执行次数
@@ -134,7 +135,7 @@ class CaseRunModel(BaseModel):
     concurrent: int = 1  # 并发数(同时执行的用例数)
     run_by_sort: Optional[bool] = False
     case_data: Optional[CaseModel | dict | None] = None  # 用例数据
-    runner: Any = None
+    runner: Any = None  # 用户ID
     dept_id: Optional[int|str] = None
 
     forward_config: Optional[ForwardConfigModel] = ForwardConfigModel()
