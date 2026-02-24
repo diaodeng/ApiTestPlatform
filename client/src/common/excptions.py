@@ -31,3 +31,8 @@ class QTRClientBaseError(Exception):
 class PosHandleException(QTRClientBaseError):
     def __init__(self, message: str, original_exception=None, error_code=None, **kwargs):
         super().__init__(message, original_exception, error_code, **kwargs)
+
+
+class PosParamsException(QTRClientBaseError):
+    def __init__(self, message: str, original_exception=None, error_code=None, **kwargs):
+        super().__init__(message, original_exception, error_code, **kwargs)

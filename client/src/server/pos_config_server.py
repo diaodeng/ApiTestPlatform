@@ -2,7 +2,7 @@ from loguru import logger
 
 from common.excptions import PosHandleException
 from utils import pos_network
-from model.config import PosChangeParamsModel
+from model.config import PosChangeParamsModel, PosParamsModel
 from model.pos_network_model import PosLogoutModel
 from server.config import PosConfig
 from utils.common import get_active_mac, get_local_ip, kill_process_by_name
@@ -25,9 +25,9 @@ class PosConfigServer:
             raise PosHandleException(f"pos环境错误:{env}")
 
         pos_info = PosConfig.read_pos_params(pos_path)
-        if not pos_info:
-            logger.warning(f"获取pos_params参数失败:{pos_path}")
-            raise PosHandleException(f"获取pos_params参数失败:{pos_path}")
+        if not pos_info or not isinstance(pos_info, PosParamsModel):
+            logger.warning(f"获取pos_params参数失败:{pos_path}, {pos_info}")
+            raise PosHandleException(f"获取pos_params参数失败:{pos_path}, {pos_info}")
 
         pos_group, account = PosConfig.get_pos_group(pos_info.venderNo, env)
         if not pos_group:
@@ -59,7 +59,7 @@ class PosConfigServer:
     async def logout_pos_account(self, pos_path) -> None:
         logger.info(f"开始退出账号：{pos_path}")
         pos_config = PosConfig.read_pos_params(pos_path)
-        if not pos_config:
+        if not pos_config or not isinstance(pos_config, PosParamsModel):
             raise PosHandleException(f"获取POS缓存失败， 无法注销POS账号: pos_config={pos_config}")
         pos_env = PosConfig.get_local_pos_env(pos_path)
         pos_group, account = PosConfig.get_pos_group(pos_config.venderNo, pos_env)
