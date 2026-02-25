@@ -1,5 +1,6 @@
 import datetime
 import json
+import re
 import textwrap
 import traceback
 
@@ -13,6 +14,7 @@ from module_hrm.entity.vo.case_vo_detail_for_handle import CustomHooksParams, Ho
 from module_hrm.enums.enums import CodeTypeEnum, DataType
 from module_hrm.utils.CaseRunLogHandle import CustomStackLevelLogger
 from module_hrm.utils.common import dict2list, key_value_dict, update_or_extend_list
+from module_hrm.utils.sandbox_globals import SANDBOX_GLOBALS
 
 # 初始化一个 JS 运行环境（默认是 Node.js）
 js_code = """
@@ -212,26 +214,12 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomS
             apt.failed = True
 
     sandbox_globals = {
-        "__builtins__": {
-            "len": len,
-            "range": range,
-            "str": str,
-            "int": int,
-            "float": float,
-            "bool": bool,
-            "dict": dict,
-            "list": list,
-            "print": print,
-            "Exception": Exception,
-        },
         "apt": apt,
         "logger": logger,
         "assertC": assertC,
-        "jmespath": jmespath,
-        "jsonpath": jsonpath,
-        "json": json,
-        "datetime": datetime,
     }
+
+    sandbox_globals.update(SANDBOX_GLOBALS)
 
     try:
         # global_namespace = globals()
