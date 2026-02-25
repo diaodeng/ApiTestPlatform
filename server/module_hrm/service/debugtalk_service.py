@@ -160,7 +160,7 @@ class DebugTalkService:
     async def commondebugtalk_source(cls, query_db: Session) -> str:
 
         common_debugtalk = query_db.query(HrmDebugTalk).filter(
-            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id is None))
+            or_(HrmDebugTalk.project_id == -1, HrmDebugTalk.project_id == None))
         common_debugtalk = await run_in_threadpool(common_debugtalk.first)
         common_debugtalk = common_debugtalk.debugtalk if common_debugtalk else ""
         return common_debugtalk
