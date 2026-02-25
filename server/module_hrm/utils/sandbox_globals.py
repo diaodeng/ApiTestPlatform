@@ -120,6 +120,8 @@ SANDBOX_GLOBALS = {
     "jmespath": jmespath,
     "jsonpath": jsonpath,
 
+    **SAFE_STD_MODULES,
+
     # 平台能力
     # "logger": logger,
     # "assertC": assertC,
