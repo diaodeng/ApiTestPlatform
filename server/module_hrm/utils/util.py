@@ -16,6 +16,7 @@ import zlib
 from collections.abc import Callable
 from datetime import datetime
 from itertools import combinations
+from types import ModuleType
 
 import psutil
 
@@ -219,11 +220,11 @@ def get_func_names(module_obj) -> list[str]:
     return iter_debugtalk_functions(module_obj).keys()
 
 
-def get_func_map(module_obj: object) -> dict:
+def get_func_map(module_obj: ModuleType) -> dict:
     return iter_debugtalk_functions(module_obj)
 
 
-def get_func_doc_map(module_obj: object, filter=None) -> dict:
+def get_func_doc_map(module_obj: ModuleType, filter=None) -> dict:
     """
     获取 DebugTalk 方法名 -> docstring
     """
