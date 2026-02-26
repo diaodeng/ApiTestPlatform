@@ -67,6 +67,8 @@ class ReportDao:
     @classmethod
     async def get_list(cls, db: Session, query_object: ReportQueryModel, data_scope_sql:DataScopeExpr):
         query = db.query(HrmReport).filter(data_scope_sql)
+        if query_object.report_id:
+            query = query.filter(HrmReport.report_id == query_object.report_id)
         if query_object.only_self:
             query = query.filter(HrmReport.manager == query_object.manager)
 
@@ -78,11 +80,11 @@ class ReportDao:
 
         query = query.order_by(HrmReport.create_time.desc())
 
-        result = await run_in_threadpool(PageUtil.paginate, query, query_object.page_num, query_object.page_size, query_object.is_page)
+        result = await run_in_threadpool(PageUtil.paginate,
+                                         query,
+                                         query_object.page_num,
+                                         query_object.page_size,
+                                         query_object.is_page)
 
-        rows = []
-        for row in result.rows:
-            rows.append(ReportListModel.model_validate(row))
-
-        result.rows = rows
+        result.rows = [ReportListModel.model_validate(row) for row in result.rows]
         return result

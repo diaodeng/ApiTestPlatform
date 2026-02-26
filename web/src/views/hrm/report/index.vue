@@ -10,6 +10,15 @@
             @keyup.enter="handleQuery"
         />
       </el-form-item>
+      <el-form-item label="报告ID" prop="reportName">
+        <el-input
+            v-model="queryParams.reportId"
+            placeholder="请输入报告ID"
+            clearable
+            style="width: 200px"
+            @keyup.enter="handleQuery"
+        />
+      </el-form-item>
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="报告状态" clearable style="width: 100px">
           <el-option
@@ -100,9 +109,7 @@ import RunDetail from "@/components/hrm/common/run/run-detail.vue";
 
 
 const {proxy} = getCurrentInstance();
-const {sys_normal_disable} = proxy.useDict("sys_normal_disable");
 const {hrm_run_status} = proxy.useDict("hrm_run_status");
-const {sys_request_method} = proxy.useDict("sys_request_method");
 const {hrm_data_type} = proxy.useDict("hrm_data_type");
 const {qtr_case_status} = proxy.useDict("qtr_case_status");
 
@@ -111,8 +118,6 @@ provide("hrm_data_type", hrm_data_type);
 provide("qtr_case_status", qtr_case_status);
 
 const reportList = ref([]);
-const projectOptions = ref([]);
-const open = ref(false);
 const loading = ref(true);
 const showSearch = ref(true);
 const ids = ref([]);
