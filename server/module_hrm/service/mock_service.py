@@ -655,11 +655,22 @@ class RuleMatcher:
         return None  # 无匹配规则
 
     async def match_response(self) -> dict | None:
+        """
+        按请求和请求类型严格查找所有规则，按优先级升序，创建时间倒序，更新时间倒序
+        按规则的条件匹配：匹配成功就返回，规则没有条件限制算通过
+        查到规则的所有响应：按优先级升序，创建时间倒序，更新时间倒序
+        按规则响应响应条件匹配：没有条件限制的算通过，匹配成功后继续匹配同一优先级的其他条件，如果找到条件匹配的当前优先级的默认值则直接返回
+        """
         matched_rule = await self._match_request()
         if matched_rule:
             rule_response = await MockResponseService.get_by_rule_id(self.query_db, matched_rule.rule_id)
             matched_response = await MockResponseMatcher(self.request, rule_response).match_request()
             if matched_response:
+                logger_mock.info(
+                    f"target response_condition is match "
+                    f"{matched_response.rule_id}_{matched_response.rule_response_id}, "
+                    f"response_condition: {matched_response}"
+                )
                 response_gen = ResponseGenerator(self.request, matched_response)
                 return await response_gen.generate_response()
         return None
@@ -678,19 +689,20 @@ class MockResponseMatcher:
         priority = 0
         for response in self.mock_rule_response:
             # 目标为空匹配所有条件，或者条件匹配
-            if not response.response_condition or self.condition_matcher.match_condition(response.response_condition):
+            if self.condition_matcher.match_condition(response.response_condition):
                 if response.priority > priority and len(matched_response) > 0:
-                    logger_mock.info(f"target response_condition is match, response_condition: {response}")
+                    logger_mock.info("target response_condition is match")
                     return matched_response[0]
                 priority = response.priority
 
                 if response.is_default:  # 优先级最高的默认值
-                    logger_mock.info(f"target response_condition is default, response_condition: {response}")
+                    logger_mock.info("target response_condition is default")
                     return response
 
                 matched_response.append(response)
 
         if len(matched_response) > 0:
+            logger_mock.info("target response_condition is match")
             return matched_response[0]
 
         return None
@@ -709,10 +721,11 @@ class ResponseGenerator:
 
         # 渲染响应体
         body = await self._render_template()
-
+        headers = {data.key: data.value for data in self.response.headers_template}
+        # headers["mockId"] = f"{self.response.rule_id}_{self.response.rule_response_id}"
         return {
             'status_code': self.response.status_code,
-            'headers': {data.key: data.value for data in self.response.headers_template},
+            'headers': headers,
             'content': body
         }
 
