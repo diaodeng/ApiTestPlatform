@@ -1,4 +1,4 @@
-window.BASE_API = window.__APP_CONFIG__?.BASE_API || window.BASE_API || "http://localhost:80";
+window.BASE_API = window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || "http://localhost:80";
 import { createApp } from 'vue'
 
 import Cookies from 'js-cookie'
