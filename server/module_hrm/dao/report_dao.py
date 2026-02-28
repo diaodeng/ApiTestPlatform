@@ -45,13 +45,30 @@ class ReportDao:
         await run_in_threadpool(db.commit)
 
     @classmethod
-    def _delete_sync(cls, db: Session, report_ids: list):
+    def _delete_sync(cls, db: Session, report_ids: list, batch_size: int = 5000):
         try:
-            db.query(HrmRunDetail).filter(HrmRunDetail.report_id.in_(report_ids)).delete(synchronize_session=False)
+            while True:
+                ids = (
+                    db.query(HrmRunDetail.detail_id)
+                    .filter(HrmRunDetail.report_id.in_(report_ids))
+                    .limit(batch_size)
+                    .all()
+                )
 
+                if not ids:
+                    break
+
+                id_list = [i[0] for i in ids]
+
+                db.query(HrmRunDetail).filter(HrmRunDetail.detail_id.in_(id_list)).delete(synchronize_session=False)
+
+                db.commit()  # 每批提交一次
+
+            # 删除主表（一般量小）
             db.query(HrmReport).filter(HrmReport.report_id.in_(report_ids)).delete(synchronize_session=False)
 
             db.commit()
+
         except:
             db.rollback()
             raise
