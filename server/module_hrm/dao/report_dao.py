@@ -45,12 +45,22 @@ class ReportDao:
         await run_in_threadpool(db.commit)
 
     @classmethod
+    def _delete_sync(cls, db: Session, report_ids: list):
+        try:
+            db.query(HrmRunDetail).filter(HrmRunDetail.report_id.in_(report_ids)).delete(synchronize_session=False)
+
+            db.query(HrmReport).filter(HrmReport.report_id.in_(report_ids)).delete(synchronize_session=False)
+
+            db.commit()
+        except:
+            db.rollback()
+            raise
+
+    @classmethod
     async def delete(cls, db: Session, report_ids: list):
-        if report_ids:
-            await run_in_threadpool(db.query(HrmRunDetail.detail_id).
-                                    filter(HrmRunDetail.report_id.in_(report_ids)).delete)
-            await run_in_threadpool(db.query(HrmReport).filter(HrmReport.report_id.in_(report_ids)).delete)
-            await run_in_threadpool(db.commit)
+        if not report_ids:
+            return
+        await run_in_threadpool(cls._delete_sync, db, report_ids)
 
     @classmethod
     async def create(cls, db: Session, report_obj: ReportCreatModel) -> HrmReport:
