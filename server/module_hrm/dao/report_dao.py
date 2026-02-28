@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from module_hrm.entity.do.report_do import HrmReport
+from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportListModel, ReportQueryModel
 from module_hrm.enums.enums import CaseRunStatus
 from module_admin.entity.vo.common_vo import DataScopeExpr
@@ -46,6 +47,8 @@ class ReportDao:
     @classmethod
     async def delete(cls, db: Session, report_ids: list):
         if report_ids:
+            await run_in_threadpool(db.query(HrmRunDetail.detail_id).
+                                    filter(HrmRunDetail.report_id.in_(report_ids)).delete)
             await run_in_threadpool(db.query(HrmReport).filter(HrmReport.report_id.in_(report_ids)).delete)
             await run_in_threadpool(db.commit)
 
