@@ -23,7 +23,7 @@ class ParseJsonParam(BaseModel):
 
 
 @toolsController.post("/jsonParse")
-async def json_parse(request: Request,
+def json_parse(request: Request,
                      data: ParseJsonParam):
     try:
         logger.info(data.model_dump_json())
