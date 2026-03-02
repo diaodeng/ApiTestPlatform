@@ -103,7 +103,7 @@ onMounted(() => {
 
 <template>
   <div :style="{height: tabHeight + 'px'}" ref="debugContainerRef">
-    <div v-if="!calcResponse">{{ calcResponse }}</div>
+<!--    <div v-if="!calcResponse">{{ calcResponse }}</div>-->
     <el-tabs v-model="activeTab" class="request-detail">
       <el-tab-pane label="响应" name="response" key="tab_response">
         <AceEditor v-model:content="calcResponse" :can-set="true" :can-search="true"
