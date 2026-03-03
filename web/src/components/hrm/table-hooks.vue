@@ -8,6 +8,8 @@ import AceEditor from "@/components/hrm/common/ace-editor.vue";
 import FullscreenComponents from "@/components/hrm/common/fullscreen-component.vue";
 import {Close, FullScreen} from "@element-plus/icons-vue";
 import {Edit} from "@element-plus/icons-vue";
+import CodeView from "@/components/hrm/common/hightlight-view.vue";
+import CodeViewNew from "@/components/hrm/common/hightlight-component.vue";
 
 const {t} = useI18n();
 const selfData = defineModel();
@@ -32,14 +34,26 @@ const fullScreen = ref(false);
 <template>
   <div style="margin-bottom: 10px;margin-top: 10px">
     <el-text style="font-weight: bold">{{ tableTitle }}</el-text>
-    <CommonTable :cols="tableCols" v-model="selfData.functions" table-title="回调方法"></CommonTable>
-    <div style="margin-top: 5px">
+    <el-card>
+      <CommonTable :cols="tableCols" v-model="selfData.functions" table-title="回调方法"></CommonTable>
+    </el-card>
+
+    <el-card style="margin-top: 5px">
+      <el-row justify="space-between">
+        <el-text>回调脚本:{{selfData.codeInfo.codeType === CodeTypeEnum.js.value ? 'javascript' : 'python'}}</el-text>
+        <el-button type="text">编辑</el-button>
+      </el-row>
+      <CodeViewNew v-if="false"
+          :code="selfData.codeInfo.codeContent" ,
+          :lang="selfData.codeInfo.codeType === CodeTypeEnum.js.value ? 'javascript' : 'python'">
+      </CodeViewNew>
       <AceEditor v-model:content="selfData.codeInfo.codeContent"
                  :can-set="false"
                  :lang="selfData.codeInfo.codeType === CodeTypeEnum.js.value ? 'javascript' : 'python'"
                  height="200px"
                  :can-resize="true"
                  :show-full-screen-button="true"
+                 v-if="true"
       >
         <template #edit-tools>
           <div style="margin-top: 5px">
@@ -57,7 +71,7 @@ const fullScreen = ref(false);
           </div>
         </template>
       </AceEditor>
-    </div>
+    </el-card>
 
     <!--    <el-input type="textarea" v-model="selfData.codeInfo.codeContent"/>-->
   </div>
