@@ -9,6 +9,13 @@ import locale from 'element-plus/es/locale/lang/zh-cn'
 
 import '@/assets/styles/index.scss' // global css
 
+// hightlight相关
+// import 'highlight.js/styles/github.css'
+// 或
+// import 'highlight.js/styles/atom-one-dark.css'
+// 或
+import 'highlight.js/styles/monokai.css'
+
 import App from './App'
 import store from './store'
 import router from './router'

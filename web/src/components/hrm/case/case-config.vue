@@ -216,13 +216,13 @@ onMounted(() => {
 
 });
 
-watch(()=>formData.value.projectId, ()=>{
+watch(() => formData.value.projectId, () => {
   // resetModule();
   getModuleSelect()
 });
 
-watch(()=>formData.value.moduleId, ()=>{
-  nextTick(()=>{
+watch(() => formData.value.moduleId, () => {
+  nextTick(() => {
     // resetConfig();
     getConfigSelect();
   });
@@ -342,41 +342,50 @@ const calcConfigContainerHeight = computed(() => {
       </el-tab-pane>
       <el-tab-pane :label="getVariableTabName" name="caseVph">
         <el-scrollbar :height="configContainerCurrentHeight - 55">
-          <TableVariables v-model="formData.request.config.variables"
-                          :tableTitle="$t('message.configTable.header.variables')"></TableVariables>
+          <el-card>
+            <TableVariables v-model="formData.request.config.variables"
+                            :tableTitle="$t('message.configTable.header.variables')"></TableVariables>
+          </el-card>
+          <el-card style="margin-top: 10px">
+            <template v-if="dataType !== HrmDataTypeEnum.config">
+              {{ $t('message.configTable.header.parameters') }}
+              <el-row v-if="formData.request.config.parameters" v-loading="loading.initParameter">
+                <el-select placeholder="请选择" style="width: 120px;" v-model="formData.request.config.parameters.type">
+                  <el-option :value="3" :key="3" label="本地表格"></el-option>
+                  <el-option :value="4" :key="4" label="本地数据" disabled></el-option>
+                  <el-option :value="1" :key="1" label="文件" disabled></el-option>
+                  <el-option :value="2" :key="2" label="数据库"></el-option>
+                </el-select>
+                <el-button @click="startParameterDialog" style="padding-left: 5px" type="primary"
+                           :disabled="formData.request.config.parameters.type !== 3">设置
+                </el-button>
+                <el-button @click="startUploadParameterDialog" style="padding-left: 5px" type="primary"
+                           :disabled="formData.request.config.parameters.type !== 2">上传CSV文件
+                </el-button>
 
-          <template v-if="dataType !== HrmDataTypeEnum.config">
-            {{ $t('message.configTable.header.parameters') }}
-            <el-row v-if="formData.request.config.parameters" v-loading="loading.initParameter">
-              <el-select placeholder="请选择" style="width: 120px;" v-model="formData.request.config.parameters.type">
-                <el-option :value="3" :key="3" label="本地表格"></el-option>
-                <el-option :value="4" :key="4" label="本地数据" disabled></el-option>
-                <el-option :value="1" :key="1" label="文件" disabled></el-option>
-                <el-option :value="2" :key="2" label="数据库"></el-option>
-              </el-select>
-              <el-button @click="startParameterDialog" style="padding-left: 5px" type="primary" :disabled="formData.request.config.parameters.type !== 3">设置</el-button>
-              <el-button @click="startUploadParameterDialog" style="padding-left: 5px" type="primary" :disabled="formData.request.config.parameters.type !== 2">上传CSV文件</el-button>
+              </el-row>
+              <el-row style="padding-bottom: 10px" v-if="formData.request.config.parameters">
+                <template v-if="formData.request.config.parameters.value">
+                  <el-text type="success">点击“设置”修改数据</el-text>
+                </template>
+                <template v-else>
+                  <el-text type="warning">暂无数据</el-text>
+                </template>
+              </el-row>
+            </template>
+          </el-card>
+          <el-card  style="margin-top: 10px">
+            <TableHooks v-model="formData.request.config.setup_hooks"
+                        v-if="dataType !== HrmDataTypeEnum.config"
+                        :table-title="$t('message.configTable.header.setup_hooks')"></TableHooks>
+          </el-card>
+          <el-card  style="margin-top: 10px">
+            <TableHooks v-model="formData.request.config.teardown_hooks"
+                        v-if="dataType !== HrmDataTypeEnum.config"
+                        :table-title="$t('message.configTable.header.teardown_hooks')"></TableHooks>
+          </el-card>
 
-            </el-row>
-            <el-row style="padding-bottom: 10px" v-if="formData.request.config.parameters">
-              <template v-if="formData.request.config.parameters.value">
-                <el-text type="success">点击“设置”修改数据</el-text>
-              </template>
-              <template v-else>
-                <el-text type="warning">暂无数据</el-text>
-              </template>
-            </el-row>
-          </template>
 
-          <!--      <TableVariables v-model="formData.request.config.parameters"></TableVariables>-->
-
-          <TableHooks v-model="formData.request.config.setup_hooks"
-                      v-if="dataType !== HrmDataTypeEnum.config"
-                      :table-title="$t('message.configTable.header.setup_hooks')"></TableHooks>
-
-          <TableHooks v-model="formData.request.config.teardown_hooks"
-                      v-if="dataType !== HrmDataTypeEnum.config"
-                      :table-title="$t('message.configTable.header.teardown_hooks')"></TableHooks>
         </el-scrollbar>
 
       </el-tab-pane>
@@ -443,24 +452,24 @@ const calcConfigContainerHeight = computed(() => {
   </div>
 
   <el-dialog fullscreen :title="'上传参数化文件' + '【' +formData.caseName + '】'"
-               v-model="uploadParameterDialogShow"
-               :before-close="beforeColseDialog"
-               append-to-body destroy-on-close>
-      <el-container style="height: 100%">
-        <el-main style="max-height: calc(100vh - 95px);">
-          <div>
-            <input type="file" @change="handleFileChange" />
-            <el-text type="primary" v-if="file">{{ importProcess }}</el-text>
-            <el-button @click="uploadFile" :disabled="!file" :loading="loading.import">上传</el-button>
-            <el-button @click="delCaseParamsCall" type="danger" :disabled="loading.import">删除</el-button>
+             v-model="uploadParameterDialogShow"
+             :before-close="beforeColseDialog"
+             append-to-body destroy-on-close>
+    <el-container style="height: 100%">
+      <el-main style="max-height: calc(100vh - 95px);">
+        <div>
+          <input type="file" @change="handleFileChange"/>
+          <el-text type="primary" v-if="file">{{ importProcess }}</el-text>
+          <el-button @click="uploadFile" :disabled="!file" :loading="loading.import">上传</el-button>
+          <el-button @click="delCaseParamsCall" type="danger" :disabled="loading.import">删除</el-button>
 
-            <el-text>当前参数数量：{{ paramsCount }}</el-text>
-            <el-button @click="getCaseParamsList" type="primary" :disabled="loading.searchParam">查询</el-button>
+          <el-text>当前参数数量：{{ paramsCount }}</el-text>
+          <el-button @click="getCaseParamsList" type="primary" :disabled="loading.searchParam">查询</el-button>
 
-          </div>
-        </el-main>
-      </el-container>
-    </el-dialog>
+        </div>
+      </el-main>
+    </el-container>
+  </el-dialog>
 
 </template>
 

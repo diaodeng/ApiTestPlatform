@@ -22,7 +22,7 @@ const httpStepData = computed({
   get() {
     if (currentStepDataRef.value && currentStepDataRef.value.step_type === CaseStepTypeEnum.http) {
       return currentStepDataRef.value;
-    }else {
+    } else {
       const stepData = JSON.parse(JSON.stringify(initStepData));
       stepData.request = JSON.parse(JSON.stringify(initRequestData));
       return stepData;
@@ -37,7 +37,7 @@ const websocketStepData = computed({
   get() {
     if (currentStepDataRef.value && currentStepDataRef.value.step_type === CaseStepTypeEnum.websocket) {
       return currentStepDataRef.value;
-    }else {
+    } else {
 
       const stepData = JSON.parse(JSON.stringify(initStepData));
       stepData.request = JSON.parse(JSON.stringify(initWebsocketData));
@@ -93,36 +93,44 @@ const websocketStepData = computed({
       </div>
     </el-tab-pane>
     <el-tab-pane :label="$t('message.caseDetail.tabNames.request')" name="stepRequest">
-        <StepRequest v-model:step-detail-data="httpStepData"
-                     :request-container-height="tabsHeight - 5"
-                     v-show="currentStepDataRef.step_type === CaseStepTypeEnum.http"
-        ></StepRequest>
-        <StepWebsocket v-model:step-detail-data="websocketStepData"
-                       :step-container-height="tabsHeight - 5"
-                       v-show="currentStepDataRef.step_type === CaseStepTypeEnum.websocket"
-        ></StepWebsocket>
+      <StepRequest v-model:step-detail-data="httpStepData"
+                   :request-container-height="tabsHeight - 5"
+                   v-show="currentStepDataRef.step_type === CaseStepTypeEnum.http"
+      ></StepRequest>
+      <StepWebsocket v-model:step-detail-data="websocketStepData"
+                     :step-container-height="tabsHeight - 5"
+                     v-show="currentStepDataRef.step_type === CaseStepTypeEnum.websocket"
+      ></StepWebsocket>
 
     </el-tab-pane>
     <el-tab-pane :label="$t('message.caseDetail.tabNames.ev')" name="stepEv">
       <el-scrollbar :max-height="tabsHeight-55">
-        <TableExtract v-model="currentStepDataRef.extract"
+        <el-card>
+          <TableExtract v-model="currentStepDataRef.extract"
                       :table-title="$t('message.configTable.header.extract')"></TableExtract>
-        <TableValidate v-model="currentStepDataRef.validate"
+        </el-card>
+        <el-card style="margin-top: 10px">
+          <TableValidate v-model="currentStepDataRef.validate"
                        :table-title="$t('message.configTable.header.validate')"></TableValidate>
+        </el-card>
       </el-scrollbar>
     </el-tab-pane>
     <el-tab-pane :label="$t('message.caseDetail.tabNames.vh')" name="stepVh"
                  :class="['step-variables-hooks-stepVh' + currentStepDataRef.step_id]">
       <el-scrollbar :max-height="tabsHeight-55">
-        <TableVariables v-model="currentStepDataRef.variables"
-                        :table-title="$t('message.configTable.header.variables')"
-        ></TableVariables>
-
-        <TableHooks v-model="currentStepDataRef.setup_hooks"
-                    :table-title="$t('message.configTable.header.setup_hooks')"></TableHooks>
-
-        <TableHooks v-model="currentStepDataRef.teardown_hooks"
-                    :table-title="$t('message.configTable.header.teardown_hooks')"></TableHooks>
+        <el-card>
+          <TableVariables v-model="currentStepDataRef.variables"
+                          :table-title="$t('message.configTable.header.variables')"
+          ></TableVariables>
+        </el-card>
+        <el-card style="margin-top: 10px">
+          <TableHooks v-model="currentStepDataRef.setup_hooks"
+                      :table-title="$t('message.configTable.header.setup_hooks')"></TableHooks>
+        </el-card>
+        <el-card style="margin-top: 10px">
+          <TableHooks v-model="currentStepDataRef.teardown_hooks"
+                      :table-title="$t('message.configTable.header.teardown_hooks')"></TableHooks>
+        </el-card>
       </el-scrollbar>
     </el-tab-pane>
     <el-tab-pane :label="$t('message.caseDetail.tabNames.other')" name="stepThinktime">
