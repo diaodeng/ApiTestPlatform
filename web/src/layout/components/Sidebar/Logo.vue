@@ -2,7 +2,7 @@
   <div class="sidebar-logo-container" :class="{ 'collapse': collapse }" :style="{ backgroundColor: sideTheme === 'theme-dark' ? variables.menuBackground : variables.menuLightBackground }">
     <transition name="sidebarLogoFade">
       <router-link v-if="collapse" key="collapse" class="sidebar-logo-link" to="/">
-        <img v-if="logo" :src="logo" class="sidebar-logo" />
+        <img v-if="logo" :src="logoCoolapse" class="sidebar-logo" />
 <!--        <h1 v-else class="sidebar-title" :style="{ color: sideTheme === 'theme-dark' ? variables.logoTitleColor : variables.logoLightTitleColor }">{{ title }}</h1>-->
       </router-link>
       <router-link v-else key="expand" class="sidebar-logo-link" to="/">
@@ -16,6 +16,7 @@
 <script setup>
 import variables from '@/assets/styles/variables.module.scss'
 import logo from '@/assets/images/tr-banner.png'
+import logoCoolapse from '@/assets/images/trunner-banner-icon.png'
 import useSettingsStore from '@/store/modules/settings'
 
 defineProps({
