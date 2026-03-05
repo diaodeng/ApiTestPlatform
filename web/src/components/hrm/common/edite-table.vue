@@ -326,6 +326,10 @@ function addRowAndColumnHandle(columnNum, rowNum, position, index) {
     }
   }
   if (row) {
+    if (columnsRef.value.length <= 0) {
+      ElMessage.warning("请先添加列！");
+      return
+    }
     for (let i = 0; i < row; i++) {
       // let newData = structuredClone(toValue(toRaw(tableDatasRef.value[0])));
       let newData = {};
