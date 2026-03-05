@@ -131,6 +131,10 @@ function formatJSONIfNeeded(key) {
    保存逻辑
 ========================= */
 
+function save() {
+  saveBlock(activeKey.value);
+}
+
 function saveBlock(key) {
   const meta = sessionMeta[key]
   if (!meta.dirty) return
@@ -192,11 +196,17 @@ function setBlockValue(key, value) {
   clearDirty(key)
 }
 
+function setValue(value) {
+  setBlockValue(activeKey.value, value)
+}
+
 defineExpose({
   getAllValues,
   saveAll,
   switchBlock,
-  setBlockValue
+  setBlockValue,
+  save,
+  setValue,
 })
 
 /* =========================
