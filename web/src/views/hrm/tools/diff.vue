@@ -4,7 +4,7 @@ import DiffEditor from "@/components/hrm/common/ace-editor-plug/DiffEditor.vue"
 </script>
 
 <template>
-<DiffEditor></DiffEditor>
+    <DiffEditor></DiffEditor>
 </template>
 
 <style scoped lang="scss">
