@@ -75,6 +75,7 @@ onBeforeUnmount(() => {
 <style>
 .diff-container {
   width: 100%;
-  height: 600px;
+  flex: 1;
+  min-height: 0;
 }
 </style>
