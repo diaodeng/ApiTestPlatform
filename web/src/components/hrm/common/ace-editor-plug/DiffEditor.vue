@@ -24,6 +24,14 @@ const props = defineProps({
 const container = ref()
 let diffInstance = null
 
+function clearContent() {
+  const { left, right } = diffInstance.getEditors();
+  left.session.setValue("");
+  right.session.setValue("");
+}
+
+defineExpose({clearContent});
+
 onMounted(() => {
   diffInstance = new AceDiff({
     element: container.value,
