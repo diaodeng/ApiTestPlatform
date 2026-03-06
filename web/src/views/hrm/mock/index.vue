@@ -63,14 +63,9 @@
     </MockTableQuery>
 
     <!-- 添加或修改mock规则对话框 -->
-    <MockRuleDetailDialog :form-datas="form"
-                          :data-type="dataType"
-                          :form-rules="formRules"
-                          v-model:open-dialog="open"
+    <MockRuleDetailDialog v-model:open-dialog="open"
                           :rule-id="editingRuleId"
-                          :title=ruleEditDialogTitle
                           :is-add="isAdd"
-
     ></MockRuleDetailDialog>
 
     <!-- 复制mock规则对话框 -->

@@ -125,15 +125,13 @@ aside {
 .app-container {
   padding: 10px;
   width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .components-container {
   margin: 30px 50px;
   position: relative;
-}
-
-.pagination-container {
-  margin-top: 30px;
 }
 
 .text-center {
