@@ -43,12 +43,12 @@ function comfirmParse(evt) {
 </script>
 
 <template>
-  <el-container style="width:100%;height:90vh;">
+  <el-container style="width:100%;height:100%;">
     <el-header>
       <el-text>JSON格式化工具</el-text>
       <el-row>
         <el-button @click="comfirmParse">提交</el-button>
-        <el-checkbox v-model="form.advanced">高级</el-checkbox>
+<!--        <el-checkbox v-model="form.advanced">高级</el-checkbox>-->
         <el-checkbox v-model="form.nestedParse">递归</el-checkbox>
 
       </el-row>
