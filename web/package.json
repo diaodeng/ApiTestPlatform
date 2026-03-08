@@ -24,7 +24,6 @@
     "@vueup/vue-quill": "1.2.0",
     "@vueuse/core": "10.9.0",
     "ace-diff": "^4.0.0",
-    "ant-design-vue": "^4.2.1",
     "axios": "1.6.8",
     "echarts": "^5.5.0",
     "element-plus": "2.10.0",
