@@ -1,6 +1,6 @@
 {
   "name": "vfadmin",
-  "version": "1.0.4.1",
+  "version": "1.0.4.4",
   "description": "vfadmin管理系统",
   "author": "insistence",
   "license": "MIT",
@@ -35,7 +35,6 @@
     "jsencrypt": "3.3.2",
     "markdown-it": "^14.1.0",
     "markdown-it-highlightjs": "^4.2.0",
-    "monaco-editor": "^0.48.0",
     "npm": "^10.8.3",
     "nprogress": "0.2.0",
     "pako": "^2.1.0",
