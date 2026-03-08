@@ -1,0 +1,216 @@
+{
+    "folders": [
+        {
+            "path": "server",
+            "name": "server"
+        },
+        {
+            "path": "client",
+            "name": "client"
+        },
+        {
+            "path": "web",
+            "name": "web"
+        }
+    ],
+    "settings": {
+        // 基础编辑器
+        // "editor.tabSize": 4,
+        "files.trimTrailingWhitespace": true,
+        // 排除不需要的目录
+        "files.exclude": {
+            "**/.git": true,
+            "**/.svn": true,
+            "**/.venv": true,
+            "**/venv": true,
+            "**/__pycache__": true,
+            "**/node_modules": true,
+            "**/dist": true
+        },
+        "python.analysis.exclude": [
+            "${workspaceFolder:web}/**"
+        ],
+        "client.python.defaultInterpreterPath": "${workspaceFolder:client}/.venv/Scripts/python.exe",
+        "python.defaultInterpreterPath": "${workspaceFolder:server}/.venv/Scripts/python.exe",
+        //"client.python.program": "${workspaceFolder}/client/main.py",
+        //"server.python.program": "${workspaceFolder}/server/app.py",
+        //"client.python.cwd": "${fileDirname}",
+        //"server.python.cwd": "${fileDirname}",
+        //"python.packageManager": "uv",
+        "workbench.colorTheme": "Default Light Modern",
+        "security.workspace.trust.untrustedFiles": "open",
+        //"python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+        //"python.terminal.activateEnvironment": true,
+        //"python.terminal.activateEnvInCurrentTerminal": true,
+        "python-envs.defaultEnvManager": "ms-python.python:venv",
+        "python-envs.defaultPackageManager": "ms-python.python:pip",
+        "python-envs.alwaysUseUv": true,
+        "python.analysis.autoImportCompletions": true,
+        "python.analysis.completeFunctionParens": true,
+        "python.analysis.autoFormatStrings": true,
+        "python.analysis.ignore": [],
+        "python.analysis.useLibraryCodeForTypes": true,
+        "python.analysis.include": [
+            "**/*.py"
+        ],
+        "python.analysis.extraPaths": [
+            "${workspaceFolder:client}"
+        ],
+        "python.analysis.typeCheckingMode": "basic",
+        "python.analysis.indexing": true,
+        "python.analysis.completeUnimported": true,
+        "python.analysis.diagnosticSeverityOverrides": {
+            "reportMissingModuleSource": "none",
+            "reportUnknownMemberType": "none",
+            "reportUnknownVariableType": "none",
+            "reportMissingTypeArgument": "none"
+        },
+        "python.languageServer": "Pylance",
+        "python.analysis.symbolsHierarchy": true,
+        "editor.formatOnSave": true,
+        "editor.formatOnType": true,
+        "[python]": {
+            "editor.defaultFormatter": "charliermarsh.ruff",
+            "editor.formatOnSave": true,
+            "editor.codeActionsOnSave": {
+                "source.fixAll.ruff": "always",
+                "source.organizeImports.ruff": "always"
+            }
+        },
+        "code-runner.runInTerminal": true,
+        "terminal.integrated.defaultProfile.windows": "Command Prompt",
+        "python.experiments.enabled": false,
+        "editor.fontSize": 20,
+        // 核心：仅允许推荐列表中的插件运行
+        "extensions.allowedExtensions": [
+            "ms-python.python",
+            "esbenp.prettier-vscode"
+        ],
+        // 限制模式：隐藏非允许的插件，且无法手动启用
+        "workbench.startupEditor": "none",
+        "extensions.ignoreRecommendations": true,
+        "git.repositoryScanMaxDepth": 2
+    },
+    "launch": {
+        "version": "0.2.0",
+        "configurations": [
+            // ==================== Server项目（Python）====================
+            {
+                "name": "Server: 当前文件", // 启动项名称，下拉框能识别
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${file}", // 运行当前打开的.py文件
+                "console": "integratedTerminal",
+                "args": "${command:pickArgs} --env=dev",
+                // 关键：指定server的虚拟环境（路径对应你的目录）
+                "python": "${workspaceFolder:server}/.venv/Scripts/python.exe",
+                "env": {
+                    "VIRTUAL_ENV": "${workspaceFolder:server}/.venv"
+                },
+                // 仅作用于server目录，避免和client混淆
+                "cwd": "${workspaceFolder:server}", // 运行目录为当前文件所在目录
+                "justMyCode": true
+            },
+            {
+                "name": "Server: app.py", // 固定启动server的app.py
+                "type": "debugpy",
+                "request": "launch",
+                // 精准指向server目录下的app.py
+                "program": "${workspaceFolder:server}/app.py",
+                "console": "integratedTerminal",
+                "args": "${command:pickArgs} --env=dev",
+                "python": "${workspaceFolder:server}/.venv/Scripts/python.exe",
+                "env": {
+                    "VIRTUAL_ENV": "${workspaceFolder:server}/.venv"
+                },
+                "cwd": "${workspaceFolder:server}", // 运行目录固定为server根目录
+                "justMyCode": true
+            },
+            // ==================== Client项目（Python）====================
+            {
+                "name": "Client: 当前文件",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${file}",
+                "console": "integratedTerminal",
+                "args": "${command:pickArgs} --env=test",
+                // 关键：指定client的虚拟环境
+                "python": "${workspaceFolder:client}/.venv/Scripts/python.exe",
+                "env": {
+                    "VIRTUAL_ENV": "${workspaceFolder:client}/.venv"
+                },
+                "cwd": "${workspaceFolder:client}/src",
+                "justMyCode": true
+            },
+            {
+                "name": "Client: main.py", // 假设client的入口是main.py，可自定义
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder:client}/src/main.py",
+                "console": "integratedTerminal",
+                "args": "${command:pickArgs} --env=dev",
+                "python": "${workspaceFolder:client}/.venv/Scripts/python.exe",
+                "env": {
+                    "VIRTUAL_ENV": "${workspaceFolder:client}/.venv"
+                },
+                "cwd": "${workspaceFolder:client}",
+                "justMyCode": true
+            },
+            // ==================== Web项目（Vue）====================
+            {
+                "name": "Web: npm run dev", // Vue前端启动项
+                "type": "node", // Vue基于Node.js运行
+                "request": "launch",
+                "runtimeExecutable": "npm",
+                "runtimeArgs": [
+                    "run",
+                    "dev" // 对应package.json中的scripts（如dev/serve）
+                ],
+                "cwd": "${workspaceFolder:web}", // 固定在web目录运行
+                "console": "integratedTerminal",
+                "internalConsoleOptions": "neverOpen",
+                //"port": 5173 // Vue3默认端口，根据你的项目调整
+            }
+        ],
+        // 组合启动：一键启动前后端
+        "compounds": [
+            {
+                "name": "启动全栈（Server + Web）",
+                "configurations": [
+                    "Server: app.py",
+                    "Web: npm run dev"
+                ],
+                "stopAll": true
+            }
+        ]
+    },
+    "tasks": {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "Web: install 依赖",
+                "type": "shell",
+                "command": "npm install",
+                //"cwd": "${workspaceFolder:web}"
+            }
+        ]
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.debugpy",
+            "charliermarsh.ruff",
+            "Vue.volar",
+            "dbaeumer.vscode-eslint"
+        ],
+        //"ignoreRecommendations": true,
+        "unwantedRecommendations": [
+            "vscjava.vscode-maven",
+            "vscjava.vscode-java-dependency",
+            "redhat.java",
+            "vscjava.vscode-gradle",
+            "vscjava.vscode-java-pack",
+            "vscjava.vscode-java-test"
+        ]
+    }
+}
