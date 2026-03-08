@@ -6,6 +6,7 @@ FROM node:20-alpine3.19 AS frontend-build
 WORKDIR /qtr-frontend
 ARG VITE_APP_BASE_API
 ENV VITE_APP_BASE_API=$VITE_APP_BASE_API
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 
 COPY package*.json ./
 RUN npm ci --registry=https://registry.npmmirror.com \
