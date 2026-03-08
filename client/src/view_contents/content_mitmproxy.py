@@ -1,14 +1,13 @@
 import asyncio
-from multiprocessing import Process, Manager, freeze_support
+from multiprocessing import Process, freeze_support
 
 import flet as ft
 from flet.core.control_event import ControlEvent
 from loguru import logger
 
-from server.config import MitmproxyConfig
-from utils.mitmproxy_tool import ProxyCore, MockHandle as mockHandle
-from utils.share_data import get_shared
 from common.ui_utils.ui_util import UiUtil
+from server.config import MitmproxyConfig
+from utils.mitmproxy_tool import ProxyCore
 
 
 class MitmHandel:
@@ -21,7 +20,9 @@ class MitmHandel:
         self.loop = None
         self.task = None
         self.port_field = ft.TextField(label="代理端口", value=str(self.config.port))
-        self.web_port_field = ft.TextField(label="Web端口", value=str(self.config.web_port))
+        self.web_port_field = ft.TextField(
+            label="Web端口", value=str(self.config.web_port)
+        )
         self.proxy_model_view = ft.Dropdown(
             value=self.config.proxy_model,
             editable=True,
@@ -29,48 +30,91 @@ class MitmHandel:
             options=self.get_options(),
             on_change=self.dropdown_changed,
         )
-        self.proxy_model_value_view = ft.TextField(label="需要代理的应用名，多个用逗号分隔", value=str(self.config.proxy_model_value), visible=self.config.proxy_model == "local")
-        self.proxy_application_view = ft.TextField(label="代理应用", value=self.config.proxy_model)
-        self.web_open_browser = ft.Checkbox("打开浏览器", value=self.config.web_open_browser)
-        self.mitmproxy_config_dir = ft.TextField(label="mitmproxy配置目录", value=self.config.mitmproxy_config_dir)
+        self.proxy_model_value_view = ft.TextField(
+            label="需要代理的应用名，多个用逗号分隔",
+            value=str(self.config.proxy_model_value),
+            visible=self.config.proxy_model == "local",
+        )
+        self.proxy_application_view = ft.TextField(
+            label="代理应用", value=self.config.proxy_model
+        )
+        self.web_open_browser = ft.Checkbox(
+            "打开浏览器", value=self.config.web_open_browser
+        )
+        self.mitmproxy_config_dir = ft.TextField(
+            label="mitmproxy配置目录", value=self.config.mitmproxy_config_dir
+        )
         self.status_text = ft.Text("代理未启动")
         self.proxy_running = False
-        self.start_button = ft.ElevatedButton("启动代理", on_click=self.start_proxy, disabled=self.proxy_running)
-        self.stop_button = ft.ElevatedButton("停止代理",
-                                             on_click=self.stop_proxy,
-                                             disabled=not self.proxy_running
-                                             )
+        self.start_button = ft.ElevatedButton(
+            "启动代理", on_click=self.start_proxy, disabled=self.proxy_running
+        )
+        self.stop_button = ft.ElevatedButton(
+            "停止代理", on_click=self.stop_proxy, disabled=not self.proxy_running
+        )
         self.is_mock = ft.Checkbox("启用mock", value=self.config.is_mock)
-        self.open_include = ft.Checkbox("启用包含", value=self.config.open_include, on_change=self.use_include_change)
-        self.open_exclude = ft.Checkbox("启用排除", value=self.config.open_exclude, on_change=self.use_exclude_change)
-        self.include_field = ft.TextField(label="启用mock的请求路径，多个用逗号分割", value=self.config.include, multiline=True, visible=self.config.open_include)
-        self.exclude_field = ft.TextField(label="禁用mock的请求路径，多个用逗号分割", value=self.config.exclude, multiline=True, visible=self.config.open_exclude)
-        self.mock_server_field = ft.TextField(label="mock服务器", value=self.config.mock_server)
-        self.add_headers_field = ft.TextField(label="mock请求添加headers，一行一条记录", value=self.config.add_headers, multiline=True)
-        self.add_body_field = ft.TextField(label="添加body", value=self.config.add_body, multiline=True)
-        self.save_config_button = ft.ElevatedButton("保存配置",
-                                                    on_click=self.save_config_by_button
-                                                    )
-        self.stest_button = ft.ElevatedButton("测试",
-                                              on_click=self.test_proxy
-                                              )
+        self.open_include = ft.Checkbox(
+            "启用包含",
+            value=self.config.open_include,
+            on_change=self.use_include_change,
+        )
+        self.open_exclude = ft.Checkbox(
+            "启用排除",
+            value=self.config.open_exclude,
+            on_change=self.use_exclude_change,
+        )
+        self.include_field = ft.TextField(
+            label="启用mock的请求路径，多个用逗号分割",
+            value=self.config.include,
+            multiline=True,
+            visible=self.config.open_include,
+        )
+        self.exclude_field = ft.TextField(
+            label="禁用mock的请求路径，多个用逗号分割",
+            value=self.config.exclude,
+            multiline=True,
+            visible=self.config.open_exclude,
+        )
+        self.mock_server_field = ft.TextField(
+            label="mock服务器", value=self.config.mock_server
+        )
+        self.add_headers_field = ft.TextField(
+            label="mock请求添加headers，一行一条记录",
+            value=self.config.add_headers,
+            multiline=True,
+        )
+        self.add_body_field = ft.TextField(
+            label="添加body", value=self.config.add_body, multiline=True
+        )
+        self.save_config_button = ft.ElevatedButton(
+            "保存配置", on_click=self.save_config_by_button
+        )
+        self.stest_button = ft.ElevatedButton("测试", on_click=self.test_proxy)
 
-        self.request_delay_view = ft.TextField(value=f"{self.config.request_delay.delay}",
-                                               label="请求延时s",
-                                               on_change=self._request_delay_change,
-                                               visible=self.config.request_delay.enabled)
-        self.request_delay_path_view = ft.TextField(value=f"{'\n'.join(self.config.request_delay.delay_path)}",
-                                               label="请求延时的地址",
-                                               on_change=self._request_delay_path_change,
-                                               visible=self.config.request_delay.enabled)
-        self.response_delay_view = ft.TextField(value=f"{self.config.response_delay.delay}",
-                                                label="响应延时s",
-                                                on_change=self._response_delay_change,
-                                                visible=self.config.response_delay.enabled)
-        self.response_delay_path_view = ft.TextField(value=f"{'\n'.join(self.config.response_delay.delay_path)}",
-                                                label="响应延时的地址",
-                                                on_change=self._response_delay_path_change,
-                                                visible=self.config.response_delay.enabled)
+        self.request_delay_view = ft.TextField(
+            value=f"{self.config.request_delay.delay}",
+            label="请求延时s",
+            on_change=self._request_delay_change,
+            visible=self.config.request_delay.enabled,
+        )
+        self.request_delay_path_view = ft.TextField(
+            value=f"{'\n'.join(self.config.request_delay.delay_path)}",
+            label="请求延时的地址",
+            on_change=self._request_delay_path_change,
+            visible=self.config.request_delay.enabled,
+        )
+        self.response_delay_view = ft.TextField(
+            value=f"{self.config.response_delay.delay}",
+            label="响应延时s",
+            on_change=self._response_delay_change,
+            visible=self.config.response_delay.enabled,
+        )
+        self.response_delay_path_view = ft.TextField(
+            value=f"{'\n'.join(self.config.response_delay.delay_path)}",
+            label="响应延时的地址",
+            on_change=self._response_delay_path_change,
+            visible=self.config.response_delay.enabled,
+        )
 
     def _request_delay_enable_change(self, evt: ft.ControlEvent):
         data = evt.control.value
@@ -132,23 +176,24 @@ class MitmHandel:
         MitmproxyConfig.write(self.config)
         self.page.update()
 
-    def use_include_change(self, e:ControlEvent):
+    def use_include_change(self, e: ControlEvent):
         self.include_field.visible = e.control.value
         self.page.update()
 
-    def use_exclude_change(self, e:ControlEvent):
+    def use_exclude_change(self, e: ControlEvent):
         self.exclude_field.visible = e.control.value
         self.page.update()
 
     def get_options(self):
         options = ["local", "regular", "wireguard", "socks5", "dns"]
 
-        return [ft.DropdownOption(
-            key=model,
-            content=ft.Text(
-                value=model
-            ),
-        ) for model in options]
+        return [
+            ft.DropdownOption(
+                key=model,
+                content=ft.Text(value=model),
+            )
+            for model in options
+        ]
 
     def dropdown_changed(self, e):
         self.config.proxy_model = e.control.value
@@ -188,42 +233,63 @@ class MitmHandel:
 
     def init(self):
         content = ft.Container(
-            content=ft.Column([
-                self.mock_server_field,
-                ft.Row([
-                    self.status_text,
-                    self.is_mock,
-                    self.open_include,
-                    self.open_exclude,
-                    self.web_open_browser,
-                    ft.Checkbox(label="请求延时", value=self.config.request_delay.enabled, on_change=self._request_delay_enable_change),
-                    ft.Checkbox(label="响应", value=self.config.response_delay.enabled, on_change=self._response_delay_enable_change),
-                ]),
-                ft.Row([
-                    self.port_field,
-                    self.web_port_field,
-                    self.mitmproxy_config_dir
-                ]),
-                ft.Row([
-                    self.request_delay_view,
-                    self.request_delay_path_view,
-                ]),
-                ft.Row([
-                    self.response_delay_view,
-                    self.response_delay_path_view,
-                ]),
-                self.include_field,
-                self.exclude_field,
-                self.add_headers_field,
-                # self.add_body_field,
-                ft.Row([
-                    self.start_button,
-                    self.stop_button,
-                    self.save_config_button,
-                    self.stest_button
-                ])
-            ], alignment=ft.MainAxisAlignment.START),
-            alignment=ft.alignment.center_left
+            content=ft.Column(
+                [
+                    self.mock_server_field,
+                    ft.Row(
+                        [
+                            self.status_text,
+                            self.is_mock,
+                            self.open_include,
+                            self.open_exclude,
+                            self.web_open_browser,
+                            ft.Checkbox(
+                                label="请求延时",
+                                value=self.config.request_delay.enabled,
+                                on_change=self._request_delay_enable_change,
+                            ),
+                            ft.Checkbox(
+                                label="响应",
+                                value=self.config.response_delay.enabled,
+                                on_change=self._response_delay_enable_change,
+                            ),
+                        ]
+                    ),
+                    ft.Row(
+                        [
+                            self.port_field,
+                            self.web_port_field,
+                            self.mitmproxy_config_dir,
+                        ]
+                    ),
+                    ft.Row(
+                        [
+                            self.request_delay_view,
+                            self.request_delay_path_view,
+                        ]
+                    ),
+                    ft.Row(
+                        [
+                            self.response_delay_view,
+                            self.response_delay_path_view,
+                        ]
+                    ),
+                    self.include_field,
+                    self.exclude_field,
+                    self.add_headers_field,
+                    # self.add_body_field,
+                    ft.Row(
+                        [
+                            self.start_button,
+                            self.stop_button,
+                            self.save_config_button,
+                            self.stest_button,
+                        ]
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.START,
+            ),
+            alignment=ft.alignment.center_left,
         )
         return content
 
@@ -237,8 +303,7 @@ class MitmHandel:
         self.page.update()
         self.proxy_core = ProxyCore()
         self.loop = asyncio.get_running_loop()
-        self.task = self.loop.create_task(
-            self.proxy_core.run(self.config))
+        self.task = self.loop.create_task(self.proxy_core.run(self.config))
         # await self.proxy_core.run(int(self.port_field.value),int(self.web_port_field.value),self.web_open_browser.value)
         UiUtil.show_snackbar_success(self.page, "mitmproxy 已启动")
         self.page.update()
@@ -287,11 +352,12 @@ class MitmHandel:
         # share_data = get_shared()
         # share_data.update(self.config.model_dump())
         try:
-            self.proxy = Process(target=ProxyCore().start_loop,
-                                 args=(self.config,),
-                                 name="mitmproxy-tool",
-                                 daemon=True
-                                 )
+            self.proxy = Process(
+                target=ProxyCore().start_loop,
+                args=(self.config,),
+                name="mitmproxy-tool",
+                daemon=True,
+            )
             self.proxy.start()
         except Exception as e:
             UiUtil.show_snackbar_error(self.page, f"mitmproxy启动失败:{e}")

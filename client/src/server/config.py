@@ -1,12 +1,21 @@
-import asyncio
 from shutil import rmtree
 from typing import Optional
+
 from loguru import logger
 
 from common.excptions import PosHandleException
 from do import config as do_config
-from model.config import SearchConfigModel, MitmProxyConfigModel, StartConfigModel, \
-    SetupConfigModel, PosParamsModel, PosConfigModel, AgentConfigModel, VendorConfigModel, FtpConfigModel
+from model.config import (
+    AgentConfigModel,
+    FtpConfigModel,
+    MitmProxyConfigModel,
+    PosConfigModel,
+    PosParamsModel,
+    SearchConfigModel,
+    SetupConfigModel,
+    StartConfigModel,
+    VendorConfigModel,
+)
 from model.pos_network_model import PosInitRespModel
 from utils import pos_network
 
@@ -80,7 +89,6 @@ class MitmproxyConfig:
 
 
 class StartConfig:
-
     def __init__(self):
         pass
 
@@ -119,7 +127,7 @@ class PosConfig:
         pass
 
     @classmethod
-    def read_pos_params(cls, pos_path: str, local: int=0) -> PosParamsModel | str | None:
+    def read_pos_params(cls, pos_path: str, local: int = 0, group: str = "") -> PosParamsModel | str | None:
         """
         local: 0优先取本地数据，没有就取服务端，1只取本地，2只取服务端
         """
@@ -146,11 +154,12 @@ class PosConfig:
         if not pos_config_data:
             remote_info = "获取服务端POS信息异常"
         elif isinstance(pos_config_data, PosParamsModel):
-            remote_info = f"服务端：商家：{pos_config_data.venderNo}，门店：{pos_config_data.orgNo}，POS：{pos_config_data.posId}"
+            remote_info = (
+                f"服务端：商家：{pos_config_data.venderNo}，门店：{pos_config_data.orgNo}，POS：{pos_config_data.posId}"
+            )
         else:
             remote_info = f"服务端:{str(pos_config_data)}"
         return remote_info
-
 
     @classmethod
     def read_pos_config(cls) -> PosConfigModel:

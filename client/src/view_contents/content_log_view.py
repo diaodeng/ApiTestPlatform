@@ -1,13 +1,12 @@
-import flet as ft
 import os
-import asyncio
+import re
 import threading
 import time
-# import paramiko
-from watchfiles import watch
-import re
-from datetime import datetime
+
+import flet as ft
 from loguru import logger
+
+# import paramiko
 from watchfiles import awatch
 
 
@@ -43,15 +42,27 @@ class LogViewerApp:
                 animation_duration=300,
                 tabs=[
                     ft.Tab(
-                        tab_content=ft.Container(content=ft.Row([ft.Icon(ft.Icons.SHELVES), ft.Text("SSH日志")])),
+                        tab_content=ft.Container(
+                            content=ft.Row(
+                                [ft.Icon(ft.Icons.SHELVES), ft.Text("SSH日志")]
+                            )
+                        ),
                         content=self.create_ssh_tab(),
                     ),
                     ft.Tab(
-                        tab_content=ft.Container(content=ft.Row([ft.Icon(ft.Icons.FOLDER), ft.Text("本地日志")])),
+                        tab_content=ft.Container(
+                            content=ft.Row(
+                                [ft.Icon(ft.Icons.FOLDER), ft.Text("本地日志")]
+                            )
+                        ),
                         content=self.create_local_tab(),
                     ),
                     ft.Tab(
-                        tab_content=ft.Container(content=ft.Row([ft.Icon(ft.Icons.LIST), ft.Text("程序日志")])),
+                        tab_content=ft.Container(
+                            content=ft.Row(
+                                [ft.Icon(ft.Icons.LIST), ft.Text("程序日志")]
+                            )
+                        ),
                         content=self.create_app_log_tab(),
                     ),
                 ],
@@ -66,16 +77,17 @@ class LogViewerApp:
         self.host_input = ft.TextField(label="主机地址", width=200)
         self.port_input = ft.TextField(label="端口", value="22", width=100)
         self.username_input = ft.TextField(label="用户名", width=150)
-        self.password_input = ft.TextField(
-            label="密码", password=True, width=150)
+        self.password_input = ft.TextField(label="密码", password=True, width=150)
         self.ssh_path_input = ft.TextField(
             label="日志路径",
             value="/var/log/syslog",
             width=300,
-            tooltip="例如: /var/log/syslog 或 /var/log/auth.log")
+            tooltip="例如: /var/log/syslog 或 /var/log/auth.log",
+        )
 
         self.connect_button = ft.ElevatedButton(
-            "连接SSH", on_click=self.toggle_ssh_connection)
+            "连接SSH", on_click=self.toggle_ssh_connection
+        )
         self.ssh_status = ft.Text("未连接", color="red")
 
         # 本地文件选择
@@ -83,36 +95,38 @@ class LogViewerApp:
         self.page.overlay.append(self.file_picker)
 
         self.file_path_input = ft.TextField(
-            label="本地日志路径", width=300, read_only=True)
+            label="本地日志路径", width=300, read_only=True
+        )
         self.browse_button = ft.ElevatedButton(
             "浏览文件",
             on_click=lambda _: self.file_picker.pick_files(
-                allow_multiple=False,
-                allowed_extensions=["log", "txt"]))
+                allow_multiple=False, allowed_extensions=["log", "txt"]
+            ),
+        )
 
         # 过滤设置
         self.filter_input = ft.TextField(
-            label="过滤关键词",
-            width=300,
-            hint_text="支持正则表达式")
-        self.filter_button = ft.ElevatedButton(
-            "应用过滤", on_click=self.apply_filter)
+            label="过滤关键词", width=300, hint_text="支持正则表达式"
+        )
+        self.filter_button = ft.ElevatedButton("应用过滤", on_click=self.apply_filter)
 
         self.enable_watch_file_checkbox = ft.Checkbox(label="启用文件监控")
 
         self.search_file_log_input = ft.TextField(
-            label="搜索文件日志",
-            width=300,
-            hint_text="支持正则表达式")
+            label="搜索文件日志", width=300, hint_text="支持正则表达式"
+        )
 
         self.file_max_lines_input = ft.TextField(
             label="最大显示行数",
             value="1000",
             on_change=self.file_max_lines_change,
-            width=100)
+            width=100,
+        )
 
         # 日志显示区域
-        self.enable_watch_app_file_checkbox = ft.Checkbox(label="监控日志", value=False, on_change=self.start_memory_app_logger)
+        self.enable_watch_app_file_checkbox = ft.Checkbox(
+            label="监控日志", value=False, on_change=self.start_memory_app_logger
+        )
         self.file_log_display = ft.Column(
             [ft.Text("日志内容将在这里显示...")],
             scroll=ft.ScrollMode.AUTO,
@@ -123,73 +137,75 @@ class LogViewerApp:
 
         # 日志显示区域
         self.ssh_log_display = ft.TextField(
-            label="SSH日志",
-            multiline=True,
-            expand=True,
-            col=12
+            label="SSH日志", multiline=True, expand=True, col=12
         )
 
     def create_ssh_tab(self):
         """创建SSH日志标签页"""
         return ft.Container(
-            content=ft.Column([
-                ft.Row([
-                    self.host_input,
-                    self.port_input,
-                    self.username_input,
-                    self.password_input,
-                ]),
-                ft.Row([
-                    self.ssh_path_input,
-                    self.connect_button,
-                    self.ssh_status
-                ]),
-                ft.Divider(),
-                ft.Row([
-                    self.filter_input,
-                    self.filter_button
-                ]),
-                ft.Container(
-                    content=self.ssh_log_display,
-                    border=ft.border.all(1, ft.Colors.GREY_300),
-                    border_radius=5,
-                    padding=10,
-                    expand=True
-                )
-            ], expand=True),
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            self.host_input,
+                            self.port_input,
+                            self.username_input,
+                            self.password_input,
+                        ]
+                    ),
+                    ft.Row([self.ssh_path_input, self.connect_button, self.ssh_status]),
+                    ft.Divider(),
+                    ft.Row([self.filter_input, self.filter_button]),
+                    ft.Container(
+                        content=self.ssh_log_display,
+                        border=ft.border.all(1, ft.Colors.GREY_300),
+                        border_radius=5,
+                        padding=10,
+                        expand=True,
+                    ),
+                ],
+                expand=True,
+            ),
             padding=10,
-            expand=True
+            expand=True,
         )
 
     def create_local_tab(self):
         """创建本地日志标签页"""
         return ft.Container(
-            content=ft.Column([
-                ft.Row([
-                    self.file_path_input,
-                    self.browse_button,
-                    self.enable_watch_file_checkbox,
-                    self.is_auto_update
-                ]),
-                ft.Divider(),
-                ft.Row([
-                    self.filter_input,
-                    self.filter_button,
-                    ft.Button("清空日志", on_click=self.clear_file_log),
-                    self.search_file_log_input,
-                    ft.Button("搜索日志", on_click=self.search_file_log),
-                    self.file_max_lines_input,
-                ]),
-                ft.Container(
-                    content=ft.Row([self.file_log_display]),
-                    border=ft.border.all(1, ft.Colors.GREY_300),
-                    border_radius=5,
-                    padding=10,
-                    expand=True
-                )
-            ], expand=True),
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            self.file_path_input,
+                            self.browse_button,
+                            self.enable_watch_file_checkbox,
+                            self.is_auto_update,
+                        ]
+                    ),
+                    ft.Divider(),
+                    ft.Row(
+                        [
+                            self.filter_input,
+                            self.filter_button,
+                            ft.Button("清空日志", on_click=self.clear_file_log),
+                            self.search_file_log_input,
+                            ft.Button("搜索日志", on_click=self.search_file_log),
+                            self.file_max_lines_input,
+                        ]
+                    ),
+                    ft.Container(
+                        content=ft.Row([self.file_log_display]),
+                        border=ft.border.all(1, ft.Colors.GREY_300),
+                        border_radius=5,
+                        padding=10,
+                        expand=True,
+                    ),
+                ],
+                expand=True,
+            ),
             padding=10,
-            expand=True
+            expand=True,
         )
 
     def file_max_lines_change(self, e):
@@ -204,24 +220,25 @@ class LogViewerApp:
         self.app_log_display = ft.Column(
             [ft.Text("程序运行日志将显示在这里...")],
             scroll=ft.ScrollMode.AUTO,
-            expand=True
+            expand=True,
         )
 
         return ft.Container(
-            content=ft.Column([
-                ft.Row([
-                    self.enable_watch_app_file_checkbox
-                ]),
-                ft.Container(
-                    content=self.app_log_display,
-                    border=ft.border.all(1, ft.Colors.GREY_300),
-                    border_radius=5,
-                    padding=10,
-                    expand=True
-                )
-            ], expand=True),
+            content=ft.Column(
+                [
+                    ft.Row([self.enable_watch_app_file_checkbox]),
+                    ft.Container(
+                        content=self.app_log_display,
+                        border=ft.border.all(1, ft.Colors.GREY_300),
+                        border_radius=5,
+                        padding=10,
+                        expand=True,
+                    ),
+                ],
+                expand=True,
+            ),
             padding=10,
-            expand=True
+            expand=True,
         )
 
     def toggle_ssh_connection(self, e):
@@ -310,11 +327,11 @@ class LogViewerApp:
             # 开始监控选中的文件
             # await self.log_watcher()
 
-    async def start_memory_app_logger(self, evt:ft.ControlEvent):
+    async def start_memory_app_logger(self, evt: ft.ControlEvent):
         if evt.control.value:
             self.monitor_app_log()
         else:
-            logger.info(f"停止监控程序日志文件")
+            logger.info("停止监控程序日志文件")
 
     async def log_watcher(self):
         file_path = self.file_path_input.value
@@ -345,7 +362,9 @@ class LogViewerApp:
         def watch_file():
 
             last_size = 0
-            logger.info(f"self.enable_watch_file_checkbox.value:{self.enable_watch_file_checkbox.value}")
+            logger.info(
+                f"self.enable_watch_file_checkbox.value:{self.enable_watch_file_checkbox.value}"
+            )
             while not self.stop_watch:
                 try:
                     if not os.path.exists(self.file_path):
@@ -358,8 +377,9 @@ class LogViewerApp:
                         last_size = 0
 
                     if current_size > last_size:
-
-                        with open(self.file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        with open(
+                            self.file_path, "r", encoding="utf-8", errors="ignore"
+                        ) as f:
                             if last_size > 0:
                                 f.seek(last_size)
                             new_content = f.readline(current_size - last_size)
@@ -383,7 +403,7 @@ class LogViewerApp:
 
     def monitor_app_log(self):
         """监控本地日志文件"""
-        file_path = f"logs/{time.strftime("%Y-%m-%d", time.localtime())}.log"
+        file_path = f"logs/{time.strftime('%Y-%m-%d', time.localtime())}.log"
         if not file_path:
             return
         if self.current_app_thread:
@@ -409,8 +429,9 @@ class LogViewerApp:
                         last_size = 0
 
                     if current_size > last_size:
-
-                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        with open(
+                            file_path, "r", encoding="utf-8", errors="ignore"
+                        ) as f:
                             if last_size > 0:
                                 f.seek(last_size)
                             new_content = f.readline(current_size - last_size)
@@ -460,13 +481,17 @@ class LogViewerApp:
                 for m in pattern.finditer(message):
                     # 未匹配部分
                     if m.start() > last_end:
-                        log_entry.spans.append(ft.TextSpan(message[last_end:m.start()]))
+                        log_entry.spans.append(
+                            ft.TextSpan(message[last_end : m.start()])
+                        )
 
                     # 高亮部分
-                    log_entry.spans.append(ft.TextSpan(
-                        message[m.start():m.end()],
-                        style=ft.TextStyle(color=ft.Colors.RED)
-                    ))
+                    log_entry.spans.append(
+                        ft.TextSpan(
+                            message[m.start() : m.end()],
+                            style=ft.TextStyle(color=ft.Colors.RED),
+                        )
+                    )
 
                     last_end = m.end()
 
@@ -475,7 +500,6 @@ class LogViewerApp:
                     log_entry.spans.append(ft.TextSpan(message[last_end:]))
         else:
             log_entry.spans.append(ft.TextSpan(message))
-
 
         # 添加到缓冲区
         self.log_buffer.append(log_entry)
@@ -501,12 +525,14 @@ class LogViewerApp:
         log_entry = ft.Text(f"{message}", selectable=True, spans=[])
 
         # 更新程序日志显示
-        if hasattr(self, 'app_log_display'):
+        if hasattr(self, "app_log_display"):
             self.app_log_display.controls.append(log_entry)
 
             # 限制行数
             if len(self.app_log_display.controls) > self.max_log_lines:
-                self.app_log_display.controls = self.app_log_display.controls[-self.max_log_lines:]
+                self.app_log_display.controls = self.app_log_display.controls[
+                    -self.max_log_lines :
+                ]
 
             # 滚动到底部
             if self.app_log_display.page is not None:
@@ -518,6 +544,7 @@ class LogViewerApp:
         def log_memory_usage():
             while True:
                 import psutil
+
                 process = psutil.Process()
                 memory_usage = process.memory_info().rss / 1024 / 1024  # MB
                 self.add_app_log(f"内存使用: {memory_usage:.2f} MB")
@@ -551,5 +578,11 @@ def main(page: ft.Page):
 if __name__ == "__main__":
     print(re.fullmatch("qw", "qw22qw44qw22", re.IGNORECASE))
 
-    print(re.match("testserver", "2025-12-09 12:47:51,069 -[I] Scheduler_0: http_interface@344   [de78dcff3c834dc7b6c22ffe2d8b0ee0] get: https://testserver-cpos.rta-os.com/health? timeout:3.00 params:", re.IGNORECASE))
+    print(
+        re.match(
+            "testserver",
+            "2025-12-09 12:47:51,069 -[I] Scheduler_0: http_interface@344   [de78dcff3c834dc7b6c22ffe2d8b0ee0] get: https://testserver-cpos.rta-os.com/health? timeout:3.00 params:",
+            re.IGNORECASE,
+        )
+    )
     # ft.app(target=main)

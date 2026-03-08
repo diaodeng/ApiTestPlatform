@@ -1,11 +1,13 @@
+from csv import Error
+
 from loguru import logger
 
 from common.excptions import PosHandleException
-from utils import pos_network
 from model.config import PosChangeParamsModel, PosParamsModel
 from model.pos_network_model import PosLogoutModel
 from server.config import PosConfig
-from utils.common import get_active_mac, get_local_ip, kill_process_by_name
+from utils import pos_network
+from utils.common import get_active_mac, get_local_ip
 from utils.pos_network import change_pos_from_network
 
 
@@ -56,19 +58,18 @@ class PosConfigServer:
         pass
 
     @classmethod
-    async def logout_pos_account(self, pos_path) -> None:
+    async def logout_pos_account(cls, pos_path) -> None:
         logger.info(f"开始退出账号：{pos_path}")
         pos_config = PosConfig.read_pos_params(pos_path)
         if not pos_config or not isinstance(pos_config, PosParamsModel):
             raise PosHandleException(f"获取POS缓存失败， 无法注销POS账号: pos_config={pos_config}")
         pos_env = PosConfig.get_local_pos_env(pos_path)
+        if pos_env and pos_env.upper() in ("KH", "RTA"):
+            raise Error("非测试和UAT禁止自动切换POS，请手动切换后再启动")
         pos_group, account = PosConfig.get_pos_group(pos_config.venderNo, pos_env)
         if not pos_group or not account:
             raise PosHandleException(f"获取POS账号失败， 无法注销POS账号: pos_group={pos_group}, account={account}")
-        logout_model = PosLogoutModel(
-            env=pos_group,
-            cashierNo=account
-        )
+        logout_model = PosLogoutModel(env=pos_group, cashierNo=account)
         status, message_info = await pos_network.pos_account_logout(logout_model)
         if not status:
             raise PosHandleException(message_info)

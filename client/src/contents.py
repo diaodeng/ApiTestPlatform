@@ -1,13 +1,11 @@
-from view_contents.content_log_view import LogViewerApp
-from view_contents.content_mitmproxy import MitmHandel
-from view_contents.content_home import Home
-from view_contents.content_settings import Settings
-from view_contents.content_shortcut import Shortcut
 from view_contents.content_about import About
-from view_contents.content_pos_handler import PosHandler
-from view_contents.content_goods import Goods
 from view_contents.content_agent import AgentHandler
 from view_contents.content_ftp import FtpHandler
+from view_contents.content_goods import Goods
+from view_contents.content_log_view import LogViewerApp
+from view_contents.content_mitmproxy import MitmHandel
+from view_contents.content_pos_handler import PosHandler
+from view_contents.content_settings import Settings
 
 
 class Contents(object):
@@ -39,8 +37,6 @@ class Contents(object):
             self.mitmproxy,
             self.ftp_view,
             self.log_view,
-            self.about
-
+            self.about,
         ]
         return contents[index]
-

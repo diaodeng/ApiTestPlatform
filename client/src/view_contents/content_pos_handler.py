@@ -1,20 +1,19 @@
 import asyncio
 import fnmatch
 import os
-from threading import Thread, Event
+from threading import Event, Thread
 
 import flet as ft
 from loguru import logger
 
 from common.excptions import PosParamsException
-from common.ui_utils.ui_util import UiUtil, PosSettingUi, ChangePosUi, PosAccountManagerUi, ChangeLocalPosUi
-from model.config import ResolutionModel, PosParamsModel
-from model.pos_network_model import PosLogoutModel
-from server.config import SearchConfig, StartConfig, PosConfig
+from common.ui_utils.ui_util import ChangeLocalPosUi, ChangePosUi, PosAccountManagerUi, PosSettingUi, UiUtil
+from model.config import PosParamsModel, ResolutionModel
+from server.config import PosConfig, SearchConfig, StartConfig
 from server.pos_config_server import PosConfigServer
 from server.pos_tool_config_server import PosToolConfigServer
-from utils import file_handle, pos_network
-from utils.common import kill_process_by_name, get_all_process, kill_process_by_id, ExeVersionReader
+from utils import file_handle
+from utils.common import ExeVersionReader, get_all_process, kill_process_by_id, kill_process_by_name
 from view_contents.dialog.registerDialog import FeatureDialog
 
 
@@ -33,12 +32,20 @@ class PosHandler:
             modal=True,
             title=ft.Text("已添加工作目录"),
             content=ft.Container(
-                content=ft.Column([
-                    ft.Row([
-                        ft.Text(item, expand=True),
-                        ft.ElevatedButton("删除", on_click=lambda e, pos_path=item: self.remove_work_dir(e, pos_path))
-                    ]) for item in SearchConfig.read_work_dir()
-                ], expand=True),
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Text(item, expand=True),
+                                ft.ElevatedButton(
+                                    "删除", on_click=lambda e, pos_path=item: self.remove_work_dir(e, pos_path)
+                                ),
+                            ]
+                        )
+                        for item in SearchConfig.read_work_dir()
+                    ],
+                    expand=True,
+                ),
                 expand=True,
             ),
             actions=[
@@ -56,29 +63,44 @@ class PosHandler:
             modal=True,
             title=ft.Text("运行中的进程"),
             content=ft.Container(
-                content=ft.Column([
-                    ft.Row([
-                        ft.TextField(data="filter_key"),
-                        ft.ElevatedButton("查询", on_click=self.filter_process),
-                        ft.ElevatedButton("更新", on_click=self.update_all_process),
-                    ]),
-                    ft.ListView([
-                        ft.Row([
-                            ft.Text(f"{item['name']}:{item['exe']}", expand=True),
-                            ft.Text("子进程", color=ft.Colors.GREEN_100, visible=item.get('is_current_child', False)),
-                            ft.ElevatedButton("停止", on_click=self.kill_p_by_id, data=item['pid']),
-                        ], expand=True) for item in self.all_p
-                    ], expand=True, data="filter_result"),
-                ]),
-
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.TextField(data="filter_key"),
+                                ft.ElevatedButton("查询", on_click=self.filter_process),
+                                ft.ElevatedButton("更新", on_click=self.update_all_process),
+                            ]
+                        ),
+                        ft.ListView(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Text(f"{item['name']}:{item['exe']}", expand=True),
+                                        ft.Text(
+                                            "子进程",
+                                            color=ft.Colors.GREEN_100,
+                                            visible=item.get("is_current_child", False),
+                                        ),
+                                        ft.ElevatedButton("停止", on_click=self.kill_p_by_id, data=item["pid"]),
+                                    ],
+                                    expand=True,
+                                )
+                                for item in self.all_p
+                            ],
+                            expand=True,
+                            data="filter_result",
+                        ),
+                    ]
+                ),
                 expand=True,
-                width=1000
+                width=1000,
             ),
             actions=[
                 ft.TextButton("取消", on_click=lambda e: e.page.close(dialog)),
                 # ft.TextButton("添加", on_click=lambda e: dialog.dismiss()),
             ],
-            alignment=ft.alignment.center
+            alignment=ft.alignment.center,
         )
         dialog.open = True
         self.page.open(dialog)
@@ -95,14 +117,18 @@ class PosHandler:
                 item_view.controls.clear()
                 item_view.update()
                 for item in self.all_p:
-                    if filter_data in item['name'].lower():
+                    if filter_data in item["name"].lower():
                         item_view.controls.append(
-                            ft.Row([
-                                ft.Text(f"{item['name']}:{item['exe']}", expand=True),
-                                ft.Text("子进程", color=ft.Colors.GREEN_100,
-                                        visible=item.get('is_current_child', False)),
-                                ft.ElevatedButton("停止", on_click=self.kill_p_by_id, data=item['pid']),
-                            ], expand=True)
+                            ft.Row(
+                                [
+                                    ft.Text(f"{item['name']}:{item['exe']}", expand=True),
+                                    ft.Text(
+                                        "子进程", color=ft.Colors.GREEN_100, visible=item.get("is_current_child", False)
+                                    ),
+                                    ft.ElevatedButton("停止", on_click=self.kill_p_by_id, data=item["pid"]),
+                                ],
+                                expand=True,
+                            )
                         )
                         item_view.update()
 
@@ -114,7 +140,7 @@ class PosHandler:
         if k_id:
             kill_process_by_id(e.control.data)
 
-        UiUtil.show_snackbar_success(self.page, f"进程已停止")
+        UiUtil.show_snackbar_success(self.page, "进程已停止")
 
     def remove_work_dir(self, e: ft.ControlEvent, item):
         SearchConfig.remove_work_dir(item)
@@ -125,57 +151,74 @@ class PosHandler:
     def init_ui(self):
 
         content = self.ft.Container(
-            content=self.ft.Column([
-                self.ft.Text("POS快捷功能>", size=20),
-                self.ft.Divider(),
-                self.ft.Row([
-                    # 搜索参数输入区
-                    ft.ElevatedButton(
-                        "添加工作目录",
-                        tooltip="添加工作目录，索引时会递归搜索",
-                        on_click=self.open_directory_dialog
+            content=self.ft.Column(
+                [
+                    self.ft.Text("POS快捷功能>", size=20),
+                    self.ft.Divider(),
+                    self.ft.Row(
+                        [
+                            # 搜索参数输入区
+                            ft.ElevatedButton(
+                                "添加工作目录",
+                                tooltip="添加工作目录，索引时会递归搜索",
+                                on_click=self.open_directory_dialog,
+                            ),
+                            ft.Button(
+                                "查看工作目录",
+                                tooltip="查看已经添加的工作目录",
+                                on_click=lambda e: self.open_work_dir_list_dialog(e),
+                            ),
+                            self.search_btn,
+                            self.stop_btn,
+                            self.kill_pos_btn,
+                            self.kill_offline_btn,
+                            ft.Button("结束进程", tooltip="查看并结束进程", on_click=self.open_process_list_dialog),
+                            ft.ElevatedButton(
+                                "设置", tooltip="POS工具相关设置", on_click=lambda e: self.page.open(PosSettingUi())
+                            ),
+                            ft.ElevatedButton(
+                                "切换POS", tooltip="调用接口切换POS", on_click=self.change_env_from_network
+                            ),
+                            ft.ElevatedButton(
+                                "POS账号处理",
+                                tooltip="调用接口踢出POS账号或重置密码",
+                                on_click=lambda e: self.page.open(PosAccountManagerUi()),
+                            ),
+                        ]
                     ),
-                    ft.Button("查看工作目录", tooltip="查看已经添加的工作目录",
-                              on_click=lambda e: self.open_work_dir_list_dialog(e)),
-                    self.search_btn,
-                    self.stop_btn,
-                    self.kill_pos_btn,
-                    self.kill_offline_btn,
-                    ft.Button("结束进程", tooltip="查看并结束进程", on_click=self.open_process_list_dialog),
-                    ft.ElevatedButton("设置", tooltip="POS工具相关设置",
-                                      on_click=lambda e: self.page.open(PosSettingUi())),
-                    ft.ElevatedButton("切换POS", tooltip="调用接口切换POS", on_click=self.change_env_from_network),
-                    ft.ElevatedButton("POS账号处理", tooltip="调用接口踢出POS账号或重置密码",
-                                      on_click=lambda e: self.page.open(PosAccountManagerUi()))
-                ]),
-                ft.Row([
-                    self.file_pattern,
-                    self.dir_pattern,
-                    self.scan_deep,
-                ]),
-                self.ft.Row([
-                    # 控制按钮
-                    ft.Text("启动POS前："),
-                    self.before_start_back_view,
-                    self.before_start_cover_payment_driver_view,
-                    self.before_start_replace_mitm_cert_view,
-                    self.before_start_change_pos_view,
-                    # self.before_start_change_env_view,
-                    self.before_start_logout_view,
-                    self.before_start_remove_cache_view,
-                    ft.TextField(label="查找结果", on_change=lambda e: self.search_result(e))
+                    ft.Row(
+                        [
+                            self.file_pattern,
+                            self.dir_pattern,
+                            self.scan_deep,
+                        ]
+                    ),
+                    self.ft.Row(
+                        [
+                            # 控制按钮
+                            ft.Text("启动POS前："),
+                            self.before_start_back_view,
+                            self.before_start_cover_payment_driver_view,
+                            self.before_start_replace_mitm_cert_view,
+                            self.before_start_change_pos_view,
+                            # self.before_start_change_env_view,
+                            self.before_start_logout_view,
+                            self.before_start_remove_cache_view,
+                            ft.TextField(label="查找结果", on_change=lambda e: self.search_result(e)),
+                        ],
+                        # expand=True,
+                        alignment=ft.MainAxisAlignment.START,
+                    ),
+                    # 进度显示
+                    # self.progress_bar,
+                    self.status_text,
+                    self.ft.Divider(),
+                    # 结果展示
+                    self.results_view,
                 ],
-                    # expand=True,
-                    alignment=ft.MainAxisAlignment.START,
-                ),
-                # 进度显示
-                # self.progress_bar,
-                self.status_text,
-                self.ft.Divider(),
-                # 结果展示
-                self.results_view
-            ], alignment=self.ft.MainAxisAlignment.START),
-            alignment=self.ft.alignment.center_left
+                alignment=self.ft.MainAxisAlignment.START,
+            ),
+            alignment=self.ft.alignment.center_left,
         )
         return content
 
@@ -191,7 +234,7 @@ class PosHandler:
             hint_text="例如: *.txt 或 report*.docx",
             width=self.set_width,
             value=search_config.file_pattern,
-            on_change=self.validate_inputs
+            on_change=self.validate_inputs,
         )
 
         self.dir_pattern = ft.TextField(
@@ -200,7 +243,7 @@ class PosHandler:
             hint_text="例如: * 或 report*.docx",
             width=self.set_width,
             value=search_config.dir_pattern,
-            on_change=self.validate_inputs
+            on_change=self.validate_inputs,
         )
 
         self.scan_deep = ft.TextField(
@@ -213,10 +256,7 @@ class PosHandler:
 
         # 控制按钮
         self.search_btn = ft.ElevatedButton(
-            "开始索引",
-            tooltip="按规则索引工作目录中的文件",
-            on_click=self.start_search,
-            disabled=not search_config.dir
+            "开始索引", tooltip="按规则索引工作目录中的文件", on_click=self.start_search, disabled=not search_config.dir
         )
         self.stop_btn = ft.ElevatedButton(
             "停止",
@@ -230,14 +270,14 @@ class PosHandler:
             "结束POS",
             on_click=lambda e: self.kill_pos_process(),
             # disabled=True,
-            color="red"
+            color="red",
         )
 
         self.kill_offline_btn = ft.ElevatedButton(
             "结束离线",
             on_click=lambda e: self.kill_offline_process(),
             # disabled=True,
-            color="red"
+            color="red",
         )
 
         self.before_start_back_view = ft.Checkbox(
@@ -290,33 +330,31 @@ class PosHandler:
         )
 
         # 进度显示
-        self.progress_bar = ft.ProgressBar(
-            width=self.set_width,
-            value=0,
-            visible=False
-        )
+        self.progress_bar = ft.ProgressBar(width=self.set_width, value=0, visible=False)
         self.status_text = ft.Text()
 
         # 结果展示
-        self.results_view = ft.ListView(
-            expand=True,
-            spacing=10,
-            auto_scroll=False
-        )
+        self.results_view = ft.ListView(expand=True, spacing=10, auto_scroll=False)
 
         self.before_start_change_env_dialog_view = ft.AlertDialog(
             modal=True,
             title=ft.Text("切换环境"),
-            content=ft.Container(content=ft.Column([
-                ft.Text("请选择环境"),
-                ft.RadioGroup(
-                    content=ft.Column([
-                        ft.Radio(value="RTA_TEST", label="RTA_TEST"),
-                        ft.Radio(value="RTA_UAT", label="RTA_UAT"),
-                        ft.Radio(value="RTA_PROD", label="RTA_PROD"),
-                    ]),
-                ),
-            ])),
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text("请选择环境"),
+                        ft.RadioGroup(
+                            content=ft.Column(
+                                [
+                                    ft.Radio(value="RTA_TEST", label="RTA_TEST"),
+                                    ft.Radio(value="RTA_UAT", label="RTA_UAT"),
+                                    ft.Radio(value="RTA_PROD", label="RTA_PROD"),
+                                ]
+                            ),
+                        ),
+                    ]
+                )
+            ),
             actions=[
                 ft.TextButton("Yes", on_click=self.change_env),
                 ft.TextButton("No", on_click=lambda e: e.control.close()),
@@ -339,13 +377,20 @@ class PosHandler:
             logger.error(f"更新搜索结果失败: {e}")
 
     def kill_pos_process(self):
-        kill_process_name = ["CPOS-DF.exe", "Launcher.exe", "df_sv.exe", "Pos.exe", "CPOS-KH.exe", "ONENOTE.exe",
-                             "ONENOTEM.exe"]
+        kill_process_name = [
+            "CPOS-DF.exe",
+            "Launcher.exe",
+            "df_sv.exe",
+            "Pos.exe",
+            "CPOS-KH.exe",
+            "ONENOTE.exe",
+            "ONENOTEM.exe",
+        ]
         try:
             for process_name in kill_process_name:
                 # logger.info(f"结束{process_name}进程")
                 kill_process_by_name(process_name)
-            logger.info(f"POS进程已结束")
+            logger.info("POS进程已结束")
             UiUtil.show_snackbar_success(self.page, "POS进程已结束")
         except Exception as e:
             logger.error(f"POS结束进程失败: {e}")
@@ -357,7 +402,7 @@ class PosHandler:
             for process_name in kill_process_name:
                 # logger.info(f"结束{process_name}进程")
                 kill_process_by_name(process_name)
-            logger.info(f"离线（java.exe）进程已结束")
+            logger.info("离线（java.exe）进程已结束")
             UiUtil.show_snackbar_success(self.page, "离线（java.exe）进程已结束")
         except Exception as e:
             logger.error(f"离线（java.exe）结束进程失败: {e}")
@@ -368,7 +413,7 @@ class PosHandler:
         self.page.update()
 
     def update_start_config(self, e):
-        logger.info(f"更新启动配置")
+        logger.info("更新启动配置")
         self.start_config.backup = self.before_start_back_view.value
         self.start_config.replace_mitm_cert = self.before_start_replace_mitm_cert_view.value
         self.start_config.change_env = self.before_start_change_env_view.value
@@ -411,10 +456,7 @@ class PosHandler:
             self.page.update()
 
             # 启动搜索线程
-            Thread(
-                target=self.search_files,
-                daemon=True
-            ).start()
+            Thread(target=self.search_files, daemon=True).start()
         except Exception as e:
             logger.exception(e)
             UiUtil.show_snackbar_error(self.page, f"搜索异常：{e}")
@@ -428,85 +470,163 @@ class PosHandler:
         path = evt.control.data
         try:
             await PosConfigServer.logout_pos_account(path)
-            UiUtil.show_snackbar_success(self.page, f"账号登出成功")
+            UiUtil.show_snackbar_success(self.page, "账号登出成功")
         except Exception as e:
             UiUtil.show_snackbar_error(self.page, f"账号登出失败：{e}")
 
     async def __confirm_dialog(self, title, content_data):
         return await FeatureDialog(
-            page=self.page,
-            tile=title,
-            content=content_data,
-            actions=[
-                ("取消", False),
-                ("确定", True)
-            ]).show()
+            page=self.page, tile=title, content=content_data, actions=[("取消", False), ("确定", True)]
+        ).show()
 
     async def __choice_start_type_dialog(self, title, content_data):
         return await FeatureDialog(
-            page=self.page,
-            tile=title,
-            content=content_data,
-            actions=[
-                ("取消", 0),
-                ("确定", 1),
-                ("切换后启动", 2)
-            ]).show()
+            page=self.page, tile=title, content=content_data, actions=[("取消", 0), ("确定", 1), ("切换后启动", 2)]
+        ).show()
+
+    def _get_group(self, pos_file: str):
+        """
+        根据本地POS配置获取分组信息
+        测试和pro不用判断
+        UAT有多个分组，需要判断从哪个分组读取信息
+        """
+        env_info = PosConfig.get_local_pos_env(pos_file=pos_file)
+        local_pos_params = PosConfig.read_pos_params(pos_file, 1)
+        if env_info and "uat" in env_info.lower():
+            if not local_pos_params:
+                return None
+                # raise Error("本地是UAT环境，但是没有本地配置信息（pos_params），无法判断分组，直接启动？")
+            group, account = PosConfig.get_pos_group(local_pos_params.venderNo, env=env_info)
+            return group
 
     async def open_pos_file(self, e: ft.ControlEvent):
         """打开文件"""
         cancel = False
         try:
             path = e.control.data
+            if not os.path.exists(path):
+                UiUtil.show_snackbar_error(self.page, "POS文件不存在：{path}，无法启动！！！")
+                return
+
             logger.info(f"启动POS文件: {path}")
-            logger.debug(f"启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
+            logger.debug("启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
             kill_process_by_name("CPOS-DF.exe")
             UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
             await asyncio.sleep(2)
 
+            local_env_info = PosConfig.get_local_pos_env(pos_file=path)
+            if local_env_info is None:
+                UiUtil.show_snackbar_error(self.page, "没有获取到本地环境信息，无法启动！！！")
+                return
+            pos_file_version = ExeVersionReader(path).get_exe_file_version()
+            is_uat = local_env_info and ("uat" in local_env_info.lower() or "kh_test" in local_env_info.lower())
+
             local_pos_params = PosConfig.read_pos_params(path, 1)
+            has_local = local_pos_params or isinstance(local_pos_params, PosParamsModel)
+            has_group = None
+            if has_local:
+                group, account = PosConfig.get_pos_group(local_pos_params.venderNo, env=local_env_info)
+                has_group = False if group is None else True
+
             remote_pos_params = PosConfig.read_pos_params(path, 2)
             remote_info = PosConfig.remote_pos_info(remote_pos_params)
+            has_remote = remote_pos_params and isinstance(remote_pos_params, PosParamsModel)
 
-            if not remote_pos_params or not isinstance(remote_pos_params, PosParamsModel):
-                logger.info(f"服务端没有当前机台信息，无法启动:{remote_pos_params}")
-                ok = await self.__confirm_dialog(
-                    "POS启动提示",
-                    f"服务端没有当前机台信息，继续启动？"
-                    f"{remote_pos_params}")
-                if not ok:
-                    return
+            custum_headers = ""
 
-            if not local_pos_params or not isinstance(local_pos_params, PosParamsModel):
-                logger.info(f"没有本地POS配置文件")
-                ok = await self.__confirm_dialog(
-                    "POS启动提示",
-                    f"本地配置为空，将启动服务端对应机台：\n{remote_info}"
-                    )
-                if not ok:
-                    return
-            else:
-                if not self.start_config.change_pos and (local_pos_params.venderNo != remote_pos_params.venderNo \
-                                                         or local_pos_params.orgNo != remote_pos_params.orgNo \
-                                                         or local_pos_params.posId != remote_pos_params.posId):
-                    open_type = await self.__choice_start_type_dialog(
+            can_not_auto_change_text = ""
+            if self.start_config.change_pos:
+                can_not_auto_change_text = "无法自动切换POS,"
+
+            if is_uat:
+                if not has_local:
+                    ok = await self.__confirm_dialog(
                         "POS启动提示",
-                        f"配置不一致，将启动服务端对应机台："
-                        f"\n{remote_info}""；"
-                        f"\n本地：商家：{local_pos_params.venderNo}，门店：{local_pos_params.orgNo}，POS：{local_pos_params.posId}；")
-                    if open_type == 0:
+                        f"本地是UAT环境，但是没有POS配置文件（pos_params），无法知道服务端机台信息，{can_not_auto_change_text}继续启动？",
+                    )
+                    logger.info(
+                        f"本地是UAT环境，但是没有POS配置文件（pos_params），无法知道服务端机台信息，{can_not_auto_change_text}是否继续启动：{'是' if ok else '否'}"
+                    )
+                    if not ok:
                         return
-                    elif open_type == 2:
-                        await PosConfigServer.change_pos_on_network(path)
+                # elif not has_group or not pos_file_version:
+                #     ok = await self.__confirm_dialog(
+                #         "POS启动提示",
+                #         "本地是UAT环境，但是没有获取到版本信息，无法知道服务端机台信息，继续启动？",
+                #     )
+                #     logger.info(
+                #         f"本地是UAT环境，但是没有获取到版本信息，无法知道服务端机台信息，是否继续启动：{'是' if ok else '否'}"
+                #     )
+                #     if not ok:
+                #         return
+                elif not has_remote and not self.start_config.change_pos:
+                    ok = await self.__confirm_dialog(
+                        "POS启动提示",
+                        f"本地是UAT环境，获取服务端POS信息失败，继续启动？{remote_info}",
+                    )
+                    logger.info(
+                        f"本地是UAT环境，获取服务端POS信息失败，继续启动？：{'是' if ok else '否'} {remote_info}"
+                    )
+                    if not ok:
+                        return
+
+            else:
+                if not has_local and not has_remote:
+
+                    ok = await self.__confirm_dialog(
+                        "POS启动提示",
+                        f"本地没有POS配置文件（pos_params），{can_not_auto_change_text}且服务端没有当前机台信息，继续启动？{remote_pos_params}",
+                    )
+                    logger.info(
+                        f"本地没有POS配置文件（pos_params），{can_not_auto_change_text}且服务端没有当前机台信息，是否继续启动：{'是' if ok else '否'}"
+                    )
+                    if not ok:
+                        return
+
+                elif not has_remote and not self.start_config.change_pos:
+                    ok = await self.__confirm_dialog(
+                        "POS启动提示", f"服务端没有当前机台信息，继续启动？{remote_pos_params}"
+                    )
+                    logger.info(f"服务端没有当前机台信息，继续启动？{'是' if ok else '否'}:{remote_pos_params}")
+                    if not ok:
+                        return
+
+                elif not has_local:
+
+                    ok = await self.__confirm_dialog(
+                        "POS启动提示", f"本地配置为空，{can_not_auto_change_text}将启动服务端对应机台：\n{remote_info}"
+                    )
+                    if not ok:
+                        return
 
             if self.start_config.change_pos:
                 await PosConfigServer.change_pos_on_network(path)
+            elif (
+                has_local
+                and has_remote
+                and (
+                    local_pos_params.venderNo != remote_pos_params.venderNo
+                    or local_pos_params.orgNo != remote_pos_params.orgNo
+                    or local_pos_params.posId != remote_pos_params.posId
+                )
+            ):
+                open_type = await self.__choice_start_type_dialog(
+                    "POS启动提示",
+                    f"配置不一致，将启动服务端对应机台："
+                    f"\n{remote_info}"
+                    "；"
+                    f"\n本地：商家：{local_pos_params.venderNo}，门店：{local_pos_params.orgNo}，POS：{local_pos_params.posId}；",
+                )
+                if open_type == 0:
+                    return
+                elif open_type == 2:
+                    await PosConfigServer.change_pos_on_network(path)
 
             if self.start_config.account_logout:
                 await PosConfigServer.logout_pos_account(path)
 
             if self.start_config.replace_mitm_cert:
-                logger.info(f"替换mitm证书")
+                logger.info("替换mitm证书")
                 success, msg = PosConfig.replace_mitm_cert(path)
                 if not success:
                     UiUtil.show_snackbar_error(self.page, msg)
@@ -515,7 +635,7 @@ class PosHandler:
                     UiUtil.show_snackbar_success(self.page, msg)
 
             if self.start_config.backup:
-                logger.info(f"备份支付驱动")
+                logger.info("备份支付驱动")
                 try:
                     PosConfig.backup_payment_driver(path)
                 except Exception as e:
@@ -523,7 +643,7 @@ class PosHandler:
                     return
 
             if self.start_config.cover_payment_driver:
-                logger.info(f"覆盖支付驱动")
+                logger.info("覆盖支付驱动")
                 try:
                     success, msg = PosConfig.cover_payment_driver(path)
                     if not success:
@@ -537,7 +657,7 @@ class PosHandler:
                     return
 
             if self.start_config.remove_cache:
-                logger.info(f"清理缓存")
+                logger.info("清理缓存")
                 try:
                     PosConfig.clean_cache(path)
                 except Exception as e:
@@ -663,7 +783,7 @@ class PosHandler:
         path = e.control.data
         try:
             await PosConfigServer.change_pos_on_network(path)
-            UiUtil.show_snackbar_success(self.page, f"POS切换成功")
+            UiUtil.show_snackbar_success(self.page, "POS切换成功")
         except Exception as e:
             UiUtil.show_snackbar_error(self.page, f"POS切换失败：{e}")
 
@@ -672,10 +792,12 @@ class PosHandler:
         try:
             logger.info(f"清理POS环境文件: {path}")
             PosConfig.clear_env(path)
-            e.page.open(ft.SnackBar(
-                content=ft.Text("清理成功"),
-                action="知道了",
-            ))
+            e.page.open(
+                ft.SnackBar(
+                    content=ft.Text("清理成功"),
+                    action="知道了",
+                )
+            )
             self.page.update()
         except Exception as e:
             UiUtil.show_snackbar_error(self.page, f"环境清理失败： {e}")
@@ -725,38 +847,27 @@ class PosHandler:
                         icon=ft.Icons.MORE_VERT,
                         tooltip="更多操作",
                         items=[
-
-                            ft.PopupMenuItem(text="切换本地环境",
-                                             data=pos_path,
-                                             tooltip="切换本地环境，修改pos.ini、切换database、logs、缓存等",
-                                             on_click=self.change_env,
-                                             ),
-                            ft.PopupMenuItem(text="备份支付驱动",
-                                             data=pos_path,
-                                             on_click=self.backup_payment_driver),
-                            ft.PopupMenuItem(text="恢复支付驱动",
-                                             data=pos_path,
-                                             on_click=self.restore_payment_driver),
-                            ft.PopupMenuItem(text="使用支付mock驱动",
-                                             data=pos_path,
-                                             on_click=self.cover_payment_driver),
-                            ft.PopupMenuItem(text="清理缓存",
-                                             data=pos_path,
-                                             on_click=self.clean_cache),
-                            ft.PopupMenuItem(text="清理当前环境文件",
-                                             data=pos_path,
-                                             on_click=self.clear_pos_env_file),
-                            ft.PopupMenuItem(text="退出账号",
-                                             data=pos_path,
-                                             on_click=self.logout_pos_account_for_view),
-                        ]
-                    )
-
+                            ft.PopupMenuItem(
+                                text="切换本地环境",
+                                data=pos_path,
+                                tooltip="切换本地环境，修改pos.ini、切换database、logs、缓存等",
+                                on_click=self.change_env,
+                            ),
+                            ft.PopupMenuItem(text="备份支付驱动", data=pos_path, on_click=self.backup_payment_driver),
+                            ft.PopupMenuItem(text="恢复支付驱动", data=pos_path, on_click=self.restore_payment_driver),
+                            ft.PopupMenuItem(
+                                text="使用支付mock驱动", data=pos_path, on_click=self.cover_payment_driver
+                            ),
+                            ft.PopupMenuItem(text="清理缓存", data=pos_path, on_click=self.clean_cache),
+                            ft.PopupMenuItem(text="清理当前环境文件", data=pos_path, on_click=self.clear_pos_env_file),
+                            ft.PopupMenuItem(text="退出账号", data=pos_path, on_click=self.logout_pos_account_for_view),
+                        ],
+                    ),
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 spacing=1,
                 # auto_scroll=True,
-            )
+            ),
         )
         return result_item
 
@@ -764,8 +875,12 @@ class PosHandler:
         """在多个目录中递归查找文件，可指定匹配规则和递归深度"""
         logger.info(f"开始搜索: {directories}, 模式: {file_pattern}, 目录模式: {dir_pattern}, 递归深度: {max_depth}")
 
-        data = {"dir": directories, "file_pattern": file_pattern, "dir_pattern": dir_pattern,
-                "max_depth": str(max_depth)}
+        data = {
+            "dir": directories,
+            "file_pattern": file_pattern,
+            "dir_pattern": dir_pattern,
+            "max_depth": str(max_depth),
+        }
         SearchConfig.write(data)
         result = []
         found_files = 0
@@ -785,26 +900,23 @@ class PosHandler:
                         total_files += 1
 
                         if entry.is_file():
-                            if file_pattern is None or fnmatch.fnmatch(entry.name.lower(),
-                                                                       file_pattern.lower()):  # 可换成正则匹配
+                            if file_pattern is None or fnmatch.fnmatch(
+                                entry.name.lower(), file_pattern.lower()
+                            ):  # 可换成正则匹配
                                 result.append(entry.path)
                                 # 创建结果项
                                 found_files += 1
 
                                 self.results_view.controls.append(self.row_item(entry.path))
 
-
                         elif entry.is_dir() and (
-                                dir_pattern is None or fnmatch.fnmatch(entry.name.lower(), dir_pattern.lower())):
+                            dir_pattern is None or fnmatch.fnmatch(entry.name.lower(), dir_pattern.lower())
+                        ):
                             scan_dir(entry.path, depth, found_files, total_files)
 
                         # progress = found_files / total_files
-                        self.update_ui(
-                            f"已扫描 {entry.path} 个",
-                            True,
-                            0.5
-                        )
-            except PermissionError as e:
+                        self.update_ui(f"已扫描 {entry.path} 个", True, 0.5)
+            except PermissionError:
                 self.update_ui(f"权限错误: {path}", True)
 
         for d in directories:
@@ -817,15 +929,15 @@ class PosHandler:
         pattern = self.file_pattern.value
         max_depth = 1
         try:
-
             max_depth = int(self.scan_deep.value)
             if max_depth < 1:
                 max_depth = 1
-        except Exception as e:
+        except Exception:
             pass
 
-        result = self.__find_files(directory, file_pattern=pattern, dir_pattern=self.dir_pattern.value,
-                                   max_depth=max_depth)
+        result = self.__find_files(
+            directory, file_pattern=pattern, dir_pattern=self.dir_pattern.value, max_depth=max_depth
+        )
         SearchConfig.save_search_result(result)
         found_files = len(result)
 
