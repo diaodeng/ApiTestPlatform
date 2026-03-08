@@ -3,17 +3,32 @@ name = "QTR-Client"
 version = "1.0.0"
 description = ""
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 authors = [
     { name = "Flet developer", email = "you@example.com" }
 ]
 dependencies = [
   "flet==0.28.3",
-    "aiohttp",
-    "mitmproxy",
-    "certifi",
-    "loguru",
-    "watchfiles"
+  "aiohttp",
+  "mitmproxy",
+  "certifi",
+  "loguru",
+  "watchfiles",
+  "psutil>=7.2.2",
+  "requests>=2.32.5",
+  "pyperclip>=1.8.2",
+  "pyinstaller>=6.19.0",
+  "python-barcode>=0.16.1",
+  "pillow>=11.3.0",
+  "pydantic>=1.10.26",
+  "pywin32>=311",
+  "pyftpdlib>=2.2.0",
+  "httpx>=0.28.1",
+  "flet-desktop>=0.28.3",
+  "websockets==12.0",
+]
+dependency-groups.dev = [
+    "flet[all]==0.28.3",
 ]
 
 [tool.flet]
@@ -38,11 +53,6 @@ copyright = "Copyright (C) 2025 by Flet"
 [tool.flet.app]
 path = "src"
 
-[tool.uv]
-dev-dependencies = [
-    "flet[all]==0.28.3",
-]
-
 [tool.flet.app.boot_screen]
 show = true
 message = "Preparing the app for its first launch…"
@@ -61,3 +71,28 @@ package-mode = false
 
 [tool.poetry.group.dev.dependencies]
 flet = {extras = ["all"], version = "0.28.3"}
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["README.md"]
+
+[tool.ruff.lint]
+select = ["C4", "E", "F", "B", "I", "PERF", "UP"]
+ignore = ["PERF203","UP007","UP006","UP045", "B008"]
+
+fixable = [
+    "E",    # 基础风格
+    "F",    # pyflakes
+    "I",    # import排序
+    "C4",   # 简化推导式
+    "UP",   # pyupgrade（已排除不安全规则）
+]
+
+unfixable = [
+    "B",      # bugbear（可能改语义）
+    "PERF",   # 性能优化类规则（可能改逻辑）
+]
