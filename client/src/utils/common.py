@@ -22,6 +22,7 @@ from httpx import stream
 from loguru import logger
 
 from utils import VERSION
+from common import appState
 
 
 class DBHelper:
@@ -761,7 +762,22 @@ class ExeVersionReader:
             self.get_all_version_info()
         return self.version_info.get('FileVersion', None)
 
+def get_sys_info_view():
 
+    try:
+        info = get_sys_info()
+        process_men = get_memory_usage()
+        pos = get_process_by_name("CPOS-DF.exe")
+        pos_mem = 0
+        pos_dir = ""
+        if pos:
+            pos_dir = pos[0][1]
+            pos_mem = get_memory_usage(int(pos[0][0]))
+        appState.client_info.current_pos = pos_dir
+        appState.client_info.toolbar_info = f"CPU:{info['cpu']}/内存:{info['mem']}/磁盘:{info['disk']}/进程:{process_men}/CPOS-DF:{pos_mem}/{pos_dir}"
+    except Exception as e:
+        logger.error(f"获取系统信息异常:{e}")
+        appState.client_info.toolbar_info = f"获取系统信息异常:{e}"
 
 if __name__ == "__main__":
     # 示例用法

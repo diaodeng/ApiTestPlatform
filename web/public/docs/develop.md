@@ -76,6 +76,14 @@ npm run build:prod 或 yarn build:prod
 # 运行后端
 python3 app.py --env=prod
 ```
+
+#### 客户端
+```bash
+# 打包（zip）
+pyinstaller.exe --clean .\QTRClient2.spec --noconfirm
+#独立包
+pyinstaller.exe --clean .\QTRClient.spec --noconfirm
+```
 #### uv管理依赖
 ```bash
 uv add fastapi uvicorn  # 增加依赖
