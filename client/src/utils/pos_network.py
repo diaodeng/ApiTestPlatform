@@ -53,12 +53,12 @@ async def change_pos_from_network(data: PosChangeParamsModel) -> None:
             "pos_no": data.pos_no,
         }
         logger.info(f"POS切换参数： {json.dumps(data)}")
-        if "kh_test_s" in data["env"].lower() or "test" in data["env"].lower():
+        if "kh_test_s" in data["env"].lower() or "rta_test" in data["env"].lower():
             resp = await client.post(f"{test_host}/tools/posChange", json=data)
-        elif "uat" in data["env"].lower() or "kh_test" in data["env"].lower():
+        elif "rta_uat" in data["env"].lower() or "kh_test" in data["env"].lower():
             resp = await client.post(f"{uat_host}/tools/posChange", json=data)
         else:
-            raise Error("非测试及UAT环境，禁止切换POS")
+            raise Exception("非测试及UAT环境，禁止切换POS")
         if resp.status_code != 200:
             logger.error(f"POS切换失败，状态码： {resp.status_code}")
             raise PosHandleException(f"POS切换失败，状态码： {resp.status_code}")

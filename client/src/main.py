@@ -4,6 +4,7 @@ from multiprocessing import freeze_support
 import flet as ft
 from flet import Page
 
+from common import appState
 from config import AppConfig
 from navigationMenu import NavigationMenu
 from utils import VERSION
@@ -12,12 +13,13 @@ from utils.common import (
     get_memory_usage,
     get_process_by_name,
     get_sys_info,
-    load_json,
+    load_json, get_sys_info_view,
 )
 from utils.logger import log
 from utils.mytimers import ThreadPool, clear_all_timers
 
 ensure_directory_exists("logs")
+from loguru import logger
 
 basepath = os.path.dirname(__file__)
 
@@ -54,6 +56,7 @@ class ExitAlertDialog:
         e.control.page.close(self.confirm_dialog)
         e.control.page.update()
 
+ThreadPool.add_task(get_sys_info_view, 10)
 
 async def main(page: ft.Page):
     page.window.prevent_close = True
@@ -130,20 +133,7 @@ async def main(page: ft.Page):
         e.control.page.update()
 
     def get_sys_info_view():
-
-        try:
-            info = get_sys_info()
-            process_men = get_memory_usage()
-            pos = get_process_by_name("CPOS-DF.exe")
-            pos_mem = 0
-            pos_dir = ""
-            if pos:
-                pos_dir = pos[0][1]
-                pos_mem = get_memory_usage(int(pos[0][0]))
-            sys_show_view.value = f"CPU:{info['cpu']}/内存:{info['mem']}/磁盘:{info['disk']}/进程:{process_men}/CPOS-DF:{pos_mem}/{pos_dir}"
-        except Exception as e:
-            log.error(f"获取系统信息异常:{e}")
-            sys_show_view.value = f"获取系统信息异常:{e}"
+        sys_show_view.value = appState.client_info.toolbar_info
         sys_show_view.update()
 
     # add_timer_and_start(10, get_sys_info_view)

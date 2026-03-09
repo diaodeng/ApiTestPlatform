@@ -6,6 +6,7 @@ from threading import Event, Thread
 import flet as ft
 from loguru import logger
 
+from common import appState
 from common.excptions import PosParamsException
 from common.ui_utils.ui_util import ChangeLocalPosUi, ChangePosUi, PosAccountManagerUi, PosSettingUi, UiUtil
 from model.config import PosParamsModel, ResolutionModel
@@ -171,6 +172,7 @@ class PosHandler:
                             self.search_btn,
                             self.stop_btn,
                             self.kill_pos_btn,
+                            self.restart_offline_btn,
                             self.kill_offline_btn,
                             ft.Button("结束进程", tooltip="查看并结束进程", on_click=self.open_process_list_dialog),
                             ft.ElevatedButton(
@@ -269,6 +271,14 @@ class PosHandler:
         self.kill_pos_btn = ft.ElevatedButton(
             "结束POS",
             on_click=lambda e: self.kill_pos_process(),
+            # disabled=True,
+            color="red",
+        )
+
+        self.restart_offline_btn = ft.ElevatedButton(
+            "重启POS",
+            tooltip=global_info.current_pos,
+            on_click=self.restart_pos,
             # disabled=True,
             color="red",
         )
@@ -376,6 +386,10 @@ class PosHandler:
         except Exception as e:
             logger.error(f"更新搜索结果失败: {e}")
 
+    async def restart_pos(self, e:ft.ControlEvent):
+        self.kill_pos_process()
+        await self.open_pos_file(appState.client_info.current_pos)
+
     def kill_pos_process(self):
         kill_process_name = [
             "CPOS-DF.exe",
@@ -392,6 +406,7 @@ class PosHandler:
                 kill_process_by_name(process_name)
             logger.info("POS进程已结束")
             UiUtil.show_snackbar_success(self.page, "POS进程已结束")
+            global_info.current_pos = ""
         except Exception as e:
             logger.error(f"POS结束进程失败: {e}")
             UiUtil.show_snackbar_error(self.page, f"POS结束进程失败: {e}")
@@ -499,12 +514,17 @@ class PosHandler:
             group, account = PosConfig.get_pos_group(local_pos_params.venderNo, env=env_info)
             return group
 
-    async def open_pos_file(self, e: ft.ControlEvent):
+    async def open_pos_file(self, e: ft.ControlEvent|str):
         """打开文件"""
         cancel = False
         try:
-            path = e.control.data
+            if isinstance(e, str):
+                path = e
+            else:
+                path = e.control.data
+
             if not os.path.exists(path):
+                logger.warning(f"没有POS文件：{path}")
                 UiUtil.show_snackbar_error(self.page, "POS文件不存在：{path}，无法启动！！！")
                 return
 
@@ -514,15 +534,17 @@ class PosHandler:
             UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
             await asyncio.sleep(2)
 
+            global_info.current_pos = path
+
             local_env_info = PosConfig.get_local_pos_env(pos_file=path)
             if local_env_info is None:
                 UiUtil.show_snackbar_error(self.page, "没有获取到本地环境信息，无法启动！！！")
                 return
             pos_file_version = ExeVersionReader(path).get_exe_file_version()
-            is_uat = local_env_info and ("uat" in local_env_info.lower() or "kh_test" in local_env_info.lower())
+            is_uat = local_env_info and ("rta_uat" in local_env_info.lower() or "kh_test_s" in local_env_info.lower())
 
             local_pos_params = PosConfig.read_pos_params(path, 1)
-            has_local = local_pos_params or isinstance(local_pos_params, PosParamsModel)
+            has_local = local_pos_params and isinstance(local_pos_params, PosParamsModel)
             has_group = None
             if has_local:
                 group, account = PosConfig.get_pos_group(local_pos_params.venderNo, env=local_env_info)
@@ -599,7 +621,7 @@ class PosHandler:
                     if not ok:
                         return
 
-            if self.start_config.change_pos:
+            if self.start_config.change_pos and has_local:
                 await PosConfigServer.change_pos_on_network(path)
             elif (
                 has_local
