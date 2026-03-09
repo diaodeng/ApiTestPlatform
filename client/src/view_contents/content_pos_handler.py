@@ -406,7 +406,7 @@ class PosHandler:
                 kill_process_by_name(process_name)
             logger.info("POS进程已结束")
             UiUtil.show_snackbar_success(self.page, "POS进程已结束")
-            global_info.current_pos = ""
+            appState.client_info.current_pos = ""
         except Exception as e:
             logger.error(f"POS结束进程失败: {e}")
             UiUtil.show_snackbar_error(self.page, f"POS结束进程失败: {e}")
