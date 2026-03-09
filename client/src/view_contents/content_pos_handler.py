@@ -277,7 +277,7 @@ class PosHandler:
 
         self.restart_offline_btn = ft.ElevatedButton(
             "重启POS",
-            tooltip=global_info.current_pos,
+            tooltip=appState.client_info.current_pos,
             on_click=self.restart_pos,
             # disabled=True,
             color="red",
@@ -534,7 +534,7 @@ class PosHandler:
             UiUtil.show_snackbar_success(self.page, "启动前,检查CPOS-DF.exe进程是否存在，存在则杀死")
             await asyncio.sleep(2)
 
-            global_info.current_pos = path
+            appState.client_info.current_pos = path
 
             local_env_info = PosConfig.get_local_pos_env(pos_file=path)
             if local_env_info is None:
