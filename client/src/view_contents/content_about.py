@@ -17,32 +17,45 @@ class About(object):
 
     def about(self):
         content = ft.Container(
-            content=ft.Column([
-                ft.Text("关于>", size=20),
-                ft.Divider(),
-                ft.Column([
-                    ft.Row([
-                        ft.Text("更新过程中不要离开当前tab！！！", color=ft.Colors.RED),
-                        ft.Text("exe是更新包，更新包替换原来的exe；zip是全量包，zip解压使用。", color=ft.Colors.RED)
-                    ]),
-                    ft.Row([
-                        ft.Text("QTRClient客户端"),
-                        ft.ElevatedButton("检查更新", on_click=self.check_new_version),
-                        ft.ElevatedButton("更新", on_click=self.get_sys_info_view),
-                        self.force_update_ui,
-                        self.download_progress_view,
-                        ft.Text(key="version_tip")
-                        # ft.Button("Kill POS")
-                    ]),
-                ]),
-                ft.ListView([ft.Markdown(key="update_info",
-                                         selectable=True,
-                                         auto_follow_links=True)],
-                            expand=True, key="update_info")
-                # ft.Text("离线服务状态"),
-                # ft.FilledButton("示例按钮")
-            ], alignment=ft.MainAxisAlignment.START),
-            alignment=ft.alignment.center_left
+            content=ft.Column(
+                [
+                    ft.Text("关于>", size=20),
+                    ft.Divider(),
+                    ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text("更新过程中不要离开当前tab！！！", color=ft.Colors.RED),
+                                    ft.Text(
+                                        "exe是更新包，更新包替换原来的exe；zip是全量包，zip解压使用。",
+                                        color=ft.Colors.RED,
+                                    ),
+                                ]
+                            ),
+                            ft.Row(
+                                [
+                                    ft.Text("QTRClient客户端"),
+                                    ft.ElevatedButton("检查更新", on_click=self.check_new_version),
+                                    ft.ElevatedButton("更新", on_click=self.get_sys_info_view),
+                                    self.force_update_ui,
+                                    self.download_progress_view,
+                                    ft.Text(key="version_tip"),
+                                    # ft.Button("Kill POS")
+                                ]
+                            ),
+                        ]
+                    ),
+                    ft.ListView(
+                        [ft.Markdown(key="update_info", selectable=True, auto_follow_links=True)],
+                        expand=True,
+                        key="update_info",
+                    ),
+                    # ft.Text("离线服务状态"),
+                    # ft.FilledButton("示例按钮")
+                ],
+                alignment=ft.MainAxisAlignment.START,
+            ),
+            alignment=ft.alignment.center_left,
         )
         return content
 

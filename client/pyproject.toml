@@ -8,12 +8,11 @@ authors = [
     { name = "Flet developer", email = "you@example.com" }
 ]
 dependencies = [
-  "flet==0.28.3",
+  "flet[all]==0.28.3",
   "aiohttp",
   "mitmproxy",
   "certifi",
   "loguru",
-  "watchfiles",
   "psutil>=7.2.2",
   "requests>=2.32.5",
   "pyperclip>=1.8.2",
@@ -26,9 +25,11 @@ dependencies = [
   "httpx>=0.28.1",
   "flet-desktop>=0.28.3",
   "websockets==12.0",
+  "arrow>=1.4.0",
 ]
 dependency-groups.dev = [
-    "flet[all]==0.28.3",
+    "pip",
+    "watchfiles"
 ]
 
 [tool.flet]
@@ -75,6 +76,18 @@ flet = {extras = ["all"], version = "0.28.3"}
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
+[tool.basedpyright]
+
+typeCheckingMode = "basic"
+
+reportMissingImports = true
+reportMissingTypeStubs = false
+
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+
+reportGeneralTypeIssues = true
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"
@@ -95,4 +108,9 @@ fixable = [
 unfixable = [
     "B",      # bugbear（可能改语义）
     "PERF",   # 性能优化类规则（可能改逻辑）
+]
+
+[dependency-groups]
+dev = [
+    "pip>=26.0.1",
 ]

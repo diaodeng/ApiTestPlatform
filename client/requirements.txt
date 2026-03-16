@@ -11,13 +11,8 @@ pillow
 pydantic
 pywin32
 pyftpdlib
-
 httpx
-
-
 mitmproxy
 flet-desktop
-
 watchfiles
-
 websockets==12.0

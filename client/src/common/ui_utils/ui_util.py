@@ -1,52 +1,62 @@
-from flet import SnackBar, Text, Colors, Page
-import flet as ft
 import json
 import os
 
+import flet as ft
+from flet import Colors, Page, SnackBar, Text
 from loguru import logger
 
-
-from model.config import PosConfigModel, PosParamsModel, PosChangeParamsModel, VendorConfigModel
-from server.config import PosConfig, PosToolConfig
+from model.config import PosChangeParamsModel, PosConfigModel, PosParamsModel, VendorConfigModel
+from model.pos_network_model import PosInitRespModel, PosLogoutModel, PosResetAccountRequestModel
+from server.config import PosConfig
 from server.pos_tool_config_server import PosToolConfigServer
-
-from model.pos_network_model import PosInitRespModel, PosResetAccountRequestModel, PosLogoutModel
 from utils.common import get_active_mac, get_local_ip, kill_process_by_name
-from utils.pos_network import pos_tool_init, reset_account_password, pos_account_logout, change_pos_from_network, update_network_host
+from utils.pos_network import (
+    change_pos_from_network,
+    pos_account_logout,
+    pos_tool_init,
+    reset_account_password,
+    update_network_host,
+)
 
 
 class UiUtil:
     @staticmethod
     def show_snackbar(page, msg: str, action: str = "知道了"):
-        page.open(SnackBar(
-            content=Text(msg),
-            action=action,
-        ))
+        page.open(
+            SnackBar(
+                content=Text(msg),
+                action=action,
+            )
+        )
         page.update()
 
     @staticmethod
     def show_snackbar_error(page, msg: str, action: str = "知道了"):
-        page.open(SnackBar(
-            bgcolor=Colors.RED,
-            content=Text(msg),
-            action=action,
-        ))
+        page.open(
+            SnackBar(
+                bgcolor=Colors.RED,
+                content=Text(msg),
+                action=action,
+            )
+        )
         page.update()
 
     @staticmethod
     def show_snackbar_success(page, msg: str, action: str = "知道了"):
-        page.open(SnackBar(
-            bgcolor=Colors.GREEN,
-            content=Text(msg),
-            action=action,
-        ))
+        page.open(
+            SnackBar(
+                bgcolor=Colors.GREEN,
+                content=Text(msg),
+                action=action,
+            )
+        )
         page.update()
 
 
 class StorageInMemory:
-    def __init__(self, page:Page):
+    def __init__(self, page: Page):
         self.data = {}
-        self.page:Page = page
+        self.page: Page = page
 
     def set(self, key: str, value: any):
         self.page.client_storage.set(key, value)
@@ -64,28 +74,100 @@ class StorageInMemory:
         return pos_init_data
 
 
-
 class PosSettingUi(ft.AlertDialog):
     def __init__(self):
         super().__init__()
         self.config_data: PosConfigModel = PosConfig.read_pos_config()
         self.modal = False
         self.title = ft.Text("POS设置")
-        self.content = ft.Container(content=ft.Row(controls=[
-            ft.Column(controls=[
-                ft.TextField(value=self.config_data.pos_tool_test_host, label="Tbox测试环境host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_tool_test_host"),
-                ft.TextField(value=self.config_data.pos_tool_uat_host, label="Tbox UAT host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_tool_uat_host"),
-                ft.TextField(value=self.config_data.pos_test_host, label="POS TEST接口host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_test_host"),
-                ft.TextField(value=self.config_data.pos_uat_host, label="POS UAT接口host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_uat_host"),
-                ft.TextField(value=self.config_data.pos_pro_host, label="POS PRO接口host(修改后需要重启工具)", on_blur=self.update_config_data, data="pos_pro_host"),
-                ft.TextField(value=self.config_data.payment_mock_driver_path, label="支付MOCK驱动目录", on_blur=self.update_config_data, data="payment_mock_driver_path"),
-                ft.TextField(value=self.config_data.payment_driver_back_up_path, label="支付驱动备份目录", on_blur=self.update_config_data, data="payment_driver_back_up_path"),
-                ft.TextField(value=json.dumps(self.config_data.env_files, indent=4, ensure_ascii=False), label="环境文件：", on_blur=self.update_config_data, data="env_files", multiline=True),
-                ft.TextField(value=json.dumps(self.config_data.cache_files, indent=4, ensure_ascii=False), label="缓存文件:", on_blur=self.update_config_data, data="cache_files", multiline=True),
-                ft.TextField(value=json.dumps(self.config_data.env_group_vendor, indent=4, ensure_ascii=False), label="商家分组:", on_blur=self.update_config_data, data="env_group_vendor", multiline=True),
-                ft.TextField(value=json.dumps([i.model_dump() for i in self.config_data.vendor_config], indent=4, ensure_ascii=False), label="商家POS账号:", on_blur=self.update_config_data, data="vendor_config", multiline=True),
-            ], expand=True)
-        ], expand=True), expand=True, width=1000)
+        self.content = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Column(
+                        controls=[
+                            ft.TextField(
+                                value=self.config_data.pos_tool_test_host,
+                                label="Tbox测试环境host(修改后需要重启工具)",
+                                on_blur=self.update_config_data,
+                                data="pos_tool_test_host",
+                            ),
+                            ft.TextField(
+                                value=self.config_data.pos_tool_uat_host,
+                                label="Tbox UAT host(修改后需要重启工具)",
+                                on_blur=self.update_config_data,
+                                data="pos_tool_uat_host",
+                            ),
+                            ft.TextField(
+                                value=self.config_data.pos_test_host,
+                                label="POS TEST接口host(修改后需要重启工具)",
+                                on_blur=self.update_config_data,
+                                data="pos_test_host",
+                            ),
+                            ft.TextField(
+                                value=self.config_data.pos_uat_host,
+                                label="POS UAT接口host(修改后需要重启工具)",
+                                on_blur=self.update_config_data,
+                                data="pos_uat_host",
+                            ),
+                            ft.TextField(
+                                value=self.config_data.pos_pro_host,
+                                label="POS PRO接口host(修改后需要重启工具)",
+                                on_blur=self.update_config_data,
+                                data="pos_pro_host",
+                            ),
+                            ft.TextField(
+                                value=self.config_data.payment_mock_driver_path,
+                                label="支付MOCK驱动目录",
+                                on_blur=self.update_config_data,
+                                data="payment_mock_driver_path",
+                            ),
+                            ft.TextField(
+                                value=self.config_data.payment_driver_back_up_path,
+                                label="支付驱动备份目录",
+                                on_blur=self.update_config_data,
+                                data="payment_driver_back_up_path",
+                            ),
+                            ft.TextField(
+                                value=json.dumps(self.config_data.env_files, indent=4, ensure_ascii=False),
+                                label="环境文件：",
+                                on_blur=self.update_config_data,
+                                data="env_files",
+                                multiline=True,
+                            ),
+                            ft.TextField(
+                                value=json.dumps(self.config_data.cache_files, indent=4, ensure_ascii=False),
+                                label="缓存文件:",
+                                on_blur=self.update_config_data,
+                                data="cache_files",
+                                multiline=True,
+                            ),
+                            ft.TextField(
+                                value=json.dumps(self.config_data.env_group_vendor, indent=4, ensure_ascii=False),
+                                label="商家分组:",
+                                on_blur=self.update_config_data,
+                                data="env_group_vendor",
+                                multiline=True,
+                            ),
+                            ft.TextField(
+                                value=json.dumps(
+                                    [i.model_dump() for i in self.config_data.vendor_config],
+                                    indent=4,
+                                    ensure_ascii=False,
+                                ),
+                                label="商家POS账号:",
+                                on_blur=self.update_config_data,
+                                data="vendor_config",
+                                multiline=True,
+                            ),
+                        ],
+                        expand=True,
+                    )
+                ],
+                expand=True,
+            ),
+            expand=True,
+            width=1000,
+        )
         self.actions = [
             ft.TextButton("关闭", on_click=self.close_dlg),
             ft.TextButton("保存", on_click=self.save_config),
@@ -93,7 +175,6 @@ class PosSettingUi(ft.AlertDialog):
         self.actions_alignment = ft.MainAxisAlignment.END
         self.scrollable = True
         self.open = True
-
 
     def close_dlg(self, event: ft.ControlEvent):
         self.open = False
@@ -126,13 +207,15 @@ class PosSettingUi(ft.AlertDialog):
             if not config_value:
                 self.config_data.vendor_config = []
                 return
-            setattr(self.config_data, config_key, [VendorConfigModel.model_validate(j) for j in json.loads(config_value)])
+            setattr(
+                self.config_data, config_key, [VendorConfigModel.model_validate(j) for j in json.loads(config_value)]
+            )
         else:
             setattr(self.config_data, config_key, json.loads(config_value))
 
 
 class ChangePosUi(ft.AlertDialog):
-    def __init__(self, pos_path = None):
+    def __init__(self, pos_path=None):
         logger.info(f"打开切换POS页面：{pos_path}")
         super().__init__()
         self.pos_tool_config_data = PosToolConfigServer.read_pos_tool_config()
@@ -145,7 +228,7 @@ class ChangePosUi(ft.AlertDialog):
         self.vender_potions = {}
         self.store_potions = {}
 
-        env_group , vendor_id, store, pos_group, pos_type = None, None, None, None, None
+        env_group, vendor_id, store, pos_group, pos_type = None, None, None, None, None
         try:
             if pos_path:
                 pos_params: PosParamsModel = PosConfig.read_pos_params(pos_path)
@@ -160,72 +243,93 @@ class ChangePosUi(ft.AlertDialog):
 
                     for store_potion in self.pos_tool_config_data.data.store_list:
                         if env_group and env_group == store_potion.env:
-                            self.vender_potions[store_potion.vender_id] =store_potion.vender_name
+                            self.vender_potions[store_potion.vender_id] = store_potion.vender_name
                             if vendor_id and store_potion.vender_id == vendor_id:
                                 self.store_potions[store_potion.store_id] = store_potion.store_name
         except Exception as e:
             logger.error(e)
             pass
 
-        self.content = ft.Container(content=ft.Row(controls=[
-            ft.Column(controls=[
-                ft.Dropdown(label="环境",
-                            value=env_group,
-                            options=[ft.DropdownOption(item.env_code, item.env_name) for item in self.pos_tool_config_data.data.env_list],
-                            # editable=True,
-                            on_change=self.change_env,
-                            data="env",
-                            expand=True
+        self.content = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Column(
+                        controls=[
+                            ft.Dropdown(
+                                label="环境",
+                                value=env_group,
+                                options=[
+                                    ft.DropdownOption(item.env_code, item.env_name)
+                                    for item in self.pos_tool_config_data.data.env_list
+                                ],
+                                # editable=True,
+                                on_change=self.change_env,
+                                data="env",
+                                expand=True,
                             ),
-                ft.Dropdown(label="商家",
-                            value=vendor_id,
-                            options=[ft.DropdownOption(key, name) for key,name in self.vender_potions.items()],
-                            # editable=True,
-                            on_change=self.change_vendor,
-                            data="venderId",
-                            expand=True
+                            ft.Dropdown(
+                                label="商家",
+                                value=vendor_id,
+                                options=[ft.DropdownOption(key, name) for key, name in self.vender_potions.items()],
+                                # editable=True,
+                                on_change=self.change_vendor,
+                                data="venderId",
+                                expand=True,
                             ),
-                ft.Dropdown(label="门店",
-                            value=store,
-                            options=[ft.DropdownOption(key, name) for key,name in self.store_potions.items()],
-                            # editable=True,
-                            on_change=self.change_store,
-                            data="orgNo",
-                            expand=True
+                            ft.Dropdown(
+                                label="门店",
+                                value=store,
+                                options=[ft.DropdownOption(key, name) for key, name in self.store_potions.items()],
+                                # editable=True,
+                                on_change=self.change_store,
+                                data="orgNo",
+                                expand=True,
                             ),
-                ft.Dropdown(label="切换模式",
-                            value="1",
-                            options=[ft.DropdownOption("1", "指定MAC"),
-                                     ft.DropdownOption("2", "指定POS_ID")],
-                            # editable=True,
-                            on_change=self.change_switch_model,
-                            data="switchMode",
-                            expand=True
+                            ft.Dropdown(
+                                label="切换模式",
+                                value="1",
+                                options=[ft.DropdownOption("1", "指定MAC"), ft.DropdownOption("2", "指定POS_ID")],
+                                # editable=True,
+                                on_change=self.change_switch_model,
+                                data="switchMode",
+                                expand=True,
                             ),
-                ft.TextField(value=mac, label="mac", data="pos_mac", visible=True, on_blur=lambda e: print(e)),
-                ft.TextField(value="", label="pos_id", data="pos_no", visible=False),
-                ft.TextField(value=ip, label="ip", data="pos_ip"),
-                ft.Dropdown(label="POS类型",
-                            value=pos_type or "1",
-                            options=[ft.DropdownOption("1", "人工收银"),
-                                     ft.DropdownOption("2", "SCO"),
-                                     ft.DropdownOption("4", "Combined")],
-                            # editable=True,
-                            # on_change=self.change_store,
-                            data="pos_type",
-                            expand=True
+                            ft.TextField(
+                                value=mac, label="mac", data="pos_mac", visible=True, on_blur=lambda e: print(e)
                             ),
-                ft.Dropdown(label="POS机台组",
-                            value=pos_group,
-                            options=[],
-                            # editable=True,
-                            # on_change=self.change_store,
-                            data="pos_group",
-                            expand=True
+                            ft.TextField(value="", label="pos_id", data="pos_no", visible=False),
+                            ft.TextField(value=ip, label="ip", data="pos_ip"),
+                            ft.Dropdown(
+                                label="POS类型",
+                                value=pos_type or "1",
+                                options=[
+                                    ft.DropdownOption("1", "人工收银"),
+                                    ft.DropdownOption("2", "SCO"),
+                                    ft.DropdownOption("4", "Combined"),
+                                ],
+                                # editable=True,
+                                # on_change=self.change_store,
+                                data="pos_type",
+                                expand=True,
                             ),
-
-            ], expand=True)
-        ], expand=True), expand=True, width=1000)
+                            ft.Dropdown(
+                                label="POS机台组",
+                                value=pos_group,
+                                options=[],
+                                # editable=True,
+                                # on_change=self.change_store,
+                                data="pos_group",
+                                expand=True,
+                            ),
+                        ],
+                        expand=True,
+                    )
+                ],
+                expand=True,
+            ),
+            expand=True,
+            width=1000,
+        )
         self.actions = [
             ft.TextButton("关闭", on_click=self.close_dlg),
             ft.TextButton("切换", on_click=self.change_pos_on_network),
@@ -233,7 +337,6 @@ class ChangePosUi(ft.AlertDialog):
         self.actions_alignment = ft.MainAxisAlignment.END
         self.scrollable = True
         self.open = True
-
 
     def close_dlg(self, event: ft.ControlEvent):
         self.open = False
@@ -275,10 +378,9 @@ class ChangePosUi(ft.AlertDialog):
                     if env_group == vendor_item.env and not vendor_item.vender_id in added_vendor:
                         added_vendor.append(vendor_item.vender_id)
                         cont.options.append(ft.DropdownOption(vendor_item.vender_id, vendor_item.vender_name))
-                cont.options = sorted(cont.options, key=lambda x:x.key)
+                cont.options = sorted(cont.options, key=lambda x: x.key)
                 # cont.value = cont.options[0].key if cont.options else None
                 cont.update()
-
 
     def change_vendor(self, event: ft.ControlEvent):
         current_env = ""
@@ -334,31 +436,51 @@ class PosAccountManagerUi(ft.AlertDialog):
             pass
         self.modal = False
         self.title = ft.Text("POS账号管理")
-        self.content = ft.Container(content=ft.Row(controls=[
-            ft.Column(controls=[
-                ft.Dropdown(label="环境",
-                            value=env_group,
-                            options=[ft.DropdownOption(item.env_code, item.env_name) for item in self.pos_tool_config_data.data.env_list],
-                            editable=True,
-                            on_change=self.change_env,
-                            data="env",
-                            expand=True
+        self.content = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Column(
+                        controls=[
+                            ft.Dropdown(
+                                label="环境",
+                                value=env_group,
+                                options=[
+                                    ft.DropdownOption(item.env_code, item.env_name)
+                                    for item in self.pos_tool_config_data.data.env_list
+                                ],
+                                editable=True,
+                                on_change=self.change_env,
+                                data="env",
+                                expand=True,
                             ),
-                ft.TextField(value=account, label="收银员账号", data="cashierNo", on_change=lambda e: print(e),visible=True),
-                ft.Row(controls=[
-                    ft.ElevatedButton("踢出登录", on_click=self.tick_out),
-                    ft.ElevatedButton("重置密码", on_click=self.reset_password)
-                ])
-
-            ], expand=True)
-        ], expand=True), expand=True, width=1000)
+                            ft.TextField(
+                                value=account,
+                                label="收银员账号",
+                                data="cashierNo",
+                                on_change=lambda e: print(e),
+                                visible=True,
+                            ),
+                            ft.Row(
+                                controls=[
+                                    ft.ElevatedButton("踢出登录", on_click=self.tick_out),
+                                    ft.ElevatedButton("重置密码", on_click=self.reset_password),
+                                ]
+                            ),
+                        ],
+                        expand=True,
+                    )
+                ],
+                expand=True,
+            ),
+            expand=True,
+            width=1000,
+        )
         self.actions = [
             ft.TextButton("关闭", on_click=self.close_dlg),
         ]
         self.actions_alignment = ft.MainAxisAlignment.END
         self.scrollable = True
         self.open = True
-
 
     def close_dlg(self, event: ft.ControlEvent):
         self.open = False
@@ -436,7 +558,7 @@ class PosAccountManagerUi(ft.AlertDialog):
                     if env_group == vendor_item.env and not vendor_item.vender_id in added_vendor:
                         added_vendor.append(vendor_item.vender_id)
                         cont.options.append(ft.DropdownOption(vendor_item.vender_id, vendor_item.vender_name))
-                cont.options = sorted(cont.options, key=lambda x:x.key)
+                cont.options = sorted(cont.options, key=lambda x: x.key)
                 # cont.value = cont.options[0].key if cont.options else None
                 cont.update()
 
@@ -450,23 +572,33 @@ class ChangeLocalPosUi(ft.AlertDialog):
         self.title = ft.Text("本地切换POS")
         self.target_env = None
 
-        env_group , vendor_id, store, pos_group, pos_type = None, None, None, None, None
+        env_group, vendor_id, store, pos_group, pos_type = None, None, None, None, None
         self.pos_path = pos_path
 
-        self.content = ft.Container(content=ft.Row(controls=[
-            ft.Column(controls=[
-                ft.TextField(value=self.get_current_env_info(), label="当前环境", data="current_env"),
-                ft.Dropdown(label="已备份环境",
-                            value=None,
-                            options=[ft.DropdownOption(key, name) for key, name in self.get_backed_env().items()],
-                            # editable=True,
-                            on_change=self.change_target_env,
-                            data="backed_env",
-                            expand=True
-                            )
-
-            ], expand=True)
-        ], expand=True), expand=True, width=1000)
+        self.content = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Column(
+                        controls=[
+                            ft.TextField(value=self.get_current_env_info(), label="当前环境", data="current_env"),
+                            ft.Dropdown(
+                                label="已备份环境",
+                                value=None,
+                                options=[ft.DropdownOption(key, name) for key, name in self.get_backed_env().items()],
+                                # editable=True,
+                                on_change=self.change_target_env,
+                                data="backed_env",
+                                expand=True,
+                            ),
+                        ],
+                        expand=True,
+                    )
+                ],
+                expand=True,
+            ),
+            expand=True,
+            width=1000,
+        )
         self.actions = [
             ft.TextButton("关闭", on_click=self.close_dlg),
             ft.TextButton("切换", on_click=self.change_local_pos, data=pos_path),
@@ -474,7 +606,6 @@ class ChangeLocalPosUi(ft.AlertDialog):
         self.actions_alignment = ft.MainAxisAlignment.END
         self.scrollable = True
         self.open = True
-
 
     def close_dlg(self, event: ft.ControlEvent):
         self.open = False
@@ -489,14 +620,18 @@ class ChangeLocalPosUi(ft.AlertDialog):
             env_group, account = PosConfig.get_pos_group(pos_params.venderNo, local_pos_env)
             pos_tool_config_data = PosToolConfigServer.read_pos_tool_config()
             for store_info in pos_tool_config_data.data.store_list:
-                if store_info.vender_id == pos_params.venderNo and store_info.env == env_group and store_info.store_id == pos_params.orgNo:
+                if (
+                    store_info.vender_id == pos_params.venderNo
+                    and store_info.env == env_group
+                    and store_info.store_id == pos_params.orgNo
+                ):
                     return f"{env_local} {local_pos_env} --> {store_info.vender_name} --> {store_info.store_name} --> POS:{pos_params.posId}"
 
             return f"{env_local} 环境：{local_pos_env}，商家：{pos_params.venderNo}，门店：{pos_params.orgNo}，POS：{pos_params.posId}"
         else:
             return f"环境：{local_pos_env}，商家：无，门店：无"
 
-    def get_backed_env(self) -> dict[str,str]:
+    def get_backed_env(self) -> dict[str, str]:
         config_data: PosConfigModel = PosConfig.read_pos_config()
         backed_env = ["RTA_TEST", "RTA_UAT", "RTA"]
         # backed_env.extend(config_data.backup_envs.get(self.pos_path, []))
@@ -511,7 +646,7 @@ class ChangeLocalPosUi(ft.AlertDialog):
             subdirs.sort()
             backed_env.extend(subdirs)
 
-        backed_env = {e:e for e in backed_env}
+        backed_env = {e: e for e in backed_env}
 
         local_pos_env = PosConfig.get_local_pos_env(self.pos_path)
         if not local_pos_env:
@@ -521,21 +656,24 @@ class ChangeLocalPosUi(ft.AlertDialog):
         current_backed_env = {}
         for local_backed_env, _ in backed_env.items():
             backed_env_info = local_backed_env.split("_")
-            if len(backed_env_info) >2:
-                current_env = '_'.join(backed_env_info[:-2])
+            if len(backed_env_info) > 2:
+                current_env = "_".join(backed_env_info[:-2])
                 vender_id = backed_env_info[-2]
                 store = backed_env_info[-1]
                 env_group, account = PosConfig.get_pos_group(vender_id, current_env)
                 for store_info in pos_tool_config_data.data.store_list:
-                    if store_info.vender_id == vender_id and store_info.env == env_group and store_info.store_id == store:
-                        current_backed_env[local_backed_env] = f"{local_backed_env} --> {store_info.vender_name} --> {store_info.store_name}"
+                    if (
+                        store_info.vender_id == vender_id
+                        and store_info.env == env_group
+                        and store_info.store_id == store
+                    ):
+                        current_backed_env[local_backed_env] = (
+                            f"{local_backed_env} --> {store_info.vender_name} --> {store_info.store_name}"
+                        )
         backed_env.update(current_backed_env)
         return backed_env
 
-
         # pos_params: PosParamsModel = PosConfig.read_pos_params(self.pos_path)
-
-
 
         return backed_env
 
@@ -575,4 +713,3 @@ class ChangeLocalPosUi(ft.AlertDialog):
 
     def change_target_env(self, event: ft.ControlEvent):
         self.target_env = event.control.value
-

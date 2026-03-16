@@ -40,7 +40,7 @@ def update_network_host(data: PosConfigModel):
 
 async def change_pos_from_network(data: PosChangeParamsModel) -> None:
     async with httpx.AsyncClient(verify=False) as client:
-        data = {
+        data_info = {
             "env": data.env,
             "venderId": data.venderId,
             "orgNo": data.orgNo,
@@ -52,11 +52,11 @@ async def change_pos_from_network(data: PosChangeParamsModel) -> None:
             "switchMode": data.switchMode,
             "pos_no": data.pos_no,
         }
-        logger.info(f"POS切换参数： {json.dumps(data)}")
-        if "kh_test_s" in data["env"].lower() or "rta_test" in data["env"].lower():
-            resp = await client.post(f"{test_host}/tools/posChange", json=data)
-        elif "rta_uat" in data["env"].lower() or "kh_test" in data["env"].lower():
-            resp = await client.post(f"{uat_host}/tools/posChange", json=data)
+        logger.info(f"c： {json.dumps(data_info)}")
+        if "test" in data_info["env"].lower():
+            resp = await client.post(f"{test_host}/tools/posChange", json=data_info)
+        elif "uat" in data_info["env"].lower():
+            resp = await client.post(f"{uat_host}/tools/posChange", json=data_info)
         else:
             raise Exception("非测试及UAT环境，禁止切换POS")
         if resp.status_code != 200:
@@ -70,12 +70,12 @@ async def change_pos_from_network(data: PosChangeParamsModel) -> None:
 
 async def pos_account_logout(data: PosLogoutModel) -> tuple[bool, str]:
     async with httpx.AsyncClient(verify=False) as client:
-        data = data.model_dump()
-        logger.info(f"POS账号注销参数： {json.dumps(data)}")
-        if "uat" in data["env"].lower():
-            resp = await client.post(f"{uat_host}/tools/kickOut", json=data)
+        data_info = data.model_dump()
+        logger.info(f"POS账号注销参数： {json.dumps(data_info)}")
+        if "uat" in data_info["env"].lower():
+            resp = await client.post(f"{uat_host}/tools/kickOut", json=data_info)
         else:
-            resp = await client.post(f"{test_host}/tools/kickOut", json=data)
+            resp = await client.post(f"{test_host}/tools/kickOut", json=data_info)
         if resp.status_code != 200:
             logger.error(f"POS切换失败，状态码： {resp.status_code}")
             return False, f"POS切换失败，状态码： {resp.status_code}"
@@ -101,12 +101,12 @@ def pos_tool_init() -> PosInitRespModel | bool:
 
 async def get_user_info(data: PosResetAccountRequestModel) -> PosUserInfoRespModel | None:
     async with httpx.AsyncClient(verify=False) as client:
-        data = data.model_dump()
-        logger.info(f"查询POS账号信息： {json.dumps(data)}")
-        if "uat" in data["env"].lower():
-            resp = await client.post(f"{uat_host}/tools/getuserinfo", json=data)
+        data_info = data.model_dump()
+        logger.info(f"查询POS账号信息： {json.dumps(data_info)}")
+        if "uat" in data_info["env"].lower():
+            resp = await client.post(f"{uat_host}/tools/getuserinfo", json=data_info)
         else:
-            resp = await client.post(f"{test_host}/tools/getuserinfo", json=data)
+            resp = await client.post(f"{test_host}/tools/getuserinfo", json=data_info)
         if resp.status_code != 200:
             logger.error(f"查询POS账号信息失败，状态码： {resp.status_code}")
             return None
@@ -125,12 +125,12 @@ async def reset_account_password(data: PosResetAccountRequestModel) -> tuple[boo
     data.username = user_info.user_name
 
     async with httpx.AsyncClient(verify=False) as client:
-        data = data.model_dump()
-        logger.info(f"重置POS账号密码： {json.dumps(data, ensure_ascii=False)}")
-        if "uat" in data["env"].lower():
-            resp = await client.post(f"{uat_host}/tools/resetpwd", json=data)
+        data_info = data.model_dump()
+        logger.info(f"重置POS账号密码： {json.dumps(data_info, ensure_ascii=False)}")
+        if "uat" in data_info["env"].lower():
+            resp = await client.post(f"{uat_host}/tools/resetpwd", json=data_info)
         else:
-            resp = await client.post(f"{test_host}/tools/resetpwd", json=data)
+            resp = await client.post(f"{test_host}/tools/resetpwd", json=data_info)
         if resp.status_code != 200:
             logger.error(f"重置POS账号密码失败，状态码： {resp.status_code}")
             return False, f"重置密码失败: {resp.status_code}"
@@ -144,9 +144,11 @@ async def reset_account_password(data: PosResetAccountRequestModel) -> tuple[boo
 def pos_init(pos_path: str, version: str = "", group: str = "") -> PosParamsModel:
     ip = get_local_ip()
     mac = get_active_mac()
+    pos_vender_config = ""
     pos_version = ExeVersionReader(pos_path).get_exe_file_version()
     local_params = PosConfig.read_pos_params(pos_path)
-    pos_vender_config = PosConfig.get_vendor_config(local_params.venderNo)
+    if local_params:
+        pos_vender_config = PosConfig.get_vendor_config(local_params.venderNo)
     headers = {}
     if pos_vender_config:
         ch = pos_vender_config.custum_headers
