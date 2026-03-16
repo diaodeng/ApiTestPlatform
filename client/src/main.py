@@ -10,16 +10,13 @@ from navigationMenu import NavigationMenu
 from utils import VERSION
 from utils.common import (
     ensure_directory_exists,
-    get_memory_usage,
-    get_process_by_name,
-    get_sys_info,
-    load_json, get_sys_info_view,
+    get_sys_info_view,
+    load_json,
 )
 from utils.logger import log
 from utils.mytimers import ThreadPool, clear_all_timers
 
 ensure_directory_exists("logs")
-from loguru import logger
 
 basepath = os.path.dirname(__file__)
 
@@ -56,13 +53,13 @@ class ExitAlertDialog:
         e.control.page.close(self.confirm_dialog)
         e.control.page.update()
 
+
 ThreadPool.add_task(get_sys_info_view, 10)
+
 
 async def main(page: ft.Page):
     page.window.prevent_close = True
-    page.window.on_event = lambda e: (
-        page.open(ExitAlertDialog(page).confirm_dialog) if e.data == "close" else None
-    )
+    page.window.on_event = lambda e: page.open(ExitAlertDialog(page).confirm_dialog) if e.data == "close" else None
     app = AppConfig(page)
     config = load_json(app.tools_db)
     config["ToolsConfig"] = os.path.join(basepath, app.tools_db)
@@ -99,9 +96,7 @@ async def main(page: ft.Page):
                 ft.Row(
                     controls=[
                         sys_show_view,
-                        ft.Text(
-                            f"当前版本: {VERSION}", size=16, text_align=ft.TextAlign.END
-                        ),
+                        ft.Text(f"当前版本: {VERSION}", size=16, text_align=ft.TextAlign.END),
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 ),

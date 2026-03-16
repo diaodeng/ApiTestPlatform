@@ -15,12 +15,12 @@ server/.env.prod
 server/.env.test
 server/alembic
 server/alembic.ini
-server/node_modules
+node_modules
 server/temp_test
-server/app
-server/.vscode
-client/src
+.vscode
 temp
+_internal
+
 
 web/vite.config.js.timestamp*.mjs
 pyrightconfig.json
@@ -159,4 +159,3 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
-

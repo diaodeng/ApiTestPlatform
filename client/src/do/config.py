@@ -401,11 +401,12 @@ class PosConfig:
             account = account[0]
         if not account:
             account = ""
-        if "test" in env.lower():
+        if env.lower() in ("rta_test", "kh_test_s"):
             return "rta-test", account
-        for k, v in pos_config.env_group_vendor.items():
-            if vendor_id and int(vendor_id) in v:
-                return k, account
+        elif env.lower() in ("rta_uat", "kh_test"):
+            for k, v in pos_config.env_group_vendor.items():
+                if vendor_id and int(vendor_id) in v:
+                    return k, account
         return None, account
 
     @classmethod

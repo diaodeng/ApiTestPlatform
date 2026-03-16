@@ -386,7 +386,7 @@ class PosHandler:
         except Exception as e:
             logger.error(f"更新搜索结果失败: {e}")
 
-    async def restart_pos(self, e:ft.ControlEvent):
+    async def restart_pos(self, e: ft.ControlEvent):
         self.kill_pos_process()
         await self.open_pos_file(appState.client_info.current_pos)
 
@@ -514,7 +514,7 @@ class PosHandler:
             group, account = PosConfig.get_pos_group(local_pos_params.venderNo, env=env_info)
             return group
 
-    async def open_pos_file(self, e: ft.ControlEvent|str):
+    async def open_pos_file(self, e: ft.ControlEvent | str):
         """打开文件"""
         cancel = False
         try:
@@ -594,7 +594,6 @@ class PosHandler:
 
             else:
                 if not has_local and not has_remote:
-
                     ok = await self.__confirm_dialog(
                         "POS启动提示",
                         f"本地没有POS配置文件（pos_params），{can_not_auto_change_text}且服务端没有当前机台信息，继续启动？{remote_pos_params}",
@@ -614,7 +613,6 @@ class PosHandler:
                         return
 
                 elif not has_local:
-
                     ok = await self.__confirm_dialog(
                         "POS启动提示", f"本地配置为空，{can_not_auto_change_text}将启动服务端对应机台：\n{remote_info}"
                     )
