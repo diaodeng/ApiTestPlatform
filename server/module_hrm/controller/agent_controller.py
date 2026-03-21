@@ -49,6 +49,8 @@ async def add_qtr_agent(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     try:
+        if not current_user.user:
+            return ResponseUtil.error(msg="用户未登录")
         add_agent.manager = current_user.user.user_id
         add_agent.create_by = current_user.user.user_name
         add_agent.update_by = current_user.user.user_name

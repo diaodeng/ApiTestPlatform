@@ -13,6 +13,7 @@ class PageResponseModel(BaseModel):
     """
     列表分页查询返回模型
     """
+
     model_config = ConfigDict(alias_generator=to_camel)
 
     rows: list = Field(default_factory=lambda: [])
@@ -45,21 +46,15 @@ class PageUtil:
         has_next = True if math.ceil(len(data_list) / page_size) > page_num else False
 
         result = PageResponseModel(
-            rows=paginated_data,
-            pageNum=page_num,
-            pageSize=page_size,
-            total=len(data_list),
-            hasNext=has_next
+            rows=paginated_data, page_num=page_num, page_size=page_size, total=len(data_list), has_next=has_next
         )
 
         return result
 
     @classmethod
-    def paginate(cls,
-                 query: Query,
-                 page_num: int,
-                 page_size: int,
-                 is_page: bool = False) -> PageResponseModel|list|None:
+    def paginate(
+        cls, query: Query, page_num: int, page_size: int, is_page: bool = False
+    ) -> PageResponseModel | list | None:
         """
         输入查询语句和分页信息，返回分页数据列表结果
         :param query: sqlalchemy查询语句
@@ -75,10 +70,10 @@ class PageUtil:
             logger.info("分页查询结束")
             result = PageResponseModel(
                 rows=CamelCaseUtil.transform_result(paginated_data),
-                pageNum=page_num,
-                pageSize=page_size,
+                page_num=page_num,
+                page_size=page_size,
                 total=total,
-                hasNext=has_next
+                has_next=has_next,
             )
         else:
             no_paginated_data = query.all()
@@ -104,11 +99,7 @@ def get_page_obj(data_list: list, page_num: int, page_size: int):
     has_next = True if math.ceil(len(data_list) / page_size) > page_num else False
 
     result = PageResponseModel(
-        rows=paginated_data,
-        pageNum=page_num,
-        pageSize=page_size,
-        total=len(data_list),
-        hasNext=has_next
+        rows=paginated_data, page_num=page_num, page_size=page_size, total=len(data_list), has_next=has_next
     )
 
     return result

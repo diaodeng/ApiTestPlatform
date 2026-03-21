@@ -37,6 +37,9 @@ class AgentService:
         """
 
         try:
+            if not page_object.agent_code:
+                result = {"is_success": False, "message": "agent_code不能为空"}
+                return CrudResponseModel(**result)
             agent_info = AgentDao.get_agent_by_code(query_db, page_object.agent_code)
             if agent_info:
                 result = {"is_success": False, "message": "agent已存在"}
@@ -58,8 +61,11 @@ class AgentService:
         :param agent_object: 编辑Agent对象
         :return: 编辑Agent校验结果
         """
+        if not agent_object.agent_id:
+            result = {"is_success": False, "message": "Agent不存在"}
+            return CrudResponseModel(**result)
         edit_agent = agent_object.model_dump(exclude_unset=True)
-        info = cls.agent_detail_services(query_db, edit_agent.get("agent_id"))
+        info = cls.agent_detail_services(query_db, agent_object.agent_id)
         if info:
             try:
                 AgentDao.edit_agent_dao(query_db, edit_agent)
@@ -82,7 +88,10 @@ class AgentService:
         :return: 编辑Agent校验结果
         """
         edit_agent = agent_object.model_dump(exclude_unset=True)
-        info = cls.agent_detail_services_controller(query_db, edit_agent.get("agent_id"))
+        if not agent_object.agent_id:
+            result = {"is_success": False, "message": "Agent不存在"}
+            return CrudResponseModel(**result)
+        info = cls.agent_detail_services_controller(query_db, agent_object.agent_id)
         if info:
             try:
                 AgentDao.edit_agent_dao_controller(query_db, edit_agent)
@@ -109,7 +118,9 @@ class AgentService:
             for agent_id in page_object.agent_ids:
                 AgentDao.delete_agent_dao(
                     query_db,
-                    AgentModel(agentId=agent_id, updateTime=page_object.update_time, updateBy=page_object.update_by),
+                    AgentModel(
+                        agent_id=int(agent_id), update_time=page_object.update_time, update_by=page_object.update_by
+                    ),
                 )
             query_db.commit()
             result = {"is_success": True, "message": "删除成功"}

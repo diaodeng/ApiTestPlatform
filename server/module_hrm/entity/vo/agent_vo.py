@@ -12,6 +12,7 @@ class AgentModel(CommonDataModel):
     """
     Agent表对应pydantic模型
     """
+
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
     agent_id: Optional[int] = None
@@ -24,11 +25,13 @@ class AgentModel(CommonDataModel):
     status: Optional[int] = None
     del_flag: Optional[int] = None
 
+
 @as_query
-class AgentQueryModel(QueryModel,AgentModel):
+class AgentQueryModel(QueryModel, AgentModel):
     """
     Agent管理不分页查询模型
     """
+
     begin_time: Optional[str] = None
     end_time: Optional[str] = None
 
@@ -39,6 +42,7 @@ class AgentPageQueryModel(AgentQueryModel):
     """
     定时任务管理分页查询模型
     """
+
     page_num: int = 1
     page_size: int = 10
 
@@ -47,6 +51,7 @@ class EditJobModel(AgentModel):
     """
     编辑Agent模型
     """
+
     pass
 
 
@@ -54,6 +59,7 @@ class DeleteAgentModel(CommonDataModel):
     """
     删除Agent模型
     """
+
     model_config = ConfigDict(alias_generator=to_camel)
 
-    agent_ids: list[str|int]
+    agent_ids: list[str | int]
