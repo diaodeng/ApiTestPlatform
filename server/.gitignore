@@ -17,6 +17,7 @@ node_modules
 temp_test
 app
 .vscode
+.zed
 
 pricetag_test.py
 package.json
