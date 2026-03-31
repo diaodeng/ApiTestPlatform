@@ -57,7 +57,9 @@ class ForwardRulesService:
         return ForwardRulesDao.get_list_all(db, data_scope_sql=data_scope_sql)
 
     @classmethod
-    def query_list(cls, db: Session, query_info: ForwardRulesQueryModel, data_scope_sql:DataScopeExpr) -> list[ForwardRulesModel]:
+    def query_list(
+        cls, db: Session, query_info: ForwardRulesQueryModel, data_scope_sql: DataScopeExpr
+    ) -> list[ForwardRulesModel]:
         return ForwardRulesDao.get_list_by_page(db, query_info, data_scope_sql=data_scope_sql)
 
     @classmethod
@@ -114,10 +116,9 @@ class ForwardRulesDetailService:
         return datas
 
     @classmethod
-    def query_list(cls,
-                   db: Session,
-                   query_info: ForwardRulesDetailQueryModel,
-                   data_scope_sql: DataScopeExpr|None = None) -> list[ForwardRulesDetailModel]:
+    def query_list(
+        cls, db: Session, query_info: ForwardRulesDetailQueryModel, data_scope_sql: DataScopeExpr | None = True
+    ) -> list[ForwardRulesDetailModel]:
         return ForwardRulesDetailDao.get_list_by_page(db, query_info, data_scope_sql=data_scope_sql)
 
     @classmethod
