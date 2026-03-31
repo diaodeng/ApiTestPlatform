@@ -43,8 +43,7 @@ if "WSL" in str(platform.platform()):
     multiprocessing.set_start_method("spawn")
 
 
-
-def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel|None:
+def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel | None:
     if case_data.case_id and isinstance(case_data.case_id, int):  # 没有ID的请求信息不记录
         # 保存前清空不必要的信息，减少数据存储
         case_data.config.variables = []
@@ -71,6 +70,7 @@ def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel|None:
         return run_detail_obj
     return None
 
+
 async def save_run_detail(query_db, case_data, run_info):
     run_detail_obj = build_run_detail_info(case_data, run_info)
     if run_detail_obj:
@@ -78,11 +78,12 @@ async def save_run_detail(query_db, case_data, run_info):
         return run_detail
 
 
-async def run_by_single(case_data,
-                        run_info: CaseRunModel = None,
-                        semaphore: asyncio.Semaphore = None,
-                        debugtalk_info: ProjectDebugtalkInfoModel = None,
-                        ) -> list[TestCase]:
+async def run_by_single(
+    case_data,
+    run_info: CaseRunModel = None,
+    semaphore: asyncio.Semaphore = None,
+    debugtalk_info: ProjectDebugtalkInfoModel = None,
+) -> list[TestCase]:
     # test_case = CaseInfoHandle(query_db).from_db(index).toRun(env_obj).run_data()
     test_case = case_data
     case_res_datas = []
@@ -111,9 +112,7 @@ async def run_by_single(case_data,
     return case_res_datas
 
 
-async def run_by_batch(run_info: CaseRunModel,
-                       user=None
-                       ) -> list[bool|int]:
+async def run_by_batch(run_info: CaseRunModel, user=None) -> list[bool | int]:
     """
     批量组装用例数据
     :param test_list:
@@ -124,9 +123,11 @@ async def run_by_batch(run_info: CaseRunModel,
     """
 
     async def get_case_data(query_db: Session, all_cases, data_type, ids: list):
-        tmp_case_info_query = query_db.query(HrmCase.project_id, HrmCase.module_id,
-                                             HrmCase.case_id).filter(
-            HrmCase.status != CaseStatusEnum.disabled.value).filter(HrmCase.type == DataType.case.value)
+        tmp_case_info_query = (
+            query_db.query(HrmCase.project_id, HrmCase.module_id, HrmCase.case_id)
+            .filter(HrmCase.status != CaseStatusEnum.disabled.value)
+            .filter(HrmCase.type == DataType.case.value)
+        )
         if data_type == RunTypeEnum.project.value:
             tmp_case_info_query = tmp_case_info_query.filter(HrmCase.project_id.in_(ids))
         elif data_type == RunTypeEnum.model.value:
@@ -144,37 +145,49 @@ async def run_by_batch(run_info: CaseRunModel,
     all_cases = defaultdict(list)
     with SessionLocal() as query_db:
         if run_info.run_type == RunTypeEnum.suite.value:
-            all_suite_orm = await run_in_threadpool(query_db.query(QtrSuite).filter(QtrSuite.suite_id.in_(run_info.ids)).order_by(
-                QtrSuite.order_num).all)
+            all_suite_orm = await run_in_threadpool(
+                query_db.query(QtrSuite).filter(QtrSuite.suite_id.in_(run_info.ids)).order_by(QtrSuite.order_num).all
+            )
             for suite_orm in all_suite_orm:
                 if run_info.run_by_sort:
-                    all_suite_content_orm = await run_in_threadpool(query_db.query(QtrSuiteDetail).
-                                             filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
-                                             filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
-                                             order_by(QtrSuiteDetail.order_num).all)
+                    all_suite_content_orm = await run_in_threadpool(
+                        query_db.query(QtrSuiteDetail)
+                        .filter(QtrSuiteDetail.suite_id == suite_orm.suite_id)
+                        .filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value)
+                        .order_by(QtrSuiteDetail.order_num)
+                        .all
+                    )
                     for suite_content_orm in all_suite_content_orm:
                         suite_data_id = suite_content_orm.data_id
                         data_type = suite_content_orm.data_type
-                        await get_case_data(query_db, data_type, [suite_data_id])
+                        await get_case_data(query_db, all_cases, data_type, [suite_data_id])
                 else:
-                    all_case_item = await run_in_threadpool(query_db.query(QtrSuiteDetail.data_id).
-                                     filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
-                                     filter(QtrSuiteDetail.data_type == DataType.case.value).
-                                     filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
-                                     order_by(QtrSuiteDetail.order_num).
-                                     all)
-                    await get_case_data(query_db, all_cases, RunTypeEnum.case.value, [case_item[0] for case_item in all_case_item])
+                    all_case_item = await run_in_threadpool(
+                        query_db.query(QtrSuiteDetail.data_id)
+                        .filter(QtrSuiteDetail.suite_id == suite_orm.suite_id)
+                        .filter(QtrSuiteDetail.data_type == DataType.case.value)
+                        .filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value)
+                        .order_by(QtrSuiteDetail.order_num)
+                        .all
+                    )
+                    await get_case_data(
+                        query_db, all_cases, RunTypeEnum.case.value, [case_item[0] for case_item in all_case_item]
+                    )
 
-                    all_not_case_item: list[type[QtrSuiteDetail]] = await run_in_threadpool(query_db.query(QtrSuiteDetail).
-                                                                     filter(QtrSuiteDetail.suite_id == suite_orm.suite_id).
-                                                                     filter(
-                        QtrSuiteDetail.data_type != DataType.case.value).
-                                                                     filter(
-                        QtrSuiteDetail.status == QtrDataStatusEnum.normal.value).
-                                                                     order_by(QtrSuiteDetail.order_num).
-                                                                     all)
+                    all_not_case_item: list[type[QtrSuiteDetail]] = await run_in_threadpool(
+                        query_db.query(QtrSuiteDetail)
+                        .filter(QtrSuiteDetail.suite_id == suite_orm.suite_id)
+                        .filter(QtrSuiteDetail.data_type != DataType.case.value)
+                        .filter(QtrSuiteDetail.status == QtrDataStatusEnum.normal.value)
+                        .order_by(QtrSuiteDetail.order_num)
+                        .all
+                    )
                     for not_case_item in all_not_case_item:
-                        run_type = RunTypeEnum.project.value if not_case_item.data_type == RunTypeEnum.project.value else RunTypeEnum.model.value
+                        run_type = (
+                            RunTypeEnum.project.value
+                            if not_case_item.data_type == RunTypeEnum.project.value
+                            else RunTypeEnum.model.value
+                        )
 
                         await get_case_data(query_db, all_cases, run_type, [not_case_item.data_id])
         else:
@@ -211,105 +224,140 @@ async def run_by_batch(run_info: CaseRunModel,
 
 
 async def get_case_info_batch(case_ids, env_obj) -> AsyncGenerator[TestCase, None]:
-    all_data = []  # 参数化执行时一条用例其实是多条用例，所以需要返回一个列表
-    # case_objs = CaseDao.get_case_by_ids(query_db, case_ids)
     async for case_obj in CaseDao.get_case_by_ids_iter(case_ids):
         with SessionLocal() as session:
             test_case = CaseInfoHandle(session).from_db(case_obj).toRun(env_obj).run_data()
         async for case_data in ParametersHandler.get_parameters_case([test_case]):
             yield case_data
-        # all_data.extend(tmp_case_datas)
-    # return all_data
 
 
-async def run_by_concurrent(case_ids: list[int],
-                            env_obj,
-                            run_info: CaseRunModel = None,
-                            debugtalk_info: ProjectDebugtalkInfoModel = None
-                            ) -> list[int]:
+async def _run_result_write_worker(
+    result_queue: asyncio.Queue, worker_count, run_info, stats: dict, lock: asyncio.Lock
+):
+    buffer = []
+    batch_size = 100
+
+    finished_workers = 0
+
+    while True:
+        item = await result_queue.get()
+
+        if item is None:
+            finished_workers += 1
+            if finished_workers == worker_count:
+                break
+            continue
+
+        data: TestCase = item
+        success = 0
+        failed = 0
+        if data.config.result.status in [
+            CaseRunStatus.passed.value,
+            CaseRunStatus.skipped.value,
+            CaseRunStatus.xpassed.value,
+        ]:
+            success += 1
+        elif data.config.result.status == CaseRunStatus.failed.value:
+            failed += 1
+        async with lock:
+            stats["success"] += success
+            stats["failed"] += failed
+            stats["total"] += 1
+
+        run_detail_obj = build_run_detail_info(data, run_info)
+        if run_detail_obj:
+            buffer.append(run_detail_obj)
+
+        if len(buffer) >= batch_size:
+            with SessionLocal() as db:
+                await RunDetailDao.create_bulk(db, buffer)
+                await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
+            buffer = []
+
+    if buffer:
+        with SessionLocal() as db:
+            await RunDetailDao.create_bulk(db, buffer)
+            await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
+
+
+async def _run_worker(
+    queue: asyncio.Queue,
+    semaphore: asyncio.Semaphore,
+    debugtalk_info: ProjectDebugtalkInfoModel,
+    result_queue: asyncio.Queue,
+    run_info,
+):
+    while True:
+        case_data = await queue.get()
+        if case_data is None:
+            await result_queue.put(None)
+            queue.task_done()
+            break
+        try:
+            res_list = await run_by_single(case_data, run_info, semaphore, debugtalk_info=debugtalk_info)
+        except Exception as e:
+            logger.warning(f"用例执行异常：{case_data}, 异常信息：{e}")
+            continue
+
+        if not res_list:
+            continue
+        for res_data in res_list:
+            await result_queue.put(res_data)
+        queue.task_done()
+
+
+async def run_by_concurrent(
+    case_ids: list[int], env_obj, run_info: CaseRunModel = None, debugtalk_info: ProjectDebugtalkInfoModel = None
+) -> list[int]:
     """
     并发执行多个用例
     """
-    lock = asyncio.Lock()
+    result_status_lock = asyncio.Lock()
     stats = {"total": 0, "success": 0, "failed": 0}
-    queue = asyncio.Queue(maxsize=500)
+    run_queue = asyncio.Queue(maxsize=500)
+    result_queue = asyncio.Queue(maxsize=600)
     if run_info.run_by_sort:
         run_info.concurrent = 1
     semaphore = asyncio.Semaphore(run_info.concurrent)
     run_info.semaphore = semaphore
-    # case_data_list = get_case_info_batch(query_db, case_ids, env_obj)
-    # case_data_group = [case_data_list[i:i + run_info.concurrent] for i in
-    #                    range(0, len(case_data_list), run_info.concurrent)]
 
-    async def worker(queue: asyncio.Queue,
-                     semaphore: asyncio.Semaphore,
-                     stats: dict,
-                     lock: asyncio.Lock,
-                     debugtalk_info: ProjectDebugtalkInfoModel
-                     ):
-        buffer = []
-        batch_size = 50
+    concurrent = min(int(run_info.concurrent * 1.5), 20)
+    tasks = [
+        asyncio.create_task(
+            _run_worker(
+                run_queue,
+                semaphore,
+                debugtalk_info=debugtalk_info,
+                result_queue=result_queue,
+                run_info=run_info,
+            )
+        )
+        for i in range(concurrent)
+    ]
 
-        while True:
-            case_data = await queue.get()
-            if case_data is None:
-                queue.task_done()
-                break
-            res_list = await run_by_single(case_data, run_info, semaphore, debugtalk_info=debugtalk_info)
-            if not res_list:
-                continue
-            for res_data in res_list:
-                async with lock:
-                    data: TestCase = res_data
-                    if data.config.result.status in [CaseRunStatus.passed.value,
-                                                     CaseRunStatus.skipped.value,
-                                                     CaseRunStatus.xpassed.value]:
-                        stats["success"] += 1
-                    elif data.config.result.status == CaseRunStatus.failed.value:
-                        stats["failed"] += 1
-                    stats["total"] += 1
-
-                run_detail_obj = build_run_detail_info(data, run_info)
-                if run_detail_obj:
-                    buffer.append(run_detail_obj)
-
-            if len(buffer) >= batch_size:
-                async with lock:
-                    with SessionLocal() as db:
-                        await RunDetailDao.create_bulk(db, buffer)
-                        await ReportDao.update(db,
-                                               run_info.report_id,
-                                               stats["success"],
-                                               stats["total"],
-                                               CaseRunStatus.running)
-                buffer = []
-            queue.task_done()
-
-
-        if buffer:
-            async with lock:
-                with SessionLocal() as db:
-                    await RunDetailDao.create_bulk(db, buffer)
-                    await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
-
-    concurrent = int(run_info.concurrent * 1.5)
-    tasks = [asyncio.create_task(worker(queue,
-                                        semaphore,
-                                        stats=stats,
-                                        lock=lock,
-                                        debugtalk_info=debugtalk_info)) for i in range(concurrent)]
+    writer_task = asyncio.create_task(
+        _run_result_write_worker(
+            result_queue,
+            concurrent,
+            run_info,
+            stats=stats,
+            lock=result_status_lock,
+        )
+    )
 
     async for case_data in get_case_info_batch(case_ids, env_obj):
-        await queue.put(case_data)
+        await run_queue.put(case_data)
 
-    await queue.join()
+    # await queue.join()
 
     for _ in range(len(tasks)):
-        await queue.put(None)
+        await run_queue.put(None)
 
     await asyncio.gather(*tasks)
+    await writer_task
 
     return [stats["total"], stats["success"], stats["failed"]]
+
 
 async def run_test_in_background(run_info: CaseRunModel, current_user: CurrentUserModel):
     await run_by_async(run_info, current_user)
@@ -317,22 +365,24 @@ async def run_test_in_background(run_info: CaseRunModel, current_user: CurrentUs
     return "执行完成，请前往报告查看"
 
 
-
-async def run_by_async(run_info: CaseRunModel,
-                       current_user: CurrentUserModel,
-                       ):
+async def run_by_async(
+    run_info: CaseRunModel,
+    current_user: CurrentUserModel,
+):
     """
     异步执行用例
     """
     test_start_time = time.time()
-    start_time  =datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(
-            timezone(timedelta(hours=8)))
+    start_time = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(timezone(timedelta(hours=8)))
     report_id = None
     report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        report_data = ReportCreatModel(**{"reportName": report_name,
-                                          "status": CaseRunStatus.running.value,
-                                          })
+        report_data = ReportCreatModel(
+            **{
+                "reportName": report_name,
+                "status": CaseRunStatus.running.value,
+            }
+        )
         logger.info(f"当前用户信息:{current_user.user.model_dump()}")
         report_data.update_by = current_user.user.user_name
         report_data.create_by = current_user.user.user_name
@@ -345,14 +395,17 @@ async def run_by_async(run_info: CaseRunModel,
             run_info.run_id = report_info.report_id
             report_id = report_info.report_id
 
-        success, total_count, success_count, failed_count = await run_by_batch(run_info,
-                                        user=current_user.user.user_id)
+        success, total_count, success_count, failed_count = await run_by_batch(run_info, user=current_user.user.user_id)
         test_end_time = time.time()
         with SessionLocal() as query_db:
             report_info = await ReportDao.get_by_id(query_db, report_info.report_id)
             report_info.test_duration = test_end_time - test_start_time
 
-            report_info.status = CaseRunStatus.failed.value if (not success or failed_count > 0 or total_count != success_count) else CaseRunStatus.passed.value
+            report_info.status = (
+                CaseRunStatus.failed.value
+                if (not success or failed_count > 0 or total_count != success_count)
+                else CaseRunStatus.passed.value
+            )
             report_info.total = total_count
             report_info.success = success_count
             await run_in_threadpool(query_db.commit)
