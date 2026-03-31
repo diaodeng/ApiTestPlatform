@@ -45,26 +45,20 @@ class CaseDao:
         :param case_ids: 用例id
         :return: 在用用例信息对象
         """
-        ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)],
-                             else_=len(case_ids))
         batch_size = 1000
-        offset = 0
-        while True:
-            with SessionLocal() as db:
-                batch = await run_in_threadpool(
-                    db.query(HrmCase)
-                    .filter(HrmCase.case_id.in_(case_ids))
-                    .order_by(ordering_case)
-                    .offset(offset)
-                    .limit(batch_size)
-                    .all
-                )
-            if not batch:
-                break
-            for row in batch:
-                yield row  # 逐条 yield（或者改成 yield batch）
-            offset += batch_size
 
+        id_order_map = {cid: idx for idx, cid in enumerate(case_ids)}
+
+        for i in range(0, len(case_ids), batch_size):
+            chunk_ids = case_ids[i : i + batch_size]
+
+            with SessionLocal() as db:
+                batch = await run_in_threadpool(db.query(HrmCase).filter(HrmCase.case_id.in_(chunk_ids)).all)
+
+            batch.sort(key=lambda x: id_order_map[x.case_id])
+
+            for row in batch:
+                yield row
 
     @classmethod
     def get_case_by_ids(cls, db: Session, case_ids: list[int]) -> Sequence[HrmCase]:
@@ -74,8 +68,9 @@ class CaseDao:
         :param case_ids: 用例id
         :return: 在用用例信息对象
         """
-        ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)],
-                             else_=len(case_ids))
+        ordering_case = case(
+            *[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)], else_=len(case_ids)
+        )
         # info = db.query(HrmCase).filter(HrmCase.case_id.in_(case_ids)).order_by(ordering_case).all()
 
         info = db.execute(select(HrmCase).where(HrmCase.case_id.in_(case_ids)).order_by(ordering_case)).scalars().all()
@@ -107,11 +102,9 @@ class CaseDao:
         return info
 
     @classmethod
-    def get_case_list(cls,
-                      db: Session,
-                      query_object: CasePageQueryModel,
-                      is_page: bool = False,
-                      data_scope_sql:DataScopeExpr = True):
+    def get_case_list(
+        cls, db: Session, query_object: CasePageQueryModel, is_page: bool = False, data_scope_sql: DataScopeExpr = True
+    ):
         """
         根据查询参数获取用例列表信息
         :param db: orm对象
@@ -120,12 +113,11 @@ class CaseDao:
         :return: 用例列表信息对象
         """
         # 创建查询的基本部分
-        query = db.query(HrmCase,
-                         HrmProject.project_name,
-                         HrmModule.module_name
-                         ).outerjoin(HrmProject,
-                                     HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
-                                                                                            HrmCase.module_id == HrmModule.module_id)
+        query = (
+            db.query(HrmCase, HrmProject.project_name, HrmModule.module_name)
+            .outerjoin(HrmProject, HrmCase.project_id == HrmProject.project_id)
+            .outerjoin(HrmModule, HrmCase.module_id == HrmModule.module_id)
+        )
         query = query.filter(data_scope_sql)
         if query_object.suite_id:
             # 查询条件中增加需要排除部分caseId
@@ -151,7 +143,7 @@ class CaseDao:
 
         # 根据其他查询参数添加过滤条件
         if query_object.case_name:
-            query = query.filter(HrmCase.case_name.like(f'%{query_object.case_name}%'))
+            query = query.filter(HrmCase.case_name.like(f"%{query_object.case_name}%"))
         if query_object.status is not None:
             query = query.filter(HrmCase.status == query_object.status)
         if query_object.case_id is not None:
@@ -197,13 +189,9 @@ class CaseDao:
         PermissionHandler.check_is_self(user, db.query(HrmCase).filter(HrmCase.case_id == case.case_id).first())
 
         db.query(HrmCase).filter(HrmCase.case_id == case.case_id).update(case_data)
-        case_module_project = {
-            'module_id': case.module_id,
-            'project_id': case.project_id
-        }
+        case_module_project = {"module_id": case.module_id, "project_id": case.project_id}
         # 更新用例、模块、项目关系表
-        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).update(
-            case_module_project)
+        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).update(case_module_project)
 
     @classmethod
     async def delete_case_dao(cls, db: Session, case: CaseModel, user: CurrentUserModel = None):
@@ -216,7 +204,9 @@ class CaseDao:
         PermissionHandler.check_is_self(user, db.query(HrmCase).filter(HrmCase.case_id == case.case_id).first())
         await run_in_threadpool(db.query(HrmCase).filter(HrmCase.case_id == case.case_id).delete)
         # 删除用例、模块、项目关系
-        await run_in_threadpool(db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).delete)
+        await run_in_threadpool(
+            db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).delete
+        )
 
     @classmethod
     def add_case_module_project_dao(cls, db: Session, case_project: CaseModuleProjectModel):
@@ -263,7 +253,7 @@ class CaseParamsDao:
                         params_name=col_name,
                         col_value=str(col_value),
                         sort_key=sort_key,
-                        enabled=True
+                        enabled=True,
                     )
                 )
             sort_key += 100
@@ -296,7 +286,7 @@ class CaseParamsDao:
                     params_name=col_name,
                     col_value=str(col_value),
                     sort_key=max_sort_key,
-                    enabled=True
+                    enabled=True,
                 )
             )
         db.bulk_save_objects(records)
@@ -312,7 +302,9 @@ class CaseParamsDao:
         :param row_id: 行 ID
         """
         # 1️⃣ 先查最大的 sort_key
-        row_info = db.query(HrmCaseParams.row_id, HrmCaseParams.sort_key).filter_by(case_id=use_case_id).distinct().all()
+        row_info = (
+            db.query(HrmCaseParams.row_id, HrmCaseParams.sort_key).filter_by(case_id=use_case_id).distinct().all()
+        )
 
         # 2️⃣ 插入数据
         records = []
@@ -324,7 +316,7 @@ class CaseParamsDao:
                     col_name=col_name,
                     params_name=col_name,
                     col_value=str(col_value),
-                    sort_key=max_sort_key
+                    sort_key=max_sort_key,
                 )
             )
 
@@ -338,12 +330,7 @@ class CaseParamsDao:
         :param use_case_id: 用例 ID
         :return: 表格数据
         """
-        rows = (
-            db.query(HrmCaseParams)
-            .filter_by(case_id=use_case_id)
-            .order_by(HrmCaseParams.sort_key)
-            .all()
-        )
+        rows = db.query(HrmCaseParams).filter_by(case_id=use_case_id).order_by(HrmCaseParams.sort_key).all()
         table = defaultdict(dict)
         sort_keys = {}
         for r in rows:
@@ -356,12 +343,7 @@ class CaseParamsDao:
 
     @classmethod
     def _reorder_all(cls, db: Session, use_case_id):
-        query = (
-            db.query(HrmCaseParams)
-            .filter_by(case_id=use_case_id)
-            .order_by(HrmCaseParams.sort_key)
-            .all()
-        )
+        query = db.query(HrmCaseParams).filter_by(case_id=use_case_id).order_by(HrmCaseParams.sort_key).all()
         new_key = 100
         for r in query:
             r.sort_key = new_key
@@ -408,6 +390,7 @@ class CaseParamsDao:
         :param use_case_id: 用例 ID
         :param rows_data: 行数据
         """
+
         def _update_row_data():
 
             for row in rows_data:
@@ -416,8 +399,9 @@ class CaseParamsDao:
                     db.query(HrmCaseParams).filter(
                         HrmCaseParams.case_id == use_case_id,
                         HrmCaseParams.row_id == row_id,
-                        HrmCaseParams.params_name == k
+                        HrmCaseParams.params_name == k,
                     ).update({"col_value": v})
+
         await run_in_threadpool(_update_row_data)
 
     @classmethod
@@ -437,8 +421,7 @@ class CaseParamsDao:
             if enabled is not None and enabled != -1:
                 query = query.filter_by(enabled=enabled)
             subquery = (
-                query
-                .distinct()
+                query.distinct()
                 .with_entities(HrmCaseParams.row_id, HrmCaseParams.sort_key)
                 .order_by(HrmCaseParams.sort_key)
                 .offset((page - 1) * page_size)
@@ -457,6 +440,7 @@ class CaseParamsDao:
 
         # 3️⃣ 拼成二维表
         from collections import defaultdict
+
         table = defaultdict(dict)
         sort_keys = {}
         for r in rows:
@@ -486,16 +470,14 @@ class CaseParamsDao:
         :param use_case_id: 用例 ID
         :return: 行数
         """
-        return await run_in_threadpool(
-            db.query(HrmCaseParams.row_id).filter_by(case_id=use_case_id).distinct().count
-        )
+        return await run_in_threadpool(db.query(HrmCaseParams.row_id).filter_by(case_id=use_case_id).distinct().count)
 
     @classmethod
     async def delete_table(cls, db: Session, use_case_id):
         await cls.delete_table_row(db, use_case_id)
 
     @classmethod
-    async def delete_table_row(cls, db: Session, use_case_id, row_ids: list[str|int] = None):
+    async def delete_table_row(cls, db: Session, use_case_id, row_ids: list[str | int] = None):
         while True:
             query = db.query(HrmCaseParams.id).filter(HrmCaseParams.case_id == use_case_id)
             if row_ids:
@@ -505,8 +487,7 @@ class CaseParamsDao:
             if not batch_ids:
                 break
             delete_count = await run_in_threadpool(
-                db.query(HrmCaseParams).filter(HrmCaseParams.id.in_(batch_ids)).delete,
-                synchronize_session=False
+                db.query(HrmCaseParams).filter(HrmCaseParams.id.in_(batch_ids)).delete, synchronize_session=False
             )
             await run_in_threadpool(db.commit)
 
