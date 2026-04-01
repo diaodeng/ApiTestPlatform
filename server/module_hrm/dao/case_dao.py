@@ -3,7 +3,7 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from sqlalchemy import Sequence, case, select
+from sqlalchemy import Sequence, case, select, and_, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from starlette.concurrency import run_in_threadpool
@@ -453,15 +453,77 @@ class CaseParamsDao:
 
     @classmethod
     async def load_table_iter(cls, use_case_id) -> AsyncGenerator[dict, None]:
-        page = 1
+        split_data = {"last_sort_key": None, "last_id": None}
         while True:
-            datas = await cls.load_table_page(use_case_id, page=page, page_size=1000, enabled=True)
+            datas, split_data = await cls.load_table_page_cursor(use_case_id, page_size=1000, enabled=True, **split_data)
             if not datas:
                 break
             for data in datas:
                 data.pop("_row_id", None)
                 yield data
-            page += 1
+
+    @classmethod
+    async def load_table_page_cursor(
+        cls,
+        use_case_id: int,
+        page_size: int = 1000,
+        enabled: int | None = -1,
+        last_sort_key: int | None = None,
+        last_id: int | None = None,  # 用主键id做游标
+    ):
+        with SessionLocal() as db:
+            # 每行只保留最小id（稳定、唯一）
+            anchor_sub = (
+                db.query(
+                    HrmCaseParams.row_id.label("row_id"),
+                    HrmCaseParams.sort_key.label("sort_key"),
+                    db.func.min(HrmCaseParams.id).label("anchor_id"),
+                )
+                .filter(HrmCaseParams.case_id == use_case_id)
+                .filter(HrmCaseParams.enabled == enabled if enabled is not None and enabled != -1 else True)
+                .group_by(HrmCaseParams.row_id, HrmCaseParams.sort_key)
+                .subquery()
+            )
+
+            page_q = db.query(anchor_sub.c.row_id, anchor_sub.c.sort_key, anchor_sub.c.anchor_id)
+
+            if last_sort_key is not None and last_id is not None:
+                page_q = page_q.filter(
+                    or_(
+                        anchor_sub.c.sort_key > last_sort_key,
+                        and_(
+                            anchor_sub.c.sort_key == last_sort_key,
+                            anchor_sub.c.anchor_id > last_id,
+                        ),
+                    )
+                )
+
+            row_page = await run_in_threadpool(
+                page_q.order_by(anchor_sub.c.sort_key, anchor_sub.c.anchor_id).limit(page_size).all
+            )
+            if not row_page:
+                return [], None
+
+            page_row_ids = [r.row_id for r in row_page]
+            order_map = {rid: idx for idx, rid in enumerate(page_row_ids)}
+
+            rows = await run_in_threadpool(
+                db.query(HrmCaseParams)
+                .filter(HrmCaseParams.case_id == use_case_id)
+                .filter(HrmCaseParams.row_id.in_(page_row_ids))
+                .order_by(HrmCaseParams.sort_key, HrmCaseParams.row_id, HrmCaseParams.col_sort, HrmCaseParams.id)
+                .all
+            )
+
+        table = defaultdict(dict)
+        for r in rows:
+            table[r.row_id]["_row_id"] = r.row_id
+            table[r.row_id][r.col_name] = r.col_value
+
+        result = [table[rid] for rid in sorted(table.keys(), key=lambda x: order_map[x])]
+        last = row_page[-1]
+        next_cursor = {"last_sort_key": last.sort_key, "last_id": last.anchor_id}
+        return result, next_cursor
 
     @classmethod
     async def get_table_row_count(cls, db: Session, use_case_id):
