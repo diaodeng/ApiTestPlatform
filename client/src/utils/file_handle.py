@@ -32,7 +32,10 @@ class IniFileHandel:
     def __init__(self, ini_file_path: str):
         self.ini_file_path = ini_file_path
         self.config = configparser.ConfigParser()
-        self.config.read(ini_file_path, encoding='gbk')
+        try:
+            self.config.read(ini_file_path, encoding='utf-8')
+        except Exception as e:
+            self.config.read(ini_file_path, encoding='gbk')
 
     def get_section(self, section: str) -> dict:
         """
