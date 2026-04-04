@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
+from config.sqlalchemy_types import long_text_type
 from module_hrm.entity.do.common_do import BaseModel
 from utils.snowflake import snowIdWorker
 
@@ -34,7 +34,7 @@ class HrmWebCase(Base, BaseModel):
     browser_name: Mapped[str] = mapped_column(String(32), nullable=False, default="chromium", comment="浏览器类型")
     headless: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否无头模式")
     runtime_settings_json: Mapped[str | None] = mapped_column(
-        LONGTEXT,
+        long_text_type(),
         nullable=True,
         default=None,
         comment="运行参数JSON",
@@ -80,9 +80,9 @@ class HrmWebCaseStep(Base, BaseModel):
         comment="步骤来源，manual/recording",
     )
     element_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, default=None, comment="元素库引用ID")
-    params_json: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, default=None, comment="动作参数JSON")
-    assertions_json: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, default=None, comment="断言JSON")
-    raw_event_json: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, default=None, comment="录制原始事件JSON")
+    params_json: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, default=None, comment="动作参数JSON")
+    assertions_json: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, default=None, comment="断言JSON")
+    raw_event_json: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, default=None, comment="录制原始事件JSON")
 
 
 class HrmWebCaseStepTargetSnapshot(Base, BaseModel):
@@ -102,7 +102,7 @@ class HrmWebCaseStepTargetSnapshot(Base, BaseModel):
         comment="目标快照ID",
     )
     step_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="步骤ID")
-    context_json: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, default=None, comment="上下文JSON")
+    context_json: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, default=None, comment="上下文JSON")
     fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None, comment="元素指纹")
     element_text: Mapped[str | None] = mapped_column(String(1000), nullable=True, default=None, comment="元素文本")
     stable_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="稳定性评分")
@@ -126,7 +126,7 @@ class HrmWebCaseLocatorSnapshot(Base, BaseModel):
     target_snapshot_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="目标快照ID")
     locator_type: Mapped[str] = mapped_column(String(120), nullable=False, comment="定位器类型")
     locator_value_json: Mapped[str | None] = mapped_column(
-        LONGTEXT,
+        long_text_type(),
         nullable=True,
         default=None,
         comment="定位器内容JSON",
@@ -177,7 +177,7 @@ class HrmWebElementLocator(Base, BaseModel):
     element_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="元素ID")
     locator_type: Mapped[str] = mapped_column(String(120), nullable=False, comment="定位器类型")
     locator_value_json: Mapped[str | None] = mapped_column(
-        LONGTEXT,
+        long_text_type(),
         nullable=True,
         default=None,
         comment="定位器内容JSON",
@@ -208,9 +208,9 @@ class HrmWebElementCandidate(Base, BaseModel):
     step_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, default=None, comment="来源步骤ID")
     candidate_name: Mapped[str] = mapped_column(String(500), nullable=False, comment="候选名称")
     fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, comment="元素指纹")
-    context_json: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, default=None, comment="上下文JSON")
+    context_json: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, default=None, comment="上下文JSON")
     locator_summary_json: Mapped[str | None] = mapped_column(
-        LONGTEXT,
+        long_text_type(),
         nullable=True,
         default=None,
         comment="定位器摘要JSON",
@@ -248,7 +248,7 @@ class HrmWebRecordingSession(Base, BaseModel):
     start_url: Mapped[str] = mapped_column(String(2048), nullable=False, comment="录制起始URL")
     browser_name: Mapped[str] = mapped_column(String(32), nullable=False, default="chromium", comment="浏览器类型")
     headless: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否无头")
-    options_json: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, default=None, comment="录制配置JSON")
+    options_json: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, default=None, comment="录制配置JSON")
     status: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -260,7 +260,7 @@ class HrmWebRecordingSession(Base, BaseModel):
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="最近事件时间")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None, comment="异常信息")
     result_summary_json: Mapped[str | None] = mapped_column(
-        LONGTEXT,
+        long_text_type(),
         nullable=True,
         default=None,
         comment="录制摘要JSON",
@@ -285,7 +285,7 @@ class HrmWebRecordingEvent(Base, BaseModel):
     recording_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="录制会话ID")
     event_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="事件序号")
     event_type: Mapped[str] = mapped_column(String(120), nullable=False, comment="事件类型")
-    payload_json: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, default=None, comment="事件载荷JSON")
+    payload_json: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, default=None, comment="事件载荷JSON")
 
 
 class HrmWebCaseRun(Base, BaseModel):
@@ -312,5 +312,5 @@ class HrmWebCaseRun(Base, BaseModel):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="开始时间")
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="结束时间")
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="执行时长毫秒")
-    result_json: Mapped[str | None] = mapped_column(LONGTEXT, nullable=True, default=None, comment="执行结果JSON")
+    result_json: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, default=None, comment="执行结果JSON")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None, comment="异常信息")

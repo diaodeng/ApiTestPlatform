@@ -23,17 +23,22 @@ from apscheduler.events import (
 from apscheduler.executors.pool import ProcessPoolExecutor, ThreadPoolExecutor
 from apscheduler.job import Job
 from apscheduler.jobstores.base import ConflictingIdError, JobLookupError
+from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from config.database import SQLALCHEMY_DATABASE_URL, engine
+from config.database import DATABASE_BACKEND, SQLALCHEMY_DATABASE_URL, engine
 from config.env import RedisConfig
 from module_hrm.entity.vo.job_vo import JobModel
 from module_hrm.enums.enums import TaskStatusEnum
 from module_task.task_register import JOB_REGISTRY
 from utils.log_util import logger
+
+
+CACHE_BACKEND = (RedisConfig.cache_backend or "redis").strip().lower()
+USE_IN_MEMORY_SQLITE_JOBSTORE = DATABASE_BACKEND == "sqlite" and SQLALCHEMY_DATABASE_URL.endswith(":memory:")
 
 
 # 重写Cron定时
@@ -99,18 +104,23 @@ class SchedulerUtil:
     """
 
     def __init__(self, table_name="apscheduler_jobs", redis_db=None):
+        sqlalchemy_job_store = (
+            MemoryJobStore()
+            if USE_IN_MEMORY_SQLITE_JOBSTORE
+            else SQLAlchemyJobStore(engine=engine, tablename=table_name)
+        )
+        redis_job_store = MemoryJobStore() if CACHE_BACKEND == "memory" else RedisJobStore(
+            **{
+                'host': RedisConfig.redis_host,
+                'port': RedisConfig.redis_port,
+                'username': RedisConfig.redis_username,
+                'password': RedisConfig.redis_password,
+                'db': redis_db or RedisConfig.redis_database
+            }
+        )
         job_stores = {
-            # 'default': MemoryJobStore(),
-            'sqlalchemy': SQLAlchemyJobStore(url=SQLALCHEMY_DATABASE_URL, engine=engine, tablename=table_name),
-            'redis': RedisJobStore(
-                **{
-                    'host': RedisConfig.redis_host,
-                    'port': RedisConfig.redis_port,
-                    'username': RedisConfig.redis_username,
-                    'password': RedisConfig.redis_password,
-                    'db': redis_db or RedisConfig.redis_database
-                }
-            )
+            'sqlalchemy': sqlalchemy_job_store,
+            'redis': redis_job_store,
         }
         executors = {
             'default': ThreadPoolExecutor(20),
@@ -125,7 +135,7 @@ class SchedulerUtil:
 
         # if self.acquire_lock():
         self.scheduler.start()
-        logger.info("scheduler启动了")
+        logger.info(f"scheduler启动了，缓存型jobstore={CACHE_BACKEND}")
 
         self.add_event()
 
