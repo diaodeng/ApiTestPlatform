@@ -1,8 +1,9 @@
 # 直接数据操作
+import ast
 import base64
 import json
 import os
-from shutil import copyfile, copytree, rmtree
+from shutil import copyfile, copytree, move, rmtree
 from typing import Optional
 
 from loguru import logger
@@ -214,11 +215,18 @@ class PosConfig:
         params_file = os.path.join(pos_dir, "pos_params")
         if not os.path.exists(params_file):
             return None
-        with open(params_file) as f:
-            content = base64.b64decode(f.read().encode("utf-8")).decode("utf-8")
-            content = eval(content)
-            # content_str = json.dumps(content, indent=4, ensure_ascii=False)
-            return PosParamsModel.model_validate(content)
+        with open(params_file, encoding="utf-8") as f:
+            raw_content = f.read().strip()
+        try:
+            content = base64.b64decode(raw_content.encode("utf-8")).decode("utf-8").strip()
+            try:
+                parsed_content = json.loads(content)
+            except json.JSONDecodeError:
+                parsed_content = ast.literal_eval(content)
+            return PosParamsModel.model_validate(parsed_content)
+        except Exception as e:
+            logger.error(f"解析pos_params失败:{params_file}, error={e}")
+            return None
 
     @classmethod
     def read_pos_config(cls) -> PosConfigModel:
@@ -320,7 +328,7 @@ class PosConfig:
                 logger.warning(f"{current_file}文件不存在")
                 return
 
-            os.rename(current_file, target_file)
+            move(current_file, target_file)
 
         def backup_pos_env_file(pos_path: str, file_name: str, old_env_key: str):
             db_file = os.path.join(pos_path, file_name)
@@ -470,8 +478,8 @@ class PosConfig:
         if not os.path.exists(mock_dirver_dir):
             logger.error(f"支付mock驱动不存在:{mock_dirver_dir}，请设置支付mock驱动的目录")
             return
-        backup_dir = pos_config.payment_mock_driver_backup_dir
-        if not os.path.exists(backup_dir):
+        backup_dir = pos_config.payment_driver_back_up_path
+        if not backup_dir or not os.path.exists(backup_dir):
             pos_dir = os.path.dirname(pos_file)
             backup_dir = os.path.join(pos_dir, "drive_backup")
         if not os.path.exists(backup_dir):

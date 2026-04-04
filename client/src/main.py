@@ -2,7 +2,6 @@ import os
 from multiprocessing import freeze_support
 
 import flet as ft
-from flet import Page
 
 from common import appState
 from config import AppConfig
@@ -10,58 +9,24 @@ from navigationMenu import NavigationMenu
 from utils import VERSION
 from utils.common import (
     ensure_directory_exists,
-    get_sys_info_view,
+    get_sys_info_view as refresh_sys_info_cache,
     load_json,
 )
 from utils.logger import log
-from utils.mytimers import ThreadPool, clear_all_timers
+from utils.mytimers import ThreadPool
+from view_contents.exitAlertDialog import ExitAlertDialog
 
 ensure_directory_exists("logs")
 
 basepath = os.path.dirname(__file__)
 
 
-class ExitAlertDialog:
-    def __init__(self, page, **kwargs):
-        self.page: Page = page
-        self.kwargs = kwargs
-
-        self.confirm_dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Do you really want to exit this app?"),
-            # content=ft.Text("Do you really want to exit this app?"),
-            actions=[
-                ft.ElevatedButton("Yes", on_click=self.yes_click),
-                ft.OutlinedButton("No", on_click=self.no_click),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-        self.page.add(self.confirm_dialog)
-        page.update()
-
-    def yes_click(self, e):
-        e.control.page.window.prevent_close = False
-        e.control.page.close(self.confirm_dialog)
-        # e.control.page.update()
-        # 页面包含定时器，需要先关闭定时器，清理资源
-        clear_all_timers()
-        # e.control.page.window.destroy()
-        e.control.page.window.close()
-        # sys.exit(0)  # 直接退出进程
-
-    def no_click(self, e):
-        e.control.page.close(self.confirm_dialog)
-        e.control.page.update()
-
-
-ThreadPool.add_task(get_sys_info_view, 10)
-
-
 async def main(page: ft.Page):
     page.window.prevent_close = True
-    page.window.on_event = lambda e: page.open(ExitAlertDialog(page).confirm_dialog) if e.data == "close" else None
+    exit_dialog = ExitAlertDialog(page)
+    page.window.on_event = lambda e: page.open(exit_dialog.confirm_dialog) if e.data == "close" else None
     app = AppConfig(page)
-    config = load_json(app.tools_db)
+    config = load_json(app.tools_db) or {}
     config["ToolsConfig"] = os.path.join(basepath, app.tools_db)
 
     # page.appbar = ft.AppBar(
@@ -127,12 +92,18 @@ async def main(page: ft.Page):
         dlg_modal.open = True
         e.control.page.update()
 
-    def get_sys_info_view():
-        sys_show_view.value = appState.client_info.toolbar_info
-        sys_show_view.update()
+    def sync_sys_info_view():
+        toolbar_info = appState.client_info.toolbar_info or "正在获取信息..."
+        if sys_show_view.value == toolbar_info:
+            return
+        sys_show_view.value = toolbar_info
+        try:
+            sys_show_view.update()
+        except Exception as ex:
+            log.debug(f"系统信息视图更新失败: {ex}")
 
-    # add_timer_and_start(10, get_sys_info_view)
-    ThreadPool.add_task(get_sys_info_view, 10)
+    ThreadPool.add_task(refresh_sys_info_cache, 10)
+    ThreadPool.add_task(sync_sys_info_view, 1)
     page.on_error = lambda e: log.error(f"页面异常:{e}")
     # page.on_window_event = lambda e: open_dlg(e) if e.data == "close" else None
 

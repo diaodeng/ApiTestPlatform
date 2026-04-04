@@ -28,12 +28,16 @@ def add_timer_and_start(interval, function, *args, **kwargs):
 
 def clear_all_timers():
     """清理所有计时器"""
+    global _thread_pool
     for task in thread_tasks:
         task.cancel()
     for t in _active_timers:
         t.cancel()
     _active_timers.clear()
     thread_tasks.clear()
+    if _thread_pool is not None:
+        _thread_pool.shutdown(wait=False, cancel_futures=True)
+        _thread_pool = None
     log.info("所有计时器已取消并清除")
 
 
@@ -84,7 +88,7 @@ class RepeatedTask(threading.Thread):
         :param args: 传给 func 的位置参数
         :param kwargs: 传给 func 的关键字参数
         """
-        super().__init__()
+        super().__init__(daemon=True)
         self.func = func
         self.interval = interval
         self.count = count
@@ -100,7 +104,10 @@ class RepeatedTask(threading.Thread):
                 break
 
             # 执行任务
-            self.func(*self.args, **self.kwargs)
+            try:
+                self.func(*self.args, **self.kwargs)
+            except Exception as ex:
+                log.exception(f"重复任务执行异常: {ex}")
             executed += 1
 
             # 等待间隔，但允许随时取消

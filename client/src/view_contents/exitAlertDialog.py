@@ -1,7 +1,8 @@
 import flet as ft
 
-from utils.mytimers import clear_all_timers
 from flet import Page
+from utils.mytimers import clear_all_timers
+
 
 class ExitAlertDialog:
     def __init__(self, page, **kwargs):
@@ -18,14 +19,16 @@ class ExitAlertDialog:
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
-        page.update()
 
     def yes_click(self, e):
+        self.page.window.prevent_close = False
         self.page.close(self.confirm_dialog)
-        self.page.update()
         # 页面包含定时器，需要先关闭定时器，清理资源
         clear_all_timers()
-        self.page.window.destroy()
+        if hasattr(self.page.window, "close"):
+            self.page.window.close()
+        else:
+            self.page.window.destroy()
         # sys.exit(0)  # 直接退出进程
 
     def no_click(self, e):

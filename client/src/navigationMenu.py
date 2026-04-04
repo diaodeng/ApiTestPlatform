@@ -1,20 +1,19 @@
-import flet
-
 from contents import Contents
 
 
 class NavigationMenu:
     def __init__(self, ft, page, log, **kwargs):
-        self.ft = flet
+        self.ft = ft
         self.page = page
         self.log = log
+        self.default_index = 3
         # 当前选中索引
         self.selected_index = self.ft.Ref[int]()
-        self.selected_index.current = 3
+        self.selected_index.current = self.default_index
         # 内容对象
         self.contents = Contents(ft, log, page, **kwargs)
         # 内容区域
-        self.content_area = ft.Container(content=self.contents.get_content(3), expand=True)
+        self.content_area = ft.Container(content=self.contents.get_content(self.default_index), expand=True)
 
     # 导航栏点击处理
     def on_nav_change(self, e):
@@ -33,7 +32,7 @@ class NavigationMenu:
     def nav_rail_menu(self):
         # 构建导航栏
         nav_rail = self.ft.NavigationRail(
-            selected_index=3,
+            selected_index=self.default_index,
             label_type=self.ft.NavigationRailLabelType.ALL,
             min_width=100,
             min_extended_width=200,
