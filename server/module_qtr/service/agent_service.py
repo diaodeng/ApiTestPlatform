@@ -71,6 +71,8 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
             elif response_data.get("request_type") == TstepTypeEnum.websocket.value:
                 response = AgentResponseWebSocket(response_data)
                 # logger.info(f"ws响应数据：{response}")
+            elif response_data.get("request_type") == TstepTypeEnum.webui.value:
+                response = AgentResponseWebUI(**response_data)
             else:
                 return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
                                         response_data,
@@ -256,10 +258,23 @@ class AgentResponseWebSocket(WebSocketClientProtocol):
         return json.loads(self.message.get('response_headers'))
 
 
+class AgentResponseWebUI(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, arbitrary_types_allowed=True)
+
+    request_type: int | None = None
+    command: str | None = None
+    status: str | None = None
+    success: bool = True
+    message: str | None = None
+    recording_id: int | str | None = None
+    result: dict[str, Any] | None = None
+    data: dict[str, Any] | None = None
+
+
 class HandleResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, arbitrary_types_allowed=True)
     status_code: int = 200
-    response: AgentResponse | AgentResponseWebSocket | dict | None = None
+    response: AgentResponse | AgentResponseWebSocket | AgentResponseWebUI | dict | None = None
     message: str = None
 
 

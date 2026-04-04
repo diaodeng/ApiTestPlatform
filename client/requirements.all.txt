@@ -94,6 +94,7 @@ typing_extensions==4.14.0
 urllib3==2.5.0
 urwid==2.6.16
 uvicorn==0.35.0
+playwright==1.54.0
 watchdog==4.0.2
 watchfiles==1.1.0
 wcwidth==0.2.13

@@ -1,4 +1,4 @@
-aiohappyeyeballs==2.6.1
+﻿aiohappyeyeballs==2.6.1
 aiohttp==3.12.15
 aioquic==1.2.0
 aiosignal==1.4.0
@@ -102,3 +102,5 @@ win32_setctime==1.2.0
 wsproto==1.2.0
 yarl==1.20.1
 zstandard==0.24.0
+playwright==1.54.0
+

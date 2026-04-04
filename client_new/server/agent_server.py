@@ -3,7 +3,7 @@ import json
 import traceback
 from collections import defaultdict
 from enum import Enum
-from typing import Callable
+from typing import Awaitable, Callable
 
 import httpx
 import websockets
@@ -11,6 +11,7 @@ from httpx import HTTPError
 from loguru import logger
 from websockets.exceptions import InvalidStatus
 
+from services.web_test_service import WebTestService
 from utils.common import compress_dict_to_str, decompress_str_to_dict
 
 # websocket发送数据分片大小
@@ -27,7 +28,10 @@ class RequestByInput:
 
     @classmethod
     async def forward_by_rules(
-        cls, message_data_dict: dict, http_client: httpx.AsyncClient
+        cls,
+        message_data_dict: dict,
+        http_client: httpx.AsyncClient,
+        event_sender: Callable[[dict], Awaitable[None]] | None = None,
     ) -> (dict, bool):
         """根据入参转发请求"""
         logger.info(f"请求数据：{json.dumps(message_data_dict, ensure_ascii=True)}")
@@ -69,6 +73,15 @@ class RequestByInput:
                 logger.error(e.args)
                 res_data["Error"] = "".join(traceback.format_exception(e))
                 # client_status = False
+            res_data["request_id"] = request_id
+            res_data["request_type"] = request_type
+            return res_data, client_status
+        elif request_type == RequestTypeEnum.webui.value:
+            try:
+                res_data = await WebTestService.handle_request(message_data_dict, event_sender)
+            except Exception as e:
+                logger.exception(e)
+                res_data = {"Error": "".join(traceback.format_exception(e))}
             res_data["request_id"] = request_id
             res_data["request_type"] = request_type
             return res_data, client_status
@@ -266,7 +279,7 @@ class WebSocketClient:
         request_data = decompress_str_to_dict(request_all_chunk.pop(request_id))
         if self.before_request_call:
             self._safe_invoke(self.before_request_call, request_data)
-        response, _ = await RequestByInput.forward_by_rules(request_data, http_client)
+        response, _ = await RequestByInput.forward_by_rules(request_data, http_client, self.send_message)
         if self.after_request_call:
             self._safe_invoke(self.after_request_call, response)
         response = compress_dict_to_str(response)

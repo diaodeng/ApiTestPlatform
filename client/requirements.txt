@@ -16,3 +16,4 @@ mitmproxy
 flet-desktop
 watchfiles
 websockets==12.0
+playwright>=1.54.0

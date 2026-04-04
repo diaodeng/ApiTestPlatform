@@ -335,6 +335,14 @@ INSERT INTO sys_menu VALUES (1183,"编辑",1163,2,"",null,null,1,0,"F","0","0","
 INSERT INTO sys_menu VALUES (1188,"删除",1163,3,"",null,null,1,0,"F","0","0","qtr:forwardRules:remove","#","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1193,"复制",1163,4,"",null,null,1,0,"F","0","0","qtr:forwardRules:copy","#","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1198,"详情",1163,5,"",null,null,1,0,"F","0","0","qtr:forwardRules:detail","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1199,"Web测试管理",1061,9,"webcase","hrm/webcase/index",null,1,0,"C","0","0","hrm:webCase:list","guide","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1200,"新增",1199,1,"",null,null,1,0,"F","0","0","hrm:webCase:add","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1201,"编辑",1199,2,"",null,null,1,0,"F","0","0","hrm:webCase:edit","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1202,"删除",1199,3,"",null,null,1,0,"F","0","0","hrm:webCase:remove","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1203,"详情",1199,4,"",null,null,1,0,"F","0","0","hrm:webCase:detail","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1204,"执行",1199,5,"",null,null,1,0,"F","0","0","hrm:webCase:run","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1205,"录制",1199,6,"",null,null,1,0,"F","0","0","hrm:webCase:record","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1206,"历史",1199,7,"",null,null,1,0,"F","0","0","hrm:webCase:history","#","admin",sysdate(),"admin",null,"");
 
 -- ----------------------------
 -- 6、用户和角色关联表  用户N-1角色
