@@ -16,6 +16,7 @@ from model.config import (
     SearchConfigModel,
     SetupConfigModel,
     StartConfigModel,
+    ThemeConfigModel,
     VendorConfigModel,
 )
 from model.pos_network_model import PosInitRespModel
@@ -612,6 +613,33 @@ class FtpConfig:
 
     @classmethod
     def save_config(cls, config_data: FtpConfigModel):
+        with open(cls.config_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(config_data.model_dump(), ensure_ascii=False))
+
+
+class ThemeConfig:
+    config_path = "storage/data/theme_config.json"
+
+    @classmethod
+    def read_config(cls) -> ThemeConfigModel:
+        if not os.path.exists(cls.config_path):
+            config = ThemeConfigModel()
+            with open(cls.config_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+            return config
+
+        with open(cls.config_path, encoding="utf-8") as f:
+            data = f.read()
+            if not data:
+                config = ThemeConfigModel()
+                with open(cls.config_path, "w", encoding="utf-8") as w:
+                    w.write(json.dumps(config.model_dump(), ensure_ascii=False))
+                return config
+
+            return ThemeConfigModel.model_validate(json.loads(data))
+
+    @classmethod
+    def save_config(cls, config_data: ThemeConfigModel):
         with open(cls.config_path, "w", encoding="utf-8") as f:
             f.write(json.dumps(config_data.model_dump(), ensure_ascii=False))
 

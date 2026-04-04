@@ -18,12 +18,22 @@ export function parseTime(time, pattern) {
     if ((typeof time === 'string') && (/^[0-9]+$/.test(time))) {
       time = parseInt(time)
     } else if (typeof time === 'string') {
-      time = time.replace(new RegExp(/-/gm), '/').replace('T', ' ').replace(new RegExp(/\.[\d]{3}/gm), '');
+      const normalizedDate = parseDateString(time)
+      if (normalizedDate) {
+        date = normalizedDate
+      } else {
+        time = time.replace(new RegExp(/-/gm), '/').replace('T', ' ').replace(new RegExp(/\.[\d]{3}/gm), '')
+      }
     }
-    if ((typeof time === 'number') && (time.toString().length === 10)) {
-      time = time * 1000
+    if (!date) {
+      if ((typeof time === 'number') && (time.toString().length === 10)) {
+        time = time * 1000
+      }
+      date = new Date(time)
     }
-    date = new Date(time)
+  }
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return null
   }
   const formatObj = {
     y: date.getFullYear(),
@@ -44,6 +54,43 @@ export function parseTime(time, pattern) {
     return value || 0
   })
   return time_str
+}
+
+function parseDateString(value) {
+  const input = `${value}`.trim()
+  if (!input) {
+    return null
+  }
+  const matched = input.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,6}))?)?)?(?:\s*(Z|[+-]\d{2}:?\d{2}))?$/
+  )
+  if (!matched) {
+    return null
+  }
+  const year = Number(matched[1])
+  const month = Number(matched[2]) - 1
+  const day = Number(matched[3])
+  const hour = Number(matched[4] || 0)
+  const minute = Number(matched[5] || 0)
+  const second = Number(matched[6] || 0)
+  const fraction = matched[7] || ''
+  const millisecond = Number(fraction.slice(0, 3).padEnd(3, '0') || 0)
+  const timezone = matched[8]
+
+  if (!timezone) {
+    return new Date(year, month, day, hour, minute, second, millisecond)
+  }
+  if (timezone === 'Z') {
+    return new Date(Date.UTC(year, month, day, hour, minute, second, millisecond))
+  }
+
+  const compactTimezone = timezone.replace(':', '')
+  const sign = compactTimezone[0] === '-' ? -1 : 1
+  const zoneHour = Number(compactTimezone.slice(1, 3))
+  const zoneMinute = Number(compactTimezone.slice(3, 5))
+  const offsetMinutes = sign * (zoneHour * 60 + zoneMinute)
+  const utcTime = Date.UTC(year, month, day, hour, minute, second, millisecond) - offsetMinutes * 60 * 1000
+  return new Date(utcTime)
 }
 
 // 表单重置

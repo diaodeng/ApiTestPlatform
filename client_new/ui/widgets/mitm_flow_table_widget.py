@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from emitter.mitm_flow_emitter import flow_emitter
 from models.mitmproxy_models import FlowTableModel
+from ui.theme_manager import ThemeManager, color_to_hex
 
 
 class HoverTableView(QTableView):
@@ -80,17 +81,21 @@ class FlowRowDelegate(QStyledItemDelegate):
 
         is_selected = bool(opt.state & QStyle.State_Selected)
         is_hovered = index.row() == self._table_view.hover_row
+        tokens = ThemeManager.instance().tokens()
 
         if is_hovered and not is_selected:
-            hovered_color = QColor("#ebf4ff")
+            hovered_color = QColor(tokens.surface_hover)
             opt.backgroundBrush = hovered_color
             opt.palette.setColor(QPalette.Base, hovered_color)
             opt.palette.setColor(QPalette.AlternateBase, hovered_color)
 
         if is_selected:
-            selected_color = QColor("#cfe3ff")
+            selected_color = QColor(tokens.selection)
+            opt.backgroundBrush = selected_color
             opt.palette.setColor(QPalette.Highlight, selected_color)
-            opt.palette.setColor(QPalette.HighlightedText, QColor("#1a202c"))
+            opt.palette.setColor(
+                QPalette.HighlightedText, QColor(tokens.selection_text)
+            )
 
         super().paint(painter, opt, index)
 
@@ -253,20 +258,6 @@ class FlowTableWidget(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setShowGrid(False)
         self.table.setSortingEnabled(False)
-        self.table.setStyleSheet(
-            "QTableView {"
-            " selection-background-color: #cfe3ff;"
-            " selection-color: #1a202c;"
-            " alternate-background-color: #f7fafc;"
-            "}"
-            "QHeaderView::section {"
-            " background: #f7fafc;"
-            " border: none;"
-            " border-bottom: 1px solid #e2e8f0;"
-            " padding: 6px 8px;"
-            " font-weight: 600;"
-            "}"
-        )
         self.table.setColumnWidth(2, 160)
         self.table.setColumnWidth(7, 160)
 
@@ -289,6 +280,7 @@ class FlowTableWidget(QWidget):
         self.setLayout(layout)
 
         self._bind()
+        self._apply_theme()
         self._refresh_stats()
 
     def _bind(self):
@@ -301,6 +293,7 @@ class FlowTableWidget(QWidget):
         self.failed_only_checkbox.toggled.connect(self._apply_filters)
         self.clear_filter_btn.clicked.connect(self._clear_filters)
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        ThemeManager.instance().theme_changed.connect(self._apply_theme)
 
     def _on_model_changed(self):
         self._refresh_stats()
@@ -382,3 +375,18 @@ class FlowTableWidget(QWidget):
         self.table.clearSelection()
         self.model.clear()
         self.flow_selected.emit(None)
+
+    def _apply_theme(self, *_args):
+        tokens = ThemeManager.instance().tokens()
+        self.table.setStyleSheet(
+            f"""
+            QTableView {{
+                background-color: {color_to_hex(tokens.base)};
+                border: 1px solid {color_to_hex(tokens.border)};
+                border-radius: 10px;
+                selection-background-color: {color_to_hex(tokens.selection)};
+                selection-color: {color_to_hex(tokens.selection_text)};
+            }}
+            """
+        )
+        self.table.viewport().update()

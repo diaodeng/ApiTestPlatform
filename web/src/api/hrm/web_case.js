@@ -46,6 +46,13 @@ export function runWebCase(data) {
   })
 }
 
+export function getWebRun(webCaseRunId) {
+  return request({
+    url: '/hrm/web-case/run/' + webCaseRunId,
+    method: 'get'
+  })
+}
+
 export function listWebRecording(query) {
   return request({
     url: '/hrm/web-case/recording/list',
@@ -80,6 +87,22 @@ export function stopWebRecording(data) {
 export function applyWebRecording(data) {
   return request({
     url: '/hrm/web-case/recording/apply',
+    method: 'post',
+    data
+  })
+}
+
+export function saveWebRecordingAsCase(data) {
+  return request({
+    url: '/hrm/web-case/recording/save-as-case',
+    method: 'post',
+    data
+  })
+}
+
+export function replayWebRecording(data) {
+  return request({
+    url: '/hrm/web-case/recording/replay',
     method: 'post',
     data
   })

@@ -1,10 +1,16 @@
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QStackedWidget,
+    QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -14,11 +20,19 @@ from ui.pages.agent_page import AgentPage
 from ui.pages.log_view_page import LogViewPage
 from ui.pages.mitmproxy_page import MitmWidget
 from ui.pages.pos_page import PosPage
+from ui.theme_manager import (
+    THEME_MODE_AUTO,
+    THEME_MODE_DARK,
+    THEME_MODE_LIGHT,
+    ThemeManager,
+    theme_mode_label,
+)
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.theme_manager = ThemeManager.instance()
         self.setWindowTitle("QTRClient - PySide6")
         self.resize(1200, 800)
 
@@ -27,7 +41,46 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         central = QWidget()
-        layout = QHBoxLayout()
+        root_layout = QVBoxLayout()
+        root_layout.setContentsMargins(12, 12, 12, 12)
+        root_layout.setSpacing(12)
+
+        self.header_bar = QFrame()
+        self.header_bar.setObjectName("mainHeaderBar")
+        header_layout = QHBoxLayout(self.header_bar)
+        header_layout.setContentsMargins(12, 10, 12, 10)
+        header_layout.setSpacing(10)
+
+        self.app_title_label = QLabel("QTRClient")
+        self.app_title_label.setStyleSheet("font-size: 18px; font-weight: 600;")
+
+        self.theme_button = QToolButton()
+        self.theme_button.setObjectName("themeToggleButton")
+        self.theme_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.theme_button.setPopupMode(QToolButton.InstantPopup)
+        self.theme_menu = QMenu(self.theme_button)
+        self.theme_action_group = QActionGroup(self)
+        self.theme_action_group.setExclusive(True)
+        self.theme_actions = {}
+        for mode in (THEME_MODE_AUTO, THEME_MODE_LIGHT, THEME_MODE_DARK):
+            action = QAction(theme_mode_label(mode), self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda checked, selected_mode=mode: checked
+                and self.theme_manager.apply_theme(selected_mode)
+            )
+            self.theme_action_group.addAction(action)
+            self.theme_menu.addAction(action)
+            self.theme_actions[mode] = action
+        self.theme_button.setMenu(self.theme_menu)
+
+        header_layout.addWidget(self.app_title_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self.theme_button)
+
+        content_layout = QHBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
 
         # 左侧菜单
         self.menu = QListWidget()
@@ -67,11 +120,19 @@ class MainWindow(QMainWindow):
         self.menu.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.menu.setCurrentRow(3)
 
-        layout.addWidget(self.menu)
-        layout.addWidget(self.stack)
+        content_layout.addWidget(self.menu)
+        content_layout.addWidget(self.stack)
 
-        central.setLayout(layout)
+        root_layout.addWidget(self.header_bar)
+        root_layout.addLayout(content_layout, 1)
+
+        central.setLayout(root_layout)
         self.setCentralWidget(central)
+
+        self.theme_manager.theme_changed.connect(self._update_theme_button)
+        self._update_theme_button(
+            self.theme_manager.current_mode(), self.theme_manager.is_dark()
+        )
 
     def _init_status_bar(self):
         self.statusBar().showMessage("就绪 | 当前运行POS: -")
@@ -79,6 +140,17 @@ class MainWindow(QMainWindow):
         self._status_timer.setInterval(2000)
         self._status_timer.timeout.connect(self._refresh_global_status)
         self._status_timer.start()
+
+    def _update_theme_button(self, mode: str, is_dark: bool):
+        for theme_mode, action in self.theme_actions.items():
+            action.setChecked(theme_mode == mode)
+
+        resolved = "深色" if is_dark else "浅色"
+        self.theme_button.setText(f"主题: {theme_mode_label(mode)}")
+        if mode == THEME_MODE_AUTO:
+            self.theme_button.setToolTip(f"当前跟随系统主题，已应用 {resolved} 模式")
+            return
+        self.theme_button.setToolTip(f"当前固定为 {resolved} 模式")
 
     def _refresh_global_status(self):
         current = PosManager.instance().get()

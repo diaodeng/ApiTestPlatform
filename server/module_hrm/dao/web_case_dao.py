@@ -130,6 +130,7 @@ class WebCaseDao:
         query = (
             db.query(HrmWebRecordingSession)
             .filter(
+                HrmWebRecordingSession.recording_id == page_object.recording_id if page_object.recording_id else True,
                 HrmWebRecordingSession.web_case_id == page_object.web_case_id if page_object.web_case_id else True,
                 HrmWebRecordingSession.agent_code == page_object.agent_code if page_object.agent_code else True,
                 HrmWebRecordingSession.status == page_object.status if page_object.status else True,
@@ -167,13 +168,19 @@ class WebCaseDao:
         db.query(HrmWebCaseRun).filter(HrmWebCaseRun.web_case_run_id == web_case_run_id).update(update_data)
 
     @classmethod
+    def get_run_record(cls, db: Session, web_case_run_id: int):
+        return db.query(HrmWebCaseRun).filter(HrmWebCaseRun.web_case_run_id == web_case_run_id).first()
+
+    @classmethod
     def list_run_records(cls, db: Session, page_object: WebCaseRunRecordPageQueryModel):
         query = (
             db.query(HrmWebCaseRun)
             .filter(
+                HrmWebCaseRun.web_case_run_id == page_object.web_case_run_id if page_object.web_case_run_id else True,
                 HrmWebCaseRun.web_case_id == page_object.web_case_id if page_object.web_case_id else True,
                 HrmWebCaseRun.agent_code == page_object.agent_code if page_object.agent_code else True,
                 HrmWebCaseRun.status == page_object.status if page_object.status else True,
+                HrmWebCaseRun.trigger_type == page_object.trigger_type if page_object.trigger_type else True,
             )
             .order_by(HrmWebCaseRun.started_at.desc(), HrmWebCaseRun.create_time.desc())
         )
