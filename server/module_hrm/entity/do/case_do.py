@@ -1,8 +1,8 @@
 from sqlalchemy import BigInteger, Boolean, Index, Integer, String, Text
-from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
+from config.sqlalchemy_types import long_text_type
 from module_hrm.entity.do.common_do import BaseModel
 from module_hrm.enums.enums import DataType
 from utils.snowflake import snowIdWorker
@@ -26,7 +26,7 @@ class HrmCase(Base, BaseModel):
     project_id: Mapped[BigInteger] = mapped_column(BigInteger, nullable=True, default=None, comment='项目ID')
     module_id: Mapped[BigInteger] = mapped_column(BigInteger, nullable=True, default=None, comment='模块ID')
     include: Mapped[str] = mapped_column(String(1024), nullable=True, comment='前置config/test')
-    request: Mapped[LONGTEXT] = mapped_column(LONGTEXT, nullable=True, comment='请求信息')
+    request: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment='请求信息')
     notes: Mapped[Text] = mapped_column(Text, nullable=True, comment='注释')
     desc2mind: Mapped[Text] = mapped_column(Text, nullable=True, comment='脑图')
     sort: Mapped[Integer] = mapped_column(Integer, nullable=False, default=0, comment='显示顺序')
@@ -56,7 +56,7 @@ class HrmCaseParams(Base, BaseModel):
     sort_key: Mapped[Integer] = mapped_column(Integer, nullable=False, default=0, comment='行排序键')
     col_name: Mapped[String] = mapped_column(String(500), nullable=False, comment='列名')
     params_name: Mapped[String] = mapped_column(String(500), nullable=False, comment='参数名称')
-    col_value: Mapped[LONGTEXT] = mapped_column(LONGTEXT, nullable=False, comment='列值')
+    col_value: Mapped[str] = mapped_column(long_text_type(), nullable=False, comment='列值')
     params_type: Mapped[Integer] = mapped_column(Integer, comment='1 字符串 2 数字 3 列表 4 字典', default=1,
                                           nullable=False)
 

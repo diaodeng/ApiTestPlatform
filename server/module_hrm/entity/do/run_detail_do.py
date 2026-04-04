@@ -1,10 +1,10 @@
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Float, Index, Integer, String
-from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
+from config.sqlalchemy_types import long_text_type
 from utils.snowflake import snowIdWorker
 
 from .common_do import BaseModel
@@ -29,7 +29,7 @@ class HrmRunDetail(Base, BaseModel):
     run_end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now(),
                                                    comment='执行结束时间')
     run_duration: Mapped[float] = mapped_column(Float, nullable=False, default=0, comment='执行耗时')
-    run_detail: Mapped[str] = mapped_column(LONGTEXT, nullable=False, default=None, comment='执行详情')
+    run_detail: Mapped[str] = mapped_column(long_text_type(), nullable=False, default=None, comment='执行详情')
     status: Mapped[int] = mapped_column(Integer, nullable=False, comment='用例执行状态：1-成功，2-失败，3-跳过')
 
     __table_args__ = (

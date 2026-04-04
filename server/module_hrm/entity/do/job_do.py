@@ -1,10 +1,10 @@
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Integer, String
-from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
+from config.sqlalchemy_types import long_text_type
 from module_hrm.entity.do.common_do import BaseModel
 from utils.snowflake import snowIdWorker
 
@@ -29,8 +29,8 @@ class QtrJob(Base, BaseModel):
                                               comment='任务执行器')
     invoke_target: Mapped[str] = mapped_column(String(500, collation='utf8_general_ci'), nullable=False,
                                                comment='调用目标字符串')
-    job_args: Mapped[str] = mapped_column(LONGTEXT(collation='utf8_general_ci'), nullable=True, comment='位置参数')
-    job_kwargs: Mapped[str] = mapped_column(LONGTEXT(collation='utf8_general_ci'), nullable=True, comment='关键字参数')
+    job_args: Mapped[str] = mapped_column(long_text_type('utf8_general_ci'), nullable=True, comment='位置参数')
+    job_kwargs: Mapped[str] = mapped_column(long_text_type('utf8_general_ci'), nullable=True, comment='关键字参数')
     cron_expression: Mapped[str] = mapped_column(String(255, collation='utf8_general_ci'), nullable=True, default='',
                                                  comment='cron执行表达式')
     misfire_policy: Mapped[str] = mapped_column(String(20, collation='utf8_general_ci'), nullable=True, default='3',
@@ -64,8 +64,8 @@ class QtrJobLog(Base, BaseModel):
     job_executor = mapped_column(String(64, collation='utf8_general_ci'), nullable=False, default='default',
                                  comment='任务执行器')
     invoke_target = mapped_column(String(500, collation='utf8_general_ci'), nullable=False, comment='调用目标字符串')
-    job_args = mapped_column(LONGTEXT(collation='utf8_general_ci'), nullable=True, comment='位置参数')
-    job_kwargs = mapped_column(LONGTEXT(collation='utf8_general_ci'), nullable=True, comment='关键字参数')
+    job_args = mapped_column(long_text_type('utf8_general_ci'), nullable=True, comment='位置参数')
+    job_kwargs = mapped_column(long_text_type('utf8_general_ci'), nullable=True, comment='关键字参数')
     job_trigger = mapped_column(String(255, collation='utf8_general_ci'), nullable=True, comment='任务触发器')
     job_message = mapped_column(String(500, collation='utf8_general_ci'), nullable=True, default='', comment='日志信息')
     status = mapped_column(String(1, collation='utf8_general_ci'), nullable=True, default='0',

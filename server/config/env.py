@@ -38,6 +38,12 @@ class DataBaseSettings(BaseSettings):
     """
     数据库配置
     """
+    db_type: str = 'mysql'
+    db_url: str = ''
+    db_sqlite_path: str = 'caches/qtr-dev.sqlite3'
+    sqlite_auto_seed: bool = False
+    sqlite_seed_sql_file: str = 'sql/apitest.sql'
+    sqlite_seed_table_prefix: str = 'sys_'
     db_host: str = '127.0.0.1'
     db_port: int = 3306
     db_username: str = 'root'
@@ -57,6 +63,7 @@ class RedisSettings(BaseSettings):
     """
     Redis配置
     """
+    cache_backend: str = 'redis'
     redis_host: str = '127.0.0.1'
     redis_port: int = 6379
     redis_username: str = ''

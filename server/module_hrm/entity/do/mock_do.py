@@ -1,8 +1,8 @@
 from sqlalchemy import BigInteger, Integer, String, Text
-from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
+from config.sqlalchemy_types import long_text_type
 from module_hrm.entity.do.common_do import BaseModel
 from module_hrm.enums.enums import DataType, QtrDataStatusEnum
 from utils.snowflake import snowIdWorker
@@ -48,7 +48,7 @@ class RuleResponse(Base, BaseModel):
     rule_id: Mapped[int] = mapped_column(BigInteger, comment='rule_id', nullable=False, index=True)
     status_code: Mapped[int] = mapped_column(Integer, comment='响应状态码', nullable=False, default=1)
     headers_template: Mapped[str] = mapped_column(Text, comment='响应头模板', nullable=True, default=None)
-    body_template: Mapped[str] = mapped_column(LONGTEXT, comment='响应体模板', nullable=True, default=None)
+    body_template: Mapped[str] = mapped_column(long_text_type(), comment='响应体模板', nullable=True, default=None)
     delay: Mapped[int] = mapped_column(Integer, comment='响应延时，毫秒', nullable=False, default=0)
     desc: Mapped[str] = mapped_column(Text, comment='MOCK描述', nullable=True, default=None)
 

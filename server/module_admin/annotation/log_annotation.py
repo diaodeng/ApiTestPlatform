@@ -3,7 +3,7 @@ import json
 import os
 import time
 from datetime import datetime
-from functools import lru_cache, wraps
+from functools import wraps
 
 import httpx
 from fastapi import Request
@@ -14,6 +14,9 @@ from config.env import AppConfig
 from module_admin.entity.vo.log_vo import LogininforModel, OperLogModel
 from module_admin.service.log_service import LoginLogService, OperationLogService
 from module_admin.service.login_service import LoginService
+
+IP_LOCATION_CACHE_TTL_SECONDS = 60 * 60
+_ip_location_cache: dict[str, tuple[float, str]] = {}
 
 
 def log_decorator(title: str, business_type: int, log_type: str | None = "operation"):
@@ -52,6 +55,10 @@ def log_decorator(title: str, business_type: int, log_type: str | None = "operat
             oper_url = request.url.path
             # 获取请求的ip及ip归属区域
             oper_ip = request.headers.get("X-Forwarded-For")
+            if oper_ip:
+                oper_ip = oper_ip.split(",")[0].strip()
+            elif request.client:
+                oper_ip = request.client.host
             oper_location = "内网IP"
             if AppConfig.app_ip_location_query:
                 oper_location = await get_ip_location(oper_ip)
@@ -175,25 +182,40 @@ def log_decorator(title: str, business_type: int, log_type: str | None = "operat
     return decorator
 
 
-@lru_cache
-async def get_ip_location(oper_ip: str):
+async def get_ip_location(oper_ip: str | None):
     """
     查询ip归属区域
     :param oper_ip: 需要查询的ip
     :return: ip归属区域
     """
+    normalized_ip = (oper_ip or "").strip()
+    if not normalized_ip:
+        return "未知"
+    if normalized_ip in {"127.0.0.1", "localhost", "::1"}:
+        return "内网IP"
+
+    current_timestamp = time.time()
+    cached_location = _ip_location_cache.get(normalized_ip)
+    if cached_location and cached_location[0] > current_timestamp:
+        return cached_location[1]
+
     oper_location = "内网IP"
     try:
-        if oper_ip != "127.0.0.1" and oper_ip != "localhost":
-            oper_location = "未知"
-            async with httpx.AsyncClient() as client:
-                ip_result = await client.get(f"https://qifu-api.baidubce.com/ip/geo/v1/district?ip={oper_ip}")
-            if ip_result.status_code == 200:
-                prov = ip_result.json().get("data").get("prov")
-                city = ip_result.json().get("data").get("city")
-                if prov or city:
-                    oper_location = f"{prov}-{city}"
+        oper_location = "未知"
+        async with httpx.AsyncClient() as client:
+            ip_result = await client.get(f"https://qifu-api.baidubce.com/ip/geo/v1/district?ip={normalized_ip}")
+        if ip_result.status_code == 200:
+            data = ip_result.json().get("data") or {}
+            prov = data.get("prov")
+            city = data.get("city")
+            if prov or city:
+                oper_location = f"{prov}-{city}"
     except Exception as e:
         oper_location = "未知"
         print(e)
+
+    _ip_location_cache[normalized_ip] = (
+        current_timestamp + IP_LOCATION_CACHE_TTL_SECONDS,
+        oper_location,
+    )
     return oper_location

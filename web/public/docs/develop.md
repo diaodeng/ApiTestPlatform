@@ -90,3 +90,16 @@ uv add fastapi uvicorn  # 增加依赖
 uv add --group dev pytest ruff  # 增加依赖到开发环境
 uv sync  # 使用uv.lock安装依赖
 ```
+
+#### 兼容sqlite和内存缓存
+```text
+DB_TYPE='sqlite'
+DB_SQLITE_PATH='caches/qtr-dev.sqlite3'
+CACHE_BACKEND='memory'
+SQLITE_AUTO_SEED=true
+
+第一次启动会默认插入初始化数据                                                                                                                                                                                                                                    
+如果你想要空 SQLite 库，把 SQLITE_AUTO_SEED=false。如果你想强制重导，仍然可以手工跑这个脚本：
+                                                                                                                                                                                                                                    
+python.exe scripts\seed_sqlite_from_init_sql.py --create-schema --clear-existing 
+```

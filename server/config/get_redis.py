@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+from typing import Any
+
 from redis import asyncio as aioredis
 from redis.exceptions import AuthenticationError, RedisError, TimeoutError
 
+from config.cache_backend import MemoryRedis
 from config.database import SessionLocal
 from config.env import RedisConfig
 from module_admin.service.config_service import ConfigService
@@ -8,17 +13,26 @@ from module_admin.service.dict_service import DictDataService
 from utils.log_util import logger
 
 
+CACHE_BACKEND = (RedisConfig.cache_backend or "redis").strip().lower()
+
+
 class RedisUtil:
     """
-    Redis相关方法
+    缓存相关方法。保留原名称，底层可切换 Redis / Memory。
     """
 
     @classmethod
-    async def create_redis_pool(cls) -> aioredis.Redis:
+    async def create_redis_pool(cls) -> Any:
         """
-        应用启动时初始化redis连接
-        :return: Redis连接对象
+        应用启动时初始化缓存连接
+        :return: Redis连接对象或内存缓存对象
         """
+        if CACHE_BACKEND == "memory":
+            logger.info("缓存后端使用 memory")
+            cache = MemoryRedis()
+            await cache.ping()
+            return cache
+
         logger.info("开始连接redis...")
         redis = await aioredis.from_url(
             url=f"redis://{RedisConfig.redis_host}",
@@ -31,7 +45,6 @@ class RedisUtil:
             socket_keepalive=True,
             health_check_interval=30,
             retry_on_timeout=True,
-            # retry_on_exception=True
         )
         try:
             connection = await redis.ping()
@@ -39,44 +52,47 @@ class RedisUtil:
                 logger.info("redis连接成功")
             else:
                 logger.error("redis连接失败")
-        except AuthenticationError as e:
-            logger.error(f"redis用户名或密码错误，详细错误信息：{e}")
-        except TimeoutError as e:
-            logger.error(f"redis连接超时，详细错误信息：{e}")
-        except RedisError as e:
-            logger.error(f"redis连接错误，详细错误信息：{e}")
+        except AuthenticationError as exc:
+            logger.error(f"redis用户名或密码错误，详细错误信息：{exc}")
+        except TimeoutError as exc:
+            logger.error(f"redis连接超时，详细错误信息：{exc}")
+        except RedisError as exc:
+            logger.error(f"redis连接错误，详细错误信息：{exc}")
         return redis
 
     @classmethod
     async def close_redis_pool(cls, app):
         """
-        应用关闭时关闭redis连接
+        应用关闭时关闭缓存连接
         :param app: fastapi对象
         :return:
         """
-        await app.state.redis.close()
-        logger.info("关闭redis连接成功")
+        if getattr(app.state, "redis", None) is not None:
+            await app.state.redis.close()
+        logger.info("关闭缓存连接成功")
 
     @classmethod
     async def init_sys_dict(cls, redis):
         """
         应用启动时缓存字典表
-        :param redis: redis对象
+        :param redis: 缓存对象
         :return:
         """
         session = SessionLocal()
-        await DictDataService.init_cache_sys_dict_services(session, redis)
-
-        session.close()
+        try:
+            await DictDataService.init_cache_sys_dict_services(session, redis)
+        finally:
+            session.close()
 
     @classmethod
     async def init_sys_config(cls, redis):
         """
         应用启动时缓存参数配置表
-        :param redis: redis对象
+        :param redis: 缓存对象
         :return:
         """
         session = SessionLocal()
-        await ConfigService.init_cache_sys_config_services(session, redis)
-
-        session.close()
+        try:
+            await ConfigService.init_cache_sys_config_services(session, redis)
+        finally:
+            session.close()

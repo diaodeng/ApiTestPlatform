@@ -5,6 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from config.database import Base, SessionLocal, engine
+from scripts.seed_sqlite_from_init_sql import auto_seed_current_sqlite_if_needed
 from utils.log_util import logger
 
 
@@ -61,6 +62,7 @@ async def init_create_table():
     logger.info("初始化数据库连接...")
     Base.metadata.create_all(bind=engine)
     logger.info("数据库连接成功")
+    auto_seed_current_sqlite_if_needed()
 
 
 get_db = get_db_pro

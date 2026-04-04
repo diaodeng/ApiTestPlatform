@@ -60,7 +60,7 @@ class CacheService:
         :param cache_name: 缓存名称
         :return: 缓存键名列表信息
         """
-        cache_keys = await scan_keys(request.app.state.reids, f"{cache_name}*")
+        cache_keys = await scan_keys(request.app.state.redis, f"{cache_name}*")
         cache_key_list = [key.split(':', 1)[1] for key in cache_keys if key.startswith(f"{cache_name}:")]
 
         return cache_key_list
