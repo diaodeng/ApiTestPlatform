@@ -22,18 +22,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.theme_manager import ThemeManager, color_to_hex
+
 
 class DetailCard(QFrame):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.setObjectName("detailCard")
-        self.setStyleSheet(
-            "#detailCard {"
-            " background: #ffffff;"
-            " border: 1px solid #e2e8f0;"
-            " border-radius: 10px;"
-            "}"
-        )
+        ThemeManager.instance().theme_changed.connect(self._apply_theme)
+        self._apply_theme()
 
         self.title_label = QLabel(title)
         self.title_label.setStyleSheet("font-size: 14px; font-weight: 600;")
@@ -47,6 +44,18 @@ class DetailCard(QFrame):
         layout.setSpacing(10)
         layout.addWidget(self.title_label)
         layout.addLayout(self.content_layout)
+
+    def _apply_theme(self, *_args):
+        tokens = ThemeManager.instance().tokens()
+        self.setStyleSheet(
+            f"""
+            #detailCard {{
+                background: {color_to_hex(tokens.surface)};
+                border: 1px solid {color_to_hex(tokens.border)};
+                border-radius: 10px;
+            }}
+            """
+        )
 
 
 class InfoCard(DetailCard):

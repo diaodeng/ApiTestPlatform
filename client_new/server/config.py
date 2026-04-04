@@ -14,6 +14,7 @@ from model.config import (
     SearchConfigModel,
     SetupConfigModel,
     StartConfigModel,
+    ThemeConfigModel,
     VendorConfigModel,
 )
 from model.pos_network_model import PosInitRespModel
@@ -260,6 +261,16 @@ class FtpConfig:
     @classmethod
     def save_config(cls, config_data: FtpConfigModel):
         do_config.FtpConfig.save_config(config_data)
+
+
+class ThemeConfig:
+    @classmethod
+    def read_config(cls) -> ThemeConfigModel:
+        return do_config.ThemeConfig.read_config()
+
+    @classmethod
+    def save_config(cls, config_data: ThemeConfigModel):
+        do_config.ThemeConfig.save_config(config_data)
 
 
 if __name__ == "__main__":

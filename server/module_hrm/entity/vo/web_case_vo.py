@@ -126,6 +126,7 @@ class WebRecordingOptionsModel(WebJsonModel):
     include_shadow_context: bool = True
     save_html_snapshot: bool = False
     text_assertion_max_length: int = 120
+    close_browser_on_stop: bool | None = None
     prefer_locator_order: list[str] = Field(
         default_factory=lambda: ["role", "label", "placeholder", "text", "test_id", "css", "xpath"]
     )
@@ -171,6 +172,7 @@ class WebRecordingEventModel(CommonDataModel):
 
 class WebRecordingDetailModel(WebRecordingSessionModel):
     events: list[WebRecordingEventModel] = Field(default_factory=list)
+    steps: list[WebStepModel] = Field(default_factory=list)
 
 
 class WebRecordingSessionQueryModel(QueryModel):
@@ -206,6 +208,10 @@ class WebCaseRunRecordModel(CommonDataModel):
     error_message: str | None = None
 
 
+class WebCaseRunDetailModel(WebCaseRunRecordModel):
+    case_name: str | None = None
+
+
 class WebCaseRunRecordQueryModel(QueryModel):
     web_case_run_id: int | str | None = None
     web_case_id: int | None = None
@@ -225,6 +231,7 @@ class WebCaseRunRequestModel(WebJsonModel):
     agent_code: str | None = None
     browser_name: str | None = None
     headless: bool | None = None
+    close_browser_on_finish: bool | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     save_screenshot_on_failure: bool = True
     continue_on_failure: bool = False
@@ -246,9 +253,35 @@ class WebRecordingStopRequestModel(WebJsonModel):
     recording_id: int
     agent_id: int | None = None
     agent_code: str | None = None
+    close_browser_on_stop: bool | None = None
 
 
 class WebRecordingApplyRequestModel(WebJsonModel):
     recording_id: int
     web_case_id: int | None = None
     replace_steps: bool = True
+
+
+class WebRecordingSaveCaseRequestModel(WebJsonModel):
+    recording_id: int
+    case_name: str
+    project_id: int | None = None
+    module_id: int | None = None
+    start_url: str | None = None
+    browser_name: str | None = None
+    headless: bool | None = None
+    notes: str | None = None
+    status: int = 2
+    remark: str | None = None
+
+
+class WebRecordingReplayRequestModel(WebJsonModel):
+    recording_id: int
+    agent_id: int | None = None
+    agent_code: str | None = None
+    browser_name: str | None = None
+    headless: bool | None = None
+    close_browser_on_finish: bool | None = None
+    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    save_screenshot_on_failure: bool = True
+    continue_on_failure: bool = False

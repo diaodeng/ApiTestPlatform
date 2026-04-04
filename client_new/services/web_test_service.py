@@ -3,16 +3,18 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
 try:
-    from playwright.async_api import Frame, FrameLocator, Locator, Page, async_playwright
+    from playwright.async_api import Frame, FrameLocator, Locator, Page
 except Exception:  # pragma: no cover - optional dependency
     Frame = FrameLocator = Locator = Page = Any
-    async_playwright = None
+
+from services.playwright_browser_runtime import start_playwright_browser
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -20,6 +22,7 @@ RECORDER_SCRIPT = """
 (() => {
   if (window.__qtrRecorderInstalled__) return;
   window.__qtrRecorderInstalled__ = true;
+  window.__qtrRecordActive__ = window.__qtrRecordActive__ !== false;
   const cleanText = (value) => (value || "").replace(/\\s+/g, " ").trim().slice(0, 120);
   const inferRole = (el) => {
     const explicit = el.getAttribute("role");
@@ -85,6 +88,9 @@ RECORDER_SCRIPT = """
     locators: buildLocators(el)
   });
   const emit = (payload) => {
+    if (window.__qtrRecordActive__ === false) {
+      return;
+    }
     if (typeof window.__qtrRecordEvent === "function") {
       window.__qtrRecordEvent(payload);
     }
@@ -176,6 +182,34 @@ def _as_dict(data: Any) -> dict[str, Any]:
     return {}
 
 
+async def _close_playwright_objects(
+    page: Any,
+    context: Any,
+    browser: Any,
+    playwright: Any,
+) -> None:
+    if page is not None:
+        try:
+            await page.close()
+        except Exception as exc:
+            logger.debug(f"关闭 page 失败: {exc}")
+    if context is not None:
+        try:
+            await context.close()
+        except Exception as exc:
+            logger.debug(f"关闭 context 失败: {exc}")
+    if browser is not None:
+        try:
+            await browser.close()
+        except Exception as exc:
+            logger.debug(f"关闭 browser 失败: {exc}")
+    if playwright is not None:
+        try:
+            await playwright.stop()
+        except Exception as exc:
+            logger.debug(f"关闭 playwright 失败: {exc}")
+
+
 @dataclass
 class RecorderSession:
     recording_id: int
@@ -191,8 +225,11 @@ class RecorderSession:
     page: Any = None
     event_index: int = 0
     events: list[dict[str, Any]] = field(default_factory=list)
+    active: bool = True
 
     async def emit(self, payload: dict[str, Any], event_type: str = "record_event") -> None:
+        if not self.active:
+            return
         self.event_index += 1
         self.events.append(payload)
         await self.sender(
@@ -204,19 +241,58 @@ class RecorderSession:
             }
         )
 
-    async def close(self) -> None:
-        if self.page is not None:
-            await self.page.close()
+    async def disable_recording(self) -> None:
+        self.active = False
         if self.context is not None:
-            await self.context.close()
-        if self.browser is not None:
-            await self.browser.close()
-        if self.playwright is not None:
-            await self.playwright.stop()
+            try:
+                await self.context.add_init_script(
+                    "window.__qtrRecordActive__ = false;"
+                )
+            except Exception as exc:
+                logger.debug(f"禁用后续页面录制脚本失败: {exc}")
+        if self.page is not None:
+            try:
+                await self.page.evaluate("() => { window.__qtrRecordActive__ = false; }")
+            except Exception as exc:
+                logger.debug(f"禁用当前页面录制脚本失败: {exc}")
+
+    async def close(self) -> None:
+        self.active = False
+        page = self.page
+        context = self.context
+        browser = self.browser
+        playwright = self.playwright
+        self.page = None
+        self.context = None
+        self.browser = None
+        self.playwright = None
+        await _close_playwright_objects(page, context, browser, playwright)
+
+
+@dataclass
+class RetainedRunSession:
+    session_id: str
+    playwright: Any = None
+    browser: Any = None
+    context: Any = None
+    page: Any = None
+
+    async def close(self) -> None:
+        page = self.page
+        context = self.context
+        browser = self.browser
+        playwright = self.playwright
+        self.page = None
+        self.context = None
+        self.browser = None
+        self.playwright = None
+        await _close_playwright_objects(page, context, browser, playwright)
 
 
 class WebTestService:
     _recorders: dict[int, RecorderSession] = {}
+    _retained_sessions: dict[int, RecorderSession] = {}
+    _retained_runs: dict[str, RetainedRunSession] = {}
     _lock = asyncio.Lock()
 
     @classmethod
@@ -238,14 +314,6 @@ class WebTestService:
 
     @classmethod
     async def _start_recording(cls, req_data: dict[str, Any], event_sender: EventSender | None) -> dict[str, Any]:
-        if async_playwright is None:
-            return {
-                "request_type": 3,
-                "command": "start_recording",
-                "success": False,
-                "status": "failed",
-                "message": "playwright 未安装，无法录制",
-            }
         if event_sender is None:
             return {
                 "request_type": 3,
@@ -287,11 +355,11 @@ class WebTestService:
             cls._recorders[recording_id] = session
 
         try:
-            session.playwright = await async_playwright().start()
-            launcher = getattr(session.playwright, session.browser_name, None)
-            if launcher is None:
-                raise RuntimeError(f"unsupported browser: {session.browser_name}")
-            session.browser = await launcher.launch(headless=session.headless)
+            session.playwright, session.browser = await start_playwright_browser(
+                session.browser_name,
+                headless=session.headless,
+                request_options=session.options,
+            )
             session.context = await session.browser.new_context(ignore_https_errors=True)
 
             async def _event_binding(source: Any, payload: Any) -> None:
@@ -351,7 +419,7 @@ class WebTestService:
 
     @classmethod
     async def _handle_navigation(cls, frame: Any, session: RecorderSession) -> None:
-        if session.page is None or frame != session.page.main_frame:
+        if not session.active or session.page is None or frame != session.page.main_frame:
             return
         await session.emit(
             {
@@ -378,6 +446,15 @@ class WebTestService:
                 "status": "failed",
                 "message": "录制会话不存在",
             }
+        close_browser_on_stop = req_data.get("closeBrowserOnStop")
+        if close_browser_on_stop is None:
+            close_browser_on_stop = session.options.get("closeBrowserOnStop")
+        if close_browser_on_stop is None:
+            close_browser_on_stop = session.headless
+        else:
+            close_browser_on_stop = bool(close_browser_on_stop)
+
+        await session.disable_recording()
         await session.sender(
             {
                 "type": "record_finished",
@@ -385,45 +462,70 @@ class WebTestService:
                 "payload": {"eventCount": len(session.events), "lastUrl": session.page.url if session.page else ""},
             }
         )
-        await session.close()
+        if close_browser_on_stop:
+            await session.close()
+        else:
+            async with cls._lock:
+                cls._retained_sessions[recording_id] = session
         return {
             "request_type": 3,
             "command": "stop_recording",
             "success": True,
             "status": "stopped",
             "recording_id": recording_id,
-            "data": {"eventCount": len(session.events)},
+            "data": {
+                "eventCount": len(session.events),
+                "browserRetained": not close_browser_on_stop,
+            },
         }
 
     @classmethod
+    async def shutdown_all_sessions(cls) -> None:
+        async with cls._lock:
+            sessions = (
+                list(cls._recorders.values())
+                + list(cls._retained_sessions.values())
+                + list(cls._retained_runs.values())
+            )
+            cls._recorders.clear()
+            cls._retained_sessions.clear()
+            cls._retained_runs.clear()
+
+        for session in sessions:
+            try:
+                await session.close()
+            except Exception as exc:
+                logger.exception(exc)
+
+    @classmethod
     async def _run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
-        if async_playwright is None:
-            return {
-                "request_type": 3,
-                "command": "run_case",
-                "success": False,
-                "status": "failed",
-                "message": "playwright 未安装，无法执行 Web 用例",
-            }
         case_data = _as_dict(req_data.get("caseData"))
         runtime_options = _as_dict(req_data.get("runtimeOptions"))
         browser_name = str(runtime_options.get("browserName") or case_data.get("browserName") or "chromium")
         headless = bool(runtime_options.get("headless", case_data.get("headless", True)))
+        close_browser_on_finish = runtime_options.get("closeBrowserOnFinish")
+        if close_browser_on_finish is None:
+            close_browser_on_finish = True
+        else:
+            close_browser_on_finish = bool(close_browser_on_finish)
         start_url = str(case_data.get("startUrl") or "")
         steps = case_data.get("steps") or []
         if not isinstance(steps, list):
             steps = []
 
         result_steps: list[dict[str, Any]] = []
-        playwright = await async_playwright().start()
+        playwright = None
         browser = None
         context = None
         page = None
+        response_payload: dict[str, Any]
+        retained_session_id: str | None = None
         try:
-            launcher = getattr(playwright, browser_name, None)
-            if launcher is None:
-                raise RuntimeError(f"unsupported browser: {browser_name}")
-            browser = await launcher.launch(headless=headless)
+            playwright, browser = await start_playwright_browser(
+                browser_name,
+                headless=headless,
+                request_options=runtime_options,
+            )
             context = await browser.new_context(ignore_https_errors=True)
             page = await context.new_page()
             if start_url:
@@ -437,7 +539,7 @@ class WebTestService:
                     overall_success = False
                     if not bool(runtime_options.get("continueOnFailure", False)):
                         break
-            return {
+            response_payload = {
                 "request_type": 3,
                 "command": "run_case",
                 "success": overall_success,
@@ -446,7 +548,7 @@ class WebTestService:
             }
         except Exception as exc:
             logger.exception(exc)
-            return {
+            response_payload = {
                 "request_type": 3,
                 "command": "run_case",
                 "success": False,
@@ -455,13 +557,29 @@ class WebTestService:
                 "result": {"steps": result_steps, "pageUrl": page.url if page else start_url},
             }
         finally:
-            if page is not None:
-                await page.close()
-            if context is not None:
-                await context.close()
-            if browser is not None:
-                await browser.close()
-            await playwright.stop()
+            if close_browser_on_finish or browser is None or playwright is None:
+                await _close_playwright_objects(page, context, browser, playwright)
+            else:
+                retained_session_id = uuid.uuid4().hex
+                retained_session = RetainedRunSession(
+                    session_id=retained_session_id,
+                    playwright=playwright,
+                    browser=browser,
+                    context=context,
+                    page=page,
+                )
+                page = None
+                context = None
+                browser = None
+                playwright = None
+                async with cls._lock:
+                    cls._retained_runs[retained_session_id] = retained_session
+
+        if isinstance(response_payload.get("result"), dict):
+            response_payload["result"]["browserRetained"] = retained_session_id is not None
+            if retained_session_id is not None:
+                response_payload["result"]["retainedSessionId"] = retained_session_id
+        return response_payload
 
     @classmethod
     async def _run_single_step(cls, page: Any, step: dict[str, Any]) -> dict[str, Any]:

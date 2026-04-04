@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.dialogs.dialog_service import DialogService
+from ui.theme_manager import ThemeManager, color_to_hex
 
 
 class PosItemWidget(QWidget):
@@ -22,6 +23,7 @@ class PosItemWidget(QWidget):
         self._init_ui()
         self._bind()
         self.dialog_service = DialogService(self)
+        ThemeManager.instance().theme_changed.connect(self._apply_theme)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -42,7 +44,6 @@ class PosItemWidget(QWidget):
         # 信息
         self.info_label = QLabel("环境: 未获取")
         self.info_label.setStyleSheet("""
-            color: #888;
             font-size: 12px;
             background: transparent;
             border: none;
@@ -140,16 +141,7 @@ class PosItemWidget(QWidget):
             Qt.WA_StyledBackground, True
         )  # 主动绘制背景，子容器不会主动绘制背景
 
-        self.setStyleSheet("""
-        #posItem {
-            background-color: #ffffff;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-        }
-        #posItem:hover {
-            background-color: #f5f7fa;
-        }
-        """)
+        self._apply_theme()
         # for w in self.findChildren(QLabel):
         #     w.setStyleSheet("background: transparent; border: none;")
 
@@ -231,3 +223,26 @@ class PosItemWidget(QWidget):
 
     def update_env_info(self, env_info):
         self.info_label.setText(env_info)
+
+    def _apply_theme(self, *_args):
+        tokens = ThemeManager.instance().tokens()
+        self.info_label.setStyleSheet(
+            f"""
+            color: {color_to_hex(tokens.subtle_text)};
+            font-size: 12px;
+            background: transparent;
+            border: none;
+            """
+        )
+        self.setStyleSheet(
+            f"""
+            #posItem {{
+                background-color: {color_to_hex(tokens.surface)};
+                border: 1px solid {color_to_hex(tokens.border)};
+                border-radius: 6px;
+            }}
+            #posItem:hover {{
+                background-color: {color_to_hex(tokens.surface_hover)};
+            }}
+            """
+        )

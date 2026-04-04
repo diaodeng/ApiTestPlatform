@@ -170,6 +170,18 @@ class SetupConfigModel(BaseModel):
     setup_pos: bool = False
 
 
+class ThemeConfigModel(BaseModel):
+    mode: str = "auto"
+
+
+class AgentBrowserConfigModel(BaseModel):
+    auto_install: bool = True
+    install_dir: str = ""
+    chromium_executable_path: str = ""
+    firefox_executable_path: str = ""
+    webkit_executable_path: str = ""
+
+
 class AgentConfigModel(BaseModel):
     current_server: str = ""
     server_list: dict[str, str] = {}
@@ -178,6 +190,7 @@ class AgentConfigModel(BaseModel):
     retry_times: int = 0
     retry_interval: float = 5
     retry: bool = False
+    browser: AgentBrowserConfigModel = AgentBrowserConfigModel()
 
 
 class FtpConfigModel(BaseModel):

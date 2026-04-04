@@ -10,6 +10,7 @@ import websockets
 from httpx import HTTPError
 from loguru import logger
 from websockets.exceptions import InvalidStatus
+from websockets.protocol import State
 
 from services.web_test_service import WebTestService
 from utils.common import compress_dict_to_str, decompress_str_to_dict
@@ -20,6 +21,34 @@ MAX_MESSAGE_SIZE = 1024
 HEARTBEAT_INTERVAL = 30
 
 request_all_chunk = defaultdict(str)
+
+
+def _is_websocket_open(websocket) -> bool:
+    if websocket is None:
+        return False
+
+    closed = getattr(websocket, "closed", None)
+    if closed is not None:
+        return not closed
+
+    state = getattr(websocket, "state", None)
+    if state is None:
+        return True
+
+    return state == State.OPEN or getattr(state, "name", None) == "OPEN"
+
+
+def _get_websocket_response_headers(websocket) -> dict:
+    response_headers = getattr(websocket, "response_headers", None)
+    if response_headers is not None:
+        return dict(response_headers)
+
+    response = getattr(websocket, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        return dict(headers)
+
+    return {}
 
 
 class RequestByInput:
@@ -109,7 +138,7 @@ class RequestByInput:
                     response = await websocket.recv()
                     res_data.append(response)
                 logger.info(f"响应数据{res_data}")
-                response_headers = json.dumps(dict(websocket.response_headers))
+                response_headers = json.dumps(_get_websocket_response_headers(websocket))
                 return res_data, response_headers
         except ConnectionError as e:
             logger.error(e)
@@ -329,7 +358,7 @@ class WebSocketClient:
         发送的消息体必须为字典类型
         :param message: 消息体
         """
-        if not self.websocket or self.websocket.closed:
+        if not _is_websocket_open(self.websocket):
             raise RuntimeError("WebSocket 未连接，无法发送消息")
         await self.websocket.send(json.dumps(message))
 
@@ -338,7 +367,11 @@ class WebSocketClient:
         self.manual_stop = True
         self.running = False
         try:
-            if self.websocket and not self.websocket.closed:
+            await WebTestService.shutdown_all_sessions()
+        except Exception as e:
+            logger.exception(f"关闭 Web 录制会话失败: {e}")
+        try:
+            if _is_websocket_open(self.websocket):
                 await self.websocket.close(code=1000, reason="关闭连接")
         except websockets.exceptions.ConnectionClosedOK:
             logger.info("连接已断开")

@@ -28,6 +28,7 @@ from module_hrm.entity.vo.web_case_vo import (
     WebCaseDetailModel,
     WebCaseModel,
     WebCasePageQueryModel,
+    WebCaseRunDetailModel,
     WebCaseRunRecordModel,
     WebCaseRunRecordPageQueryModel,
     WebCaseRunRequestModel,
@@ -35,6 +36,8 @@ from module_hrm.entity.vo.web_case_vo import (
     WebRecordingApplyRequestModel,
     WebRecordingDetailModel,
     WebRecordingEventModel,
+    WebRecordingReplayRequestModel,
+    WebRecordingSaveCaseRequestModel,
     WebRecordingSessionPageQueryModel,
     WebRecordingStartRequestModel,
     WebRecordingStopRequestModel,
@@ -170,6 +173,119 @@ class WebCaseService:
             elif isinstance(item, dict):
                 result.append(item)
         return result
+
+    @classmethod
+    def _normalize_recording_step(cls, payload: dict[str, Any], step_index: int) -> WebStepModel | None:
+        if not payload:
+            return None
+        try:
+            step = WebStepModel.model_validate(payload)
+        except Exception:
+            logger.warning(f"录制事件转换步骤失败，step_index={step_index}")
+            return None
+        if not step.action_type:
+            return None
+        if not step.step_name:
+            step.step_name = f"{step.action_type}-{step_index}"
+        step.step_index = step_index
+        if not step.record_origin:
+            step.record_origin = "recording"
+        return step
+
+    @classmethod
+    def _build_steps_from_recording_events(cls, events: list[HrmWebRecordingEvent]) -> list[WebStepModel]:
+        steps: list[WebStepModel] = []
+        for index, event in enumerate(events, start=1):
+            step = cls._normalize_recording_step(cls._loads(event.payload_json, {}), index)
+            if step is not None:
+                steps.append(step)
+        return steps
+
+    @classmethod
+    def _clone_step_for_persist(cls, step: WebStepModel, step_index: int) -> WebStepModel:
+        cloned_step = WebStepModel.model_validate(step.model_dump(mode="python", by_alias=True))
+        cloned_step.step_id = None
+        cloned_step.step_index = step_index
+        cloned_step.record_origin = cloned_step.record_origin or "recording"
+        if cloned_step.target_snapshot is not None:
+            cloned_step.target_snapshot.target_snapshot_id = None
+            for locator in cloned_step.target_snapshot.locators:
+                locator.locator_snapshot_id = None
+        return cloned_step
+
+    @classmethod
+    def _build_run_record_model(
+        cls,
+        run_record: HrmWebCaseRun,
+        *,
+        case_name: str | None = None,
+    ) -> WebCaseRunDetailModel:
+        return WebCaseRunDetailModel(
+            webCaseRunId=run_record.web_case_run_id,
+            webCaseId=run_record.web_case_id,
+            caseName=case_name,
+            agentId=run_record.agent_id,
+            agentCode=run_record.agent_code,
+            triggerType=run_record.trigger_type,
+            status=run_record.status,
+            startedAt=run_record.started_at,
+            endedAt=run_record.ended_at,
+            durationMs=run_record.duration_ms,
+            result=cls._loads(run_record.result_json, {}),
+            errorMessage=run_record.error_message,
+            createTime=run_record.create_time,
+            updateTime=run_record.update_time,
+            createBy=run_record.create_by,
+            updateBy=run_record.update_by,
+            manager=run_record.manager,
+            deptId=run_record.dept_id,
+        )
+
+    @classmethod
+    def _extract_run_error_message(cls, response_result: dict[str, Any]) -> str | None:
+        if not isinstance(response_result, dict):
+            return None
+        for key in ("error", "errorMessage", "message"):
+            value = response_result.get(key)
+            if value:
+                return str(value)
+
+        step_results = response_result.get("steps")
+        if not isinstance(step_results, list):
+            return None
+        for item in step_results:
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") in ("passed", "success", 1, "ok"):
+                continue
+            return str(item.get("error") or item.get("message") or item.get("stepName") or "步骤执行失败")
+        return None
+
+    @classmethod
+    def _extract_webui_run_response(cls, response) -> tuple[bool, dict[str, Any], str | None]:
+        response_payload = response.response
+        response_result: dict[str, Any] = {}
+        success = True
+        message = response.message
+
+        if isinstance(response_payload, AgentResponseWebUI):
+            success = bool(response_payload.success)
+            if isinstance(response_payload.result, dict):
+                response_result = response_payload.result
+            elif isinstance(response_payload.data, dict):
+                response_result = response_payload.data
+            message = response_payload.message or message
+        elif isinstance(response_payload, dict):
+            success = bool(response_payload.get("success", True))
+            if isinstance(response_payload.get("result"), dict):
+                response_result = response_payload["result"]
+            elif isinstance(response_payload.get("data"), dict):
+                response_result = response_payload["data"]
+            message = response_payload.get("message") or message
+
+        if not success and not message:
+            message = cls._extract_run_error_message(response_result) or "执行失败"
+        return success, response_result, message
 
     @classmethod
     def _build_fingerprint(cls, target_snapshot: WebTargetSnapshotModel) -> str:
@@ -404,6 +520,7 @@ class WebCaseService:
         if session_obj is None:
             return None
         events = WebCaseDao.list_recording_events(query_db, recording_id)
+        steps = cls._build_steps_from_recording_events(events)
         return WebRecordingDetailModel(
             recordingId=session_obj.recording_id,
             webCaseId=session_obj.web_case_id,
@@ -436,6 +553,7 @@ class WebCaseService:
                 )
                 for item in events
             ],
+            steps=steps,
             createTime=session_obj.create_time,
             updateTime=session_obj.update_time,
             createBy=session_obj.create_by,
@@ -533,26 +651,32 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
+        stop_message = {
+            "requestType": TstepTypeEnum.webui.value,
+            "command": "stop_recording",
+            "recordingId": session_obj.recording_id,
+        }
+        updated_options: dict[str, Any] | None = None
+        if request_model.close_browser_on_stop is not None:
+            updated_options = cls._loads(session_obj.options_json, {})
+            updated_options["closeBrowserOnStop"] = request_model.close_browser_on_stop
+            stop_message["closeBrowserOnStop"] = request_model.close_browser_on_stop
+
         result = await send_message(
             agent.agent_code,
-            {
-                "requestType": TstepTypeEnum.webui.value,
-                "command": "stop_recording",
-                "recordingId": session_obj.recording_id,
-            },
+            stop_message,
         )
         if result.status_code != AgentResponseEnum.SUCCESS.value:
             return CrudResponseModel(is_success=False, message=result.message)
 
-        WebCaseDao.update_recording_session(
-            query_db,
-            session_obj.recording_id,
-            {
-                "status": 5,
-                "ended_at": datetime.now(),
-                "last_event_at": datetime.now(),
-            },
-        )
+        update_data = {
+            "status": 5,
+            "ended_at": datetime.now(),
+            "last_event_at": datetime.now(),
+        }
+        if updated_options is not None:
+            update_data["options_json"] = cls._dumps(updated_options)
+        WebCaseDao.update_recording_session(query_db, session_obj.recording_id, update_data)
         query_db.commit()
         return CrudResponseModel(is_success=True, message="录制停止指令已发送")
 
@@ -579,25 +703,21 @@ class WebCaseService:
             return CrudResponseModel(is_success=False, message="目标Web用例不存在")
 
         events = WebCaseDao.list_recording_events(query_db, request_model.recording_id)
-        steps: list[WebStepModel] = []
-        for index, event in enumerate(events, start=1):
-            payload = cls._loads(event.payload_json, {})
-            if not payload:
-                continue
-            try:
-                step = WebStepModel.model_validate(payload)
-            except Exception:
-                logger.warning(f"录制事件转换步骤失败，event_id={event.event_id}")
-                continue
-            if not step.action_type:
-                continue
-            if not step.step_name:
-                step.step_name = f"{step.action_type}-{index}"
-            step.step_index = index
-            steps.append(step)
+        recording_steps = cls._build_steps_from_recording_events(events)
+        if not recording_steps:
+            return CrudResponseModel(is_success=False, message="录制会话中没有可用步骤")
 
         detail = cls._build_detail_model(query_db, web_case)
-        detail.steps = steps
+        merged_steps: list[WebStepModel] = []
+        if not request_model.replace_steps:
+            for index, step in enumerate(detail.steps, start=1):
+                step.step_index = index
+                merged_steps.append(step)
+
+        for step in recording_steps:
+            merged_steps.append(cls._clone_step_for_persist(step, len(merged_steps) + 1))
+
+        detail.steps = merged_steps
         detail.update_by = user_name
         detail.create_by = detail.create_by or user_name
         detail.manager = manager or detail.manager
@@ -617,12 +737,148 @@ class WebCaseService:
         return result
 
     @classmethod
+    def save_recording_as_case_services(
+        cls,
+        query_db: Session,
+        request_model: WebRecordingSaveCaseRequestModel,
+        *,
+        manager: int | None,
+        dept_id: int | None,
+        user_name: str | None,
+    ) -> CrudResponseModel:
+        session_obj = WebCaseDao.get_recording_session(query_db, request_model.recording_id)
+        if session_obj is None:
+            return CrudResponseModel(is_success=False, message="录制会话不存在")
+
+        events = WebCaseDao.list_recording_events(query_db, request_model.recording_id)
+        recording_steps = cls._build_steps_from_recording_events(events)
+        if not recording_steps:
+            return CrudResponseModel(is_success=False, message="录制会话中没有可用步骤")
+
+        source_case = None
+        if session_obj.web_case_id:
+            source_case = WebCaseDao.get_web_case_by_id(query_db, session_obj.web_case_id)
+
+        add_case = AddWebCaseModel(
+            caseName=request_model.case_name,
+            projectId=request_model.project_id if request_model.project_id is not None else getattr(source_case, "project_id", None),
+            moduleId=request_model.module_id if request_model.module_id is not None else getattr(source_case, "module_id", None),
+            startUrl=request_model.start_url
+            if request_model.start_url is not None
+            else (session_obj.start_url or getattr(source_case, "start_url", None)),
+            browserName=request_model.browser_name or session_obj.browser_name or getattr(source_case, "browser_name", "chromium"),
+            headless=request_model.headless
+            if request_model.headless is not None
+            else bool(session_obj.headless if session_obj.headless is not None else getattr(source_case, "headless", False)),
+            runtimeSettings=cls._loads(getattr(source_case, "runtime_settings_json", None), {}),
+            notes=request_model.notes
+            if request_model.notes is not None
+            else (getattr(source_case, "notes", None) or f"由录制[{session_obj.session_name}]生成"),
+            status=request_model.status,
+            remark=request_model.remark,
+            steps=[cls._clone_step_for_persist(step, index) for index, step in enumerate(recording_steps, start=1)],
+            manager=manager,
+            deptId=dept_id,
+            createBy=user_name,
+            updateBy=user_name,
+        )
+        result = cls.add_web_case_services(query_db, add_case)
+        if result.is_success:
+            created_case_id = None
+            if isinstance(result.result, dict):
+                created_case_id = result.result.get("webCaseId") or result.result.get("web_case_id")
+            WebCaseDao.update_recording_session(
+                query_db,
+                session_obj.recording_id,
+                {
+                    "web_case_id": created_case_id,
+                    "update_by": user_name or session_obj.update_by,
+                    "update_time": datetime.now(),
+                },
+            )
+            query_db.commit()
+        return result
+
+    @classmethod
+    async def replay_recording_services(
+        cls,
+        query_db: Session,
+        request_model: WebRecordingReplayRequestModel,
+    ) -> CrudResponseModel:
+        session_obj = WebCaseDao.get_recording_session(query_db, request_model.recording_id)
+        if session_obj is None:
+            return CrudResponseModel(is_success=False, message="录制会话不存在")
+
+        recording_detail = cls.recording_detail_services(query_db, request_model.recording_id)
+        if recording_detail is None or not recording_detail.steps:
+            return CrudResponseModel(is_success=False, message="录制会话中没有可回放步骤")
+
+        agent = cls._resolve_agent(query_db, request_model.agent_id or session_obj.agent_id, request_model.agent_code or session_obj.agent_code)
+        if agent is None or not agent.agent_code:
+            return CrudResponseModel(is_success=False, message="未找到可用的Agent")
+
+        runtime_options = request_model.model_dump(
+            mode="json",
+            by_alias=True,
+            exclude={"recording_id", "agent_id", "agent_code"},
+        )
+        start_url = (
+            request_model.runtime_overrides.get("startUrl")
+            or request_model.runtime_overrides.get("start_url")
+            or recording_detail.start_url
+        )
+        case_data = {
+            "webCaseId": recording_detail.web_case_id or 0,
+            "caseName": recording_detail.session_name or f"录制回放-{recording_detail.recording_id}",
+            "startUrl": start_url,
+            "browserName": request_model.browser_name or recording_detail.browser_name,
+            "headless": request_model.headless if request_model.headless is not None else recording_detail.headless,
+            "steps": [step.model_dump(mode="json", by_alias=True) for step in recording_detail.steps],
+        }
+
+        response = await send_message(
+            agent.agent_code,
+            {
+                "requestType": TstepTypeEnum.webui.value,
+                "command": "run_case",
+                "caseData": case_data,
+                "runtimeOptions": runtime_options,
+            },
+        )
+        if response.status_code != AgentResponseEnum.SUCCESS.value:
+            return CrudResponseModel(is_success=False, message=response.message)
+
+        success, response_result, failure_message = cls._extract_webui_run_response(response)
+        return CrudResponseModel(
+            is_success=success,
+            message="回放完成" if success else (failure_message or "回放失败"),
+            result={
+                "recordingId": recording_detail.recording_id,
+                "sessionName": recording_detail.session_name,
+                "status": "passed" if success else "failed",
+                "result": response_result,
+                "errorMessage": None if success else failure_message,
+            },
+        )
+
+    @classmethod
     def list_run_record_services(
         cls,
         query_db: Session,
         query_object: WebCaseRunRecordPageQueryModel,
     ) -> PageResponseModel:
         return WebCaseDao.list_run_records(query_db, query_object)
+
+    @classmethod
+    def run_record_detail_services(cls, query_db: Session, web_case_run_id: int) -> WebCaseRunDetailModel | None:
+        run_record = WebCaseDao.get_run_record(query_db, web_case_run_id)
+        if run_record is None:
+            return None
+        web_case = WebCaseDao.get_web_case_by_id(query_db, run_record.web_case_id)
+        return cls._build_run_record_model(
+            run_record,
+            case_name=web_case.case_name if web_case else None,
+        )
 
     @classmethod
     async def run_web_case_services(
@@ -658,16 +914,19 @@ class WebCaseService:
         WebCaseDao.create_run_record(query_db, run_record)
         query_db.commit()
 
+        case_data = detail.model_dump(mode="json", by_alias=True)
+        runtime_options = request_model.model_dump(
+            mode="json",
+            by_alias=True,
+            exclude={"web_case_id", "agent_id", "agent_code"},
+        )
         response = await send_message(
             agent.agent_code,
             {
                 "requestType": TstepTypeEnum.webui.value,
                 "command": "run_case",
-                "caseData": detail.model_dump(by_alias=True),
-                "runtimeOptions": request_model.model_dump(
-                    by_alias=True,
-                    exclude={"web_case_id", "agent_id", "agent_code"},
-                ),
+                "caseData": case_data,
+                "runtimeOptions": runtime_options,
             },
         )
         ended_at = datetime.now()
@@ -689,22 +948,7 @@ class WebCaseService:
             query_db.commit()
             return CrudResponseModel(is_success=False, message=response.message)
 
-        response_payload = response.response
-        response_result: dict[str, Any] = {}
-        success = True
-        if isinstance(response_payload, AgentResponseWebUI):
-            success = bool(response_payload.success)
-            if isinstance(response_payload.result, dict):
-                response_result = response_payload.result
-            elif isinstance(response_payload.data, dict):
-                response_result = response_payload.data
-        elif isinstance(response_payload, dict):
-            success = bool(response_payload.get("success", True))
-            if isinstance(response_payload.get("result"), dict):
-                response_result = response_payload["result"]
-            elif isinstance(response_payload.get("data"), dict):
-                response_result = response_payload["data"]
-
+        success, response_result, failure_message = cls._extract_webui_run_response(response)
         run_status = CaseRunStatus.passed.value if success else CaseRunStatus.failed.value
         WebCaseDao.update_run_record(
             query_db,
@@ -714,7 +958,7 @@ class WebCaseService:
                 "ended_at": ended_at,
                 "duration_ms": duration_ms,
                 "result_json": cls._dumps(response_result),
-                "error_message": None if success else response.message,
+                "error_message": None if success else failure_message,
                 "update_by": user_name or run_record.update_by,
                 "update_time": datetime.now(),
             },
@@ -725,7 +969,7 @@ class WebCaseService:
 
         return CrudResponseModel(
             is_success=success,
-            message="执行完成" if success else "执行失败",
+            message="执行完成" if success else (failure_message or "执行失败"),
             result=WebCaseRunRecordModel(
                 webCaseRunId=run_record.web_case_run_id,
                 webCaseId=run_record.web_case_id,
@@ -737,6 +981,7 @@ class WebCaseService:
                 endedAt=ended_at,
                 durationMs=duration_ms,
                 result=response_result,
+                errorMessage=None if success else failure_message,
             ).model_dump(by_alias=True),
         )
 

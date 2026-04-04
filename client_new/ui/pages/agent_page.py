@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 )
 
 from controller.agent_controller import AgentController
+from model.config import AgentBrowserConfigModel
+from ui.dialogs.agent_browser_setting_dialog import AgentBrowserSettingDialog
 from ui.dialogs.agent_server_manage_dialog import AgentServerManageDialog
 
 
@@ -78,6 +80,7 @@ class AgentPage(QWidget):
         self.proxy_state = "stopped"
         self._quick_save_guard = False
         self._server_list: dict[str, str] = {}
+        self._browser_config = AgentBrowserConfigModel()
 
         self._init_ui()
         self.controller = AgentController(self)
@@ -95,6 +98,7 @@ class AgentPage(QWidget):
         self.stop_btn = QPushButton("停止")
         self.clear_all_btn = QPushButton("清空日志")
         self.add_server_btn = QPushButton("服务器管理")
+        self.browser_settings_btn = QPushButton("浏览器设置")
         self.stop_btn.setEnabled(False)
 
         action_layout = QHBoxLayout()
@@ -104,6 +108,7 @@ class AgentPage(QWidget):
         action_layout.addSpacing(12)
         action_layout.addWidget(self.clear_all_btn)
         action_layout.addWidget(self.add_server_btn)
+        action_layout.addWidget(self.browser_settings_btn)
         action_layout.addWidget(self.start_btn)
         action_layout.addWidget(self.stop_btn)
         action_layout.addStretch()
@@ -204,6 +209,7 @@ class AgentPage(QWidget):
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
         self.clear_all_btn.clicked.connect(self.clear_logs)
         self.add_server_btn.clicked.connect(self._open_server_manage_dialog)
+        self.browser_settings_btn.clicked.connect(self._open_browser_setting_dialog)
 
         self.server_combo.currentTextChanged.connect(self._on_server_text_changed)
         self.server_combo.currentIndexChanged.connect(self._save_quick_settings)
@@ -233,6 +239,18 @@ class AgentPage(QWidget):
         self._update_server_meta()
         self._save_quick_settings()
 
+    def _open_browser_setting_dialog(self):
+        dialog = AgentBrowserSettingDialog(self._browser_config, self)
+        if not dialog.exec():
+            return
+
+        data = dialog.get_data()
+        if data is None:
+            return
+
+        self._browser_config = AgentBrowserConfigModel.model_validate(data)
+        self._save_quick_settings()
+
     def _on_server_text_changed(self, _text: str):
         self._update_server_meta()
 
@@ -250,11 +268,19 @@ class AgentPage(QWidget):
             "retry_times": int(self.retry_times_input.value()),
             "retry_interval": float(self.retry_interval_input.value()),
             "retry": self.retry_checkbox.isChecked(),
+            "browser": self._browser_config.model_dump(),
         }
 
     def apply_config(self, config, connection_state: str, local_mac: str):
         self.proxy_state = connection_state
         self._server_list = dict(config.server_list or {})
+        browser_config = getattr(config, "browser", None)
+        if isinstance(browser_config, AgentBrowserConfigModel):
+            self._browser_config = browser_config.model_copy(deep=True)
+        elif isinstance(browser_config, dict):
+            self._browser_config = AgentBrowserConfigModel.model_validate(browser_config)
+        else:
+            self._browser_config = AgentBrowserConfigModel()
 
         self._quick_save_guard = True
         self._apply_server_options(config.current_server)
