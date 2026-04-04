@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import fnmatch
 import os
 from threading import Event, Thread
@@ -28,35 +28,162 @@ class PosHandler:
         self.stop_event = Event()
         self.setup_ui()
 
-    def open_work_dir_list_dialog(self, e):
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("已添加工作目录"),
-            content=ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Row(
+    def _ensure_directory_picker(self):
+        if getattr(self, "directory_picker", None) is None:
+            self.directory_picker = ft.FilePicker(on_result=self._handle_directory_selected)
+            self.page.overlay.append(self.directory_picker)
+            self.page.update()
+
+    def _handle_directory_selected(self, e: ft.FilePickerResultEvent):
+        if not e.path:
+            return
+        work_dirs = SearchConfig.read_work_dir()
+        if e.path in work_dirs:
+            UiUtil.show_snackbar_error(self.page, "工作目录已存在")
+            return
+        SearchConfig.add_work_dir(e.path)
+        self._render_work_dir_list()
+        self.validate_inputs(None)
+        UiUtil.show_snackbar_success(self.page, "工作目录添加成功")
+
+    def _load_search_settings_to_fields(self):
+        search_config = SearchConfig.read()
+        self.file_pattern.value = search_config.file_pattern
+        self.dir_pattern.value = search_config.dir_pattern
+        self.scan_deep.value = search_config.max_depth
+        for control in (self.file_pattern, self.dir_pattern, self.scan_deep):
+            try:
+                control.update()
+            except Exception:
+                pass
+
+    def _render_work_dir_list(self):
+        self.work_dir_list_view.controls.clear()
+        work_dirs = SearchConfig.read_work_dir()
+        if not work_dirs:
+            self.work_dir_list_view.controls.append(
+                ft.Container(
+                    padding=12,
+                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                    border_radius=12,
+                    content=ft.Text("暂无工作目录，请先添加。", color=ft.Colors.BLUE_GREY_500),
+                )
+            )
+        else:
+            for item in work_dirs:
+                self.work_dir_list_view.controls.append(
+                    ft.Container(
+                        padding=10,
+                        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        border_radius=12,
+                        content=ft.Row(
                             [
-                                ft.Text(item, expand=True),
-                                ft.ElevatedButton(
-                                    "删除", on_click=lambda e, pos_path=item: self.remove_work_dir(e, pos_path)
-                                ),
+                                ft.Text(item, expand=True, selectable=True),
+                                ft.TextButton("删除", on_click=lambda e, pos_path=item: self.remove_work_dir(e, pos_path)),
                             ]
-                        )
-                        for item in SearchConfig.read_work_dir()
+                        ),
+                    )
+                )
+        if self.search_settings_dialog is not None:
+            try:
+                self.work_dir_list_view.update()
+            except Exception:
+                pass
+
+    def _ensure_search_settings_dialog(self):
+        if self.search_settings_dialog is not None:
+            return
+        self.search_settings_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("索引设置"),
+            content=ft.Container(
+                width=960,
+                height=460,
+                content=ft.Row(
+                    [
+                        ft.Container(
+                            expand=2,
+                            padding=12,
+                            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                            border_radius=12,
+                            content=ft.Column(
+                                [
+                                    ft.Row(
+                                        [
+                                            ft.Text("工作目录", weight=ft.FontWeight.W_600),
+                                            ft.ElevatedButton("添加工作目录", on_click=self.open_directory_dialog),
+                                        ],
+                                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    ),
+                                    ft.Text("索引时会递归搜索这些目录。", size=12, color=ft.Colors.BLUE_GREY_500),
+                                    self.work_dir_list_view,
+                                ],
+                                spacing=10,
+                                expand=True,
+                            ),
+                        ),
+                        ft.Container(
+                            width=320,
+                            padding=12,
+                            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                            border_radius=12,
+                            content=ft.Column(
+                                [
+                                    ft.Text("扫描规则", weight=ft.FontWeight.W_600),
+                                    self.file_pattern,
+                                    self.dir_pattern,
+                                    self.scan_deep,
+                                    ft.Row(
+                                        [
+                                            ft.OutlinedButton("重新载入", on_click=lambda e: self._load_search_settings_to_fields()),
+                                            ft.ElevatedButton("保存", on_click=self.save_search_settings),
+                                        ],
+                                        alignment=ft.MainAxisAlignment.END,
+                                    ),
+                                ],
+                                spacing=12,
+                            ),
+                        ),
                     ],
-                    expand=True,
+                    spacing=16,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
-                expand=True,
             ),
-            actions=[
-                ft.TextButton("取消", on_click=lambda e: e.page.close(dialog)),
-                # ft.TextButton("添加", on_click=lambda e: dialog.dismiss()),
-            ],
+            actions=[ft.TextButton("关闭", on_click=lambda e: self.page.close(self.search_settings_dialog))],
+            actions_alignment=ft.MainAxisAlignment.END,
         )
-        dialog.open = True
-        self.page.open(dialog)
-        self.page.update()
+
+    def open_search_settings_dialog(self, _e):
+        self._ensure_search_settings_dialog()
+        self._load_search_settings_to_fields()
+        self._render_work_dir_list()
+        self.page.open(self.search_settings_dialog)
+
+    def save_search_settings(self, _e: ft.ControlEvent):
+        file_pattern = (self.file_pattern.value or "").strip()
+        if not file_pattern:
+            UiUtil.show_snackbar_error(self.page, "文件名模式不能为空")
+            return
+        dir_pattern = (self.dir_pattern.value or "*").strip() or "*"
+        depth_value = (self.scan_deep.value or "1").strip()
+        try:
+            depth = max(int(depth_value), 1)
+        except ValueError:
+            UiUtil.show_snackbar_error(self.page, "递归深度必须是正整数")
+            return
+
+        SearchConfig.write(
+            {
+                "dir": SearchConfig.read_work_dir(),
+                "file_pattern": file_pattern,
+                "dir_pattern": dir_pattern,
+                "max_depth": str(depth),
+            }
+        )
+        self.scan_deep.value = str(depth)
+        self.validate_inputs(None)
+        self.page.close(self.search_settings_dialog)
+        UiUtil.show_snackbar_success(self.page, "索引设置保存成功")
 
     def open_process_list_dialog(self, e):
         self.all_p = get_all_process()
@@ -143,31 +270,32 @@ class PosHandler:
 
         UiUtil.show_snackbar_success(self.page, "进程已停止")
 
-    def remove_work_dir(self, e: ft.ControlEvent, item):
+    def remove_work_dir(self, e: ft.ControlEvent | None, item):
+        work_dirs = SearchConfig.read_work_dir()
+        if item not in work_dirs:
+            return
         SearchConfig.remove_work_dir(item)
-        e.control.parent.parent.controls.remove(e.control.parent)
-        # self.open_work_dir_list_dialog(None)
-        self.page.update()
+        self._render_work_dir_list()
+        self.validate_inputs(None)
+        if e is not None:
+            UiUtil.show_snackbar_success(self.page, "工作目录已删除")
 
     def init_ui(self):
 
         content = self.ft.Container(
             content=self.ft.Column(
-                [
+                controls = [
                     self.ft.Text("POS快捷功能>", size=20),
                     self.ft.Divider(),
-                    self.ft.Row(
-                        [
-                            # 搜索参数输入区
+                    ft.Row(
+                        spacing=10,
+                        run_spacing=10,
+                        wrap=True,
+                        controls=[
                             ft.ElevatedButton(
-                                "添加工作目录",
-                                tooltip="添加工作目录，索引时会递归搜索",
-                                on_click=self.open_directory_dialog,
-                            ),
-                            ft.Button(
-                                "查看工作目录",
-                                tooltip="查看已经添加的工作目录",
-                                on_click=lambda e: self.open_work_dir_list_dialog(e),
+                                "索引设置",
+                                tooltip="配置工作目录和扫描规则",
+                                on_click=self.open_search_settings_dialog,
                             ),
                             self.search_btn,
                             self.stop_btn,
@@ -186,92 +314,84 @@ class PosHandler:
                                 tooltip="调用接口踢出POS账号或重置密码",
                                 on_click=lambda e: self.page.open(PosAccountManagerUi()),
                             ),
-                        ]
-                    ),
-                    ft.Row(
-                        [
-                            self.file_pattern,
-                            self.dir_pattern,
-                            self.scan_deep,
-                        ]
+                        ],
                     ),
                     self.ft.Row(
                         [
-                            # 控制按钮
                             ft.Text("启动POS前："),
                             self.before_start_back_view,
                             self.before_start_cover_payment_driver_view,
                             self.before_start_replace_mitm_cert_view,
                             self.before_start_change_pos_view,
-                            # self.before_start_change_env_view,
                             self.before_start_logout_view,
                             self.before_start_remove_cache_view,
-                            ft.TextField(label="查找结果", on_change=lambda e: self.search_result(e)),
+                            self.search_keyword_field,
                         ],
-                        # expand=True,
                         alignment=ft.MainAxisAlignment.START,
                     ),
-                    # 进度显示
-                    # self.progress_bar,
                     self.status_text,
                     self.ft.Divider(),
-                    # 结果展示
                     self.results_view,
                 ],
                 alignment=self.ft.MainAxisAlignment.START,
+                expand=True,
             ),
             alignment=self.ft.alignment.center_left,
+            expand=True,
         )
         return content
 
     def setup_ui(self):
         search_config = SearchConfig.read()
-        self.page.vertical_alignment = ft.MainAxisAlignment.CENTER
-        self.page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+        self.page.vertical_alignment = ft.MainAxisAlignment.START
+        self.page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
         self.page.padding = 30
+
+        self.directory_picker = None
+        self.search_settings_dialog = None
+        self.search_results_cache = []
+        self.work_dir_list_view = ft.ListView(expand=True, spacing=10, auto_scroll=False)
+        self.search_keyword_field = ft.TextField(label="查找结果", width=260, on_change=self.search_result)
 
         self.file_pattern = ft.TextField(
             label="文件名模式",
             tooltip="匹配指定规则的文件名",
             hint_text="例如: *.txt 或 report*.docx",
-            width=self.set_width,
+            width=280,
             value=search_config.file_pattern,
-            on_change=self.validate_inputs,
         )
 
         self.dir_pattern = ft.TextField(
             label="目录名模式",
             tooltip="只索引指定规则的目录名",
             hint_text="例如: * 或 report*.docx",
-            width=self.set_width,
+            width=280,
             value=search_config.dir_pattern,
-            on_change=self.validate_inputs,
         )
 
         self.scan_deep = ft.TextField(
             label="递归深度",
             hint_text="1",
             value=search_config.max_depth,
-            width=100,
-            # on_change=self.validate_inputs
+            width=120,
         )
 
-        # 控制按钮
         self.search_btn = ft.ElevatedButton(
-            "开始索引", tooltip="按规则索引工作目录中的文件", on_click=self.start_search, disabled=not search_config.dir
+            "开始索引",
+            tooltip="按规则索引工作目录中的文件",
+            on_click=self.start_search,
+            disabled=not SearchConfig.read_work_dir() or not (search_config.file_pattern or "").strip(),
         )
         self.stop_btn = ft.ElevatedButton(
             "停止",
             tooltip="停止索引",
             on_click=self.stop_search,
             disabled=True,
-            # color="red"
         )
 
         self.kill_pos_btn = ft.ElevatedButton(
             "结束POS",
             on_click=lambda e: self.kill_pos_process(),
-            # disabled=True,
             color="red",
         )
 
@@ -279,14 +399,12 @@ class PosHandler:
             "重启POS",
             tooltip=appState.client_info.current_pos,
             on_click=self.restart_pos,
-            # disabled=True,
             color="red",
         )
 
         self.kill_offline_btn = ft.ElevatedButton(
             "结束离线",
             on_click=lambda e: self.kill_offline_process(),
-            # disabled=True,
             color="red",
         )
 
@@ -339,11 +457,8 @@ class PosHandler:
             on_change=self.update_start_config,
         )
 
-        # 进度显示
         self.progress_bar = ft.ProgressBar(width=self.set_width, value=0, visible=False)
         self.status_text = ft.Text()
-
-        # 结果展示
         self.results_view = ft.ListView(expand=True, spacing=10, auto_scroll=False)
 
         self.before_start_change_env_dialog_view = ft.AlertDialog(
@@ -372,13 +487,13 @@ class PosHandler:
             actions_alignment=ft.MainAxisAlignment.END,
             on_dismiss=lambda e: print("Modal dialog dismissed!"),
         )
-        for i in SearchConfig.read_search_result():
-            self.results_view.controls.append(self.row_item(i))
+        self._set_search_results(SearchConfig.read_search_result())
+        self.validate_inputs(None)
 
     def search_result(self, e):
         keyword = (e.control.value or "").strip()
         self.results_view.controls.clear()
-        for i in SearchConfig.read_search_result():
+        for i in self.search_results_cache:
             if (not keyword) or (keyword.lower() in i.lower()):
                 self.results_view.controls.append(self.row_item(i))
         try:
@@ -423,9 +538,22 @@ class PosHandler:
             logger.error(f"离线（java.exe）结束进程失败: {e}")
             UiUtil.show_snackbar_error(self.page, f"离线（java.exe）结束进程失败: {e}")
 
-    def validate_inputs(self, e):
-        self.search_btn.disabled = not self.file_pattern.value
-        self.page.update()
+    def validate_inputs(self, _e):
+        search_config = SearchConfig.read()
+        self.search_btn.disabled = not SearchConfig.read_work_dir() or not (search_config.file_pattern or "").strip()
+        try:
+            self.search_btn.update()
+        except Exception:
+            pass
+
+    def _set_search_results(self, results: list[str], keyword: str = ""):
+        self.search_results_cache = list(results)
+        filtered_results = self.search_results_cache
+        if keyword:
+            keyword = keyword.lower()
+            filtered_results = [item for item in self.search_results_cache if keyword in item.lower()]
+        self.results_view.controls.clear()
+        self.results_view.controls.extend(self.row_item(item) for item in filtered_results)
 
     def update_start_config(self, e):
         logger.info("更新启动配置")
@@ -438,39 +566,29 @@ class PosHandler:
         self.start_config.cover_payment_driver = self.before_start_cover_payment_driver_view.value
         StartConfig.write(self.start_config)
 
-    def open_directory_dialog(self, e):
-        def on_dialog_result(e: ft.FilePickerResultEvent):
-            # for i in e.files:
-            #     logger.info(f"选择文件: {i.name} path :{i.path}")
-            # logger.info(f"选择目录: {e.path}")
-            if e.path:
-                SearchConfig.add_work_dir(e.path)
-                self.validate_inputs(None)
-
-        directory_dialog = ft.FilePicker(on_result=on_dialog_result)
-
-        self.page.overlay.append(directory_dialog)
-        self.page.update()
-        directory_dialog.get_directory_path()
-        # directory_dialog.pick_files(allow_multiple=True)
+    def open_directory_dialog(self, _e):
+        self._ensure_directory_picker()
+        self.directory_picker.get_directory_path()
 
     def start_search(self, e):
         try:
+            search_config = SearchConfig.read()
             work_dirs = SearchConfig.read_work_dir()
             if not work_dirs:
-                logger.info("请先添加工作目录")
+                UiUtil.show_snackbar_error(self.page, "请先在索引设置中添加工作目录")
+                return
+            if not (search_config.file_pattern or "").strip():
+                UiUtil.show_snackbar_error(self.page, "请先在索引设置中配置文件名模式")
                 return
 
-            # 重置状态
             self.stop_event.clear()
-            self.results_view.controls.clear()
+            self._set_search_results([])
             self.search_btn.disabled = True
             self.stop_btn.disabled = False
             self.progress_bar.visible = True
             self.progress_bar.value = 0
             self.page.update()
 
-            # 启动搜索线程
             Thread(target=self.search_files, daemon=True).start()
         except Exception as e:
             logger.exception(e)
@@ -903,11 +1021,10 @@ class PosHandler:
         }
         SearchConfig.write(data)
         result = []
-        found_files = 0
-        total_files = 0
         depth = 0
+        scan_state = {"count": 0, "last_report_count": 0}
 
-        def scan_dir(path, depth, found_files, total_files):
+        def scan_dir(path, depth):
             if max_depth is not None and depth >= max_depth:
                 return
             try:
@@ -917,57 +1034,62 @@ class PosHandler:
                         logger.debug(f"当前目录: {path}, 深度: {depth}, 文件名: {entry.name}")
                         if self.stop_event.is_set():
                             break
-                        total_files += 1
+                        scan_state["count"] += 1
 
                         if entry.is_file():
                             if file_pattern is None or fnmatch.fnmatch(
                                 entry.name.lower(), file_pattern.lower()
                             ):  # 可换成正则匹配
                                 result.append(entry.path)
-                                # 创建结果项
-                                found_files += 1
-
-                                self.results_view.controls.append(self.row_item(entry.path))
 
                         elif entry.is_dir() and (
                             dir_pattern is None or fnmatch.fnmatch(entry.name.lower(), dir_pattern.lower())
                         ):
-                            scan_dir(entry.path, depth, found_files, total_files)
+                            scan_dir(entry.path, depth)
 
-                        # progress = found_files / total_files
-                        self.update_ui(f"已扫描 {entry.path} 个", True, 0.5)
+                        if scan_state["count"] - scan_state["last_report_count"] >= 100:
+                            scan_state["last_report_count"] = scan_state["count"]
+                            self.update_ui(
+                                f"已扫描 {scan_state['count']} 项，已找到 {len(result)} 个文件",
+                                True,
+                                0.5,
+                            )
             except PermissionError:
                 self.update_ui(f"权限错误: {path}", True)
 
         for d in directories:
-            scan_dir(d, depth=depth, found_files=found_files, total_files=total_files)
+            scan_dir(d, depth=depth)
 
         return result
 
     def search_files(self):
+        search_config = SearchConfig.read()
         directory = SearchConfig.read_work_dir()
-        pattern = self.file_pattern.value
+        pattern = search_config.file_pattern
+        dir_pattern = search_config.dir_pattern
         max_depth = 1
         try:
-            max_depth = int(self.scan_deep.value)
+            max_depth = int(search_config.max_depth)
             if max_depth < 1:
                 max_depth = 1
         except Exception:
             pass
 
-        result = self.__find_files(
-            directory, file_pattern=pattern, dir_pattern=self.dir_pattern.value, max_depth=max_depth
-        )
+        result = self.__find_files(directory, file_pattern=pattern, dir_pattern=dir_pattern, max_depth=max_depth)
         SearchConfig.save_search_result(result)
         found_files = len(result)
+        self._set_search_results(result, (self.search_keyword_field.value or "").strip())
 
-        # 搜索完成
         msg = "搜索已停止" if self.stop_event.is_set() else f"完成! 共找到 {found_files} 个文件"
         self.update_ui(msg, False)
 
     def update_ui(self, message, searching, progress=0):
         self.status_text.value = message
         self.progress_bar.value = progress
+        self.progress_bar.visible = searching
         self.search_btn.disabled = searching
         self.stop_btn.disabled = not searching
         self.page.update()
+
+
+

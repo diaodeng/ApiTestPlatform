@@ -133,18 +133,35 @@ class MitmHandel:
         self.page.update()
 
     def _request_delay_change(self, evt: ft.ControlEvent):
-        data = evt.control.value
-        data = eval(str(data))
+        data = self._parse_delay_value(evt.control.value, "请求延时")
+        if data is None:
+            evt.control.value = f"{self.config.request_delay.delay}"
+            evt.control.update()
+            return
         self.config.request_delay.delay = data
         MitmproxyConfig.write(self.config)
         self.page.update()
 
     def _response_delay_change(self, evt: ft.ControlEvent):
-        data = evt.control.value
-        data = eval(str(data))
+        data = self._parse_delay_value(evt.control.value, "响应延时")
+        if data is None:
+            evt.control.value = f"{self.config.response_delay.delay}"
+            evt.control.update()
+            return
         self.config.response_delay.delay = data
         MitmproxyConfig.write(self.config)
         self.page.update()
+
+    def _parse_delay_value(self, value, field_name: str) -> float | None:
+        try:
+            parsed = float(str(value).strip())
+        except (TypeError, ValueError):
+            UiUtil.show_snackbar_error(self.page, f"{field_name}必须是数字")
+            return None
+        if parsed < 0:
+            UiUtil.show_snackbar_error(self.page, f"{field_name}不能小于 0")
+            return None
+        return parsed
 
     def _request_delay_path_change(self, evt: ft.ControlEvent):
         data = evt.control.value

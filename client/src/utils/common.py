@@ -287,9 +287,12 @@ def get_process_memory_usage(process_name: str) -> float:
 def get_sys_info() -> dict:
     info = {}
     # CPU 使用率（百分比）
-    info["cpu"] = f"{psutil.cpu_percent(interval=1)}%"
-    # 每个 CPU 核心使用率
-    info["cpu_percent"] = psutil.cpu_percent(interval=1, percpu=True)
+    cpu_percent = psutil.cpu_percent(interval=0.2, percpu=True)
+    info["cpu_percent"] = cpu_percent
+    if cpu_percent:
+        info["cpu"] = f"{sum(cpu_percent) / len(cpu_percent):.1f}%"
+    else:
+        info["cpu"] = "0%"
     # CPU 逻辑核 / 物理核数
     info["cpu_count"] = f"{psutil.cpu_count(logical=True)}"
     info["cpu_count_physical"] = f"{psutil.cpu_count(logical=False)}"

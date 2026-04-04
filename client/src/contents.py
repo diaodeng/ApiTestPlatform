@@ -1,42 +1,65 @@
-from view_contents.content_about import About
-from view_contents.content_agent import AgentHandler
-from view_contents.content_ftp import FtpHandler
-from view_contents.content_goods import Goods
-from view_contents.content_log_view import LogViewerApp
-from view_contents.content_mitmproxy import MitmHandel
-from view_contents.content_pos_handler import PosHandler
-from view_contents.content_settings import Settings
-
-
-class Contents(object):
+class Contents:
     def __init__(self, ft, log, page, **kwargs):
         self.ft = ft
         self.log = log
         self.page = page
+        self.kwargs = kwargs
+        self._content_cache = {}
+        self._content_builders = [
+            self._build_settings,
+            self._build_goods,
+            self._build_agent,
+            self._build_pos,
+            self._build_mitmproxy,
+            self._build_ftp,
+            self._build_log_view,
+            self._build_about,
+        ]
 
-        # self.home = Home(ft, page, log, **kwargs).home()
-        self.settings = Settings(ft, page, log).settings()
-        # self.shortcut = Shortcut(ft, page, log).shortcut()
-        self.about = About().about()
-        self.agent_handler = AgentHandler(ft, page).init_ui()
-        self.pos_handler = PosHandler(ft, page).init_ui()
-        self.mitmproxy = MitmHandel(page).init()
-        self.log_view = LogViewerApp(page).init_ui()
-        self.ftp_view = FtpHandler(page).init_ui()
-        self.goods = Goods(ft, page, log, **kwargs).goods()
+    def _build_settings(self):
+        from view_contents.content_settings import Settings
+
+        return Settings(self.ft, self.page, self.log).settings()
+
+    def _build_goods(self):
+        from view_contents.content_goods import Goods
+
+        return Goods(self.ft, self.page, self.log, **self.kwargs).goods()
+
+    def _build_agent(self):
+        from view_contents.content_agent import AgentHandler
+
+        return AgentHandler(self.ft, self.page).init_ui()
+
+    def _build_pos(self):
+        from view_contents.content_pos_handler import PosHandler
+
+        return PosHandler(self.ft, self.page).init_ui()
+
+    def _build_mitmproxy(self):
+        from view_contents.content_mitmproxy import MitmHandel
+
+        return MitmHandel(self.page).init()
+
+    def _build_ftp(self):
+        from view_contents.content_ftp import FtpHandler
+
+        return FtpHandler(self.page).init_ui()
+
+    def _build_log_view(self):
+        from view_contents.content_log_view import LogViewerApp
+
+        return LogViewerApp(self.page).init_ui()
+
+    def _build_about(self):
+        from view_contents.content_about import About
+
+        return About().about()
 
     # 内容区域函数
     def get_content(self, index):
-        contents = [
-            # self.home,
-            # self.shortcut,
-            self.settings,
-            self.goods,
-            self.agent_handler,
-            self.pos_handler,
-            self.mitmproxy,
-            self.ftp_view,
-            self.log_view,
-            self.about,
-        ]
-        return contents[index]
+        if index < 0 or index >= len(self._content_builders):
+            raise IndexError(f"invalid content index: {index}")
+        if index not in self._content_cache:
+            self._content_cache[index] = self._content_builders[index]()
+        return self._content_cache[index]

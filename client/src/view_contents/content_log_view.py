@@ -19,7 +19,8 @@ class LogViewerApp:
         self.current_log_file_path = None
         self.current_thread = None
         self.current_app_thread = None
-        self.stop_watch = False
+        self.file_watch_stop_event = threading.Event()
+        self.app_watch_stop_event = threading.Event()
 
         # 日志缓冲区
         self.log_buffer = []
@@ -331,7 +332,9 @@ class LogViewerApp:
         if evt.control.value:
             self.monitor_app_log()
         else:
+            self.app_watch_stop_event.set()
             logger.info("停止监控程序日志文件")
+            self.add_app_log("停止监控程序日志文件")
 
     async def log_watcher(self):
         file_path = self.file_path_input.value
@@ -352,20 +355,21 @@ class LogViewerApp:
         self.file_path = self.file_path_input.value
         if not self.file_path:
             return
-        if self.current_thread:
-            self.stop_watch = True
-            self.current_thread.join()
-            self.current_thread = None
-            self.stop_watch = False
+        self.file_watch_stop_event.set()
+        if self.current_thread and self.current_thread.is_alive():
+            self.current_thread.join(timeout=1)
+        self.current_thread = None
+        self.file_watch_stop_event = threading.Event()
 
         # 在后台线程中监控文件变化
         def watch_file():
+            stop_event = self.file_watch_stop_event
 
             last_size = 0
             logger.info(
                 f"self.enable_watch_file_checkbox.value:{self.enable_watch_file_checkbox.value}"
             )
-            while not self.stop_watch:
+            while not stop_event.is_set():
                 try:
                     if not os.path.exists(self.file_path):
                         time.sleep(1)
@@ -376,23 +380,26 @@ class LogViewerApp:
                     if current_size < last_size:
                         last_size = 0
 
-                    if current_size > last_size:
-                        with open(
-                            self.file_path, "r", encoding="utf-8", errors="ignore"
-                        ) as f:
-                            if last_size > 0:
-                                f.seek(last_size)
-                            new_content = f.readline(current_size - last_size)
-                            last_size = current_size
-                            if not new_content:
-                                time.sleep(0.5)
-                                continue
+                    if current_size == last_size:
+                        time.sleep(0.3)
+                        continue
 
-                            if self.enable_watch_file_checkbox.value:
-                                for line in new_content.splitlines():
-                                    line = line.strip()
-                                    if line:
-                                        self.add_log(line.strip())
+                    with open(
+                        self.file_path, "r", encoding="utf-8", errors="ignore"
+                    ) as f:
+                        if last_size > 0:
+                            f.seek(last_size)
+                        new_content = f.read()
+                        last_size = f.tell()
+                        if not new_content:
+                            time.sleep(0.3)
+                            continue
+
+                        if self.enable_watch_file_checkbox.value:
+                            for line in new_content.splitlines():
+                                line = line.strip()
+                                if line:
+                                    self.add_log(line)
                 except Exception as e:
                     logger.error(f"文件监控异常: {str(e)}")
                     time.sleep(1)
@@ -406,18 +413,19 @@ class LogViewerApp:
         file_path = f"logs/{time.strftime('%Y-%m-%d', time.localtime())}.log"
         if not file_path:
             return
-        if self.current_app_thread:
-            self.stop_watch = True
-            self.current_app_thread.join()
-            self.current_app_thread = None
-            self.stop_watch = False
+        self.app_watch_stop_event.set()
+        if self.current_app_thread and self.current_app_thread.is_alive():
+            self.current_app_thread.join(timeout=1)
+        self.current_app_thread = None
+        self.app_watch_stop_event = threading.Event()
 
         # 在后台线程中监控文件变化
         def watch_file():
+            stop_event = self.app_watch_stop_event
 
             last_size = 0
             logger.info(f"开始监控程序日志文件：{file_path}")
-            while True:
+            while not stop_event.is_set():
                 try:
                     if not os.path.exists(file_path):
                         time.sleep(1)
@@ -428,26 +436,25 @@ class LogViewerApp:
                     if current_size < last_size:
                         last_size = 0
 
-                    if current_size > last_size:
-                        with open(
-                            file_path, "r", encoding="utf-8", errors="ignore"
-                        ) as f:
-                            if last_size > 0:
-                                f.seek(last_size)
-                            new_content = f.readline(current_size - last_size)
-                            last_size = current_size
-                            if not new_content:
-                                time.sleep(0.5)
-                                continue
+                    if current_size == last_size:
+                        time.sleep(0.3)
+                        continue
 
-                            if self.enable_watch_app_file_checkbox.value:
-                                for line in new_content.splitlines():
-                                    line = line.strip()
-                                    if line:
-                                        self.add_app_log(line.strip())
-                            else:
-                                self.add_app_log(f"停止监控程序日志文件：{file_path}")
-                                break
+                    with open(
+                        file_path, "r", encoding="utf-8", errors="ignore"
+                    ) as f:
+                        if last_size > 0:
+                            f.seek(last_size)
+                        new_content = f.read()
+                        last_size = f.tell()
+                        if not new_content:
+                            time.sleep(0.3)
+                            continue
+
+                        for line in new_content.splitlines():
+                            line = line.strip()
+                            if line:
+                                self.add_app_log(line)
                 except Exception as e:
                     logger.error(f"程序日志文件监控异常: {str(e)}")
                     time.sleep(1)
