@@ -45,6 +45,7 @@ from module_hrm.controller.runner_controler import runnerController
 from module_hrm.controller.suite_controller import suiteController
 from module_hrm.controller.test_controller import mockController
 from module_hrm.controller.tools_controller import toolsController
+from module_hrm.controller.web_case_controller import webCaseController
 from module_qtr.controller.agent_controller import agentController, startup_handler
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
@@ -135,6 +136,7 @@ controller_list = [
     {'router': agentManagerController, 'tags': ['QTR-agent后台管理']},
     {'router': pushController, 'tags': ['推送配置管理']},
     {'router': toolsController, 'tags': ['工具']},
+    {'router': webCaseController, 'tags': ['HRM-Web测试管理']},
     # {'router': celeryController, 'tags': ['celery']},
 ]
 

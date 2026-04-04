@@ -15,11 +15,13 @@ from module_hrm.service.agent_service import AgentService
 from module_hrm.utils.util import compress_dict_to_str, decompress_str_to_dict
 from module_qtr.service.agent_service import (
     AgentResponse,
+    AgentResponseWebUI,
     AgentResponseWebSocket,
     agents,
     handle_response,
     response_futures,
 )
+from module_hrm.service.web_case_service import WebCaseService
 from utils.log_util import logger
 from utils.snowflake import snowIdWorker
 
@@ -168,6 +170,8 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
             if message_data.get("type") in ("ping", "pong"):
                 agent_status[agent_code]["heart_status"] = True
                 # logger.info(message_data.get("message"))
+            elif message_data.get("type") in ("record_event", "record_status", "record_finished", "record_error"):
+                WebCaseService.handle_agent_recording_event(db, agent_code, message_data)
             # 检查消息类型是否为分片
             elif message_data.get("type") == "response_chunk":
                 # 获取分片信息
@@ -263,6 +267,8 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
             elif response.get("request_type") == TstepTypeEnum.websocket.value:
                 response = AgentResponseWebSocket(response)
                 logger.info(f"ws响应数据：{response}")
+            elif response.get("request_type") == TstepTypeEnum.webui.value:
+                response = AgentResponseWebUI(**response)
             response = handle_response((AgentResponseEnum.SUCCESS.value, response, "操作成功"))
             return response
         except TimeoutError as e:
