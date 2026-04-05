@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QSizePolicy,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
@@ -20,6 +21,7 @@ from ui.pages.agent_page import AgentPage
 from ui.pages.log_view_page import LogViewPage
 from ui.pages.mitmproxy_page import MitmWidget
 from ui.pages.pos_page import PosPage
+from ui.pages.sqlite_query_page import SqliteQueryPage
 from ui.theme_manager import (
     THEME_MODE_AUTO,
     THEME_MODE_DARK,
@@ -27,6 +29,7 @@ from ui.theme_manager import (
     ThemeManager,
     theme_mode_label,
 )
+from ui.utils.icon_util import apply_window_icon
 
 
 class MainWindow(QMainWindow):
@@ -35,6 +38,7 @@ class MainWindow(QMainWindow):
         self.theme_manager = ThemeManager.instance()
         self.setWindowTitle("QTRClient - PySide6")
         self.resize(1200, 800)
+        apply_window_icon(self)
 
         self._init_ui()
         self._init_status_bar()
@@ -85,12 +89,17 @@ class MainWindow(QMainWindow):
         # 左侧菜单
         self.menu = QListWidget()
         self.menu.addItems(
-            ["设置", "商品", "Agent", "POS", "mitmproxy", "FTP", "日志", "关于"]
+            ["设置", "商品", "Agent", "POS", "SQLite", "mitmproxy", "FTP", "日志", "关于"]
         )
         self.menu.setFixedWidth(150)
+        self.menu.setFrameShape(QFrame.NoFrame)
+        self.menu.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.menu.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
         # 右侧内容区
         self.stack = QStackedWidget()
+        self.stack.setObjectName("mainContentStack")
+        self.stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # 页面注册
         self.pages = {
@@ -98,6 +107,7 @@ class MainWindow(QMainWindow):
             "商品": QWidget(),
             "Agent": AgentPage(),
             "POS": PosPage(),
+            "SQLite": SqliteQueryPage(),
             "mitmproxy": MitmWidget(),
             "FTP": QWidget(),
             "日志": LogViewPage(),
@@ -109,6 +119,7 @@ class MainWindow(QMainWindow):
             "商品",
             "Agent",
             "POS",
+            "SQLite",
             "mitmproxy",
             "FTP",
             "日志",
@@ -120,8 +131,24 @@ class MainWindow(QMainWindow):
         self.menu.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.menu.setCurrentRow(3)
 
-        content_layout.addWidget(self.menu)
-        content_layout.addWidget(self.stack)
+        self.nav_frame = QFrame()
+        self.nav_frame.setObjectName("mainNavFrame")
+        nav_layout = QVBoxLayout(self.nav_frame)
+        nav_layout.setContentsMargins(6, 6, 6, 6)
+        nav_layout.setSpacing(0)
+        nav_layout.addWidget(self.menu, 1)
+
+        self.content_frame = QFrame()
+        self.content_frame.setObjectName("mainContentFrame")
+        stack_layout = QVBoxLayout(self.content_frame)
+        stack_layout.setContentsMargins(0, 0, 0, 0)
+        stack_layout.setSpacing(0)
+        stack_layout.addWidget(self.stack, 1)
+
+        content_layout.addWidget(self.nav_frame)
+        content_layout.addWidget(self.content_frame, 1)
+        content_layout.setStretch(0, 0)
+        content_layout.setStretch(1, 1)
 
         root_layout.addWidget(self.header_bar)
         root_layout.addLayout(content_layout, 1)

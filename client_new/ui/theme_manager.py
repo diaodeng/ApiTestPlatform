@@ -257,10 +257,30 @@ def _build_stylesheet(tokens: ThemeTokens) -> str:
         QToolButton#themeToggleButton:hover {{
             background-color: {color_to_hex(tokens.surface_hover)};
         }}
-        QFrame#mainHeaderBar {{
+        QFrame#mainHeaderBar,
+        QFrame#mainNavFrame,
+        QFrame#mainContentFrame,
+        QFrame#sqliteSqlFrame,
+        QFrame#sqliteResultFrame {{
             background-color: {color_to_hex(tokens.surface)};
             border: 1px solid {color_to_hex(tokens.border)};
             border-radius: 10px;
+        }}
+        QStackedWidget#mainContentStack {{
+            background-color: transparent;
+            border: none;
+        }}
+        QFrame#mainNavFrame QListWidget {{
+            background-color: transparent;
+            border: none;
+        }}
+        QSplitter::handle {{
+            background-color: {color_to_hex(tokens.border)};
+        }}
+        QSplitter::handle:vertical {{
+            height: 8px;
+            margin: 4px 12px;
+            border-radius: 4px;
         }}
     """
 

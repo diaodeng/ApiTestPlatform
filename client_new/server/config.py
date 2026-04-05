@@ -12,6 +12,7 @@ from model.config import (
     PosConfigModel,
     PosParamsModel,
     SearchConfigModel,
+    SqliteQueryConfigModel,
     SetupConfigModel,
     StartConfigModel,
     ThemeConfigModel,
@@ -251,6 +252,16 @@ class AgentConfig:
     @classmethod
     def save_config(cls, config_data: AgentConfigModel):
         do_config.AgentConfig.save_config(config_data)
+
+
+class SqliteQueryConfig:
+    @classmethod
+    def read_config(cls) -> SqliteQueryConfigModel:
+        return do_config.SqliteQueryConfig.read_config()
+
+    @classmethod
+    def save_config(cls, config_data: SqliteQueryConfigModel):
+        do_config.SqliteQueryConfig.save_config(config_data)
 
 
 class FtpConfig:

@@ -14,6 +14,7 @@ from model.config import (
     PosConfigModel,
     PosParamsModel,
     SearchConfigModel,
+    SqliteQueryConfigModel,
     SetupConfigModel,
     StartConfigModel,
     ThemeConfigModel,
@@ -586,6 +587,33 @@ class AgentConfig:
 
     @classmethod
     def save_config(cls, config_data: AgentConfigModel):
+        with open(cls.config_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(config_data.model_dump(), ensure_ascii=False))
+
+
+class SqliteQueryConfig:
+    config_path = "storage/data/sqlite_query_config.json"
+
+    @classmethod
+    def read_config(cls) -> SqliteQueryConfigModel:
+        if not os.path.exists(cls.config_path):
+            config = SqliteQueryConfigModel()
+            with open(cls.config_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+            return config
+
+        with open(cls.config_path, encoding="utf-8") as f:
+            data = f.read()
+            if not data:
+                config = SqliteQueryConfigModel()
+                with open(cls.config_path, "w", encoding="utf-8") as w:
+                    w.write(json.dumps(config.model_dump(), ensure_ascii=False))
+                return config
+
+            return SqliteQueryConfigModel.model_validate(json.loads(data))
+
+    @classmethod
+    def save_config(cls, config_data: SqliteQueryConfigModel):
         with open(cls.config_path, "w", encoding="utf-8") as f:
             f.write(json.dumps(config_data.model_dump(), ensure_ascii=False))
 
