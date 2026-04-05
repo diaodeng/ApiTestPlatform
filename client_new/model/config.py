@@ -2,7 +2,7 @@ import os.path
 from collections import defaultdict
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SearchConfigModel(BaseModel):
@@ -191,6 +191,44 @@ class AgentConfigModel(BaseModel):
     retry_interval: float = 5
     retry: bool = False
     browser: AgentBrowserConfigModel = AgentBrowserConfigModel()
+
+
+class SqliteScannedDatabaseModel(BaseModel):
+    file_name: str = ""
+    file_path: str = ""
+    size: int = 0
+
+
+class SqliteScannedDirectoryModel(BaseModel):
+    directory_path: str = ""
+    database_files: list[SqliteScannedDatabaseModel] = Field(default_factory=list)
+
+
+class SqliteTableViewConfigModel(BaseModel):
+    visible_columns: list[str] = Field(default_factory=list)
+    page_size: int = 100
+    filter_field: str = ""
+    filter_operator: str = "contains"
+    filter_value: str = ""
+
+
+class SqliteFavoriteSqlModel(BaseModel):
+    name: str = ""
+    sql: str = ""
+    scope: str = "global"
+    database_path: str = ""
+    table_name: str = ""
+
+
+class SqliteQueryConfigModel(BaseModel):
+    entry_type: str = "pos"
+    scanned_directories: list[SqliteScannedDirectoryModel] = Field(default_factory=list)
+    last_directory_path: str = ""
+    last_database_path: str = ""
+    last_table_name: str = ""
+    last_sql: str = ""
+    table_view_configs: dict[str, SqliteTableViewConfigModel] = Field(default_factory=dict)
+    favorite_sqls: list[SqliteFavoriteSqlModel] = Field(default_factory=list)
 
 
 class FtpConfigModel(BaseModel):

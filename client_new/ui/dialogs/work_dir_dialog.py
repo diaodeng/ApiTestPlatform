@@ -13,20 +13,33 @@ from PySide6.QtWidgets import (
 )
 
 from server.config import SearchConfig
+from ui.utils.icon_util import apply_window_icon
 
 
 class WorkDirDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, mode: str = "pos"):
         super().__init__(parent)
+        self.mode = mode if mode in {"pos", "sqlite"} else "pos"
 
-        self.setWindowTitle("工作目录管理")
+        self.setWindowTitle("SQLite 工作目录管理" if self.mode == "sqlite" else "工作目录管理")
         self.resize(500, 400)
+        apply_window_icon(self)
 
         self._init_ui()
         self._load_data()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+
+        self.note_label = QLabel()
+        self.note_label.setWordWrap(True)
+        if self.mode == "sqlite":
+            self.note_label.setText(
+                "SQLite 页面复用工作目录和递归深度设置。扫描时按文件头识别，兼容 .sqlite / .sqlite3 / .db 等文件，不依赖扩展名。"
+            )
+        else:
+            self.note_label.setText("配置 POS 扫描的文件名模式、目录模式和递归深度。")
+        layout.addWidget(self.note_label)
 
         # 扫描配置（低频配置放到工作目录弹窗）
         self.file_pattern_input = QLineEdit()
@@ -35,8 +48,9 @@ class WorkDirDialog(QDialog):
         self.depth_input.setRange(1, 20)
 
         config_layout = QFormLayout()
-        config_layout.addRow(QLabel("文件名模式"), self.file_pattern_input)
-        config_layout.addRow(QLabel("目录名模式"), self.dir_pattern_input)
+        if self.mode != "sqlite":
+            config_layout.addRow(QLabel("文件名模式"), self.file_pattern_input)
+            config_layout.addRow(QLabel("目录名模式"), self.dir_pattern_input)
         config_layout.addRow(QLabel("递归深度"), self.depth_input)
         layout.addLayout(config_layout)
 
@@ -71,8 +85,9 @@ class WorkDirDialog(QDialog):
         dirs = SearchConfig.read_work_dir()
         cfg = SearchConfig.read()
 
-        self.file_pattern_input.setText(cfg.file_pattern or "cpos-*.exe")
-        self.dir_pattern_input.setText(cfg.dir_pattern or "*")
+        if self.mode != "sqlite":
+            self.file_pattern_input.setText(cfg.file_pattern or "cpos-*.exe")
+            self.dir_pattern_input.setText(cfg.dir_pattern or "*")
         try:
             self.depth_input.setValue(max(1, int(cfg.max_depth)))
         except Exception:
@@ -106,17 +121,17 @@ class WorkDirDialog(QDialog):
         self._load_data()
 
     def save_scan_config(self):
-        cfg = SearchConfig.read()
-        cfg.file_pattern = (self.file_pattern_input.text() or "cpos-*.exe").strip()
-        cfg.dir_pattern = (self.dir_pattern_input.text() or "*").strip()
-        cfg.max_depth = str(self.depth_input.value())
-        SearchConfig.write(cfg)
+        self._persist_config()
         QMessageBox.information(self, "成功", "扫描配置已保存")
 
     def accept(self):
+        self._persist_config()
+        super().accept()
+
+    def _persist_config(self):
         cfg = SearchConfig.read()
-        cfg.file_pattern = (self.file_pattern_input.text() or "cpos-*.exe").strip()
-        cfg.dir_pattern = (self.dir_pattern_input.text() or "*").strip()
+        if self.mode != "sqlite":
+            cfg.file_pattern = (self.file_pattern_input.text() or "cpos-*.exe").strip()
+            cfg.dir_pattern = (self.dir_pattern_input.text() or "*").strip()
         cfg.max_depth = str(self.depth_input.value())
         SearchConfig.write(cfg)
-        super().accept()
