@@ -12,6 +12,7 @@ from loguru import logger
 from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
+from services.desktop_test_service import DesktopTestService
 from services.web_test_service import WebTestService
 from utils.common import compress_dict_to_str, decompress_str_to_dict
 
@@ -108,6 +109,15 @@ class RequestByInput:
         elif request_type == RequestTypeEnum.webui.value:
             try:
                 res_data = await WebTestService.handle_request(message_data_dict, event_sender)
+            except Exception as e:
+                logger.exception(e)
+                res_data = {"Error": "".join(traceback.format_exception(e))}
+            res_data["request_id"] = request_id
+            res_data["request_type"] = request_type
+            return res_data, client_status
+        elif request_type == RequestTypeEnum.desktopui.value:
+            try:
+                res_data = await DesktopTestService.handle_request(message_data_dict, event_sender)
             except Exception as e:
                 logger.exception(e)
                 res_data = {"Error": "".join(traceback.format_exception(e))}
@@ -371,6 +381,10 @@ class WebSocketClient:
         except Exception as e:
             logger.exception(f"关闭 Web 录制会话失败: {e}")
         try:
+            await DesktopTestService.shutdown_all_sessions()
+        except Exception as e:
+            logger.exception(f"关闭 Desktop 录制会话失败: {e}")
+        try:
             if _is_websocket_open(self.websocket):
                 await self.websocket.close(code=1000, reason="关闭连接")
         except websockets.exceptions.ConnectionClosedOK:
@@ -420,6 +434,7 @@ class RequestTypeEnum(Enum):
     websocket = 2
     webui = 3
     folder = 4
+    desktopui = 5
 
 
 # 根据枚举值获取枚举名称

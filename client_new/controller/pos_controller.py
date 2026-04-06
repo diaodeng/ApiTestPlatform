@@ -134,7 +134,7 @@ class PosController(QObject):
         self.status_signal.emit("停止离线进程...")
 
         def run():
-            names = ["java.exe", "mitmdump.exe"]
+            names = ["java.exe"]
             return PosService.stop_offline(names)
 
         worker = Worker(run)
@@ -418,12 +418,15 @@ class PosController(QObject):
         return data
 
     def _format_env_message(self, payload: dict) -> str:
-        if not payload:
-            return "环境信息获取失败"
-        source = "本地" if payload.get("is_local", True) else "远端"
-        env_show = payload.get("remote_env") or payload.get("local_env") or "-"
-        return (
-            f"{source} 商家:{payload.get('vender_no', '-')} | "
-            f"门店ID(sap/org): {payload.get('sap_org_no', '-')}/{payload.get('org_no', '-')} | "
-            f"环境:{env_show} 版本:{payload.get('version', '-')} POS:{payload.get('pos_id', '-')}"
-        )
+        try:
+            if not payload:
+                return "环境信息获取失败"
+            source = "本地" if payload.get("is_local", True) else "远端"
+            env_show = payload.get("remote_env") or payload.get("local_env") or "-"
+            return (
+                f"{source} 商家:{payload.get('vender_no', '-')} | "
+                f"门店ID(sap/org): {payload.get('sap_org_no', '-')}/{payload.get('org_no', '-')} | "
+                f"环境:{env_show} 版本:{payload.get('version', '-')} POS:{payload.get('pos_id', '-')}"
+            )
+        except Exception:
+            return f"组装信息异常：{str(payload)}"

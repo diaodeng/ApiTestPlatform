@@ -343,6 +343,14 @@ INSERT INTO sys_menu VALUES (1203,"详情",1199,4,"",null,null,1,0,"F","0","0","
 INSERT INTO sys_menu VALUES (1204,"执行",1199,5,"",null,null,1,0,"F","0","0","hrm:webCase:run","#","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1205,"录制",1199,6,"",null,null,1,0,"F","0","0","hrm:webCase:record","#","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1206,"历史",1199,7,"",null,null,1,0,"F","0","0","hrm:webCase:history","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1207,"桌面测试管理",1061,10,"desktopcase","hrm/desktopcase/index",null,1,0,"C","0","0","hrm:desktopCase:list","monitor","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1208,"新增",1207,1,"",null,null,1,0,"F","0","0","hrm:desktopCase:add","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1209,"编辑",1207,2,"",null,null,1,0,"F","0","0","hrm:desktopCase:edit","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1210,"删除",1207,3,"",null,null,1,0,"F","0","0","hrm:desktopCase:remove","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1211,"详情",1207,4,"",null,null,1,0,"F","0","0","hrm:desktopCase:detail","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1212,"执行",1207,5,"",null,null,1,0,"F","0","0","hrm:desktopCase:run","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1213,"录制",1207,6,"",null,null,1,0,"F","0","0","hrm:desktopCase:record","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1214,"历史",1207,7,"",null,null,1,0,"F","0","0","hrm:desktopCase:history","#","admin",sysdate(),"admin",null,"");
 
 -- ----------------------------
 -- 6、用户和角色关联表  用户N-1角色
@@ -459,6 +467,14 @@ insert into sys_role_menu values ('2', '1057');
 insert into sys_role_menu values ('2', '1058');
 insert into sys_role_menu values ('2', '1059');
 insert into sys_role_menu values ('2', '1060');
+insert into sys_role_menu values ('2', '1207');
+insert into sys_role_menu values ('2', '1208');
+insert into sys_role_menu values ('2', '1209');
+insert into sys_role_menu values ('2', '1210');
+insert into sys_role_menu values ('2', '1211');
+insert into sys_role_menu values ('2', '1212');
+insert into sys_role_menu values ('2', '1213');
+insert into sys_role_menu values ('2', '1214');
 
 -- ----------------------------
 -- 8、角色和部门关联表  角色1-N部门
@@ -702,6 +718,7 @@ insert into sys_config values(3, '主框架页-侧边栏主题',           'sys.
 insert into sys_config values(4, '账号自助-验证码开关',           'sys.account.captchaEnabled',    'true',          'Y', 'admin', sysdate(), '', null, '是否开启验证码功能（true开启，false关闭）');
 insert into sys_config values(5, '账号自助-是否开启用户注册功能', 'sys.account.registerUser',      'false',         'Y', 'admin', sysdate(), '', null, '是否开启注册用户功能（true开启，false关闭）');
 insert into sys_config values(6, '用户登录-黑名单列表',           'sys.login.blackIPList',         '',              'Y', 'admin', sysdate(), '', null, '设置登录IP黑名单限制，多个匹配项以;分隔，支持匹配（*通配、网段）');
+insert into sys_config values(7, '桌面测试-默认视觉比对配置',     'hrm.desktop.compare.default',   '{"useHash":true,"useSsim":true,"useOcr":false,"useLocalDiff":true,"useFullDiff":true,"hashThreshold":6,"ssimThreshold":0.995,"pixelDiffThreshold":0.01,"templateThreshold":0.9,"preprocessGrayscale":true,"preprocessBlur":true,"blurKernel":3,"searchIntervalMs":250}', 'Y', 'admin', sysdate(), '', null, '桌面测试默认视觉比对配置 JSON，可在系统参数中修改，执行时也可覆盖');
 
 
 -- ----------------------------
