@@ -22,4 +22,5 @@ class Worker(QRunnable):
             logger.info("线程任务执行结束")
         except Exception as e:
             logger.exception(e)
+            self.signals.finished.emit(str(e))
             self.signals.error.emit(str(e))

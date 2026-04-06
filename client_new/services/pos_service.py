@@ -8,6 +8,7 @@ from server.config import PosConfig, StartConfig
 from server.pos_config_server import PosConfigServer
 from services.pos.pos_start_service import PosStartService
 from services.process_service import ProcessService
+from utils.common import kill_process_by_name
 from utils.file_handle import start_file_independent
 from utils.pos_network import change_pos_from_network
 
@@ -37,13 +38,32 @@ class PosService:
 
     @staticmethod
     def stop_current():
-        current = PosManager.instance().get()
-        if not current:
+        kill_process_name = [
+            "CPOS-DF.exe",
+            "Launcher.exe",
+            "df_sv.exe",
+            "Pos.exe",
+            "CPOS-KH.exe",
+            "ONENOTE.exe",
+            "ONENOTEM.exe",
+        ]
+        try:
+            for process_name in kill_process_name:
+                # logger.info(f"结束{process_name}进程")
+                kill_process_by_name(process_name)
+            logger.info("POS进程已结束")
+            return True
+        except Exception as e:
+            logger.error(f"POS结束进程失败: {e}")
             return False
 
-        ProcessService.kill_by_pid(current["pid"])
-        PosManager.instance().clear()
-        return True
+        # current = PosManager.instance().get()
+        # if not current:
+        #     return False
+        #
+        # ProcessService.kill_by_pid(current["pid"])
+        # PosManager.instance().clear()
+        # return True
 
     @staticmethod
     def stop_offline(process_names):

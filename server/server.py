@@ -34,6 +34,7 @@ from module_hrm.controller.checkStatus_controler import qtrServiceStatusControll
 from module_hrm.controller.common_controller import hrmCommonController
 from module_hrm.controller.config_controller import hrmConfigController
 from module_hrm.controller.debugtalk_controller import debugtalkController
+from module_hrm.controller.desktop_case_controller import desktopCaseController
 from module_hrm.controller.env_controller import envController
 from module_hrm.controller.forward_rules_controller import forwardRulesController
 from module_hrm.controller.module_controler import moduleController
@@ -137,6 +138,7 @@ controller_list = [
     {'router': pushController, 'tags': ['推送配置管理']},
     {'router': toolsController, 'tags': ['工具']},
     {'router': webCaseController, 'tags': ['HRM-Web测试管理']},
+    {'router': desktopCaseController, 'tags': ['HRM-桌面测试管理']},
     # {'router': celeryController, 'tags': ['celery']},
 ]
 

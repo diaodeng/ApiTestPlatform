@@ -85,6 +85,7 @@ class TstepTypeEnum(Enum):
     websocket = 2
     webui = 3
     folder = 4
+    desktopui = 5
 
 
 class RunTypeEnum(Enum):
