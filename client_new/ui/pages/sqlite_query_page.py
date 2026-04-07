@@ -33,6 +33,7 @@ from services.sqlite_query_service import SqliteQueryService
 from ui.dialogs.sqlite_column_config_dialog import SqliteColumnConfigDialog
 from ui.dialogs.sqlite_favorite_sql_dialog import SqliteFavoriteSqlDialog
 from ui.dialogs.work_dir_dialog import WorkDirDialog
+from ui.widgets.searchable_combo_box import SearchableComboBox
 from workers.worker import Worker
 
 
@@ -100,11 +101,11 @@ class SqliteQueryPage(QWidget):
         action_layout.addWidget(self.status_label)
         main_layout.addLayout(action_layout)
 
-        self.directory_combo = QComboBox()
+        self.directory_combo = SearchableComboBox("输入目录关键字搜索")
         self.directory_combo.setMinimumWidth(300)
-        self.database_combo = QComboBox()
+        self.database_combo = SearchableComboBox("输入数据库名搜索")
         self.database_combo.setMinimumWidth(300)
-        self.table_combo = QComboBox()
+        self.table_combo = SearchableComboBox("输入表名搜索")
         self.table_combo.setMinimumWidth(220)
 
         self.page_size_spin = QSpinBox()
@@ -123,9 +124,9 @@ class SqliteQueryPage(QWidget):
         selection_layout.addWidget(self.table_combo, 1)
         main_layout.addLayout(selection_layout)
 
-        self.filter_field_combo = QComboBox()
+        self.filter_field_combo = SearchableComboBox("输入字段名搜索")
         self.filter_field_combo.setMinimumWidth(180)
-        self.filter_operator_combo = QComboBox()
+        self.filter_operator_combo = SearchableComboBox("输入操作符搜索")
         self.filter_operator_combo.setMinimumWidth(120)
         self.filter_operator_combo.addItem("包含", "contains")
         self.filter_operator_combo.addItem("等于", "equals")
@@ -154,7 +155,7 @@ class SqliteQueryPage(QWidget):
         filter_layout.addWidget(self.filter_clear_btn)
         main_layout.addLayout(filter_layout)
 
-        self.favorite_combo = QComboBox()
+        self.favorite_combo = SearchableComboBox("输入常用 SQL 名称搜索")
         self.favorite_combo.hide()
 
         sql_frame = QFrame()

@@ -18,12 +18,20 @@ def is_sftp_available() -> bool:
     return paramiko is not None
 
 
-def project_root_dir() -> Path:
+def server_root_dir() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def workspace_root_dir() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
 def default_local_root_dir() -> Path:
-    return project_root_dir() / "case_data" / "image"
+    return server_root_dir() / "case_data" / "image"
+
+
+def legacy_default_local_root_dir() -> Path:
+    return workspace_root_dir() / "case_data" / "image"
 
 
 def normalize_storage_mode(mode: Any) -> str:
@@ -39,7 +47,7 @@ def resolve_local_root_dir(local_directory: Any = None) -> Path:
         return default_local_root_dir()
     path = Path(raw_value).expanduser()
     if not path.is_absolute():
-        path = project_root_dir() / path
+        path = server_root_dir() / path
     return path.resolve()
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from PySide6.QtCore import QObject, QEvent, Qt
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QWidget
 
 if sys.platform.startswith("win"):
@@ -87,15 +87,7 @@ def load_app_icon() -> QIcon:
     icon_path = app_icon_path()
     if not icon_path.exists():
         return QIcon()
-    pixmap = QPixmap(str(icon_path))
-    if pixmap.isNull():
-        return QIcon(str(icon_path))
-    icon = QIcon()
-    for size in ICON_SIZES:
-        scaled = pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        if not scaled.isNull():
-            icon.addPixmap(scaled)
-    return icon if not icon.isNull() else QIcon(str(icon_path))
+    return QIcon(str(icon_path))
 
 
 @lru_cache(maxsize=1)

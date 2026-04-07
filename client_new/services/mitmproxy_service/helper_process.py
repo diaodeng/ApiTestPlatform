@@ -26,13 +26,14 @@ from services.mitmproxy_service.runtime_config import RuntimeConfig
 class HelperProtocol:
     def __init__(self):
         self._write_lock = threading.Lock()
+        self._stdout = getattr(sys, "__stdout__", None) or sys.stdout
 
     def send(self, message_type: str, **payload):
         message = {"type": message_type, **payload}
         line = json.dumps(message, ensure_ascii=False)
         with self._write_lock:
-            sys.stdout.write(line + "\n")
-            sys.stdout.flush()
+            self._stdout.write(line + "\n")
+            self._stdout.flush()
 
 
 class HelperRuntime:
@@ -193,7 +194,7 @@ class HelperRuntime:
         opts = Options(
             listen_host="127.0.0.1",
             listen_port=config.port,
-            ssl_insecure=True,
+            ssl_insecure=bool(config.ssl_insecure),
             mode=mode,
             confdir=config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy"),
         )
@@ -286,10 +287,12 @@ class HelperRuntime:
 
 
 def main():
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(line_buffering=True)
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(line_buffering=True)
+    protocol_stdout = getattr(sys, "__stdout__", None) or sys.stdout
+    protocol_stderr = getattr(sys, "__stderr__", None) or sys.stderr
+    if hasattr(protocol_stdout, "reconfigure"):
+        protocol_stdout.reconfigure(line_buffering=True)
+    if hasattr(protocol_stderr, "reconfigure"):
+        protocol_stderr.reconfigure(line_buffering=True)
 
     protocol = HelperProtocol()
     runtime = HelperRuntime(protocol)

@@ -19,6 +19,7 @@ class MitmWidget(QWidget):
     start_clicked = Signal()
     stop_clicked = Signal()
     save_clicked = Signal(dict)
+    install_cert_clicked = Signal()
 
     def __init__(self):
         super().__init__()
@@ -65,6 +66,13 @@ class MitmWidget(QWidget):
         self.port_value_label = QLabel("-")
         self.web_port_value_label = QLabel("-")
         self.flow_count_label = QLabel("记录 0 条")
+        self.mode_hint_label = QLabel("当前模式说明：-")
+        self.mode_hint_label.setWordWrap(True)
+        self.mode_hint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.cert_status_label = QLabel("证书状态：-")
+        self.cert_status_label.setWordWrap(True)
+        self.cert_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.install_cert_btn = QPushButton("安装当前用户证书")
         self.port_value_label.setMinimumWidth(64)
         self.web_port_value_label.setMinimumWidth(64)
         self.flow_count_label.setMinimumWidth(120)
@@ -98,10 +106,18 @@ class MitmWidget(QWidget):
         info_layout.addWidget(self.mode_value_container)
         info_layout.addStretch()
 
+        cert_layout = QHBoxLayout()
+        cert_layout.setContentsMargins(0, 0, 0, 0)
+        cert_layout.setSpacing(8)
+        cert_layout.addWidget(self.cert_status_label, 1)
+        cert_layout.addWidget(self.install_cert_btn)
+
         self.flow_widget = FlowMainWidget()
 
         main_layout.addLayout(action_layout)
         main_layout.addLayout(info_layout)
+        main_layout.addWidget(self.mode_hint_label)
+        main_layout.addLayout(cert_layout)
         main_layout.addWidget(self.flow_widget, 1)
 
     def _bind(self):
@@ -110,6 +126,9 @@ class MitmWidget(QWidget):
         self.clear_btn.clicked.connect(self._handle_clear_clicked)
         self.detail_toggle_btn.clicked.connect(self._toggle_detail)
         self.settings_btn.clicked.connect(self._open_settings_dialog)
+        self.install_cert_btn.clicked.connect(
+            lambda _checked=False: self.install_cert_clicked.emit()
+        )
         self.mode_select.currentTextChanged.connect(self._on_mode_changed)
         self.mode_value_input.value_committed.connect(self._save_quick_settings)
         self.flow_widget.table.stats_changed.connect(self._update_flow_stats)
@@ -162,6 +181,7 @@ class MitmWidget(QWidget):
 
         self.port_value_label.setText(str(config.port))
         self.web_port_value_label.setText(str(config.web_port))
+        self._update_mode_hint(config)
         self._apply_state_text(proxy_state)
 
     def _update_flow_stats(self, visible_count: int, total_count: int):
@@ -173,6 +193,48 @@ class MitmWidget(QWidget):
     def _update_mode_input(self, mode: str):
         is_local = mode == "local"
         self.mode_value_container.setVisible(is_local)
+
+    def _update_mode_hint(self, config):
+        mode = str(config.proxy_model or "").strip()
+        if mode == "local":
+            target = str(config.proxy_model_value or "").strip() or "指定进程"
+            message = (
+                f"当前模式说明：local 会自动拦截本机进程 {target} 的流量。"
+                "Windows 下通常需要管理员权限；HTTPS 网站仍需要先信任 mitmproxy CA。"
+            )
+        elif mode == "regular":
+            message = (
+                f"当前模式说明：regular 不会自动抓包，需要把浏览器或系统代理手动指向 "
+                f"127.0.0.1:{config.port}。"
+            )
+        elif mode:
+            message = (
+                f"当前模式说明：{mode} 模式需要按 mitmproxy 的该模式完成代理接入，"
+                "HTTPS 网站仍需要先信任 mitmproxy CA。"
+            )
+        else:
+            message = "当前模式说明：尚未配置代理模式。"
+        self.mode_hint_label.setText(message)
+
+    def set_cert_status(
+        self,
+        message: str,
+        trusted: bool,
+        can_install: bool,
+        cert_path: str = "",
+    ):
+        prefix = "证书状态"
+        if cert_path:
+            prefix = f"证书状态（{cert_path}）"
+        self.cert_status_label.setText(f"{prefix}：{message}")
+        if trusted:
+            color = "#2f855a"
+        elif can_install:
+            color = "#dd6b20"
+        else:
+            color = "#c53030"
+        self.cert_status_label.setStyleSheet(f"color: {color};")
+        self.install_cert_btn.setEnabled(can_install)
 
     def set_running(self, running: bool):
         self.start_btn.setEnabled(not running)

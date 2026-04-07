@@ -5,14 +5,30 @@ from pathlib import Path
 
 from loguru import logger
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtWidgets import QMessageBox
 
 from emitter.mitm_flow_emitter import flow_emitter
 from models.mitmproxy_models import FlowItem
 from server.config import MitmproxyConfig
+from utils.mitmproxy_cert import (
+    describe_windows_cert_status,
+    install_mitmproxy_cert_for_current_user,
+)
 
 
 class MitmController(QObject):
     data_signal = Signal(dict)
+    RESTART_SENSITIVE_FIELDS = {
+        "port": "代理端口",
+        "web_port": "Web端口",
+        "web_open_browser": "启动浏览器",
+        "ssl_insecure": "忽略 SSL 校验",
+        "mitmproxy_config_dir": "配置目录",
+        "cert_path": "证书路径",
+        "script_path": "脚本路径",
+        "proxy_model": "代理模式",
+        "proxy_model_value": "代理模式值",
+    }
 
     def __init__(self, widget):
         super().__init__()
@@ -24,6 +40,8 @@ class MitmController(QObject):
         self._stdout_buffer = ""
         self._stderr_buffer = ""
         self._shutting_down = False
+        self._restart_after_stop = False
+        self._restart_reason = ""
 
         self.timer = QTimer()
         self.timer.timeout.connect(self._sync_ui_state)
@@ -36,11 +54,13 @@ class MitmController(QObject):
         self._bind()
         self.widget.apply_config(self.config, self.helper_state)
         self._sync_ui_state()
+        self._refresh_cert_status()
 
     def _bind(self):
         self.widget.start_clicked.connect(self.start)
         self.widget.stop_clicked.connect(self.stop)
         self.widget.save_clicked.connect(self.save)
+        self.widget.install_cert_clicked.connect(self.install_cert)
 
     def start(self):
         logger.info("启动 mitmproxy")
@@ -62,7 +82,9 @@ class MitmController(QObject):
     def stop(self):
         logger.info("停止 mitmproxy")
         try:
-            if not self._is_helper_running():
+            self._restart_after_stop = False
+            self._restart_reason = ""
+            if not self._is_proxy_active():
                 self.helper_state = "stopped"
                 self._sync_ui_state()
                 return
@@ -71,25 +93,53 @@ class MitmController(QObject):
                 return
 
             self.config = MitmproxyConfig.read()
-            self.helper_state = "stopping"
-            self._send_command("stop", timeout=10.0)
-            self._start_force_stop_timer()
-            self._sync_ui_state()
+            self._request_proxy_stop()
         except Exception as e:
             logger.exception(f"停止 mitmproxy 失败: {e}")
 
     def save(self, data):
         try:
+            old_config = self.config
             MitmproxyConfig.write(data)
             self.config = MitmproxyConfig.read()
             self.widget.apply_config(self.config, self.helper_state)
+            self._refresh_cert_status()
 
-            if self._is_helper_running():
-                self._send_command("update", config=self.config.model_dump())
+            if self._is_proxy_active():
+                changed_fields = self._changed_restart_sensitive_fields(
+                    old_config,
+                    self.config,
+                )
+                if changed_fields:
+                    self._restart_after_stop = True
+                    self._restart_reason = "、".join(changed_fields)
+                    logger.info(
+                        f"mitmproxy 关键配置已变更，准备重启后应用：{self._restart_reason}"
+                    )
+                    self._request_proxy_stop()
+                else:
+                    self._send_command("update", config=self.config.model_dump())
 
             logger.info("配置已保存")
         except Exception as e:
             logger.exception(f"保存 mitmproxy 配置失败: {e}")
+
+    def install_cert(self):
+        try:
+            self.config = MitmproxyConfig.read()
+            ok, message, _cert_path = install_mitmproxy_cert_for_current_user(
+                self.config
+            )
+            self._refresh_cert_status()
+            if ok:
+                logger.info(message)
+                QMessageBox.information(self.widget, "mitmproxy 证书", message)
+            else:
+                logger.warning(message)
+                QMessageBox.warning(self.widget, "mitmproxy 证书", message)
+        except Exception as e:
+            logger.exception(f"安装 mitmproxy 证书失败: {e}")
+            QMessageBox.warning(self.widget, "mitmproxy 证书", str(e))
 
     def shutdown(self):
         self._shutting_down = True
@@ -170,6 +220,38 @@ class MitmController(QObject):
     def _is_helper_running(self) -> bool:
         return bool(self.helper and self.helper.state() != QProcess.NotRunning)
 
+    def _is_proxy_active(self) -> bool:
+        return self.helper_state in {"starting", "running", "stopping"}
+
+    def _request_proxy_stop(self):
+        if not self._is_proxy_active():
+            self.helper_state = "stopped"
+            self._sync_ui_state()
+            return
+
+        self.helper_state = "stopping"
+        self._send_command("stop", timeout=10.0)
+        self._start_force_stop_timer()
+        self._sync_ui_state()
+
+    def _changed_restart_sensitive_fields(self, old_config, new_config) -> list[str]:
+        changed_fields = []
+        for field_name, display_name in self.RESTART_SENSITIVE_FIELDS.items():
+            if getattr(old_config, field_name, None) != getattr(new_config, field_name, None):
+                changed_fields.append(display_name)
+        return changed_fields
+
+    def _refresh_cert_status(self):
+        trusted, can_install, cert_path, message = describe_windows_cert_status(
+            self.config
+        )
+        self.widget.set_cert_status(
+            message=message,
+            trusted=trusted,
+            can_install=can_install,
+            cert_path=cert_path,
+        )
+
     def _send_command(self, cmd: str, **payload):
         if not self.helper:
             raise RuntimeError("mitmproxy helper 未启动")
@@ -228,6 +310,19 @@ class MitmController(QObject):
         if msg_type == "state":
             self.helper_state = message.get("state", "stopped")
             self._sync_ui_state()
+            if (
+                self.helper_state == "stopped"
+                and self._restart_after_stop
+                and not self._shutting_down
+            ):
+                restart_reason = self._restart_reason
+                self._restart_after_stop = False
+                self._restart_reason = ""
+                if restart_reason:
+                    logger.info(
+                        f"mitmproxy 已停止，开始重新启动以应用配置：{restart_reason}"
+                    )
+                QTimer.singleShot(0, self.start)
             return
 
         if msg_type == "flow_new":

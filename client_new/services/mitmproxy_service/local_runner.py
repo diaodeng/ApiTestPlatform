@@ -33,7 +33,7 @@ async def _run():
     opts = Options(
         listen_host="127.0.0.1",
         listen_port=config.port,
-        ssl_insecure=True,
+        ssl_insecure=bool(config.ssl_insecure),
         mode=mode,
         confdir=config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy"),
     )

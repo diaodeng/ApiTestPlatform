@@ -1,6 +1,8 @@
+import mimetypes
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -31,6 +33,58 @@ from module_hrm.service.desktop_case_service import DesktopCaseService
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
 from utils.response_util import ResponseUtil
+
+desktopCaseAssetController = APIRouter()
+
+
+@desktopCaseAssetController.get("/hrm/desktop-case/assets/{asset_id}")
+async def get_desktop_asset_content(
+    asset_id: int,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = DesktopCaseService.read_asset_bytes_services(query_db, asset_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="桌面截图不存在")
+        asset, asset_bytes = result
+        media_type, _encoding = mimetypes.guess_type(str(asset.file_name or asset.file_path or ""))
+        return Response(
+            content=asset_bytes,
+            media_type=media_type or "application/octet-stream",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@desktopCaseAssetController.get("/desktop-test/{asset_path:path}")
+async def get_desktop_asset_by_path(
+    asset_path: str,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        normalized_path = f"{DesktopCaseService.IMAGE_DIR_NAME}/{asset_path or ''}".rstrip("/")
+        asset_bytes = DesktopCaseService.read_asset_bytes_by_path_services(
+            query_db,
+            normalized_path,
+        )
+        if asset_bytes is None:
+            raise HTTPException(status_code=404, detail="桌面截图不存在")
+        media_type, _encoding = mimetypes.guess_type(str(asset_path or ""))
+        return Response(
+            content=asset_bytes,
+            media_type=media_type or "application/octet-stream",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 
 desktopCaseController = APIRouter(
     prefix="/hrm/desktop-case",
