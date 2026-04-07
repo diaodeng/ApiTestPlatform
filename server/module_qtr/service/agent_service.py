@@ -18,7 +18,26 @@ from utils.log_util import logger
 # 存储agent的WebSocket连接和Future对象（用于HTTP请求等待WebSocket响应）
 agents: dict = {}
 response_futures = defaultdict(dict)
-CHUNK_SIZE = 1024 * 16
+CHUNK_SIZE = 5 * 1024
+
+
+def _sanitize_log_value(value, *, key: str | None = None):
+    normalized_key = str(key or "").lower()
+    if normalized_key in {"imagebase64", "image_base64"}:
+        return f"<base64 len={len(str(value or ''))}>"
+    if normalized_key == "data" and isinstance(value, str):
+        return f"<chunk len={len(value)}>"
+    if isinstance(value, dict):
+        return {k: _sanitize_log_value(v, key=k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_log_value(item) for item in value]
+    if isinstance(value, str) and len(value) > 240:
+        return f"<str len={len(value)}>"
+    return value
+
+
+def _summarize_message(message: dict | None) -> str:
+    return json.dumps(_sanitize_log_value(message or {}), ensure_ascii=False)
 
 
 async def send_message(agent_code: str, message: dict, request_id: str = None):
@@ -37,6 +56,7 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
 
         # 将Future对象存储在字典中，以便稍后设置其结果
         response_futures[request_id]["future"] = future
+        response_futures[request_id]["agent_code"] = agent_code
 
         # 发送消息到WebSocket，并包含request_id以便客户端能够识别是哪个请求的响应
         compress_data = compress_dict_to_str(message)
@@ -59,7 +79,7 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
         # 等待Future对象的结果（即WebSocket客户端的响应）
         try:
             response_data = await asyncio.wait_for(future, timeout=120)
-            logger.info(f"response={response_data}")
+            logger.info(f"response={_summarize_message(response_data)}")
             response = {}
             if response_data.get("Error", None):
                 return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
@@ -108,6 +128,8 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
         finally:
             if future and not future.done():
                 future.cancel()
+            if response_futures.get(request_id, {}).get("future") is future:
+                response_futures.pop(request_id, None)
 
 
     else:

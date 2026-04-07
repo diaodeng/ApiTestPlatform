@@ -9,7 +9,7 @@ from services.mitmproxy_service.helper_process import main as mitm_helper_main
 from ui.main_window import MainWindow
 from ui.theme_manager import ThemeManager
 from ui.utils.desktop_record_overlay import install_desktop_record_overlay
-from ui.utils.icon_util import install_app_icon
+from ui.utils.icon_util import apply_window_icon, install_app_icon
 from utils.logger import logger
 
 
@@ -56,4 +56,5 @@ if __name__ == "__main__":
 
     window = MainWindow()
     window.show()
+    apply_window_icon(window)
     sys.exit(app.exec())

@@ -462,30 +462,14 @@ def format_duration(seconds, show_days=True):
 
 
 def compress_dict_to_str(data: dict) -> str:
-    message = json.dumps(data)
-    # 将字符串转换为字节
-    string_bytes = message.encode('utf-8')
-
-    # 使用 base64 模块进行编码
-    encoded_bytes = base64.b64encode(string_bytes)
-
-    # 将编码后的字节转换回字符串
-    message = encoded_bytes.decode('utf-8')
-
-    # 压缩数据
-    return compress_text(message)
+    return compress_text(json.dumps(data, ensure_ascii=False, separators=(',', ':')))
 
 
 def decompress_str_to_dict(data: str) -> dict:
     data = decompress_text(data)
-
-    # 将字符串转换为字节
-    string_bytes = data.encode('utf-8')
-
-    # 使用 base64 模块进行解码
-    encoded_bytes = base64.b64decode(string_bytes)
-
-    # 将编码后的字节转换回字符串
-    data = encoded_bytes.decode('utf-8')
-
-    return json.loads(data)
+    try:
+        return json.loads(data)
+    except json.JSONDecodeError:
+        string_bytes = data.encode('utf-8')
+        encoded_bytes = base64.b64decode(string_bytes)
+        return json.loads(encoded_bytes.decode('utf-8'))
