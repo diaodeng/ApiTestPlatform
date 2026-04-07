@@ -52,8 +52,10 @@ from module_hrm.entity.vo.desktop_case_vo import (
 from module_hrm.enums.enums import AgentResponseEnum, CaseRunStatus, TstepTypeEnum
 from module_hrm.service.agent_service import AgentService
 from module_hrm.utils.desktop_asset_storage import (
+    build_storage_path,
     build_storage_metadata,
     default_local_root_dir,
+    legacy_default_local_root_dir,
     normalize_storage_config,
     public_asset_metadata,
     read_asset_bytes,
@@ -69,6 +71,7 @@ class DesktopCaseService:
     """桌面测试模块服务层。"""
 
     IMAGE_DIR_NAME = "desktop-test"
+    PUBLIC_ASSET_ROUTE_PREFIX = "/hrm/desktop-case/assets"
     DEFAULT_COMPARE_CONFIG_KEY = "hrm.desktop.compare.default"
     IMAGE_STORAGE_CONFIG_KEY = "hrm.desktop.asset.storage"
     IMAGE_STORAGE_CONFIG_NAME = "桌面截图存储配置"
@@ -265,7 +268,7 @@ class DesktopCaseService:
             sourceType=asset.source_type,
             fileName=asset.file_name,
             filePath=asset.file_path,
-            previewUrl=asset.file_path if str(asset.file_path or "").startswith(UploadConfig.UPLOAD_PREFIX) else None,
+            previewUrl=cls._build_public_asset_url(asset.asset_id, asset.file_path),
             resolutionKey=asset.resolution_key,
             width=asset.width,
             height=asset.height,
@@ -273,6 +276,29 @@ class DesktopCaseService:
             region=cls._loads(asset.region_json, None),
             metadata=public_asset_metadata(metadata),
         )
+
+    @classmethod
+    def _build_public_asset_url(
+        cls,
+        asset_id: int | str | None,
+        file_path: str | None,
+    ) -> str | None:
+        if asset_id not in (None, "", 0, "0"):
+            return f"{cls.PUBLIC_ASSET_ROUTE_PREFIX}/{asset_id}"
+        normalized = cls._normalize_public_asset_path(file_path)
+        if not normalized:
+            return None
+        return f"/{normalized}"
+
+    @classmethod
+    def _normalize_public_asset_path(cls, file_path: str | None) -> str:
+        raw_value = str(file_path or "").strip().replace("\\", "/")
+        if not raw_value:
+            return ""
+        normalized = PurePosixPath(raw_value.lstrip("/"))
+        if any(part in ("", ".", "..") for part in normalized.parts):
+            return ""
+        return normalized.as_posix()
 
     @classmethod
     def _build_case_model(cls, desktop_case: HrmDesktopCase) -> DesktopCaseModel:
@@ -1128,9 +1154,71 @@ class DesktopCaseService:
             return None
         file_url = str(asset_file_url)
         if not file_url.startswith(UploadConfig.UPLOAD_PREFIX):
-            return None
+            normalized = cls._normalize_public_asset_path(file_url)
+            if not normalized:
+                return None
+            current_default_path = resolve_local_root_dir() / Path(normalized)
+            if current_default_path.exists():
+                return current_default_path
+            legacy_path = legacy_default_local_root_dir() / Path(normalized)
+            if legacy_path.exists():
+                return legacy_path
+            return current_default_path
         relative = file_url.replace(UploadConfig.UPLOAD_PREFIX, "", 1).lstrip("/\\")
         return Path(UploadConfig.UPLOAD_PATH) / Path(relative)
+
+    @classmethod
+    def read_asset_bytes_services(
+        cls,
+        query_db: Session,
+        asset_id: int,
+    ) -> tuple[HrmDesktopImageAsset, bytes] | None:
+        asset = DesktopCaseDao.get_image_asset(query_db, asset_id)
+        if asset is None:
+            return None
+        payload = cls._build_asset_model(asset).model_dump(mode="python", by_alias=True)
+        asset_bytes = cls._read_asset_bytes(query_db, payload)
+        if asset_bytes is None:
+            return None
+        return asset, asset_bytes
+
+    @classmethod
+    def read_asset_bytes_by_path_services(
+        cls,
+        query_db: Session,
+        file_path: str,
+    ) -> bytes | None:
+        normalized = cls._normalize_public_asset_path(file_path)
+        if not normalized:
+            return None
+
+        relative_path = PurePosixPath(normalized)
+        storage_config = cls._load_storage_config(query_db)
+        storage_type, storage_path = build_storage_path(
+            storage_config,
+            relative_path=relative_path,
+        )
+
+        try:
+            if storage_type == "local":
+                local_root = resolve_local_root_dir(storage_config.get("localDirectory"))
+                local_path = Path(storage_path).resolve()
+                try:
+                    local_path.relative_to(local_root)
+                except ValueError:
+                    return None
+                if not local_path.exists():
+                    legacy_path = (legacy_default_local_root_dir() / Path(normalized)).resolve()
+                    if legacy_path.exists():
+                        return legacy_path.read_bytes()
+            return read_asset_bytes(
+                storage_config,
+                storage_type=storage_type,
+                storage_path=storage_path,
+            )
+        except Exception as exc:
+            logger.warning(f"按路径读取桌面图片资产失败: path={normalized}, error={exc}")
+            return None
 
     @classmethod
     def _read_asset_bytes(cls, query_db: Session, asset_payload: Any) -> bytes | None:

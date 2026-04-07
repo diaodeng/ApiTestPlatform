@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from model.config import SqliteFavoriteSqlModel
 from ui.utils.icon_util import apply_window_icon
+from ui.widgets.searchable_combo_box import SearchableComboBox
 
 
 class SqliteFavoriteSqlDialog(QDialog):
@@ -66,7 +67,7 @@ class SqliteFavoriteSqlDialog(QDialog):
         filter_layout.setContentsMargins(0, 0, 0, 0)
         filter_layout.setSpacing(8)
         filter_layout.addWidget(QLabel("查看范围"))
-        self.scope_filter_combo = QComboBox()
+        self.scope_filter_combo = SearchableComboBox("输入范围关键字搜索")
         self.scope_filter_combo.addItem("当前可用", "current")
         self.scope_filter_combo.addItem("全部", "all")
         self.scope_filter_combo.addItem("全局", "global")
@@ -101,7 +102,7 @@ class SqliteFavoriteSqlDialog(QDialog):
         save_layout.setSpacing(8)
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("常用 SQL 名称")
-        self.save_scope_combo = QComboBox()
+        self.save_scope_combo = SearchableComboBox("输入保存范围关键字搜索")
         self.save_btn = QPushButton("保存")
         self.close_btn = QPushButton("关闭")
         save_layout.addWidget(QLabel("名称"))

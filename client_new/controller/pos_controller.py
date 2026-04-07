@@ -421,6 +421,8 @@ class PosController(QObject):
         try:
             if not payload:
                 return "环境信息获取失败"
+            if isinstance(payload, str):
+                return f"环境信息获取失败: {payload}"
             source = "本地" if payload.get("is_local", True) else "远端"
             env_show = payload.get("remote_env") or payload.get("local_env") or "-"
             return (

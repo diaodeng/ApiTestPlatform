@@ -34,10 +34,11 @@ def run_proxy(config_queue, result_queue, port):
             RuntimeConfig.set(config)
 
     async def main():
+        config = RuntimeConfig.get()
         opts = Options(
             listen_host="127.0.0.1",
             listen_port=port,
-            ssl_insecure=True,
+            ssl_insecure=bool(getattr(config, "ssl_insecure", True)),
         )
 
         master = DumpMaster(opts)

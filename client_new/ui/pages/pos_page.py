@@ -1,12 +1,12 @@
 from loguru import logger
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -14,43 +14,34 @@ from PySide6.QtWidgets import (
 from controller.pos_controller import PosController
 from server.config import SearchConfig
 from ui.dialogs.change_pos_dialog import ChangePosDialog
+from ui.dialogs.dialog_service import DialogService
 from ui.dialogs.local_env_dialog import LocalEnvDialog
 from ui.dialogs.pos_account_dialog import PosAccountDialog
 from ui.dialogs.pos_setting_dialog import PosSettingDialog
 from ui.dialogs.process_manager_dialog import ProcessManagerDialog
 from ui.dialogs.work_dir_dialog import WorkDirDialog
-
-from .pos_item import PosItemWidget
+from ui.widgets.pos_table_widget import PosTableWidget
 
 
 class PosPage(QWidget):
     def __init__(self):
         super().__init__()
-        self.all_results = []  # 原始数据（不会变）
-        self.filtered_results = []  # 当前显示
-
+        self.all_results = []
         self.controller = PosController()
+        self.dialog_service = DialogService(self)
         self._result_set = set()
 
         self._init_ui()
         self._bind()
 
-    # ======================
-    # UI 初始化
-    # ======================
     def _init_ui(self):
         self.setWindowTitle("POS 启动器")
 
         main_layout = QVBoxLayout(self)
 
-        # ======================
-        # 顶部控制区
-        # ======================
         top_layout = QVBoxLayout()
 
-        # ===== 第一行（按钮）
         row1 = QHBoxLayout()
-
         self.dir_btn = QPushButton("工作目录")
         self.scan_btn = QPushButton("扫描")
         self.stop_pos_btn = QPushButton("停止POS")
@@ -70,15 +61,14 @@ class PosPage(QWidget):
         row1.addWidget(self.account_btn)
         row1.addWidget(self.btn_setting)
 
-        # ===== 第三行（启动前选项）
         row3 = QHBoxLayout()
-
         self.cb_cert = QCheckBox("替换证书")
         self.cb_cache = QCheckBox("清缓存")
         self.cb_driver = QCheckBox("覆盖驱动")
 
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText("输入关键字过滤（路径/文件名）")
+        self.filter_input.setClearButtonEnabled(True)
 
         self.refresh_btn = QPushButton("刷新列表")
 
@@ -93,37 +83,18 @@ class PosPage(QWidget):
 
         top_layout.addLayout(row1)
         top_layout.addLayout(row3)
-
         main_layout.addLayout(top_layout)
 
-        # ======================
-        # 状态栏
-        # ======================
         self.status_label = QLabel("状态：就绪")
         self.status_label.setStyleSheet("color: gray;")
         main_layout.addWidget(self.status_label)
 
-        # ======================
-        # 列表区（卡片容器）
-        # ======================
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
+        self.result_table = PosTableWidget(self)
+        main_layout.addWidget(self.result_table, 1)
 
-        self.list_container = QWidget()
-        self.list_layout = QVBoxLayout(self.list_container)
-        self.list_layout.setAlignment(Qt.AlignTop)
-        # self.list_container.setStyleSheet("background: #ffffff;")
-
-        self.scroll.setWidget(self.list_container)
-
-        main_layout.addWidget(self.scroll)
         self.load_history()
 
-    # ======================
-    # 信号绑定
-    # ======================
     def _bind(self):
-        # UI按钮
         self.dir_btn.clicked.connect(self.open_work_dir_dialog)
         self.scan_btn.clicked.connect(self.on_scan)
         self.stop_pos_btn.clicked.connect(self.on_stop_pos)
@@ -135,21 +106,25 @@ class PosPage(QWidget):
         self.process_btn.clicked.connect(self.open_process_dialog)
         self.account_btn.clicked.connect(self.open_pos_account_dialog)
 
-        # controller 信号
+        self.result_table.open_dir_requested.connect(self.on_row_open_dir)
+        self.result_table.switch_online_requested.connect(
+            self.on_row_switch_online
+        )
+        self.result_table.load_env_requested.connect(self.on_row_load_env)
+        self.result_table.start_requested.connect(self.on_row_start)
+        self.result_table.more_requested.connect(self.open_row_more_menu)
+        self.result_table.copy_path_requested.connect(self.copy_path)
+
         self.controller.result_signal.connect(self.add_result)
         self.controller.status_signal.connect(self.update_status)
         self.controller.finished_signal.connect(self.on_finished)
         self.controller.log_signal.connect(self.update_status)
 
-    # ======================
-    # UI -> Controller
-    # ======================
     def open_work_dir_dialog(self):
         dialog = WorkDirDialog(self)
         dialog.exec()
 
     def on_scan(self):
-        """开始扫描"""
         logger.info("开始扫描")
         config = SearchConfig.read()
         file_pattern = config.file_pattern or "*"
@@ -159,13 +134,7 @@ class PosPage(QWidget):
         except Exception:
             depth = 3
 
-        # 清空UI
         self.clear_list()
-        self.all_results.clear()
-        self.filtered_results.clear()
-        self._result_set.clear()
-
-        # 调controller
         self.controller.start_search(
             file_pattern=file_pattern,
             dir_pattern=dir_pattern,
@@ -180,74 +149,110 @@ class PosPage(QWidget):
         logger.info("停止离线进程")
         self.controller.stop_offline()
 
-    # ======================
-    # Controller -> UI
-    # ======================
-    #
     def refresh_list(self):
         self.apply_filter()
 
-    def apply_filter(self):
-        keyword = self.filter_input.text().lower().strip()
-
-        if not keyword:
-            self.filtered_results = self.all_results[:]
-        else:
-            self.filtered_results = [
-                p for p in self.all_results if keyword in p.lower()
-            ]
-
-        self.render_list()
-
-    def render_list(self):
-        # 清空UI
-        while self.list_layout.count():
-            item = self.list_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-
-        # 重新渲染
-        for path in self.filtered_results:
-            item = PosItemWidget(path, self)
-            self.list_layout.addWidget(item)
-
-        self.list_container.adjustSize()
+    def apply_filter(self, *_args):
+        self.result_table.set_filter_text(self._get_filter_keyword())
 
     def load_history(self):
-        results = SearchConfig.read_search_result()
-
-        self.all_results = results or []
+        results = list(dict.fromkeys(SearchConfig.read_search_result() or []))
+        self.clear_list()
+        self.all_results = results
         self._result_set = set(self.all_results)
-        self.refresh_list()
+        self.result_table.set_paths(self.all_results)
+        self.apply_filter()
 
     def add_result(self, file_path):
-        """添加一条结果（卡片）"""
         if not file_path or file_path in self._result_set:
             return
         self._result_set.add(file_path)
         self.all_results.append(file_path)
-        keyword = self.filter_input.text().lower().strip()
-        if not keyword or keyword in file_path.lower():
-            item = PosItemWidget(file_path, self)
-            self.list_layout.addWidget(item)
+        self.result_table.add_path(file_path)
 
     def update_status(self, text):
         self.status_label.setText(f"状态：{text}")
 
     def on_finished(self):
-        self.status_label.setText("状态：完成")
+        pass
 
-    # ======================
-    # 工具方法
-    # ======================
     def clear_list(self):
         self._result_set.clear()
-        while self.list_layout.count():
-            item = self.list_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+        self.all_results.clear()
+        self.result_table.clear()
+
+    def copy_path(self, pos_path: str):
+        if not pos_path:
+            return
+        QGuiApplication.clipboard().setText(pos_path)
+        self.update_status("POS路径已复制")
+
+    def on_row_open_dir(self, pos_path: str):
+        self.controller.open_pos_location(pos_path)
+
+    def on_row_switch_online(self, pos_path: str):
+        self.controller.switch_pos_online_by_path(pos_path)
+
+    def on_row_load_env(self, pos_path: str):
+        self.result_table.set_env_loading(pos_path)
+
+        def callback(text, target_path=pos_path):
+            self.result_table.update_env_info(target_path, text)
+            self.update_status(text)
+
+        self.controller.get_env(pos_path, callback)
+
+    def on_row_start(self, pos_path: str):
+        self.controller.start_pos(pos_path, self.dialog_service)
+
+    def open_row_more_menu(self, pos_path: str, global_pos):
+        if not pos_path:
+            return
+        if global_pos is None or global_pos.isNull():
+            global_pos = self.mapToGlobal(self.rect().center())
+
+        menu = QMenu(self)
+        action_change_env = menu.addAction("切换本地环境")
+        action_open_online_dialog = menu.addAction("打开切换POS(在线)弹窗")
+        action_backup_driver = menu.addAction("备份支付驱动")
+        action_restore_driver = menu.addAction("恢复支付驱动")
+        action_cover_driver = menu.addAction("覆盖支付驱动")
+        action_clear_env_file = menu.addAction("清理当前环境文件")
+        action_replace_cert = menu.addAction("替换证书")
+        action_logout = menu.addAction("退出账号")
+        menu.addSeparator()
+        action_copy_path = menu.addAction("复制路径")
+
+        selected_action = menu.exec(global_pos)
+        if selected_action == action_change_env:
+            self.open_local_env_dialog(pos_path)
+            return
+        if selected_action == action_open_online_dialog:
+            self.open_change_pos_dialog(pos_path)
+            return
+        if selected_action == action_backup_driver:
+            self.controller.backup_payment_driver(pos_path)
+            return
+        if selected_action == action_restore_driver:
+            self.controller.restore_payment_driver(pos_path)
+            return
+        if selected_action == action_cover_driver:
+            self.controller.cover_payment_driver(pos_path)
+            return
+        if selected_action == action_clear_env_file:
+            self.controller.clear_pos_env_file(pos_path)
+            return
+        if selected_action == action_replace_cert:
+            self.controller.replace_mitm_cert(pos_path)
+            return
+        if selected_action == action_logout:
+            self.controller.logout_pos_account(pos_path)
+            return
+        if selected_action == action_copy_path:
+            self.copy_path(pos_path)
+
+    def _get_filter_keyword(self):
+        return self.filter_input.text().lower().strip()
 
     def open_setting_dialog(self):
         dlg = PosSettingDialog(self)
