@@ -40,7 +40,7 @@ class AgentClientService(QObject):
             self._stop_requested = False
             self._state = "starting"
 
-        agent_server.MAX_MESSAGE_SIZE = config.max_send_size
+        agent_server.MAX_MESSAGE_SIZE = agent_server.clamp_message_size(config.max_send_size)
         self.state_changed.emit("starting")
         self.status_message.emit(f"开始连接服务器：{connect_url}")
 
@@ -87,7 +87,7 @@ class AgentClientService(QObject):
         return True, "Agent 停止请求已发送"
 
     def update_runtime_config(self, config: AgentConfigModel):
-        agent_server.MAX_MESSAGE_SIZE = config.max_send_size
+        agent_server.MAX_MESSAGE_SIZE = agent_server.clamp_message_size(config.max_send_size)
 
         with self._lock:
             client = self._client

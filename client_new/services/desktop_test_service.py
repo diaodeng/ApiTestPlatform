@@ -81,6 +81,9 @@ VIEWPORT_MODE_MANUAL_REGION = "manual_region"
 ANNOTATION_WAIT_DISABLED = "disabled"
 ANNOTATION_WAIT_AFTER_CAPTURE = "after_capture"
 ANNOTATION_WAIT_BEFORE_CAPTURE = "before_capture"
+TRANSPORT_MAX_IMAGE_SIDE = 1600
+TRANSPORT_MAX_IMAGE_PIXELS = 1600 * 900
+TRANSPORT_WEBP_MIN_PIXELS = 320 * 240
 
 KEY_NAME_MAP = {
     "Key.enter": "enter",
@@ -394,10 +397,61 @@ def _resolution_key(image) -> str:
     return f"{image.width}x{image.height}"
 
 
-def _image_to_base64(image) -> str:
+def _image_resample_filter():
+    if Image is None:
+        return 1
+    resampling = getattr(Image, "Resampling", None)
+    if resampling is not None:
+        return getattr(resampling, "LANCZOS", 1)
+    return getattr(Image, "LANCZOS", 1)
+
+
+def _resize_image_for_transport(image) -> tuple[Any, dict[str, Any]]:
+    width = max(int(getattr(image, "width", 0) or 0), 1)
+    height = max(int(getattr(image, "height", 0) or 0), 1)
+    pixel_count = width * height
+    scale = 1.0
+    if max(width, height) > TRANSPORT_MAX_IMAGE_SIDE:
+        scale = min(scale, TRANSPORT_MAX_IMAGE_SIDE / max(width, height))
+    if pixel_count > TRANSPORT_MAX_IMAGE_PIXELS:
+        scale = min(scale, (TRANSPORT_MAX_IMAGE_PIXELS / pixel_count) ** 0.5)
+    if scale >= 0.999:
+        return image, {}
+    resized = image.resize(
+        (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        ),
+        _image_resample_filter(),
+    )
+    return resized, {
+        "transportScaled": True,
+        "transportScale": round(scale, 6),
+        "originalWidth": width,
+        "originalHeight": height,
+        "originalResolutionKey": f"{width}x{height}",
+        "transportResolutionKey": _resolution_key(resized),
+    }
+
+
+def _replace_file_extension(file_name: str, extension: str) -> str:
+    root, _ = os.path.splitext(str(file_name or "image"))
+    root = root or "image"
+    return f"{root}.{extension}"
+
+
+def _image_to_base64(image) -> tuple[str, str]:
     buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode("ascii")
+    prefer_webp = image.width * image.height >= TRANSPORT_WEBP_MIN_PIXELS
+    if prefer_webp:
+        try:
+            image.save(buffer, format="WEBP", lossless=True, method=6)
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            return f"data:image/webp;base64,{encoded}", "webp"
+        except Exception:
+            buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True, compress_level=9)
+    return base64.b64encode(buffer.getvalue()).decode("ascii"), "png"
 
 
 def _image_payload(
@@ -408,15 +462,20 @@ def _image_payload(
     region: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    original_resolution_key = _resolution_key(image)
+    payload_metadata = dict(metadata or {})
+    transport_image, transport_metadata = _resize_image_for_transport(image)
+    payload_metadata.update(transport_metadata)
+    image_base64, extension = _image_to_base64(transport_image)
     return {
         "assetType": asset_type,
-        "fileName": file_name,
-        "resolutionKey": _resolution_key(image),
-        "width": image.width,
-        "height": image.height,
+        "fileName": _replace_file_extension(file_name, extension),
+        "resolutionKey": original_resolution_key,
+        "width": transport_image.width,
+        "height": transport_image.height,
         "region": region,
-        "metadata": metadata or {},
-        "imageBase64": _image_to_base64(image),
+        "metadata": payload_metadata,
+        "imageBase64": image_base64,
     }
 
 
@@ -598,10 +657,18 @@ def _compare_visual(
 ) -> tuple[bool, dict[str, Any], Any | None, Any]:
     baseline_image = _decode_image_payload(baseline_payload)
     region = _as_dict(baseline_payload.get("region"))
+    metadata = _as_dict(baseline_payload.get("metadata"))
     x, y, width, height = _normalize_region(region, current_image)
     current_crop = current_image.crop((x, y, x + width, y + height))
+    original_crop_size = current_crop.size
     if current_crop.size != baseline_image.size:
-        baseline_image = baseline_image.resize(current_crop.size)
+        should_resize_current = bool(metadata.get("transportScaled")) or (
+            baseline_image.width * baseline_image.height <= current_crop.width * current_crop.height
+        )
+        if should_resize_current:
+            current_crop = current_crop.resize(baseline_image.size, _image_resample_filter())
+        else:
+            baseline_image = baseline_image.resize(current_crop.size, _image_resample_filter())
 
     gray_baseline = _pil_to_gray_array(
         baseline_image,
@@ -613,7 +680,9 @@ def _compare_visual(
         grayscale=bool(compare_config.get("preprocessGrayscale", True)),
         blur_kernel=int(compare_config.get("blurKernel") or 3),
     )
-    mask = _build_mask(gray_current.shape, mask_regions, offset_x=x, offset_y=y)
+    mask = _build_mask((original_crop_size[1], original_crop_size[0]), mask_regions, offset_x=x, offset_y=y)
+    if mask is not None and (mask.shape[1], mask.shape[0]) != (gray_current.shape[1], gray_current.shape[0]):
+        mask = cv2.resize(mask, (gray_current.shape[1], gray_current.shape[0]), interpolation=cv2.INTER_NEAREST)
 
     if mask is not None:
         gray_baseline = np.where(mask > 0, gray_baseline, 0)
@@ -922,7 +991,12 @@ def _select_baseline_image(step: dict[str, Any], resolution_key: str) -> dict[st
         (
             item
             for item in baseline_images
-            if isinstance(item, dict) and str(item.get("resolutionKey") or item.get("resolution_key") or "") == resolution_key
+            if isinstance(item, dict)
+            and resolution_key
+            in {
+                str(item.get("resolutionKey") or item.get("resolution_key") or ""),
+                str(_as_dict(item.get("metadata")).get("originalResolutionKey") or ""),
+            }
         ),
         None,
     )

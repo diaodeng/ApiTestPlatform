@@ -32,6 +32,31 @@ def _virtual_geometry() -> QRect:
     return geometry
 
 
+def _intersection_area(rect1: QRect, rect2: QRect) -> int:
+    intersected = rect1.intersected(rect2)
+    if not intersected.isValid():
+        return 0
+    return max(intersected.width(), 0) * max(intersected.height(), 0)
+
+
+def _available_geometry_for_rect(target_rect: QRect) -> QRect:
+    screens = QGuiApplication.screens()
+    if not screens:
+        return QRect(0, 0, 1920, 1080)
+    if target_rect.isValid():
+        target_center = target_rect.center()
+        screen = QGuiApplication.screenAt(target_center)
+        if screen is not None:
+            return QRect(screen.availableGeometry())
+        best_screen = max(
+            screens,
+            key=lambda screen_obj: _intersection_area(screen_obj.availableGeometry(), target_rect),
+            default=screens[0],
+        )
+        return QRect(best_screen.availableGeometry())
+    return QRect(screens[0].availableGeometry())
+
+
 def _payload_to_rect(payload: dict[str, Any] | None) -> QRect:
     payload = payload or {}
     return QRect(
@@ -235,6 +260,7 @@ class _AnnotationToolbarWidget(QFrame):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setObjectName("desktopRecordAnnotationToolbar")
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setWindowTitle("桌面录制标注")
         self._status_label = QLabel()
         self._prompt_label = QLabel()
@@ -363,17 +389,40 @@ class _DesktopRecordOverlayController(QObject):
     def _place_toolbar(self) -> None:
         desktop_rect = self._desktop_rect if self._desktop_rect.isValid() else _virtual_geometry()
         viewport_rect = self._viewport_rect if self._viewport_rect.isValid() else QRect(desktop_rect)
+        available_rect = _available_geometry_for_rect(viewport_rect)
         self._toolbar_widget.adjustSize()
         toolbar_size = self._toolbar_widget.size()
+        margin = 18
 
-        x = viewport_rect.right() + 18
-        y = max(viewport_rect.top(), desktop_rect.top() + 18)
-        if x + toolbar_size.width() > desktop_rect.right():
-            x = min(max(viewport_rect.left(), desktop_rect.left() + 18), max(desktop_rect.right() - toolbar_size.width(), desktop_rect.left()))
-            y = viewport_rect.bottom() + 18
-        if y + toolbar_size.height() > desktop_rect.bottom():
-            y = max(desktop_rect.top() + 18, desktop_rect.bottom() - toolbar_size.height() - 18)
-        self._toolbar_widget.move(x, y)
+        safe_rect = available_rect.adjusted(margin, margin, -margin, -margin)
+        if safe_rect.width() < toolbar_size.width():
+            safe_rect = QRect(available_rect)
+        if safe_rect.height() < toolbar_size.height():
+            safe_rect = QRect(available_rect)
+
+        min_x = safe_rect.left()
+        min_y = safe_rect.top()
+        max_x = max(min_x, safe_rect.right() - toolbar_size.width() + 1)
+        max_y = max(min_y, safe_rect.bottom() - toolbar_size.height() + 1)
+
+        candidates = [
+            QPoint(viewport_rect.right() + margin, max(viewport_rect.top(), min_y)),
+            QPoint(max(viewport_rect.left(), min_x), viewport_rect.bottom() + margin),
+            QPoint(max(viewport_rect.left(), min_x), viewport_rect.top() - toolbar_size.height() - margin),
+            QPoint(max_x, min_y),
+        ]
+
+        chosen = QPoint(max_x, min_y)
+        for candidate in candidates:
+            clamped_x = min(max(candidate.x(), min_x), max_x)
+            clamped_y = min(max(candidate.y(), min_y), max_y)
+            candidate_rect = QRect(clamped_x, clamped_y, toolbar_size.width(), toolbar_size.height())
+            if safe_rect.contains(candidate_rect):
+                chosen = QPoint(clamped_x, clamped_y)
+                break
+            chosen = QPoint(clamped_x, clamped_y)
+
+        self._toolbar_widget.move(chosen)
 
     def _update_toolbar(self, prompt: str = "") -> None:
         self._toolbar_widget.update_state(

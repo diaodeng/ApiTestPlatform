@@ -2,7 +2,10 @@ import os.path
 from collections import defaultdict
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+DEFAULT_AGENT_MAX_SEND_SIZE = 5 * 1024
 
 
 class SearchConfigModel(BaseModel):
@@ -186,11 +189,22 @@ class AgentConfigModel(BaseModel):
     current_server: str = ""
     server_list: dict[str, str] = {}
     show_logs: bool = False
-    max_send_size: int = 1024
+    max_send_size: int = DEFAULT_AGENT_MAX_SEND_SIZE
     retry_times: int = 0
     retry_interval: float = 5
     retry: bool = False
     browser: AgentBrowserConfigModel = AgentBrowserConfigModel()
+
+    @field_validator("max_send_size", mode="before")
+    @classmethod
+    def normalize_max_send_size(cls, value):
+        try:
+            resolved = int(value)
+        except Exception:
+            resolved = DEFAULT_AGENT_MAX_SEND_SIZE
+        if resolved <= 0:
+            return DEFAULT_AGENT_MAX_SEND_SIZE
+        return resolved
 
 
 class SqliteScannedDatabaseModel(BaseModel):

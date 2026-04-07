@@ -1,8 +1,8 @@
 import asyncio
 import json
-import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket
 from sqlalchemy.orm import Session
@@ -10,15 +10,11 @@ from sqlalchemy.orm import Session
 from config.database import SessionLocal
 from config.get_db import get_db
 from module_hrm.entity.vo.agent_vo import AgentModel
-from module_hrm.enums.enums import AgentResponseEnum, TstepTypeEnum
 from module_hrm.service.agent_service import AgentService
-from module_hrm.utils.util import compress_dict_to_str, decompress_str_to_dict
+from module_hrm.utils.util import decompress_str_to_dict
 from module_qtr.service.agent_service import (
-    AgentResponse,
-    AgentResponseWebUI,
-    AgentResponseWebSocket,
     agents,
-    handle_response,
+    send_message as agent_service_send_message,
     response_futures,
 )
 from module_hrm.service.desktop_case_service import DesktopCaseService
@@ -28,12 +24,50 @@ from utils.snowflake import snowIdWorker
 
 agentController = APIRouter(prefix="/qtr/agent")
 
-# websocket发送数据分片大小
-MAX_MESSAGE_SIZE = 1024 * 16
 # 心跳间隔（秒）
 HEARTBEAT_INTERVAL = 30
 # agent状态
 agent_status = defaultdict(dict)
+event_chunks = defaultdict(lambda: {"chunks": {}, "total": 0})
+
+
+def _sanitize_log_value(value, *, key: str | None = None):
+    normalized_key = str(key or "").lower()
+    if normalized_key in {"imagebase64", "image_base64"}:
+        return f"<base64 len={len(str(value or ''))}>"
+    if normalized_key == "data" and isinstance(value, str):
+        return f"<chunk len={len(value)}>"
+    if isinstance(value, dict):
+        return {k: _sanitize_log_value(v, key=k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_log_value(item) for item in value]
+    if isinstance(value, str) and len(value) > 240:
+        return f"<str len={len(value)}>"
+    return value
+
+
+def _summarize_message(message: Any) -> str:
+    if isinstance(message, str):
+        if len(message) > 240:
+            return f"<raw len={len(message)}>"
+        return message
+    return json.dumps(_sanitize_log_value(message or {}), ensure_ascii=False)
+
+
+def _dispatch_agent_event(db: Session, agent_code: str, message_data: dict[str, Any]) -> bool:
+    message_type = message_data.get("type")
+    if message_type in ("record_event", "record_status", "record_finished", "record_error"):
+        WebCaseService.handle_agent_recording_event(db, agent_code, message_data)
+        return True
+    if message_type in (
+        "desktop_record_event",
+        "desktop_record_status",
+        "desktop_record_finished",
+        "desktop_record_error",
+    ):
+        DesktopCaseService.handle_agent_recording_event(db, agent_code, message_data)
+        return True
+    return False
 
 
 def change_agent_status(current_db, agent):
@@ -59,11 +93,14 @@ class ConnectionManager:
         logger.info(f"Client connected: {self.agents[agent_code].client_state}")
 
     async def disconnect(self, agent_code: str, close_code):
-        if agent_code in self.agents:
-            logger.info(self.agents[agent_code])
-            self.agents.pop(agent_code).close()
-            logger.info(f"Client disconnected: {self.agents[agent_code].client_state}, close code: {close_code}")
-            del self.agents[agent_code]
+        websocket = self.agents.pop(agent_code, None)
+        if websocket is None:
+            return
+        try:
+            logger.info(f"Client disconnected: {getattr(websocket, 'client_state', None)}, close code: {close_code}")
+            await websocket.close(code=close_code)
+        except Exception:
+            pass
 
     async def send_heartbeat(self):
         while True:
@@ -139,26 +176,23 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
     # await websocket.accept()
     await manager.connect(agent_code, websocket)
     # agents[agent_code] = websocket
-    # 当有新的WebSocket连接时，初始化一个空的字典来存储该agent的待处理Future对象
-    if agent_code not in response_futures:
-        response_futures[agent_code] = {}
-        agent_obj = AgentModel()
-        agent_obj.agent_code = snowIdWorker.get_id()
-        agent_obj.agent_code = agent_code
-        agent_obj.agent_name = agent_code
-        add_agent_result = AgentService.add_agent_services(db, agent_obj)
-        if add_agent_result.is_success:
-            logger.info(add_agent_result.message)
-        else:
-            # logger.warning(add_agent_result.message)
-            # logger.info(f'{add_agent_result.message},agent_code:{agent_code}')
-            agent_info = AgentService.get_agent_detail_services(db, agent_code)
-            # logger.info(f'agent_info:{agent_info},agent_code:{agent_code}')
-            if agent_info:
-                agent_info.status = 2
-                agent_info.online_time = datetime.now()
-                AgentService.edit_agent_services(db, agent_info)
-                logger.info(f"agent:{agent_code} 状态为：{agent_info.status}")
+    agent_obj = AgentModel()
+    agent_obj.agent_code = snowIdWorker.get_id()
+    agent_obj.agent_code = agent_code
+    agent_obj.agent_name = agent_code
+    add_agent_result = AgentService.add_agent_services(db, agent_obj)
+    if add_agent_result.is_success:
+        logger.info(add_agent_result.message)
+    else:
+        # logger.warning(add_agent_result.message)
+        # logger.info(f'{add_agent_result.message},agent_code:{agent_code}')
+        agent_info = AgentService.get_agent_detail_services(db, agent_code)
+        # logger.info(f'agent_info:{agent_info},agent_code:{agent_code}')
+        if agent_info:
+            agent_info.status = 2
+            agent_info.online_time = datetime.now()
+            AgentService.edit_agent_services(db, agent_info)
+            logger.info(f"agent:{agent_code} 状态为：{agent_info.status}")
 
     try:
         while True:
@@ -166,38 +200,35 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
             agent_status[agent_code]["heart_status"] = True
             agent_status[agent_code]["heart_time"] = datetime.now()
             # 解析接收到的消息
-            logger.debug(f"收到消息：{data}")
             message_data = json.loads(data)
+            logger.debug(f"收到消息：{_summarize_message(message_data)}")
             if message_data.get("type") in ("ping", "pong"):
                 agent_status[agent_code]["heart_status"] = True
-                # logger.info(message_data.get("message"))
-            elif message_data.get("type") in ("record_event", "record_status", "record_finished", "record_error"):
-                WebCaseService.handle_agent_recording_event(db, agent_code, message_data)
-            elif message_data.get("type") in (
-                "desktop_record_event",
-                "desktop_record_status",
-                "desktop_record_finished",
-                "desktop_record_error",
-            ):
-                DesktopCaseService.handle_agent_recording_event(db, agent_code, message_data)
+            elif _dispatch_agent_event(db, agent_code, message_data):
+                continue
             # 检查消息类型是否为分片
             elif message_data.get("type") == "response_chunk":
                 # 获取分片信息
                 request_id = message_data["request_id"]
                 data_chunk = message_data["data"]
+                request_state = response_futures.get(request_id)
+                if not request_state:
+                    logger.warning(f"收到未知响应分片，request_id={request_id}")
+                    continue
 
                 # 将分片存储在字典中
-                if "chunks" not in response_futures[request_id]:
-                    response_futures[request_id]["chunks"] = []
+                if "chunks" not in request_state:
+                    request_state["chunks"] = []
 
                 # 存储分片数据
-                response_futures[request_id]["chunks"].append(data_chunk)
+                request_state["chunks"].append(data_chunk)
 
                 # 检查是否收到了所有的分片
-                logger.debug(f"收到消息： {message_data}")
                 if message_data["finished"]:
                     # 重新组装消息
-                    current_finished_request = response_futures.pop(request_id)
+                    current_finished_request = response_futures.pop(request_id, None)
+                    if not current_finished_request:
+                        continue
                     try:
                         complete_message = "".join(current_finished_request["chunks"])
                         response_data = decompress_str_to_dict(complete_message)
@@ -212,6 +243,27 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                         del response_data
                     finally:
                         del current_finished_request["chunks"]
+            elif message_data.get("type") == "event_chunk":
+                chunk_id = f"{agent_code}:{message_data.get('chunk_id')}"
+                current_event = event_chunks[chunk_id]
+                total = int(message_data.get("total") or 0)
+                index = int(message_data.get("index") or 0)
+                current_event["chunks"][index] = message_data.get("data") or ""
+                current_event["total"] = max(total, int(current_event.get("total") or 0))
+                if (
+                    message_data.get("finished")
+                    and current_event["total"] > 0
+                    and len(current_event["chunks"]) >= current_event["total"]
+                ):
+                    try:
+                        complete_message = "".join(
+                            current_event["chunks"].get(i, "") for i in range(current_event["total"])
+                        )
+                        event_data = decompress_str_to_dict(complete_message)
+                        if not _dispatch_agent_event(db, agent_code, event_data):
+                            logger.warning(f"收到未知事件分片类型: {event_data.get('type')}")
+                    finally:
+                        event_chunks.pop(chunk_id, None)
             else:
                 # 如果不是分片消息，则直接处理（这里可以根据需要添加逻辑）
                 pass
@@ -221,14 +273,15 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
         logger.error(f"Error with {agent_code}: connection closed, {e}")
     finally:
         try:
-            # del agents[agent_code]
-            del manager.agents[agent_code]
-            # 取消所有未处理的Future对象
-            if agent_code in response_futures:
-                for future in response_futures[agent_code].values():
+            for request_id, request_state in list(response_futures.items()):
+                if request_state.get("agent_code") != agent_code:
+                    continue
+                future = request_state.get("future")
+                if future and not future.done():
                     future.cancel()
-                del response_futures[agent_code]
-            await manager.agents[agent_code].close()
+                response_futures.pop(request_id, None)
+            for chunk_key in [key for key in event_chunks.keys() if str(key).startswith(f"{agent_code}:")]:
+                event_chunks.pop(chunk_key, None)
         except Exception:
             pass
         finally:
@@ -243,74 +296,7 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
 
 @agentController.post("/send/{agent_code}")
 async def send_message(agent_code: str, message: dict, request_id: str = None):
-    logger.info(f"agent_code: {agent_code}")
-    request_type = message.get("requestType")
-    logger.info(f"转发类型: {request_type}")
-    # 如果没有提供request_id，则生成一个唯一的标识符
-    if not request_id:
-        request_id = str(uuid.uuid4())
-
-    if agent_code in agents:
-        # 创建一个Future对象来代表异步操作的结果
-        loop = asyncio.get_event_loop()
-        future = loop.create_future()
-
-        # 将Future对象存储在字典中，以便稍后设置其结果
-        if agent_code not in response_futures:
-            response_futures[agent_code] = {}
-        response_futures[agent_code][request_id] = future
-
-        # 发送消息到WebSocket，并包含request_id以便客户端能够识别是哪个请求的响应
-        message["request_id"] = request_id
-
-        message = compress_dict_to_str(message)
-        await agents[agent_code].send_text(json.dumps(message))
-
-        # 等待Future对象的结果（即WebSocket客户端的响应）
-        try:
-            response = await asyncio.wait_for(future, timeout=10)
-            logger.info(f"response={response}")
-            if response.get("request_type") == TstepTypeEnum.http.value:
-                response = AgentResponse(response)
-            elif response.get("request_type") == TstepTypeEnum.websocket.value:
-                response = AgentResponseWebSocket(response)
-                logger.info(f"ws响应数据：{response}")
-            elif response.get("request_type") in (TstepTypeEnum.webui.value, TstepTypeEnum.desktopui.value):
-                response = AgentResponseWebUI(**response)
-            response = handle_response((AgentResponseEnum.SUCCESS.value, response, "操作成功"))
-            return response
-        except TimeoutError as e:
-            logger.error(f"wobsocket请求超时{e}")
-            # 如果超时，取消Future对象
-            if agent_code in response_futures and request_id in response_futures[agent_code]:
-                response_futures[agent_code][request_id].cancel()
-                del response_futures[agent_code][request_id]
-            if request_type == TstepTypeEnum.http.value:
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value, None, f"wobsocket请求超时{e}"))
-                return response
-            elif request_type == TstepTypeEnum.websocket.value:
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value, None, f"wobsocket请求超时{e}"))
-                return response
-        except asyncio.CancelledError as e:
-            logger.error(e)
-            # 如果超时，取消Future对象
-            if agent_code in response_futures and request_id in response_futures[agent_code]:
-                response_futures[agent_code][request_id].cancel()
-                del response_futures[agent_code][request_id]
-            response = handle_response((AgentResponseEnum.TASK_CANCELLED.value, None, str(e.args)))
-            return response
-        except Exception as e:
-            logger.error(e)
-            # 如果超时，取消Future对象
-            if agent_code in response_futures and request_id in response_futures[agent_code]:
-                response_futures[agent_code][request_id].cancel()
-                del response_futures[agent_code][request_id]
-            response = handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, str(e.args)))
-            return response
-
-    else:
-        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value, None, "Agent not connected"))
-        return response
+    return await agent_service_send_message(agent_code, message, request_id)
 
 
 

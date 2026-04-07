@@ -1,9 +1,10 @@
 import asyncio
 import json
 import traceback
+import uuid
 from collections import defaultdict
 from enum import Enum
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 import httpx
 import websockets
@@ -17,7 +18,9 @@ from services.web_test_service import WebTestService
 from utils.common import compress_dict_to_str, decompress_str_to_dict
 
 # websocket发送数据分片大小
-MAX_MESSAGE_SIZE = 1024
+DEFAULT_MESSAGE_SIZE = 5 * 1024
+MAX_MESSAGE_SIZE = DEFAULT_MESSAGE_SIZE
+EVENT_CHUNK_TYPE = "event_chunk"
 # 心跳间隔（秒）
 HEARTBEAT_INTERVAL = 30
 
@@ -50,6 +53,21 @@ def _get_websocket_response_headers(websocket) -> dict:
         return dict(headers)
 
     return {}
+
+
+def clamp_message_size(value: Any) -> int:
+    try:
+        size = int(value)
+    except Exception:
+        size = DEFAULT_MESSAGE_SIZE
+    return max(1024, size)
+
+
+def _split_payload(payload: str, chunk_size: int) -> list[str]:
+    safe_chunk_size = clamp_message_size(chunk_size)
+    if not payload:
+        return [""]
+    return [payload[i : i + safe_chunk_size] for i in range(0, len(payload), safe_chunk_size)]
 
 
 class RequestByInput:
@@ -271,8 +289,10 @@ class WebSocketClient:
                     if msg["type"] == "ping":
                         self.status = True
                         asyncio.create_task(self.send_heart())
-                    else:
+                    elif msg.get("type") == "request_chunk":
                         asyncio.create_task(self.handle_message_chunk(msg, http_client))
+                    else:
+                        logger.warning(f"收到未知消息类型: {msg.get('type')}")
         except ConnectionRefusedError as e:
             logger.error(e)
             self._notify_status("error", f"连接被拒绝：{e}")
@@ -318,30 +338,49 @@ class WebSocketClient:
         request_data = decompress_str_to_dict(request_all_chunk.pop(request_id))
         if self.before_request_call:
             self._safe_invoke(self.before_request_call, request_data)
-        response, _ = await RequestByInput.forward_by_rules(request_data, http_client, self.send_message)
+        response, _ = await RequestByInput.forward_by_rules(request_data, http_client, self.send_event_message)
         if self.after_request_call:
             self._safe_invoke(self.after_request_call, response)
         response = compress_dict_to_str(response)
         # 如果响应不是None，则发送它回去
         if response is not None:
-            # 分片发送
-            logger.info(f"分片大小:{MAX_MESSAGE_SIZE}")
-            response_chunks = [
-                response[i : i + MAX_MESSAGE_SIZE]
-                for i in range(0, len(response), MAX_MESSAGE_SIZE)
-            ]
-            total_size = len(response_chunks) or 1
-            for idx, chunk in enumerate(response_chunks):
-                chunk_message = {
-                    "type": "response_chunk",
-                    "index": idx,
-                    "total": total_size,
-                    "data": chunk,
-                    "finished": (total_size == idx + 1),
-                    "request_id": request_id,
-                }
-                # 发送分片消息
-                await self.send_message(chunk_message)
+            await self._send_chunked_message(
+                response,
+                chunk_type="response_chunk",
+                extra={"request_id": request_id},
+            )
+
+    async def _send_chunked_message(
+        self,
+        payload: str,
+        *,
+        chunk_type: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        chunks = _split_payload(payload, MAX_MESSAGE_SIZE)
+        total_size = len(chunks) or 1
+        for idx, chunk in enumerate(chunks):
+            chunk_message = {
+                "type": chunk_type,
+                "index": idx,
+                "total": total_size,
+                "data": chunk,
+                "finished": idx == total_size - 1,
+                **(extra or {}),
+            }
+            await self.send_message(chunk_message)
+
+    async def send_event_message(self, message: dict[str, Any]) -> None:
+        payload = compress_dict_to_str(message)
+        await self._send_chunked_message(
+            payload,
+            chunk_type=EVENT_CHUNK_TYPE,
+            extra={
+                "chunk_id": uuid.uuid4().hex,
+                "message_type": message.get("type"),
+                "recording_id": message.get("recording_id") or message.get("recordingId"),
+            },
+        )
 
     async def reconnect(self):
         """
@@ -370,7 +409,7 @@ class WebSocketClient:
         """
         if not _is_websocket_open(self.websocket):
             raise RuntimeError("WebSocket 未连接，无法发送消息")
-        await self.websocket.send(json.dumps(message))
+        await self.websocket.send(json.dumps(message, ensure_ascii=False, separators=(",", ":")))
 
     async def send_close(self):
         """主动断开连接"""
