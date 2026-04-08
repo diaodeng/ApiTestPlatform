@@ -12,6 +12,7 @@ from model.pos_network_model import (
     PosResetAccountRequestModel,
     PosUserInfoRespModel,
 )
+from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 from utils.common import ExeVersionReader, get_active_mac, get_local_ip
 
 pos_config_data = PosConfig.read_pos_config()
@@ -39,7 +40,7 @@ def update_network_host(data: PosConfigModel):
 
 
 def change_pos_from_network(data: PosChangeParamsModel) -> None:
-    with httpx.Client(verify=False) as client:
+    with httpx.Client(verify=False, timeout=DEFAULT_HTTP_TIMEOUT) as client:
         data_info = {
             "env": data.env,
             "venderId": data.venderId,
@@ -69,7 +70,7 @@ def change_pos_from_network(data: PosChangeParamsModel) -> None:
 
 
 def pos_account_logout(data: PosLogoutModel) -> tuple[bool, str]:
-    with httpx.Client(verify=False) as client:
+    with httpx.Client(verify=False, timeout=DEFAULT_HTTP_TIMEOUT) as client:
         data_info = data.model_dump()
         logger.info(f"POS账号注销参数： {json.dumps(data_info)}")
         if "uat" in data_info["env"].lower():
@@ -89,7 +90,7 @@ def pos_account_logout(data: PosLogoutModel) -> tuple[bool, str]:
 
 
 def pos_tool_init() -> PosInitRespModel | bool:
-    with httpx.Client(verify=False) as client:
+    with httpx.Client(verify=False, timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = client.get(f"{test_host}/tools/init")
         if resp.status_code != 200:
             logger.error(f"POS初始化失败，状态码： {resp.status_code}")
@@ -104,7 +105,10 @@ def pos_tool_init() -> PosInitRespModel | bool:
 async def get_user_info(
     data: PosResetAccountRequestModel,
 ) -> PosUserInfoRespModel | None:
-    async with httpx.AsyncClient(verify=False) as client:
+    async with httpx.AsyncClient(
+        verify=False,
+        timeout=DEFAULT_HTTP_TIMEOUT,
+    ) as client:
         data_info = data.model_dump()
         logger.info(f"查询POS账号信息： {json.dumps(data_info)}")
         if "uat" in data_info["env"].lower():
@@ -128,7 +132,10 @@ async def reset_account_password(data: PosResetAccountRequestModel) -> tuple[boo
     data.userid = user_info.user_id
     data.username = user_info.user_name
 
-    async with httpx.AsyncClient(verify=False) as client:
+    async with httpx.AsyncClient(
+        verify=False,
+        timeout=DEFAULT_HTTP_TIMEOUT,
+    ) as client:
         data_info = data.model_dump()
         logger.info(f"重置POS账号密码： {json.dumps(data_info, ensure_ascii=False)}")
         if "uat" in data_info["env"].lower():
@@ -159,7 +166,7 @@ def pos_init(pos_path: str, version: str = "", group: str = "") -> PosParamsMode
         if ch:
             headers = ch
 
-    with httpx.Client(verify=False, timeout=10) as client:
+    with httpx.Client(verify=False, timeout=DEFAULT_HTTP_TIMEOUT) as client:
         data = {
             "configTypeList": [],
             "extParams": {"picType": "base64"},
@@ -206,7 +213,7 @@ if __name__ == "__main__":
     ip = get_local_ip()
     mac = get_active_mac()
     version = ""
-    with httpx.Client(verify=False) as client:
+    with httpx.Client(verify=False, timeout=DEFAULT_HTTP_TIMEOUT) as client:
         data = {
             "configTypeList": [],
             "extParams": {"picType": "base64"},

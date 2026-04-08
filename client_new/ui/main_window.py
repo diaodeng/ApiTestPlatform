@@ -35,8 +35,9 @@ from ui.utils.icon_util import apply_window_icon
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self._closing_for_update = False
         self.theme_manager = ThemeManager.instance()
-        self.setWindowTitle("QTRClient - PySide6")
+        self.setWindowTitle("QTRClient")
         self.resize(1200, 800)
         apply_window_icon(self)
 
@@ -70,8 +71,9 @@ class MainWindow(QMainWindow):
             action = QAction(theme_mode_label(mode), self)
             action.setCheckable(True)
             action.triggered.connect(
-                lambda checked, selected_mode=mode: checked
-                and self.theme_manager.apply_theme(selected_mode)
+                lambda checked, selected_mode=mode: (
+                    checked and self.theme_manager.apply_theme(selected_mode)
+                )
             )
             self.theme_action_group.addAction(action)
             self.theme_menu.addAction(action)
@@ -174,17 +176,22 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("就绪 | 当前运行POS: -")
 
+    def close_for_update(self):
+        self._closing_for_update = True
+        self.close()
+
     def closeEvent(self, event):
-        reply = QMessageBox.question(
-            self,
-            "退出确认",
-            "确认关闭应用吗？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
-            event.ignore()
-            return
+        if not self._closing_for_update:
+            reply = QMessageBox.question(
+                self,
+                "退出确认",
+                "确认关闭应用吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
 
         if hasattr(self, "_status_timer") and self._status_timer:
             self._status_timer.stop()

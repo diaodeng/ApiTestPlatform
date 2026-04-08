@@ -52,11 +52,13 @@ class _UpdateThread(QThread):
             def _on_progress(text: str):
                 self.progress.emit(text)
 
-            success = asyncio.run(perform_update_with_powershell(_on_progress))
-            if success:
-                self.done.emit(True, "更新程序已启动，应用即将退出")
-            else:
-                self.done.emit(False, "更新未执行或下载失败")
+            success, message = asyncio.run(
+                perform_update_with_powershell(
+                    _on_progress,
+                    force=self.force_update,
+                )
+            )
+            self.done.emit(success, message)
         except Exception as e:
             logger.exception(e)
             self.done.emit(False, f"更新失败: {e}")
@@ -109,6 +111,8 @@ class AboutPage(QWidget):
             return
 
         self.check_btn.setEnabled(False)
+        self.update_btn.setEnabled(False)
+        self.force_update.setEnabled(False)
         self.check_thread = _CheckUpdateThread()
         self.check_thread.done.connect(self._on_check_done)
         self.check_thread.start()
@@ -117,12 +121,16 @@ class AboutPage(QWidget):
         self.version_tip.setText(message)
         self.update_info.setMarkdown(info or "")
         self.check_btn.setEnabled(True)
+        self.update_btn.setEnabled(True)
+        self.force_update.setEnabled(True)
 
     def _start_update(self):
         if self.update_thread and self.update_thread.isRunning():
             return
 
         self.update_btn.setEnabled(False)
+        self.check_btn.setEnabled(False)
+        self.force_update.setEnabled(False)
         self.progress_label.setText("准备更新...")
 
         self.update_thread = _UpdateThread(force_update=self.force_update.isChecked())
@@ -133,8 +141,14 @@ class AboutPage(QWidget):
     def _on_update_done(self, success: bool, message: str):
         self.progress_label.setText(message)
         self.update_btn.setEnabled(True)
+        self.check_btn.setEnabled(True)
+        self.force_update.setEnabled(True)
         if success and self.window():
-            self.window().close()
+            window = self.window()
+            if hasattr(window, "close_for_update"):
+                window.close_for_update()
+            else:
+                window.close()
 
     def shutdown(self):
         for thread in [self.check_thread, self.update_thread]:

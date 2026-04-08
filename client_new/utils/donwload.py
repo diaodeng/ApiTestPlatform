@@ -6,13 +6,21 @@
 # @Software: PyCharm
 
 import os
-import requests
 import zipfile
+
+import httpx
+
+from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 
 
 def donwload_file(url, file_name):
     # 下载文件到当前目录
-    response = requests.get(url)
+    with httpx.Client(
+        timeout=DEFAULT_HTTP_TIMEOUT,
+        follow_redirects=True,
+    ) as client:
+        response = client.get(url)
+        response.raise_for_status()
     temp_filename = "temp_file"
     with open(temp_filename, "wb") as f:
         f.write(response.content)

@@ -21,6 +21,5 @@ class Worker(QRunnable):
             self.signals.finished.emit(result)
             logger.info("线程任务执行结束")
         except Exception as e:
-            logger.exception(e)
-            self.signals.finished.emit(str(e))
+            logger.exception(f"线程任务执行异常: {e}")
             self.signals.error.emit(str(e))

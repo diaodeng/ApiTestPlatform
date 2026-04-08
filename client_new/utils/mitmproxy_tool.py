@@ -7,7 +7,7 @@ import re
 import json
 import threading
 from collections import defaultdict
-import requests
+import httpx
 
 
 import psutil
@@ -23,6 +23,7 @@ from loguru import logger
 
 from model.config import MitmProxyConfigModel
 from server.config import MitmproxyConfig
+from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 
 
 def get_local_ip():
@@ -165,12 +166,16 @@ class MockHandle:
                 "mac": MockHandle.local_mac,
                 **MockHandle.add_headers
             }
-            result_data = requests.post(f"{MockHandle.mock_server}{flow.request.path}",
-                                    json=json_data,
-                                    data=dict(flow.request.urlencoded_form),
-                                    headers=headers,
-                                    timeout=99999
-                                    )
+            async with httpx.AsyncClient(
+                timeout=DEFAULT_HTTP_TIMEOUT,
+                follow_redirects=True,
+            ) as client:
+                result_data = await client.post(
+                    f"{MockHandle.mock_server}{flow.request.path}",
+                    json=json_data,
+                    data=dict(flow.request.urlencoded_form),
+                    headers=headers,
+                )
             if result_data.status_code != 505 or result_data.json().get("code") != 4444444:
                 logger.info(result_data.text)
                 flow.response = Response.make(result_data.status_code,

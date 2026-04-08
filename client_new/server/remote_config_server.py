@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from model.config import AgentConfigModel, PosConfigModel
 from server.config import AgentConfig, PosConfig, PosToolConfig
+from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 from utils.pos_network import update_network_host
 
 
@@ -17,7 +18,7 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class RemoteConfigServer:
-    REQUEST_TIMEOUT = 10.0
+    REQUEST_TIMEOUT = DEFAULT_HTTP_TIMEOUT
 
     @classmethod
     def fetch_remote_config(cls, config_url: str) -> dict[str, Any]:
