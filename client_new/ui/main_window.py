@@ -87,10 +87,9 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(12)
 
         # 左侧菜单
+        self.nav_items = ["Agent", "POS", "SQLite", "mitmproxy", "日志", "关于"]
         self.menu = QListWidget()
-        self.menu.addItems(
-            ["设置", "商品", "Agent", "POS", "SQLite", "mitmproxy", "FTP", "日志", "关于"]
-        )
+        self.menu.addItems(self.nav_items)
         self.menu.setFixedWidth(150)
         self.menu.setFrameShape(QFrame.NoFrame)
         self.menu.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -103,33 +102,20 @@ class MainWindow(QMainWindow):
 
         # 页面注册
         self.pages = {
-            "设置": QWidget(),
-            "商品": QWidget(),
             "Agent": AgentPage(),
             "POS": PosPage(),
             "SQLite": SqliteQueryPage(),
             "mitmproxy": MitmWidget(),
-            "FTP": QWidget(),
             "日志": LogViewPage(),
             "关于": AboutPage(),
         }
 
-        for name in [
-            "设置",
-            "商品",
-            "Agent",
-            "POS",
-            "SQLite",
-            "mitmproxy",
-            "FTP",
-            "日志",
-            "关于",
-        ]:
+        for name in self.nav_items:
             self.stack.addWidget(self.pages[name])
 
         # 绑定菜单
         self.menu.currentRowChanged.connect(self.stack.setCurrentIndex)
-        self.menu.setCurrentRow(3)
+        self.menu.setCurrentRow(self.nav_items.index("POS"))
 
         self.nav_frame = QFrame()
         self.nav_frame.setObjectName("mainNavFrame")

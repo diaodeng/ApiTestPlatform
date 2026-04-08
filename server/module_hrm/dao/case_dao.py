@@ -477,7 +477,7 @@ class CaseParamsDao:
                 db.query(
                     HrmCaseParams.row_id.label("row_id"),
                     HrmCaseParams.sort_key.label("sort_key"),
-                    db.func.min(HrmCaseParams.id).label("anchor_id"),
+                    func.min(HrmCaseParams.id).label("anchor_id"),
                 )
                 .filter(HrmCaseParams.case_id == use_case_id)
                 .filter(HrmCaseParams.enabled == enabled if enabled is not None and enabled != -1 else True)

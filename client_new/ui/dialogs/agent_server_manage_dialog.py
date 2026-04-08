@@ -1,8 +1,11 @@
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -14,11 +17,16 @@ from ui.dialogs.agent_server_dialog import AgentServerDialog
 
 
 class AgentServerManageDialog(QDialog):
+    sync_requested = Signal()
+
     def __init__(
         self,
         parent=None,
         server_list: dict[str, str] | None = None,
         current_server: str = "",
+        config_sync_url: str = "",
+        config_sync_initialized: bool = False,
+        config_sync_last_sync_at: str = "",
     ):
         super().__init__(parent)
         self.setWindowTitle("服务器管理")
@@ -26,6 +34,9 @@ class AgentServerManageDialog(QDialog):
 
         self._server_list: dict[str, str] = dict(server_list or {})
         self._current_server = (current_server or "").strip()
+        self._config_sync_url = (config_sync_url or "").strip()
+        self._config_sync_initialized = bool(config_sync_initialized)
+        self._config_sync_last_sync_at = str(config_sync_last_sync_at or "")
 
         self.table = QTableWidget(0, 2, self)
         self.table.setHorizontalHeaderLabels(["服务名称", "服务地址"])
@@ -45,6 +56,24 @@ class AgentServerManageDialog(QDialog):
         action_layout.addWidget(self.delete_btn)
         action_layout.addStretch()
 
+        sync_layout = QHBoxLayout()
+        sync_layout.addWidget(QLabel("配置拉取地址"))
+        self.config_sync_url_input = QLineEdit(self._config_sync_url)
+        self.config_sync_url_input.setClearButtonEnabled(True)
+        self.config_sync_url_input.setPlaceholderText(
+            "输入 HTTP 配置拉取地址，例如: http://127.0.0.1:9099/qtr/agent/bootstrap/config/agent_client_config"
+        )
+        sync_layout.addWidget(self.config_sync_url_input, 1)
+        self.sync_config_btn = QPushButton("更新配置")
+        sync_layout.addWidget(self.sync_config_btn)
+
+        sync_status_layout = QHBoxLayout()
+        sync_status_layout.addWidget(QLabel("同步状态"))
+        self.sync_status_label = QLabel("未同步")
+        self.sync_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.sync_status_label.setWordWrap(True)
+        sync_status_layout.addWidget(self.sync_status_label, 1)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.Save | QDialogButtonBox.Cancel, parent=self
         )
@@ -52,6 +81,8 @@ class AgentServerManageDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
+        layout.addLayout(sync_layout)
+        layout.addLayout(sync_status_layout)
         layout.addLayout(action_layout)
         layout.addWidget(self.table, 1)
         layout.addWidget(buttons)
@@ -59,11 +90,47 @@ class AgentServerManageDialog(QDialog):
         self.add_btn.clicked.connect(self._add_server)
         self.edit_btn.clicked.connect(self._edit_server)
         self.delete_btn.clicked.connect(self._delete_server)
+        self.sync_config_btn.clicked.connect(self.sync_requested.emit)
 
         self._reload_table()
+        self.set_sync_state(
+            self._config_sync_initialized,
+            self._config_sync_last_sync_at,
+            self._config_sync_url,
+        )
 
-    def get_data(self) -> tuple[str, dict[str, str]]:
-        return self._current_server, dict(self._server_list)
+    def get_data(self) -> tuple[str, dict[str, str], str]:
+        self._config_sync_url = self.config_sync_url_input.text().strip()
+        return self._current_server, dict(self._server_list), self._config_sync_url
+
+    def get_config_sync_url(self) -> str:
+        self._config_sync_url = self.config_sync_url_input.text().strip()
+        return self._config_sync_url
+
+    def set_sync_state(
+        self,
+        initialized: bool,
+        last_sync_at: str = "",
+        sync_url: str = "",
+    ):
+        self._config_sync_initialized = bool(initialized)
+        self._config_sync_last_sync_at = str(last_sync_at or "")
+        self._config_sync_url = (sync_url or self.get_config_sync_url()).strip()
+        if self._config_sync_initialized:
+            text = "已同步"
+            if self._config_sync_last_sync_at:
+                text = f"{text} {self._config_sync_last_sync_at}"
+        else:
+            text = "未同步"
+        self.set_sync_status_text(text, self._config_sync_url)
+
+    def set_sync_status_text(self, text: str, tooltip: str = ""):
+        self.sync_status_label.setText(text or "-")
+        self.sync_status_label.setToolTip((tooltip or "").strip())
+
+    def set_config_syncing(self, syncing: bool):
+        self.sync_config_btn.setEnabled(not syncing)
+        self.sync_config_btn.setText("更新中..." if syncing else "更新配置")
 
     def _reload_table(self):
         rows = list(self._server_list.items())

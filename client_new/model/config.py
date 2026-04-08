@@ -164,6 +164,9 @@ class PosConfigModel(BaseModel):
     account_logout_params: str = ""
     backup_envs: dict[str, list[str]] = defaultdict(list)  # 备份过的环境
     backup_status: int = 3  # 备份状态，1备份现有数据，2恢复原备份数据，3备份完成
+    config_sync_url: str = ""
+    config_sync_initialized: bool = False
+    config_sync_last_sync_at: str = ""
 
 
 class SetupConfigModel(BaseModel):
@@ -193,6 +196,9 @@ class AgentConfigModel(BaseModel):
     retry_times: int = 0
     retry_interval: float = 5
     retry: bool = False
+    config_sync_url: str = ""
+    config_sync_initialized: bool = False
+    config_sync_last_sync_at: str = ""
     browser: AgentBrowserConfigModel = AgentBrowserConfigModel()
 
     @field_validator("max_send_size", mode="before")

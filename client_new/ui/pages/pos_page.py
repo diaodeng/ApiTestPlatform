@@ -1,4 +1,5 @@
 from loguru import logger
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -12,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from controller.pos_controller import PosController
-from server.config import SearchConfig
+from server.config import PosConfig, SearchConfig, StartConfig
 from ui.dialogs.change_pos_dialog import ChangePosDialog
 from ui.dialogs.dialog_service import DialogService
 from ui.dialogs.local_env_dialog import LocalEnvDialog
@@ -30,9 +31,12 @@ class PosPage(QWidget):
         self.controller = PosController()
         self.dialog_service = DialogService(self)
         self._result_set = set()
+        self._sync_in_progress = False
 
         self._init_ui()
         self._bind()
+        self._load_start_config()
+        QTimer.singleShot(0, self._maybe_auto_sync_config)
 
     def _init_ui(self):
         self.setWindowTitle("POS 启动器")
@@ -99,6 +103,9 @@ class PosPage(QWidget):
         self.scan_btn.clicked.connect(self.on_scan)
         self.stop_pos_btn.clicked.connect(self.on_stop_pos)
         self.stop_offline_btn.clicked.connect(self.on_stop_offline)
+        self.cb_cert.toggled.connect(self._save_start_config)
+        self.cb_cache.toggled.connect(self._save_start_config)
+        self.cb_driver.toggled.connect(self._save_start_config)
         self.filter_input.textChanged.connect(self.apply_filter)
         self.refresh_btn.clicked.connect(self.refresh_list)
         self.btn_setting.clicked.connect(self.open_setting_dialog)
@@ -119,6 +126,7 @@ class PosPage(QWidget):
         self.controller.status_signal.connect(self.update_status)
         self.controller.finished_signal.connect(self.on_finished)
         self.controller.log_signal.connect(self.update_status)
+        self.controller.config_sync_signal.connect(self._on_config_sync_finished)
 
     def open_work_dir_dialog(self):
         dialog = WorkDirDialog(self)
@@ -154,6 +162,21 @@ class PosPage(QWidget):
 
     def apply_filter(self, *_args):
         self.result_table.set_filter_text(self._get_filter_keyword())
+
+    def sync_remote_config(self, auto: bool = False):
+        if self._sync_in_progress:
+            return
+
+        config = PosConfig.read_pos_config()
+        config_url = (config.config_sync_url or "").strip()
+        if not config_url:
+            self.update_status("请先在 POS 设置中填写配置拉取地址")
+            return
+
+        self.set_config_syncing(True)
+        if auto:
+            self.update_status("正在初始化 POS 配置...")
+        self.controller.sync_remote_config(config_url)
 
     def load_history(self):
         results = list(dict.fromkeys(SearchConfig.read_search_result() or []))
@@ -275,3 +298,35 @@ class PosPage(QWidget):
     def open_pos_account_dialog(self):
         dlg = PosAccountDialog(self)
         dlg.exec()
+
+    def set_config_syncing(self, syncing: bool):
+        self._sync_in_progress = syncing
+
+    def _load_start_config(self):
+        start_config = StartConfig.read()
+        for checkbox, value in (
+            (self.cb_cert, start_config.replace_mitm_cert),
+            (self.cb_cache, start_config.remove_cache),
+            (self.cb_driver, start_config.cover_payment_driver),
+        ):
+            checkbox.blockSignals(True)
+            checkbox.setChecked(bool(value))
+            checkbox.blockSignals(False)
+
+    def _save_start_config(self, *_args):
+        start_config = StartConfig.read()
+        start_config.replace_mitm_cert = self.cb_cert.isChecked()
+        start_config.remove_cache = self.cb_cache.isChecked()
+        start_config.cover_payment_driver = self.cb_driver.isChecked()
+        StartConfig.write(start_config)
+
+    def _maybe_auto_sync_config(self):
+        config = PosConfig.read_pos_config()
+        if not (config.config_sync_url or "").strip():
+            return
+        if config.config_sync_initialized:
+            return
+        self.sync_remote_config(auto=True)
+
+    def _on_config_sync_finished(self, _success: bool, _message: str, _payload: object):
+        self.set_config_syncing(False)

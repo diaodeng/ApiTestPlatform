@@ -1,10 +1,11 @@
 from collections.abc import Callable
 from typing import Any
 
+from sqlalchemy import text
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
-from config.database import Base, SessionLocal, engine
+from config.database import Base, DATABASE_BACKEND, SessionLocal, engine
 from scripts.seed_sqlite_from_init_sql import auto_seed_current_sqlite_if_needed
 from utils.log_util import logger
 
@@ -61,8 +62,43 @@ async def init_create_table():
     """
     logger.info("初始化数据库连接...")
     Base.metadata.create_all(bind=engine)
+    _ensure_large_sys_config_value_column()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
 
 
 get_db = get_db_pro
+
+
+def _ensure_large_sys_config_value_column():
+    if DATABASE_BACKEND != "mysql":
+        return
+
+    try:
+        with engine.begin() as connection:
+            result = connection.execute(
+                text(
+                    """
+                    SELECT DATA_TYPE
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'sys_config'
+                      AND COLUMN_NAME = 'config_value'
+                    """
+                )
+            ).mappings().first()
+            current_type = str((result or {}).get("DATA_TYPE") or "").lower()
+            if current_type in {"longtext", ""}:
+                return
+
+            logger.info("检测到 sys_config.config_value 仍为短文本，升级为 LONGTEXT")
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE sys_config
+                    MODIFY COLUMN config_value LONGTEXT NULL COMMENT '参数键值'
+                    """
+                )
+            )
+    except Exception as exc:
+        logger.warning(f"检查或升级 sys_config.config_value 字段失败: {exc}")

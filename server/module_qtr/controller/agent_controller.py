@@ -12,6 +12,7 @@ from config.get_db import get_db
 from module_hrm.entity.vo.agent_vo import AgentModel
 from module_hrm.service.agent_service import AgentService
 from module_hrm.utils.util import decompress_str_to_dict
+from module_qtr.service.agent_bootstrap_service import AgentBootstrapService
 from module_qtr.service.agent_service import (
     agents,
     send_message as agent_service_send_message,
@@ -20,6 +21,7 @@ from module_qtr.service.agent_service import (
 from module_hrm.service.desktop_case_service import DesktopCaseService
 from module_hrm.service.web_case_service import WebCaseService
 from utils.log_util import logger
+from utils.response_util import ResponseUtil
 from utils.snowflake import snowIdWorker
 
 agentController = APIRouter(prefix="/qtr/agent")
@@ -169,6 +171,32 @@ async def startup_handler():
     # asyncio.create_task(background_task())
     asyncio.create_task(manager.send_heartbeat())
     logger.info("Agent manager background task started.")
+
+
+@agentController.get("/bootstrap/pos-config")
+async def get_agent_pos_config(query_db: Session = Depends(get_db)):
+    try:
+        payload = AgentBootstrapService.get_pos_config_services(query_db)
+        return ResponseUtil.success(data=payload)
+    except ValueError as exc:
+        logger.warning(exc)
+        return ResponseUtil.failure(msg=str(exc))
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@agentController.get("/bootstrap/config/{config_key}")
+async def get_agent_config_by_key(config_key: str, query_db: Session = Depends(get_db)):
+    try:
+        payload = AgentBootstrapService.get_config_services(query_db, config_key)
+        return ResponseUtil.success(data=payload)
+    except ValueError as exc:
+        logger.warning(exc)
+        return ResponseUtil.failure(msg=str(exc))
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
 
 
 @agentController.websocket("/ws/{agent_code}")

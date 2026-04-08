@@ -1,10 +1,27 @@
 from loguru import logger
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QThread, Signal
 
 from model.config import AgentConfigModel
 from server.config import AgentConfig
+from server.remote_config_server import RemoteConfigServer
 from services.agent_client_service import AgentClientService
 from utils.common import get_active_mac
+
+
+class _ConfigSyncThread(QThread):
+    done = Signal(bool, object, str)
+
+    def __init__(self, config_url: str):
+        super().__init__()
+        self.config_url = (config_url or "").strip()
+
+    def run(self):
+        try:
+            result = RemoteConfigServer.sync_agent_config(self.config_url)
+            self.done.emit(True, result, "")
+        except Exception as e:
+            logger.exception(e)
+            self.done.emit(False, None, str(e))
 
 
 class AgentController(QObject):
@@ -15,6 +32,7 @@ class AgentController(QObject):
         self.local_mac = get_active_mac() or ""
         self.connection_state = "stopped"
         self.service = AgentClientService()
+        self._config_sync_thread: _ConfigSyncThread | None = None
 
         self._bind_widget()
         self._bind_service()
@@ -27,6 +45,7 @@ class AgentController(QObject):
         self.widget.start_clicked.connect(self.start)
         self.widget.stop_clicked.connect(self.stop)
         self.widget.save_clicked.connect(self.save)
+        self.widget.sync_config_clicked.connect(self.sync_config)
 
     def _bind_service(self):
         self.service.state_changed.connect(self._on_service_state_changed)
@@ -77,6 +96,7 @@ class AgentController(QObject):
             self.widget.set_status_message(message)
 
     def save(self, data: dict):
+        previous_sync_url = (self.config.config_sync_url or "").strip()
         try:
             config = AgentConfigModel.model_validate(data)
         except Exception as e:
@@ -84,17 +104,28 @@ class AgentController(QObject):
             self.widget.set_status_message(f"配置无效: {e}")
             return
 
+        current_sync_url = (config.config_sync_url or "").strip()
+        if current_sync_url != previous_sync_url:
+            config.config_sync_initialized = False
+            config.config_sync_last_sync_at = ""
+
         AgentConfig.save_config(config)
         self.config = AgentConfig.read_config()
         self.service.update_runtime_config(self.config)
         self.widget.apply_config(self.config, self.connection_state, self.local_mac)
         self._sync_ui_state()
 
+    def sync_config(self):
+        self._start_config_sync()
+
     def shutdown(self):
         try:
             self.service.shutdown()
         except Exception as e:
             logger.exception(f"关闭 Agent 服务失败: {e}")
+        if self._config_sync_thread and self._config_sync_thread.isRunning():
+            self._config_sync_thread.quit()
+            self._config_sync_thread.wait(1000)
 
     def _on_service_state_changed(self, state: str):
         self.connection_state = state or "stopped"
@@ -125,3 +156,44 @@ class AgentController(QObject):
         if not self.local_mac:
             return base
         return f"{base}/{self.local_mac}"
+
+    def _start_config_sync(self):
+        if self._config_sync_thread and self._config_sync_thread.isRunning():
+            return
+
+        self.config = AgentConfig.read_config()
+        config_url = (self.config.config_sync_url or "").strip()
+        if not config_url:
+            self.widget.set_status_message("请先在服务器管理中填写配置拉取地址")
+            return
+
+        self.widget.set_config_syncing(True)
+        self.widget.set_status_message("正在更新 Agent 配置...")
+
+        self._config_sync_thread = _ConfigSyncThread(config_url)
+        self._config_sync_thread.done.connect(self._on_config_sync_done)
+        self._config_sync_thread.finished.connect(self._on_config_sync_finished)
+        self._config_sync_thread.start()
+
+    def _on_config_sync_done(self, success: bool, result: object, message: str):
+        if success and isinstance(result, dict):
+            self.config = AgentConfig.read_config()
+            self.service.update_runtime_config(self.config)
+            self.widget.apply_config(self.config, self.connection_state, self.local_mac)
+            updated_at = str(result.get("updated_at") or "").strip()
+            prefix = "Agent 配置已更新"
+            if updated_at:
+                prefix = f"{prefix}，服务端更新时间：{updated_at}"
+            self.widget.set_status_message(prefix)
+            if hasattr(self.widget, "on_config_sync_result"):
+                self.widget.on_config_sync_result(True, prefix)
+            return
+
+        error_message = f"更新 Agent 配置失败: {message}"
+        self.widget.set_status_message(error_message)
+        if hasattr(self.widget, "on_config_sync_result"):
+            self.widget.on_config_sync_result(False, error_message)
+
+    def _on_config_sync_finished(self):
+        self.widget.set_config_syncing(False)
+        self._config_sync_thread = None

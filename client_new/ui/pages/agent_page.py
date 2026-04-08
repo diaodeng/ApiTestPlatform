@@ -74,6 +74,7 @@ class AgentPage(QWidget):
     start_clicked = Signal()
     stop_clicked = Signal()
     save_clicked = Signal(dict)
+    sync_config_clicked = Signal()
 
     def __init__(self):
         super().__init__()
@@ -81,6 +82,11 @@ class AgentPage(QWidget):
         self._quick_save_guard = False
         self._server_list: dict[str, str] = {}
         self._browser_config = AgentBrowserConfigModel()
+        self._config_sync_url = ""
+        self._config_sync_initialized = False
+        self._config_sync_last_sync_at = ""
+        self._sync_in_progress = False
+        self._server_manage_dialog: AgentServerManageDialog | None = None
 
         self._init_ui()
         self.controller = AgentController(self)
@@ -229,15 +235,21 @@ class AgentPage(QWidget):
             self,
             server_list=self._server_list,
             current_server=self.current_server(),
+            config_sync_url=self._config_sync_url,
+            config_sync_initialized=self._config_sync_initialized,
+            config_sync_last_sync_at=self._config_sync_last_sync_at,
         )
-        if not dialog.exec():
-            return
+        dialog.sync_requested.connect(lambda: self._handle_server_manage_sync(dialog))
+        self._server_manage_dialog = dialog
+        self._sync_server_manage_dialog_state()
+        try:
+            if not dialog.exec():
+                return
 
-        current_server, server_list = dialog.get_data()
-        self._server_list = dict(server_list or {})
-        self._apply_server_options(current_server)
-        self._update_server_meta()
-        self._save_quick_settings()
+            self._apply_server_manage_dialog_data(dialog)
+        finally:
+            if self._server_manage_dialog is dialog:
+                self._server_manage_dialog = None
 
     def _open_browser_setting_dialog(self):
         dialog = AgentBrowserSettingDialog(self._browser_config, self)
@@ -268,6 +280,9 @@ class AgentPage(QWidget):
             "retry_times": int(self.retry_times_input.value()),
             "retry_interval": float(self.retry_interval_input.value()),
             "retry": self.retry_checkbox.isChecked(),
+            "config_sync_url": self._config_sync_url,
+            "config_sync_initialized": self._config_sync_initialized,
+            "config_sync_last_sync_at": self._config_sync_last_sync_at,
             "browser": self._browser_config.model_dump(),
         }
 
@@ -281,6 +296,9 @@ class AgentPage(QWidget):
             self._browser_config = AgentBrowserConfigModel.model_validate(browser_config)
         else:
             self._browser_config = AgentBrowserConfigModel()
+        self._config_sync_url = str(getattr(config, "config_sync_url", "") or "")
+        self._config_sync_initialized = bool(getattr(config, "config_sync_initialized", False))
+        self._config_sync_last_sync_at = str(getattr(config, "config_sync_last_sync_at", "") or "")
 
         self._quick_save_guard = True
         self._apply_server_options(config.current_server)
@@ -293,6 +311,7 @@ class AgentPage(QWidget):
         self._quick_save_guard = False
 
         self._update_server_meta()
+        self._sync_server_manage_dialog_state()
         self._apply_state_text(connection_state)
 
     def set_running(self, running: bool):
@@ -313,6 +332,21 @@ class AgentPage(QWidget):
 
     def set_status_message(self, message: str):
         self.status_detail_label.setText(message or "-")
+
+    def set_config_syncing(self, syncing: bool):
+        self._sync_in_progress = syncing
+        if self._server_manage_dialog:
+            self._server_manage_dialog.set_config_syncing(syncing)
+
+    def on_config_sync_result(self, success: bool, message: str):
+        if success:
+            self._sync_server_manage_dialog_state()
+            return
+        if self._server_manage_dialog:
+            self._server_manage_dialog.set_sync_status_text(
+                message,
+                self._config_sync_url,
+            )
 
     def current_server(self) -> str:
         return self.server_combo.currentText().strip()
@@ -372,3 +406,30 @@ class AgentPage(QWidget):
             "color: white; "
             "font-weight: 600;"
         )
+
+    def _apply_server_manage_dialog_data(self, dialog: AgentServerManageDialog):
+        current_server, server_list, config_sync_url = dialog.get_data()
+        self._server_list = dict(server_list or {})
+        self._config_sync_url = (config_sync_url or "").strip()
+        self._apply_server_options(current_server)
+        self._update_server_meta()
+        self._save_quick_settings()
+
+    def _handle_server_manage_sync(self, dialog: AgentServerManageDialog):
+        self._config_sync_url = dialog.get_config_sync_url()
+        self._save_quick_settings()
+        if not self._config_sync_url:
+            dialog.set_sync_status_text("请先填写配置拉取地址")
+            return
+        dialog.set_sync_status_text("正在更新 Agent 配置...", self._config_sync_url)
+        self.sync_config_clicked.emit()
+
+    def _sync_server_manage_dialog_state(self):
+        if not self._server_manage_dialog:
+            return
+        self._server_manage_dialog.set_sync_state(
+            self._config_sync_initialized,
+            self._config_sync_last_sync_at,
+            self._config_sync_url,
+        )
+        self._server_manage_dialog.set_config_syncing(self._sync_in_progress)

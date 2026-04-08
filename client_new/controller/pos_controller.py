@@ -9,6 +9,7 @@ from model.config import PosChangeParamsModel
 from server.config import PosConfig, SearchConfig
 from server.pos_config_server import PosConfigServer
 from server.pos_tool_config_server import PosToolConfigServer
+from server.remote_config_server import RemoteConfigServer
 from services.pos_service import PosService
 from utils.common import ExeVersionReader
 from utils.file_handle import open_file_location
@@ -23,6 +24,7 @@ class PosController(QObject):
     status_signal = Signal(str)  # 状态
     log_signal = Signal(str)  # 日志
     finished_signal = Signal()  # 完成
+    config_sync_signal = Signal(bool, str, object)
 
     def __init__(self):
         super().__init__()
@@ -229,6 +231,43 @@ class PosController(QObject):
 
         self.status_signal.emit(msg)
         self.log_signal.emit(msg)
+
+    def sync_remote_config(self, config_url: str):
+        self.status_signal.emit("正在更新 POS 配置...")
+
+        def run():
+            try:
+                result = RemoteConfigServer.sync_pos_config(config_url)
+                return {"ok": True, "result": result}
+            except Exception as e:
+                logger.exception(e)
+                return {"ok": False, "error": str(e)}
+
+        worker = Worker(run)
+        worker.signals.finished.connect(self._on_sync_remote_config_finished)
+        self.pool.start(worker)
+
+    def _on_sync_remote_config_finished(self, payload):
+        if isinstance(payload, dict) and payload.get("ok"):
+            result = payload.get("result") or {}
+            updated_at = str(result.get("updated_at") or "").strip()
+            message = "POS 配置已更新"
+            if updated_at:
+                message = f"{message}，服务端更新时间：{updated_at}"
+            self.status_signal.emit(message)
+            self.log_signal.emit(message)
+            self.config_sync_signal.emit(True, message, result)
+            return
+
+        error = ""
+        if isinstance(payload, dict):
+            error = str(payload.get("error") or "")
+        elif payload:
+            error = str(payload)
+        message = f"POS 配置更新失败: {error or '未知错误'}"
+        self.status_signal.emit(message)
+        self.log_signal.emit(message)
+        self.config_sync_signal.emit(False, message, payload)
 
     def clean_cache(self, path: str):
         self.status_signal.emit("清理缓存中...")
