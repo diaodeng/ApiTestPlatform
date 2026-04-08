@@ -243,6 +243,10 @@ class PosToolConfig:
     def save_local_pos_tool_config(cls, data: PosInitRespModel) -> None:
         do_config.PosToolConfig.save_local_pos_tool_config(data)
 
+    @classmethod
+    def clear_local_pos_tool_config(cls) -> None:
+        do_config.PosToolConfig.clear_local_pos_tool_config()
+
 
 class AgentConfig:
     @classmethod

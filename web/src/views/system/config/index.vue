@@ -130,7 +130,7 @@
       />
 
       <!-- 添加或修改参数配置对话框 -->
-      <el-dialog :title="title" v-model="open" width="500px" append-to-body>
+      <el-dialog :title="title" v-model="open" width="720px" append-to-body>
          <el-form ref="configRef" :model="form" :rules="rules" label-width="80px">
             <el-form-item label="参数名称" prop="configName">
                <el-input v-model="form.configName" placeholder="请输入参数名称" />
@@ -139,7 +139,12 @@
                <el-input v-model="form.configKey" placeholder="请输入参数键名" />
             </el-form-item>
             <el-form-item label="参数键值" prop="configValue">
-               <el-input v-model="form.configValue" placeholder="请输入参数键值" />
+               <el-input
+                  v-model="form.configValue"
+                  type="textarea"
+                  :rows="10"
+                  placeholder="请输入参数键值，支持 JSON"
+               />
             </el-form-item>
             <el-form-item label="系统内置" prop="configType">
                <el-radio-group v-model="form.configType">

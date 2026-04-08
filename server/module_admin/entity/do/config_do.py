@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import Column, DateTime, Integer, String
 
 from config.database import Base
+from config.sqlalchemy_types import long_text_type
 
 
 class SysConfig(Base):
@@ -14,7 +15,7 @@ class SysConfig(Base):
     config_id = Column(Integer, primary_key=True, autoincrement=True, comment='参数主键')
     config_name = Column(String(100), nullable=True, default='', comment='参数名称')
     config_key = Column(String(100), nullable=True, default='', comment='参数键名')
-    config_value = Column(String(500), nullable=True, default='', comment='参数键值')
+    config_value = Column(long_text_type(), nullable=True, default='', comment='参数键值')
     config_type = Column(String(1), nullable=True, default='N', comment='系统内置（Y是 N否）')
     create_by = Column(String(64), nullable=True, default='', comment='创建者')
     create_time = Column(DateTime, nullable=True, default=datetime.now(), comment='创建时间')

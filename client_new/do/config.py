@@ -563,6 +563,11 @@ class PosToolConfig:
         with open(cls.config_file, "w", encoding="utf-8") as f:
             f.write(json.dumps(data.model_dump(), indent=4, ensure_ascii=False))
 
+    @classmethod
+    def clear_local_pos_tool_config(cls) -> None:
+        if os.path.exists(cls.config_file):
+            os.remove(cls.config_file)
+
 
 class AgentConfig:
     config_path = "storage/data/agent_config.json"
