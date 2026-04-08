@@ -32,6 +32,9 @@ class PosController(QObject):
         self.pool.setMaxThreadCount(4)
         self._scan_running = False
         self._env_loading_paths = set()
+        self._workers = []
+        self._online_switching_path = ""
+        self._logout_pos_path = ""
 
     # ======================
     # 搜索
@@ -167,11 +170,7 @@ class PosController(QObject):
                 return future.result(timeout=10)
 
         worker = Worker(run)
-        # 👇 持有 worker，防止 GC
-        if not hasattr(self, "_workers"):
-            self._workers = []
-
-        self._workers.append(worker)
+        self._track_worker(worker)
 
         def finished(result):
             try:
@@ -184,11 +183,18 @@ class PosController(QObject):
                 self.log_signal.emit(msg)
             finally:
                 self._env_loading_paths.discard(path)
-                if worker in self._workers:
-                    self._workers.remove(worker)
+                self._release_worker(worker)
+
+        def on_error(err):
+            try:
+                logger.warning(f"获取环境信息失败: {path}, error={err}")
+                self._on_error(err)
+            finally:
+                self._env_loading_paths.discard(path)
+                self._release_worker(worker)
 
         worker.signals.finished.connect(finished)
-        worker.signals.error.connect(self._on_error)
+        worker.signals.error.connect(on_error)
 
         self.pool.start(worker)
 
@@ -369,17 +375,47 @@ class PosController(QObject):
         self.log_signal.emit(text)
 
     def logout_pos_account(self, path: str):
+        current_path = self._logout_pos_path
+        if current_path:
+            if current_path == path:
+                message = "当前POS正在退出账号中，请稍候"
+            else:
+                message = "已有POS账号退出任务进行中，请稍候"
+            logger.warning(f"{message}: current={current_path}, incoming={path}")
+            self.status_signal.emit(message)
+            self.log_signal.emit(message)
+            return
+
+        self._logout_pos_path = path
         self.status_signal.emit("退出账号中...")
+        logger.info(f"开始退出POS账号: {path}")
 
         def run():
             PosConfigServer.logout_pos_account(path)
             return "POS账号已退出"
 
         worker = Worker(run)
-        worker.signals.finished.connect(
-            lambda msg: (self.status_signal.emit(msg), self.log_signal.emit(msg))
-        )
-        worker.signals.error.connect(self._on_error)
+        self._track_worker(worker)
+
+        def finished(msg):
+            try:
+                logger.info(f"退出POS账号完成: {path}")
+                self.status_signal.emit(msg)
+                self.log_signal.emit(msg)
+            finally:
+                self._logout_pos_path = ""
+                self._release_worker(worker)
+
+        def on_error(err):
+            try:
+                logger.warning(f"退出POS账号失败: {path}, error={err}")
+                self._on_error(err)
+            finally:
+                self._logout_pos_path = ""
+                self._release_worker(worker)
+
+        worker.signals.finished.connect(finished)
+        worker.signals.error.connect(on_error)
         self.pool.start(worker)
 
     def _scan_dir(
@@ -416,18 +452,55 @@ class PosController(QObject):
         return found
 
     def switch_pos_online_by_path(self, path: str):
+        current_path = self._online_switching_path
+        if current_path:
+            if current_path == path:
+                message = "当前POS正在在线切换中，请稍候"
+            else:
+                message = "已有在线切换任务进行中，请稍候"
+            logger.warning(f"{message}: current={current_path}, incoming={path}")
+            self.status_signal.emit(message)
+            self.log_signal.emit(message)
+            return
+
+        self._online_switching_path = path
         self.status_signal.emit("在线切换POS中...")
+        logger.info(f"开始在线切换POS: {path}")
 
         def run():
             PosConfigServer.change_pos_on_network(path)
             return "在线切换POS成功"
 
         worker = Worker(run)
-        worker.signals.finished.connect(
-            lambda msg: (self.status_signal.emit(msg), self.log_signal.emit(msg))
-        )
-        worker.signals.error.connect(self._on_error)
+        self._track_worker(worker)
+
+        def finished(msg):
+            try:
+                logger.info(f"在线切换POS完成: {path}")
+                self.status_signal.emit(msg)
+                self.log_signal.emit(msg)
+            finally:
+                self._online_switching_path = ""
+                self._release_worker(worker)
+
+        def on_error(err):
+            try:
+                logger.warning(f"在线切换POS失败: {path}, error={err}")
+                self._on_error(err)
+            finally:
+                self._online_switching_path = ""
+                self._release_worker(worker)
+
+        worker.signals.finished.connect(finished)
+        worker.signals.error.connect(on_error)
         self.pool.start(worker)
+
+    def _track_worker(self, worker: Worker):
+        self._workers.append(worker)
+
+    def _release_worker(self, worker: Worker):
+        if worker in self._workers:
+            self._workers.remove(worker)
 
     def _build_env_payload(self, path: str) -> dict:
         local_env = PosConfig.get_local_pos_env(path) or "-"

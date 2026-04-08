@@ -12,6 +12,7 @@ from utils.pos_network import change_pos_from_network
 class PosConfigServer:
     @classmethod
     def change_pos_on_network(cls, pos_path: str) -> None:
+        logger.info(f"开始在线切换POS配置: {pos_path}")
         env = PosConfig.get_local_pos_env(pos_path)
         if not env:
             logger.warning(f"获取pos环境失败:{pos_path}")
@@ -39,6 +40,9 @@ class PosConfigServer:
         data.venderId = pos_info.venderNo
         data.orgNo = pos_info.orgNo
         data.env = pos_group.lower()
+        logger.info(
+            f"在线切换POS参数已准备: env={data.env}, venderId={data.venderId}, orgNo={data.orgNo}, posPath={pos_path}"
+        )
 
         # data.pos_skin = pos_info.pos_skin
         # data.pos_no = pos_info.pos_no

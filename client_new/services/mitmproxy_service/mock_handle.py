@@ -3,11 +3,12 @@ import json
 import uuid
 from datetime import datetime
 
-import requests
+import httpx
 from loguru import logger
 from mitmproxy.http import HTTPFlow, Response
 
 from models.mitmproxy_models import FlowItem
+from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 
 from .runtime_config import RuntimeConfig
 
@@ -98,13 +99,16 @@ class MockHandle:
             json_data, form_data = self._build_mock_payload(flow, config.add_body)
             headers = self._parse_key_values(config.add_headers)
 
-            resp = requests.post(
-                f"{config.mock_server}{path}",
-                json=json_data,
-                data=form_data,
-                headers=headers,
-                timeout=30,
-            )
+            async with httpx.AsyncClient(
+                timeout=DEFAULT_HTTP_TIMEOUT,
+                follow_redirects=True,
+            ) as client:
+                resp = await client.post(
+                    f"{config.mock_server}{path}",
+                    json=json_data,
+                    data=form_data,
+                    headers=headers,
+                )
 
             if resp.status_code == 505:
                 logger.info(f"mock 未命中规则，继续真实请求: {path}")

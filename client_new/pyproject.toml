@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "aiohttp>=3.13.3",
     "httpx>=0.28.1",
     "loguru>=0.7.3",
     "mitmproxy>=11.0.2",
@@ -22,7 +21,6 @@ dependencies = [
     "pyside6>=6.10.2",
     "pytesseract>=0.3.13",
     "pywin32>=311",
-    "requests>=2.32.5",
     "websockets>=15.0.1",
 ]
 
