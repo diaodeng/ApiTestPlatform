@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox
 
 from emitter.mitm_flow_emitter import flow_emitter
@@ -26,6 +27,7 @@ class MitmController(QObject):
         "mitmproxy_config_dir": "配置目录",
         "cert_path": "证书路径",
         "script_path": "脚本路径",
+        "startup_mode": "启动方式",
         "proxy_model": "代理模式",
         "proxy_model_value": "代理模式值",
     }
@@ -42,6 +44,7 @@ class MitmController(QObject):
         self._shutting_down = False
         self._restart_after_stop = False
         self._restart_reason = ""
+        self._current_web_url = ""
 
         self.timer = QTimer()
         self.timer.timeout.connect(self._sync_ui_state)
@@ -61,6 +64,7 @@ class MitmController(QObject):
         self.widget.stop_clicked.connect(self.stop)
         self.widget.save_clicked.connect(self.save)
         self.widget.install_cert_clicked.connect(self.install_cert)
+        self.widget.open_web_clicked.connect(self.open_web_page)
 
     def start(self):
         logger.info("启动 mitmproxy")
@@ -143,6 +147,8 @@ class MitmController(QObject):
 
     def shutdown(self):
         self._shutting_down = True
+        self._current_web_url = ""
+        self.widget.set_web_url("")
         if not self.helper:
             return
 
@@ -162,6 +168,8 @@ class MitmController(QObject):
         running = self.helper_state in {"starting", "running", "stopping"}
         if self.helper_state == "stopped":
             self._force_stop_timer.stop()
+            self._current_web_url = ""
+            self.widget.set_web_url("")
         self.widget.proxy_state = self.helper_state
         self.widget.set_running(running)
 
@@ -308,6 +316,8 @@ class MitmController(QObject):
             return
 
         if msg_type == "state":
+            self._current_web_url = str(message.get("web_url") or "")
+            self.widget.set_web_url(self._current_web_url)
             self.helper_state = message.get("state", "stopped")
             self._sync_ui_state()
             if (
@@ -353,6 +363,35 @@ class MitmController(QObject):
             if self.helper_state == "starting":
                 self.helper_state = "stopped"
                 self._sync_ui_state()
+
+    def open_web_page(self):
+        self.config = MitmproxyConfig.read()
+        if str(getattr(self.config, "startup_mode", "dump") or "dump").strip().lower() != "web":
+            QMessageBox.information(self.widget, "mitmproxy Web", "当前不是 Web 模式")
+            return
+
+        if self.helper_state != "running":
+            QMessageBox.information(
+                self.widget,
+                "mitmproxy Web",
+                "请先启动 mitmproxy，再打开 Web 页面",
+            )
+            return
+
+        web_url = self._current_web_url.strip()
+        if not web_url:
+            web_url = f"http://127.0.0.1:{self.config.web_port}/"
+
+        if QDesktopServices.openUrl(QUrl(web_url)):
+            logger.info(f"已打开 mitmproxy Web 页面: {web_url}")
+            return
+
+        logger.warning(f"打开 mitmproxy Web 页面失败: {web_url}")
+        QMessageBox.warning(
+            self.widget,
+            "mitmproxy Web",
+            f"打开 Web 页面失败，请手动访问：{web_url}",
+        )
 
     def _build_flow_item(self, payload: dict) -> FlowItem:
         raw_time = payload.get("time")

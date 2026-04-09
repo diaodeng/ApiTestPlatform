@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import errno
 import json
 import os
 import sys
@@ -9,10 +10,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from loguru import logger
-from mitmproxy import addons as mitm_addons
 from mitmproxy import master as mitm_master
 from mitmproxy.options import Options
+from mitmproxy.tools.dump import DumpMaster
+from mitmproxy.tools.web.master import WebMaster
 from mitmproxy.utils import asyncio_utils
+import tornado.httpserver
+import tornado.ioloop
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -21,6 +25,49 @@ if str(ROOT) not in sys.path:
 from model.config import MitmProxyConfigModel
 from services.mitmproxy_service.mock_handle import MockHandle
 from services.mitmproxy_service.runtime_config import RuntimeConfig
+
+
+class ManagedWebMaster(WebMaster):
+    def __init__(self, opts: Options, with_termlog: bool = True):
+        super().__init__(opts, with_termlog=with_termlog)
+        self._http_server: tornado.httpserver.HTTPServer | None = None
+
+    async def running(self):
+        tornado.ioloop.IOLoop.current()
+
+        if self._http_server is None:
+            self._http_server = tornado.httpserver.HTTPServer(
+                self.app,
+                max_buffer_size=2**32,
+            )
+
+        try:
+            self._http_server.listen(self.options.web_port, self.options.web_host)
+        except OSError as e:
+            message = (
+                f"Web server failed to listen on {self.options.web_host or '*'}:"
+                f"{self.options.web_port} with {e}"
+            )
+            if e.errno == errno.EADDRINUSE:
+                message += (
+                    "\nTry specifying a different port by using "
+                    f"`--set web_port={self.options.web_port + 2}`."
+                )
+            raise OSError(e.errno, message, e.filename) from e
+
+        logger.info(f"Web server listening at {self.web_url}")
+        return await mitm_master.Master.running(self)
+
+    async def done(self) -> None:
+        if self._http_server is not None:
+            try:
+                self._http_server.stop()
+                await self._http_server.close_all_connections()
+            except Exception:
+                logger.exception("关闭 mitmweb 服务失败")
+            finally:
+                self._http_server = None
+        await super().done()
 
 
 class HelperProtocol:
@@ -69,7 +116,7 @@ class HelperRuntime:
             self._config = config
             self._stop_requested = False
 
-        self.protocol.send("state", state="starting")
+        self.protocol.send("state", state="starting", **self._runtime_state_payload(config=config))
         future = asyncio.run_coroutine_threadsafe(self._run_session(config), self._loop)
         future.add_done_callback(self._on_session_finished)
 
@@ -90,7 +137,11 @@ class HelperRuntime:
             loop = self._loop
             master = self._master
 
-        self.protocol.send("state", state="stopping")
+        self.protocol.send(
+            "state",
+            state="stopping",
+            **self._runtime_state_payload(master=master),
+        )
 
         if loop and master:
             try:
@@ -103,8 +154,17 @@ class HelperRuntime:
     def update_config(self, config_data: dict) -> tuple[bool, str]:
         config = MitmProxyConfigModel.model_validate(config_data)
         RuntimeConfig.set(config)
+        state = None
+        master = None
         with self._lock:
             self._config = config
+            state = self._state
+            master = self._master
+        self.protocol.send(
+            "state",
+            state=state or "stopped",
+            **self._runtime_state_payload(config=config, master=master),
+        )
         return True, "配置已更新"
 
     def shutdown(self, timeout: float = 5.0) -> tuple[bool, str]:
@@ -182,7 +242,50 @@ class HelperRuntime:
             )
         master.shutdown()
 
-    async def _run_session(self, config: MitmProxyConfigModel):
+    def _normalize_startup_mode(self, startup_mode: str | None) -> str:
+        mode = str(startup_mode or "dump").strip().lower()
+        return mode if mode in {"dump", "web"} else "dump"
+
+    def _should_emit_app_flows(self, config: MitmProxyConfigModel | None) -> bool:
+        if not config:
+            return True
+        if self._normalize_startup_mode(getattr(config, "startup_mode", "dump")) != "web":
+            return True
+        return bool(getattr(config, "web_show_in_app", True))
+
+    def _runtime_state_payload(
+        self,
+        *,
+        config: MitmProxyConfigModel | None = None,
+        master: mitm_master.Master | None = None,
+    ) -> dict:
+        active_config = config
+        active_master = master
+        with self._lock:
+            if active_config is None:
+                active_config = self._config
+            if active_master is None:
+                active_master = self._master
+
+        startup_mode = self._normalize_startup_mode(
+            getattr(active_config, "startup_mode", "dump")
+        )
+        web_url = ""
+        if startup_mode == "web" and isinstance(active_master, WebMaster):
+            web_url = getattr(active_master, "web_url", "") or ""
+
+        return {
+            "startup_mode": startup_mode,
+            "web_show_in_app": self._should_emit_app_flows(active_config),
+            "web_url": web_url,
+        }
+
+    def _build_master(
+        self,
+        *,
+        config: MitmProxyConfigModel,
+        loop: asyncio.AbstractEventLoop,
+    ) -> mitm_master.Master:
         mode = [config.proxy_model] if config.proxy_model else []
         if config.proxy_model == "local":
             mode = [f"{config.proxy_model}:{config.proxy_model_value}"]
@@ -199,13 +302,30 @@ class HelperRuntime:
             confdir=config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy"),
         )
 
-        master = mitm_master.Master(
-            opts,
-            event_loop=asyncio.get_running_loop(),
-            with_termlog=False,
-        )
-        master.addons.add(*mitm_addons.default_addons())
+        startup_mode = self._normalize_startup_mode(config.startup_mode)
+        if startup_mode == "web":
+            master = ManagedWebMaster(opts, with_termlog=False)
+            master.options.update(
+                web_host="127.0.0.1",
+                web_port=config.web_port,
+                web_open_browser=bool(config.web_open_browser),
+            )
+        else:
+            master = DumpMaster(
+                opts,
+                loop=loop,
+                with_termlog=False,
+                with_dumper=False,
+            )
+
         master.addons.add(MockHandle(flow_dispatcher=self._dispatch_flow))
+        return master
+
+    async def _run_session(self, config: MitmProxyConfigModel):
+        master = self._build_master(
+            config=config,
+            loop=asyncio.get_running_loop(),
+        )
 
         proxyserver = master.addons.get("proxyserver")
         with self._lock:
@@ -229,7 +349,11 @@ class HelperRuntime:
                     self._state = "running"
                     should_stop = self._stop_requested
 
-                self.protocol.send("state", state="running")
+                self.protocol.send(
+                    "state",
+                    state="running",
+                    **self._runtime_state_payload(config=config, master=master),
+                )
 
                 if should_stop:
                     master.shutdown()
@@ -267,7 +391,13 @@ class HelperRuntime:
                     self._stop_requested = False
                     self._state = "stopped"
 
-                self.protocol.send("state", state="stopped")
+                self.protocol.send(
+                    "state",
+                    state="stopped",
+                    startup_mode=self._normalize_startup_mode(config.startup_mode),
+                    web_show_in_app=self._should_emit_app_flows(config),
+                    web_url="",
+                )
 
     def _on_session_finished(self, future: concurrent.futures.Future):
         try:
@@ -280,6 +410,9 @@ class HelperRuntime:
             )
 
     def _dispatch_flow(self, event_type: str, item):
+        config = RuntimeConfig.get()
+        if not self._should_emit_app_flows(config):
+            return
         payload = asdict(item)
         payload["time"] = item.time.isoformat()
         message_type = "flow_new" if event_type == "new" else "flow_update"

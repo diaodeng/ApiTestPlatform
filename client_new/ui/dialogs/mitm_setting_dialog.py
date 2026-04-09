@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -25,16 +26,20 @@ class MitmSettingDialog(QDialog):
         self._saved_data = None
 
         self.setWindowTitle("mitmproxy 设置")
-        self.resize(860, 760)
+        self.resize(1000, 760)
+        self.setMinimumSize(920, 680)
 
         self._init_ui()
         self._bind_data()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(10)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
 
         container = QWidget()
         self.content_layout = QVBoxLayout(container)
@@ -69,6 +74,9 @@ class MitmSettingDialog(QDialog):
 
         self.port_input = QLineEdit()
         self.web_port_input = QLineEdit()
+        self.startup_mode_select = QComboBox()
+        self.startup_mode_select.addItem("dump", "dump")
+        self.startup_mode_select.addItem("web", "web")
         self.mode_select = QComboBox()
         self.mode_select.addItems(["local", "regular", "wireguard", "socks5", "dns"])
         self.mode_select.setFixedWidth(120)
@@ -86,6 +94,7 @@ class MitmSettingDialog(QDialog):
         self.script_path_input = QLineEdit()
         self.ssl_insecure_checkbox = QCheckBox("忽略 SSL 校验")
         self.web_open_browser_checkbox = QCheckBox("启动后打开浏览器")
+        self.web_show_in_app_checkbox = QCheckBox("Web 模式下同步显示到应用界面")
 
         mode_row = QWidget()
         mode_row_layout = QHBoxLayout(mode_row)
@@ -97,14 +106,17 @@ class MitmSettingDialog(QDialog):
 
         layout.addRow("代理端口", self.port_input)
         layout.addRow("Web 端口", self.web_port_input)
+        layout.addRow("启动方式", self.startup_mode_select)
         layout.addRow("模式", mode_row)
         layout.addRow("配置目录", self.config_dir_input)
         layout.addRow("证书路径", self.cert_path_input)
         layout.addRow("脚本路径", self.script_path_input)
         layout.addRow("", self.ssl_insecure_checkbox)
         layout.addRow("", self.web_open_browser_checkbox)
+        layout.addRow("", self.web_show_in_app_checkbox)
 
         self.mode_select.currentTextChanged.connect(self._update_mode_value_state)
+        self.startup_mode_select.currentTextChanged.connect(self._update_startup_mode_state)
         return box
 
     def _build_mock_group(self):
@@ -171,6 +183,9 @@ class MitmSettingDialog(QDialog):
 
         self.port_input.setText(str(d.port))
         self.web_port_input.setText(str(d.web_port))
+        self.startup_mode_select.setCurrentText(
+            str(getattr(d, "startup_mode", "dump") or "dump")
+        )
         self.mode_select.setCurrentText(d.proxy_model)
         self.mode_value_input.set_value(d.proxy_model_value)
         self.config_dir_input.setText(d.mitmproxy_config_dir)
@@ -178,6 +193,9 @@ class MitmSettingDialog(QDialog):
         self.script_path_input.setText(d.script_path)
         self.ssl_insecure_checkbox.setChecked(d.ssl_insecure)
         self.web_open_browser_checkbox.setChecked(d.web_open_browser)
+        self.web_show_in_app_checkbox.setChecked(
+            bool(getattr(d, "web_show_in_app", True))
+        )
 
         self.is_mock_checkbox.setChecked(d.is_mock)
         self.mock_server_input.setText(d.mock_server)
@@ -198,10 +216,18 @@ class MitmSettingDialog(QDialog):
         self.res_delay_paths.setPlainText("\n".join(d.response_delay.delay_path))
 
         self._update_mode_value_state(d.proxy_model)
+        self._update_startup_mode_state(
+            str(getattr(d, "startup_mode", "dump") or "dump")
+        )
 
     def _update_mode_value_state(self, mode: str):
         is_local = mode == "local"
         self.mode_value_container.setVisible(is_local)
+
+    def _update_startup_mode_state(self, mode: str):
+        is_web = (mode or "").strip().lower() == "web"
+        self.web_open_browser_checkbox.setEnabled(is_web)
+        self.web_show_in_app_checkbox.setEnabled(is_web)
 
     def _save(self):
         try:
@@ -218,6 +244,7 @@ class MitmSettingDialog(QDialog):
             {
                 "port": int(self.port_input.text()),
                 "web_port": int(self.web_port_input.text()),
+                "startup_mode": self.startup_mode_select.currentData(),
                 "proxy_model": self.mode_select.currentText(),
                 "proxy_model_value": self.mode_value_input.value(),
                 "mitmproxy_config_dir": self.config_dir_input.text().strip(),
@@ -225,6 +252,7 @@ class MitmSettingDialog(QDialog):
                 "script_path": self.script_path_input.text().strip(),
                 "ssl_insecure": self.ssl_insecure_checkbox.isChecked(),
                 "web_open_browser": self.web_open_browser_checkbox.isChecked(),
+                "web_show_in_app": self.web_show_in_app_checkbox.isChecked(),
                 "is_mock": self.is_mock_checkbox.isChecked(),
                 "mock_server": self.mock_server_input.text().strip(),
                 "add_headers": self.headers_input.toPlainText(),

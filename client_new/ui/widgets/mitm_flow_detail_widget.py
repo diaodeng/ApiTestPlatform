@@ -5,19 +5,19 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QTabWidget,
     QToolButton,
-    QTreeWidget,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -83,26 +83,76 @@ class InfoCard(DetailCard):
             label.setText(str(value if value not in (None, "") else "-"))
 
 
-class StructuredTextCard(DetailCard):
-    def __init__(self, title: str, min_height: int = 96, parent=None):
-        super().__init__(title, parent)
+class StructuredTextCard(QWidget):
+    PARSER_PLAIN = "plain"
+    PARSER_JSON = "json"
+    PARSER_HEADERS = "headers"
+    PARSER_PAIRS = "pairs"
+
+    def __init__(
+        self,
+        title: str,
+        min_height: int = 96,
+        *,
+        parser_mode: str = PARSER_PLAIN,
+        allow_format_switch: bool = False,
+        allow_json_copy: bool = False,
+        allow_search: bool = False,
+        collapsible: bool = False,
+        start_collapsed: bool = False,
+        parent=None,
+    ):
+        super().__init__(parent)
         self._raw_value = ""
-        self._json_available = False
+        self._display_value = "-"
+        self._parser_mode = parser_mode
+        self._allow_format_switch = allow_format_switch
+        self._allow_json_copy = allow_json_copy
+        self._allow_search = allow_search
+        self._collapsible = collapsible
+        self._is_collapsed = False
+
+        self.title_label = QLabel(title)
+        self.title_label.setStyleSheet("font-size: 13px; font-weight: 600;")
+
+        self.toggle_btn = QToolButton()
+        self.toggle_btn.setVisible(self._collapsible)
+        self.toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+
+        self.format_label = QLabel("格式")
+        self.format_combo = QComboBox()
+        self.format_combo.addItem("文本", "text")
+        if self._allow_format_switch:
+            self.format_combo.addItem("JSON", "json")
+        self.format_label.setVisible(self._allow_format_switch)
+        self.format_combo.setVisible(self._allow_format_switch)
 
         self.copy_btn = QPushButton("复制")
-        self.expand_btn = QPushButton("展开 JSON")
-        self.collapse_btn = QPushButton("折叠 JSON")
+        self.copy_json_btn = QPushButton("复制 JSON")
+        self.copy_json_btn.setVisible(self._allow_json_copy)
 
         toolbar_layout = QHBoxLayout()
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
         toolbar_layout.setSpacing(6)
+        toolbar_layout.addWidget(self.title_label)
         toolbar_layout.addStretch()
+        toolbar_layout.addWidget(self.toggle_btn)
+        toolbar_layout.addWidget(self.format_label)
+        toolbar_layout.addWidget(self.format_combo)
         toolbar_layout.addWidget(self.copy_btn)
-        toolbar_layout.addWidget(self.expand_btn)
-        toolbar_layout.addWidget(self.collapse_btn)
+        toolbar_layout.addWidget(self.copy_json_btn)
 
-        self.view_tabs = QTabWidget()
-        self.view_tabs.setDocumentMode(True)
+        self.search_container = QWidget()
+        search_layout = QHBoxLayout(self.search_container)
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(6)
+        self.search_label = QLabel("搜索")
+        self.search_input = QLineEdit()
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setPlaceholderText(f"输入关键字过滤 {title}")
+        search_layout.addWidget(self.search_label)
+        search_layout.addWidget(self.search_input, 1)
+        self.search_container.setVisible(self._allow_search)
 
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)
@@ -110,131 +160,152 @@ class StructuredTextCard(DetailCard):
         self.text.setMinimumHeight(min_height)
         self.text.setPlaceholderText("暂无内容")
 
-        self.json_tree = QTreeWidget()
-        self.json_tree.setHeaderLabels(["Key", "Value"])
-        self.json_tree.setRootIsDecorated(True)
-        self.json_tree.setAlternatingRowColors(True)
-        self.json_tree.setMinimumHeight(min_height)
-
         font = QFont("Consolas")
         if not font.exactMatch():
             font = QFont("Courier New")
         self.text.setFont(font)
 
-        self.content_layout.addLayout(toolbar_layout)
-        self.view_tabs.addTab(self.text, "文本")
-        self.view_tabs.addTab(self.json_tree, "JSON")
-        self.content_layout.addWidget(self.view_tabs)
+        self.body_container = QWidget()
+        body_layout = QVBoxLayout(self.body_container)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(6)
+        body_layout.addWidget(self.search_container)
+        body_layout.addWidget(self.text)
 
-        self.copy_btn.clicked.connect(self._copy_text)
-        self.expand_btn.clicked.connect(self._expand_json)
-        self.collapse_btn.clicked.connect(self._collapse_json)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addLayout(toolbar_layout)
+        layout.addWidget(self.body_container)
 
-        self._set_json_available(False)
+        self.copy_btn.clicked.connect(self._copy_current_text)
+        self.copy_json_btn.clicked.connect(self._copy_json_text)
+        self.format_combo.currentIndexChanged.connect(self._refresh_display)
+        self.search_input.textChanged.connect(self._refresh_display)
+        self.toggle_btn.clicked.connect(self._toggle_collapsed)
+        if self._collapsible:
+            self._set_collapsed(start_collapsed)
+        self._refresh_display()
 
     def set_text(self, value: str):
-        text = value or "-"
-        parsed = self._try_parse_json(text)
-        if parsed is None:
-            self._raw_value = text
-            self.text.setPlainText(text)
-            self.json_tree.clear()
-            self._set_json_available(False)
-            self.view_tabs.setCurrentIndex(0)
-            return
-
-        formatted = json.dumps(parsed, indent=2, ensure_ascii=False)
-        self._raw_value = formatted
-        self.text.setPlainText(formatted)
-        self._populate_json_tree(parsed)
-        self._set_json_available(True)
-        self.view_tabs.setCurrentIndex(1)
+        self._raw_value = value or "-"
+        self._refresh_display()
 
     def clear(self):
         self._raw_value = ""
-        self.text.clear()
-        self.json_tree.clear()
-        self._set_json_available(False)
-        self.view_tabs.setCurrentIndex(0)
+        self._refresh_display()
 
     def text_value(self) -> str:
-        return self._raw_value or self.text.toPlainText()
+        return self._display_value or self.text.toPlainText()
 
-    def _set_json_available(self, available: bool):
-        self._json_available = available
-        self.view_tabs.setTabEnabled(1, available)
-        self.expand_btn.setEnabled(available)
-        self.collapse_btn.setEnabled(available)
-        if not available:
-            self.view_tabs.setTabText(1, "JSON")
-            return
-        self.view_tabs.setTabText(1, "JSON树")
+    def _refresh_display(self):
+        raw_text = self._normalized_text(self._raw_value)
+        mode = self.format_combo.currentData() if self._allow_format_switch else "text"
 
-    def _try_parse_json(self, text: str):
-        raw = (text or "").strip()
-        if not raw or raw == "-" or raw.startswith("<binary content:"):
-            return None
-        try:
-            return json.loads(raw)
-        except Exception:
-            return None
-
-    def _populate_json_tree(self, data):
-        self.json_tree.clear()
-        if isinstance(data, dict):
-            for key, child_value in data.items():
-                item = QTreeWidgetItem([str(key), self._display_value(child_value)])
-                self.json_tree.addTopLevelItem(item)
-                self._populate_node(item, child_value)
-        elif isinstance(data, list):
-            for index, child_value in enumerate(data):
-                item = QTreeWidgetItem([f"[{index}]", self._display_value(child_value)])
-                self.json_tree.addTopLevelItem(item)
-                self._populate_node(item, child_value)
+        if mode == "json":
+            json_text, error = self._build_json_text(raw_text)
+            if error:
+                display_text = f"格式化失败: {error}\n\n原始内容:\n{raw_text}"
+            else:
+                display_text = json_text
         else:
-            self.json_tree.addTopLevelItem(
-                QTreeWidgetItem(["value", self._display_value(data)])
+            display_text = raw_text
+
+        display_text = self._filter_display_text(display_text)
+        self._display_value = display_text
+        self.text.setPlainText(display_text)
+
+        if self._allow_json_copy:
+            json_text, error = self._build_json_text(raw_text)
+            self.copy_json_btn.setEnabled(
+                bool(json_text and not error and json_text != "-")
             )
 
-        self._collapse_json()
-        self.json_tree.resizeColumnToContents(0)
+    def _filter_display_text(self, text: str) -> str:
+        if not self._allow_search:
+            return text
 
-    def _populate_node(self, parent: QTreeWidgetItem, value):
-        if isinstance(value, dict):
-            for key, child_value in value.items():
-                item = QTreeWidgetItem([str(key), self._display_value(child_value)])
-                parent.addChild(item)
-                self._populate_node(item, child_value)
-        elif isinstance(value, list):
-            for index, child_value in enumerate(value):
-                item = QTreeWidgetItem([f"[{index}]", self._display_value(child_value)])
-                parent.addChild(item)
-                self._populate_node(item, child_value)
+        keyword = (self.search_input.text() or "").strip().lower()
+        if not keyword:
+            return text
 
-    def _display_value(self, value) -> str:
-        if isinstance(value, (dict, list)):
-            return ""
-        if value is None:
-            return "null"
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        return str(value)
+        normalized = (text or "").strip()
+        if not normalized or normalized == "-":
+            return text
 
-    def _copy_text(self):
+        matched_lines = [line for line in text.splitlines() if keyword in line.lower()]
+        if matched_lines:
+            return "\n".join(matched_lines)
+        return f"未匹配到内容：{self.search_input.text().strip()}"
+
+    def _normalized_text(self, value: str) -> str:
+        text = value if value not in (None, "") else "-"
+        return str(text)
+
+    def _build_json_text(self, raw_text: str) -> tuple[str, str]:
+        normalized = (raw_text or "").strip()
+        if not normalized or normalized == "-":
+            return "-", ""
+
+        try:
+            if self._parser_mode == self.PARSER_JSON:
+                if normalized.startswith("<binary content:"):
+                    raise ValueError("二进制内容不支持 JSON 格式化")
+                parsed = json.loads(normalized)
+            elif self._parser_mode == self.PARSER_HEADERS:
+                parsed = self._parse_pair_lines(normalized, ":")
+            elif self._parser_mode == self.PARSER_PAIRS:
+                parsed = self._parse_pair_lines(normalized, "=")
+            else:
+                raise ValueError("当前内容不支持 JSON 格式化")
+        except Exception as exc:
+            return "", str(exc)
+
+        return json.dumps(parsed, indent=2, ensure_ascii=False), ""
+
+    def _parse_pair_lines(self, text: str, separator: str) -> dict:
+        result: dict[str, object] = {}
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped or stripped == "-":
+                continue
+            if separator not in stripped:
+                raise ValueError(f"第 {line_no} 行缺少分隔符 {separator!r}")
+
+            key, value = stripped.split(separator, 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                raise ValueError(f"第 {line_no} 行键名为空")
+
+            existing = result.get(key)
+            if existing is None:
+                result[key] = value
+            elif isinstance(existing, list):
+                existing.append(value)
+            else:
+                result[key] = [existing, value]
+        return result
+
+    def _copy_current_text(self):
         QApplication.clipboard().setText(self.text_value())
 
-    def _expand_json(self):
-        if self._json_available:
-            self.json_tree.expandAll()
-
-    def _collapse_json(self):
-        if not self._json_available and self.json_tree.topLevelItemCount() == 0:
+    def _copy_json_text(self):
+        json_text, error = self._build_json_text(self._normalized_text(self._raw_value))
+        if error:
+            QApplication.clipboard().setText(f"格式化失败: {error}")
             return
-        self.json_tree.collapseAll()
-        for index in range(self.json_tree.topLevelItemCount()):
-            item = self.json_tree.topLevelItem(index)
-            if item:
-                item.setExpanded(True)
+        QApplication.clipboard().setText(json_text)
+
+    def _toggle_collapsed(self, *_args):
+        self._set_collapsed(not self._is_collapsed)
+
+    def _set_collapsed(self, collapsed: bool):
+        self._is_collapsed = collapsed
+        self.body_container.setVisible(not collapsed)
+        if self._collapsible:
+            self.toggle_btn.setArrowType(Qt.RightArrow if collapsed else Qt.DownArrow)
+            self.toggle_btn.setText("展开" if collapsed else "收起")
 
 
 class ScrollTabPage(QWidget):
@@ -338,40 +409,62 @@ class FlowDetailWidget(QWidget):
             [
                 ("request_line", "Request Line"),
                 ("url", "URL"),
-                ("scheme", "Scheme"),
+                # ("scheme", "Scheme"),
                 ("host", "Host"),
-                ("port", "Port"),
-                ("http_version", "HTTP Version"),
+                # ("port", "Port"),
+                # ("http_version", "HTTP Version"),
                 ("content_type", "Content-Type"),
             ],
         )
-        self.request_query_card = StructuredTextCard("Query Parameters", 88)
-        self.request_cookie_card = StructuredTextCard("Cookies", 88)
-        self.request_form_card = StructuredTextCard("Form Data", 88)
-        self.request_header_card = StructuredTextCard("Headers", 140)
-        self.request_body_card = StructuredTextCard("Body", 220)
+        self.request_form_card = StructuredTextCard("Form Data", 72)
+        self.request_header_card = StructuredTextCard(
+            "Headers",
+            100,
+            parser_mode=StructuredTextCard.PARSER_HEADERS,
+            allow_json_copy=True,
+            allow_search=True,
+            collapsible=True,
+            start_collapsed=True,
+        )
+        self.request_body_card = StructuredTextCard(
+            "Body",
+            220,
+            parser_mode=StructuredTextCard.PARSER_JSON,
+            allow_format_switch=True,
+        )
 
         self.response_meta_card = InfoCard(
             "响应信息",
             [
                 ("response_line", "Response Line"),
-                ("status", "Status"),
-                ("reason", "Reason"),
+                # ("status", "Status"),
+                # ("reason", "Reason"),
                 ("duration", "耗时"),
-                ("http_version", "HTTP Version"),
+                # ("http_version", "HTTP Version"),
                 ("content_type", "Content-Type"),
                 ("size", "Size"),
             ],
         )
-        self.response_header_card = StructuredTextCard("Headers", 140)
-        self.response_body_card = StructuredTextCard("Body", 220)
+        self.response_header_card = StructuredTextCard(
+            "Headers",
+            100,
+            parser_mode=StructuredTextCard.PARSER_HEADERS,
+            allow_json_copy=True,
+            allow_search=True,
+            collapsible=True,
+            start_collapsed=True,
+        )
+        self.response_body_card = StructuredTextCard(
+            "Body",
+            220,
+            parser_mode=StructuredTextCard.PARSER_JSON,
+            allow_format_switch=True,
+        )
 
         self.overview_tab.add_widget(self.summary_card)
         self.overview_tab.add_widget(self.overview_card)
 
         self.request_tab.add_widget(self.request_meta_card)
-        self.request_tab.add_widget(self.request_query_card)
-        self.request_tab.add_widget(self.request_cookie_card)
         self.request_tab.add_widget(self.request_form_card)
         self.request_tab.add_widget(self.request_header_card)
         self.request_tab.add_widget(self.request_body_card)
@@ -455,11 +548,12 @@ class FlowDetailWidget(QWidget):
                 "content_type": flow.request_content_type or "-",
             }
         )
-        self.request_query_card.set_text(flow.request_query or "-")
-        self.request_cookie_card.set_text(flow.request_cookies or "-")
-        self.request_form_card.set_text(flow.request_form or "-")
-        self.request_header_card.set_text(flow.request_headers or "-")
-        self.request_body_card.set_text(flow.request_body or "-")
+        self._set_optional_text_card(self.request_form_card, flow.request_form)
+        self._set_optional_text_card(self.request_header_card, flow.request_headers)
+        self._set_optional_text_card(
+            self.request_body_card,
+            self._request_body_for_display(flow),
+        )
 
         self.response_meta_card.set_values(
             {
@@ -478,8 +572,8 @@ class FlowDetailWidget(QWidget):
                 "size": flow.size,
             }
         )
-        self.response_header_card.set_text(flow.response_headers or "-")
-        self.response_body_card.set_text(flow.response_body or "-")
+        self._set_optional_text_card(self.response_header_card, flow.response_headers)
+        self._set_optional_text_card(self.response_body_card, flow.response_body)
         self._set_actions_enabled(True)
 
     def clear(self):
@@ -489,15 +583,31 @@ class FlowDetailWidget(QWidget):
         self.overview_card.set_values({})
         self.request_meta_card.set_values({})
         self.response_meta_card.set_values({})
-        self.request_query_card.clear()
-        self.request_cookie_card.clear()
-        self.request_form_card.clear()
-        self.request_header_card.clear()
-        self.request_body_card.clear()
-        self.response_header_card.clear()
-        self.response_body_card.clear()
+        self._set_optional_text_card(self.request_form_card, "", visible=False)
+        self._set_optional_text_card(self.request_header_card, "", visible=False)
+        self._set_optional_text_card(self.request_body_card, "", visible=False)
+        self._set_optional_text_card(self.response_header_card, "", visible=False)
+        self._set_optional_text_card(self.response_body_card, "", visible=False)
         self.tabs.setCurrentIndex(0)
         self._set_actions_enabled(False)
+
+    def _set_optional_text_card(
+        self, card: StructuredTextCard, value: str, *, visible: bool | None = None
+    ):
+        card.set_text(value or "")
+        if visible is None:
+            visible = self._has_meaningful_content(value)
+        card.setVisible(visible)
+
+    def _has_meaningful_content(self, value: str | None) -> bool:
+        return bool(str(value or "").strip())
+
+    def _request_body_for_display(self, flow) -> str:
+        if "x-www-form-urlencoded" in str(
+            flow.request_content_type or ""
+        ).strip().lower() and self._has_meaningful_content(flow.request_form):
+            return ""
+        return flow.request_body or ""
 
     def _set_actions_enabled(self, enabled: bool):
         self.copy_menu_btn.setEnabled(enabled)
@@ -556,26 +666,30 @@ class FlowDetailWidget(QWidget):
                 flow.request_http_version or "-",
             ]
         )
-        return "\n\n".join(
-            [
-                "[Request Line]\n"
-                + "\n".join(
-                    [
-                        request_line,
-                        f"URL: {flow.url or '-'}",
-                        f"Scheme: {flow.request_scheme or '-'}",
-                        f"Host: {flow.request_host or '-'}",
-                        f"Port: {flow.request_port or '-'}",
-                        f"Content-Type: {flow.request_content_type or '-'}",
-                    ]
-                ),
-                f"[Query Parameters]\n{flow.request_query or '-'}",
-                f"[Cookies]\n{flow.request_cookies or '-'}",
-                f"[Form Data]\n{flow.request_form or '-'}",
-                f"[Headers]\n{flow.request_headers or '-'}",
-                f"[Body]\n{flow.request_body or '-'}",
-            ]
-        )
+        sections = [
+            "[Request Line]\n"
+            + "\n".join(
+                [
+                    request_line,
+                    f"URL: {flow.url or '-'}",
+                    f"Scheme: {flow.request_scheme or '-'}",
+                    f"Host: {flow.request_host or '-'}",
+                    f"Port: {flow.request_port or '-'}",
+                    f"Content-Type: {flow.request_content_type or '-'}",
+                ]
+            )
+        ]
+
+        if self._has_meaningful_content(flow.request_form):
+            sections.append(f"[Form Data]\n{flow.request_form}")
+        if self._has_meaningful_content(flow.request_headers):
+            sections.append(f"[Headers]\n{flow.request_headers}")
+
+        request_body = self._request_body_for_display(flow)
+        if self._has_meaningful_content(request_body):
+            sections.append(f"[Body]\n{request_body}")
+
+        return "\n\n".join(sections)
 
     def _build_response_text(self, flow) -> str:
         status_text = flow.status_code if flow.status_code is not None else "-"
@@ -586,21 +700,24 @@ class FlowDetailWidget(QWidget):
                 flow.response_reason or "-",
             ]
         )
-        return "\n\n".join(
-            [
-                "[Response Line]\n"
-                + "\n".join(
-                    [
-                        response_line,
-                        f"Content-Type: {flow.response_content_type or '-'}",
-                        f"Duration: {self._format_duration(flow.duration_ms)}",
-                        f"Size: {flow.size}",
-                    ]
-                ),
-                f"[Headers]\n{flow.response_headers or '-'}",
-                f"[Body]\n{flow.response_body or '-'}",
-            ]
-        )
+        sections = [
+            "[Response Line]\n"
+            + "\n".join(
+                [
+                    response_line,
+                    f"Content-Type: {flow.response_content_type or '-'}",
+                    f"Duration: {self._format_duration(flow.duration_ms)}",
+                    f"Size: {flow.size}",
+                ]
+            )
+        ]
+
+        if self._has_meaningful_content(flow.response_headers):
+            sections.append(f"[Headers]\n{flow.response_headers}")
+        if self._has_meaningful_content(flow.response_body):
+            sections.append(f"[Body]\n{flow.response_body}")
+
+        return "\n\n".join(sections)
 
     def _build_full_text(self, flow) -> str:
         status_text = flow.status_code if flow.status_code is not None else "-"
