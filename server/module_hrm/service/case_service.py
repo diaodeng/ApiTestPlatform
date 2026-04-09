@@ -16,7 +16,14 @@ from module_hrm.dao.case_dao import CaseDao, CaseParamsDao
 from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseParams
 from module_hrm.entity.dto.case_dto import CaseModelForApi
-from module_hrm.entity.vo.case_params_vo import CaseParamsDeleteModel, CaseParamsQueryModel
+from module_hrm.entity.vo.case_params_vo import (
+    CaseParamsColumnCreateModel,
+    CaseParamsColumnDeleteModel,
+    CaseParamsCreateModel,
+    CaseParamsDeleteModel,
+    CaseParamsQueryModel,
+    CaseParamsUpdateModel,
+)
 from module_hrm.entity.vo.case_vo import AddCaseModel, CaseModel, CasePageQueryModel, CaseQuery, DeleteCaseModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from utils.common_util import CamelCaseUtil, export_list2excel
@@ -242,18 +249,38 @@ class CaseParamsService:
         :param query_info: 用例参数查询对象
         :return: 用例参数信息
         """
-        count = await CaseParamsDao.get_table_row_count(query_db, use_case_id=query_info.case_id)
+        if not query_info.case_id:
+            return {
+                "total": 0,
+                "page_num": query_info.page_num,
+                "page_size": query_info.page_size,
+                "case_id": query_info.case_id,
+                "columns": [],
+                "rows": [],
+            }
+
+        search_value = query_info.search_value.strip() if isinstance(query_info.search_value, str) else query_info.search_value
+        if search_value == "":
+            search_value = None
+
+        count = await CaseParamsDao.get_table_row_count(
+            query_db,
+            use_case_id=query_info.case_id,
+            enabled=query_info.enabled,
+            row_id=query_info.row_id,
+            search_column=query_info.search_column,
+            search_value=search_value,
+        )
         case_params = await CaseParamsDao.load_table_page(
             use_case_id=query_info.case_id,
             page=query_info.page_num,
             page_size=query_info.page_size,
             enabled=query_info.enabled,
+            row_id=query_info.row_id,
+            search_column=query_info.search_column,
+            search_value=search_value,
         )
-        columns_name = []
-        if case_params and len(case_params) > 0:
-            cols = list(case_params[0].keys())
-            cols.remove("_row_id")
-            columns_name = cols
+        columns_name = await run_in_threadpool(CaseParamsDao.get_table_columns, query_db, query_info.case_id)
         page_info = {
             "total": count,
             "page_num": query_info.page_num,
@@ -287,7 +314,7 @@ class CaseParamsService:
             yield case_param
 
     @classmethod
-    def add_case_params_services(cls, query_db: Session, case_id: int, params: dict):
+    def add_case_params_services(cls, query_db: Session, case_id: int | str, params: dict | None = None):
         """
         添加用例参数信息service
         :param query_db: orm对象
@@ -295,10 +322,33 @@ class CaseParamsService:
         :param params: 用例参数信息
         :return: 用例参数信息
         """
-        CaseParamsDao.add_table_row(query_db, use_case_id=case_id, row_data=params)
+        return CaseParamsDao.add_table_row(query_db, use_case_id=case_id, row_data=params or {})
 
     @classmethod
-    async def update_case_params_services(cls, query_db: Session, case_id: int, rows_data: list[dict]):
+    def add_case_params_row_services(cls, query_db: Session, create_data: CaseParamsCreateModel):
+        return cls.add_case_params_services(query_db, create_data.case_id, create_data.row_data)
+
+    @classmethod
+    def add_case_params_column_services(cls, query_db: Session, create_data: CaseParamsColumnCreateModel):
+        CaseParamsDao.insert_table_col(
+            query_db,
+            use_case_id=create_data.case_id,
+            col_name=create_data.column_name,
+            col_value=create_data.default_value,
+        )
+
+    @classmethod
+    def delete_case_params_column_services(cls, query_db: Session, delete_data: CaseParamsColumnDeleteModel):
+        CaseParamsDao.delete_table_col(
+            query_db,
+            use_case_id=delete_data.case_id,
+            col_name=delete_data.column_name,
+        )
+
+    @classmethod
+    async def update_case_params_services(
+        cls, query_db: Session, case_id: int | str, rows_data: list[dict]
+    ):
         """
         更新用例参数信息service
         :param query_db: orm对象
@@ -307,6 +357,10 @@ class CaseParamsService:
         :return: 用例参数信息
         """
         await CaseParamsDao.update_table_row(query_db, use_case_id=case_id, rows_data=rows_data)
+
+    @classmethod
+    async def update_case_params_by_model_services(cls, query_db: Session, update_data: CaseParamsUpdateModel):
+        await cls.update_case_params_services(query_db, update_data.case_id, update_data.rows_data)
 
     @classmethod
     async def delete_case_params_services(cls, query_db: Session, delete_data: CaseParamsDeleteModel):
