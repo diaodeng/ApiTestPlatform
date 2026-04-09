@@ -1,5 +1,5 @@
 from loguru import logger
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 from model.config import AgentConfigModel
 from server.config import AgentConfig
@@ -24,15 +24,28 @@ class _ConfigSyncThread(QThread):
             self.done.emit(False, None, str(e))
 
 
+class _LocalMacThread(QThread):
+    done = Signal(str)
+
+    def run(self):
+        try:
+            mac = get_active_mac() or ""
+        except Exception as e:
+            logger.exception(f"获取本机 MAC 失败: {e}")
+            mac = ""
+        self.done.emit(mac)
+
+
 class AgentController(QObject):
     def __init__(self, widget):
         super().__init__()
         self.widget = widget
         self.config = AgentConfig.read_config()
-        self.local_mac = get_active_mac() or ""
+        self.local_mac = ""
         self.connection_state = "stopped"
         self.service = AgentClientService()
         self._config_sync_thread: _ConfigSyncThread | None = None
+        self._local_mac_thread: _LocalMacThread | None = None
 
         self._bind_widget()
         self._bind_service()
@@ -40,6 +53,7 @@ class AgentController(QObject):
         self.widget.apply_config(self.config, self.connection_state, self.local_mac)
         self.widget.set_running(False)
         self.widget.set_status_message("就绪")
+        QTimer.singleShot(0, self._refresh_local_mac_async)
 
     def _bind_widget(self):
         self.widget.start_clicked.connect(self.start)
@@ -56,6 +70,8 @@ class AgentController(QObject):
 
     def start(self):
         self.local_mac = get_active_mac() or self.local_mac
+        if hasattr(self.widget, "set_local_mac"):
+            self.widget.set_local_mac(self.local_mac)
         self.config = AgentConfig.read_config()
 
         if self.connection_state in {"starting", "running", "stopping"}:
@@ -126,6 +142,9 @@ class AgentController(QObject):
         if self._config_sync_thread and self._config_sync_thread.isRunning():
             self._config_sync_thread.quit()
             self._config_sync_thread.wait(1000)
+        if self._local_mac_thread and self._local_mac_thread.isRunning():
+            self._local_mac_thread.quit()
+            self._local_mac_thread.wait(500)
 
     def _on_service_state_changed(self, state: str):
         self.connection_state = state or "stopped"
@@ -150,6 +169,27 @@ class AgentController(QObject):
         running = self.connection_state in {"starting", "running", "stopping"}
         self.widget.apply_config(self.config, self.connection_state, self.local_mac)
         self.widget.set_running(running)
+
+    def _refresh_local_mac_async(self):
+        if self._local_mac_thread and self._local_mac_thread.isRunning():
+            return
+
+        self._local_mac_thread = _LocalMacThread(self)
+        self._local_mac_thread.done.connect(self._on_local_mac_done)
+        self._local_mac_thread.finished.connect(self._on_local_mac_finished)
+        self._local_mac_thread.start()
+
+    def _on_local_mac_done(self, mac: str):
+        resolved_mac = (mac or "").strip()
+        if not resolved_mac or resolved_mac == self.local_mac:
+            return
+
+        self.local_mac = resolved_mac
+        if hasattr(self.widget, "set_local_mac"):
+            self.widget.set_local_mac(self.local_mac)
+
+    def _on_local_mac_finished(self):
+        self._local_mac_thread = None
 
     def _build_connect_url(self, server: str) -> str:
         base = (server or "").strip().rstrip("/")

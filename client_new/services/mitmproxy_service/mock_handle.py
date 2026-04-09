@@ -2,12 +2,13 @@ import asyncio
 import json
 import uuid
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import httpx
 from loguru import logger
 from mitmproxy.http import HTTPFlow, Response
 
-from models.mitmproxy_models import FlowItem
+from models.mitmproxy_common import FlowItem
 from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 
 from .runtime_config import RuntimeConfig
@@ -47,7 +48,7 @@ class MockHandle:
             size=0,
             time=datetime.now(),
             request_scheme=flow.request.scheme,
-            request_host=flow.request.host,
+            request_host=self._resolve_request_host(flow),
             request_port=flow.request.port,
             request_http_version=flow.request.http_version,
             request_query=self._format_query(flow),
@@ -164,6 +165,40 @@ class MockHandle:
 
     def _format_query(self, flow: HTTPFlow) -> str:
         return self._format_headers(self._iter_items(flow.request.query), separator="=")
+
+    def _resolve_request_host(self, flow: HTTPFlow) -> str:
+        request = flow.request
+        candidates = [
+            self._host_from_url(getattr(request, "pretty_url", "")),
+            str(getattr(request, "pretty_host", "") or "").strip(),
+            self._host_from_authority(getattr(request, "host_header", "")),
+            self._host_from_authority(request.headers.get("host", "")),
+            str(getattr(request, "host", "") or "").strip(),
+        ]
+        for candidate in candidates:
+            if candidate:
+                return candidate
+        return ""
+
+    def _host_from_url(self, url: str) -> str:
+        raw_url = str(url or "").strip()
+        if not raw_url:
+            return ""
+        try:
+            return str(urlsplit(raw_url).hostname or "").strip()
+        except Exception:
+            return ""
+
+    def _host_from_authority(self, authority: str) -> str:
+        raw_authority = str(authority or "").strip()
+        if not raw_authority:
+            return ""
+        if "://" not in raw_authority:
+            raw_authority = f"tcp://{raw_authority}"
+        try:
+            return str(urlsplit(raw_authority).hostname or "").strip()
+        except Exception:
+            return ""
 
     def _calculate_duration_ms(self, flow: HTTPFlow, item: FlowItem) -> int | None:
         request_start = getattr(flow.request, "timestamp_start", None)

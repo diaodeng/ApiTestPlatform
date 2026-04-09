@@ -15,13 +15,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from managers.pos_manager import PosManager
-from ui.pages.about_page import AboutPage
-from ui.pages.agent_page import AgentPage
-from ui.pages.log_view_page import LogViewPage
-from ui.pages.mitmproxy_page import MitmWidget
-from ui.pages.pos_page import PosPage
-from ui.pages.sqlite_query_page import SqliteQueryPage
 from ui.theme_manager import (
     THEME_MODE_AUTO,
     THEME_MODE_DARK,
@@ -32,10 +25,49 @@ from ui.theme_manager import (
 from ui.utils.icon_util import apply_window_icon
 
 
+def _create_agent_page():
+    from ui.pages.agent_page import AgentPage
+
+    return AgentPage()
+
+
+def _create_pos_page():
+    from ui.pages.pos_page import PosPage
+
+    return PosPage()
+
+
+def _create_sqlite_page():
+    from ui.pages.sqlite_query_page import SqliteQueryPage
+
+    return SqliteQueryPage()
+
+
+def _create_mitm_page(parent=None):
+    from ui.pages.mitmproxy_page import MitmWidget
+
+    return MitmWidget(parent)
+
+
+def _create_log_page():
+    from ui.pages.log_view_page import LogViewPage
+
+    return LogViewPage()
+
+
+def _create_about_page():
+    from ui.pages.about_page import AboutPage
+
+    return AboutPage()
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._closing_for_update = False
+        self._page_loading_enabled = False
+        self._initial_page_load_scheduled = False
+        self._default_page_name = "POS"
         self.theme_manager = ThemeManager.instance()
         self.setWindowTitle("QTRClient")
         self.resize(1200, 800)
@@ -102,22 +134,27 @@ class MainWindow(QMainWindow):
         self.stack.setObjectName("mainContentStack")
         self.stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # 页面注册
-        self.pages = {
-            "Agent": AgentPage(),
-            "POS": PosPage(),
-            "SQLite": SqliteQueryPage(),
-            "mitmproxy": MitmWidget(),
-            "日志": LogViewPage(),
-            "关于": AboutPage(),
+        self.page_factories = {
+            "Agent": _create_agent_page,
+            "POS": _create_pos_page,
+            "SQLite": _create_sqlite_page,
+            "mitmproxy": _create_mitm_page,
+            "日志": _create_log_page,
+            "关于": _create_about_page,
         }
+        self.pages: dict[str, QWidget | None] = {
+            name: None for name in self.nav_items
+        }
+        self._page_placeholders: dict[str, QWidget] = {}
 
         for name in self.nav_items:
-            self.stack.addWidget(self.pages[name])
+            placeholder = self._build_page_placeholder(name)
+            self._page_placeholders[name] = placeholder
+            self.stack.addWidget(placeholder)
 
         # 绑定菜单
-        self.menu.currentRowChanged.connect(self.stack.setCurrentIndex)
-        self.menu.setCurrentRow(self.nav_items.index("POS"))
+        self.menu.currentRowChanged.connect(self._on_nav_row_changed)
+        self.menu.setCurrentRow(self.nav_items.index(self._default_page_name))
 
         self.nav_frame = QFrame()
         self.nav_frame.setObjectName("mainNavFrame")
@@ -149,6 +186,49 @@ class MainWindow(QMainWindow):
             self.theme_manager.current_mode(), self.theme_manager.is_dark()
         )
 
+    def _build_page_placeholder(self, page_name: str) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.addStretch()
+
+        label = QLabel(f"{page_name} 页面加载中...")
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("color: gray; font-size: 14px;")
+        layout.addWidget(label)
+        layout.addStretch()
+        return widget
+
+    def _ensure_page(self, page_name: str) -> QWidget:
+        page = self.pages.get(page_name)
+        if page is not None:
+            return page
+
+        factory = self.page_factories[page_name]
+        if page_name == "mitmproxy":
+            page = factory(self.stack)
+        else:
+            page = factory()
+        self.pages[page_name] = page
+
+        placeholder = self._page_placeholders.pop(page_name, None)
+        if placeholder is not None:
+            index = self.stack.indexOf(placeholder)
+            if index >= 0:
+                self.stack.removeWidget(placeholder)
+                self.stack.insertWidget(index, page)
+                placeholder.deleteLater()
+        return page
+
+    def _on_nav_row_changed(self, row: int):
+        if row < 0 or row >= len(self.nav_items):
+            return
+
+        page_name = self.nav_items[row]
+        if self._page_loading_enabled:
+            self._ensure_page(page_name)
+        self.stack.setCurrentIndex(row)
+
     def _init_status_bar(self):
         self.statusBar().showMessage("就绪 | 当前运行POS: -")
         self._status_timer = QTimer(self)
@@ -168,6 +248,8 @@ class MainWindow(QMainWindow):
         self.theme_button.setToolTip(f"当前固定为 {resolved} 模式")
 
     def _refresh_global_status(self):
+        from managers.pos_manager import PosManager
+
         current = PosManager.instance().get()
         if current:
             path = current.get("path") or "-"
@@ -179,6 +261,22 @@ class MainWindow(QMainWindow):
     def close_for_update(self):
         self._closing_for_update = True
         self.close()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._initial_page_load_scheduled:
+            return
+        self._initial_page_load_scheduled = True
+        QTimer.singleShot(0, self._activate_initial_page)
+
+    def _activate_initial_page(self):
+        self._page_loading_enabled = True
+        current_row = self.menu.currentRow()
+        if current_row < 0:
+            current_row = self.nav_items.index(self._default_page_name)
+            self.menu.setCurrentRow(current_row)
+            return
+        self._on_nav_row_changed(current_row)
 
     def closeEvent(self, event):
         if not self._closing_for_update:
@@ -198,6 +296,8 @@ class MainWindow(QMainWindow):
 
         # 应用退出前，先关闭 mitmproxy helper，避免残留进程影响下次启动
         for page in self.pages.values():
+            if page is None:
+                continue
             if hasattr(page, "controller"):
                 try:
                     page.controller.shutdown()

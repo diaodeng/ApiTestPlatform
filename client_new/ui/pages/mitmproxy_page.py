@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -22,17 +22,20 @@ class MitmWidget(QWidget):
     install_cert_clicked = Signal()
     open_web_clicked = Signal()
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.config = MitmproxyConfig.read()
         self.proxy_state = "stopped"
         self._quick_save_guard = False
         self._detail_visible = True
         self._current_web_url = ""
         self._app_flow_visible = True
+        self._runtime_initialized = False
+        self._runtime_init_scheduled = False
+        self.flow_widget: FlowMainWidget | None = None
+        self.controller: MitmController | None = None
 
         self._init_ui()
-        self.controller = MitmController(self)
         self._bind()
         self.apply_config(self.config, self.proxy_state)
 
@@ -50,6 +53,8 @@ class MitmWidget(QWidget):
         self.detail_toggle_btn = QPushButton("隐藏详情")
         self.open_web_btn = QPushButton("打开 Web 页面")
         self.settings_btn = QPushButton("设置")
+        self.clear_btn.setEnabled(False)
+        self.detail_toggle_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
 
         action_layout = QHBoxLayout()
@@ -121,7 +126,13 @@ class MitmWidget(QWidget):
         cert_layout.addWidget(self.cert_status_label, 1)
         cert_layout.addWidget(self.install_cert_btn)
 
-        self.flow_widget = FlowMainWidget()
+        self.loading_label = QLabel("mitmproxy 页面初始化中...")
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.setWordWrap(True)
+        self.loading_label.setStyleSheet(
+            "padding: 24px; border: 1px dashed #a0aec0; border-radius: 10px;"
+        )
+
         self.flow_placeholder = QLabel()
         self.flow_placeholder.setAlignment(Qt.AlignCenter)
         self.flow_placeholder.setWordWrap(True)
@@ -130,12 +141,18 @@ class MitmWidget(QWidget):
         )
         self.flow_placeholder.hide()
 
+        self.flow_container = QWidget()
+        self.flow_container_layout = QVBoxLayout(self.flow_container)
+        self.flow_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.flow_container_layout.setSpacing(10)
+        self.flow_container_layout.addWidget(self.loading_label, 1)
+        self.flow_container_layout.addWidget(self.flow_placeholder, 1)
+
         main_layout.addLayout(action_layout)
         main_layout.addLayout(info_layout)
         main_layout.addWidget(self.mode_hint_label)
         main_layout.addLayout(cert_layout)
-        main_layout.addWidget(self.flow_widget, 1)
-        main_layout.addWidget(self.flow_placeholder, 1)
+        main_layout.addWidget(self.flow_container, 1)
 
     def _bind(self):
         self.start_btn.clicked.connect(self._handle_start_clicked)
@@ -151,14 +168,17 @@ class MitmWidget(QWidget):
         )
         self.mode_select.currentTextChanged.connect(self._on_mode_changed)
         self.mode_value_input.value_committed.connect(self._save_quick_settings)
-        self.flow_widget.table.stats_changed.connect(self._update_flow_stats)
 
     def _handle_start_clicked(self, _checked=False):
+        if self.controller is None and not self._runtime_initialized:
+            self._initialize_runtime()
+        if self._should_show_app_flows():
+            self._ensure_flow_widget()
         self._save_quick_settings()
         self.start_clicked.emit()
 
     def _toggle_detail(self, _checked=False):
-        if not self._app_flow_visible:
+        if not self._app_flow_visible or self.flow_widget is None:
             return
         self._detail_visible = self.flow_widget.toggle_detail()
         self.detail_toggle_btn.setText(
@@ -169,7 +189,7 @@ class MitmWidget(QWidget):
         self.stop_clicked.emit()
 
     def _handle_clear_clicked(self, _checked=False):
-        if not self._app_flow_visible:
+        if not self._app_flow_visible or self.flow_widget is None:
             return
         self.flow_widget.clear()
 
@@ -273,15 +293,31 @@ class MitmWidget(QWidget):
 
     def _update_app_flow_visibility(self, config):
         should_show = self._should_show_app_flows(config)
-        if self._app_flow_visible and not should_show:
+        if self._app_flow_visible and not should_show and self.flow_widget is not None:
             self.flow_widget.clear()
         self._app_flow_visible = should_show
-        self.flow_widget.setVisible(should_show)
-        self.flow_placeholder.setVisible(not should_show)
-        self.clear_btn.setEnabled(should_show)
-        self.detail_toggle_btn.setEnabled(should_show)
+        if not self._runtime_initialized:
+            self.loading_label.setVisible(True)
+            self.flow_placeholder.hide()
+            return
+
+        if self.flow_widget is not None:
+            self.flow_widget.setVisible(should_show)
+        self.loading_label.hide()
+        self.flow_placeholder.setVisible(False)
+        self.clear_btn.setEnabled(should_show and self.flow_widget is not None)
+        self.detail_toggle_btn.setEnabled(should_show and self.flow_widget is not None)
         if should_show:
-            self.flow_widget.set_detail_visible(self._detail_visible)
+            if self.flow_widget is None:
+                self.flow_placeholder.setText(
+                    "启动 mitmproxy 后将在这里显示流量列表。\n"
+                    "当前尚未初始化流量视图。"
+                )
+                self.flow_placeholder.show()
+                self.detail_toggle_btn.setText("隐藏详情")
+                return
+            if self.flow_widget is not None:
+                self.flow_widget.set_detail_visible(self._detail_visible)
             self.detail_toggle_btn.setText(
                 "隐藏详情" if self._detail_visible else "显示详情"
             )
@@ -356,3 +392,41 @@ class MitmWidget(QWidget):
             "color: white; "
             "font-weight: 600;"
         )
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._runtime_initialized or self._runtime_init_scheduled:
+            return
+        self._runtime_init_scheduled = True
+        QTimer.singleShot(0, self._initialize_runtime)
+
+    def _initialize_runtime(self):
+        if self._runtime_initialized:
+            return
+        try:
+            self.controller = MitmController(self)
+            self._runtime_initialized = True
+            self._runtime_init_scheduled = False
+            self.loading_label.hide()
+            self.apply_config(self.config, self.proxy_state)
+        except Exception as e:
+            self.loading_label.setText(f"mitmproxy 页面初始化失败：{e}")
+            self.loading_label.show()
+            if self.flow_widget is not None:
+                self.flow_widget.deleteLater()
+                self.flow_widget = None
+            self.controller = None
+            self._runtime_init_scheduled = False
+
+    def _ensure_flow_widget(self):
+        if self.flow_widget is not None:
+            return self.flow_widget
+
+        self.flow_widget = FlowMainWidget(self.flow_container)
+        self.flow_widget.table.stats_changed.connect(self._update_flow_stats)
+        self.flow_container_layout.insertWidget(0, self.flow_widget, 1)
+        self.flow_placeholder.hide()
+        self.clear_btn.setEnabled(self._app_flow_visible)
+        self.detail_toggle_btn.setEnabled(self._app_flow_visible)
+        self.flow_widget.set_detail_visible(self._detail_visible)
+        return self.flow_widget

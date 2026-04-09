@@ -354,9 +354,9 @@ class _DesktopRecordOverlayController(QObject):
     def __init__(self, app: QApplication):
         super().__init__(app)
         self._app = app
-        self._outline_widget = _ViewportOutlineWidget()
-        self._selector_widget = _SelectionOverlayWidget()
-        self._toolbar_widget = _AnnotationToolbarWidget()
+        self._outline_widget: _ViewportOutlineWidget | None = None
+        self._selector_widget: _SelectionOverlayWidget | None = None
+        self._toolbar_widget: _AnnotationToolbarWidget | None = None
         self._desktop_rect = QRect()
         self._viewport_rect = QRect()
         self._pending_annotation_future: concurrent.futures.Future | None = None
@@ -368,14 +368,39 @@ class _DesktopRecordOverlayController(QObject):
         self._suspended_state: dict[str, bool] = {}
 
         self.command_received.connect(self._handle_command, Qt.QueuedConnection)
-        self._selector_widget.selection_finished.connect(self._handle_selection_finished)
-        self._selector_widget.selection_cancelled.connect(self._handle_selection_cancelled)
-        self._toolbar_widget.focus_requested.connect(lambda: self._start_selection("focus"))
-        self._toolbar_widget.mask_requested.connect(lambda: self._start_selection("mask"))
-        self._toolbar_widget.assert_requested.connect(lambda: self._start_selection("assert"))
-        self._toolbar_widget.clear_requested.connect(self._clear_annotation_state)
-        self._toolbar_widget.accept_requested.connect(self._finish_annotation)
-        self._toolbar_widget.cancel_requested.connect(self._cancel_annotation)
+
+    def _ensure_outline_widget(self) -> _ViewportOutlineWidget:
+        if self._outline_widget is None:
+            self._outline_widget = _ViewportOutlineWidget()
+        return self._outline_widget
+
+    def _ensure_selector_widget(self) -> _SelectionOverlayWidget:
+        if self._selector_widget is None:
+            self._selector_widget = _SelectionOverlayWidget()
+            self._selector_widget.selection_finished.connect(
+                self._handle_selection_finished
+            )
+            self._selector_widget.selection_cancelled.connect(
+                self._handle_selection_cancelled
+            )
+        return self._selector_widget
+
+    def _ensure_toolbar_widget(self) -> _AnnotationToolbarWidget:
+        if self._toolbar_widget is None:
+            self._toolbar_widget = _AnnotationToolbarWidget()
+            self._toolbar_widget.focus_requested.connect(
+                lambda: self._start_selection("focus")
+            )
+            self._toolbar_widget.mask_requested.connect(
+                lambda: self._start_selection("mask")
+            )
+            self._toolbar_widget.assert_requested.connect(
+                lambda: self._start_selection("assert")
+            )
+            self._toolbar_widget.clear_requested.connect(self._clear_annotation_state)
+            self._toolbar_widget.accept_requested.connect(self._finish_annotation)
+            self._toolbar_widget.cancel_requested.connect(self._cancel_annotation)
+        return self._toolbar_widget
 
     def _resolve_desktop_context(self, viewport_payload: dict[str, Any] | None) -> tuple[QRect, QRect]:
         desktop_rect = _virtual_geometry()
@@ -387,11 +412,14 @@ class _DesktopRecordOverlayController(QObject):
         return desktop_rect, viewport_rect
 
     def _place_toolbar(self) -> None:
+        toolbar_widget = self._toolbar_widget
+        if toolbar_widget is None:
+            return
         desktop_rect = self._desktop_rect if self._desktop_rect.isValid() else _virtual_geometry()
         viewport_rect = self._viewport_rect if self._viewport_rect.isValid() else QRect(desktop_rect)
         available_rect = _available_geometry_for_rect(viewport_rect)
-        self._toolbar_widget.adjustSize()
-        toolbar_size = self._toolbar_widget.size()
+        toolbar_widget.adjustSize()
+        toolbar_size = toolbar_widget.size()
         margin = 18
 
         safe_rect = available_rect.adjusted(margin, margin, -margin, -margin)
@@ -422,10 +450,11 @@ class _DesktopRecordOverlayController(QObject):
                 break
             chosen = QPoint(clamped_x, clamped_y)
 
-        self._toolbar_widget.move(chosen)
+        toolbar_widget.move(chosen)
 
     def _update_toolbar(self, prompt: str = "") -> None:
-        self._toolbar_widget.update_state(
+        toolbar_widget = self._ensure_toolbar_widget()
+        toolbar_widget.update_state(
             prompt=prompt,
             focus_region=self._annotation_state.get("focusRegion"),
             mask_regions=list(self._annotation_state.get("maskRegions") or []),
@@ -435,13 +464,15 @@ class _DesktopRecordOverlayController(QObject):
 
     def _show_viewport_outline(self, viewport_payload: dict[str, Any] | None) -> None:
         desktop_rect, viewport_rect = self._resolve_desktop_context(viewport_payload)
+        outline_widget = self._ensure_outline_widget()
         if _is_full_viewport(viewport_rect, desktop_rect):
-            self._outline_widget.clear_viewport()
+            outline_widget.clear_viewport()
             return
-        self._outline_widget.set_viewport(desktop_rect, viewport_rect)
+        outline_widget.set_viewport(desktop_rect, viewport_rect)
 
     def _hide_viewport_outline(self) -> None:
-        self._outline_widget.clear_viewport()
+        if self._outline_widget is not None:
+            self._outline_widget.clear_viewport()
 
     def _clear_annotation_state(self) -> None:
         self._annotation_state = {"focusRegion": None, "maskRegions": [], "assertRegions": []}
@@ -451,8 +482,14 @@ class _DesktopRecordOverlayController(QObject):
     def _start_selection(self, purpose: str) -> None:
         if not self._pending_annotation_future or self._pending_annotation_future.done():
             return
-        self._toolbar_widget.hide()
-        self._selector_widget.begin(self._desktop_rect, self._viewport_rect, purpose)
+        toolbar_widget = self._toolbar_widget
+        if toolbar_widget is not None:
+            toolbar_widget.hide()
+        self._ensure_selector_widget().begin(
+            self._desktop_rect,
+            self._viewport_rect,
+            purpose,
+        )
 
     def _handle_selection_finished(self, payload: dict[str, Any]) -> None:  # pragma: no cover - GUI callback
         purpose = str(payload.get("purpose") or "")
@@ -463,14 +500,16 @@ class _DesktopRecordOverlayController(QObject):
             self._annotation_state.setdefault("maskRegions", []).append({**rect_payload, "exclude": True})
         elif purpose == "assert":
             self._annotation_state.setdefault("assertRegions", []).append(rect_payload)
-        self._toolbar_widget.show()
-        self._toolbar_widget.raise_()
+        toolbar_widget = self._ensure_toolbar_widget()
+        toolbar_widget.show()
+        toolbar_widget.raise_()
         self._update_toolbar("标注已记录，可继续增加区域或继续录制。")
 
     def _handle_selection_cancelled(self) -> None:  # pragma: no cover - GUI callback
         if self._pending_annotation_future and not self._pending_annotation_future.done():
-            self._toolbar_widget.show()
-            self._toolbar_widget.raise_()
+            toolbar_widget = self._ensure_toolbar_widget()
+            toolbar_widget.show()
+            toolbar_widget.raise_()
             self._update_toolbar("已取消当前选择。")
 
     def _finish_annotation(self) -> None:
@@ -481,8 +520,10 @@ class _DesktopRecordOverlayController(QObject):
             "assertRegions": list(self._annotation_state.get("assertRegions") or []),
             "skipped": False,
         }
-        self._selector_widget.hide()
-        self._toolbar_widget.hide()
+        if self._selector_widget is not None:
+            self._selector_widget.hide()
+        if self._toolbar_widget is not None:
+            self._toolbar_widget.hide()
         self._pending_annotation_future = None
         self._annotation_state = {"focusRegion": None, "maskRegions": [], "assertRegions": []}
         if future is not None and not future.done():
@@ -490,35 +531,47 @@ class _DesktopRecordOverlayController(QObject):
 
     def _cancel_annotation(self) -> None:
         future = self._pending_annotation_future
-        self._selector_widget.hide()
-        self._toolbar_widget.hide()
+        if self._selector_widget is not None:
+            self._selector_widget.hide()
+        if self._toolbar_widget is not None:
+            self._toolbar_widget.hide()
         self._pending_annotation_future = None
         self._annotation_state = {"focusRegion": None, "maskRegions": [], "assertRegions": []}
         if future is not None and not future.done():
             future.set_result({"focusRegion": None, "maskRegions": [], "assertRegions": [], "skipped": True})
 
     def _suspend_capture(self) -> dict[str, Any]:
+        selector_widget = self._selector_widget
+        toolbar_widget = self._toolbar_widget
+        outline_widget = self._outline_widget
         state = {
-            "outlineVisible": self._outline_widget.isVisible(),
-            "toolbarVisible": self._toolbar_widget.isVisible(),
-            "selectorVisible": self._selector_widget.isVisible(),
-            "selectorPurpose": self._selector_widget.current_purpose(),
+            "outlineVisible": bool(outline_widget and outline_widget.isVisible()),
+            "toolbarVisible": bool(toolbar_widget and toolbar_widget.isVisible()),
+            "selectorVisible": bool(selector_widget and selector_widget.isVisible()),
+            "selectorPurpose": selector_widget.current_purpose() if selector_widget else "focus",
         }
-        self._outline_widget.hide()
-        self._toolbar_widget.hide()
-        self._selector_widget.hide()
+        if outline_widget is not None:
+            outline_widget.hide()
+        if toolbar_widget is not None:
+            toolbar_widget.hide()
+        if selector_widget is not None:
+            selector_widget.hide()
         return state
 
     def _resume_capture(self, state: dict[str, Any] | None) -> None:
         state = state or {}
         if state.get("outlineVisible") and self._viewport_rect.isValid() and not _is_full_viewport(self._viewport_rect, self._desktop_rect):
-            self._outline_widget.set_viewport(self._desktop_rect, self._viewport_rect)
+            self._ensure_outline_widget().set_viewport(
+                self._desktop_rect,
+                self._viewport_rect,
+            )
         if state.get("toolbarVisible") and self._pending_annotation_future and not self._pending_annotation_future.done():
-            self._toolbar_widget.show()
-            self._toolbar_widget.raise_()
+            toolbar_widget = self._ensure_toolbar_widget()
+            toolbar_widget.show()
+            toolbar_widget.raise_()
             self._update_toolbar()
         if state.get("selectorVisible") and self._pending_annotation_future and not self._pending_annotation_future.done():
-            self._selector_widget.begin(
+            self._ensure_selector_widget().begin(
                 self._desktop_rect,
                 self._viewport_rect,
                 str(state.get("selectorPurpose") or "focus"),
@@ -560,8 +613,9 @@ class _DesktopRecordOverlayController(QObject):
                 self._annotation_state = {"focusRegion": None, "maskRegions": [], "assertRegions": []}
                 self._show_viewport_outline(command.payload.get("viewport"))
                 self._update_toolbar(command.payload.get("prompt") or "")
-                self._toolbar_widget.show()
-                self._toolbar_widget.raise_()
+                toolbar_widget = self._ensure_toolbar_widget()
+                toolbar_widget.show()
+                toolbar_widget.raise_()
                 return
 
             if command.kind == "cancel_annotation":

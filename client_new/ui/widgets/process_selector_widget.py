@@ -27,6 +27,7 @@ class ProcessSelectorWidget(QWidget):
         super().__init__(parent)
         self._loaded_once = False
         self._process_names: list[str] = []
+        self._completer: QCompleter | None = None
 
         self.combo = _ProcessComboBox()
         self.combo.setEditable(True)
@@ -35,12 +36,6 @@ class ProcessSelectorWidget(QWidget):
         self.combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.combo.lineEdit().setClearButtonEnabled(True)
         self.combo.lineEdit().setPlaceholderText(placeholder)
-
-        completer = QCompleter(self.combo.model(), self)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        self.combo.setCompleter(completer)
 
         self.refresh_btn = QPushButton("加载")
         self.refresh_btn.setFixedWidth(56)
@@ -68,6 +63,7 @@ class ProcessSelectorWidget(QWidget):
 
     def refresh_processes(self):
         current = self.value()
+        self._ensure_completer()
         self._process_names = self._list_process_names()
         self._apply_items(self._process_names, current)
         self._loaded_once = True
@@ -75,6 +71,17 @@ class ProcessSelectorWidget(QWidget):
     def _refresh_before_popup(self):
         if not self._loaded_once:
             self.refresh_processes()
+            return
+        self._ensure_completer()
+
+    def _ensure_completer(self):
+        if self._completer is not None:
+            return
+        self._completer = QCompleter(self.combo.model(), self)
+        self._completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self._completer.setFilterMode(Qt.MatchContains)
+        self._completer.setCompletionMode(QCompleter.PopupCompletion)
+        self.combo.setCompleter(self._completer)
 
     def _emit_value(self, *_args):
         self.value_committed.emit(self.value())

@@ -90,7 +90,10 @@ class PosStartEngine:
 
         elif ctx.has_local and ctx.has_remote:
             if ctx.is_mismatch():
-                choice = ui.choice("提示", "本地和服务端配置不一致，继续启动？")
+                choice = ui.choice(
+                    "提示",
+                    f"本地和服务端配置不一致，继续启动？\n{ctx.local_env_info}\n{ctx.remote_info}",
+                )
 
                 if choice == 0:
                     return False

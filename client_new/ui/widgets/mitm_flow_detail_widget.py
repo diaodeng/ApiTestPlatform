@@ -5,7 +5,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.theme_manager import ThemeManager, color_to_hex
+from ui.widgets.menu_select_button import MenuSelectButton
 
 
 class DetailCard(QFrame):
@@ -119,13 +119,12 @@ class StructuredTextCard(QWidget):
         self.toggle_btn.setVisible(self._collapsible)
         self.toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
-        self.format_label = QLabel("格式")
-        self.format_combo = QComboBox()
-        self.format_combo.addItem("文本", "text")
+        format_options = [("文本", "text")]
         if self._allow_format_switch:
-            self.format_combo.addItem("JSON", "json")
-        self.format_label.setVisible(self._allow_format_switch)
-        self.format_combo.setVisible(self._allow_format_switch)
+            format_options.append(("JSON", "json"))
+        self.format_select = MenuSelectButton("格式", format_options, self)
+        self.format_select.setVisible(self._allow_format_switch)
+        self.format_select.setMinimumWidth(88)
 
         self.copy_btn = QPushButton("复制")
         self.copy_json_btn = QPushButton("复制 JSON")
@@ -137,8 +136,7 @@ class StructuredTextCard(QWidget):
         toolbar_layout.addWidget(self.title_label)
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(self.toggle_btn)
-        toolbar_layout.addWidget(self.format_label)
-        toolbar_layout.addWidget(self.format_combo)
+        toolbar_layout.addWidget(self.format_select)
         toolbar_layout.addWidget(self.copy_btn)
         toolbar_layout.addWidget(self.copy_json_btn)
 
@@ -180,7 +178,7 @@ class StructuredTextCard(QWidget):
 
         self.copy_btn.clicked.connect(self._copy_current_text)
         self.copy_json_btn.clicked.connect(self._copy_json_text)
-        self.format_combo.currentIndexChanged.connect(self._refresh_display)
+        self.format_select.value_changed.connect(self._refresh_display)
         self.search_input.textChanged.connect(self._refresh_display)
         self.toggle_btn.clicked.connect(self._toggle_collapsed)
         if self._collapsible:
@@ -200,7 +198,7 @@ class StructuredTextCard(QWidget):
 
     def _refresh_display(self):
         raw_text = self._normalized_text(self._raw_value)
-        mode = self.format_combo.currentData() if self._allow_format_switch else "text"
+        mode = self.format_select.currentData() if self._allow_format_switch else "text"
 
         if mode == "json":
             json_text, error = self._build_json_text(raw_text)
@@ -333,8 +331,8 @@ class ScrollTabPage(QWidget):
 
 
 class FlowDetailWidget(QWidget):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
 
         self._current_flow = None
 
