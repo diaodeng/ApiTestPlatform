@@ -394,6 +394,7 @@ def get_all_process() -> list[dict]:
 
 
 _RELEASES_API_URL = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
+_RUNTIME_PRESERVE_NAMES = {"storage", "logs", ".update_backup"}
 
 
 def is_frozen_client_runtime() -> bool:
@@ -404,6 +405,62 @@ def get_client_root_dir() -> Path:
     if is_frozen_client_runtime():
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
+
+
+def get_client_package_mode() -> str:
+    """
+    返回客户端当前运行形态:
+    - source: 源码运行
+    - standalone: 单文件独立打包
+    - portable_dir: 非独立目录打包
+    """
+    if not is_frozen_client_runtime():
+        return "source"
+
+    exe_dir = Path(sys.executable).resolve().parent
+    if (exe_dir / "_internal").is_dir():
+        return "portable_dir"
+
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        try:
+            bundle_root_path = Path(bundle_root).resolve()
+            if bundle_root_path == exe_dir or bundle_root_path.parent == exe_dir:
+                return "portable_dir"
+        except Exception:
+            pass
+
+    return "standalone"
+
+
+def get_client_update_runtime_profile() -> dict[str, Any]:
+    package_mode = get_client_package_mode()
+    client_root = get_client_root_dir()
+    current_exe = Path(sys.executable).resolve() if is_frozen_client_runtime() else None
+    main_exe_name = current_exe.name if current_exe else ""
+    main_exe_stem = current_exe.stem if current_exe else ""
+
+    label_map = {
+        "source": "源码运行",
+        "standalone": "独立打包",
+        "portable_dir": "非独立打包",
+    }
+    preferred_suffixes = [".exe", ".zip"]
+    preferred_asset_label = "exe"
+    if package_mode == "portable_dir":
+        preferred_suffixes = [".zip", ".exe"]
+        preferred_asset_label = "zip"
+
+    return {
+        "package_mode": package_mode,
+        "package_mode_label": label_map.get(package_mode, package_mode),
+        "preferred_suffixes": preferred_suffixes,
+        "preferred_asset_label": preferred_asset_label,
+        "client_root": client_root,
+        "current_exe": current_exe,
+        "main_exe_name": main_exe_name,
+        "main_exe_stem": main_exe_stem,
+    }
 
 
 def _normalize_version_tuple(value: str | None) -> tuple[int, ...]:
@@ -448,23 +505,73 @@ def _build_release_markdown(releases: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
-def _select_release_asset(release: dict[str, Any]) -> tuple[str | None, str | None]:
-    exe_url = None
-    zip_url = None
+def _iter_release_assets(release: dict[str, Any]) -> list[dict[str, str]]:
+    assets: list[dict[str, str]] = []
     for item in release.get("assets") or []:
-        name = item.get("name")
-        url = item.get("browser_download_url")
-        if not url:
+        name = str(item.get("name") or "").strip()
+        url = str(item.get("browser_download_url") or "").strip()
+        if not name or not url:
             continue
-        if name == "QTRClient.exe":
-            exe_url = url
-        elif name == "QTRClient.zip":
-            zip_url = url
-    if exe_url:
-        return exe_url, ".exe"
-    if zip_url:
-        return zip_url, ".zip"
-    return None, None
+        suffix = Path(name).suffix.lower()
+        if suffix not in {".exe", ".zip"}:
+            continue
+        assets.append({"name": name, "url": url, "suffix": suffix})
+    return assets
+
+
+def _asset_match_score(asset_name: str, suffix: str, runtime_profile: dict[str, Any]) -> int:
+    lower_name = asset_name.lower()
+    stem = Path(asset_name).stem.lower()
+    current_exe_name = str(runtime_profile.get("main_exe_name") or "").lower()
+    current_exe_stem = str(runtime_profile.get("main_exe_stem") or "").lower()
+
+    if suffix == ".exe":
+        if current_exe_name and lower_name == current_exe_name:
+            return 300
+        if current_exe_stem and stem == current_exe_stem:
+            return 260
+        if current_exe_stem and current_exe_stem in stem:
+            return 220
+        if lower_name in {"qtrclientnew.exe", "qtrclient.exe"}:
+            return 200
+    elif suffix == ".zip":
+        expected_zip_name = f"{current_exe_stem}.zip" if current_exe_stem else ""
+        if expected_zip_name and lower_name == expected_zip_name:
+            return 300
+        if current_exe_stem and stem == current_exe_stem:
+            return 260
+        if current_exe_stem and current_exe_stem in stem:
+            return 220
+        if lower_name in {"qtrclientnew.zip", "qtrclient.zip"}:
+            return 200
+
+    if stem in {"qtrclientnew", "qtrclient"}:
+        return 160
+    if "qtrclientnew" in stem or "qtrclient" in stem:
+        return 120
+    return 10
+
+
+def _select_release_asset(release: dict[str, Any]) -> dict[str, str] | None:
+    runtime_profile = get_client_update_runtime_profile()
+    assets = _iter_release_assets(release)
+    if not assets:
+        return None
+
+    for suffix in runtime_profile["preferred_suffixes"]:
+        candidates = [item for item in assets if item["suffix"] == suffix]
+        if not candidates:
+            continue
+        ranked = sorted(
+            candidates,
+            key=lambda item: (
+                -_asset_match_score(item["name"], item["suffix"], runtime_profile),
+                item["name"].lower(),
+            ),
+        )
+        return ranked[0]
+
+    return None
 
 
 async def check_app_has_new() -> tuple[bool | str, str]:
@@ -481,8 +588,17 @@ async def download_new_app(
     download_process_call=None, force: bool = False
 ) -> str | None:
     logger.info("开始下载新包")
+    runtime_profile = get_client_update_runtime_profile()
+    logger.info(
+        "当前升级运行形态: {}，优先更新包类型: {}",
+        runtime_profile["package_mode_label"],
+        runtime_profile["preferred_asset_label"],
+    )
     if download_process_call:
-        download_process_call("正在获取版本信息...")
+        download_process_call(
+            f"正在获取版本信息... 当前运行形态: {runtime_profile['package_mode_label']}，"
+            f"优先选择 {runtime_profile['preferred_asset_label']} 包"
+        )
 
     releases = await _fetch_release_list()
     if not releases:
@@ -494,10 +610,16 @@ async def download_new_app(
         logger.info(f"当前版本 {VERSION} 已是最新版本，无需下载")
         return None
 
-    asset_url, file_suffix = _select_release_asset(latest_release)
-    if not asset_url or not file_suffix:
+    selected_asset = _select_release_asset(latest_release)
+    if not selected_asset:
         logger.info("没有找到升级文件")
         return None
+    asset_url = selected_asset["url"]
+    file_suffix = selected_asset["suffix"]
+    asset_name = selected_asset["name"]
+    logger.info(f"已选择更新包: {asset_name}")
+    if download_process_call:
+        download_process_call(f"已选择更新包: {asset_name}")
 
     download_dir = Path(tempfile.gettempdir()) / "QTRClient" / "updates"
     download_dir.mkdir(parents=True, exist_ok=True)
@@ -564,11 +686,134 @@ Start-Transcript -Path $LogPath -Append | Out-Null
 
 $MainExeName = [System.IO.Path]::GetFileName($MainExePath)
 $ProcessName = [System.IO.Path]::GetFileNameWithoutExtension($MainExePath)
+$BackupRoot = Join-Path $CurrentDir ".update_backup"
+$PreserveNames = @("storage", "logs", ".update_backup")
+$ReplacedItems = New-Object System.Collections.ArrayList
+$CreatedItems = New-Object System.Collections.ArrayList
 
 Write-Host "=== QTRClient Update ==="
 Write-Host "Target directory: $CurrentDir"
 Write-Host "Main exe path: $MainExePath"
 Write-Host "New file: $NewFile"
+
+function Add-ReplacedItem {
+    param(
+        [string]$Destination,
+        [string]$Backup
+    )
+    [void]$ReplacedItems.Add([PSCustomObject]@{
+        Destination = $Destination
+        Backup = $Backup
+    })
+}
+
+function Add-CreatedItem {
+    param([string]$Path)
+    [void]$CreatedItems.Add($Path)
+}
+
+function Backup-ExistingItem {
+    param([string]$DestinationPath)
+
+    if (-not (Test-Path $DestinationPath)) {
+        return $false
+    }
+
+    $ItemName = [System.IO.Path]::GetFileName($DestinationPath)
+    $BackupPath = Join-Path $BackupRoot $ItemName
+    if (Test-Path $BackupPath) {
+        Remove-Item $BackupPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Move-Item -LiteralPath $DestinationPath -Destination $BackupPath -Force
+    Add-ReplacedItem -Destination $DestinationPath -Backup $BackupPath
+    return $true
+}
+
+function Resolve-SourceDir {
+    param([string]$TempDir)
+
+    $TopFiles = @(Get-ChildItem -Path $TempDir -Force -File -ErrorAction SilentlyContinue)
+    $TopDirs = @(Get-ChildItem -Path $TempDir -Force -Directory -ErrorAction SilentlyContinue)
+    if ($TopFiles.Count -eq 0 -and $TopDirs.Count -eq 1) {
+        return $TopDirs[0].FullName
+    }
+    return $TempDir
+}
+
+function Find-MainExeInPackage {
+    param(
+        [string]$SourceDir,
+        [string]$PreferredName
+    )
+
+    $ExactPath = Join-Path $SourceDir $PreferredName
+    if (Test-Path $ExactPath) {
+        return $ExactPath
+    }
+
+    $Candidates = @(Get-ChildItem -Path $SourceDir -Filter *.exe -File -ErrorAction SilentlyContinue | Sort-Object Name)
+    if ($Candidates.Count -eq 0) {
+        return $null
+    }
+
+    $PrimaryCandidates = @($Candidates | Where-Object { $_.BaseName -match "(?i)^QTRClient" -and $_.Name -notmatch "(?i)helper" })
+    if ($PrimaryCandidates.Count -gt 0) {
+        return $PrimaryCandidates[0].FullName
+    }
+
+    $NonHelperCandidates = @($Candidates | Where-Object { $_.Name -notmatch "(?i)helper" })
+    if ($NonHelperCandidates.Count -gt 0) {
+        return $NonHelperCandidates[0].FullName
+    }
+
+    return $Candidates[0].FullName
+}
+
+function Copy-PackageItem {
+    param(
+        [System.IO.FileSystemInfo]$SourceItem,
+        [string]$DestinationRoot
+    )
+
+    $DestinationPath = Join-Path $DestinationRoot $SourceItem.Name
+    $DestinationExisted = Test-Path $DestinationPath
+    [void](Backup-ExistingItem -DestinationPath $DestinationPath)
+
+    if ($SourceItem.PSIsContainer) {
+        Copy-Item -LiteralPath $SourceItem.FullName -Destination $DestinationRoot -Recurse -Force
+    } else {
+        Copy-Item -LiteralPath $SourceItem.FullName -Destination $DestinationPath -Force
+    }
+
+    if (-not $DestinationExisted -and (Test-Path $DestinationPath)) {
+        Add-CreatedItem -Path $DestinationPath
+    }
+}
+
+function Restore-Backups {
+    if ($CreatedItems.Count -gt 0) {
+        foreach ($CreatedPath in @($CreatedItems) | Sort-Object Length -Descending) {
+            if (Test-Path $CreatedPath) {
+                Remove-Item $CreatedPath -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    if ($ReplacedItems.Count -gt 0) {
+        foreach ($Entry in @($ReplacedItems) | Sort-Object { $_.Destination.Length } -Descending) {
+            if (Test-Path $Entry.Destination) {
+                Remove-Item $Entry.Destination -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            if (Test-Path $Entry.Backup) {
+                Move-Item -LiteralPath $Entry.Backup -Destination $Entry.Destination -Force
+            }
+        }
+    }
+
+    if (Test-Path $BackupRoot) {
+        Remove-Item $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 try {
     if (-not (Test-Path $NewFile)) {
@@ -615,26 +860,25 @@ try {
     Write-Host "Start updating..."
     $FileExtension = [System.IO.Path]::GetExtension($NewFile).ToLower()
     Write-Host "File type: $FileExtension"
+    if (-not (Test-Path $BackupRoot)) {
+        New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
+    }
 
     if ($FileExtension -eq ".exe") {
-        Write-Host "Replacing EXE file only..."
+        Write-Host "Replacing main EXE only..."
 
         $CurrentExePath = $MainExePath
-        $BackupExePath = "$CurrentExePath.backup"
-
-        if (Test-Path $CurrentExePath) {
-            if (Test-Path $BackupExePath) {
-                Remove-Item $BackupExePath -Force
-            }
-            Move-Item -LiteralPath $CurrentExePath -Destination $BackupExePath -Force
-            Write-Host "EXE backup created: $BackupExePath"
-        }
+        $CurrentExeExists = Test-Path $CurrentExePath
+        [void](Backup-ExistingItem -DestinationPath $CurrentExePath)
 
         Copy-Item -LiteralPath $NewFile -Destination $CurrentExePath -Force
+        if (-not $CurrentExeExists -and (Test-Path $CurrentExePath)) {
+            Add-CreatedItem -Path $CurrentExePath
+        }
         Write-Host "EXE file replaced"
 
     } elseif ($FileExtension -eq ".zip") {
-        Write-Host "Replacing EXE and _internal directory..."
+        Write-Host "Replacing packaged application files from ZIP..."
 
         $TempDir = "$CurrentDir.temp"
         if (Test-Path $TempDir) {
@@ -645,45 +889,37 @@ try {
         Write-Host "Extracting ZIP package..."
         Expand-Archive -Path $NewFile -DestinationPath $TempDir -Force
 
-        $SourceDir = $TempDir
-        $UnzippedItems = Get-ChildItem -Path $TempDir -Directory
-        if ($UnzippedItems.Count -eq 1) {
-            $SourceDir = $UnzippedItems[0].FullName
-            Write-Host "Found subdirectory: $SourceDir"
+        $SourceDir = Resolve-SourceDir -TempDir $TempDir
+        Write-Host "Resolved source directory: $SourceDir"
+
+        $PackageMainExePath = Find-MainExeInPackage -SourceDir $SourceDir -PreferredName $MainExeName
+        if (-not $PackageMainExePath) {
+            throw "Cannot find main exe inside ZIP package"
+        }
+        $PackageMainExeName = [System.IO.Path]::GetFileName($PackageMainExePath)
+        Write-Host "Detected package main exe: $PackageMainExeName"
+
+        $PackageItems = @(Get-ChildItem -Path $SourceDir -Force -ErrorAction SilentlyContinue)
+        foreach ($Item in $PackageItems) {
+            if ($PreserveNames -contains $Item.Name) {
+                Write-Host "Skip runtime item: $($Item.Name)"
+                continue
+            }
+            if (-not $Item.PSIsContainer -and $Item.FullName -eq $PackageMainExePath) {
+                continue
+            }
+            Copy-PackageItem -SourceItem $Item -DestinationRoot $CurrentDir
+            Write-Host "Copied package item: $($Item.Name)"
         }
 
         $CurrentExePath = $MainExePath
-        $NewExePath = Join-Path $SourceDir $MainExeName
-
-        if (Test-Path $NewExePath) {
-            $BackupExePath = "$CurrentExePath.backup"
-            if (Test-Path $CurrentExePath) {
-                if (Test-Path $BackupExePath) {
-                    Remove-Item $BackupExePath -Force
-                }
-                Move-Item -LiteralPath $CurrentExePath -Destination $BackupExePath -Force
-                Write-Host "EXE backup created"
-            }
-            Copy-Item -LiteralPath $NewExePath -Destination $CurrentExePath -Force
-            Write-Host "EXE file replaced"
+        $CurrentExeExists = Test-Path $CurrentExePath
+        [void](Backup-ExistingItem -DestinationPath $CurrentExePath)
+        Copy-Item -LiteralPath $PackageMainExePath -Destination $CurrentExePath -Force
+        if (-not $CurrentExeExists -and (Test-Path $CurrentExePath)) {
+            Add-CreatedItem -Path $CurrentExePath
         }
-
-        $CurrentInternalDir = Join-Path $CurrentDir "_internal"
-        $NewInternalDir = Join-Path $SourceDir "_internal"
-
-        if (Test-Path $NewInternalDir) {
-            $BackupInternalDir = "$CurrentInternalDir.backup"
-            if (Test-Path $CurrentInternalDir) {
-                if (Test-Path $BackupInternalDir) {
-                    Remove-Item $BackupInternalDir -Recurse -Force
-                }
-                Move-Item -LiteralPath $CurrentInternalDir -Destination $BackupInternalDir -Force
-                Write-Host "_internal backup created"
-            }
-            New-Item -ItemType Directory -Path $CurrentInternalDir -Force | Out-Null
-            Copy-Item -Path (Join-Path $NewInternalDir "*") -Destination $CurrentInternalDir -Recurse -Force
-            Write-Host "_internal directory replaced"
-        }
+        Write-Host "Main EXE replaced"
 
         Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "ZIP update completed"
@@ -693,6 +929,9 @@ try {
     }
 
     Remove-Item $NewFile -Force
+    if (Test-Path $BackupRoot) {
+        Remove-Item $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     if (-not (Test-Path $MainExePath)) {
         throw "Cannot find main program after update: $MainExePath"
@@ -709,30 +948,7 @@ try {
     }
 } catch {
     Write-Host "Update failed: $($_.Exception.Message)"
-
-    $CurrentExePath = $MainExePath
-    $BackupExePath = "$CurrentExePath.backup"
-    $CurrentInternalDir = Join-Path $CurrentDir "_internal"
-    $BackupInternalDir = "$CurrentInternalDir.backup"
-
-    if (Test-Path $BackupExePath) {
-        Write-Host "Restoring EXE from backup..."
-        if (Test-Path $CurrentExePath) {
-            Remove-Item $CurrentExePath -Force -ErrorAction SilentlyContinue
-        }
-        Move-Item -LiteralPath $BackupExePath -Destination $CurrentExePath -Force
-        Write-Host "EXE restored from backup"
-    }
-
-    if (Test-Path $BackupInternalDir) {
-        Write-Host "Restoring _internal from backup..."
-        if (Test-Path $CurrentInternalDir) {
-            Remove-Item $CurrentInternalDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        Move-Item -LiteralPath $BackupInternalDir -Destination $CurrentInternalDir -Force
-        Write-Host "_internal restored from backup"
-    }
-
+    Restore-Backups
     exit 1
 } finally {
     try {
@@ -754,12 +970,20 @@ async def perform_update_with_powershell(
     download_process_call=None, force: bool = False
 ) -> tuple[bool, str]:
     """使用 PowerShell 执行更新"""
-    if not is_frozen_client_runtime():
+    runtime_profile = get_client_update_runtime_profile()
+    if runtime_profile["package_mode"] == "source":
         return False, "当前为源码运行模式，不支持自更新，请使用打包版客户端"
 
-    current_exe_path = Path(sys.executable).resolve()
-    current_dir = str(current_exe_path.parent)
+    current_exe_path = runtime_profile["current_exe"]
+    current_dir = str(runtime_profile["client_root"])
+    if current_exe_path is None:
+        return False, "未识别到当前客户端主程序路径，无法执行自更新"
     logger.info(f"current_exe: {current_exe_path}")
+    logger.info(
+        "开始执行自更新，当前运行形态: {}，优先更新包类型: {}",
+        runtime_profile["package_mode_label"],
+        runtime_profile["preferred_asset_label"],
+    )
 
     new_app_path = await download_new_app(download_process_call, force=force)
     if not new_app_path:
