@@ -8,8 +8,9 @@ import TableVariables from "@/components/hrm/table-variables.vue";
 import {selectModulList} from "@/api/hrm/module.js";
 import {list as listConfig, allConfig} from "@/api/hrm/config.js";
 import {HrmDataTypeEnum} from "@/components/hrm/enum.js";
-import {getComparator, uploadParamsFileToServer, listCaseParams, delCaseParams} from "@/api/hrm/case.js";
+import {getComparator} from "@/api/hrm/case.js";
 import ParamsDalog from "@/components/hrm/common/edite-table.vue";
+import CaseParamsDbEditor from "@/components/hrm/case/case-params-db-editor.vue";
 import {ElMessage, ElMessageBox} from "element-plus";
 import {useResizeObserver} from "@vueuse/core";
 import {useI18n} from "vue-i18n";
@@ -49,80 +50,15 @@ const parameterDialogShow = ref(false);
 const uploadParameterDialogShow = ref(false);
 const parameterInfo = ref({tableHeaders: [], tableDatas: []});
 
-const paramsCount = ref(0);
-
 const loading = ref({
   initParameter: false,
   save: false,
   debug: false,
-  updateData: false,
-  import: false,
-  searchParam: false
+  updateData: false
 });
-
-const importProcess = ref("");
 
 const configContainerRef = ref();
 const configContainerCurrentHeight = ref(0);
-
-
-const handleFileChange = (event) => {
-  file.value = event.target.files[0];
-};
-const file = ref(null);
-const uploadFile = () => {
-  if (file.value) {
-    loading.value.import = true;
-    ElMessage.success("上传中...");
-    const uploadFormData = new FormData();
-    uploadFormData.append('file', file.value);
-    uploadFormData.append('caseId', formData.value.caseId);
-    // 发送请求到后端
-    uploadParamsFileToServer(uploadFormData, importProcess).then(response => {
-      // 处理上传成功的逻辑
-      ElMessage.success("导入成功");
-      getCaseParamsList();
-    }).catch(error => {
-      // 处理上传失败的逻辑
-      ElMessage.error("导入失败");
-    }).finally(() => {
-      loading.value.import = false;
-    });
-  }
-};
-
-// 删除用例参数
-const delCaseParamsCall = () => {
-  loading.value.import = true;
-  let data = {
-    caseId: formData.value.caseId
-  }
-  delCaseParams(data).then(response => {
-    if (response.code === 200) {
-      ElMessage.success("删除成功");
-      getCaseParamsList();
-    }
-  }).finally(() => {
-    loading.value.import = false;
-  });
-}
-
-// 查询用例参数列表
-const getCaseParamsList = () => {
-  loading.value.searchParam = true;
-  let data = {
-    caseId: formData.value.caseId
-  }
-  listCaseParams(data).then(response => {
-    if (response.code === 200) {
-      paramsCount.value = response.total;
-      // parameterInfo.value.tableDatas = response.data;
-
-    }
-  }).finally(() => {
-    loading.value.searchParam = false;
-  });
-}
 
 function getModuleSelect() {
   selectModulList(formData.value).then(response => {
@@ -181,6 +117,10 @@ function startParameterDialog() {
 }
 
 function startUploadParameterDialog() {
+  if (!formData.value.caseId) {
+    ElMessage.warning("请先保存用例后再管理数据库参数");
+    return;
+  }
   loading.value.initParameter = true;
   uploadParameterDialogShow.value = true;
 }
@@ -365,7 +305,10 @@ const calcConfigContainerHeight = computed(() => {
 
               </el-row>
               <el-row style="padding-bottom: 10px" v-if="formData.request.config.parameters">
-                <template v-if="formData.request.config.parameters.value">
+                <template v-if="formData.request.config.parameters.type === 2">
+                  <el-text type="primary">数据库模式请点击“上传CSV文件”管理数据</el-text>
+                </template>
+                <template v-else-if="formData.request.config.parameters.value">
                   <el-text type="success">点击“设置”修改数据</el-text>
                 </template>
                 <template v-else>
@@ -457,16 +400,7 @@ const calcConfigContainerHeight = computed(() => {
              append-to-body destroy-on-close>
     <el-container style="height: 100%">
       <el-main style="max-height: calc(100vh - 95px);">
-        <div>
-          <input type="file" @change="handleFileChange"/>
-          <el-text type="primary" v-if="file">{{ importProcess }}</el-text>
-          <el-button @click="uploadFile" :disabled="!file" :loading="loading.import">上传</el-button>
-          <el-button @click="delCaseParamsCall" type="danger" :disabled="loading.import">删除</el-button>
-
-          <el-text>当前参数数量：{{ paramsCount }}</el-text>
-          <el-button @click="getCaseParamsList" type="primary" :disabled="loading.searchParam">查询</el-button>
-
-        </div>
+        <CaseParamsDbEditor :case-id="formData.caseId" :case-name="formData.caseName" />
       </el-main>
     </el-container>
   </el-dialog>
