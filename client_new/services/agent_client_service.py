@@ -7,8 +7,21 @@ from loguru import logger
 from PySide6.QtCore import QObject, Signal
 
 from model.config import AgentConfigModel
-from server import agent_server
-from server.agent_server import WebSocketClient
+
+_AGENT_SERVER_MODULE = None
+
+
+def _agent_server_module():
+    global _AGENT_SERVER_MODULE
+    if _AGENT_SERVER_MODULE is None:
+        from server import agent_server
+
+        _AGENT_SERVER_MODULE = agent_server
+    return _AGENT_SERVER_MODULE
+
+
+def _websocket_client_class():
+    return getattr(_agent_server_module(), "WebSocketClient")
 
 
 class AgentClientService(QObject):
@@ -40,7 +53,18 @@ class AgentClientService(QObject):
             self._stop_requested = False
             self._state = "starting"
 
-        agent_server.MAX_MESSAGE_SIZE = agent_server.clamp_message_size(config.max_send_size)
+        try:
+            agent_server_module = _agent_server_module()
+            agent_server_module.MAX_MESSAGE_SIZE = agent_server_module.clamp_message_size(
+                config.max_send_size
+            )
+        except Exception as e:
+            logger.exception(f"加载 Agent 通信模块失败: {e}")
+            with self._lock:
+                self._state = "stopped"
+            self.state_changed.emit("stopped")
+            return False, f"加载 Agent 通信模块失败: {e}"
+
         self.state_changed.emit("starting")
         self.status_message.emit(f"开始连接服务器：{connect_url}")
 
@@ -87,7 +111,13 @@ class AgentClientService(QObject):
         return True, "Agent 停止请求已发送"
 
     def update_runtime_config(self, config: AgentConfigModel):
-        agent_server.MAX_MESSAGE_SIZE = agent_server.clamp_message_size(config.max_send_size)
+        try:
+            agent_server_module = _agent_server_module()
+            agent_server_module.MAX_MESSAGE_SIZE = agent_server_module.clamp_message_size(
+                config.max_send_size
+            )
+        except Exception as e:
+            logger.warning(f"更新 Agent 通信配置失败: {e}")
 
         with self._lock:
             client = self._client
@@ -119,7 +149,8 @@ class AgentClientService(QObject):
         with self._lock:
             self._loop = loop
 
-        client = WebSocketClient(
+        client_cls = _websocket_client_class()
+        client = client_cls(
             connect_url,
             before_request_call=self._handle_before_request,
             after_request_call=self._handle_after_request,

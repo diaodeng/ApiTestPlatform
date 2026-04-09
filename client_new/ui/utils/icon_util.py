@@ -6,7 +6,7 @@ import sys
 
 from PySide6.QtCore import QObject, QEvent, Qt
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QMainWindow, QWidget
 
 if sys.platform.startswith("win"):
     import ctypes
@@ -154,8 +154,18 @@ def _apply_native_window_icon(widget: QWidget | None, icon_path: Path) -> None:
         pass
 
 
+def _should_apply_window_icon(widget: QWidget | None) -> bool:
+    if widget is None or not widget.isWindow():
+        return False
+
+    if not isinstance(widget, (QMainWindow, QDialog)):
+        return False
+
+    return True
+
+
 def apply_window_icon(widget: QWidget | None) -> None:
-    if widget is None:
+    if not _should_apply_window_icon(widget):
         return
     icon = load_app_icon()
     if icon.isNull():
@@ -174,7 +184,7 @@ class _WindowIconEventFilter(QObject):
     def eventFilter(self, watched, event) -> bool:
         if event is None or event.type() not in WINDOW_ICON_EVENT_TYPES:
             return False
-        if isinstance(watched, QWidget) and watched.isWindow():
+        if isinstance(watched, QWidget) and _should_apply_window_icon(watched):
             apply_window_icon(watched)
         return False
 
@@ -199,5 +209,5 @@ def install_app_icon(app: QApplication | None) -> None:
         app.installEventFilter(event_filter)
         _INSTALLED_APP_IDS.add(app_id)
     for widget in QApplication.topLevelWidgets():
-        if widget.isWindow():
+        if _should_apply_window_icon(widget):
             apply_window_icon(widget)

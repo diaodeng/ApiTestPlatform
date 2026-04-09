@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -14,11 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from controller.agent_controller import AgentController
 from model.config import AgentBrowserConfigModel
-from ui.dialogs.agent_browser_setting_dialog import AgentBrowserSettingDialog
-from ui.dialogs.agent_server_manage_dialog import AgentServerManageDialog
-
 
 class AgentLogPane(QWidget):
     def __init__(self, title: str, parent=None):
@@ -86,10 +82,12 @@ class AgentPage(QWidget):
         self._config_sync_initialized = False
         self._config_sync_last_sync_at = ""
         self._sync_in_progress = False
-        self._server_manage_dialog: AgentServerManageDialog | None = None
+        self._server_manage_dialog = None
+        self.controller = None
+        self._runtime_initialized = False
+        self._runtime_init_scheduled = False
 
         self._init_ui()
-        self.controller = AgentController(self)
         self._bind()
 
     def _init_ui(self):
@@ -227,10 +225,16 @@ class AgentPage(QWidget):
         self.retry_interval_input.valueChanged.connect(self._save_quick_settings)
 
     def _handle_start_clicked(self):
+        if self.controller is None and not self._runtime_initialized:
+            self._initialize_runtime()
         self._save_quick_settings()
         self.start_clicked.emit()
 
     def _open_server_manage_dialog(self):
+        if self.controller is None and not self._runtime_initialized:
+            self._initialize_runtime()
+        from ui.dialogs.agent_server_manage_dialog import AgentServerManageDialog
+
         dialog = AgentServerManageDialog(
             self,
             server_list=self._server_list,
@@ -252,6 +256,10 @@ class AgentPage(QWidget):
                 self._server_manage_dialog = None
 
     def _open_browser_setting_dialog(self):
+        if self.controller is None and not self._runtime_initialized:
+            self._initialize_runtime()
+        from ui.dialogs.agent_browser_setting_dialog import AgentBrowserSettingDialog
+
         dialog = AgentBrowserSettingDialog(self._browser_config, self)
         if not dialog.exec():
             return
@@ -332,6 +340,10 @@ class AgentPage(QWidget):
 
     def set_status_message(self, message: str):
         self.status_detail_label.setText(message or "-")
+
+    def set_local_mac(self, local_mac: str):
+        self.mac_value_label.setText(local_mac or "-")
+        self._update_server_meta()
 
     def set_config_syncing(self, syncing: bool):
         self._sync_in_progress = syncing
@@ -433,3 +445,21 @@ class AgentPage(QWidget):
             self._config_sync_url,
         )
         self._server_manage_dialog.set_config_syncing(self._sync_in_progress)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._runtime_initialized or self._runtime_init_scheduled:
+            return
+        self._runtime_init_scheduled = True
+        QTimer.singleShot(0, self._initialize_runtime)
+
+    def _initialize_runtime(self):
+        if self._runtime_initialized:
+            return
+        try:
+            from controller.agent_controller import AgentController
+
+            self.controller = AgentController(self)
+            self._runtime_initialized = True
+        finally:
+            self._runtime_init_scheduled = False

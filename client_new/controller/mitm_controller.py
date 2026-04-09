@@ -1,20 +1,67 @@
 import json
+import queue
+import subprocess
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import QObject, QProcess, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox
 
 from emitter.mitm_flow_emitter import flow_emitter
-from models.mitmproxy_models import FlowItem
+from models.mitmproxy_common import FlowItem
 from server.config import MitmproxyConfig
 from utils.mitmproxy_cert import (
     describe_windows_cert_status,
     install_mitmproxy_cert_for_current_user,
+    resolve_mitmproxy_cert_path,
 )
+
+
+class _CertStatusThread(QThread):
+    done = Signal(bool, bool, str, str)
+
+    def __init__(self, config):
+        super().__init__()
+        self._config = (
+            config.model_copy(deep=True) if hasattr(config, "model_copy") else config
+        )
+
+    def run(self):
+        try:
+            trusted, can_install, cert_path, message = describe_windows_cert_status(
+                self._config
+            )
+            self.done.emit(trusted, can_install, cert_path, message)
+        except Exception as e:
+            cert_path = str(resolve_mitmproxy_cert_path(self._config))
+            self.done.emit(
+                False,
+                False,
+                cert_path,
+                f"检查 mitmproxy 证书状态失败: {e}",
+            )
+
+
+class _PipeReaderThread(threading.Thread):
+    def __init__(self, stream, target_queue: queue.Queue[str], name: str):
+        super().__init__(name=name, daemon=True)
+        self._stream = stream
+        self._target_queue = target_queue
+
+    def run(self):
+        if self._stream is None:
+            return
+        try:
+            for line in iter(self._stream.readline, ""):
+                if not line:
+                    break
+                self._target_queue.put(line)
+        except Exception:
+            return
 
 
 class MitmController(QObject):
@@ -37,7 +84,7 @@ class MitmController(QObject):
         self.widget = widget
         self.config = MitmproxyConfig.read()
 
-        self.helper: QProcess | None = None
+        self.helper: subprocess.Popen | None = None
         self.helper_state = "stopped"
         self._stdout_buffer = ""
         self._stderr_buffer = ""
@@ -45,10 +92,23 @@ class MitmController(QObject):
         self._restart_after_stop = False
         self._restart_reason = ""
         self._current_web_url = ""
+        self._cert_status_thread: _CertStatusThread | None = None
+        self._cert_status_refresh_pending = False
+        self._cert_status_check_seq = 0
+        self._helper_stdout_queue: queue.Queue[str] = queue.Queue()
+        self._helper_stderr_queue: queue.Queue[str] = queue.Queue()
+        self._helper_stdout_thread: _PipeReaderThread | None = None
+        self._helper_stderr_thread: _PipeReaderThread | None = None
+        self._helper_finished_emitted = False
 
         self.timer = QTimer()
         self.timer.timeout.connect(self._sync_ui_state)
         self.timer.start(200)
+
+        self._helper_io_timer = QTimer(self)
+        self._helper_io_timer.setInterval(30)
+        self._helper_io_timer.timeout.connect(self._poll_helper_io)
+        self._helper_io_timer.start()
 
         self._force_stop_timer = QTimer(self)
         self._force_stop_timer.setSingleShot(True)
@@ -57,7 +117,7 @@ class MitmController(QObject):
         self._bind()
         self.widget.apply_config(self.config, self.helper_state)
         self._sync_ui_state()
-        self._refresh_cert_status()
+        self._refresh_cert_status_async()
 
     def _bind(self):
         self.widget.start_clicked.connect(self.start)
@@ -107,7 +167,7 @@ class MitmController(QObject):
             MitmproxyConfig.write(data)
             self.config = MitmproxyConfig.read()
             self.widget.apply_config(self.config, self.helper_state)
-            self._refresh_cert_status()
+            self._refresh_cert_status_async()
 
             if self._is_proxy_active():
                 changed_fields = self._changed_restart_sensitive_fields(
@@ -134,7 +194,7 @@ class MitmController(QObject):
             ok, message, _cert_path = install_mitmproxy_cert_for_current_user(
                 self.config
             )
-            self._refresh_cert_status()
+            self._refresh_cert_status_async()
             if ok:
                 logger.info(message)
                 QMessageBox.information(self.widget, "mitmproxy 证书", message)
@@ -147,6 +207,18 @@ class MitmController(QObject):
 
     def shutdown(self):
         self._shutting_down = True
+        if self._helper_io_timer.isActive():
+            self._helper_io_timer.stop()
+        if self._cert_status_thread and self._cert_status_thread.isRunning():
+            try:
+                self._cert_status_thread.done.disconnect(self._on_cert_status_done)
+                self._cert_status_thread.finished.disconnect(
+                    self._on_cert_status_thread_finished
+                )
+            except Exception:
+                pass
+            self._cert_status_thread.wait(1500)
+        self._cert_status_thread = None
         self._current_web_url = ""
         self.widget.set_web_url("")
         if not self.helper:
@@ -155,10 +227,15 @@ class MitmController(QObject):
         try:
             if self._is_helper_running():
                 self._send_command("shutdown", timeout=5.0)
-                if not self.helper.waitForFinished(5000):
+                try:
+                    self.helper.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
                     self.helper.terminate()
-                    if not self.helper.waitForFinished(2000):
+                    try:
+                        self.helper.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
                         self.helper.kill()
+                        self.helper.wait(timeout=2.0)
         except Exception as e:
             logger.exception(f"关闭 mitmproxy helper 失败: {e}")
 
@@ -180,53 +257,77 @@ class MitmController(QObject):
         if self.helper:
             self._dispose_helper()
 
-        helper = QProcess(self)
-        helper.setWorkingDirectory(str(Path(__file__).resolve().parent.parent))
-        helper.setProcessChannelMode(QProcess.SeparateChannels)
-        helper.readyReadStandardOutput.connect(self._on_helper_stdout)
-        helper.readyReadStandardError.connect(self._on_helper_stderr)
-        helper.finished.connect(self._on_helper_finished)
-        helper.errorOccurred.connect(self._on_helper_error)
+        program, arguments = self._resolve_helper_command()
+        command = [program, *arguments]
+        popen_kwargs = {
+            "args": command,
+            "cwd": str(Path(__file__).resolve().parent.parent),
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "bufsize": 1,
+        }
+        if sys.platform.startswith("win"):
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+            startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+            popen_kwargs["creationflags"] = creationflags
+            popen_kwargs["startupinfo"] = startupinfo
 
-        if getattr(sys, "frozen", False):
-            program = sys.executable
-            arguments = ["--mitm-helper"]
-        else:
-            app_main = Path(__file__).resolve().parents[1] / "main.py"
-            program = sys.executable
-            arguments = ["-Xfrozen_modules=off", "-u", str(app_main), "--mitm-helper"]
-
-        helper.start(program, arguments)
-
-        if not helper.waitForStarted(3000):
+        helper = subprocess.Popen(**popen_kwargs)
+        if helper.poll() is not None:
             raise RuntimeError("mitmproxy helper 进程启动失败")
 
         self.helper = helper
         self.helper_state = "stopped"
         self._stdout_buffer = ""
         self._stderr_buffer = ""
+        self._helper_finished_emitted = False
+        self._helper_stdout_queue = queue.Queue()
+        self._helper_stderr_queue = queue.Queue()
+        self._helper_stdout_thread = _PipeReaderThread(
+            helper.stdout,
+            self._helper_stdout_queue,
+            "mitmproxy-helper-stdout",
+        )
+        self._helper_stderr_thread = _PipeReaderThread(
+            helper.stderr,
+            self._helper_stderr_queue,
+            "mitmproxy-helper-stderr",
+        )
+        self._helper_stdout_thread.start()
+        self._helper_stderr_thread.start()
 
     def _dispose_helper(self):
         if not self.helper:
             return
 
-        try:
-            self.helper.readyReadStandardOutput.disconnect(self._on_helper_stdout)
-            self.helper.readyReadStandardError.disconnect(self._on_helper_stderr)
-            self.helper.finished.disconnect(self._on_helper_finished)
-            self.helper.errorOccurred.disconnect(self._on_helper_error)
-        except Exception:
-            pass
+        for stream_name in ("stdin", "stdout", "stderr"):
+            stream = getattr(self.helper, stream_name, None)
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except Exception:
+                pass
 
-        self.helper.deleteLater()
         self.helper = None
         self._force_stop_timer.stop()
         self.helper_state = "stopped"
         self._stdout_buffer = ""
         self._stderr_buffer = ""
+        self._helper_finished_emitted = False
+        self._helper_stdout_thread = None
+        self._helper_stderr_thread = None
+        self._helper_stdout_queue = queue.Queue()
+        self._helper_stderr_queue = queue.Queue()
 
     def _is_helper_running(self) -> bool:
-        return bool(self.helper and self.helper.state() != QProcess.NotRunning)
+        return bool(self.helper and self.helper.poll() is None)
 
     def _is_proxy_active(self) -> bool:
         return self.helper_state in {"starting", "running", "stopping"}
@@ -250,9 +351,7 @@ class MitmController(QObject):
         return changed_fields
 
     def _refresh_cert_status(self):
-        trusted, can_install, cert_path, message = describe_windows_cert_status(
-            self.config
-        )
+        trusted, can_install, cert_path, message = describe_windows_cert_status(self.config)
         self.widget.set_cert_status(
             message=message,
             trusted=trusted,
@@ -260,24 +359,143 @@ class MitmController(QObject):
             cert_path=cert_path,
         )
 
+    def _refresh_cert_status_async(self):
+        cert_path = str(resolve_mitmproxy_cert_path(self.config))
+        self.widget.set_cert_status(
+            message="正在检查 mitmproxy CA...",
+            trusted=False,
+            can_install=False,
+            cert_path=cert_path,
+        )
+        self._cert_status_check_seq += 1
+        check_seq = self._cert_status_check_seq
+        QTimer.singleShot(
+            25000,
+            lambda seq=check_seq, path=cert_path: self._on_cert_status_timeout(
+                seq, path
+            ),
+        )
+
+        if self._cert_status_thread and self._cert_status_thread.isRunning():
+            self._cert_status_refresh_pending = True
+            return
+
+        self._cert_status_refresh_pending = False
+        self._cert_status_thread = _CertStatusThread(self.config)
+        self._cert_status_thread.done.connect(self._on_cert_status_done)
+        self._cert_status_thread.finished.connect(self._on_cert_status_thread_finished)
+        self._cert_status_thread.start()
+
+    def _on_cert_status_done(
+        self,
+        trusted: bool,
+        can_install: bool,
+        cert_path: str,
+        message: str,
+    ):
+        if self._shutting_down:
+            return
+        self.widget.set_cert_status(
+            message=message,
+            trusted=trusted,
+            can_install=can_install,
+            cert_path=cert_path,
+        )
+
+    def _on_cert_status_thread_finished(self):
+        self._cert_status_thread = None
+        if self._cert_status_refresh_pending and not self._shutting_down:
+            self._cert_status_refresh_pending = False
+            QTimer.singleShot(0, self._refresh_cert_status_async)
+
+    def _on_cert_status_timeout(self, check_seq: int, cert_path: str):
+        if self._shutting_down:
+            return
+        if check_seq != self._cert_status_check_seq:
+            return
+        if not self._cert_status_thread or not self._cert_status_thread.isRunning():
+            return
+
+        can_install = Path(cert_path).exists()
+        logger.warning("mitmproxy 证书状态检查超时")
+        self.widget.set_cert_status(
+            message="检查 mitmproxy CA 超时，状态暂未确认，可继续使用或稍后重试。",
+            trusted=False,
+            can_install=can_install,
+            cert_path=cert_path,
+        )
+
+    def _resolve_helper_command(self) -> tuple[str, list[str]]:
+        if getattr(sys, "frozen", False):
+            helper_executable = self._find_frozen_helper_executable()
+            if helper_executable is not None:
+                return str(helper_executable), []
+            return str(sys.executable), ["--mitm-helper"]
+
+        helper_main = Path(__file__).resolve().parents[1] / "mitm_helper_main.py"
+        program = self._resolve_helper_program()
+        return program, ["-Xfrozen_modules=off", "-u", str(helper_main)]
+
+    def _find_frozen_helper_executable(self) -> Path | None:
+        executable_dir = Path(sys.executable).resolve().parent
+        candidates = (
+            "QTRClientNewMitmHelper.exe",
+            "QTRMitmHelper.exe",
+        )
+        for name in candidates:
+            candidate = executable_dir / name
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _resolve_helper_program(self) -> str:
+        program_path = Path(sys.executable)
+        if not sys.platform.startswith("win"):
+            return str(program_path)
+
+        if program_path.name.lower() == "python.exe":
+            pythonw_path = program_path.with_name("pythonw.exe")
+            if pythonw_path.exists():
+                return str(pythonw_path)
+
+        return str(program_path)
+
     def _send_command(self, cmd: str, **payload):
         if not self.helper:
             raise RuntimeError("mitmproxy helper 未启动")
 
         message = json.dumps({"cmd": cmd, **payload}, ensure_ascii=False) + "\n"
-        written = self.helper.write(message.encode("utf-8"))
-        if written == -1:
+        stdin = self.helper.stdin
+        if stdin is None:
             raise RuntimeError(f"发送命令失败: {cmd}")
-        self.helper.waitForBytesWritten(1000)
+        try:
+            stdin.write(message)
+            stdin.flush()
+        except Exception as e:
+            raise RuntimeError(f"发送命令失败: {cmd}: {e}") from e
 
-    def _on_helper_stdout(self):
-        if not self.helper:
+    def _poll_helper_io(self):
+        self._drain_helper_stdout()
+        self._drain_helper_stderr()
+        if not self.helper or self._helper_finished_emitted:
             return
 
-        chunk = bytes(self.helper.readAllStandardOutput()).decode(
-            "utf-8", errors="replace"
-        )
-        self._stdout_buffer += chunk
+        exit_code = self.helper.poll()
+        if exit_code is None:
+            return
+
+        self._helper_finished_emitted = True
+        exit_status = "NormalExit" if exit_code == 0 else "CrashExit"
+        self._on_helper_finished(exit_code, exit_status)
+
+    def _drain_helper_stdout(self):
+        while True:
+            try:
+                line = self._helper_stdout_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            self._stdout_buffer += line
 
         while "\n" in self._stdout_buffer:
             line, self._stdout_buffer = self._stdout_buffer.split("\n", 1)
@@ -293,14 +511,14 @@ class MitmController(QObject):
 
             self._handle_helper_message(message)
 
-    def _on_helper_stderr(self):
-        if not self.helper:
-            return
+    def _drain_helper_stderr(self):
+        while True:
+            try:
+                line = self._helper_stderr_queue.get_nowait()
+            except queue.Empty:
+                break
 
-        chunk = bytes(self.helper.readAllStandardError()).decode(
-            "utf-8", errors="replace"
-        )
-        self._stderr_buffer += chunk
+            self._stderr_buffer += line
 
         while "\n" in self._stderr_buffer:
             line, self._stderr_buffer = self._stderr_buffer.split("\n", 1)
@@ -437,6 +655,8 @@ class MitmController(QObject):
                 f"mitmproxy helper 已退出 exit_code={exit_code}, exit_status={exit_status}"
             )
         self._force_stop_timer.stop()
+        self._drain_helper_stdout()
+        self._drain_helper_stderr()
         self.helper_state = "stopped"
         self._sync_ui_state()
         self._dispose_helper()
@@ -461,8 +681,10 @@ class MitmController(QObject):
         logger.warning("mitmproxy 停止超时，强制结束 helper 进程")
         try:
             self.helper.terminate()
-            if not self.helper.waitForFinished(3000):
+            try:
+                self.helper.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
                 self.helper.kill()
-                self.helper.waitForFinished(2000)
+                self.helper.wait(timeout=2.0)
         except Exception as e:
             logger.exception(f"强制结束 mitmproxy helper 失败: {e}")

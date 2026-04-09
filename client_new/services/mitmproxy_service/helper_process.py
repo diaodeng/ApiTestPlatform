@@ -25,6 +25,9 @@ if str(ROOT) not in sys.path:
 from model.config import MitmProxyConfigModel
 from services.mitmproxy_service.mock_handle import MockHandle
 from services.mitmproxy_service.runtime_config import RuntimeConfig
+from services.mitmproxy_service.windows_redirector_util import (
+    ensure_windows_redirector_gui_subsystem,
+)
 
 
 class ManagedWebMaster(WebMaster):
@@ -286,6 +289,13 @@ class HelperRuntime:
         config: MitmProxyConfigModel,
         loop: asyncio.AbstractEventLoop,
     ) -> mitm_master.Master:
+        if config.proxy_model == "local":
+            ok, message = ensure_windows_redirector_gui_subsystem()
+            if ok:
+                logger.info(message)
+            else:
+                logger.warning(message)
+
         mode = [config.proxy_model] if config.proxy_model else []
         if config.proxy_model == "local":
             mode = [f"{config.proxy_model}:{config.proxy_model_value}"]

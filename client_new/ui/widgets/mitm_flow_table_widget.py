@@ -3,7 +3,6 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -20,6 +19,7 @@ from PySide6.QtWidgets import (
 from emitter.mitm_flow_emitter import flow_emitter
 from models.mitmproxy_models import FlowTableModel
 from ui.theme_manager import ThemeManager, color_to_hex
+from ui.widgets.menu_select_button import MenuSelectButton
 
 
 class HoverTableView(QTableView):
@@ -195,8 +195,8 @@ class FlowTableWidget(QWidget):
     flow_selected = Signal(object)
     stats_changed = Signal(int, int)
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
 
         self.model = FlowTableModel()
         self.proxy_model = FlowFilterProxyModel(self)
@@ -209,18 +209,27 @@ class FlowTableWidget(QWidget):
         )
         self.search_input.setClearButtonEnabled(True)
 
-        self.method_filter = QComboBox()
-        self.method_filter.addItem("全部方法", "ALL")
-        for method in ("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"):
-            self.method_filter.addItem(method, method)
+        self.method_filter = MenuSelectButton(
+            "方法",
+            [("全部方法", "ALL")]
+            + [(method, method) for method in ("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD")],
+            self,
+        )
+        self.method_filter.setMinimumWidth(110)
 
-        self.status_filter = QComboBox()
-        self.status_filter.addItem("全部状态", "ALL")
-        self.status_filter.addItem("2xx", "2XX")
-        self.status_filter.addItem("3xx", "3XX")
-        self.status_filter.addItem("4xx", "4XX")
-        self.status_filter.addItem("5xx", "5XX")
-        self.status_filter.addItem("未响应", "NO_STATUS")
+        self.status_filter = MenuSelectButton(
+            "状态",
+            [
+                ("全部状态", "ALL"),
+                ("2xx", "2XX"),
+                ("3xx", "3XX"),
+                ("4xx", "4XX"),
+                ("5xx", "5XX"),
+                ("未响应", "NO_STATUS"),
+            ],
+            self,
+        )
+        self.status_filter.setMinimumWidth(110)
 
         self.failed_only_checkbox = QCheckBox("只看失败请求")
         self.clear_filter_btn = QPushButton("清除筛选")
@@ -288,8 +297,8 @@ class FlowTableWidget(QWidget):
         flow_emitter.update_flow.connect(self.model.update_flow)
         self.model.changed.connect(self._on_model_changed)
         self.search_input.textChanged.connect(self._apply_filters)
-        self.method_filter.currentTextChanged.connect(self._apply_filters)
-        self.status_filter.currentTextChanged.connect(self._apply_filters)
+        self.method_filter.value_changed.connect(self._apply_filters)
+        self.status_filter.value_changed.connect(self._apply_filters)
         self.failed_only_checkbox.toggled.connect(self._apply_filters)
         self.clear_filter_btn.clicked.connect(self._clear_filters)
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
@@ -309,8 +318,8 @@ class FlowTableWidget(QWidget):
 
     def _clear_filters(self):
         self.search_input.clear()
-        self.method_filter.setCurrentIndex(0)
-        self.status_filter.setCurrentIndex(0)
+        self.method_filter.set_current_data("ALL", emit_signal=False)
+        self.status_filter.set_current_data("ALL", emit_signal=False)
         self.failed_only_checkbox.setChecked(False)
         self._apply_filters()
 
@@ -369,8 +378,8 @@ class FlowTableWidget(QWidget):
     def clear(self):
         self._selected_flow_id = ""
         self.search_input.clear()
-        self.method_filter.setCurrentIndex(0)
-        self.status_filter.setCurrentIndex(0)
+        self.method_filter.set_current_data("ALL", emit_signal=False)
+        self.status_filter.set_current_data("ALL", emit_signal=False)
         self.failed_only_checkbox.setChecked(False)
         self.table.clearSelection()
         self.model.clear()

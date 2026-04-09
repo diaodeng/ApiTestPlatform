@@ -7,11 +7,11 @@ from .mitm_flow_table_widget import FlowTableWidget
 
 
 class FlowMainWidget(QWidget):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
 
-        self.table = FlowTableWidget()
-        self.detail = FlowDetailWidget()
+        self.table = FlowTableWidget(self)
+        self.detail = FlowDetailWidget(self)
         self._last_sizes = [900, 420]
 
         self.splitter = QSplitter(Qt.Horizontal)
