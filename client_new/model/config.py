@@ -26,7 +26,9 @@ class MitmProxyConfigModel(BaseModel):
 
     port: int = 9080
     web_port: int = 9081
+    startup_mode: str = "dump"
     web_open_browser: bool = False
+    web_show_in_app: bool = True
     ssl_insecure: bool = True  # 是否忽略ssl校验
     cert_path: str = ""
     script_path: str = ""

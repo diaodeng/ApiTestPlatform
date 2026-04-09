@@ -20,6 +20,7 @@ class MitmWidget(QWidget):
     stop_clicked = Signal()
     save_clicked = Signal(dict)
     install_cert_clicked = Signal()
+    open_web_clicked = Signal()
 
     def __init__(self):
         super().__init__()
@@ -27,6 +28,8 @@ class MitmWidget(QWidget):
         self.proxy_state = "stopped"
         self._quick_save_guard = False
         self._detail_visible = True
+        self._current_web_url = ""
+        self._app_flow_visible = True
 
         self._init_ui()
         self.controller = MitmController(self)
@@ -45,6 +48,7 @@ class MitmWidget(QWidget):
         self.stop_btn = QPushButton("停止")
         self.clear_btn = QPushButton("清空")
         self.detail_toggle_btn = QPushButton("隐藏详情")
+        self.open_web_btn = QPushButton("打开 Web 页面")
         self.settings_btn = QPushButton("设置")
         self.stop_btn.setEnabled(False)
 
@@ -53,6 +57,7 @@ class MitmWidget(QWidget):
         action_layout.addSpacing(12)
         action_layout.addWidget(self.clear_btn)
         action_layout.addWidget(self.detail_toggle_btn)
+        action_layout.addWidget(self.open_web_btn)
         action_layout.addWidget(self.settings_btn)
         action_layout.addWidget(self.start_btn)
         action_layout.addWidget(self.stop_btn)
@@ -65,6 +70,7 @@ class MitmWidget(QWidget):
 
         self.port_value_label = QLabel("-")
         self.web_port_value_label = QLabel("-")
+        self.startup_mode_value_label = QLabel("-")
         self.flow_count_label = QLabel("记录 0 条")
         self.mode_hint_label = QLabel("当前模式说明：-")
         self.mode_hint_label.setWordWrap(True)
@@ -75,6 +81,7 @@ class MitmWidget(QWidget):
         self.install_cert_btn = QPushButton("安装当前用户证书")
         self.port_value_label.setMinimumWidth(64)
         self.web_port_value_label.setMinimumWidth(64)
+        self.startup_mode_value_label.setMinimumWidth(64)
         self.flow_count_label.setMinimumWidth(120)
         self.mode_select = QComboBox()
         self.mode_select.addItems(["local", "regular", "wireguard", "socks5", "dns"])
@@ -99,6 +106,8 @@ class MitmWidget(QWidget):
         info_layout.addWidget(self.port_value_label)
         info_layout.addWidget(QLabel("Web端口"))
         info_layout.addWidget(self.web_port_value_label)
+        info_layout.addWidget(QLabel("启动方式"))
+        info_layout.addWidget(self.startup_mode_value_label)
         info_layout.addWidget(QLabel("记录"))
         info_layout.addWidget(self.flow_count_label)
         info_layout.addWidget(QLabel("模式"))
@@ -113,18 +122,29 @@ class MitmWidget(QWidget):
         cert_layout.addWidget(self.install_cert_btn)
 
         self.flow_widget = FlowMainWidget()
+        self.flow_placeholder = QLabel()
+        self.flow_placeholder.setAlignment(Qt.AlignCenter)
+        self.flow_placeholder.setWordWrap(True)
+        self.flow_placeholder.setStyleSheet(
+            "padding: 24px; border: 1px dashed #a0aec0; border-radius: 10px;"
+        )
+        self.flow_placeholder.hide()
 
         main_layout.addLayout(action_layout)
         main_layout.addLayout(info_layout)
         main_layout.addWidget(self.mode_hint_label)
         main_layout.addLayout(cert_layout)
         main_layout.addWidget(self.flow_widget, 1)
+        main_layout.addWidget(self.flow_placeholder, 1)
 
     def _bind(self):
         self.start_btn.clicked.connect(self._handle_start_clicked)
         self.stop_btn.clicked.connect(self._handle_stop_clicked)
         self.clear_btn.clicked.connect(self._handle_clear_clicked)
         self.detail_toggle_btn.clicked.connect(self._toggle_detail)
+        self.open_web_btn.clicked.connect(
+            lambda _checked=False: self.open_web_clicked.emit()
+        )
         self.settings_btn.clicked.connect(self._open_settings_dialog)
         self.install_cert_btn.clicked.connect(
             lambda _checked=False: self.install_cert_clicked.emit()
@@ -138,6 +158,8 @@ class MitmWidget(QWidget):
         self.start_clicked.emit()
 
     def _toggle_detail(self, _checked=False):
+        if not self._app_flow_visible:
+            return
         self._detail_visible = self.flow_widget.toggle_detail()
         self.detail_toggle_btn.setText(
             "隐藏详情" if self._detail_visible else "显示详情"
@@ -147,6 +169,8 @@ class MitmWidget(QWidget):
         self.stop_clicked.emit()
 
     def _handle_clear_clicked(self, _checked=False):
+        if not self._app_flow_visible:
+            return
         self.flow_widget.clear()
 
     def _open_settings_dialog(self, _checked=False):
@@ -181,10 +205,18 @@ class MitmWidget(QWidget):
 
         self.port_value_label.setText(str(config.port))
         self.web_port_value_label.setText(str(config.web_port))
+        self.startup_mode_value_label.setText(
+            str(getattr(config, "startup_mode", "dump") or "dump").strip().lower()
+        )
         self._update_mode_hint(config)
+        self._update_app_flow_visibility(config)
+        self._refresh_web_controls()
         self._apply_state_text(proxy_state)
 
     def _update_flow_stats(self, visible_count: int, total_count: int):
+        if not self._app_flow_visible:
+            self.flow_count_label.setText("Web 查看")
+            return
         if visible_count == total_count:
             self.flow_count_label.setText(f"{total_count} 条")
             return
@@ -196,6 +228,8 @@ class MitmWidget(QWidget):
 
     def _update_mode_hint(self, config):
         mode = str(config.proxy_model or "").strip()
+        startup_mode = str(getattr(config, "startup_mode", "dump") or "dump").strip().lower()
+        show_in_app = bool(getattr(config, "web_show_in_app", True))
         if mode == "local":
             target = str(config.proxy_model_value or "").strip() or "指定进程"
             message = (
@@ -214,7 +248,50 @@ class MitmWidget(QWidget):
             )
         else:
             message = "当前模式说明：尚未配置代理模式。"
+        if startup_mode == "web":
+            browser_hint = (
+                "启动后会自动打开 Web 页面。"
+                if bool(getattr(config, "web_open_browser", False))
+                else "启动后可点击“打开 Web 页面”查看或重新打开浏览器页面。"
+            )
+            display_hint = (
+                "同时会同步显示在当前应用界面。"
+                if show_in_app
+                else "当前应用界面不显示流量，请在 Web 页面查看。"
+            )
+            message = f"{message}\n当前运行方式：web。{browser_hint}{display_hint}"
+        else:
+            message = f"{message}\n当前运行方式：dump，流量会显示在当前应用界面。"
         self.mode_hint_label.setText(message)
+
+    def _should_show_app_flows(self, config=None) -> bool:
+        cfg = config or self.config
+        startup_mode = str(getattr(cfg, "startup_mode", "dump") or "dump").strip().lower()
+        if startup_mode != "web":
+            return True
+        return bool(getattr(cfg, "web_show_in_app", True))
+
+    def _update_app_flow_visibility(self, config):
+        should_show = self._should_show_app_flows(config)
+        if self._app_flow_visible and not should_show:
+            self.flow_widget.clear()
+        self._app_flow_visible = should_show
+        self.flow_widget.setVisible(should_show)
+        self.flow_placeholder.setVisible(not should_show)
+        self.clear_btn.setEnabled(should_show)
+        self.detail_toggle_btn.setEnabled(should_show)
+        if should_show:
+            self.flow_widget.set_detail_visible(self._detail_visible)
+            self.detail_toggle_btn.setText(
+                "隐藏详情" if self._detail_visible else "显示详情"
+            )
+            return
+
+        self.flow_placeholder.setText(
+            "当前为 Web 模式，应用内流量列表已关闭。\n"
+            "可点击“打开 Web 页面”在浏览器中查看 mitmweb 数据。"
+        )
+        self.flow_count_label.setText("Web 查看")
 
     def set_cert_status(
         self,
@@ -241,10 +318,23 @@ class MitmWidget(QWidget):
         self.stop_btn.setEnabled(running)
         self.mode_select.setEnabled(not running)
         self.mode_value_input.setEnabled(not running)
+        self._refresh_web_controls()
         if self.proxy_state in {"starting", "running", "stopping"}:
             self._apply_state_text(self.proxy_state)
         else:
             self._apply_state_text("running" if running else "stopped")
+
+    def set_web_url(self, web_url: str):
+        self._current_web_url = str(web_url or "").strip()
+        self._refresh_web_controls()
+
+    def _refresh_web_controls(self):
+        startup_mode = str(getattr(self.config, "startup_mode", "dump") or "dump").strip().lower()
+        is_web_mode = startup_mode == "web"
+        is_running = self.proxy_state == "running"
+        self.open_web_btn.setVisible(is_web_mode)
+        self.open_web_btn.setEnabled(is_web_mode and is_running)
+        self.open_web_btn.setToolTip(self._current_web_url if self._current_web_url else "")
 
     def _apply_state_text(self, state: str):
         state_map = {

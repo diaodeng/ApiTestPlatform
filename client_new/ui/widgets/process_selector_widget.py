@@ -1,7 +1,7 @@
 import os
 
 import psutil
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QCompleter,
@@ -26,6 +26,7 @@ class ProcessSelectorWidget(QWidget):
     def __init__(self, placeholder: str = "", parent=None):
         super().__init__(parent)
         self._loaded_once = False
+        self._process_names: list[str] = []
 
         self.combo = _ProcessComboBox()
         self.combo.setEditable(True)
@@ -55,29 +56,25 @@ class ProcessSelectorWidget(QWidget):
         self.combo.activated.connect(self._emit_value)
         self.combo.lineEdit().editingFinished.connect(self._emit_value)
 
-        QTimer.singleShot(0, self.refresh_processes)
-
     def value(self) -> str:
         return self.combo.currentText().strip()
 
     def set_value(self, value: str):
         text = (value or "").strip()
-        self._apply_items(self._list_process_names(), text)
+        self._apply_items(self._process_names, text)
 
     def set_placeholder(self, placeholder: str):
         self.combo.lineEdit().setPlaceholderText(placeholder)
 
     def refresh_processes(self):
         current = self.value()
-        self._apply_items(self._list_process_names(), current)
+        self._process_names = self._list_process_names()
+        self._apply_items(self._process_names, current)
         self._loaded_once = True
 
     def _refresh_before_popup(self):
         if not self._loaded_once:
             self.refresh_processes()
-            return
-
-        self.refresh_processes()
 
     def _emit_value(self, *_args):
         self.value_committed.emit(self.value())

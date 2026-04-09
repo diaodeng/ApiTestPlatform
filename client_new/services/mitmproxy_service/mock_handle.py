@@ -14,10 +14,13 @@ from .runtime_config import RuntimeConfig
 
 
 class MockHandle:
-    def __init__(self, flow_dispatcher=None):
+    def __init__(self, flow_dispatcher=None, emit_flows: bool = True):
         self._flow_dispatcher = flow_dispatcher
+        self._emit_flows = emit_flows
 
     def _emit_flow(self, event_type: str, item: FlowItem):
+        if not self._emit_flows:
+            return
         if self._flow_dispatcher:
             self._flow_dispatcher(event_type, item)
             return
@@ -125,25 +128,23 @@ class MockHandle:
 
     async def response(self, flow: HTTPFlow):
         item = flow.metadata.get("ui_item")
-        if not item:
-            return
+        if item:
+            duration_ms = self._calculate_duration_ms(flow, item)
+            item.status_code = flow.response.status_code
+            item.size = len(flow.response.content or b"")
+            item.response_reason = getattr(flow.response, "reason", "")
+            item.response_http_version = getattr(flow.response, "http_version", "")
+            item.response_headers = self._format_headers(
+                self._iter_items(flow.response.headers)
+            )
+            item.response_body = self._format_content(
+                flow.response.raw_content or b"",
+                flow.response.headers.get("content-type", ""),
+            )
+            item.response_content_type = flow.response.headers.get("content-type", "")
+            item.duration_ms = duration_ms
 
-        duration_ms = self._calculate_duration_ms(flow, item)
-        item.status_code = flow.response.status_code
-        item.size = len(flow.response.content or b"")
-        item.response_reason = getattr(flow.response, "reason", "")
-        item.response_http_version = getattr(flow.response, "http_version", "")
-        item.response_headers = self._format_headers(
-            self._iter_items(flow.response.headers)
-        )
-        item.response_body = self._format_content(
-            flow.response.raw_content or b"",
-            flow.response.headers.get("content-type", ""),
-        )
-        item.response_content_type = flow.response.headers.get("content-type", "")
-        item.duration_ms = duration_ms
-
-        self._emit_flow("update", item)
+            self._emit_flow("update", item)
 
         config = RuntimeConfig.get()
         if not config:
