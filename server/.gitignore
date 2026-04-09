@@ -18,6 +18,8 @@ temp_test
 app
 .vscode
 .zed
+caches
+case_data
 
 pricetag_test.py
 package.json
