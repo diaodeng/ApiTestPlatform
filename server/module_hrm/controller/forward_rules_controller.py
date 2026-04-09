@@ -107,7 +107,7 @@ async def update_rules(request: Request,
 
 
 @forwardRulesController.delete("",
-                               dependencies=[Depends(CheckUserInterfaceAuth('qtr:forwardRules:delete'))])
+                               dependencies=[Depends(CheckUserInterfaceAuth('qtr:forwardRules:remove'))])
 @log_decorator(title='删除转发规则', business_type=3)
 async def delete_rules(request: Request,
                        page_query: ForwardRulesDeleteModel,
@@ -256,7 +256,7 @@ async def update_rules_detail(request: Request,
 
 
 @forwardRulesController.delete("/detail",
-                               dependencies=[Depends(CheckUserInterfaceAuth('qtr:forwardRules:delete'))])
+                               dependencies=[Depends(CheckUserInterfaceAuth('qtr:forwardRules:remove'))])
 @log_decorator(title='删除转发规则详情', business_type=3)
 async def delete_rules_detail(request: Request,
                               page_query: ForwardRulesDetailDeleteModel,

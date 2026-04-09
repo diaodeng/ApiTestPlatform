@@ -305,7 +305,7 @@ async def delete_hrm_mock_rule(request: Request,
 @mockController.get("/mockManager/rule/{mock_rule_id}",
                     response_model=MockModel,
                     dependencies=[
-                        Depends(CheckUserInterfaceAuth(['hrm:mockManager:detailRule', "hrm.mock_rule:editRule"],
+                        Depends(CheckUserInterfaceAuth(['hrm:mockManager:detailRule', "hrm:mockManager:editRule"],
                                                        False))])
 async def query_detail_hrm_mock_rule(request: Request, mock_rule_id: int, query_db: Session = Depends(get_db)):
     try:

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 # from module_hrm.controller.celery_controller import celeryController
+from common.permission.sync import sync_registered_menus
 from config.env import AppConfig
 from config.get_db import init_create_table
 from config.get_qtr_scheduler import qtr_scheduler_util as QtrSchedulerUtil
@@ -27,6 +28,7 @@ from module_admin.controller.post_controler import postController
 from module_admin.controller.role_controller import roleController
 from module_admin.controller.server_controller import serverController
 from module_admin.controller.user_controller import userController
+from module_admin.perms import register as register_admin_permission_defs
 from module_hrm.controller.agent_controller import agentController as agentManagerController
 from module_hrm.controller.api_controler import hrmApiController
 from module_hrm.controller.case_controler import caseController
@@ -50,6 +52,7 @@ from module_hrm.controller.suite_controller import suiteController
 from module_hrm.controller.test_controller import mockController
 from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
+from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
@@ -64,6 +67,9 @@ async def lifespan(app: FastAPI):
         logger.info(f"{AppConfig.app_name}开始启动")
         worship()
         await init_create_table()
+        register_admin_permission_defs()
+        register_hrm_permission_defs()
+        sync_registered_menus(app)
         app.state.redis = await RedisUtil.create_redis_pool()
         await RedisUtil.init_sys_dict(app.state.redis)
         await RedisUtil.init_sys_config(app.state.redis)
