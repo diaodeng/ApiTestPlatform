@@ -13,7 +13,11 @@ from PySide6.QtWidgets import (
 )
 
 from utils import VERSION
-from utils.common import check_app_has_new, perform_update_with_powershell
+from utils.common import (
+    check_app_has_new,
+    get_client_update_runtime_profile,
+    perform_update_with_powershell,
+)
 
 
 class _CheckUpdateThread(QThread):
@@ -69,6 +73,7 @@ class AboutPage(QWidget):
         super().__init__(parent)
         self.check_thread: _CheckUpdateThread | None = None
         self.update_thread: _UpdateThread | None = None
+        self.runtime_profile = get_client_update_runtime_profile()
 
         self._build_ui()
 
@@ -77,7 +82,12 @@ class AboutPage(QWidget):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        tips = QLabel("更新过程中不要离开当前页面。exe 为增量包，zip 为全量包。")
+        runtime_label = self.runtime_profile["package_mode_label"]
+        preferred_asset_label = self.runtime_profile["preferred_asset_label"]
+        tips = QLabel(
+            "更新过程中不要离开当前页面。"
+            f"当前运行形态：{runtime_label}，将优先选择 {preferred_asset_label} 更新包。"
+        )
         tips.setStyleSheet("color:#c53030;font-weight:600;")
 
         row = QHBoxLayout()
@@ -131,7 +141,9 @@ class AboutPage(QWidget):
         self.update_btn.setEnabled(False)
         self.check_btn.setEnabled(False)
         self.force_update.setEnabled(False)
-        self.progress_label.setText("准备更新...")
+        self.progress_label.setText(
+            f"准备更新... 当前形态: {self.runtime_profile['package_mode_label']}"
+        )
 
         self.update_thread = _UpdateThread(force_update=self.force_update.isChecked())
         self.update_thread.progress.connect(self.progress_label.setText)
