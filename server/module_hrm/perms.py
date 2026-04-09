@@ -303,7 +303,7 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         12,
         remark="MOCK管理菜单",
     ),
-    M("hrm.tools", "工具", "hrm", "tools", 8, parent_key="hrm.root", remark="工具"),
+    M("hrm.tools", "工具", "tools", "tools", 8, parent_key="hrm.root", remark="工具"),
     C(
         "hrm.json",
         "工具",
