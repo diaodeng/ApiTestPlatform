@@ -207,7 +207,7 @@ async def delete_hrm_case(
     "/{case_id}",
     response_model=CaseModel,
     dependencies=[
-        Depends(CheckUserInterfaceAuth(["hrm:case:detail", "hrm.case:edit"], False))
+        Depends(CheckUserInterfaceAuth(["hrm:case:detail", "hrm:case:edit"], False))
     ],
 )
 async def query_detail_hrm_case(
