@@ -20,6 +20,9 @@ server/temp_test
 .vscode
 temp
 _internal
+case_data
+server/caches
+server/case_data
 
 
 web/vite.config.js.timestamp*.mjs
