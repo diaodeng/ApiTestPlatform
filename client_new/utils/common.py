@@ -400,6 +400,17 @@ _RELEASE_SPLIT_ASSET_RE = re.compile(
     r"^(?P<base>.+(?P<suffix>\.(?:exe|zip)))(?:\.(?P<digits>\d{3,4})|\.part(?P<part>\d{1,4}))$",
     re.IGNORECASE,
 )
+_PORTABLE_UPDATE_ZIP_HINTS = (
+    "portable",
+    "update",
+    "upgrade",
+    "onedir",
+    "nonstandalone",
+    "non-standalone",
+    "目录包",
+    "非独立",
+    "升级",
+)
 
 
 def is_frozen_client_runtime() -> bool:
@@ -450,22 +461,81 @@ def get_client_update_runtime_profile() -> dict[str, Any]:
         "standalone": "独立打包",
         "portable_dir": "非独立打包",
     }
-    preferred_suffixes = [".exe", ".zip"]
-    preferred_asset_label = "exe"
+    asset_selection_plan = [
+        {"suffix": ".exe", "portable_only": False},
+        {"suffix": ".zip", "portable_only": False},
+    ]
+    preferred_asset_label = "exe（无则回退 zip）"
     if package_mode == "portable_dir":
-        preferred_suffixes = [".zip", ".exe"]
-        preferred_asset_label = "zip"
+        asset_selection_plan = [
+            {"suffix": ".zip", "portable_only": False},
+            {"suffix": ".exe", "portable_only": False},
+        ]
+        preferred_asset_label = "zip（无则回退 exe）"
+    elif package_mode == "standalone":
+        asset_selection_plan = [
+            {"suffix": ".zip", "portable_only": True},
+            {"suffix": ".exe", "portable_only": False},
+            {"suffix": ".zip", "portable_only": False},
+        ]
+        preferred_asset_label = "portable zip 升级包（无则回退 exe）"
 
     return {
         "package_mode": package_mode,
         "package_mode_label": label_map.get(package_mode, package_mode),
-        "preferred_suffixes": preferred_suffixes,
+        "asset_selection_plan": asset_selection_plan,
         "preferred_asset_label": preferred_asset_label,
         "client_root": client_root,
         "current_exe": current_exe,
         "main_exe_name": main_exe_name,
         "main_exe_stem": main_exe_stem,
     }
+
+
+def _portable_update_hint_score(asset_name: str) -> int:
+    lower_name = str(asset_name or "").lower()
+    if not lower_name:
+        return 0
+
+    strong_keywords = {
+        "portable",
+        "onedir",
+        "nonstandalone",
+        "non-standalone",
+        "目录包",
+        "非独立",
+    }
+    score = 0
+    for keyword in _PORTABLE_UPDATE_ZIP_HINTS:
+        if keyword in lower_name:
+            score += 60 if keyword in strong_keywords else 25
+    return score
+
+
+def _is_portable_update_asset(asset_name: str, suffix: str) -> bool:
+    if suffix != ".zip":
+        return False
+    return _portable_update_hint_score(asset_name) > 0
+
+
+def _portable_zip_exact_names(current_exe_stem: str) -> set[str]:
+    stems = {item for item in {current_exe_stem, "qtrclientnew", "qtrclient"} if item}
+    exact_names: set[str] = set()
+    for stem in stems:
+        exact_names.update(
+            {
+                f"{stem}_portable.zip",
+                f"{stem}-portable.zip",
+                f"{stem}_update.zip",
+                f"{stem}-update.zip",
+                f"{stem}_upgrade.zip",
+                f"{stem}-upgrade.zip",
+                f"{stem}_onedir.zip",
+                f"{stem}-onedir.zip",
+                f"{stem}portable.zip",
+            }
+        )
+    return exact_names
 
 
 def _normalize_version_tuple(value: str | None) -> tuple[int, ...]:
@@ -636,6 +706,7 @@ def _asset_match_score(asset_name: str, suffix: str, runtime_profile: dict[str, 
     stem = Path(asset_name).stem.lower()
     current_exe_name = str(runtime_profile.get("main_exe_name") or "").lower()
     current_exe_stem = str(runtime_profile.get("main_exe_stem") or "").lower()
+    portable_hint_score = _portable_update_hint_score(lower_name) if suffix == ".zip" else 0
 
     if suffix == ".exe":
         if current_exe_name and lower_name == current_exe_name:
@@ -647,20 +718,22 @@ def _asset_match_score(asset_name: str, suffix: str, runtime_profile: dict[str, 
         if lower_name in {"qtrclientnew.exe", "qtrclient.exe"}:
             return 200
     elif suffix == ".zip":
+        if lower_name in _portable_zip_exact_names(current_exe_stem):
+            return 340 + portable_hint_score
         expected_zip_name = f"{current_exe_stem}.zip" if current_exe_stem else ""
         if expected_zip_name and lower_name == expected_zip_name:
-            return 300
+            return 300 + portable_hint_score
         if current_exe_stem and stem == current_exe_stem:
-            return 260
+            return 260 + portable_hint_score
         if current_exe_stem and current_exe_stem in stem:
-            return 220
+            return 220 + portable_hint_score
         if lower_name in {"qtrclientnew.zip", "qtrclient.zip"}:
-            return 200
+            return 200 + portable_hint_score
 
     if stem in {"qtrclientnew", "qtrclient"}:
-        return 160
+        return 160 + portable_hint_score
     if "qtrclientnew" in stem or "qtrclient" in stem:
-        return 120
+        return 120 + portable_hint_score
     return 10
 
 
@@ -670,8 +743,15 @@ def _select_release_asset(release: dict[str, Any]) -> dict[str, Any] | None:
     if not assets:
         return None
 
-    for suffix in runtime_profile["preferred_suffixes"]:
+    for rule in runtime_profile["asset_selection_plan"]:
+        suffix = rule["suffix"]
         candidates = [item for item in assets if item["suffix"] == suffix]
+        if rule.get("portable_only"):
+            candidates = [
+                item
+                for item in candidates
+                if _is_portable_update_asset(item["name"], item["suffix"])
+            ]
         if not candidates:
             continue
         ranked = sorted(
@@ -703,14 +783,14 @@ async def download_new_app(
     logger.info("开始下载新包")
     runtime_profile = get_client_update_runtime_profile()
     logger.info(
-        "当前升级运行形态: {}，优先更新包类型: {}",
+        "当前升级运行形态: {}，升级资源策略: {}",
         runtime_profile["package_mode_label"],
         runtime_profile["preferred_asset_label"],
     )
     if download_process_call:
         download_process_call(
             f"正在获取版本信息... 当前运行形态: {runtime_profile['package_mode_label']}，"
-            f"优先选择 {runtime_profile['preferred_asset_label']} 包"
+            f"升级资源策略: {runtime_profile['preferred_asset_label']}"
         )
 
     releases = await _fetch_release_list()
@@ -1142,7 +1222,7 @@ async def perform_update_with_powershell(
         return False, "未识别到当前客户端主程序路径，无法执行自更新"
     logger.info(f"current_exe: {current_exe_path}")
     logger.info(
-        "开始执行自更新，当前运行形态: {}，优先更新包类型: {}",
+        "开始执行自更新，当前运行形态: {}，升级资源策略: {}",
         runtime_profile["package_mode_label"],
         runtime_profile["preferred_asset_label"],
     )

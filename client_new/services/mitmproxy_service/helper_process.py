@@ -9,14 +9,14 @@ import traceback
 from dataclasses import asdict
 from pathlib import Path
 
+import tornado.httpserver
+import tornado.ioloop
 from loguru import logger
 from mitmproxy import master as mitm_master
 from mitmproxy.options import Options
 from mitmproxy.tools.dump import DumpMaster
 from mitmproxy.tools.web.master import WebMaster
 from mitmproxy.utils import asyncio_utils
-import tornado.httpserver
-import tornado.ioloop
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -119,7 +119,9 @@ class HelperRuntime:
             self._config = config
             self._stop_requested = False
 
-        self.protocol.send("state", state="starting", **self._runtime_state_payload(config=config))
+        self.protocol.send(
+            "state", state="starting", **self._runtime_state_payload(config=config)
+        )
         future = asyncio.run_coroutine_threadsafe(self._run_session(config), self._loop)
         future.add_done_callback(self._on_session_finished)
 
@@ -252,7 +254,10 @@ class HelperRuntime:
     def _should_emit_app_flows(self, config: MitmProxyConfigModel | None) -> bool:
         if not config:
             return True
-        if self._normalize_startup_mode(getattr(config, "startup_mode", "dump")) != "web":
+        if (
+            self._normalize_startup_mode(getattr(config, "startup_mode", "dump"))
+            != "web"
+        ):
             return True
         return bool(getattr(config, "web_show_in_app", True))
 
@@ -290,7 +295,9 @@ class HelperRuntime:
         loop: asyncio.AbstractEventLoop,
     ) -> mitm_master.Master:
         if config.proxy_model == "local":
+            logger.info("before ensure redirector")
             ok, message = ensure_windows_redirector_gui_subsystem()
+            logger.info("after ensure redirector")
             if ok:
                 logger.info(message)
             else:
@@ -349,7 +356,9 @@ class HelperRuntime:
                 asyncio_utils.set_eager_task_factory(),
             ):
                 if proxyserver:
+                    logger.info("before setup_servers")
                     ok = await proxyserver.setup_servers()
+                    logger.info("after setup_servers")
                     if not ok:
                         raise RuntimeError("mitmproxy 服务器启动失败")
 
