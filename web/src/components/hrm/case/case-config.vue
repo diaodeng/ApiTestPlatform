@@ -195,7 +195,7 @@ const calcConfigContainerHeight = computed(() => {
 <template>
   <div :style="{height:calcConfigContainerHeight}" ref="configContainerRef">
     <el-tabs type="" v-model="activeTabName">
-      <el-tab-pane :label="$t('message.caseDetail.tabNames.message')" name="caseMessages">
+      <el-tab-pane :label="$t('message.caseDetail.tabNames.message')" name="caseMessages" lazy>
         <el-scrollbar :height="configContainerCurrentHeight - 55">
           <el-form-item :label="dataName+'名称'" prop="caseName">
             <el-input v-model="formData.caseName" placeholder="请输入用例名称" clearable/>
@@ -274,13 +274,13 @@ const calcConfigContainerHeight = computed(() => {
         </el-scrollbar>
 
       </el-tab-pane>
-      <el-tab-pane :label="$t('message.caseDetail.tabNames.headers')" name="caseHeaders">
+      <el-tab-pane :label="$t('message.caseDetail.tabNames.headers')" name="caseHeaders" lazy>
         <el-scrollbar :height="configContainerCurrentHeight - 55">
           <TableHeaders v-model="formData.request.config.headers"></TableHeaders>
         </el-scrollbar>
 
       </el-tab-pane>
-      <el-tab-pane :label="getVariableTabName" name="caseVph">
+      <el-tab-pane :label="getVariableTabName" name="caseVph" lazy>
         <el-scrollbar :height="configContainerCurrentHeight - 55">
           <el-card>
             <TableVariables v-model="formData.request.config.variables"
@@ -320,19 +320,23 @@ const calcConfigContainerHeight = computed(() => {
           <el-card  style="margin-top: 10px">
             <TableHooks v-model="formData.request.config.setup_hooks"
                         v-if="dataType !== HrmDataTypeEnum.config"
-                        :table-title="$t('message.configTable.header.setup_hooks')"></TableHooks>
+                        :table-title="$t('message.configTable.header.setup_hooks')"
+                        editor-key="case-config-setup-hooks"
+                        :editor-title="`${formData.caseName || '当前用例'} - 前置回调脚本`"></TableHooks>
           </el-card>
           <el-card  style="margin-top: 10px">
             <TableHooks v-model="formData.request.config.teardown_hooks"
                         v-if="dataType !== HrmDataTypeEnum.config"
-                        :table-title="$t('message.configTable.header.teardown_hooks')"></TableHooks>
+                        :table-title="$t('message.configTable.header.teardown_hooks')"
+                        editor-key="case-config-teardown-hooks"
+                        :editor-title="`${formData.caseName || '当前用例'} - 后置回调脚本`"></TableHooks>
           </el-card>
 
 
         </el-scrollbar>
 
       </el-tab-pane>
-      <el-tab-pane :label="$t('message.caseDetail.tabNames.other')" name="caseThinktime">
+      <el-tab-pane :label="$t('message.caseDetail.tabNames.other')" name="caseThinktime" lazy>
         <el-row>
           <el-input
               v-model="formData.request.config.think_time.limit"

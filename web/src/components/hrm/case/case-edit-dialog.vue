@@ -10,6 +10,7 @@ import {initCaseFormData} from "@/components/hrm/data-template.js";
 import {allConfig} from "@/api/hrm/config.js";
 import {useResizeObserver} from "@vueuse/core";
 import DebugComponent from "@/components/hrm/common/debug_component.vue";
+import SharedScriptEditorDialog from "@/components/hrm/common/ace-editor-plug/SharedScriptEditorDialog.vue";
 
 
 const {proxy} = getCurrentInstance();
@@ -38,6 +39,9 @@ const loading = ref({
   debug: false,
   init: false
 });
+const dialogContentReady = ref(false);
+const scriptEditorRef = ref();
+let stopDataWatch = null;
 
 const caseMainRef = ref();
 const caseMainHeight = ref(0);
@@ -49,18 +53,16 @@ const dataName = computed(() => {
 
 provide("hrm_comparator_dict", hrm_comparator_dict);
 provide("hrm_case_config_list", selectConfigList);
+provide("hrm_script_editor", {
+  openScriptEditor(payload) {
+    scriptEditorRef.value?.open?.(payload);
+  }
+});
 
 watch(() => props.formDatas, () => {
   formData.value = props.formDatas;
   activeCaseName.value = "caseConfig"
-  // getComparatorFromNetwork();
 });
-
-// watch(() => props.openCaseEditDialog, () => {
-//   if (props.openCaseEditDialog === true) {
-//     getConfigSelect();
-//   }
-// })
 
 
 /** 提交按钮 */
@@ -157,22 +159,42 @@ async function getConfigSelect() {
 }
 
 
-onMounted(async () => {
+async function initDialog() {
+  if (loading.value.init) {
+    return;
+  }
   loading.value.init = true;
+  dialogContentReady.value = true;
+  await nextTick();
   reset();
-  await getProjectSelect();
-  await getConfigSelect();
-  await getComparatorFromNetwork();
+  await Promise.all([
+    getProjectSelect(),
+    getConfigSelect(),
+    getComparatorFromNetwork()
+  ]);
 
-  watch(() => formData.value, () => {
+  stopDataWatch?.();
+  stopDataWatch = watch(() => formData.value, () => {
     dataChange.value = true;
   }, {deep: true});
   dataChange.value = false;
-
-  // nextTick(() => {
-  //   dataChange.value = false;
-  // });
   loading.value.init = false;
+}
+
+watch(() => openCaseEditDialog.value, async (newValue) => {
+  if (newValue) {
+    await initDialog();
+    return;
+  }
+  stopDataWatch?.();
+  stopDataWatch = null;
+  dataChange.value = false;
+  activeCaseName.value = "caseConfig";
+  dialogContentReady.value = false;
+}, {immediate: true});
+
+onBeforeUnmount(() => {
+  stopDataWatch?.();
 });
 
 function beforeCloseDialog(done) {
@@ -207,7 +229,13 @@ useResizeObserver(caseMainRef, (entries) => {
              v-model="openCaseEditDialog"
              :before-close="beforeCloseDialog"
              append-to-body>
-    <el-form ref="postRef" :model="formData" :rules="formRules" label-width="100px" style="height: 100%" v-loading="loading.init">
+    <el-form v-if="dialogContentReady"
+             ref="postRef"
+             :model="formData"
+             :rules="formRules"
+             label-width="100px"
+             style="height: 100%"
+             v-loading="loading.init">
       <el-container style="height: 100%; overflow-y: hidden">
         <el-header height="40px" border="2px" style="border-bottom-color: #97a8be;text-align: right">
           <el-button-group>
@@ -246,7 +274,7 @@ useResizeObserver(caseMainRef, (entries) => {
           ></CaseConfig>
           <el-tabs type="border-card" v-model="activeCaseName" style="height: 100%;"
                    v-else-if="dataType !== HrmDataTypeEnum.config">
-            <el-tab-pane :label="$t('message.caseDetail.tabNames.configLabel')" name="caseConfig">
+            <el-tab-pane :label="$t('message.caseDetail.tabNames.configLabel')" name="caseConfig" lazy>
               <CaseConfig v-model:form-data="formData"
                           :project-options="projectOptions"
                           :data-type="dataType"
@@ -254,7 +282,7 @@ useResizeObserver(caseMainRef, (entries) => {
 
               ></CaseConfig>
             </el-tab-pane>
-            <el-tab-pane :label="$t('message.caseDetail.tabNames.stepsLabel')" name="caseSteps">
+            <el-tab-pane :label="$t('message.caseDetail.tabNames.stepsLabel')" name="caseSteps" lazy>
               <TestStep v-model:test-steps-data="formData.request.teststeps"
                         :steps-height="caseMainHeight - 57"
               ></TestStep>
@@ -262,9 +290,8 @@ useResizeObserver(caseMainRef, (entries) => {
           </el-tabs>
         </el-main>
       </el-container>
-
-
     </el-form>
+    <SharedScriptEditorDialog ref="scriptEditorRef" v-if="dialogContentReady"></SharedScriptEditorDialog>
   </el-dialog>
 </template>
 

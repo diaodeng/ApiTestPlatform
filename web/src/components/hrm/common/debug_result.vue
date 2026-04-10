@@ -106,11 +106,11 @@ onMounted(() => {
   <div :style="{height: tabHeight + 'px'}" ref="debugContainerRef">
 <!--    <div v-if="!calcResponse">{{ calcResponse }}</div>-->
     <el-tabs v-model="activeTab" class="request-detail">
-      <el-tab-pane label="响应" name="response" key="tab_response">
+      <el-tab-pane label="响应" name="response" key="tab_response" lazy>
         <AceEditor v-model:content="calcResponse" :can-set="true" :can-search="true"
                    :height="responseEditHeight" key="edit_response"></AceEditor>
       </el-tab-pane>
-      <el-tab-pane label="日志" name="logs" key="tab_logs">
+      <el-tab-pane label="日志" name="logs" key="tab_logs" lazy>
         <LogView :logs="calcLogs"
                  :highlightKeywords=[]
                  :auto-scroll="false"
@@ -128,7 +128,7 @@ onMounted(() => {
                    v-if="false"
         ></AceEditor>
       </el-tab-pane>
-      <el-tab-pane label="异常" name="errorLogs" key="tab_errorLogs">
+      <el-tab-pane label="异常" name="errorLogs" key="tab_errorLogs" lazy>
         <LogView :logs="calcErrorLogs"
                  :auto-scroll="false"
                  style="overflow: auto;min-height: 0"
