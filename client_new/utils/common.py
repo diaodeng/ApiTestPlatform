@@ -395,6 +395,11 @@ def get_all_process() -> list[dict]:
 
 _RELEASES_API_URL = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
 _RUNTIME_PRESERVE_NAMES = {"storage", "logs", ".update_backup"}
+_RELEASE_PACKAGE_SUFFIXES = {".exe", ".zip"}
+_RELEASE_SPLIT_ASSET_RE = re.compile(
+    r"^(?P<base>.+(?P<suffix>\.(?:exe|zip)))(?:\.(?P<digits>\d{3,4})|\.part(?P<part>\d{1,4}))$",
+    re.IGNORECASE,
+)
 
 
 def is_frozen_client_runtime() -> bool:
@@ -505,18 +510,125 @@ def _build_release_markdown(releases: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
-def _iter_release_assets(release: dict[str, Any]) -> list[dict[str, str]]:
-    assets: list[dict[str, str]] = []
+def _parse_release_asset_name(asset_name: str) -> dict[str, Any] | None:
+    normalized_name = str(asset_name or "").strip()
+    if not normalized_name:
+        return None
+
+    lower_name = normalized_name.lower()
+    for suffix in _RELEASE_PACKAGE_SUFFIXES:
+        if lower_name.endswith(suffix):
+            return {
+                "package_name": normalized_name,
+                "suffix": suffix,
+                "part_index": None,
+            }
+
+    match = _RELEASE_SPLIT_ASSET_RE.match(normalized_name)
+    if not match:
+        return None
+
+    suffix = str(match.group("suffix") or "").lower()
+    part_value = match.group("digits") or match.group("part")
+    if suffix not in _RELEASE_PACKAGE_SUFFIXES or not part_value:
+        return None
+
+    part_index = int(part_value)
+    if part_index <= 0:
+        return None
+
+    return {
+        "package_name": str(match.group("base") or "").strip(),
+        "suffix": suffix,
+        "part_index": part_index,
+    }
+
+
+def _iter_release_assets(release: dict[str, Any]) -> list[dict[str, Any]]:
+    assets: list[dict[str, Any]] = []
     for item in release.get("assets") or []:
         name = str(item.get("name") or "").strip()
         url = str(item.get("browser_download_url") or "").strip()
         if not name or not url:
             continue
-        suffix = Path(name).suffix.lower()
-        if suffix not in {".exe", ".zip"}:
+        parsed_name = _parse_release_asset_name(name)
+        if not parsed_name:
             continue
-        assets.append({"name": name, "url": url, "suffix": suffix})
+
+        try:
+            asset_size = int(item.get("size") or 0)
+        except (TypeError, ValueError):
+            asset_size = 0
+
+        assets.append(
+            {
+                "name": name,
+                "url": url,
+                "size": max(asset_size, 0),
+                **parsed_name,
+            }
+        )
     return assets
+
+
+def _build_release_asset_packages(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    packages: list[dict[str, Any]] = []
+    split_groups: dict[tuple[str, str], dict[str, Any]] = {}
+
+    for asset in assets:
+        if asset["part_index"] is None:
+            packages.append(
+                {
+                    "name": asset["package_name"],
+                    "display_name": asset["name"],
+                    "suffix": asset["suffix"],
+                    "is_split": False,
+                    "part_count": 1,
+                    "total_size": int(asset.get("size") or 0),
+                    "parts": [asset],
+                }
+            )
+            continue
+
+        key = (str(asset["package_name"]).lower(), str(asset["suffix"]).lower())
+        group = split_groups.setdefault(
+            key,
+            {
+                "name": asset["package_name"],
+                "suffix": asset["suffix"],
+                "parts": [],
+            },
+        )
+        group["parts"].append(asset)
+
+    for group in split_groups.values():
+        parts = sorted(group["parts"], key=lambda item: int(item["part_index"]))
+        if not parts:
+            continue
+
+        expected_indices = list(range(1, len(parts) + 1))
+        actual_indices = [int(item["part_index"]) for item in parts]
+        if actual_indices != expected_indices:
+            logger.warning(
+                "忽略不完整的更新分片组: {}，分片序号={}",
+                group["name"],
+                actual_indices,
+            )
+            continue
+
+        packages.append(
+            {
+                "name": group["name"],
+                "display_name": f"{group['name']}（共{len(parts)}个分片）",
+                "suffix": group["suffix"],
+                "is_split": True,
+                "part_count": len(parts),
+                "total_size": sum(int(item.get("size") or 0) for item in parts),
+                "parts": parts,
+            }
+        )
+
+    return packages
 
 
 def _asset_match_score(asset_name: str, suffix: str, runtime_profile: dict[str, Any]) -> int:
@@ -552,9 +664,9 @@ def _asset_match_score(asset_name: str, suffix: str, runtime_profile: dict[str, 
     return 10
 
 
-def _select_release_asset(release: dict[str, Any]) -> dict[str, str] | None:
+def _select_release_asset(release: dict[str, Any]) -> dict[str, Any] | None:
     runtime_profile = get_client_update_runtime_profile()
-    assets = _iter_release_assets(release)
+    assets = _build_release_asset_packages(_iter_release_assets(release))
     if not assets:
         return None
 
@@ -566,6 +678,7 @@ def _select_release_asset(release: dict[str, Any]) -> dict[str, str] | None:
             candidates,
             key=lambda item: (
                 -_asset_match_score(item["name"], item["suffix"], runtime_profile),
+                item["is_split"],
                 item["name"].lower(),
             ),
         )
@@ -614,12 +727,12 @@ async def download_new_app(
     if not selected_asset:
         logger.info("没有找到升级文件")
         return None
-    asset_url = selected_asset["url"]
     file_suffix = selected_asset["suffix"]
     asset_name = selected_asset["name"]
-    logger.info(f"已选择更新包: {asset_name}")
+    display_name = selected_asset.get("display_name") or asset_name
+    logger.info(f"已选择更新包: {display_name}")
     if download_process_call:
-        download_process_call(f"已选择更新包: {asset_name}")
+        download_process_call(f"已选择更新包: {display_name}")
 
     download_dir = Path(tempfile.gettempdir()) / "QTRClient" / "updates"
     download_dir.mkdir(parents=True, exist_ok=True)
@@ -634,29 +747,78 @@ async def download_new_app(
             timeout=DEFAULT_HTTP_TIMEOUT,
             follow_redirects=True,
         ) as client:
-            async with client.stream("GET", asset_url) as response:
-                response.raise_for_status()
-                total_size = int(response.headers.get("content-length", 0) or 0)
+            downloaded = 0
+            total_size = int(selected_asset.get("total_size") or 0)
+            parts = selected_asset.get("parts") or []
+            part_count = max(int(selected_asset.get("part_count") or len(parts) or 1), 1)
+            if total_size > 0:
                 logger.info(f"开始下载更新包，文件大小：{total_size / 1024 / 1024:.2f} MB")
-                downloaded = 0
-                with temp_path.open("wb") as file_obj:
-                    async for chunk in response.aiter_bytes(1024 * 1024):
-                        if not chunk:
-                            continue
-                        file_obj.write(chunk)
-                        downloaded += len(chunk)
 
-                        if not download_process_call:
-                            continue
-                        if total_size > 0:
-                            percent = downloaded / total_size * 100
-                            download_process_call(
-                                f"新包大小：{total_size / 1024 / 1024:.2f}MB, 下载进度: {percent:.2f}%"
-                            )
-                        else:
-                            download_process_call(
-                                f"已下载：{downloaded / 1024 / 1024:.2f}MB"
-                            )
+            with temp_path.open("wb") as file_obj:
+                for index, part in enumerate(parts, start=1):
+                    part_name = str(part.get("name") or "")
+                    part_url = str(part.get("url") or "")
+                    if not part_url:
+                        raise RuntimeError(f"更新分片地址为空: {part_name or index}")
+
+                    part_downloaded = 0
+                    part_size = int(part.get("size") or 0)
+                    logger.info(
+                        "开始下载更新{}: {}/{} {}",
+                        "分片" if selected_asset["is_split"] else "包",
+                        index,
+                        part_count,
+                        part_name,
+                    )
+
+                    async with client.stream("GET", part_url) as response:
+                        response.raise_for_status()
+                        header_size = int(response.headers.get("content-length", 0) or 0)
+                        if header_size > 0 and part_size <= 0:
+                            part_size = header_size
+
+                        async for chunk in response.aiter_bytes(1024 * 1024):
+                            if not chunk:
+                                continue
+                            file_obj.write(chunk)
+                            chunk_size = len(chunk)
+                            downloaded += chunk_size
+                            part_downloaded += chunk_size
+
+                            if not download_process_call:
+                                continue
+
+                            if total_size > 0:
+                                percent = downloaded / total_size * 100
+                                if selected_asset["is_split"]:
+                                    download_process_call(
+                                        "下载分片 {}/{}: {}，总进度 {:.2f}% ({:.2f}/{:.2f}MB)".format(
+                                            index,
+                                            part_count,
+                                            part_name,
+                                            percent,
+                                            downloaded / 1024 / 1024,
+                                            total_size / 1024 / 1024,
+                                        )
+                                    )
+                                else:
+                                    download_process_call(
+                                        f"新包大小：{total_size / 1024 / 1024:.2f}MB, 下载进度: {percent:.2f}%"
+                                    )
+                            elif selected_asset["is_split"] and part_size > 0:
+                                percent = part_downloaded / part_size * 100
+                                download_process_call(
+                                    "下载分片 {}/{}: {}，分片进度 {:.2f}%".format(
+                                        index,
+                                        part_count,
+                                        part_name,
+                                        percent,
+                                    )
+                                )
+                            else:
+                                download_process_call(
+                                    f"已下载：{downloaded / 1024 / 1024:.2f}MB"
+                                )
 
         if target_path.exists():
             target_path.unlink()
