@@ -86,6 +86,9 @@ class CurrentUserModel(BaseModel):
     permissions: list
     roles: list
     user: Union[UserInfoModel, None]
+    auth_type: Optional[str] = "user"
+    api_key_id: Optional[int] = None
+    api_key_name: Optional[str] = None
 
 
 class UserDetailModel(BaseModel):
