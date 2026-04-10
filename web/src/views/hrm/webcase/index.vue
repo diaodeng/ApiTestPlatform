@@ -2165,8 +2165,10 @@ function saveCase() {
   }
 
   loading.value.save = true;
+  const rawForm = toRaw(form.value) || {};
   const payload = {
-    ...cloneData(form.value),
+    ...rawForm,
+    runtimeSettings: isPlainObject(rawForm.runtimeSettings) ? cloneData(rawForm.runtimeSettings) : {},
     steps: form.value.steps.map((step, index) => prepareStepForSubmit(step, index + 1)),
   };
   const request = payload.webCaseId ? updateWebCase(payload) : addWebCase(payload);
