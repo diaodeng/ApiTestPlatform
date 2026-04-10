@@ -346,12 +346,16 @@ class MitmController(QObject):
     def _changed_restart_sensitive_fields(self, old_config, new_config) -> list[str]:
         changed_fields = []
         for field_name, display_name in self.RESTART_SENSITIVE_FIELDS.items():
-            if getattr(old_config, field_name, None) != getattr(new_config, field_name, None):
+            if getattr(old_config, field_name, None) != getattr(
+                new_config, field_name, None
+            ):
                 changed_fields.append(display_name)
         return changed_fields
 
     def _refresh_cert_status(self):
-        trusted, can_install, cert_path, message = describe_windows_cert_status(self.config)
+        trusted, can_install, cert_path, message = describe_windows_cert_status(
+            self.config
+        )
         self.widget.set_cert_status(
             message=message,
             trusted=trusted,
@@ -449,6 +453,7 @@ class MitmController(QObject):
         return None
 
     def _resolve_helper_program(self) -> str:
+        return str(Path(sys.executable))
         program_path = Path(sys.executable)
         if not sys.platform.startswith("win"):
             return str(program_path)
@@ -584,7 +589,10 @@ class MitmController(QObject):
 
     def open_web_page(self):
         self.config = MitmproxyConfig.read()
-        if str(getattr(self.config, "startup_mode", "dump") or "dump").strip().lower() != "web":
+        if (
+            str(getattr(self.config, "startup_mode", "dump") or "dump").strip().lower()
+            != "web"
+        ):
             QMessageBox.information(self.widget, "mitmproxy Web", "当前不是 Web 模式")
             return
 
