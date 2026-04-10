@@ -69,24 +69,24 @@ const calcRequestContainerHeight = computed(()=>{
           <el-tabs v-model="activeRequestDetailName"
                    style="width: 100%;"
                    class="request-detail">
-            <el-tab-pane label="header" name="requestHeader">
+            <el-tab-pane label="header" name="requestHeader" lazy>
               <el-scrollbar :max-height="tabsMaxHeight">
                 <TableHeaders v-model:self-data="stepDetailData.request.headers"
                               v-model:include="stepDetailData.include"
                               :show-include="true"></TableHeaders>
               </el-scrollbar>
             </el-tab-pane>
-            <el-tab-pane label="json" name="requestJson">
+            <el-tab-pane label="json" name="requestJson" lazy>
               <AceEditor v-model:content="stepDetailData.request.json" :can-set="true"
                          :height="tabsMaxHeight - 25 + 'px'"></AceEditor>
             </el-tab-pane>
-            <el-tab-pane label="data" name="requestData">
+            <el-tab-pane label="data" name="requestData" lazy>
               <el-scrollbar :max-height="tabsMaxHeight">
                 <TableVariables v-model="stepDetailData.request.data"></TableVariables>
               </el-scrollbar>
 
             </el-tab-pane>
-            <el-tab-pane label="param" name="requestParam">
+            <el-tab-pane label="param" name="requestParam" lazy>
               <el-scrollbar :max-height="tabsMaxHeight">
                 <TableVariables v-model="stepDetailData.request.params"></TableVariables>
               </el-scrollbar>

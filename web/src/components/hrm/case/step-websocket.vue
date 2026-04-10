@@ -58,7 +58,7 @@ const calcStepContainerHeight = computed(() => {
 
         <template #left>
           <el-tabs v-model="activeRequestDetailName" style="width: 100%">
-            <el-tab-pane label="header" name="requestHeader">
+            <el-tab-pane label="header" name="requestHeader" lazy>
               <el-scrollbar :max-height="tabsMaxHeight">
                 <TableHeaders
                     v-model:self-data="stepDetailData.request.headers"
@@ -67,7 +67,7 @@ const calcStepContainerHeight = computed(() => {
                 ></TableHeaders>
               </el-scrollbar>
             </el-tab-pane>
-            <el-tab-pane label="data" name="requestJson">
+            <el-tab-pane label="data" name="requestJson" lazy>
               <AceEditor v-model:content="stepDetailData.request.data"
                          :can-set="true"
                          :height="tabsMaxHeight - 25 + 'px'"

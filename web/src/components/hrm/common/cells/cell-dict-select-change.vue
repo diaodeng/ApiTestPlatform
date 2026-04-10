@@ -11,7 +11,8 @@ function update(e) {
 
 const selectRef = ref(null);
 const selectLabel = computed(()=>{
-  const curVal = props.options.find((item)=>item.value === selectValue.value);
+  const optionList = Array.isArray(props.options) ? props.options : [];
+  const curVal = optionList.find((item)=>item.value === selectValue.value);
   return curVal?curVal.label:null;
 });
 

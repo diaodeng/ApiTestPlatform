@@ -53,7 +53,7 @@ const websocketStepData = computed({
 
 <template>
   <el-tabs type="" v-model="activeRequestName">
-    <el-tab-pane :label="$t('message.caseDetail.tabNames.request_base')" name="stepRunCondition">
+    <el-tab-pane :label="$t('message.caseDetail.tabNames.request_base')" name="stepRunCondition" lazy>
       <div>
         <div>
           <el-text style="font-weight: bold">是否执行步骤：</el-text>
@@ -92,18 +92,18 @@ const websocketStepData = computed({
         </div>
       </div>
     </el-tab-pane>
-    <el-tab-pane :label="$t('message.caseDetail.tabNames.request')" name="stepRequest">
+    <el-tab-pane :label="$t('message.caseDetail.tabNames.request')" name="stepRequest" lazy>
       <StepRequest v-model:step-detail-data="httpStepData"
                    :request-container-height="tabsHeight - 5"
-                   v-show="currentStepDataRef.step_type === CaseStepTypeEnum.http"
+                   v-if="currentStepDataRef.step_type === CaseStepTypeEnum.http"
       ></StepRequest>
       <StepWebsocket v-model:step-detail-data="websocketStepData"
                      :step-container-height="tabsHeight - 5"
-                     v-show="currentStepDataRef.step_type === CaseStepTypeEnum.websocket"
+                     v-else-if="currentStepDataRef.step_type === CaseStepTypeEnum.websocket"
       ></StepWebsocket>
 
     </el-tab-pane>
-    <el-tab-pane :label="$t('message.caseDetail.tabNames.ev')" name="stepEv">
+    <el-tab-pane :label="$t('message.caseDetail.tabNames.ev')" name="stepEv" lazy>
       <el-scrollbar :max-height="tabsHeight-55">
         <el-card>
           <TableExtract v-model="currentStepDataRef.extract"
@@ -115,7 +115,7 @@ const websocketStepData = computed({
         </el-card>
       </el-scrollbar>
     </el-tab-pane>
-    <el-tab-pane :label="$t('message.caseDetail.tabNames.vh')" name="stepVh"
+    <el-tab-pane :label="$t('message.caseDetail.tabNames.vh')" name="stepVh" lazy
                  :class="['step-variables-hooks-stepVh' + currentStepDataRef.step_id]">
       <el-scrollbar :max-height="tabsHeight-55">
         <el-card>
@@ -125,15 +125,19 @@ const websocketStepData = computed({
         </el-card>
         <el-card style="margin-top: 10px">
           <TableHooks v-model="currentStepDataRef.setup_hooks"
-                      :table-title="$t('message.configTable.header.setup_hooks')"></TableHooks>
+                      :table-title="$t('message.configTable.header.setup_hooks')"
+                      :editor-key="`step-${currentStepDataRef.step_id}-setup-hooks`"
+                      :editor-title="`${currentStepDataRef.name || currentStepDataRef.step_id || '当前步骤'} - 前置回调脚本`"></TableHooks>
         </el-card>
         <el-card style="margin-top: 10px">
           <TableHooks v-model="currentStepDataRef.teardown_hooks"
-                      :table-title="$t('message.configTable.header.teardown_hooks')"></TableHooks>
+                      :table-title="$t('message.configTable.header.teardown_hooks')"
+                      :editor-key="`step-${currentStepDataRef.step_id}-teardown-hooks`"
+                      :editor-title="`${currentStepDataRef.name || currentStepDataRef.step_id || '当前步骤'} - 后置回调脚本`"></TableHooks>
         </el-card>
       </el-scrollbar>
     </el-tab-pane>
-    <el-tab-pane :label="$t('message.caseDetail.tabNames.other')" name="stepThinktime">
+    <el-tab-pane :label="$t('message.caseDetail.tabNames.other')" name="stepThinktime" lazy>
       <el-row>
         <el-input
             v-model="currentStepDataRef.think_time.limit"

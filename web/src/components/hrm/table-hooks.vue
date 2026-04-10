@@ -3,19 +3,15 @@
 import {useI18n} from "vue-i18n";
 import CommonTable from './table-config-common.vue';
 import {CodeTypeEnum} from "@/components/hrm/enum.js";
-import TagSelector from "@/components/hrm/common/tag-selector.vue";
-import AceEditor from "@/components/hrm/common/ace-editor.vue";
-import FullscreenComponents from "@/components/hrm/common/fullscreen-component.vue";
-import {Close, FullScreen} from "@element-plus/icons-vue";
-import {Edit} from "@element-plus/icons-vue";
-import CodeView from "@/components/hrm/common/hightlight-view.vue";
 import CodeViewNew from "@/components/hrm/common/hightlight-component.vue";
 
 const {t} = useI18n();
 const selfData = defineModel();
 const props = defineProps({
   tableTitle: {type: String, default: ""},
-  toolFixTarget: {type: String, default: ""}
+  toolFixTarget: {type: String, default: ""},
+  editorKey: {type: String, default: ""},
+  editorTitle: {type: String, default: ""}
 });
 const tableCols = [{
   name: t('message.configTable.header.key'),
@@ -26,7 +22,43 @@ const tableCols = [{
   prop: "desc",
   width: ""
 }]
-const fullScreen = ref(false);
+const scriptEditorContext = inject("hrm_script_editor", null);
+
+const languageOptions = Object.values(CodeTypeEnum);
+
+const currentLang = computed(() => {
+  return selfData.value?.codeInfo?.codeType === CodeTypeEnum.js.value ? "javascript" : "python";
+});
+
+const hasScriptContent = computed(() => {
+  return Boolean(selfData.value?.codeInfo?.codeContent);
+});
+
+watch(() => selfData.value, (newValue) => {
+  if (!newValue) {
+    return;
+  }
+  if (!newValue.codeInfo) {
+    newValue.codeInfo = {
+      codeType: CodeTypeEnum.js.value,
+      codeContent: "",
+    };
+  }
+  if (!Array.isArray(newValue.functions)) {
+    newValue.functions = [];
+  }
+}, {immediate: true});
+
+function openScriptEditor() {
+  if (!selfData.value?.codeInfo) {
+    return;
+  }
+  scriptEditorContext?.openScriptEditor?.({
+    sessionKey: props.editorKey || props.tableTitle || "table-hooks-editor",
+    title: props.editorTitle || props.tableTitle || "回调脚本",
+    codeInfo: selfData.value.codeInfo,
+  });
+}
 
 
 </script>
@@ -39,38 +71,33 @@ const fullScreen = ref(false);
     </el-card>
 
     <el-card style="margin-top: 5px">
-      <el-row justify="space-between">
-        <el-text>回调脚本:{{selfData.codeInfo.codeType === CodeTypeEnum.js.value ? 'javascript' : 'python'}}</el-text>
-        <el-button type="text">编辑</el-button>
+      <el-row justify="space-between" align="middle" class="hooks-script-toolbar">
+        <div class="hooks-script-toolbar__left">
+          <el-text>回调脚本</el-text>
+          <el-tag size="small" type="info">{{ currentLang }}</el-tag>
+        </div>
+        <div class="hooks-script-toolbar__right">
+          <el-select v-model="selfData.codeInfo.codeType"
+                     size="small"
+                     style="width: 100px">
+            <el-option
+                v-for="option in languageOptions"
+                :key="option.value * 1"
+                :label="option.label"
+                :value="option.value * 1"
+            />
+          </el-select>
+          <el-button type="primary" text @click="openScriptEditor">编辑</el-button>
+        </div>
       </el-row>
-      <CodeViewNew v-if="false"
-          :code="selfData.codeInfo.codeContent" ,
-          :lang="selfData.codeInfo.codeType === CodeTypeEnum.js.value ? 'javascript' : 'python'">
-      </CodeViewNew>
-      <AceEditor v-model:content="selfData.codeInfo.codeContent"
-                 :can-set="false"
-                 :lang="selfData.codeInfo.codeType === CodeTypeEnum.js.value ? 'javascript' : 'python'"
-                 height="200px"
-                 :can-resize="true"
-                 :show-full-screen-button="true"
-                 v-if="true"
-      >
-        <template #edit-tools>
-          <div style="margin-top: 5px">
-            <el-text>自定义回调脚本</el-text>
-            <el-select v-model="selfData.codeInfo.codeType"
-                       style="width: 95px">
-              <el-option
-                  v-for="option in Object.values(CodeTypeEnum)"
-                  :key="option.value * 1"
-                  :label="option.label"
-                  :value="option.value * 1"
-              />
-
-            </el-select>
-          </div>
-        </template>
-      </AceEditor>
+      <div class="hooks-script-preview">
+        <CodeViewNew
+            v-if="hasScriptContent"
+            :code="selfData.codeInfo.codeContent"
+            :lang="currentLang"
+        />
+        <el-empty v-else description="暂无脚本" :image-size="60"/>
+      </div>
     </el-card>
 
     <!--    <el-input type="textarea" v-model="selfData.codeInfo.codeContent"/>-->
@@ -79,4 +106,14 @@ const fullScreen = ref(false);
 </template>
 
 <style scoped lang="scss">
+.hooks-script-toolbar__left,
+.hooks-script-toolbar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hooks-script-preview {
+  margin-top: 10px;
+}
 </style>

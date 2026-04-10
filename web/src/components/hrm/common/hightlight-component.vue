@@ -1,17 +1,13 @@
 <template>
   <div class="code-wrapper">
-    <div class="toolbar" v-if="false">
-      <span class="lang">{{ lang }}</span>
-      <button class="copy-btn" @click="copy">Copy</button>
-    </div>
-    <pre ref="preRef" class="preview hljs">
+    <pre class="preview hljs">
       <code v-html="highlighted"></code>
     </pre>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, watch, onMounted } from 'vue'
+import {computed, ref, watch} from 'vue'
 import hljs from 'highlight.js/lib/core'
 
 // 不预注册语言，动态加载
@@ -28,8 +24,8 @@ const props = defineProps({
   theme: { type: String, default: 'dark' }, // dark | light
 })
 
-const preRef = ref(null)
 const loadedLangs = new Set()
+const langReadyVersion = ref(0)
 
 async function ensureLang(lang) {
   if (!lang || loadedLangs.has(lang)) return
@@ -38,9 +34,11 @@ async function ensureLang(lang) {
   const module = await languageMap[lang]()
   hljs.registerLanguage(lang, module.default)
   loadedLangs.add(lang)
+  langReadyVersion.value += 1
 }
 
 const highlighted = computed(() => {
+  langReadyVersion.value
   if (!props.code) return ''
 
   if (hljs.getLanguage(props.lang)) {
@@ -53,16 +51,12 @@ const highlighted = computed(() => {
 })
 
 watch(
-  () => props.lang,
-  async (val) => {
-    await ensureLang(val)
-  },
-  { immediate: true }
+    () => props.lang,
+    async (val) => {
+      await ensureLang(val)
+    },
+    {immediate: true}
 )
-
-async function copy() {
-  await navigator.clipboard.writeText(props.code)
-}
 </script>
 
 <style scoped>
@@ -70,57 +64,22 @@ async function copy() {
   position: relative;
   border-radius: 8px;
   overflow: hidden;
-  font-size: 13px;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 10px;
-  font-size: 12px;
-  background: var(--toolbar-bg);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.copy-btn {
-  cursor: pointer;
-  border: none;
-  background: transparent;
-  color: var(--primary);
+  border: 1px solid var(--el-border-color-light);
+  background: #272822;
 }
 
 .preview {
   margin: 0;
-  padding: 12px 16px;
-  overflow-x: auto;
-  counter-reset: line;
+  padding: 12px 14px;
+  overflow: auto;
+  min-height: 120px;
+  line-height: 1.55;
+  white-space: pre;
 }
 
 .preview code {
   display: block;
-}
-
-/* 行号实现 */
-.preview code span {
-  display: inline-block;
-  width: 100%;
-}
-
-.preview code span::before {
-  counter-increment: line;
-  content: counter(line);
-  display: inline-block;
-  width: 36px;
-  margin-right: 12px;
-  color: #666;
-  text-align: right;
-}
-
-/* 主题变量 */
-:host,
-.code-wrapper {
-  --primary: #409eff;
-  --border-color: #2a2a2a;
-  --toolbar-bg: #1b1b1b;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
 }
 </style>
