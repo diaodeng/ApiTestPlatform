@@ -87,7 +87,9 @@ class AboutPage(QWidget):
         tips = QLabel(
             "更新过程中不要离开当前页面。"
             f"当前运行形态：{runtime_label}，将优先选择 {preferred_asset_label} 更新包。"
+            "支持单文件和连续分片文件更新，分片建议使用 .001、.002 这类命名。"
         )
+        tips.setWordWrap(True)
         tips.setStyleSheet("color:#c53030;font-weight:600;")
 
         row = QHBoxLayout()
