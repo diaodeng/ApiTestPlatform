@@ -44,6 +44,8 @@ class WebAssertionModel(WebJsonModel):
     operator: str | None = None
     actual_source: str | None = None
     enabled: bool = True
+    wait_ms: int | None = None
+    target_snapshot: WebTargetSnapshotModel | None = None
 
 
 class WebStepModel(WebJsonModel):
@@ -121,7 +123,8 @@ class WebRecordingOptionsModel(WebJsonModel):
     capture_inputs: bool = True
     capture_assertions: bool = True
     capture_hover: bool = False
-    auto_assert_text_on_click: bool = True
+    auto_assert_text_on_click: bool = False
+    assertion_attach_mode: str = "inside_step"
     include_iframe_context: bool = True
     include_shadow_context: bool = True
     save_html_snapshot: bool = False
@@ -233,9 +236,58 @@ class WebCaseRunRequestModel(WebJsonModel):
     headless: bool | None = None
     close_browser_on_finish: bool | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    runtime_profile_id: str | None = None
     save_screenshot_on_failure: bool = True
     continue_on_failure: bool = False
     trigger_type: str = "manual"
+
+
+class WebRuntimeProfileModel(WebJsonModel):
+    profile_id: str | None = None
+    profile_name: str = ""
+    profile_type: str = "runtime"
+    targets: list[str] = Field(default_factory=lambda: ["web"])
+    enabled: bool = True
+    project_id: int | None = None
+    module_id: int | None = None
+    sort: int = 0
+    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    variables: dict[str, Any] = Field(default_factory=dict)
+    cookie_rules: list[dict[str, Any]] = Field(default_factory=list)
+    remark: str | None = None
+    create_by: str | None = None
+    update_by: str | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+class WebRuntimeProfileSaveModel(WebJsonModel):
+    profile_id: str | None = None
+    profile_name: str = ""
+    profile_type: str = "runtime"
+    targets: list[str] = Field(default_factory=lambda: ["web"])
+    enabled: bool = True
+    project_id: int | None = None
+    module_id: int | None = None
+    sort: int = 0
+    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    variables: dict[str, Any] = Field(default_factory=dict)
+    cookie_rules: list[dict[str, Any]] = Field(default_factory=list)
+    remark: str | None = None
+
+
+class WebRuntimeProfileQueryModel(QueryModel):
+    profile_id: str | None = None
+    profile_name: str | None = None
+    project_id: int | None = None
+    module_id: int | None = None
+    enabled: bool | None = None
+    target: str | None = None
+
+
+@as_query
+class WebRuntimeProfilePageQueryModel(WebRuntimeProfileQueryModel):
+    is_page: bool = False
 
 
 class WebRecordingStartRequestModel(WebJsonModel):
@@ -246,6 +298,8 @@ class WebRecordingStartRequestModel(WebJsonModel):
     start_url: str
     browser_name: str = "chromium"
     headless: bool = False
+    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    runtime_profile_id: str | None = None
     recording_options: WebRecordingOptionsModel = Field(default_factory=WebRecordingOptionsModel)
 
 

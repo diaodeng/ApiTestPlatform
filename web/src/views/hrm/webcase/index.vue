@@ -26,15 +26,39 @@
           <el-col :span="1.5">
             <el-button type="primary" plain icon="Plus" @click="handleAdd" v-hasPermi="['hrm:webCase:add']">新增</el-button>
           </el-col>
+          <el-col :span="2">
+            <el-button
+              type="success"
+              plain
+              icon="CaretRight"
+              :disabled="!selectedCaseRows.length"
+              @click="openBatchRunDialog"
+              v-hasPermi="['hrm:webCase:run']"
+            >
+              批量执行
+            </el-button>
+          </el-col>
           <el-col :span="1.5">
             <el-button type="warning" plain icon="VideoPlay" @click="openRecordingDialog()" v-hasPermi="['hrm:webCase:record']">独立录制</el-button>
           </el-col>
           <el-col :span="1.5">
             <el-button type="default" plain icon="Refresh" @click="getList">刷新</el-button>
           </el-col>
+          <el-col :span="2">
+            <el-button type="info" plain icon="Setting" @click="openRuntimeProfileDialog" v-hasPermi="['hrm:webCase:edit']">Cookie配置</el-button>
+          </el-col>
         </el-row>
 
-        <el-table v-loading="loading.page" :data="pageDataList" border table-layout="fixed" max-height="calc(100vh - 340px)">
+        <el-table
+          v-loading="loading.page"
+          :data="pageDataList"
+          border
+          table-layout="fixed"
+          max-height="calc(100vh - 340px)"
+          row-key="webCaseId"
+          @selection-change="handleCaseSelectionChange"
+        >
+          <el-table-column type="selection" width="52" align="center" :reserve-selection="true" />
           <el-table-column label="Web用例ID" prop="webCaseId" width="170" />
           <el-table-column label="用例名称" prop="caseName" min-width="220" />
           <el-table-column label="项目" min-width="140">
@@ -126,7 +150,7 @@
             <template #default="scope">{{ formatDuration(scope.row.durationMs) }}</template>
           </el-table-column>
           <el-table-column label="失败原因" min-width="260" show-overflow-tooltip>
-            <template #default="scope">{{ scope.row.errorMessage || "-" }}</template>
+            <template #default="scope">{{ getRunRowFailureReason(scope.row) }}</template>
           </el-table-column>
           <el-table-column label="操作" width="120" fixed="right">
             <template #default="scope">
@@ -238,7 +262,15 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-dialog v-model="showCaseDialog" :title="caseDialogTitle" width="1360px" destroy-on-close>
+    <el-dialog
+      v-model="showCaseDialog"
+      :title="caseDialogTitle"
+      width="1360px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
       <el-form :model="form" label-width="90px" class="mb16">
         <el-row :gutter="16">
           <el-col :span="10">
@@ -365,6 +397,18 @@
                       @update:model-value="updatePrimaryLocatorValue(scope.row, 'testId', $event)"
                     />
                     <el-input
+                      v-else-if="getPrimaryLocator(scope.row)?.locatorType === 'id'"
+                      :model-value="getPrimaryLocator(scope.row)?.locatorValue?.id || ''"
+                      placeholder="元素 id"
+                      @update:model-value="updatePrimaryLocatorValue(scope.row, 'id', $event)"
+                    />
+                    <el-input
+                      v-else-if="getPrimaryLocator(scope.row)?.locatorType === 'name'"
+                      :model-value="getPrimaryLocator(scope.row)?.locatorValue?.name || ''"
+                      placeholder="元素 name"
+                      @update:model-value="updatePrimaryLocatorValue(scope.row, 'name', $event)"
+                    />
+                    <el-input
                       v-else
                       :model-value="getPrimaryLocator(scope.row)?.locatorValue?.selector || ''"
                       :placeholder="getPrimaryLocator(scope.row)?.locatorType === 'xpath' ? '//*[@id=&quot;login&quot;]' : '.login-button'"
@@ -410,12 +454,28 @@
                     @click.stop
                   />
                 </template>
+                <template v-else-if="['sleep', 'wait'].includes(scope.row.actionType)">
+                  <el-input-number v-model="scope.row.params.waitMs" :min="0" :step="100" controls-position="right" style="width: 100%" />
+                </template>
+                <template v-else-if="['assert_page_contains', 'assert_page_not_contains'].includes(scope.row.actionType)">
+                  <el-input v-model="scope.row.params.text" @click.stop placeholder="请输入断言文本" />
+                </template>
+                <template v-else-if="scope.row.actionType === 'assert_title_contains'">
+                  <el-input v-model="scope.row.params.title" @click.stop placeholder="请输入页面标题关键字" />
+                </template>
+                <template v-else-if="scope.row.actionType === 'assert_url_contains'">
+                  <el-input v-model="scope.row.params.urlPart" @click.stop placeholder="请输入URL关键字" />
+                </template>
+                <template v-else-if="['assert_text_equals', 'assert_text_contains'].includes(scope.row.actionType)">
+                  <el-input v-model="scope.row.params.expected" @click.stop placeholder="请输入元素文本期望值" />
+                </template>
                 <span v-else class="step-cell-placeholder">当前动作无额外参数</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="220" fixed="right">
+            <el-table-column label="操作" width="290" fixed="right">
               <template #default="scope">
                 <div class="step-op-buttons">
+                  <el-button link type="primary" icon="Plus" @click.stop="insertStep(scope.$index)">前插</el-button>
                   <el-button link icon="Top" :disabled="scope.$index === 0" @click.stop="moveStep(scope.$index, -1)" />
                   <el-button link icon="Bottom" :disabled="scope.$index === form.steps.length - 1" @click.stop="moveStep(scope.$index, 1)" />
                   <el-button link type="primary" icon="EditPen" @click.stop="openStepDetailByIndex(scope.$index)">编辑</el-button>
@@ -441,7 +501,15 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showStepDetailDialog" :title="stepDetailTitle" width="1160px" destroy-on-close append-to-body>
+    <el-dialog
+      v-model="showStepDetailDialog"
+      :title="stepDetailTitle"
+      width="1160px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
       <template v-if="currentStep">
         <el-form :model="currentStep" label-width="100px" class="mb16">
           <el-row :gutter="16">
@@ -467,17 +535,22 @@
                 <el-switch v-model="currentStep.continueOnFailure" />
               </el-form-item>
             </el-col>
-            <el-col :span="8">
+            <el-col :span="6">
               <el-form-item label="超时(ms)">
                 <el-input-number v-model="currentStep.timeoutMs" :min="0" :step="1000" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
-            <el-col :span="8">
+            <el-col :span="6">
+              <el-form-item label="思考(ms)">
+                <el-input-number v-model="currentStep.params.thinkTimeMs" :min="0" :step="100" controls-position="right" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="6">
               <el-form-item label="记录来源">
                 <el-input v-model="currentStep.recordOrigin" placeholder="manual / record" />
               </el-form-item>
             </el-col>
-            <el-col :span="8">
+            <el-col :span="6">
               <el-form-item label="元素ID">
                 <el-input v-model="currentStep.elementId" placeholder="可选" />
               </el-form-item>
@@ -521,6 +594,31 @@
                 />
               </el-form-item>
             </el-col>
+            <el-col v-else-if="['sleep', 'wait'].includes(currentStep.actionType)" :span="24">
+              <el-form-item label="等待时长(ms)">
+                <el-input-number v-model="currentStep.params.waitMs" :min="0" :step="100" controls-position="right" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col v-else-if="['assert_page_contains', 'assert_page_not_contains'].includes(currentStep.actionType)" :span="24">
+              <el-form-item label="页面文本">
+                <el-input v-model="currentStep.params.text" type="textarea" :rows="2" placeholder="请输入页面中应包含/不包含的文本" />
+              </el-form-item>
+            </el-col>
+            <el-col v-else-if="currentStep.actionType === 'assert_title_contains'" :span="24">
+              <el-form-item label="标题关键字">
+                <el-input v-model="currentStep.params.title" placeholder="请输入页面标题关键字" />
+              </el-form-item>
+            </el-col>
+            <el-col v-else-if="currentStep.actionType === 'assert_url_contains'" :span="24">
+              <el-form-item label="URL关键字">
+                <el-input v-model="currentStep.params.urlPart" placeholder="请输入 URL 中应包含的关键字" />
+              </el-form-item>
+            </el-col>
+            <el-col v-else-if="['assert_text_equals', 'assert_text_contains'].includes(currentStep.actionType)" :span="24">
+              <el-form-item label="文本期望值">
+                <el-input v-model="currentStep.params.expected" type="textarea" :rows="2" placeholder="请输入元素文本期望值" />
+              </el-form-item>
+            </el-col>
           </el-row>
         </el-form>
 
@@ -559,6 +657,7 @@
               </el-form-item>
             </el-col>
           </el-row>
+          <div class="locator-tip">执行顺序按列表从上到下，仅尝试“启用”定位器；命中后继续下一步，可用“设为首选”快速置顶。</div>
 
           <div v-if="currentStep.targetSnapshot?.locators?.length" class="locator-list">
             <div
@@ -567,9 +666,13 @@
               class="locator-item"
             >
               <div class="locator-header">
-                <div class="locator-title">定位器 {{ locatorIndex + 1 }}</div>
+                <div class="locator-title">
+                  <span>定位器 {{ locatorIndex + 1 }}</span>
+                  <el-tag v-if="locatorIndex === 0" size="small" type="success">首选</el-tag>
+                </div>
                 <div class="locator-actions">
                   <el-switch v-model="locator.enabled" inline-prompt active-text="启用" inactive-text="停用" />
+                  <el-button link type="primary" :disabled="locatorIndex === 0" @click="setPrimaryLocator(currentStep, locatorIndex)">设为首选</el-button>
                   <el-button link icon="Top" :disabled="locatorIndex === 0" @click="moveLocator(currentStep, locatorIndex, -1)" />
                   <el-button
                     link
@@ -619,6 +722,16 @@
                     <el-input v-model="locator.locatorValue.testId" placeholder="data-testid" />
                   </el-form-item>
                 </el-col>
+                <el-col v-if="locator.locatorType === 'id'" :span="14">
+                  <el-form-item label="ID" label-width="70px">
+                    <el-input v-model="locator.locatorValue.id" placeholder="元素 id" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="locator.locatorType === 'name'" :span="14">
+                  <el-form-item label="Name" label-width="70px">
+                    <el-input v-model="locator.locatorValue.name" placeholder="元素 name" />
+                  </el-form-item>
+                </el-col>
                 <el-col v-if="['css', 'xpath'].includes(locator.locatorType)" :span="18">
                   <el-form-item label="选择器" label-width="60px">
                     <el-input
@@ -641,36 +754,199 @@
             </div>
           </template>
 
-          <div v-if="currentStep.assertions?.length" class="assertion-list">
-            <div v-for="(assertion, assertionIndex) in currentStep.assertions" :key="`${selectedStepIndex}-${assertionIndex}`" class="assertion-item">
-              <el-row :gutter="12">
-                <el-col :span="6">
-                  <el-form-item label="断言类型" label-width="80px">
-                    <el-select v-model="assertion.assertType" style="width: 100%">
-                      <el-option v-for="item in assertionTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :span="8">
-                  <el-form-item label="期望值" label-width="80px">
-                    <el-input v-model="assertion.expected" placeholder="请输入期望值" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="6">
-                  <el-form-item label="实际来源" label-width="80px">
-                    <el-input v-model="assertion.actualSource" placeholder="如 text / url" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="2">
-                  <el-form-item label="启用" label-width="50px">
-                    <el-switch v-model="assertion.enabled" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="2" class="assertion-remove">
-                  <el-button link type="danger" icon="Delete" @click="removeAssertion(currentStep, assertionIndex)">删除</el-button>
-                </el-col>
-              </el-row>
-            </div>
+          <div v-if="currentStep.assertions?.length">
+            <el-table :data="currentStep.assertions" border table-layout="fixed" class="assertion-edit-table">
+              <el-table-column type="expand" width="56">
+                <template #default="scope">
+                  <template v-if="assertionNeedsTarget(scope.row.assertType)">
+                    <div class="locator-tip">断言定位器会按从上到下顺序尝试，命中第一个后执行断言。</div>
+                    <div v-if="getAssertionLocatorList(scope.row).length" class="locator-list">
+                      <div
+                        v-for="(locator, locatorIndex) in getAssertionLocatorList(scope.row)"
+                        :key="locator.locatorSnapshotId || `${selectedStepIndex}-${scope.$index}-${locatorIndex}`"
+                        class="locator-item"
+                      >
+                        <div class="locator-header">
+                          <div class="locator-title">
+                            <span>定位器 {{ locatorIndex + 1 }}</span>
+                            <el-tag v-if="locatorIndex === 0" size="small" type="success">首选</el-tag>
+                          </div>
+                          <div class="locator-actions">
+                            <el-switch v-model="locator.enabled" inline-prompt active-text="启用" inactive-text="停用" />
+                            <el-button link type="primary" :disabled="locatorIndex === 0" @click="setAssertionPrimaryLocator(scope.row, locatorIndex)">设为首选</el-button>
+                            <el-button link icon="Top" :disabled="locatorIndex === 0" @click="moveAssertionLocator(scope.row, locatorIndex, -1)" />
+                            <el-button
+                              link
+                              icon="Bottom"
+                              :disabled="locatorIndex === getAssertionLocatorList(scope.row).length - 1"
+                              @click="moveAssertionLocator(scope.row, locatorIndex, 1)"
+                            />
+                            <el-button link type="danger" icon="Delete" @click="removeAssertionLocator(scope.row, locatorIndex)" />
+                          </div>
+                        </div>
+
+                        <el-row :gutter="12">
+                          <el-col :span="6">
+                            <el-form-item label="类型" label-width="60px">
+                              <el-select v-model="locator.locatorType" style="width: 100%" @change="handleLocatorTypeChange(locator)">
+                                <el-option v-for="item in locatorTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+                              </el-select>
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="locator.locatorType === 'role'" :span="8">
+                            <el-form-item label="角色" label-width="60px">
+                              <el-input v-model="locator.locatorValue.role" placeholder="button / textbox" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="locator.locatorType === 'role'" :span="6">
+                            <el-form-item label="名称" label-width="60px">
+                              <el-input v-model="locator.locatorValue.name" placeholder="按钮名称" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="locator.locatorType === 'role'" :span="4">
+                            <el-form-item label="精确" label-width="60px">
+                              <el-switch v-model="locator.locatorValue.exact" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="['label', 'placeholder', 'text'].includes(locator.locatorType)" :span="14">
+                            <el-form-item label="文本" label-width="60px">
+                              <el-input v-model="locator.locatorValue.text" placeholder="定位文本" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="['label', 'placeholder', 'text'].includes(locator.locatorType)" :span="4">
+                            <el-form-item label="精确" label-width="60px">
+                              <el-switch v-model="locator.locatorValue.exact" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="locator.locatorType === 'test_id'" :span="14">
+                            <el-form-item label="Test ID" label-width="70px">
+                              <el-input v-model="locator.locatorValue.testId" placeholder="data-testid" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="locator.locatorType === 'id'" :span="14">
+                            <el-form-item label="ID" label-width="70px">
+                              <el-input v-model="locator.locatorValue.id" placeholder="元素 id" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="locator.locatorType === 'name'" :span="14">
+                            <el-form-item label="Name" label-width="70px">
+                              <el-input v-model="locator.locatorValue.name" placeholder="元素 name" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col v-if="['css', 'xpath'].includes(locator.locatorType)" :span="18">
+                            <el-form-item label="选择器" label-width="60px">
+                              <el-input
+                                v-model="locator.locatorValue.selector"
+                                :placeholder="locator.locatorType === 'xpath' ? '//*[@id=&quot;login&quot;]' : '.login-button'"
+                              />
+                            </el-form-item>
+                          </el-col>
+                        </el-row>
+                      </div>
+                    </div>
+                    <el-empty v-else description="当前断言暂无定位器" :image-size="60" />
+                  </template>
+                  <span v-else class="step-cell-placeholder">当前断言无需独立定位器</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="序号" width="76">
+                <template #default="scope">#{{ scope.$index + 1 }}</template>
+              </el-table-column>
+              <el-table-column label="启用" width="90">
+                <template #default="scope">
+                  <el-switch v-model="scope.row.enabled" />
+                </template>
+              </el-table-column>
+              <el-table-column label="断言类型" width="170">
+                <template #default="scope">
+                  <el-select v-model="scope.row.assertType" style="width: 100%" @change="handleAssertionTypeChange(scope.row)">
+                    <el-option v-for="item in assertionTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="期望值" min-width="220">
+                <template #default="scope">
+                  <el-input v-model="scope.row.expected" placeholder="请输入期望值" />
+                </template>
+              </el-table-column>
+              <el-table-column label="等待(ms)" width="130">
+                <template #default="scope">
+                  <el-input-number v-model="scope.row.waitMs" :min="200" :step="100" controls-position="right" style="width: 100%" />
+                </template>
+              </el-table-column>
+              <el-table-column label="定位器(首选)" min-width="340">
+                <template #default="scope">
+                  <template v-if="assertionNeedsTarget(scope.row.assertType) && getAssertionPrimaryLocator(scope.row)">
+                    <div class="step-inline-target" @click.stop>
+                      <el-select
+                        :model-value="getAssertionPrimaryLocator(scope.row)?.locatorType"
+                        style="width: 110px"
+                        @update:model-value="updateAssertionPrimaryLocatorType(scope.row, $event)"
+                      >
+                        <el-option v-for="item in locatorTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+                      </el-select>
+                      <template v-if="getAssertionPrimaryLocator(scope.row)?.locatorType === 'role'">
+                        <el-input
+                          :model-value="getAssertionPrimaryLocator(scope.row)?.locatorValue?.role || ''"
+                          placeholder="角色"
+                          @update:model-value="updateAssertionPrimaryLocatorValue(scope.row, 'role', $event)"
+                        />
+                        <el-input
+                          :model-value="getAssertionPrimaryLocator(scope.row)?.locatorValue?.name || ''"
+                          placeholder="名称"
+                          @update:model-value="updateAssertionPrimaryLocatorValue(scope.row, 'name', $event)"
+                        />
+                      </template>
+                      <el-input
+                        v-else-if="['label', 'placeholder', 'text'].includes(getAssertionPrimaryLocator(scope.row)?.locatorType)"
+                        :model-value="getAssertionPrimaryLocator(scope.row)?.locatorValue?.text || ''"
+                        placeholder="定位文本"
+                        @update:model-value="updateAssertionPrimaryLocatorValue(scope.row, 'text', $event)"
+                      />
+                      <el-input
+                        v-else-if="getAssertionPrimaryLocator(scope.row)?.locatorType === 'test_id'"
+                        :model-value="getAssertionPrimaryLocator(scope.row)?.locatorValue?.testId || ''"
+                        placeholder="Test ID"
+                        @update:model-value="updateAssertionPrimaryLocatorValue(scope.row, 'testId', $event)"
+                      />
+                      <el-input
+                        v-else-if="getAssertionPrimaryLocator(scope.row)?.locatorType === 'id'"
+                        :model-value="getAssertionPrimaryLocator(scope.row)?.locatorValue?.id || ''"
+                        placeholder="元素 id"
+                        @update:model-value="updateAssertionPrimaryLocatorValue(scope.row, 'id', $event)"
+                      />
+                      <el-input
+                        v-else-if="getAssertionPrimaryLocator(scope.row)?.locatorType === 'name'"
+                        :model-value="getAssertionPrimaryLocator(scope.row)?.locatorValue?.name || ''"
+                        placeholder="元素 name"
+                        @update:model-value="updateAssertionPrimaryLocatorValue(scope.row, 'name', $event)"
+                      />
+                      <el-input
+                        v-else
+                        :model-value="getAssertionPrimaryLocator(scope.row)?.locatorValue?.selector || ''"
+                        :placeholder="getAssertionPrimaryLocator(scope.row)?.locatorType === 'xpath' ? '//*[@id=&quot;login&quot;]' : '.login-button'"
+                        @update:model-value="updateAssertionPrimaryLocatorValue(scope.row, 'selector', $event)"
+                      />
+                    </div>
+                  </template>
+                  <span v-else class="step-cell-placeholder">当前断言无需定位器</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="170" fixed="right">
+                <template #default="scope">
+                  <el-button
+                    link
+                    type="primary"
+                    :disabled="!assertionNeedsTarget(scope.row.assertType)"
+                    @click="addAssertionLocator(scope.row)"
+                  >
+                    新增定位器
+                  </el-button>
+                  <el-button link type="danger" icon="Delete" @click="removeAssertion(currentStep, scope.$index)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="step-detail-tip mt8">展开每行可编辑该断言的完整定位器列表及优先级。</div>
           </div>
           <el-empty v-else description="当前步骤暂无断言" :image-size="70" />
         </el-card>
@@ -690,10 +966,18 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showRunDialog" title="执行 Web 用例" width="560px" destroy-on-close>
+    <el-dialog
+      v-model="showRunDialog"
+      title="执行 Web 用例"
+      width="760px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
       <el-form :model="runForm" label-width="120px">
         <el-form-item label="目标用例">
-          <el-input :model-value="selectedCase ? `${selectedCase.caseName} [${selectedCase.webCaseId}]` : ''" readonly />
+          <el-input :model-value="runTargetLabel" type="textarea" :rows="2" readonly />
         </el-form-item>
         <el-form-item label="执行 Agent">
           <el-select v-model="runForm.agentId" filterable style="width: 100%">
@@ -711,6 +995,56 @@
         <el-form-item label="结束后关闭浏览器">
           <el-switch v-model="runForm.closeBrowserOnFinish" />
         </el-form-item>
+        <el-form-item label="Cookie配置">
+          <el-row :gutter="10" style="width: 100%">
+            <el-col :span="18">
+              <el-select v-model="runForm.runtimeProfileId" clearable filterable style="width: 100%" placeholder="可选：选择公共Cookie配置">
+                <el-option
+                  v-for="item in availableRuntimeProfilesForRun"
+                  :key="item.profileId"
+                  :label="formatRuntimeProfileLabel(item)"
+                  :value="item.profileId"
+                />
+              </el-select>
+            </el-col>
+            <el-col :span="6">
+              <el-button style="width: 100%" @click="openRuntimeProfileDialog">管理配置</el-button>
+            </el-col>
+          </el-row>
+        </el-form-item>
+        <el-form-item>
+          <span class="step-detail-tip">
+            已选配置会在执行时自动注入 Cookie；下方 JSON 作为当前执行的临时覆盖。
+          </span>
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="单步超时覆盖(ms)">
+              <el-input-number v-model="runForm.stepTimeoutMs" :min="500" :step="500" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="步骤思考时间(ms)">
+              <el-input-number v-model="runForm.stepThinkTimeMs" :min="0" :step="100" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="Cookie变量(JSON)">
+          <el-input
+            v-model="runForm.cookieVariablesText"
+            type="textarea"
+            :rows="4"
+            placeholder='可选，例如：{"token":"xxx","sid":"yyy"}'
+          />
+        </el-form-item>
+        <el-form-item label="Cookie规则(JSON)">
+          <el-input
+            v-model="runForm.cookieRulesText"
+            type="textarea"
+            :rows="6"
+            placeholder='可选数组，例如：[{"name":"主站登录","match":{"host":"example.com"},"cookies":[{"name":"token","value":"${token}"}]}]'
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showRunDialog = false">取消</el-button>
@@ -718,7 +1052,15 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showRunDetailDialog" :title="runDetailTitle" width="1180px" destroy-on-close>
+    <el-dialog
+      v-model="showRunDetailDialog"
+      :title="runDetailTitle"
+      width="1180px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
       <template v-if="runDetail">
         <el-descriptions :column="4" border class="mb16">
           <el-descriptions-item label="执行记录ID">{{ runDetail.webCaseRunId }}</el-descriptions-item>
@@ -733,7 +1075,15 @@
           <el-descriptions-item label="触发方式">{{ runDetail.triggerType || "-" }}</el-descriptions-item>
         </el-descriptions>
 
-        <el-alert v-if="runDetail.errorMessage" :title="runDetail.errorMessage" type="error" show-icon :closable="false" class="mb16" />
+        <el-alert v-if="runDetailFailureMessage" :title="runDetailFailureMessage" type="error" show-icon :closable="false" class="mb16" />
+        <el-alert
+          v-if="runCookieApplySummary"
+          :title="runCookieApplySummary"
+          :type="runCookieApplySummaryType"
+          show-icon
+          :closable="false"
+          class="mb16"
+        />
 
         <el-table :data="runStepResults" border max-height="320px" class="mb16">
           <el-table-column label="步骤" prop="stepName" min-width="220" />
@@ -746,14 +1096,25 @@
             <template #default="scope">{{ formatDuration(scope.row.durationMs) }}</template>
           </el-table-column>
           <el-table-column label="页面" prop="pageUrl" min-width="220" show-overflow-tooltip />
-          <el-table-column label="失败原因" prop="error" min-width="260" show-overflow-tooltip />
+          <el-table-column label="失败原因" min-width="260" show-overflow-tooltip>
+            <template #default="scope">{{ getStepFailureReason(scope.row) }}</template>
+          </el-table-column>
         </el-table>
 
         <AceEditor :content="runDetailJsonText" lang="json" :read-only="true" height="260px" />
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showRecordingDialog" :title="recordingDialogTitle" width="1240px" destroy-on-close @close="stopRecordingPoll">
+    <el-dialog
+      v-model="showRecordingDialog"
+      :title="recordingDialogTitle"
+      width="1240px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      @close="stopRecordingPoll"
+    >
       <el-form :model="recordingForm" label-width="120px" class="mb12">
         <el-row :gutter="16">
           <el-col :span="12">
@@ -790,9 +1151,49 @@
               <el-input v-model="recordingForm.startUrl" placeholder="https://example.com" />
             </el-form-item>
           </el-col>
+          <el-col :span="24">
+            <el-form-item label="Cookie配置">
+              <el-row :gutter="10" style="width: 100%">
+                <el-col :span="18">
+                  <el-select v-model="recordingForm.runtimeProfileId" clearable filterable style="width: 100%" placeholder="可选：录制前注入公共Cookie配置">
+                    <el-option
+                      v-for="item in availableRuntimeProfilesForRecording"
+                      :key="item.profileId"
+                      :label="formatRuntimeProfileLabel(item)"
+                      :value="item.profileId"
+                    />
+                  </el-select>
+                </el-col>
+                <el-col :span="6">
+                  <el-button style="width: 100%" @click="openRuntimeProfileDialog">管理配置</el-button>
+                </el-col>
+              </el-row>
+            </el-form-item>
+          </el-col>
           <el-col :span="12">
             <el-form-item label="停止时关闭浏览器">
               <el-switch v-model="recordingForm.closeBrowserOnStop" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="启用断言录制">
+              <el-switch v-model="recordingForm.captureAssertions" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="断言归属方式">
+              <el-switch
+                v-model="recordingForm.attachAssertionsToPreviousStep"
+                :disabled="!recordingForm.captureAssertions"
+                inline-prompt
+                active-text="步骤内"
+                inactive-text="平级"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="点击前自动断言">
+              <el-switch v-model="recordingForm.autoAssertTextOnClick" :disabled="!recordingForm.captureAssertions" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -812,6 +1213,13 @@
         <el-button type="info" plain :disabled="!recordingResultReady" @click="openRecordingActionDialog('append', recordingForm.recordingId)">追加到用例</el-button>
         <el-button type="danger" plain :disabled="!recordingResultReady" @click="openRecordingActionDialog('replace', recordingForm.recordingId)">覆盖到用例</el-button>
       </div>
+      <el-alert
+        :title="recordingAssertionTipText"
+        type="info"
+        :closable="false"
+        show-icon
+        class="mb12"
+      />
 
       <el-alert :title="recordingLiveStatusText" :type="recordingLiveStatusType" :closable="false" show-icon class="mb16" />
 
@@ -832,7 +1240,15 @@
       <AceEditor :content="recordingDetailText" lang="json" :read-only="true" height="220px" />
     </el-dialog>
 
-    <el-dialog v-model="showRecordingDetailDialog" :title="recordingDetailTitle" width="1240px" destroy-on-close>
+    <el-dialog
+      v-model="showRecordingDetailDialog"
+      :title="recordingDetailTitle"
+      width="1240px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
       <template v-if="recordingDetail">
         <el-descriptions :column="4" border class="mb16">
           <el-descriptions-item label="录制ID">{{ recordingDetail.recordingId }}</el-descriptions-item>
@@ -894,7 +1310,15 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showRecordingActionDialog" :title="recordingActionDialogTitle" width="760px" destroy-on-close>
+    <el-dialog
+      v-model="showRecordingActionDialog"
+      :title="recordingActionDialogTitle"
+      width="760px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
       <el-alert :title="recordingActionDialogTip" :type="recordingActionMode === 'replace' ? 'warning' : 'info'" :closable="false" show-icon class="mb16" />
       <el-form :model="recordingActionForm" label-width="110px">
         <template v-if="recordingActionMode === 'create'">
@@ -967,7 +1391,15 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showReplayDialog" title="录制回放" width="560px" destroy-on-close>
+    <el-dialog
+      v-model="showReplayDialog"
+      title="录制回放"
+      width="560px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
       <el-form :model="replayForm" label-width="120px">
         <el-form-item label="录制会话">
           <el-input :model-value="selectedReplayLabel" readonly />
@@ -995,10 +1427,18 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showReplayResultDialog" :title="replayResultTitle" width="1180px" destroy-on-close>
+    <el-dialog
+      v-model="showReplayResultDialog"
+      :title="replayResultTitle"
+      width="1180px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
       <template v-if="replayResult">
         <el-alert
-          :title="replayResult.errorMessage || (replayResult.status === 'passed' ? '回放执行成功' : '回放执行失败')"
+          :title="replayFailureMessage || (replayResult.status === 'passed' ? '回放执行成功' : '回放执行失败')"
           :type="replayResult.status === 'passed' ? 'success' : 'error'"
           :closable="false"
           show-icon
@@ -1015,9 +1455,157 @@
             <template #default="scope">{{ formatDuration(scope.row.durationMs) }}</template>
           </el-table-column>
           <el-table-column label="页面" prop="pageUrl" min-width="220" show-overflow-tooltip />
-          <el-table-column label="失败原因" prop="error" min-width="260" show-overflow-tooltip />
+          <el-table-column label="失败原因" min-width="260" show-overflow-tooltip>
+            <template #default="scope">{{ getStepFailureReason(scope.row) }}</template>
+          </el-table-column>
         </el-table>
         <AceEditor :content="replayResultJsonText" lang="json" :read-only="true" height="260px" />
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="showRuntimeProfileDialog"
+      title="Cookie配置管理"
+      width="1180px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <el-row :gutter="16">
+        <el-col :span="11">
+          <div class="runtime-profile-toolbar mb12">
+            <el-input v-model="runtimeProfileKeyword" clearable placeholder="按名称筛选配置" />
+            <el-button type="primary" @click="createRuntimeProfileDraft">新建</el-button>
+            <el-button @click="loadRuntimeProfiles">刷新</el-button>
+          </div>
+          <el-table
+            v-loading="loading.runtimeProfile"
+            :data="filteredRuntimeProfiles"
+            border
+            row-key="profileId"
+            highlight-current-row
+            max-height="520px"
+            @current-change="handleRuntimeProfileRowChange"
+          >
+            <el-table-column label="名称" min-width="220" show-overflow-tooltip>
+              <template #default="scope">{{ scope.row.profileName || "-" }}</template>
+            </el-table-column>
+            <el-table-column label="适用范围" min-width="150" show-overflow-tooltip>
+              <template #default="scope">{{ formatRuntimeProfileScope(scope.row) }}</template>
+            </el-table-column>
+            <el-table-column label="目标链路" min-width="120" show-overflow-tooltip>
+              <template #default="scope">{{ (scope.row.targets || []).join(", ") || "-" }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="scope">
+                <el-tag :type="scope.row.enabled === false ? 'info' : 'success'">{{ scope.row.enabled === false ? "停用" : "启用" }}</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-col>
+        <el-col :span="13">
+          <el-form :model="runtimeProfileForm" label-width="120px">
+            <el-row :gutter="12">
+              <el-col :span="12">
+                <el-form-item label="配置名称">
+                  <el-input v-model="runtimeProfileForm.profileName" placeholder="例如：生产登录态" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="是否启用">
+                  <el-switch v-model="runtimeProfileForm.enabled" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="目标链路">
+                  <el-select v-model="runtimeProfileForm.targets" multiple collapse-tags style="width: 100%">
+                    <el-option v-for="item in runtimeTargetOptions" :key="item.value" :label="item.label" :value="item.value" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="排序">
+                  <el-input-number v-model="runtimeProfileForm.sort" :min="0" :step="1" controls-position="right" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="项目(可选)">
+                  <el-select v-model="runtimeProfileForm.projectId" clearable filterable style="width: 100%">
+                    <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="模块(可选)">
+                  <el-select v-model="runtimeProfileForm.moduleId" clearable filterable style="width: 100%">
+                    <el-option v-for="item in filteredRuntimeProfileModules" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="运行覆盖(JSON)">
+                  <el-input
+                    v-model="runtimeProfileForm.runtimeOverridesText"
+                    type="textarea"
+                    :rows="3"
+                    placeholder='可选，例如：{"stepTimeoutMs":10000}'
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="变量(JSON)">
+                  <el-input
+                    v-model="runtimeProfileForm.variablesText"
+                    type="textarea"
+                    :rows="3"
+                    placeholder='可选，例如：{"token":"xxx","sid":"yyy"}'
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="Cookie规则(JSON)">
+                  <el-input
+                    v-model="runtimeProfileForm.cookieRulesText"
+                    type="textarea"
+                    :rows="5"
+                    placeholder='可选数组，例如：[{"name":"主站登录","match":{"host":"example.com"},"cookies":[{"name":"token","value":"${token}"}]}]'
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="快速导入">
+                  <el-row :gutter="8" style="width: 100%">
+                    <el-col :span="14">
+                      <el-input v-model="runtimeProfileImportHost" placeholder="可选：匹配域名，例如 example.com" />
+                    </el-col>
+                    <el-col :span="10">
+                      <el-button style="width: 100%" @click="applyRuntimeProfileQuickImport">解析并填充Cookie规则</el-button>
+                    </el-col>
+                    <el-col :span="24" class="mt8">
+                      <el-input
+                        v-model="runtimeProfileImportText"
+                        type="textarea"
+                        :rows="4"
+                        placeholder="支持 Cookie: a=1; b=2、Set-Cookie 响应头，或完整请求头文本"
+                      />
+                    </el-col>
+                  </el-row>
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="备注">
+                  <el-input v-model="runtimeProfileForm.remark" type="textarea" :rows="2" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </el-form>
+        </el-col>
+      </el-row>
+      <template #footer>
+        <el-button @click="showRuntimeProfileDialog = false">关闭</el-button>
+        <el-button type="danger" :disabled="!runtimeProfileForm.profileId" @click="deleteRuntimeProfile">删除</el-button>
+        <el-button type="primary" :loading="loading.runtimeProfileSave" @click="saveRuntimeProfile">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -1033,17 +1621,21 @@ import {
   addWebCase,
   applyWebRecording,
   delWebCase,
+  delWebRuntimeProfile,
   getWebCase,
   getWebRecording,
   getWebRun,
+  listWebRuntimeProfile,
   listWebCase,
   listWebRecording,
   listWebRun,
   replayWebRecording,
   runWebCase,
+  addWebRuntimeProfile,
   saveWebRecordingAsCase,
   startWebRecording,
   stopWebRecording,
+  updateWebRuntimeProfile,
   updateWebCase,
 } from "@/api/hrm/web_case.js";
 
@@ -1057,22 +1649,42 @@ const browserOptions = [
   { label: "WebKit", value: "webkit" },
 ];
 
+const runtimeTargetOptions = [
+  { label: "Web", value: "web" },
+  { label: "API", value: "api" },
+  { label: "Desktop", value: "desktop" },
+];
+
 const actionOptions = [
   { label: "打开页面", value: "goto" },
   { label: "点击元素", value: "click" },
+  { label: "双击元素", value: "double_click" },
+  { label: "悬停元素", value: "hover" },
   { label: "填写内容", value: "fill" },
+  { label: "清空输入", value: "clear" },
   { label: "键盘按键", value: "press" },
   { label: "勾选元素", value: "check" },
   { label: "取消勾选", value: "uncheck" },
   { label: "选择下拉项", value: "select_option" },
+  { label: "等待元素可见", value: "wait_visible" },
+  { label: "等待元素隐藏", value: "wait_hidden" },
+  { label: "固定等待", value: "sleep" },
+  { label: "断言页面包含文本", value: "assert_page_contains" },
+  { label: "断言页面不包含文本", value: "assert_page_not_contains" },
+  { label: "断言元素文本等于", value: "assert_text_equals" },
+  { label: "断言元素文本包含", value: "assert_text_contains" },
+  { label: "断言页面标题包含", value: "assert_title_contains" },
+  { label: "断言URL包含", value: "assert_url_contains" },
 ];
 
 const locatorTypeOptions = [
+  { label: "Test ID", value: "test_id" },
+  { label: "ID", value: "id" },
+  { label: "Name", value: "name" },
   { label: "Role", value: "role" },
   { label: "Label", value: "label" },
   { label: "Placeholder", value: "placeholder" },
   { label: "Text", value: "text" },
-  { label: "Test ID", value: "test_id" },
   { label: "CSS", value: "css" },
   { label: "XPath", value: "xpath" },
 ];
@@ -1081,7 +1693,10 @@ const assertionTypeOptions = [
   { label: "文本包含", value: "text_contains" },
   { label: "文本相等", value: "text_equals" },
   { label: "元素可见", value: "visible" },
+  { label: "页面包含", value: "page_contains" },
+  { label: "标题包含", value: "title_contains" },
   { label: "URL包含", value: "url_contains" },
+  { label: "URL相等", value: "url_equals" },
 ];
 
 const keyboardKeyOptions = [
@@ -1155,8 +1770,14 @@ const agentOptions = ref([]);
 const allCaseOptions = ref([]);
 const caseSelectOptions = ref([]);
 const caseSelectLoading = ref(false);
+const runtimeProfiles = ref([]);
+const runtimeProfileKeyword = ref("");
+const runtimeProfileImportText = ref("");
+const runtimeProfileImportHost = ref("");
 
 const selectedCase = ref(null);
+const selectedCaseRows = ref([]);
+const runTargetCases = ref([]);
 const selectedRecording = ref(null);
 const recordingEvents = ref([]);
 const liveRecordingSteps = ref([]);
@@ -1176,6 +1797,8 @@ const loading = ref({
   recordingDetail: false,
   recordingAction: false,
   replay: false,
+  runtimeProfile: false,
+  runtimeProfileSave: false,
 });
 
 const queryParams = ref({
@@ -1211,6 +1834,7 @@ const showRecordingActionDialog = ref(false);
 const showReplayDialog = ref(false);
 const showReplayResultDialog = ref(false);
 const showStepDetailDialog = ref(false);
+const showRuntimeProfileDialog = ref(false);
 
 const caseEditorTab = ref("visual");
 const recordingDetailTab = ref("steps");
@@ -1324,6 +1948,36 @@ function safeJsonStringify(value) {
   }
 }
 
+function parseOptionalJsonObject(text, label) {
+  const raw = `${text ?? ""}`.trim();
+  if (!raw) return undefined;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${label} 解析失败：${error.message}`);
+  }
+  if (!isPlainObject(parsed)) {
+    throw new Error(`${label} 必须是 JSON 对象`);
+  }
+  return parsed;
+}
+
+function parseOptionalJsonArray(text, label) {
+  const raw = `${text ?? ""}`.trim();
+  if (!raw) return undefined;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${label} 解析失败：${error.message}`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${label} 必须是 JSON 数组`);
+  }
+  return parsed;
+}
+
 function createDefaultContext() {
   return {
     pageUrl: "",
@@ -1353,6 +2007,18 @@ function normalizeLocatorValue(locatorType, locatorValue) {
     const value = isPlainObject(locatorValue) ? locatorValue : {};
     return {
       testId: value.testId || "",
+    };
+  }
+  if (locatorType === "id") {
+    const value = isPlainObject(locatorValue) ? locatorValue : {};
+    return {
+      id: value.id || "",
+    };
+  }
+  if (locatorType === "name") {
+    const value = isPlainObject(locatorValue) ? locatorValue : {};
+    return {
+      name: value.name || "",
     };
   }
   if (["css", "xpath"].includes(locatorType)) {
@@ -1426,7 +2092,13 @@ function createDefaultAssertion(assertType = "visible") {
     operator: "",
     actualSource: "",
     enabled: true,
+    waitMs: undefined,
+    targetSnapshot: null,
   };
+}
+
+function assertionNeedsTarget(assertType) {
+  return ["text_contains", "text_equals", "visible"].includes(`${assertType || ""}`.toLowerCase());
 }
 
 function normalizeAssertion(assertion = {}) {
@@ -1436,33 +2108,66 @@ function normalizeAssertion(assertion = {}) {
     operator: assertion.operator || "",
     actualSource: assertion.actualSource || assertion.actual_source || "",
     enabled: assertion.enabled !== false,
+    waitMs: assertion.waitMs ?? assertion.wait_ms,
+    targetSnapshot: normalizeTargetSnapshot(assertion.targetSnapshot || assertion.target_snapshot),
   };
 }
 
 function stepNeedsTarget(actionType) {
-  return actionType !== "goto";
+  return ![
+    "goto",
+    "sleep",
+    "wait",
+    "assert_page_contains",
+    "assert_page_not_contains",
+    "assert_title_contains",
+    "assert_url_contains",
+  ].includes(actionType);
 }
 
 function getActionLabel(actionType) {
   return actionOptions.find((item) => item.value === actionType)?.label || actionType || "未设置";
 }
 
+function normalizeThinkTimeMs(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.round(parsed);
+}
+
 function normalizeStepParams(actionType, params) {
   const data = isPlainObject(params) ? cloneData(params) : {};
+  const thinkTimeMs = normalizeThinkTimeMs(data.thinkTimeMs ?? data.think_time_ms);
+  const waitMs = Number(data.waitMs ?? data.wait_ms ?? 0);
   if (actionType === "goto") {
-    return { url: data.url || "" };
+    return { url: data.url || "", thinkTimeMs };
   }
   if (actionType === "fill") {
-    return { value: data.value ?? "" };
+    return { value: data.value ?? "", thinkTimeMs };
   }
   if (actionType === "press") {
-    return { key: data.key || "Enter" };
+    return { key: data.key || "Enter", thinkTimeMs };
   }
   if (actionType === "select_option") {
     const values = Array.isArray(data.values) ? data.values : data.values ? [data.values] : [];
-    return { values: values.map((item) => `${item}`) };
+    return { values: values.map((item) => `${item}`), thinkTimeMs };
   }
-  return {};
+  if (["sleep", "wait"].includes(actionType)) {
+    return { waitMs: Number.isFinite(waitMs) && waitMs >= 0 ? Math.round(waitMs) : 0, thinkTimeMs };
+  }
+  if (["assert_page_contains", "assert_page_not_contains"].includes(actionType)) {
+    return { text: data.text ?? data.expected ?? "", thinkTimeMs };
+  }
+  if (actionType === "assert_title_contains") {
+    return { title: data.title ?? data.text ?? data.expected ?? "", thinkTimeMs };
+  }
+  if (actionType === "assert_url_contains") {
+    return { urlPart: data.urlPart ?? data.url_part ?? data.text ?? data.expected ?? "", thinkTimeMs };
+  }
+  if (["assert_text_equals", "assert_text_contains"].includes(actionType)) {
+    return { expected: data.expected ?? data.text ?? "", thinkTimeMs };
+  }
+  return { thinkTimeMs };
 }
 
 function normalizeStep(step = {}, index = 0) {
@@ -1526,12 +2231,68 @@ function normalizeCase(data = {}) {
   };
 }
 
+function createEmptyRuntimeProfile() {
+  return {
+    profileId: undefined,
+    profileName: "",
+    profileType: "runtime",
+    targets: ["web"],
+    enabled: true,
+    projectId: undefined,
+    moduleId: undefined,
+    sort: 0,
+    runtimeOverridesText: "",
+    variablesText: "",
+    cookieRulesText: "",
+    remark: "",
+  };
+}
+
+function normalizeRuntimeProfile(profile = {}) {
+  const base = createEmptyRuntimeProfile();
+  const runtimeOverrides = isPlainObject(profile.runtimeOverrides || profile.runtime_overrides)
+    ? cloneData(profile.runtimeOverrides || profile.runtime_overrides)
+    : {};
+  const variables = isPlainObject(profile.variables)
+    ? cloneData(profile.variables)
+    : {};
+  const cookieRules = Array.isArray(profile.cookieRules || profile.cookie_rules)
+    ? cloneData(profile.cookieRules || profile.cookie_rules)
+    : [];
+  const targets = Array.isArray(profile.targets) && profile.targets.length
+    ? profile.targets.map((item) => `${item}`.trim().toLowerCase()).filter(Boolean)
+    : ["web"];
+  return {
+    ...base,
+    ...profile,
+    profileId: normalizeIdValue(profile.profileId || profile.profile_id),
+    profileName: profile.profileName || profile.profile_name || "",
+    profileType: profile.profileType || profile.profile_type || "runtime",
+    targets,
+    enabled: profile.enabled !== false,
+    projectId: normalizeIdValue(profile.projectId || profile.project_id),
+    moduleId: normalizeIdValue(profile.moduleId || profile.module_id),
+    sort: Number.isFinite(Number(profile.sort)) ? Math.max(Math.round(Number(profile.sort)), 0) : 0,
+    runtimeOverridesText: Object.keys(runtimeOverrides).length ? safeJsonStringify(runtimeOverrides) : "",
+    variablesText: Object.keys(variables).length ? safeJsonStringify(variables) : "",
+    cookieRulesText: cookieRules.length ? safeJsonStringify(cookieRules) : "",
+    remark: profile.remark || "",
+    createTime: profile.createTime || profile.create_time,
+    updateTime: profile.updateTime || profile.update_time,
+  };
+}
+
 const form = ref(createEmptyCase());
 const runForm = ref({
   agentId: undefined,
   browserName: "chromium",
   headless: true,
   closeBrowserOnFinish: true,
+  stepTimeoutMs: undefined,
+  stepThinkTimeMs: undefined,
+  runtimeProfileId: undefined,
+  cookieVariablesText: "",
+  cookieRulesText: "",
 });
 const recordingForm = ref({
   webCaseId: undefined,
@@ -1541,8 +2302,13 @@ const recordingForm = ref({
   headless: false,
   startUrl: "",
   closeBrowserOnStop: true,
+  captureAssertions: true,
+  attachAssertionsToPreviousStep: true,
+  autoAssertTextOnClick: false,
+  runtimeProfileId: undefined,
   recordingId: undefined,
 });
+const runtimeProfileForm = ref(createEmptyRuntimeProfile());
 const recordingActionMode = ref("create");
 const recordingActionForm = ref({
   recordingId: undefined,
@@ -1592,6 +2358,31 @@ const filteredRecordingActionModules = computed(() => {
   return moduleOptions.value.filter((item) => isSameId(item.projectId, recordingActionForm.value.projectId));
 });
 
+const filteredRuntimeProfileModules = computed(() => {
+  if (!runtimeProfileForm.value.projectId) return moduleOptions.value;
+  return moduleOptions.value.filter((item) => isSameId(item.projectId, runtimeProfileForm.value.projectId));
+});
+
+const filteredRuntimeProfiles = computed(() => {
+  const keyword = `${runtimeProfileKeyword.value || ""}`.trim().toLowerCase();
+  if (!keyword) return runtimeProfiles.value;
+  return runtimeProfiles.value.filter((item) => `${item.profileName || ""}`.toLowerCase().includes(keyword));
+});
+
+const runScopeProjectId = computed(() => runTargetCases.value?.[0]?.projectId || selectedCase.value?.projectId);
+const runScopeModuleId = computed(() => runTargetCases.value?.[0]?.moduleId || selectedCase.value?.moduleId);
+
+const recordingScopeProjectId = computed(() => selectedCase.value?.projectId);
+const recordingScopeModuleId = computed(() => selectedCase.value?.moduleId);
+
+const availableRuntimeProfilesForRun = computed(() => runtimeProfiles.value.filter(
+  (item) => item.enabled !== false && profileSupportsWeb(item) && isRuntimeProfileScopeMatch(item, runScopeProjectId.value, runScopeModuleId.value)
+));
+
+const availableRuntimeProfilesForRecording = computed(() => runtimeProfiles.value.filter(
+  (item) => item.enabled !== false && profileSupportsWeb(item) && isRuntimeProfileScopeMatch(item, recordingScopeProjectId.value, recordingScopeModuleId.value)
+));
+
 const caseDialogTitle = computed(() => `${form.value.webCaseId ? "编辑" : "新增"} Web 用例`);
 const currentStep = computed(() => form.value.steps[selectedStepIndex.value] || null);
 const stepDetailTitle = computed(() => (selectedStepIndex.value >= 0 ? `步骤详情 - #${selectedStepIndex.value + 1}` : "步骤详情"));
@@ -1599,7 +2390,49 @@ const runDetailTitle = computed(() => {
   if (!runDetail.value) return "执行详情";
   return `执行详情 - ${runDetail.value.caseName || getCaseName(runDetail.value.webCaseId) || runDetail.value.webCaseId}`;
 });
+const runTargetLabel = computed(() => {
+  const targets = Array.isArray(runTargetCases.value) ? runTargetCases.value : [];
+  if (!targets.length) return "";
+  if (targets.length === 1) {
+    const target = targets[0];
+    return `${target.caseName || target.webCaseId} [${target.webCaseId}]`;
+  }
+  const previewText = targets.slice(0, 5).map((item) => `${item.caseName || item.webCaseId} [${item.webCaseId}]`).join("，");
+  return `已选择 ${targets.length} 条用例：${previewText}${targets.length > 5 ? " ..." : ""}`;
+});
 const runStepResults = computed(() => Array.isArray(runDetail.value?.result?.steps) ? runDetail.value.result.steps : []);
+const runRuntimeDebug = computed(() => (isPlainObject(runDetail.value?.result?.runtimeDebug) ? runDetail.value.result.runtimeDebug : null));
+const runDetailFailureMessage = computed(() => getRunRowFailureReason(runDetail.value));
+const runCookieApplySummary = computed(() => {
+  const runtimeDebug = runRuntimeDebug.value;
+  if (!runtimeDebug) {
+    return "";
+  }
+  const cookieApply = isPlainObject(runtimeDebug.beforeStartCookieApply) ? runtimeDebug.beforeStartCookieApply : null;
+  if (!cookieApply) {
+    return "";
+  }
+  const appliedCount = Number(cookieApply.appliedCount || 0);
+  const rules = Array.isArray(cookieApply.rules)
+    ? cookieApply.rules.map((item) => `${item || ""}`.trim()).filter(Boolean)
+    : [];
+  if (appliedCount > 0) {
+    return `启动前已注入 ${appliedCount} 个 Cookie${rules.length ? `（规则：${rules.join("，")}）` : ""}`;
+  }
+  return "启动前未注入 Cookie，请检查配置规则的 host/domain/path 与目标站点是否匹配";
+});
+const runCookieApplySummaryType = computed(() => {
+  const runtimeDebug = runRuntimeDebug.value;
+  if (!runtimeDebug) {
+    return "info";
+  }
+  const cookieApply = isPlainObject(runtimeDebug.beforeStartCookieApply) ? runtimeDebug.beforeStartCookieApply : null;
+  if (!cookieApply) {
+    return "info";
+  }
+  const appliedCount = Number(cookieApply.appliedCount || 0);
+  return appliedCount > 0 ? "success" : "warning";
+});
 const runDetailJsonText = computed(() => safeJsonStringify(runDetail.value?.result || {}));
 
 const recordingLinkedCaseLabel = computed(() => {
@@ -1618,6 +2451,18 @@ const recordingDetailJsonText = computed(() => safeJsonStringify(recordingDetail
 
 const recordingLiveStatusMeta = computed(() => getRecordingStatusMeta(recordingDetail.value?.status || (recordingForm.value.recordingId ? 2 : 1)));
 const recordingResultReady = computed(() => canUseRecordingResult(recordingDetail.value?.status) && liveRecordingSteps.value.length > 0);
+const recordingAssertionTipText = computed(() => {
+  if (!recordingForm.value.captureAssertions) {
+    return "当前已关闭断言录制，仅记录操作步骤。";
+  }
+  const pickTip = recordingForm.value.attachAssertionsToPreviousStep
+    ? "按住 Alt 点击任意元素可把断言追加到上一步（不触发点击）。"
+    : "按住 Alt 点击任意元素会新增平级断言步骤（不触发点击）。";
+  if (recordingForm.value.autoAssertTextOnClick) {
+    return `录制技巧：普通点击会先插入“断言文本包含”再执行点击；${pickTip}`;
+  }
+  return `录制技巧：${pickTip} 适合新页面批量文案验收。`;
+});
 const recordingLiveStatusText = computed(() => {
   if (!recordingForm.value.recordingId) {
     return "请先填写录制参数后启动录制。";
@@ -1651,6 +2496,7 @@ const replayResultTitle = computed(() => {
   return `${replayResult.value.sessionName || "录制回放"} - ${replayResult.value.status === "passed" ? "成功" : "失败"}`;
 });
 const replayStepResults = computed(() => Array.isArray(replayResult.value?.result?.steps) ? replayResult.value.result.steps : []);
+const replayFailureMessage = computed(() => getRunRowFailureReason(replayResult.value));
 const replayResultJsonText = computed(() => safeJsonStringify(replayResult.value?.result || replayResult.value || {}));
 
 function formatTime(value) {
@@ -1680,6 +2526,34 @@ function isPassedStepStatus(status) {
   return ["passed", "success", "ok", 1, true].includes(status);
 }
 
+function getStepFailureReason(step) {
+  if (!step || isPassedStepStatus(step.status)) return "-";
+  const candidates = [step.error, step.errorMessage, step.message, step.reason, step.errorType, step.error_type];
+  for (const item of candidates) {
+    const text = `${item ?? ""}`.trim();
+    if (text) return text;
+  }
+  return "执行失败（无详细错误）";
+}
+
+function getFirstFailedStep(resultPayload) {
+  const steps = Array.isArray(resultPayload?.steps) ? resultPayload.steps : [];
+  return steps.find((item) => item && !isPassedStepStatus(item.status) && !["skipped", "skip"].includes(`${item.status ?? ""}`.toLowerCase()));
+}
+
+function getRunRowFailureReason(row) {
+  const direct = `${row?.errorMessage ?? ""}`.trim();
+  if (direct) return direct;
+  const failedStep = getFirstFailedStep(row?.result);
+  if (!failedStep) return "-";
+  const stepName = `${failedStep.stepName ?? failedStep.step_name ?? failedStep.stepId ?? failedStep.step_id ?? "未知步骤"}`.trim();
+  const reason = getStepFailureReason(failedStep);
+  if (!stepName) return reason || "执行失败";
+  if (!reason || reason === "-") return `[${stepName}] 执行失败`;
+  if (reason.includes(stepName)) return reason;
+  return `[${stepName}] ${reason}`;
+}
+
 function getProjectName(projectId) {
   const targetId = normalizeIdValue(projectId);
   if (!targetId) {
@@ -1702,6 +2576,407 @@ function getCaseName(webCaseId) {
     return "";
   }
   return caseNameMap.value[targetId] || mergeCaseOptions(pageDataList.value, allCaseOptions.value, caseSelectOptions.value).find((item) => isSameId(item.webCaseId, targetId))?.caseName || "";
+}
+
+function normalizeRuntimeTargets(targets) {
+  if (!Array.isArray(targets)) return ["web"];
+  const normalized = targets.map((item) => `${item || ""}`.trim().toLowerCase()).filter(Boolean);
+  return normalized.length ? Array.from(new Set(normalized)) : ["web"];
+}
+
+function profileSupportsWeb(profile) {
+  const targets = normalizeRuntimeTargets(profile?.targets);
+  return targets.includes("web") || targets.includes("all") || targets.includes("*");
+}
+
+function isRuntimeProfileScopeMatch(profile, projectId, moduleId) {
+  const profileProjectId = normalizeIdValue(profile?.projectId);
+  const profileModuleId = normalizeIdValue(profile?.moduleId);
+  const currentProjectId = normalizeIdValue(projectId);
+  const currentModuleId = normalizeIdValue(moduleId);
+  if (profileProjectId && currentProjectId && profileProjectId !== currentProjectId) return false;
+  if (profileProjectId && !currentProjectId) return false;
+  if (profileModuleId && currentModuleId && profileModuleId !== currentModuleId) return false;
+  if (profileModuleId && !currentModuleId) return false;
+  return true;
+}
+
+function formatRuntimeProfileScope(profile) {
+  const projectName = profile?.projectId ? (getProjectName(profile.projectId) || profile.projectId) : "全局";
+  const moduleName = profile?.moduleId ? (getModuleName(profile.moduleId) || profile.moduleId) : "全部模块";
+  return `${projectName} / ${moduleName}`;
+}
+
+function formatRuntimeProfileLabel(profile) {
+  const name = profile?.profileName || profile?.profileId || "未命名配置";
+  return `${name}（${formatRuntimeProfileScope(profile)}）`;
+}
+
+const runtimeVariableKeys = ["variables", "runtimeVariables", "runtime_variables", "cookieVariables", "cookie_variables"];
+const runtimeCookieRuleKeys = ["cookieRules", "cookie_rules", "cookieScopes", "cookie_scopes", "cookieProfiles", "cookie_profiles"];
+const runtimeVarPattern = /\$\{([a-zA-Z0-9_.-]+)\}|\{\{([a-zA-Z0-9_.-]+)\}\}/g;
+
+function getRuntimeProfileById(profileId) {
+  const normalizedId = normalizeIdValue(profileId);
+  if (!normalizedId) return null;
+  return runtimeProfiles.value.find((item) => isSameId(item.profileId, normalizedId)) || null;
+}
+
+function collectRuntimeVariables(runtimeOverrides) {
+  const source = isPlainObject(runtimeOverrides) ? runtimeOverrides : {};
+  const result = {};
+  runtimeVariableKeys.forEach((key) => {
+    const value = source[key];
+    if (isPlainObject(value)) {
+      Object.assign(result, value);
+    }
+  });
+  return result;
+}
+
+function collectCookieRules(runtimeOverrides) {
+  const source = isPlainObject(runtimeOverrides) ? runtimeOverrides : {};
+  const result = [];
+  runtimeCookieRuleKeys.forEach((key) => {
+    const value = source[key];
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (isPlainObject(item)) {
+          result.push(cloneData(item));
+        }
+      });
+    }
+  });
+  return result;
+}
+
+function mergeRuntimeOverrides(baseRuntimeOverrides, overrideRuntimeOverrides) {
+  const base = isPlainObject(baseRuntimeOverrides) ? cloneData(baseRuntimeOverrides) : {};
+  const override = isPlainObject(overrideRuntimeOverrides) ? cloneData(overrideRuntimeOverrides) : {};
+  const merged = { ...base };
+  Object.entries(override).forEach(([key, value]) => {
+    if (value !== null && value !== undefined) {
+      merged[key] = value;
+    }
+  });
+
+  const mergedVariables = collectRuntimeVariables(base);
+  Object.assign(mergedVariables, collectRuntimeVariables(override));
+  if (Object.keys(mergedVariables).length) {
+    merged.variables = mergedVariables;
+  }
+  runtimeVariableKeys.forEach((key) => {
+    if (key !== "variables") {
+      delete merged[key];
+    }
+  });
+
+  const mergedRules = [...collectCookieRules(base), ...collectCookieRules(override)];
+  if (mergedRules.length) {
+    merged.cookieRules = mergedRules;
+  }
+  runtimeCookieRuleKeys.forEach((key) => {
+    if (key !== "cookieRules") {
+      delete merged[key];
+    }
+  });
+  return merged;
+}
+
+function composeRuntimeOverridesFromProfile(profile) {
+  if (!profile) return {};
+  const runtimeOverrides = isPlainObject(profile.runtimeOverrides || profile.runtime_overrides)
+    ? cloneData(profile.runtimeOverrides || profile.runtime_overrides)
+    : {};
+  if (isPlainObject(profile.variables) && Object.keys(profile.variables).length) {
+    const existingVariables = collectRuntimeVariables(runtimeOverrides);
+    runtimeOverrides.variables = { ...existingVariables, ...profile.variables };
+  }
+  if (Array.isArray(profile.cookieRules || profile.cookie_rules) && (profile.cookieRules || profile.cookie_rules).length) {
+    const existingRules = collectCookieRules(runtimeOverrides);
+    runtimeOverrides.cookieRules = [...existingRules, ...cloneData(profile.cookieRules || profile.cookie_rules)];
+  }
+  runtimeVariableKeys.forEach((key) => {
+    if (key !== "variables") {
+      delete runtimeOverrides[key];
+    }
+  });
+  runtimeCookieRuleKeys.forEach((key) => {
+    if (key !== "cookieRules") {
+      delete runtimeOverrides[key];
+    }
+  });
+  return runtimeOverrides;
+}
+
+function interpolateRuntimeString(value, variables) {
+  const text = `${value ?? ""}`;
+  if (!text) return text;
+  return text.replace(runtimeVarPattern, (match, varA, varB) => {
+    const key = varA || varB || "";
+    if (Object.prototype.hasOwnProperty.call(variables, key)) {
+      return `${variables[key] ?? ""}`;
+    }
+    return match;
+  });
+}
+
+function ensureArrayValue(value) {
+  if (Array.isArray(value)) return value.map((item) => `${item ?? ""}`).filter((item) => item.trim());
+  if (value === undefined || value === null || value === "") return [];
+  return [`${value}`];
+}
+
+function hostFromUrl(url) {
+  const raw = `${url ?? ""}`.trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).hostname.toLowerCase();
+  } catch (error) {
+    return "";
+  }
+}
+
+function normalizeCookieRuleForPreview(rule, index = 0) {
+  if (!isPlainObject(rule)) return null;
+  const rawCookies = Array.isArray(rule.cookies) ? rule.cookies : [];
+  const cookies = rawCookies.filter((item) => isPlainObject(item)).map((item) => cloneData(item));
+  if (!cookies.length) return null;
+  const match = isPlainObject(rule.match) ? cloneData(rule.match) : {};
+  ["host", "domain", "urlContains", "url_contains", "urlRegex", "url_regex"].forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(match, key) && rule[key] !== undefined && rule[key] !== null && rule[key] !== "") {
+      match[key] = rule[key];
+    }
+  });
+  const applyOnRaw = Array.isArray(rule.applyOn || rule.apply_on) ? (rule.applyOn || rule.apply_on) : [];
+  const applyOn = new Set(
+    applyOnRaw
+      .map((item) => `${item ?? ""}`.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!applyOn.size) {
+    ["before_start", "before_step", "before_goto"].forEach((item) => applyOn.add(item));
+  }
+  return {
+    name: `${rule.name || `rule_${index + 1}`}`,
+    match,
+    applyOn,
+    cookies,
+  };
+}
+
+function ruleMatchesUrlForPreview(rule, targetUrl, targetHost, variables) {
+  const match = isPlainObject(rule?.match) ? rule.match : {};
+  if (!Object.keys(match).length) return true;
+
+  const hostValues = [
+    ...ensureArrayValue(match.host),
+    ...ensureArrayValue(match.domain),
+  ].map((item) => interpolateRuntimeString(`${item}`.toLowerCase(), variables));
+  if (hostValues.length) {
+    if (!targetHost) return false;
+    if (!hostValues.some((item) => item && (targetHost === item || targetHost.endsWith(`.${item}`)))) {
+      return false;
+    }
+  }
+
+  const containsValues = ensureArrayValue(match.urlContains ?? match.url_contains).map((item) => interpolateRuntimeString(item, variables));
+  if (containsValues.length) {
+    if (!containsValues.some((item) => item && targetUrl.includes(item))) {
+      return false;
+    }
+  }
+
+  const regexValues = ensureArrayValue(match.urlRegex ?? match.url_regex).map((item) => interpolateRuntimeString(item, variables));
+  if (regexValues.length) {
+    let matched = false;
+    regexValues.forEach((pattern) => {
+      if (matched || !pattern) return;
+      try {
+        if (new RegExp(pattern).test(targetUrl)) {
+          matched = true;
+        }
+      } catch (error) {
+        // ignore invalid regex
+      }
+    });
+    if (!matched) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function normalizeCookieForPreview(cookieDef, targetUrl, targetHost, variables, defaultDomain = "") {
+  if (!isPlainObject(cookieDef)) return null;
+  const name = interpolateRuntimeString(cookieDef.name, variables).trim();
+  if (!name) return null;
+  const value = interpolateRuntimeString(cookieDef.value, variables);
+  if (value === "") return null;
+
+  const cookie = {
+    name,
+    value,
+  };
+  const explicitUrl = cookieDef.url ? interpolateRuntimeString(cookieDef.url, variables) : "";
+  const explicitDomain = cookieDef.domain ? interpolateRuntimeString(cookieDef.domain, variables) : "";
+  const explicitPath = cookieDef.path ? interpolateRuntimeString(cookieDef.path, variables) : "";
+  const fallbackDomain = interpolateRuntimeString(defaultDomain || "", variables).trim().replace(/^\./, "").toLowerCase();
+  if (explicitUrl) {
+    cookie.url = explicitUrl;
+  } else if (explicitDomain) {
+    cookie.domain = explicitDomain;
+    cookie.path = explicitPath || "/";
+  } else if (fallbackDomain) {
+    cookie.domain = fallbackDomain;
+    cookie.path = explicitPath || "/";
+  } else if (targetUrl) {
+    cookie.url = targetUrl;
+  } else if (targetHost) {
+    cookie.domain = targetHost;
+    cookie.path = "/";
+  } else {
+    return null;
+  }
+  if (cookieDef.httpOnly !== undefined) {
+    cookie.httpOnly = Boolean(cookieDef.httpOnly);
+  }
+  if (cookieDef.secure !== undefined) {
+    cookie.secure = Boolean(cookieDef.secure);
+  }
+  if (cookieDef.sameSite !== undefined && cookieDef.sameSite !== null && cookieDef.sameSite !== "") {
+    cookie.sameSite = `${cookieDef.sameSite}`;
+  }
+  if (cookieDef.expires !== undefined && cookieDef.expires !== null && cookieDef.expires !== "") {
+    const expiresValue = Number(cookieDef.expires);
+    if (Number.isFinite(expiresValue)) {
+      cookie.expires = Math.round(expiresValue);
+    }
+  }
+  return cookie;
+}
+
+function buildCookiePreviewForTarget({ targetUrl, runtimeProfileId, runtimeOverrides, stage = "before_start" }) {
+  const normalizedStage = `${stage || ""}`.trim().toLowerCase() || "before_start";
+  const normalizedTargetUrl = `${targetUrl || ""}`.trim();
+  const targetHost = hostFromUrl(normalizedTargetUrl);
+
+  const profile = getRuntimeProfileById(runtimeProfileId);
+  const profileRuntimeOverrides = composeRuntimeOverridesFromProfile(profile);
+  const mergedRuntimeOverrides = mergeRuntimeOverrides(profileRuntimeOverrides, runtimeOverrides);
+  const variables = collectRuntimeVariables(mergedRuntimeOverrides);
+  const rules = collectCookieRules(mergedRuntimeOverrides)
+    .map((item, index) => normalizeCookieRuleForPreview(item, index))
+    .filter(Boolean);
+
+  const matchedRuleNames = [];
+  const cookies = [];
+  rules.forEach((rule) => {
+    if (rule.applyOn.size && !rule.applyOn.has(normalizedStage)) return;
+    if (!ruleMatchesUrlForPreview(rule, normalizedTargetUrl, targetHost, variables)) return;
+    matchedRuleNames.push(rule.name);
+    const ruleMatch = isPlainObject(rule.match) ? rule.match : {};
+    const defaultDomainCandidates = [
+      ...ensureArrayValue(ruleMatch.domain),
+      ...ensureArrayValue(ruleMatch.host),
+    ];
+    const defaultDomain = defaultDomainCandidates
+      .map((item) => interpolateRuntimeString(item, variables).trim().replace(/^\./, "").toLowerCase())
+      .find((item) => item);
+    rule.cookies.forEach((cookieDef) => {
+      const normalized = normalizeCookieForPreview(cookieDef, normalizedTargetUrl, targetHost, variables, defaultDomain);
+      if (normalized) {
+        cookies.push(normalized);
+      }
+    });
+  });
+
+  const dedup = new Map();
+  cookies.forEach((cookie) => {
+    const key = `${cookie.name}::${cookie.domain || cookie.url || ""}::${cookie.path || "/"}`;
+    dedup.set(key, cookie);
+  });
+  const dedupedCookies = Array.from(dedup.values());
+  return {
+    targetUrl: normalizedTargetUrl,
+    targetHost,
+    rules: matchedRuleNames,
+    cookies: dedupedCookies,
+    appliedCount: dedupedCookies.length,
+  };
+}
+
+function escapeHtml(text) {
+  return `${text ?? ""}`
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function hasCookiePreviewInput(runtimeProfileId, runtimeOverrides) {
+  if (normalizeIdValue(runtimeProfileId)) return true;
+  return collectCookieRules(runtimeOverrides).length > 0;
+}
+
+async function confirmCookiePreviewBeforeStart({
+  mode,
+  targets,
+  runtimeProfileId,
+  runtimeOverrides,
+  stage = "before_start",
+}) {
+  if (!hasCookiePreviewInput(runtimeProfileId, runtimeOverrides)) {
+    return true;
+  }
+  const normalizedTargets = Array.isArray(targets) ? targets.filter((item) => item && item.targetUrl) : [];
+  if (!normalizedTargets.length) {
+    return true;
+  }
+  const previewRows = normalizedTargets.map((target, index) => {
+    const preview = buildCookiePreviewForTarget({
+      targetUrl: target.targetUrl,
+      runtimeProfileId,
+      runtimeOverrides,
+      stage,
+    });
+    return {
+      label: target.label || `目标${index + 1}`,
+      ...preview,
+    };
+  });
+  const hasZeroApply = previewRows.some((item) => Number(item.appliedCount || 0) <= 0);
+  const displayRows = previewRows.slice(0, 12);
+  const omitted = previewRows.length - displayRows.length;
+  const lines = displayRows.map((item, index) => {
+    const cookieNames = item.cookies.slice(0, 6).map((cookie) => cookie.name).filter(Boolean);
+    const cookieText = cookieNames.length ? `，Cookie: ${escapeHtml(cookieNames.join(", "))}` : "";
+    const ruleText = item.rules.length ? `，规则: ${escapeHtml(item.rules.join("、"))}` : "，规则: 无命中";
+    return `${index + 1}. <strong>${escapeHtml(item.label)}</strong> (${escapeHtml(item.targetHost || item.targetUrl || "-")})：注入 <strong>${item.appliedCount}</strong> 个${ruleText}${cookieText}`;
+  });
+  if (omitted > 0) {
+    lines.push(`其余 ${omitted} 条目标已省略，规则计算逻辑一致。`);
+  }
+  if (hasZeroApply) {
+    lines.push("存在未命中Cookie规则的目标，可能仍会跳转登录页。");
+  }
+  const title = mode === "recording" ? "录制前 Cookie 预览" : "执行前 Cookie 预览";
+  const confirmText = mode === "recording" ? "确认开始录制" : "确认继续执行";
+  const html = `<div style="line-height: 1.6;">${lines.map((line) => `<div>${line}</div>`).join("")}</div>`;
+  try {
+    await ElMessageBox.confirm(html, title, {
+      type: hasZeroApply ? "warning" : "info",
+      confirmButtonText: confirmText,
+      cancelButtonText: "取消",
+      closeOnClickModal: false,
+      closeOnPressEscape: false,
+      dangerouslyUseHTMLString: true,
+    });
+    return true;
+  } catch (error) {
+    return false;
+  }
 }
 
 function syncCaseOptions(...collections) {
@@ -1760,12 +3035,24 @@ function describeLocator(locator) {
   if (locator.locatorType === "test_id") {
     return `testId=${locator.locatorValue.testId || "-"}`;
   }
+  if (locator.locatorType === "id") {
+    return `id=${locator.locatorValue.id || "-"}`;
+  }
+  if (locator.locatorType === "name") {
+    return `name=${locator.locatorValue.name || "-"}`;
+  }
   return `${locator.locatorType}=${locator.locatorValue.selector || "-"}`;
 }
 
 function describeStepTarget(step) {
   if (!stepNeedsTarget(step.actionType)) {
-    return step.params?.url || "页面跳转";
+    if (step.actionType === "goto") return step.params?.url || "页面跳转";
+    if (["sleep", "wait"].includes(step.actionType)) return `等待 ${Number(step.params?.waitMs ?? 0) || 0}ms`;
+    if (step.actionType === "assert_page_contains") return `页面包含 ${step.params?.text || "-"}`;
+    if (step.actionType === "assert_page_not_contains") return `页面不包含 ${step.params?.text || "-"}`;
+    if (step.actionType === "assert_title_contains") return `标题包含 ${step.params?.title || "-"}`;
+    if (step.actionType === "assert_url_contains") return `URL包含 ${step.params?.urlPart || "-"}`;
+    return "页面级动作";
   }
   const firstLocator = step.targetSnapshot?.locators?.find((item) => item.enabled !== false) || step.targetSnapshot?.locators?.[0];
   const locatorText = firstLocator ? describeLocator(firstLocator) : "未设置定位器";
@@ -1775,11 +3062,23 @@ function describeStepTarget(step) {
 
 function summarizeStepParams(step) {
   if (!step) return "-";
-  if (step.actionType === "goto") return step.params?.url || "-";
-  if (step.actionType === "fill") return step.params?.value || "-";
-  if (step.actionType === "press") return step.params?.key || "-";
-  if (step.actionType === "select_option") return Array.isArray(step.params?.values) && step.params.values.length ? step.params.values.join(", ") : "-";
-  return "-";
+  const thinkTimeMs = normalizeThinkTimeMs(step.params?.thinkTimeMs);
+  const appendThinkTime = (text) => (thinkTimeMs > 0 ? `${text || "-"} / 思考${thinkTimeMs}ms` : text || "-");
+  if (step.actionType === "goto") return appendThinkTime(step.params?.url || "-");
+  if (step.actionType === "fill") return appendThinkTime(step.params?.value || "-");
+  if (step.actionType === "press") return appendThinkTime(step.params?.key || "-");
+  if (step.actionType === "select_option") {
+    const valuesText = Array.isArray(step.params?.values) && step.params.values.length ? step.params.values.join(", ") : "-";
+    return appendThinkTime(valuesText);
+  }
+  if (["sleep", "wait"].includes(step.actionType)) return appendThinkTime(`${Number(step.params?.waitMs ?? 0) || 0}ms`);
+  if (step.actionType === "assert_page_contains") return appendThinkTime(`页面包含：${step.params?.text || "-"}`);
+  if (step.actionType === "assert_page_not_contains") return appendThinkTime(`页面不含：${step.params?.text || "-"}`);
+  if (step.actionType === "assert_title_contains") return appendThinkTime(`标题包含：${step.params?.title || "-"}`);
+  if (step.actionType === "assert_url_contains") return appendThinkTime(`URL包含：${step.params?.urlPart || "-"}`);
+  if (step.actionType === "assert_text_equals") return appendThinkTime(`文本等于：${step.params?.expected || "-"}`);
+  if (step.actionType === "assert_text_contains") return appendThinkTime(`文本包含：${step.params?.expected || "-"}`);
+  return appendThinkTime("-");
 }
 
 function syncStepsTextFromForm() {
@@ -1853,6 +3152,12 @@ function addStep(actionType = "click") {
   selectedStepIndex.value = form.value.steps.length - 1;
 }
 
+function insertStep(index, actionType = "click") {
+  const insertIndex = Math.max(0, Math.min(Number(index), form.value.steps.length));
+  form.value.steps.splice(insertIndex, 0, createDefaultStep(actionType));
+  selectedStepIndex.value = insertIndex;
+}
+
 function copyStep(index) {
   const source = form.value.steps[index];
   if (!source) return;
@@ -1899,6 +3204,15 @@ function moveLocator(step, index, direction) {
   step.targetSnapshot.locators = locators;
 }
 
+function setPrimaryLocator(step, index) {
+  if (!step?.targetSnapshot?.locators) return;
+  if (index <= 0 || index >= step.targetSnapshot.locators.length) return;
+  const locators = [...step.targetSnapshot.locators];
+  const [preferred] = locators.splice(index, 1);
+  locators.unshift(preferred);
+  step.targetSnapshot.locators = locators;
+}
+
 function removeLocator(step, index) {
   if (!step?.targetSnapshot?.locators) return;
   step.targetSnapshot.locators.splice(index, 1);
@@ -1910,6 +3224,83 @@ function addAssertion(step) {
 
 function removeAssertion(step, index) {
   step.assertions.splice(index, 1);
+}
+
+function handleAssertionTypeChange(assertion) {
+  if (!assertionNeedsTarget(assertion?.assertType)) {
+    return;
+  }
+  getAssertionLocatorList(assertion);
+}
+
+function ensureAssertionTargetSnapshot(assertion) {
+  if (!assertion?.targetSnapshot) {
+    assertion.targetSnapshot = createDefaultTargetSnapshot();
+  }
+  if (!Array.isArray(assertion.targetSnapshot.locators)) {
+    assertion.targetSnapshot.locators = [];
+  }
+  return assertion.targetSnapshot;
+}
+
+function getAssertionLocatorList(assertion) {
+  if (!assertionNeedsTarget(assertion?.assertType)) {
+    return [];
+  }
+  const snapshot = ensureAssertionTargetSnapshot(assertion);
+  if (!snapshot.locators.length) {
+    snapshot.locators = [createDefaultLocator()];
+  }
+  return snapshot.locators;
+}
+
+function getAssertionPrimaryLocator(assertion) {
+  const locators = getAssertionLocatorList(assertion);
+  return locators.find((item) => item.enabled !== false) || locators[0] || null;
+}
+
+function updateAssertionPrimaryLocatorType(assertion, locatorType) {
+  const locator = getAssertionPrimaryLocator(assertion);
+  if (!locator) {
+    return;
+  }
+  locator.locatorType = locatorType;
+  locator.locatorValue = normalizeLocatorValue(locatorType, {});
+}
+
+function updateAssertionPrimaryLocatorValue(assertion, key, value) {
+  const locator = getAssertionPrimaryLocator(assertion);
+  if (!locator) {
+    return;
+  }
+  locator.locatorValue = normalizeLocatorValue(locator.locatorType, locator.locatorValue);
+  locator.locatorValue[key] = value;
+}
+
+function addAssertionLocator(assertion) {
+  if (!assertionNeedsTarget(assertion?.assertType)) return;
+  const snapshot = ensureAssertionTargetSnapshot(assertion);
+  snapshot.locators.push(createDefaultLocator());
+}
+
+function moveAssertionLocator(assertion, index, direction) {
+  const locators = getAssertionLocatorList(assertion);
+  const targetIndex = index + direction;
+  if (targetIndex < 0 || targetIndex >= locators.length) return;
+  [locators[index], locators[targetIndex]] = [locators[targetIndex], locators[index]];
+}
+
+function setAssertionPrimaryLocator(assertion, index) {
+  const locators = getAssertionLocatorList(assertion);
+  if (index <= 0 || index >= locators.length) return;
+  const [preferred] = locators.splice(index, 1);
+  locators.unshift(preferred);
+}
+
+function removeAssertionLocator(assertion, index) {
+  const snapshot = ensureAssertionTargetSnapshot(assertion);
+  if (!Array.isArray(snapshot.locators) || !snapshot.locators.length) return;
+  snapshot.locators.splice(index, 1);
 }
 
 function handleStepActionTypeChange(step) {
@@ -1965,6 +3356,12 @@ function isLocatorFilled(locator) {
   if (locator.locatorType === "test_id") {
     return Boolean(locator.locatorValue.testId);
   }
+  if (locator.locatorType === "id") {
+    return Boolean(locator.locatorValue.id);
+  }
+  if (locator.locatorType === "name") {
+    return Boolean(locator.locatorValue.name);
+  }
   return Boolean(locator.locatorValue.selector);
 }
 
@@ -1981,6 +3378,21 @@ function getCaseValidationError() {
     if (step.actionType === "select_option" && (!Array.isArray(step.params.values) || !step.params.values.length)) {
       return `步骤${index + 1}至少需要一个下拉项值`;
     }
+    if (["sleep", "wait"].includes(step.actionType) && Number(step.params.waitMs ?? 0) < 0) {
+      return `步骤${index + 1}等待时间不能小于0`;
+    }
+    if (["assert_page_contains", "assert_page_not_contains"].includes(step.actionType) && !`${step.params.text ?? ""}`.trim()) {
+      return `步骤${index + 1}缺少页面断言文本`;
+    }
+    if (step.actionType === "assert_title_contains" && !`${step.params.title ?? ""}`.trim()) {
+      return `步骤${index + 1}缺少标题断言文本`;
+    }
+    if (step.actionType === "assert_url_contains" && !`${step.params.urlPart ?? ""}`.trim()) {
+      return `步骤${index + 1}缺少URL断言文本`;
+    }
+    if (["assert_text_equals", "assert_text_contains"].includes(step.actionType) && !`${step.params.expected ?? ""}`.trim()) {
+      return `步骤${index + 1}缺少元素文本断言值`;
+    }
     if (stepNeedsTarget(step.actionType)) {
       const locators = step.targetSnapshot?.locators || [];
       if (!locators.length) return `步骤${index + 1}至少需要一个定位器`;
@@ -1991,12 +3403,15 @@ function getCaseValidationError() {
 }
 
 function prepareAssertionForSubmit(assertion) {
+  const waitMs = Number(assertion.waitMs);
   return {
     assertType: assertion.assertType,
     expected: assertion.expected ?? "",
     operator: assertion.operator || undefined,
     actualSource: assertion.actualSource || undefined,
     enabled: assertion.enabled !== false,
+    waitMs: Number.isFinite(waitMs) && waitMs > 0 ? Math.round(waitMs) : undefined,
+    targetSnapshot: assertion.targetSnapshot ? prepareTargetSnapshotForSubmit(assertion.targetSnapshot) : undefined,
   };
 }
 
@@ -2028,19 +3443,36 @@ function prepareTargetSnapshotForSubmit(snapshot) {
 }
 
 function buildStepParamsForSubmit(step) {
+  const thinkTimeMs = normalizeThinkTimeMs(step.params?.thinkTimeMs);
+  const withThinkTime = (payload) => (thinkTimeMs > 0 ? { ...payload, thinkTimeMs } : payload);
   if (step.actionType === "goto") {
-    return { url: step.params.url || "" };
+    return withThinkTime({ url: step.params.url || "" });
   }
   if (step.actionType === "fill") {
-    return { value: step.params.value ?? "" };
+    return withThinkTime({ value: step.params.value ?? "" });
   }
   if (step.actionType === "press") {
-    return { key: step.params.key || "Enter" };
+    return withThinkTime({ key: step.params.key || "Enter" });
   }
   if (step.actionType === "select_option") {
-    return { values: Array.isArray(step.params.values) ? step.params.values.filter((item) => `${item}`.trim()) : [] };
+    return withThinkTime({ values: Array.isArray(step.params.values) ? step.params.values.filter((item) => `${item}`.trim()) : [] });
   }
-  return {};
+  if (["sleep", "wait"].includes(step.actionType)) {
+    return withThinkTime({ waitMs: Math.max(Math.round(Number(step.params?.waitMs ?? 0) || 0), 0) });
+  }
+  if (["assert_page_contains", "assert_page_not_contains"].includes(step.actionType)) {
+    return withThinkTime({ text: step.params?.text ?? "" });
+  }
+  if (step.actionType === "assert_title_contains") {
+    return withThinkTime({ title: step.params?.title ?? "" });
+  }
+  if (step.actionType === "assert_url_contains") {
+    return withThinkTime({ urlPart: step.params?.urlPart ?? "" });
+  }
+  if (["assert_text_equals", "assert_text_contains"].includes(step.actionType)) {
+    return withThinkTime({ expected: step.params?.expected ?? "" });
+  }
+  return withThinkTime({});
 }
 
 function prepareStepForSubmit(step, index) {
@@ -2128,6 +3560,315 @@ function getRecordingList() {
   });
 }
 
+function clearInvalidRuntimeProfileBindings() {
+  const ids = new Set(runtimeProfiles.value.map((item) => normalizeIdValue(item.profileId)).filter(Boolean));
+  if (runForm.value.runtimeProfileId && !ids.has(normalizeIdValue(runForm.value.runtimeProfileId))) {
+    runForm.value.runtimeProfileId = undefined;
+  }
+  if (recordingForm.value.runtimeProfileId && !ids.has(normalizeIdValue(recordingForm.value.runtimeProfileId))) {
+    recordingForm.value.runtimeProfileId = undefined;
+  }
+  if (runtimeProfileForm.value.profileId && !ids.has(normalizeIdValue(runtimeProfileForm.value.profileId))) {
+    runtimeProfileForm.value = createEmptyRuntimeProfile();
+  }
+}
+
+function createRuntimeProfileDraft() {
+  runtimeProfileForm.value = createEmptyRuntimeProfile();
+  runtimeProfileImportText.value = "";
+  runtimeProfileImportHost.value = "";
+}
+
+function handleRuntimeProfileRowChange(row) {
+  if (!row) return;
+  runtimeProfileForm.value = normalizeRuntimeProfile(row);
+}
+
+function loadRuntimeProfiles() {
+  loading.value.runtimeProfile = true;
+  return listWebRuntimeProfile({ isPage: false }).then((response) => {
+    const rows = Array.isArray(response?.data) ? response.data : [];
+    runtimeProfiles.value = rows.map((item) => normalizeRuntimeProfile(item));
+    clearInvalidRuntimeProfileBindings();
+  }).finally(() => {
+    loading.value.runtimeProfile = false;
+  });
+}
+
+function openRuntimeProfileDialog() {
+  showRuntimeProfileDialog.value = true;
+  if (!runtimeProfiles.value.length) {
+    loadRuntimeProfiles();
+  }
+  if (!runtimeProfileForm.value.profileId) {
+    createRuntimeProfileDraft();
+  }
+}
+
+function extractCookieContentFromImport(rawText) {
+  const raw = `${rawText ?? ""}`.trim();
+  if (!raw) return "";
+  if (raw.startsWith("{") && raw.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (isPlainObject(parsed)) {
+        const cookieValue = parsed.Cookie || parsed.cookie;
+        if (typeof cookieValue === "string" && cookieValue.trim()) {
+          return cookieValue.trim();
+        }
+      }
+    } catch (error) {
+      // ignore
+    }
+  }
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    const matched = line.match(/^cookie\s*:\s*(.+)$/i);
+    if (matched && matched[1]) {
+      return matched[1].trim();
+    }
+  }
+  if (/^cookie\s*=/i.test(raw)) {
+    return raw.replace(/^cookie\s*=/i, "").trim();
+  }
+  if (/^cookie\s*:/i.test(raw)) {
+    return raw.replace(/^cookie\s*:/i, "").trim();
+  }
+  return raw;
+}
+
+function extractSetCookieLinesFromImport(rawText) {
+  const raw = `${rawText ?? ""}`.trim();
+  if (!raw) return [];
+  const lines = [];
+  if (raw.startsWith("{") && raw.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (isPlainObject(parsed)) {
+        const setCookieValue = parsed["Set-Cookie"] || parsed["set-cookie"] || parsed.setCookie || parsed.set_cookie;
+        if (Array.isArray(setCookieValue)) {
+          setCookieValue.forEach((item) => {
+            const text = `${item ?? ""}`.trim();
+            if (text) lines.push(text);
+          });
+        } else if (typeof setCookieValue === "string" && setCookieValue.trim()) {
+          lines.push(setCookieValue.trim());
+        }
+      }
+    } catch (error) {
+      // ignore
+    }
+  }
+  if (lines.length) {
+    return lines;
+  }
+  raw.split(/\r?\n/).forEach((line) => {
+    const matched = `${line || ""}`.trim().match(/^set-cookie\s*:\s*(.+)$/i);
+    if (matched && matched[1]) {
+      lines.push(matched[1].trim());
+    }
+  });
+  if (lines.length) {
+    return lines;
+  }
+  if (/^set-cookie\s*[:=]/i.test(raw)) {
+    const text = raw.replace(/^set-cookie\s*[:=]/i, "").trim();
+    if (text) {
+      return [text];
+    }
+  }
+  return [];
+}
+
+function parseCookiePairs(cookieText) {
+  const raw = `${cookieText ?? ""}`.trim();
+  if (!raw) return [];
+  const entries = raw
+    .split(";")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const cookieMap = new Map();
+  entries.forEach((entry) => {
+    const index = entry.indexOf("=");
+    if (index <= 0) return;
+    const name = entry.slice(0, index).trim();
+    const value = entry.slice(index + 1).trim();
+    if (!name || !value) return;
+    cookieMap.set(name, { name, value });
+  });
+  return Array.from(cookieMap.values());
+}
+
+function normalizeSameSiteValue(value) {
+  const normalized = `${value || ""}`.trim().toLowerCase();
+  if (normalized === "lax") return "Lax";
+  if (normalized === "strict") return "Strict";
+  if (normalized === "none") return "None";
+  return undefined;
+}
+
+function parseExpiresTimestamp(rawValue) {
+  const text = `${rawValue || ""}`.trim();
+  if (!text) return undefined;
+  const parsed = Date.parse(text);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return Math.floor(parsed / 1000);
+}
+
+function parseSetCookieLine(line) {
+  const text = `${line || ""}`.trim();
+  if (!text) return null;
+  const parts = text.split(";").map((item) => item.trim()).filter(Boolean);
+  if (!parts.length) return null;
+  const first = parts[0];
+  const eqIndex = first.indexOf("=");
+  if (eqIndex <= 0) return null;
+  const name = first.slice(0, eqIndex).trim();
+  const value = first.slice(eqIndex + 1).trim();
+  if (!name || !value) return null;
+  const cookie = { name, value };
+  parts.slice(1).forEach((part) => {
+    const idx = part.indexOf("=");
+    const rawKey = (idx >= 0 ? part.slice(0, idx) : part).trim().toLowerCase();
+    const rawValue = idx >= 0 ? part.slice(idx + 1).trim() : "";
+    if (!rawKey) return;
+    if (rawKey === "domain" && rawValue) {
+      cookie.domain = rawValue;
+      return;
+    }
+    if (rawKey === "path" && rawValue) {
+      cookie.path = rawValue;
+      return;
+    }
+    if (rawKey === "secure") {
+      cookie.secure = true;
+      return;
+    }
+    if (rawKey === "httponly") {
+      cookie.httpOnly = true;
+      return;
+    }
+    if (rawKey === "samesite") {
+      const sameSite = normalizeSameSiteValue(rawValue);
+      if (sameSite) {
+        cookie.sameSite = sameSite;
+      }
+      return;
+    }
+    if (rawKey === "expires") {
+      const expires = parseExpiresTimestamp(rawValue);
+      if (expires !== undefined) {
+        cookie.expires = expires;
+      }
+      return;
+    }
+    if (rawKey === "max-age") {
+      const age = Number(rawValue);
+      if (Number.isFinite(age)) {
+        cookie.expires = Math.floor(Date.now() / 1000) + Math.max(Math.round(age), 0);
+      }
+    }
+  });
+  return cookie;
+}
+
+function applyRuntimeProfileQuickImport() {
+  const setCookieLines = extractSetCookieLinesFromImport(runtimeProfileImportText.value);
+  const cookiesFromSetCookie = setCookieLines.map((line) => parseSetCookieLine(line)).filter(Boolean);
+  const cookieText = extractCookieContentFromImport(runtimeProfileImportText.value);
+  const cookiesFromCookieHeader = parseCookiePairs(cookieText);
+  const useSetCookie = cookiesFromSetCookie.length > 0;
+  const cookies = useSetCookie ? cookiesFromSetCookie : cookiesFromCookieHeader;
+  if (!cookies.length) {
+    ElMessage.error("未识别到可用 Cookie，请粘贴 Cookie 或 Set-Cookie 内容");
+    return;
+  }
+
+  let currentRules = [];
+  try {
+    currentRules = parseOptionalJsonArray(runtimeProfileForm.value.cookieRulesText, "Cookie规则") || [];
+  } catch (error) {
+    ElMessage.error(error.message);
+    return;
+  }
+
+  const matchHost = `${runtimeProfileImportHost.value || ""}`.trim();
+  const ruleName = runtimeProfileForm.value.profileName?.trim() || `导入Cookie-${new Date().toISOString().slice(0, 19)}`;
+  currentRules.push({
+    name: ruleName,
+    match: matchHost ? { host: matchHost } : {},
+    applyOn: ["before_start", "before_step", "before_goto"],
+    cookies,
+  });
+  runtimeProfileForm.value.cookieRulesText = safeJsonStringify(currentRules);
+  ElMessage.success(`已导入 ${cookies.length} 个 Cookie${useSetCookie ? "（Set-Cookie）" : ""}`);
+}
+
+function buildRuntimeProfilePayload() {
+  const profileName = `${runtimeProfileForm.value.profileName || ""}`.trim();
+  if (!profileName) {
+    throw new Error("配置名称不能为空");
+  }
+  const runtimeOverrides = parseOptionalJsonObject(runtimeProfileForm.value.runtimeOverridesText, "运行覆盖") || {};
+  const variables = parseOptionalJsonObject(runtimeProfileForm.value.variablesText, "变量") || {};
+  const cookieRules = parseOptionalJsonArray(runtimeProfileForm.value.cookieRulesText, "Cookie规则") || [];
+  const targets = normalizeRuntimeTargets(runtimeProfileForm.value.targets);
+  return {
+    profileId: runtimeProfileForm.value.profileId || undefined,
+    profileName,
+    profileType: "runtime",
+    targets,
+    enabled: runtimeProfileForm.value.enabled !== false,
+    projectId: runtimeProfileForm.value.projectId || undefined,
+    moduleId: runtimeProfileForm.value.moduleId || undefined,
+    sort: Math.max(Math.round(Number(runtimeProfileForm.value.sort) || 0), 0),
+    runtimeOverrides,
+    variables,
+    cookieRules,
+    remark: runtimeProfileForm.value.remark || undefined,
+  };
+}
+
+function saveRuntimeProfile() {
+  let payload;
+  try {
+    payload = buildRuntimeProfilePayload();
+  } catch (error) {
+    ElMessage.error(error.message);
+    return;
+  }
+  loading.value.runtimeProfileSave = true;
+  const request = payload.profileId ? updateWebRuntimeProfile(payload) : addWebRuntimeProfile(payload);
+  request.then((response) => {
+    const saved = normalizeRuntimeProfile(response?.data || payload);
+    ElMessage.success(response?.msg || "保存成功");
+    return loadRuntimeProfiles().then(() => {
+      const hit = runtimeProfiles.value.find((item) => isSameId(item.profileId, saved.profileId));
+      runtimeProfileForm.value = normalizeRuntimeProfile(hit || saved);
+    });
+  }).finally(() => {
+    loading.value.runtimeProfileSave = false;
+  });
+}
+
+function deleteRuntimeProfile() {
+  const profileId = runtimeProfileForm.value.profileId;
+  if (!profileId) {
+    ElMessage.warning("请先选择要删除的配置");
+    return;
+  }
+  ElMessageBox.confirm(`确认删除配置【${runtimeProfileForm.value.profileName || profileId}】吗？`, "提示", { type: "warning" })
+    .then(() => delWebRuntimeProfile(profileId))
+    .then(async () => {
+      ElMessage.success("删除成功");
+      createRuntimeProfileDraft();
+      await loadRuntimeProfiles();
+    })
+    .catch(() => {});
+}
+
 function handleAdd() {
   resetForm();
   showCaseDialog.value = true;
@@ -2182,14 +3923,72 @@ function saveCase() {
   });
 }
 
-function openRunDialog(row) {
-  selectedCase.value = row;
+function handleCaseSelectionChange(selection) {
+  selectedCaseRows.value = Array.isArray(selection) ? selection.map((item) => normalizeCaseOption(item) || item) : [];
+}
+
+function initRunFormByCase(row) {
+  const runtimeSettings = isPlainObject(row?.runtimeSettings || row?.runtime_settings) ? cloneData(row.runtimeSettings || row.runtime_settings) : {};
+  const stepTimeoutCandidate = Number(
+    runtimeSettings.stepTimeoutMs
+      ?? runtimeSettings.step_timeout_ms
+      ?? runtimeSettings.timeoutMs
+      ?? runtimeSettings.timeout_ms
+  );
+  const stepThinkCandidate = Number(
+    runtimeSettings.stepThinkTimeMs
+      ?? runtimeSettings.step_think_time_ms
+      ?? runtimeSettings.thinkTimeMs
+      ?? runtimeSettings.think_time_ms
+  );
+  const cookieVariables = runtimeSettings.variables
+    || runtimeSettings.runtimeVariables
+    || runtimeSettings.runtime_variables
+    || runtimeSettings.cookieVariables
+    || runtimeSettings.cookie_variables;
+  const cookieRules = runtimeSettings.cookieRules
+    || runtimeSettings.cookie_rules
+    || runtimeSettings.cookieScopes
+    || runtimeSettings.cookie_scopes
+    || runtimeSettings.cookieProfiles
+    || runtimeSettings.cookie_profiles;
+  const runtimeProfileId = runtimeSettings.runtimeProfileId
+    || runtimeSettings.runtime_profile_id
+    || runtimeSettings.cookieProfileId
+    || runtimeSettings.cookie_profile_id;
   runForm.value = {
     agentId: undefined,
-    browserName: row.browserName || "chromium",
-    headless: row.headless ?? true,
+    browserName: row?.browserName || "chromium",
+    headless: row?.headless ?? true,
     closeBrowserOnFinish: true,
+    stepTimeoutMs: Number.isFinite(stepTimeoutCandidate) && stepTimeoutCandidate >= 500 ? Math.round(stepTimeoutCandidate) : undefined,
+    stepThinkTimeMs: Number.isFinite(stepThinkCandidate) && stepThinkCandidate >= 0 ? Math.round(stepThinkCandidate) : undefined,
+    runtimeProfileId: normalizeIdValue(runtimeProfileId),
+    cookieVariablesText: isPlainObject(cookieVariables) && Object.keys(cookieVariables).length ? safeJsonStringify(cookieVariables) : "",
+    cookieRulesText: Array.isArray(cookieRules) && cookieRules.length ? safeJsonStringify(cookieRules) : "",
   };
+}
+
+function openRunDialog(row) {
+  const normalized = normalizeCaseOption(row) || row;
+  selectedCase.value = normalized;
+  runTargetCases.value = normalized?.webCaseId ? [normalized] : [];
+  initRunFormByCase(normalized);
+  showRunDialog.value = true;
+}
+
+function openBatchRunDialog() {
+  const candidates = (Array.isArray(selectedCaseRows.value) ? selectedCaseRows.value : [])
+    .map((item) => normalizeCaseOption(item) || item)
+    .filter((item) => item?.webCaseId);
+  if (!candidates.length) {
+    ElMessage.warning("请先勾选至少一条用例");
+    return;
+  }
+  const uniqueTargets = Array.from(new Map(candidates.map((item) => [item.webCaseId, item])).values());
+  selectedCase.value = uniqueTargets[0];
+  runTargetCases.value = uniqueTargets;
+  initRunFormByCase(uniqueTargets[0]);
   showRunDialog.value = true;
 }
 
@@ -2211,8 +4010,11 @@ function openRunDetail(row) {
   });
 }
 
-function submitRun() {
-  if (!selectedCase.value?.webCaseId) {
+async function submitRun() {
+  const runTargets = Array.isArray(runTargetCases.value) && runTargetCases.value.length
+    ? runTargetCases.value.filter((item) => item?.webCaseId)
+    : (selectedCase.value?.webCaseId ? [selectedCase.value] : []);
+  if (!runTargets.length) {
     ElMessage.error("请选择要执行的用例");
     return;
   }
@@ -2221,29 +4023,111 @@ function submitRun() {
     return;
   }
 
+  let cookieVariables;
+  let cookieRules;
+  try {
+    cookieVariables = parseOptionalJsonObject(runForm.value.cookieVariablesText, "Cookie变量");
+    cookieRules = parseOptionalJsonArray(runForm.value.cookieRulesText, "Cookie规则");
+  } catch (error) {
+    ElMessage.error(error.message);
+    return;
+  }
+
+  const runtimeOverrides = {};
+  if (runForm.value.stepTimeoutMs !== undefined && runForm.value.stepTimeoutMs !== null && runForm.value.stepTimeoutMs !== "") {
+    const stepTimeoutMs = Math.round(Number(runForm.value.stepTimeoutMs));
+    if (!Number.isFinite(stepTimeoutMs) || stepTimeoutMs < 500) {
+      ElMessage.error("单步超时覆盖必须大于等于 500ms");
+      return;
+    }
+    runtimeOverrides.stepTimeoutMs = stepTimeoutMs;
+  }
+  if (runForm.value.stepThinkTimeMs !== undefined && runForm.value.stepThinkTimeMs !== null && runForm.value.stepThinkTimeMs !== "") {
+    const stepThinkTimeMs = Math.round(Number(runForm.value.stepThinkTimeMs));
+    if (!Number.isFinite(stepThinkTimeMs) || stepThinkTimeMs < 0) {
+      ElMessage.error("步骤思考时间必须大于等于 0ms");
+      return;
+    }
+    runtimeOverrides.stepThinkTimeMs = stepThinkTimeMs;
+  }
+  if (cookieVariables) {
+    runtimeOverrides.variables = cookieVariables;
+  }
+  if (cookieRules) {
+    runtimeOverrides.cookieRules = cookieRules;
+  }
+
+  const previewTargets = runTargets.map((target, index) => ({
+    label: `${target.caseName || target.webCaseId || `用例${index + 1}`}${target.webCaseId ? ` [${target.webCaseId}]` : ""}`,
+    targetUrl: `${target.startUrl || selectedCase.value?.startUrl || ""}`.trim(),
+  })).filter((item) => item.targetUrl);
+  const previewConfirmed = await confirmCookiePreviewBeforeStart({
+    mode: "run",
+    targets: previewTargets,
+    runtimeProfileId: runForm.value.runtimeProfileId,
+    runtimeOverrides,
+    stage: "before_start",
+  });
+  if (!previewConfirmed) {
+    return;
+  }
+
   loading.value.run = true;
-  runWebCase({
-    webCaseId: selectedCase.value.webCaseId,
-    agentId: runForm.value.agentId,
-    browserName: runForm.value.browserName,
-    headless: runForm.value.headless,
-    closeBrowserOnFinish: runForm.value.closeBrowserOnFinish,
-  }).then((response) => {
-    ElMessage.success(response.msg || "执行完成");
+  try {
+    let successCount = 0;
+    let failedCount = 0;
+    const runResponses = [];
+    for (const target of runTargets) {
+      const payload = {
+        webCaseId: target.webCaseId,
+        agentId: runForm.value.agentId,
+        browserName: runForm.value.browserName,
+        headless: runForm.value.headless,
+        closeBrowserOnFinish: runForm.value.closeBrowserOnFinish,
+        runtimeProfileId: runForm.value.runtimeProfileId || undefined,
+      };
+      if (Object.keys(runtimeOverrides).length) {
+        payload.runtimeOverrides = runtimeOverrides;
+      }
+      try {
+        const response = await runWebCase(payload);
+        successCount += 1;
+        runResponses.push({ target, response });
+      } catch (error) {
+        failedCount += 1;
+        runResponses.push({ target, error });
+      }
+    }
     showRunDialog.value = false;
     activeTab.value = "run";
-    runQueryParams.value.webCaseId = selectedCase.value.webCaseId;
+    runQueryParams.value.webCaseId = runTargets.length === 1 ? runTargets[0].webCaseId : undefined;
     getRunList();
-    if (response.data?.webCaseRunId) {
-      openRunDetail(response.data);
+    if (runTargets.length === 1) {
+      const first = runResponses[0];
+      if (first?.response) {
+        ElMessage.success(first.response.msg || "执行完成");
+        if (first.response.data?.webCaseRunId) {
+          openRunDetail(first.response.data);
+        }
+      } else {
+        const msg = first?.error?.response?.data?.msg || first?.error?.message || "执行失败";
+        ElMessage.error(msg);
+      }
+      return;
     }
-  }).catch(() => {
-    activeTab.value = "run";
-    runQueryParams.value.webCaseId = selectedCase.value.webCaseId;
-    getRunList();
-  }).finally(() => {
+    if (failedCount === 0) {
+      ElMessage.success(`批量执行完成：成功 ${successCount} 条`);
+    } else if (successCount === 0) {
+      ElMessage.error(`批量执行完成：失败 ${failedCount} 条`);
+    } else {
+      ElMessage.warning(`批量执行完成：成功 ${successCount} 条，失败 ${failedCount} 条`);
+    }
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || "执行失败";
+    ElMessage.error(msg);
+  } finally {
     loading.value.run = false;
-  });
+  }
 }
 
 function resetRecordingDialogState(row = null) {
@@ -2253,6 +4137,11 @@ function resetRecordingDialogState(row = null) {
   liveRecordingSteps.value = [];
   recordingDetail.value = null;
   recordingDetailText.value = "";
+  const runtimeSettings = isPlainObject(row?.runtimeSettings || row?.runtime_settings) ? cloneData(row.runtimeSettings || row.runtime_settings) : {};
+  const runtimeProfileId = runtimeSettings.runtimeProfileId
+    || runtimeSettings.runtime_profile_id
+    || runtimeSettings.cookieProfileId
+    || runtimeSettings.cookie_profile_id;
   recordingForm.value = {
     webCaseId: row?.webCaseId,
     sessionName: row ? `${row.caseName}-录制` : "",
@@ -2261,6 +4150,10 @@ function resetRecordingDialogState(row = null) {
     headless: false,
     startUrl: row?.startUrl || "",
     closeBrowserOnStop: true,
+    captureAssertions: true,
+    attachAssertionsToPreviousStep: true,
+    autoAssertTextOnClick: false,
+    runtimeProfileId: normalizeIdValue(runtimeProfileId),
     recordingId: undefined,
   };
 }
@@ -2300,13 +4193,29 @@ function fetchRecordingDetail(recordingId) {
   return getWebRecording(recordingId).then((response) => response.data || {});
 }
 
-function startRecording() {
+async function startRecording() {
   if (!recordingForm.value.agentId) {
     ElMessage.error("请选择执行 Agent");
     return;
   }
   if (!recordingForm.value.startUrl?.trim()) {
     ElMessage.error("请填写录制起始地址");
+    return;
+  }
+
+  const previewConfirmed = await confirmCookiePreviewBeforeStart({
+    mode: "recording",
+    targets: [
+      {
+        label: recordingLinkedCaseLabel.value || "录制起始页",
+        targetUrl: `${recordingForm.value.startUrl || ""}`.trim(),
+      },
+    ],
+    runtimeProfileId: recordingForm.value.runtimeProfileId,
+    runtimeOverrides: {},
+    stage: "before_start",
+  });
+  if (!previewConfirmed) {
     return;
   }
 
@@ -2318,8 +4227,14 @@ function startRecording() {
     browserName: recordingForm.value.browserName,
     headless: recordingForm.value.headless,
     startUrl: recordingForm.value.startUrl,
+    runtimeProfileId: recordingForm.value.runtimeProfileId || undefined,
     recordingOptions: {
       closeBrowserOnStop: recordingForm.value.closeBrowserOnStop,
+      captureAssertions: recordingForm.value.captureAssertions,
+      assertionAttachMode: recordingForm.value.captureAssertions
+        ? (recordingForm.value.attachAssertionsToPreviousStep ? "inside_step" : "parallel_step")
+        : "parallel_step",
+      autoAssertTextOnClick: recordingForm.value.captureAssertions && recordingForm.value.autoAssertTextOnClick,
     },
   }).then((response) => {
     recordingForm.value.recordingId = response.data?.recordingId;
@@ -2572,8 +4487,20 @@ watch(() => recordingActionForm.value.projectId, (projectId) => {
   }
 });
 
+watch(() => runtimeProfileForm.value.projectId, (projectId) => {
+  if (!projectId) {
+    runtimeProfileForm.value.moduleId = undefined;
+    return;
+  }
+  if (!filteredRuntimeProfileModules.value.some((item) => isSameId(item.moduleId, runtimeProfileForm.value.moduleId))) {
+    runtimeProfileForm.value.moduleId = undefined;
+  }
+});
+
 onMounted(async () => {
   await loadBaseData();
+  await loadRuntimeProfiles().catch(() => {});
+  createRuntimeProfileDraft();
   resetForm();
   getList();
 });
@@ -2775,6 +4702,9 @@ onBeforeUnmount(() => {
 }
 
 .locator-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
 }
 
@@ -2784,9 +4714,23 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.locator-tip {
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
 .assertion-remove {
   display: flex;
   align-items: center;
+}
+
+.assertion-edit-table :deep(.el-table__expanded-cell) {
+  background: var(--el-fill-color-blank);
+}
+
+.mt8 {
+  margin-top: 8px;
 }
 
 .json-toolbar {
@@ -2800,6 +4744,12 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+}
+
+.runtime-profile-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .mb12 {

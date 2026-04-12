@@ -383,17 +383,22 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="8">
-            <el-form-item label="超时毫秒">
+          <el-col :span="6">
+            <el-form-item label="超时(ms)">
               <el-input-number v-model="stepDraft.timeoutMs" :min="0" :step="500" controls-position="right" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
+            <el-form-item label="思考(ms)">
+              <el-input-number v-model="stepDraft.params.thinkTimeMs" :min="0" :step="100" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
             <el-form-item label="失败继续">
               <el-switch v-model="stepDraft.continueOnFailure" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
             <el-form-item label="启用">
               <el-switch v-model="stepDraft.enabled" />
             </el-form-item>
@@ -420,7 +425,7 @@
               </el-form-item>
             </el-col>
             <el-col v-if="stepDraft.actionType === 'move'" :span="6">
-              <el-form-item label="移动耗时">
+              <el-form-item label="移动耗时(s)">
                 <el-input-number v-model="stepDraft.params.duration" :min="0" :step="0.1" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
@@ -457,12 +462,12 @@
               </el-form-item>
             </el-col>
             <el-col :span="6">
-              <el-form-item label="拖拽耗时">
+              <el-form-item label="拖拽耗时(s)">
                 <el-input-number v-model="stepDraft.params.duration" :min="0" :step="0.1" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
             <el-col :span="6">
-              <el-form-item label="预移动耗时">
+              <el-form-item label="预移动耗时(s)">
                 <el-input-number v-model="stepDraft.params.moveDuration" :min="0" :step="0.1" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
@@ -498,7 +503,7 @@
               </el-form-item>
             </el-col>
             <el-col :span="6">
-              <el-form-item label="输入间隔">
+              <el-form-item label="输入间隔(s)">
                 <el-input-number v-model="stepDraft.params.interval" :min="0" :step="0.01" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
@@ -533,7 +538,7 @@
 
           <template v-if="['wait', 'sleep'].includes(stepDraft.actionType)">
             <el-col :span="8">
-              <el-form-item label="等待毫秒">
+              <el-form-item label="等待时长(ms)">
                 <el-input-number v-model="stepDraft.params.waitMs" :min="0" :step="500" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
@@ -551,7 +556,7 @@
               </el-form-item>
             </el-col>
             <el-col :span="6">
-              <el-form-item label="启动等待">
+              <el-form-item label="启动等待(ms)">
                 <el-input-number v-model="stepDraft.params.waitMs" :min="0" :step="500" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
@@ -669,6 +674,23 @@
         <el-form-item label="执行结束关闭应用">
           <el-switch v-model="runForm.closeAppOnFinish" />
         </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="8">
+            <el-form-item label="消息超时(秒)">
+              <el-input-number v-model="runForm.runTimeoutSec" :min="1" :step="10" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="单步超时(ms)">
+              <el-input-number v-model="runForm.stepTimeoutMs" :min="500" :step="500" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="步骤思考(ms)">
+              <el-input-number v-model="runForm.stepThinkTimeMs" :min="0" :step="100" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
         <el-divider content-position="left">逻辑视口覆盖</el-divider>
         <el-form-item label="视口模式">
           <el-select v-model="runForm.viewportMode" style="width: 100%">
@@ -1572,6 +1594,7 @@ function createDefaultStep(actionType = 'click') {
       interval: 0.02,
       key: 'enter',
       keys: [],
+      thinkTimeMs: 0,
       waitMs: 1000,
       appPath: '',
       appArgs: []
@@ -1604,6 +1627,9 @@ function createRunForm() {
   return {
     agentId: undefined,
     closeAppOnFinish: true,
+    runTimeoutSec: 120,
+    stepTimeoutMs: undefined,
+    stepThinkTimeMs: undefined,
     compareConfigText: '',
     ...createViewportFields()
   }
@@ -1810,6 +1836,9 @@ function normalizeStep(step, index = 0) {
   if (!Array.isArray(normalized.params.keys)) {
     normalized.params.keys = []
   }
+  const thinkTimeMs = Number(normalized.params.thinkTimeMs ?? normalized.params.think_time_ms ?? 0)
+  normalized.params.thinkTimeMs = Number.isFinite(thinkTimeMs) && thinkTimeMs >= 0 ? Math.round(thinkTimeMs) : 0
+  delete normalized.params.think_time_ms
   normalized.params.appArgs = Array.isArray(normalized.params.appArgs) ? normalized.params.appArgs : []
   normalized.params.button = normalized.params.button || 'left'
   return normalized
@@ -1943,25 +1972,28 @@ function getActionLabel(actionType) {
 
 function summarizeStep(step) {
   const params = step?.params || {}
+  const thinkTimeMs = Number(params.thinkTimeMs ?? params.think_time_ms ?? 0)
+  const thinkSuffix = Number.isFinite(thinkTimeMs) && thinkTimeMs > 0 ? ` / 思考${Math.round(thinkTimeMs)}ms` : ''
+  const withThink = (text) => `${text || '-'}${thinkSuffix}`
   if (['click', 'double_click', 'right_click', 'move', 'find_image', 'wait_image'].includes(step?.actionType)) {
     const point = params.position || {}
-    return `坐标(${point.x ?? '-'}, ${point.y ?? '-'}) / 目标图 ${step?.targetImage ? '已配置' : '未配置'}`
+    return withThink(`坐标(${point.x ?? '-'}, ${point.y ?? '-'}) / 目标图 ${step?.targetImage ? '已配置' : '未配置'}`)
   }
   if (step?.actionType === 'drag') {
     const point = params.position || {}
     const endPoint = params.endPosition || {}
-    return `起点(${point.x ?? '-'}, ${point.y ?? '-'}) -> 终点(${endPoint.x ?? '-'}, ${endPoint.y ?? '-'})`
+    return withThink(`起点(${point.x ?? '-'}, ${point.y ?? '-'}) -> 终点(${endPoint.x ?? '-'}, ${endPoint.y ?? '-'})`)
   }
   if (step?.actionType === 'scroll') {
-    return `纵向 ${params.scrollAmount ?? 0} / 横向 ${params.horizontalScroll ?? 0}`
+    return withThink(`纵向 ${params.scrollAmount ?? 0} / 横向 ${params.horizontalScroll ?? 0}`)
   }
-  if (step?.actionType === 'typewrite') return params.text || '-'
-  if (step?.actionType === 'press') return params.key || '-'
-  if (step?.actionType === 'hotkey') return params.semantic || (Array.isArray(params.keys) ? params.keys.join(' + ') : '-')
-  if (['wait', 'sleep'].includes(step?.actionType)) return `${params.waitMs || 0}ms`
-  if (step?.actionType === 'launch_app') return params.appPath || '-'
-  if (step?.actionType === 'assert_visual') return `基准图 ${step?.baselineImages?.length || 0} 张`
-  return '-'
+  if (step?.actionType === 'typewrite') return withThink(params.text || '-')
+  if (step?.actionType === 'press') return withThink(params.key || '-')
+  if (step?.actionType === 'hotkey') return withThink(params.semantic || (Array.isArray(params.keys) ? params.keys.join(' + ') : '-'))
+  if (['wait', 'sleep'].includes(step?.actionType)) return withThink(`${params.waitMs || 0}ms`)
+  if (step?.actionType === 'launch_app') return withThink(params.appPath || '-')
+  if (step?.actionType === 'assert_visual') return withThink(`基准图 ${step?.baselineImages?.length || 0} 张`)
+  return withThink('-')
 }
 
 function getRunStatusMeta(status) {
@@ -2440,7 +2472,25 @@ function saveCase() {
 
 function openRunDialog(row) {
   selectedCase.value = row
-  runForm.value = createRunForm()
+  const runtimeSettings = cloneData(row?.runtimeSettings || row?.runtime_settings || {})
+  const stepTimeoutMs = Number(
+    runtimeSettings.stepTimeoutMs
+    ?? runtimeSettings.step_timeout_ms
+    ?? runtimeSettings.timeoutMs
+    ?? runtimeSettings.timeout_ms
+  )
+  const stepThinkTimeMs = Number(
+    runtimeSettings.stepThinkTimeMs
+    ?? runtimeSettings.step_think_time_ms
+    ?? runtimeSettings.thinkTimeMs
+    ?? runtimeSettings.think_time_ms
+  )
+  runForm.value = {
+    ...createRunForm(),
+    stepTimeoutMs: Number.isFinite(stepTimeoutMs) && stepTimeoutMs >= 500 ? Math.round(stepTimeoutMs) : undefined,
+    stepThinkTimeMs: Number.isFinite(stepThinkTimeMs) && stepThinkTimeMs >= 0 ? Math.round(stepThinkTimeMs) : undefined,
+    ...createViewportFields(runtimeSettings)
+  }
   showRunDialog.value = true
 }
 
@@ -2467,14 +2517,42 @@ function submitRun() {
     ElMessage.error(error.message)
     return
   }
+  const runTimeoutSec = Number(runForm.value.runTimeoutSec)
+  if (!Number.isFinite(runTimeoutSec) || runTimeoutSec <= 0) {
+    ElMessage.error('消息超时必须大于 0 秒')
+    return
+  }
+  const stepTimeoutMs = runForm.value.stepTimeoutMs
+  if (stepTimeoutMs !== undefined && stepTimeoutMs !== null && stepTimeoutMs !== '') {
+    const normalizedStepTimeoutMs = Number(stepTimeoutMs)
+    if (!Number.isFinite(normalizedStepTimeoutMs) || normalizedStepTimeoutMs < 500) {
+      ElMessage.error('单步超时必须大于等于 500ms')
+      return
+    }
+  }
+  const stepThinkTimeRaw = runForm.value.stepThinkTimeMs
+  if (stepThinkTimeRaw !== undefined && stepThinkTimeRaw !== null && stepThinkTimeRaw !== '') {
+    const normalizedStepThinkTimeMs = Number(stepThinkTimeRaw)
+    if (!Number.isFinite(normalizedStepThinkTimeMs) || normalizedStepThinkTimeMs < 0) {
+      ElMessage.error('步骤思考时间必须大于等于 0ms')
+      return
+    }
+  }
   loading.run = true
   const payload = {
     desktopCaseId: selectedCase.value.desktopCaseId,
     agentId: runForm.value.agentId,
-    closeAppOnFinish: runForm.value.closeAppOnFinish
+    closeAppOnFinish: runForm.value.closeAppOnFinish,
+    runTimeoutSec: Math.max(Math.round(runTimeoutSec), 1)
   }
   const runtimeOverrides = {
     ...buildViewportPayload(runForm.value)
+  }
+  if (stepTimeoutMs !== undefined && stepTimeoutMs !== null && stepTimeoutMs !== '') {
+    runtimeOverrides.stepTimeoutMs = Math.round(Number(stepTimeoutMs))
+  }
+  if (stepThinkTimeRaw !== undefined && stepThinkTimeRaw !== null && stepThinkTimeRaw !== '') {
+    runtimeOverrides.stepThinkTimeMs = Math.round(Math.max(Number(stepThinkTimeRaw), 0))
   }
   if (compareConfig) {
     runtimeOverrides.compareConfig = compareConfig

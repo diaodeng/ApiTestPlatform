@@ -287,6 +287,7 @@ class DesktopCaseRunRequestModel(DesktopJsonModel):
     app_path: str | None = None
     app_args: list[str] = Field(default_factory=list)
     close_app_on_finish: bool | None = None
+    run_timeout_sec: int = 120
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     continue_on_failure: bool = False
     trigger_type: str = "manual"

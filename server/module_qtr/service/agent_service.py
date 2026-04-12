@@ -40,7 +40,12 @@ def _summarize_message(message: dict | None) -> str:
     return json.dumps(_sanitize_log_value(message or {}), ensure_ascii=False)
 
 
-async def send_message(agent_code: str, message: dict, request_id: str = None):
+async def send_message(
+    agent_code: str,
+    message: dict,
+    request_id: str = None,
+    timeout_seconds: int | float | None = None,
+):
     logger.info(f"agent_code: {agent_code}")
     request_type = message.get('requestType')
     logger.info(f"转发类型: {request_type}")
@@ -78,7 +83,13 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
 
         # 等待Future对象的结果（即WebSocket客户端的响应）
         try:
-            response_data = await asyncio.wait_for(future, timeout=120)
+            request_timeout = 120.0
+            if timeout_seconds not in (None, ""):
+                try:
+                    request_timeout = max(float(timeout_seconds), 1.0)
+                except Exception:
+                    request_timeout = 120.0
+            response_data = await asyncio.wait_for(future, timeout=request_timeout)
             logger.info(f"response={_summarize_message(response_data)}")
             response = {}
             if response_data.get("Error", None):
