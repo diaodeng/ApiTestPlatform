@@ -176,6 +176,80 @@ class WebCaseService:
         return merged_result
 
     @classmethod
+    def _extract_step_identity(cls, step_payload: dict[str, Any]) -> tuple[str, int | None, str]:
+        """提取步骤唯一标识：stepId、stepIndex、stepName。"""
+        step_id = str(step_payload.get("stepId") or step_payload.get("step_id") or "").strip()
+        step_index_raw = step_payload.get("stepIndex")
+        if step_index_raw is None:
+            step_index_raw = step_payload.get("step_index")
+        try:
+            step_index = int(step_index_raw) if step_index_raw not in (None, "") else None
+        except Exception:
+            step_index = None
+        step_name = str(step_payload.get("stepName") or step_payload.get("step_name") or "").strip()
+        return step_id, step_index, step_name
+
+    @classmethod
+    def _find_step_result_index(
+        cls,
+        step_results: list[dict[str, Any]],
+        step_payload: dict[str, Any],
+    ) -> int:
+        """在步骤结果列表中查找匹配项索引，未命中返回-1。"""
+        incoming_step_id, incoming_step_index, incoming_step_name = cls._extract_step_identity(step_payload)
+        for index, item in enumerate(step_results):
+            if not isinstance(item, dict):
+                continue
+            current_step_id, current_step_index, current_step_name = cls._extract_step_identity(item)
+            if incoming_step_id and current_step_id and incoming_step_id == current_step_id:
+                return index
+            if incoming_step_index is not None and current_step_index is not None and incoming_step_index == current_step_index:
+                return index
+            if incoming_step_name and current_step_name and incoming_step_name == current_step_name:
+                return index
+        return -1
+
+    @classmethod
+    def _upsert_run_step_result(
+        cls,
+        result_payload: dict[str, Any],
+        step_payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """将单步中间态写入结果JSON，已存在则更新，不存在则追加。"""
+        step_results = result_payload.get("steps")
+        if not isinstance(step_results, list):
+            step_results = []
+        normalized_step = cls._loads(step_payload, {})
+        if not isinstance(normalized_step, dict):
+            normalized_step = {}
+        target_index = cls._find_step_result_index(step_results, normalized_step)
+        if target_index >= 0:
+            merged_step = step_results[target_index]
+            if not isinstance(merged_step, dict):
+                merged_step = {}
+            merged_step.update(normalized_step)
+            step_results[target_index] = merged_step
+        else:
+            step_results.append(normalized_step)
+        result_payload["steps"] = step_results
+        return step_results
+
+    @classmethod
+    def _merge_runtime_debug_payload(
+        cls,
+        result_payload: dict[str, Any],
+        runtime_debug: dict[str, Any] | None,
+    ) -> None:
+        """合并运行时调试信息，避免覆盖已有字段。"""
+        if not isinstance(runtime_debug, dict):
+            return
+        current_debug = result_payload.get("runtimeDebug")
+        if not isinstance(current_debug, dict):
+            current_debug = {}
+        current_debug.update(runtime_debug)
+        result_payload["runtimeDebug"] = current_debug
+
+    @classmethod
     def _is_run_waiting_manual_confirm(cls, run_record: HrmWebCaseRun) -> bool:
         """判断执行记录是否处于“等待手工登录确认继续”状态。"""
         result_payload = cls._loads(run_record.result_json, {})
@@ -239,6 +313,67 @@ class WebCaseService:
         return result
 
     @classmethod
+    def _normalize_host_patterns(cls, raw_value: Any) -> list[str]:
+        """标准化作用域匹配域名列表，去重并保留顺序。"""
+        values: list[str] = []
+        if isinstance(raw_value, list):
+            values = [str(item or "").strip().lower() for item in raw_value]
+        elif isinstance(raw_value, str):
+            values = [item.strip().lower() for item in raw_value.split(",")]
+        elif raw_value not in (None, ""):
+            values = [str(raw_value).strip().lower()]
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in values:
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            result.append(item)
+        return result
+
+    @classmethod
+    def _normalize_persist_context_scopes(cls, raw_scopes: Any) -> list[dict[str, Any]]:
+        """标准化保留浏览器状态作用域配置。"""
+        source_list = raw_scopes if isinstance(raw_scopes, list) else []
+        normalized: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for raw_item in source_list:
+            if not isinstance(raw_item, dict):
+                continue
+            key = str(
+                raw_item.get("key")
+                or raw_item.get("scopeKey")
+                or raw_item.get("scope_key")
+                or raw_item.get("persistContextKey")
+                or raw_item.get("persist_context_key")
+                or ""
+            ).strip()
+            if not key:
+                continue
+            key_lower = key.lower()
+            if key_lower in seen_keys:
+                continue
+            seen_keys.add(key_lower)
+            label = str(raw_item.get("label") or raw_item.get("name") or key).strip()
+            host_patterns = cls._normalize_host_patterns(
+                raw_item.get("hostPatterns")
+                if raw_item.get("hostPatterns") is not None
+                else raw_item.get("host_patterns")
+            )
+            if not host_patterns:
+                host_patterns = cls._normalize_host_patterns(raw_item.get("host") or raw_item.get("domain"))
+            normalized.append(
+                {
+                    "key": key,
+                    "label": label or key,
+                    "hostPatterns": host_patterns,
+                    "enabled": cls._to_bool(raw_item.get("enabled"), default=True),
+                    "remark": raw_item.get("remark"),
+                }
+            )
+        return normalized
+
+    @classmethod
     def _merge_runtime_overrides(
         cls,
         base_runtime_overrides: dict[str, Any] | None,
@@ -282,6 +417,12 @@ class WebCaseService:
         cookie_rules = cls._loads(source.get("cookieRules") if source.get("cookieRules") is not None else source.get("cookie_rules"), [])
         if not isinstance(cookie_rules, list):
             cookie_rules = []
+        persist_context_scopes = cls._loads(
+            source.get("persistContextScopes")
+            if source.get("persistContextScopes") is not None
+            else source.get("persist_context_scopes"),
+            [],
+        )
 
         profile_name = str(source.get("profileName") or source.get("profile_name") or "").strip()
         profile_type = str(source.get("profileType") or source.get("profile_type") or "runtime").strip().lower() or "runtime"
@@ -311,6 +452,7 @@ class WebCaseService:
             "runtimeOverrides": runtime_overrides,
             "variables": variables,
             "cookieRules": [item for item in cookie_rules if isinstance(item, dict)],
+            "persistContextScopes": cls._normalize_persist_context_scopes(persist_context_scopes),
             "remark": source.get("remark"),
         }
 
@@ -2325,4 +2467,153 @@ class WebCaseService:
                     "update_time": now,
                 },
             )
+            query_db.commit()
+            return
+
+    @classmethod
+    def handle_agent_run_event(
+        cls,
+        query_db: Session,
+        agent_code: str,
+        message_data: dict[str, Any],
+    ) -> None:
+        """处理 Agent 上报的 Web 执行中间态事件，并实时落库。"""
+        payload = message_data.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        run_id = (
+            message_data.get("web_case_run_id")
+            or message_data.get("webCaseRunId")
+            or payload.get("webCaseRunId")
+            or payload.get("web_case_run_id")
+        )
+        if not run_id:
+            return
+        try:
+            run_id_int = int(run_id)
+        except Exception:
+            return
+
+        run_record = WebCaseDao.get_run_record(query_db, run_id_int)
+        if run_record is None:
+            logger.warning(f"未找到Web执行记录，web_case_run_id={run_id_int}")
+            return
+
+        message_type = str(message_data.get("type") or "").strip().lower()
+        now = datetime.now()
+        result_payload = cls._merge_run_result_payload(run_record)
+        if not isinstance(result_payload, dict):
+            result_payload = {}
+
+        update_data: dict[str, Any] = {
+            "agent_code": agent_code,
+            "update_time": now,
+        }
+        if run_record.update_by:
+            update_data["update_by"] = run_record.update_by
+
+        current_status = int(run_record.status or 0)
+        finished_statuses = {
+            CaseRunStatus.passed.value,
+            CaseRunStatus.failed.value,
+            CaseRunStatus.error.value,
+        }
+
+        def _attach_common_payload() -> None:
+            """将通用中间态字段写入结果JSON。"""
+            phase = str(payload.get("phase") or "").strip().lower()
+            if phase:
+                result_payload["runPhase"] = phase
+            if payload.get("pageUrl"):
+                result_payload["pageUrl"] = payload.get("pageUrl")
+            progress = payload.get("progress")
+            if isinstance(progress, dict):
+                result_payload["progress"] = progress
+            current_step = payload.get("currentStep")
+            if isinstance(current_step, dict):
+                result_payload["currentStep"] = current_step
+            if payload.get("awaitingManualConfirm") is True:
+                result_payload["awaitingManualConfirm"] = True
+            if payload.get("manualLoginStatus") is not None:
+                result_payload["manualLoginStatus"] = payload.get("manualLoginStatus")
+            result_patch = payload.get("resultPatch")
+            if isinstance(result_patch, dict):
+                result_payload.update(result_patch)
+            cls._merge_runtime_debug_payload(
+                result_payload,
+                payload.get("runtimeDebug") if isinstance(payload.get("runtimeDebug"), dict) else None,
+            )
+            result_payload["lastProgressAt"] = now.isoformat()
+
+        if message_type == "web_run_step":
+            _attach_common_payload()
+            step_payload = payload.get("step")
+            if isinstance(step_payload, dict):
+                step_results = cls._upsert_run_step_result(result_payload, step_payload)
+                failed_reason = cls._extract_run_error_message({"steps": step_results})
+                if failed_reason:
+                    update_data["error_message"] = failed_reason
+            if current_status not in finished_statuses:
+                update_data["status"] = CaseRunStatus.running.value
+            update_data["result_json"] = cls._dumps(result_payload)
+            WebCaseDao.update_run_record(query_db, run_id_int, update_data)
+            query_db.commit()
+            return
+
+        if message_type == "web_run_status":
+            _attach_common_payload()
+            if current_status not in finished_statuses:
+                update_data["status"] = CaseRunStatus.running.value
+            update_data["result_json"] = cls._dumps(result_payload)
+            WebCaseDao.update_run_record(query_db, run_id_int, update_data)
+            query_db.commit()
+            return
+
+        if message_type == "web_run_error":
+            _attach_common_payload()
+            if isinstance(payload.get("step"), dict):
+                cls._upsert_run_step_result(result_payload, payload.get("step"))
+            error_message = (
+                str(message_data.get("message") or "").strip()
+                or str(payload.get("message") or "").strip()
+                or cls._extract_run_error_message(result_payload)
+                or "执行失败"
+            )
+            update_data.update(
+                {
+                    "status": CaseRunStatus.failed.value,
+                    "error_message": error_message,
+                    "ended_at": now,
+                    "result_json": cls._dumps(result_payload),
+                }
+            )
+            started_at = run_record.started_at or now
+            update_data["duration_ms"] = max(0, int((now - started_at).total_seconds() * 1000))
+            WebCaseDao.update_run_record(query_db, run_id_int, update_data)
+            query_db.commit()
+            return
+
+        if message_type == "web_run_finished":
+            _attach_common_payload()
+            steps_payload = payload.get("steps")
+            if isinstance(steps_payload, list):
+                result_payload["steps"] = [item for item in steps_payload if isinstance(item, dict)]
+            success_from_payload = payload.get("success")
+            if isinstance(success_from_payload, bool):
+                run_success = success_from_payload
+            else:
+                inferred = cls._infer_run_success_from_result(result_payload)
+                run_success = inferred if inferred is not None else True
+            failure_message = cls._extract_run_error_message(result_payload)
+            update_data.update(
+                {
+                    "status": CaseRunStatus.passed.value if run_success else CaseRunStatus.failed.value,
+                    "error_message": None if run_success else (failure_message or "执行失败"),
+                    "ended_at": now,
+                    "result_json": cls._dumps(result_payload),
+                }
+            )
+            started_at = run_record.started_at or now
+            update_data["duration_ms"] = max(0, int((now - started_at).total_seconds() * 1000))
+            WebCaseDao.update_run_record(query_db, run_id_int, update_data)
             query_db.commit()

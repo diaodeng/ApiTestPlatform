@@ -48,6 +48,16 @@ class WebAssertionModel(WebJsonModel):
     target_snapshot: WebTargetSnapshotModel | None = None
 
 
+class WebPersistContextScopeModel(WebJsonModel):
+    """保留浏览器状态作用域配置。"""
+
+    key: str = ""
+    label: str = ""
+    host_patterns: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    remark: str | None = None
+
+
 class WebStepModel(WebJsonModel):
     step_id: int | str | None = None
     step_index: int = 0
@@ -259,6 +269,7 @@ class WebRuntimeProfileModel(WebJsonModel):
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     variables: dict[str, Any] = Field(default_factory=dict)
     cookie_rules: list[dict[str, Any]] = Field(default_factory=list)
+    persist_context_scopes: list[WebPersistContextScopeModel] = Field(default_factory=list)
     remark: str | None = None
     create_by: str | None = None
     update_by: str | None = None
@@ -278,6 +289,7 @@ class WebRuntimeProfileSaveModel(WebJsonModel):
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     variables: dict[str, Any] = Field(default_factory=dict)
     cookie_rules: list[dict[str, Any]] = Field(default_factory=list)
+    persist_context_scopes: list[WebPersistContextScopeModel] = Field(default_factory=list)
     remark: str | None = None
 
 
