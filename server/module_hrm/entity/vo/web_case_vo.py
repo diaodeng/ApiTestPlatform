@@ -246,7 +246,9 @@ class WebCaseRunRequestModel(WebJsonModel):
     headless: bool | None = None
     close_browser_on_finish: bool | None = None
     persist_context_enabled: bool = False
+    persist_context_auto_sync_session: bool = True
     persist_context_key: str | None = None
+    browser_session_id: str | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     runtime_profile_id: str | None = None
     manual_login_enabled: bool = False
@@ -307,6 +309,52 @@ class WebRuntimeProfilePageQueryModel(WebRuntimeProfileQueryModel):
     is_page: bool = False
 
 
+class WebBrowserSessionModel(WebJsonModel):
+    session_id: str | None = None
+    session_name: str = ""
+    scope_key: str = ""
+    enabled: bool = True
+    project_id: int | None = None
+    module_id: int | None = None
+    browser_name: str | None = None
+    sort: int = 0
+    host_patterns: list[str] = Field(default_factory=list)
+    storage_state: dict[str, Any] = Field(default_factory=dict)
+    remark: str | None = None
+    create_by: str | None = None
+    update_by: str | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+class WebBrowserSessionSaveModel(WebJsonModel):
+    session_id: str | None = None
+    session_name: str = ""
+    scope_key: str | None = None
+    enabled: bool = True
+    project_id: int | None = None
+    module_id: int | None = None
+    browser_name: str | None = None
+    sort: int = 0
+    host_patterns: list[str] = Field(default_factory=list)
+    storage_state: dict[str, Any] = Field(default_factory=dict)
+    remark: str | None = None
+
+
+class WebBrowserSessionQueryModel(QueryModel):
+    session_id: str | None = None
+    session_name: str | None = None
+    enabled: bool | None = None
+    project_id: int | None = None
+    module_id: int | None = None
+    browser_name: str | None = None
+
+
+@as_query
+class WebBrowserSessionPageQueryModel(WebBrowserSessionQueryModel):
+    is_page: bool = False
+
+
 class WebRecordingStartRequestModel(WebJsonModel):
     web_case_id: int | None = None
     agent_id: int | None = None
@@ -316,7 +364,9 @@ class WebRecordingStartRequestModel(WebJsonModel):
     browser_name: str = "chromium"
     headless: bool = False
     persist_context_enabled: bool = False
+    persist_context_auto_sync_session: bool = True
     persist_context_key: str | None = None
+    browser_session_id: str | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     runtime_profile_id: str | None = None
     manual_login_enabled: bool = False

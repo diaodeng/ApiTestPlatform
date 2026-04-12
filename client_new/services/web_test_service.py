@@ -576,6 +576,242 @@ def _resolve_persist_context_settings(runtime_options: dict[str, Any]) -> tuple[
     return enabled, scope_key
 
 
+def _resolve_browser_session_id(runtime_options: dict[str, Any]) -> str:
+    """解析浏览器 Session ID。"""
+    candidates = [
+        runtime_options.get("browserSessionId"),
+        runtime_options.get("browser_session_id"),
+        runtime_options.get("persistContextSessionId"),
+        runtime_options.get("persist_context_session_id"),
+        runtime_options.get("sessionProfileId"),
+        runtime_options.get("session_profile_id"),
+    ]
+    for candidate in candidates:
+        session_id = str(candidate or "").strip()
+        if session_id:
+            return session_id
+    return ""
+
+
+def _resolve_persist_context_auto_sync_session(runtime_options: dict[str, Any], *, persist_enabled: bool) -> bool:
+    """解析是否启用“运行结束自动同步到 Browser Session”。"""
+    if not persist_enabled:
+        return False
+    candidates = [
+        runtime_options.get("persistContextAutoSyncSession"),
+        runtime_options.get("persist_context_auto_sync_session"),
+        runtime_options.get("persistContextSyncToSession"),
+        runtime_options.get("persist_context_sync_to_session"),
+    ]
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return _as_bool(candidate, True)
+    return True
+
+
+def _attach_runtime_persist_debug(
+    runtime_debug: dict[str, Any],
+    runtime_options: dict[str, Any],
+    *,
+    browser_name: str,
+    persist_enabled: bool,
+    context_state_path: Path | None = None,
+) -> None:
+    """补齐 runtimeDebug 中与浏览器状态同步相关的字段。"""
+    _, persist_context_key = _resolve_persist_context_settings(runtime_options)
+    runtime_debug["browserSessionId"] = _resolve_browser_session_id(runtime_options)
+    runtime_debug["persistContextKey"] = persist_context_key
+    runtime_debug["persistContextEnabled"] = bool(persist_enabled)
+    runtime_debug["persistContextAutoSyncSession"] = _resolve_persist_context_auto_sync_session(
+        runtime_options,
+        persist_enabled=persist_enabled,
+    )
+    runtime_debug["persistContextHosts"] = _resolve_persist_context_hosts(runtime_options)
+    runtime_debug["browserName"] = str(browser_name or "").strip().lower()
+    if context_state_path is not None:
+        runtime_debug["persistContextPath"] = str(context_state_path)
+    else:
+        runtime_debug.setdefault("persistContextPath", "")
+
+
+async def _append_persist_final_state_for_sync(
+    runtime_debug: dict[str, Any],
+    context: Any,
+    runtime_options: dict[str, Any],
+    *,
+    persist_enabled: bool,
+) -> None:
+    """在结束事件前附加最终 storage_state（按作用域过滤后）用于后端回写 Session。"""
+    auto_sync_session = _resolve_persist_context_auto_sync_session(
+        runtime_options,
+        persist_enabled=persist_enabled,
+    )
+    runtime_debug["persistContextAutoSyncSession"] = auto_sync_session
+    if not auto_sync_session or context is None:
+        return
+    try:
+        storage_state = await _capture_storage_state_payload(context)
+        persist_hosts = _resolve_persist_context_hosts(runtime_options)
+        final_state = _filter_storage_state_payload(storage_state, persist_hosts) if persist_hosts else storage_state
+        runtime_debug["persistContextFinalState"] = final_state
+    except Exception as exc:
+        logger.debug(f"采集最终浏览器状态失败: {exc}")
+
+
+def _normalize_persist_context_hosts(raw_value: Any) -> list[str]:
+    """标准化保留浏览器状态的域名匹配列表。"""
+    values: list[str] = []
+    if isinstance(raw_value, list):
+        values = [str(item or "").strip().lower() for item in raw_value]
+    elif isinstance(raw_value, str):
+        values = [item.strip().lower() for item in re.split(r"[,\n;]+", raw_value)]
+    elif raw_value not in (None, ""):
+        values = [str(raw_value).strip().lower()]
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not item:
+            continue
+        normalized = item
+        if "://" in normalized:
+            normalized = _host_from_url(normalized)
+        normalized = normalized.strip().lstrip(".")
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _resolve_persist_context_hosts(runtime_options: dict[str, Any]) -> list[str]:
+    """解析本次持久化需要保留的域名列表；空列表表示全域持久化。"""
+    for key in (
+        "persistContextHosts",
+        "persist_context_hosts",
+        "persistContextHostPatterns",
+        "persist_context_host_patterns",
+    ):
+        value = runtime_options.get(key)
+        hosts = _normalize_persist_context_hosts(value)
+        if hosts:
+            return hosts
+
+    _, scope_key = _resolve_persist_context_settings(runtime_options)
+    if not scope_key:
+        return []
+    scope_key_lower = scope_key.lower()
+    raw_scopes = runtime_options.get("persistContextScopes")
+    if raw_scopes is None:
+        raw_scopes = runtime_options.get("persist_context_scopes")
+    for raw_item in _as_list(raw_scopes):
+        item = _as_dict(raw_item)
+        if not item:
+            continue
+        item_key = str(
+            item.get("key")
+            or item.get("scopeKey")
+            or item.get("scope_key")
+            or item.get("persistContextKey")
+            or item.get("persist_context_key")
+            or ""
+        ).strip()
+        if not item_key or item_key.lower() != scope_key_lower:
+            continue
+        if item.get("enabled") is False:
+            return []
+        hosts = _normalize_persist_context_hosts(
+            item.get("hostPatterns")
+            if item.get("hostPatterns") is not None
+            else item.get("host_patterns")
+        )
+        if hosts:
+            return hosts
+        return _normalize_persist_context_hosts(item.get("host") or item.get("domain"))
+    return []
+
+
+def _host_matches_persist_hosts(host: str, hosts: list[str]) -> bool:
+    if not hosts:
+        return True
+    host_text = str(host or "").strip().lower().lstrip(".")
+    if not host_text:
+        return False
+    for raw_pattern in hosts:
+        pattern = str(raw_pattern or "").strip().lower().lstrip(".")
+        if not pattern:
+            continue
+        if pattern in {"*", "all"}:
+            return True
+        if pattern.startswith("*."):
+            suffix = pattern[2:]
+            if suffix and (host_text == suffix or host_text.endswith(f".{suffix}")):
+                return True
+            continue
+        if "*" in pattern:
+            regex = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
+            if re.match(regex, host_text):
+                return True
+            continue
+        # 兼容父域 cookie：规则为子域时，允许匹配其父域（例如 pattern=test.a.com, host=a.com）。
+        if pattern.endswith(f".{host_text}"):
+            return True
+        if host_text == pattern or host_text.endswith(f".{pattern}"):
+            return True
+    return False
+
+
+def _extract_cookie_host(cookie_item: dict[str, Any]) -> str:
+    """提取 cookie 的有效 host，优先 domain，其次 url。"""
+    domain = str(cookie_item.get("domain") or "").strip().lower().lstrip(".")
+    if domain:
+        if "://" in domain:
+            parsed = _host_from_url(domain)
+            if parsed:
+                return parsed
+        return domain.split(":")[0]
+    cookie_url = str(cookie_item.get("url") or "").strip()
+    return _host_from_url(cookie_url)
+
+
+async def _capture_storage_state_payload(context: Any) -> dict[str, Any]:
+    """抓取完整 storage_state，优先包含 indexedDB。"""
+    try:
+        return await context.storage_state(indexed_db=True)
+    except TypeError:
+        return await context.storage_state()
+
+
+async def _save_storage_state_payload(context: Any, state_path: Path) -> None:
+    """保存完整 storage_state 到目标文件，优先包含 indexedDB。"""
+    try:
+        await context.storage_state(path=str(state_path), indexed_db=True)
+    except TypeError:
+        await context.storage_state(path=str(state_path))
+
+
+def _filter_storage_state_payload(storage_state: dict[str, Any], hosts: list[str]) -> dict[str, Any]:
+    """按域名过滤 storage_state（cookies + origins）。"""
+    if not hosts:
+        return storage_state
+    cookies = []
+    for raw_cookie in _as_list(storage_state.get("cookies")):
+        cookie_item = _as_dict(raw_cookie)
+        if not cookie_item:
+            continue
+        if _host_matches_persist_hosts(_extract_cookie_host(cookie_item), hosts):
+            cookies.append(cookie_item)
+
+    origins = []
+    for raw_origin in _as_list(storage_state.get("origins")):
+        origin_item = _as_dict(raw_origin)
+        if not origin_item:
+            continue
+        origin = str(origin_item.get("origin") or "").strip()
+        if _host_matches_persist_hosts(_host_from_url(origin), hosts):
+            origins.append(origin_item)
+    return {"cookies": cookies, "origins": origins}
+
+
 def _resolve_reuse_retained_session_id(runtime_options: dict[str, Any]) -> str:
     """解析跨用例复用浏览器会话ID。"""
     candidates = [
@@ -619,6 +855,64 @@ def _build_context_state_path(
     return storage_dir / f"{safe_scope}.{safe_browser}.json"
 
 
+def _normalize_seed_storage_state(raw_state: Any) -> dict[str, Any]:
+    """标准化外部注入的storage_state，仅保留 cookies/origins。"""
+    state_value = raw_state
+    if isinstance(raw_state, str):
+        text = raw_state.strip()
+        if text:
+            try:
+                state_value = json.loads(text)
+            except Exception:
+                state_value = {}
+    state = _as_dict(state_value)
+    cookies = []
+    for item in _as_list(state.get("cookies")):
+        cookie_item = _as_dict(item)
+        if cookie_item:
+            cookies.append(cookie_item)
+    origins = []
+    for item in _as_list(state.get("origins")):
+        origin_item = _as_dict(item)
+        if origin_item:
+            origins.append(origin_item)
+    return {
+        "cookies": cookies,
+        "origins": origins,
+    }
+
+
+def _resolve_seed_storage_state(runtime_options: dict[str, Any]) -> dict[str, Any]:
+    """解析本次执行用于初始化上下文的storage_state。"""
+    candidates = (
+        runtime_options.get("persistContextSeedState"),
+        runtime_options.get("persist_context_seed_state"),
+        runtime_options.get("persistContextSeedStorageState"),
+        runtime_options.get("persist_context_seed_storage_state"),
+    )
+    for candidate in candidates:
+        if candidate in (None, ""):
+            continue
+        normalized = _normalize_seed_storage_state(candidate)
+        if normalized.get("cookies") or normalized.get("origins"):
+            return normalized
+    return {}
+
+
+def _seed_context_state_file_if_needed(runtime_options: dict[str, Any], state_path: Path | None) -> None:
+    """当本地状态文件不存在时，使用运行时下发的seed state初始化。"""
+    if state_path is None or state_path.exists():
+        return
+    seed_state = _resolve_seed_storage_state(runtime_options)
+    if not seed_state:
+        return
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(seed_state, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        logger.debug(f"写入浏览器上下文seed state失败: {exc}")
+
+
 async def _create_browser_context(
     browser: Any,
     *,
@@ -635,19 +929,31 @@ async def _create_browser_context(
         default_scope=default_scope,
     )
     context_kwargs: dict[str, Any] = {"ignore_https_errors": True}
+    _seed_context_state_file_if_needed(runtime_options, state_path)
     if state_path is not None and state_path.exists():
         context_kwargs["storage_state"] = str(state_path)
     context = await browser.new_context(**context_kwargs)
     return context, state_path
 
 
-async def _save_context_state_if_needed(context: Any, state_path: Path | None) -> None:
+async def _save_context_state_if_needed(
+    context: Any,
+    state_path: Path | None,
+    runtime_options: dict[str, Any] | None = None,
+) -> None:
     """在关闭上下文前落盘状态，便于下次恢复登录态。"""
     if context is None or state_path is None:
         return
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        await context.storage_state(path=str(state_path))
+        effective_runtime = runtime_options if isinstance(runtime_options, dict) else {}
+        persist_hosts = _resolve_persist_context_hosts(effective_runtime)
+        if persist_hosts:
+            storage_state = await _capture_storage_state_payload(context)
+            filtered_state = _filter_storage_state_payload(storage_state, persist_hosts)
+            state_path.write_text(json.dumps(filtered_state, ensure_ascii=False), encoding="utf-8")
+        else:
+            await _save_storage_state_payload(context, state_path)
     except Exception as exc:
         logger.debug(f"保存浏览器上下文状态失败: {exc}")
 
@@ -1109,6 +1415,7 @@ class RecorderSession:
     context: Any = None
     page: Any = None
     context_state_path: Path | None = None
+    persist_context_runtime: dict[str, Any] = field(default_factory=dict)
     event_index: int = 0
     events: list[dict[str, Any]] = field(default_factory=list)
     active: bool = True
@@ -1156,7 +1463,7 @@ class RecorderSession:
         self.browser = None
         self.playwright = None
         self.context_state_path = None
-        await _save_context_state_if_needed(context, context_state_path)
+        await _save_context_state_if_needed(context, context_state_path, self.persist_context_runtime)
         await _close_playwright_objects(page, context, browser, playwright)
 
 
@@ -1168,6 +1475,7 @@ class RetainedRunSession:
     context: Any = None
     page: Any = None
     context_state_path: Path | None = None
+    persist_context_runtime: dict[str, Any] = field(default_factory=dict)
 
     async def close(self) -> None:
         page = self.page
@@ -1180,7 +1488,7 @@ class RetainedRunSession:
         self.browser = None
         self.playwright = None
         self.context_state_path = None
-        await _save_context_state_if_needed(context, context_state_path)
+        await _save_context_state_if_needed(context, context_state_path, self.persist_context_runtime)
         await _close_playwright_objects(page, context, browser, playwright)
 
 
@@ -1201,6 +1509,7 @@ class PreparedRunSession:
     cookie_variables: dict[str, Any] = field(default_factory=dict)
     cookie_rules: list[dict[str, Any]] = field(default_factory=list)
     runtime_debug: dict[str, Any] = field(default_factory=dict)
+    persist_context_runtime: dict[str, Any] = field(default_factory=dict)
 
     async def close(self) -> None:
         page = self.page
@@ -1213,7 +1522,7 @@ class PreparedRunSession:
         self.browser = None
         self.playwright = None
         self.context_state_path = None
-        await _save_context_state_if_needed(context, context_state_path)
+        await _save_context_state_if_needed(context, context_state_path, self.persist_context_runtime)
         await _close_playwright_objects(page, context, browser, playwright)
 
 
@@ -1226,6 +1535,7 @@ class ActiveRunSession:
     browser: Any = None
     playwright: Any = None
     context_state_path: Path | None = None
+    persist_context_runtime: dict[str, Any] = field(default_factory=dict)
 
     async def request_cancel(self) -> None:
         self.cancel_event.set()
@@ -1239,7 +1549,7 @@ class ActiveRunSession:
         self.browser = None
         self.playwright = None
         self.context_state_path = None
-        await _save_context_state_if_needed(context, context_state_path)
+        await _save_context_state_if_needed(context, context_state_path, self.persist_context_runtime)
         await _close_playwright_objects(page, context, browser, playwright)
 
     async def close(self) -> None:
@@ -1424,6 +1734,7 @@ class WebTestService:
                 **runtime_overrides,
                 **session.runtime_options,
             }
+            session.persist_context_runtime = effective_runtime
             browser_request_options = {
                 **session.options,
                 **effective_runtime,
@@ -1679,11 +1990,31 @@ class WebTestService:
             close_browser_on_stop = bool(close_browser_on_stop)
 
         await session.disable_recording()
+        runtime_debug: dict[str, Any] = {}
+        persist_runtime = _as_dict(session.persist_context_runtime)
+        persist_enabled = session.context_state_path is not None
+        _attach_runtime_persist_debug(
+            runtime_debug,
+            persist_runtime,
+            browser_name=session.browser_name,
+            persist_enabled=persist_enabled,
+            context_state_path=session.context_state_path,
+        )
+        await _append_persist_final_state_for_sync(
+            runtime_debug,
+            session.context,
+            persist_runtime,
+            persist_enabled=persist_enabled,
+        )
         await session.sender(
             {
                 "type": "record_finished",
                 "recording_id": recording_id,
-                "payload": {"eventCount": len(session.events), "lastUrl": session.page.url if session.page else ""},
+                "payload": {
+                    "eventCount": len(session.events),
+                    "lastUrl": session.page.url if session.page else "",
+                    "runtimeDebug": runtime_debug,
+                },
             }
         )
         if close_browser_on_stop:
@@ -1780,6 +2111,7 @@ class WebTestService:
             steps=[_as_dict(step) for step in steps],
             start_url=start_url,
             close_browser_on_finish=close_browser_on_finish,
+            persist_context_runtime=effective_runtime,
         )
         try:
             prepared.playwright, prepared.browser = await start_playwright_browser(
@@ -1801,9 +2133,14 @@ class WebTestService:
                 "runtimeProfileId": runtime_options.get("runtimeProfileId") or runtime_options.get("runtime_profile_id"),
                 "cookieRuleCount": len(prepared.cookie_rules),
                 "cookieVariableKeys": sorted(prepared.cookie_variables.keys()),
-                "persistContextEnabled": prepared.context_state_path is not None,
-                "persistContextPath": str(prepared.context_state_path) if prepared.context_state_path is not None else "",
             }
+            _attach_runtime_persist_debug(
+                prepared.runtime_debug,
+                effective_runtime,
+                browser_name=browser_name,
+                persist_enabled=prepared.context_state_path is not None,
+                context_state_path=prepared.context_state_path,
+            )
             if start_url:
                 before_start_cookie_apply = await _apply_cookie_rules(
                     prepared.context,
@@ -1953,8 +2290,13 @@ class WebTestService:
         runtime_debug["manualLoginGate"]["waitingConfirm"] = False
         runtime_debug["manualLoginGate"]["confirmed"] = True
         runtime_debug["manualLoginGate"]["confirmedAt"] = int(time.time())
-        runtime_debug.setdefault("persistContextEnabled", context_state_path is not None)
-        runtime_debug.setdefault("persistContextPath", str(context_state_path) if context_state_path is not None else "")
+        _attach_runtime_persist_debug(
+            runtime_debug,
+            effective_runtime,
+            browser_name=str(effective_runtime.get("browserName") or case_data.get("browserName") or ""),
+            persist_enabled=context_state_path is not None,
+            context_state_path=context_state_path,
+        )
 
         active_session = ActiveRunSession(
             run_id=run_id,
@@ -1963,6 +2305,7 @@ class WebTestService:
             browser=browser,
             playwright=playwright,
             context_state_path=context_state_path,
+            persist_context_runtime=effective_runtime,
         )
         async with cls._lock:
             cls._active_runs[run_id] = active_session
@@ -2085,6 +2428,12 @@ class WebTestService:
                     "appliedCookies": [],
                 },
             )
+            await _append_persist_final_state_for_sync(
+                runtime_debug,
+                context,
+                effective_runtime,
+                persist_enabled=context_state_path is not None,
+            )
             response_payload = {
                 "request_type": 3,
                 "command": "continue_run_case",
@@ -2127,6 +2476,12 @@ class WebTestService:
                     "appliedCookies": [],
                 },
             )
+            await _append_persist_final_state_for_sync(
+                runtime_debug,
+                context,
+                effective_runtime,
+                persist_enabled=context_state_path is not None,
+            )
             response_payload = {
                 "request_type": 3,
                 "command": "continue_run_case",
@@ -2162,7 +2517,7 @@ class WebTestService:
                 cls._active_runs.pop(run_id, None)
             cancelled = active_session.cancel_event.is_set()
             if cancelled or prepared.close_browser_on_finish or browser is None or playwright is None:
-                await _save_context_state_if_needed(context, context_state_path)
+                await _save_context_state_if_needed(context, context_state_path, effective_runtime)
                 await _close_playwright_objects(page, context, browser, playwright)
             else:
                 retained_session_id = uuid.uuid4().hex
@@ -2173,6 +2528,7 @@ class WebTestService:
                     context=context,
                     page=page,
                     context_state_path=context_state_path,
+                    persist_context_runtime=effective_runtime,
                 )
                 async with cls._lock:
                     cls._retained_runs[retained_session_id] = retained_session
@@ -2356,7 +2712,7 @@ class WebTestService:
         cookie_variables: dict[str, Any] = {}
         cookie_rules: list[dict[str, Any]] = []
         runtime_debug: dict[str, Any] = {}
-        active_session = ActiveRunSession(run_id=run_id) if run_id > 0 else None
+        active_session = ActiveRunSession(run_id=run_id, persist_context_runtime=effective_runtime) if run_id > 0 else None
         try:
             reused_session: RetainedRunSession | None = None
             if reuse_retained_session_id:
@@ -2413,9 +2769,14 @@ class WebTestService:
                 "runtimeProfileId": runtime_options.get("runtimeProfileId") or runtime_options.get("runtime_profile_id"),
                 "cookieRuleCount": len(cookie_rules),
                 "cookieVariableKeys": sorted(cookie_variables.keys()),
-                "persistContextEnabled": context_state_path is not None,
-                "persistContextPath": str(context_state_path) if context_state_path is not None else "",
             }
+            _attach_runtime_persist_debug(
+                runtime_debug,
+                effective_runtime,
+                browser_name=browser_name,
+                persist_enabled=context_state_path is not None,
+                context_state_path=context_state_path,
+            )
             if start_url:
                 before_start_cookie_apply = await _apply_cookie_rules(
                     context,
@@ -2566,6 +2927,12 @@ class WebTestService:
                     "stage": "before_case_steps",
                 },
             )
+            await _append_persist_final_state_for_sync(
+                runtime_debug,
+                context,
+                effective_runtime,
+                persist_enabled=context_state_path is not None,
+            )
             response_payload = {
                 "request_type": 3,
                 "command": "run_case",
@@ -2617,6 +2984,12 @@ class WebTestService:
                     "stage": "before_case_steps",
                 },
             )
+            await _append_persist_final_state_for_sync(
+                runtime_debug,
+                context,
+                effective_runtime,
+                persist_enabled=context_state_path is not None,
+            )
             response_payload = {
                 "request_type": 3,
                 "command": "run_case",
@@ -2653,7 +3026,7 @@ class WebTestService:
                 async with cls._lock:
                     cls._active_runs.pop(run_id, None)
             if cancelled or close_browser_on_finish or browser is None or playwright is None:
-                await _save_context_state_if_needed(context, context_state_path)
+                await _save_context_state_if_needed(context, context_state_path, effective_runtime)
                 await _close_playwright_objects(page, context, browser, playwright)
             else:
                 retained_session_id = uuid.uuid4().hex
@@ -2664,6 +3037,7 @@ class WebTestService:
                     context=context,
                     page=page,
                     context_state_path=context_state_path,
+                    persist_context_runtime=effective_runtime,
                 )
                 page = None
                 context = None
@@ -2697,6 +3071,7 @@ class WebTestService:
         assertions = step.get("assertions") or []
         timeout_ms = _step_timeout_ms(step, runtime_options, case_data)
         started_at = time.perf_counter()
+        step_deadline = started_at + (max(timeout_ms, 500) / 1000.0)
         attempts: list[dict[str, Any]] = []
         cookie_apply: dict[str, Any] | None = None
         try:
@@ -2729,9 +3104,12 @@ class WebTestService:
                 ),
                 timeout=timeout_ms / 1000.0,
             )
-            await asyncio.wait_for(
-                cls._execute_assertions(page, locator, assertions, timeout_ms=timeout_ms),
-                timeout=timeout_ms / 1000.0,
+            await cls._execute_assertions(
+                page,
+                locator,
+                assertions,
+                timeout_ms=timeout_ms,
+                step_deadline=step_deadline,
             )
             return {
                 "stepId": step_id,
@@ -3098,7 +3476,33 @@ class WebTestService:
         raise AssertionError(f"unsupported assertion type: {assert_type}")
 
     @classmethod
-    async def _execute_assertions(cls, page: Any, locator: Any, assertions: list[Any], *, timeout_ms: int) -> None:
+    def _format_assertion_label(
+        cls,
+        index: int,
+        assert_type: str,
+        expected: Any,
+        assertion: dict[str, Any],
+    ) -> str:
+        """格式化断言标签，便于在失败信息中快速定位具体断言。"""
+        title = str(assertion.get("title") or assertion.get("name") or "").strip()
+        type_label = title or assert_type
+        expected_text = _normalize_assert_text(expected)
+        if expected_text and len(expected_text) > 64:
+            expected_text = f"{expected_text[:61]}..."
+        if expected_text:
+            return f"断言#{index}[{type_label}] expected={expected_text}"
+        return f"断言#{index}[{type_label}]"
+
+    @classmethod
+    async def _execute_assertions(
+        cls,
+        page: Any,
+        locator: Any,
+        assertions: list[Any],
+        *,
+        timeout_ms: int,
+        step_deadline: float | None = None,
+    ) -> None:
         supported_types = {
             "text_contains",
             "text_equals",
@@ -3120,9 +3524,21 @@ class WebTestService:
 
             expected = assertion.get("expected")
             assertion_wait_ms = cls._assertion_wait_ms(assertion, timeout_ms)
+            assertion_label = cls._format_assertion_label(index, assert_type, expected, assertion)
+            if step_deadline is not None:
+                step_remaining_ms = int((step_deadline - time.perf_counter()) * 1000)
+                if step_remaining_ms <= 0:
+                    raise AssertionError(f"{assertion_label}未开始执行：步骤总超时（>{timeout_ms}ms）")
+                assertion_wait_ms = max(min(assertion_wait_ms, step_remaining_ms), 120)
             deadline = time.perf_counter() + (assertion_wait_ms / 1000.0)
             last_error: Exception | None = None
-            while time.perf_counter() < deadline:
+            passed = False
+            while True:
+                now = time.perf_counter()
+                if now >= deadline:
+                    break
+                if step_deadline is not None and now >= step_deadline:
+                    break
                 remaining_ms = int((deadline - time.perf_counter()) * 1000)
                 probe_timeout = max(min(remaining_ms, 1200), 120)
                 try:
@@ -3135,11 +3551,22 @@ class WebTestService:
                         timeout_ms=probe_timeout,
                     )
                     last_error = None
+                    passed = True
                     break
                 except Exception as exc:
                     last_error = exc
                 await asyncio.sleep(0.1)
 
+            if passed:
+                continue
+            if step_deadline is not None and time.perf_counter() >= step_deadline:
+                last_message = str(last_error or "").strip() or f"{assert_type} assertion failed"
+                raise AssertionError(
+                    f"{assertion_label}超时：步骤总超时（>{timeout_ms}ms），最后错误：{last_message}"
+                ) from last_error
             if last_error is not None:
-                error_message = str(last_error or "").strip() or f"{assert_type} assertion failed"
-                raise AssertionError(f"断言#{index}失败: {error_message}") from last_error
+                last_message = str(last_error or "").strip() or f"{assert_type} assertion failed"
+                raise AssertionError(
+                    f"{assertion_label}超时（{assertion_wait_ms}ms），最后错误：{last_message}"
+                ) from last_error
+            raise AssertionError(f"{assertion_label}超时（{assertion_wait_ms}ms）")

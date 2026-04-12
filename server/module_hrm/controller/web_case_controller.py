@@ -13,6 +13,8 @@ from module_admin.service.login_service import LoginService
 from module_hrm.entity.do.web_case_do import HrmWebCase
 from module_hrm.entity.vo.web_case_vo import (
     AddWebCaseModel,
+    WebBrowserSessionPageQueryModel,
+    WebBrowserSessionSaveModel,
     WebCaseDetailModel,
     WebCasePageQueryModel,
     WebCaseRunCancelRequestModel,
@@ -251,6 +253,95 @@ async def delete_runtime_profile(
         return ResponseUtil.error(msg=str(exc))
 
 
+@webCaseController.get(
+    "/browser-session/list",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:list"))],
+)
+async def list_browser_session(
+    request: Request,
+    page_query: WebBrowserSessionPageQueryModel = Depends(WebBrowserSessionPageQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = WebCaseService.list_browser_session_services(query_db, page_query)
+        return ResponseUtil.success(data=[item.model_dump(mode="json", by_alias=True) for item in result])
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post(
+    "/browser-session",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:edit"))],
+)
+@log_decorator(title="Web浏览器Session新增", business_type=1)
+async def add_browser_session(
+    request: Request,
+    session_model: WebBrowserSessionSaveModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    try:
+        result = WebCaseService.save_browser_session_services(
+            query_db,
+            session_model,
+            user_name=current_user.user.user_name,
+            require_existing=False,
+        )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.put(
+    "/browser-session",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:edit"))],
+)
+@log_decorator(title="Web浏览器Session更新", business_type=2)
+async def update_browser_session(
+    request: Request,
+    session_model: WebBrowserSessionSaveModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    try:
+        result = WebCaseService.save_browser_session_services(
+            query_db,
+            session_model,
+            user_name=current_user.user.user_name,
+            require_existing=True,
+        )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.delete(
+    "/browser-session/{session_id}",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:edit"))],
+)
+@log_decorator(title="Web浏览器Session删除", business_type=3)
+async def delete_browser_session(
+    request: Request,
+    session_id: str,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = WebCaseService.delete_browser_session_services(query_db, session_id)
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
 @webCaseController.post(
     "/run",
     dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:run"))],
@@ -263,7 +354,7 @@ async def run_web_case(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     try:
-        if run_request.persist_context_enabled and not _has_persist_context_permission(current_user):
+        if (run_request.persist_context_enabled or run_request.browser_session_id) and not _has_persist_context_permission(current_user):
             return ResponseUtil.failure(msg="当前账号无权使用“保留浏览器状态”功能")
         result = await WebCaseService.run_web_case_services(
             query_db,
@@ -409,7 +500,7 @@ async def start_recording(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     try:
-        if start_request.persist_context_enabled and not _has_persist_context_permission(current_user):
+        if (start_request.persist_context_enabled or start_request.browser_session_id) and not _has_persist_context_permission(current_user):
             return ResponseUtil.failure(msg="当前账号无权使用“保留浏览器状态”功能")
         result = await WebCaseService.start_recording_services(
             query_db,
