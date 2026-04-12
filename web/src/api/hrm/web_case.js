@@ -46,6 +46,37 @@ export function runWebCase(data) {
   })
 }
 
+export function continueWebRun(data) {
+  return request({
+    url: '/hrm/web-case/run/continue',
+    method: 'post',
+    data
+  })
+}
+
+export function stopWebRun(data) {
+  return request({
+    url: '/hrm/web-case/run/stop',
+    method: 'post',
+    data
+  })
+}
+
+export function cancelWebRun(data) {
+  return request({
+    url: '/hrm/web-case/run/cancel',
+    method: 'post',
+    data
+  })
+}
+
+export function delWebRun(webCaseRunIds) {
+  return request({
+    url: '/hrm/web-case/run/' + webCaseRunIds,
+    method: 'delete'
+  })
+}
+
 export function listWebRuntimeProfile(query) {
   return request({
     url: '/hrm/web-case/runtime-profile/list',
@@ -107,11 +138,34 @@ export function startWebRecording(data) {
   })
 }
 
+export function continueWebRecording(data) {
+  return request({
+    url: '/hrm/web-case/recording/continue',
+    method: 'post',
+    data
+  })
+}
+
+export function cancelWebRecording(data) {
+  return request({
+    url: '/hrm/web-case/recording/cancel',
+    method: 'post',
+    data
+  })
+}
+
 export function stopWebRecording(data) {
   return request({
     url: '/hrm/web-case/recording/stop',
     method: 'post',
     data
+  })
+}
+
+export function delWebRecording(recordingIds) {
+  return request({
+    url: '/hrm/web-case/recording/' + recordingIds,
+    method: 'delete'
   })
 }
 

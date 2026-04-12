@@ -417,6 +417,7 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     F("hrm.web_case.run", "Web用例执行", "hrm.web_case", "hrm:webCase:run", 5),
     F("hrm.web_case.record", "Web用例录制", "hrm.web_case", "hrm:webCase:record", 6),
     F("hrm.web_case.history", "Web用例历史", "hrm.web_case", "hrm:webCase:history", 7),
+    F("hrm.web_case.persist_context", "Web用例保留浏览器状态", "hrm.web_case", "hrm:webCase:persistContext", 8),
     F("hrm.desktop_case.add", "桌面用例新增", "hrm.desktop_case", "hrm:desktopCase:add", 1),
     F("hrm.desktop_case.edit", "桌面用例编辑", "hrm.desktop_case", "hrm:desktopCase:edit", 2),
     F("hrm.desktop_case.remove", "桌面用例删除", "hrm.desktop_case", "hrm:desktopCase:remove", 3),

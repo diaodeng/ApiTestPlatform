@@ -131,7 +131,34 @@
           </el-form-item>
         </el-form>
 
-        <el-table v-loading="loading.runPage" :data="runRecordList" border table-layout="fixed" max-height="calc(100vh - 320px)">
+        <el-row :gutter="10" class="mb8">
+          <el-col :span="1.5">
+            <el-button type="default" plain icon="Refresh" @click="getRunList">刷新</el-button>
+          </el-col>
+          <el-col :span="2">
+            <el-button
+              type="danger"
+              plain
+              icon="Delete"
+              :disabled="!selectedRunRows.length"
+              @click="handleDeleteRunRecords()"
+              v-hasPermi="['hrm:webCase:remove']"
+            >
+              删除记录
+            </el-button>
+          </el-col>
+        </el-row>
+
+        <el-table
+          v-loading="loading.runPage"
+          :data="runRecordList"
+          border
+          table-layout="fixed"
+          max-height="calc(100vh - 320px)"
+          row-key="webCaseRunId"
+          @selection-change="handleRunSelectionChange"
+        >
+          <el-table-column type="selection" width="52" align="center" :reserve-selection="true" />
           <el-table-column label="执行记录ID" prop="webCaseRunId" width="170" />
           <el-table-column label="用例名称" min-width="220">
             <template #default="scope">{{ getCaseName(scope.row.webCaseId) || scope.row.webCaseId || "-" }}</template>
@@ -152,9 +179,30 @@
           <el-table-column label="失败原因" min-width="260" show-overflow-tooltip>
             <template #default="scope">{{ getRunRowFailureReason(scope.row) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
+          <el-table-column label="操作" width="320" fixed="right">
             <template #default="scope">
               <el-button link type="primary" icon="View" @click="openRunDetail(scope.row)">查看详情</el-button>
+              <el-button
+                v-if="canStopRun(scope.row)"
+                link
+                type="warning"
+                icon="VideoPause"
+                @click="handleStopRun(scope.row)"
+                v-hasPermi="['hrm:webCase:run']"
+              >
+                停止
+              </el-button>
+              <el-button
+                v-if="canCancelPreparedRun(scope.row)"
+                link
+                type="warning"
+                icon="CircleClose"
+                @click="handleCancelPreparedRun(scope.row)"
+                v-hasPermi="['hrm:webCase:run']"
+              >
+                取消准备
+              </el-button>
+              <el-button link type="danger" icon="Delete" @click="handleDeleteRunRecords(scope.row)" v-hasPermi="['hrm:webCase:remove']">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -213,7 +261,31 @@
           </el-col>
         </el-row>
 
-        <el-table v-loading="loading.recordingPage" :data="recordingList" border table-layout="fixed" max-height="calc(100vh - 360px)">
+        <el-row :gutter="10" class="mb8">
+          <el-col :span="2">
+            <el-button
+              type="danger"
+              plain
+              icon="Delete"
+              :disabled="!selectedRecordingRows.length"
+              @click="handleDeleteRecordingRecords()"
+              v-hasPermi="['hrm:webCase:remove']"
+            >
+              删除记录
+            </el-button>
+          </el-col>
+        </el-row>
+
+        <el-table
+          v-loading="loading.recordingPage"
+          :data="recordingList"
+          border
+          table-layout="fixed"
+          max-height="calc(100vh - 360px)"
+          row-key="recordingId"
+          @selection-change="handleRecordingSelectionChange"
+        >
+          <el-table-column type="selection" width="52" align="center" :reserve-selection="true" />
           <el-table-column label="录制ID" prop="recordingId" width="170" />
           <el-table-column label="录制名称" prop="sessionName" min-width="220" />
           <el-table-column label="所属用例" min-width="220">
@@ -237,9 +309,30 @@
           <el-table-column label="失败原因" min-width="220" show-overflow-tooltip>
             <template #default="scope">{{ scope.row.errorMessage || "-" }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="360" fixed="right">
+          <el-table-column label="操作" width="620" fixed="right">
             <template #default="scope">
               <el-button link type="primary" icon="View" @click="openRecordingDetail(scope.row)">查看</el-button>
+              <el-button
+                v-if="canStopRecording(scope.row)"
+                link
+                type="warning"
+                icon="VideoPause"
+                @click="handleStopRecording(scope.row)"
+                v-hasPermi="['hrm:webCase:record']"
+              >
+                停止
+              </el-button>
+              <el-button
+                v-if="canCancelPreparedRecording(scope.row)"
+                link
+                type="warning"
+                icon="CircleClose"
+                @click="handleCancelPreparedRecording(scope.row)"
+                v-hasPermi="['hrm:webCase:record']"
+              >
+                取消准备
+              </el-button>
+              <el-button link type="danger" icon="Delete" @click="handleDeleteRecordingRecords(scope.row)" v-hasPermi="['hrm:webCase:remove']">删除</el-button>
               <el-button link type="success" icon="VideoPlay" :disabled="!canUseRecordingResult(scope.row.status)" @click="openReplayDialog(scope.row)" v-hasPermi="['hrm:webCase:run']">回放</el-button>
               <el-button link type="warning" icon="Plus" :disabled="!canUseRecordingResult(scope.row.status)" @click="openRecordingActionDialog('create', scope.row)" v-hasPermi="['hrm:webCase:add']">保存新用例</el-button>
               <el-button link type="info" icon="DocumentAdd" :disabled="!canUseRecordingResult(scope.row.status)" @click="openRecordingActionDialog('append', scope.row)" v-hasPermi="['hrm:webCase:edit']">追加</el-button>
@@ -992,8 +1085,14 @@
         <el-form-item label="无头模式">
           <el-switch v-model="runForm.headless" />
         </el-form-item>
-        <el-form-item label="结束后关闭浏览器">
+        <el-form-item label="每条后重启浏览器">
           <el-switch v-model="runForm.closeBrowserOnFinish" />
+        </el-form-item>
+        <el-form-item label="保留浏览器状态" v-hasPermi="['hrm:webCase:persistContext']">
+          <el-switch v-model="runForm.persistContextEnabled" />
+        </el-form-item>
+        <el-form-item v-if="runForm.persistContextEnabled" label="状态作用域" v-hasPermi="['hrm:webCase:persistContext']">
+          <el-input v-model="runForm.persistContextKey" placeholder="可选：例如 testpartner.sm-os.com" />
         </el-form-item>
         <el-form-item label="Cookie配置">
           <el-row :gutter="10" style="width: 100%">
@@ -1012,9 +1111,38 @@
             </el-col>
           </el-row>
         </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="手动登录闸门">
+              <el-switch v-model="runForm.manualLoginEnabled" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="登录等待(秒)">
+              <el-input-number
+                v-model="runForm.manualLoginWaitSec"
+                :min="0"
+                :max="3600"
+                :step="10"
+                controls-position="right"
+                style="width: 100%"
+                :disabled="!runForm.manualLoginEnabled || runForm.manualLoginRequireConfirm"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="登录后确认继续">
+          <el-switch
+            v-model="runForm.manualLoginRequireConfirm"
+            :disabled="!runForm.manualLoginEnabled"
+            inline-prompt
+            active-text="开启"
+            inactive-text="关闭"
+          />
+        </el-form-item>
         <el-form-item>
           <span class="step-detail-tip">
-            已选配置会在执行时自动注入 Cookie；下方 JSON 作为当前执行的临时覆盖。
+            已选配置会在执行时自动注入 Cookie。开启“登录后确认继续”后，会先启动浏览器等待你手动登录，确认后才继续；批量执行仅首条触发确认。关闭“每条后重启浏览器”可在批量执行中复用同一浏览器会话。
           </span>
         </el-form-item>
         <el-row :gutter="12">
@@ -1060,6 +1188,7 @@
       append-to-body
       :close-on-click-modal="false"
       :close-on-press-escape="false"
+      @close="stopRunDetailPoll"
     >
       <template v-if="runDetail">
         <el-descriptions :column="4" border class="mb16">
@@ -1084,6 +1213,28 @@
           :closable="false"
           class="mb16"
         />
+
+        <div class="recording-toolbar">
+          <el-button @click="refreshRunDetail">刷新详情</el-button>
+          <el-button
+            v-if="canStopRun(runDetail)"
+            type="warning"
+            @click="handleStopRun(runDetail)"
+            v-hasPermi="['hrm:webCase:run']"
+          >
+            停止执行
+          </el-button>
+          <el-button
+            v-if="canCancelPreparedRun(runDetail)"
+            type="warning"
+            plain
+            @click="handleCancelPreparedRun(runDetail)"
+            v-hasPermi="['hrm:webCase:run']"
+          >
+            取消准备
+          </el-button>
+          <el-button type="danger" plain @click="handleDeleteRunRecords(runDetail)" v-hasPermi="['hrm:webCase:remove']">删除记录</el-button>
+        </div>
 
         <el-table :data="runStepResults" border max-height="320px" class="mb16">
           <el-table-column label="步骤" prop="stepName" min-width="220" />
@@ -1151,10 +1302,10 @@
               <el-input v-model="recordingForm.startUrl" placeholder="https://example.com" />
             </el-form-item>
           </el-col>
-          <el-col :span="24">
-            <el-form-item label="Cookie配置">
-              <el-row :gutter="10" style="width: 100%">
-                <el-col :span="18">
+           <el-col :span="24">
+             <el-form-item label="Cookie配置">
+               <el-row :gutter="10" style="width: 100%">
+                 <el-col :span="18">
                   <el-select v-model="recordingForm.runtimeProfileId" clearable filterable style="width: 100%" placeholder="可选：录制前注入公共Cookie配置">
                     <el-option
                       v-for="item in availableRuntimeProfilesForRecording"
@@ -1167,19 +1318,58 @@
                 <el-col :span="6">
                   <el-button style="width: 100%" @click="openRuntimeProfileDialog">管理配置</el-button>
                 </el-col>
-              </el-row>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="停止时关闭浏览器">
-              <el-switch v-model="recordingForm.closeBrowserOnStop" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="启用断言录制">
-              <el-switch v-model="recordingForm.captureAssertions" />
-            </el-form-item>
-          </el-col>
+               </el-row>
+             </el-form-item>
+           </el-col>
+           <el-col :span="12">
+             <el-form-item label="手动登录闸门">
+               <el-switch v-model="recordingForm.manualLoginEnabled" />
+             </el-form-item>
+           </el-col>
+           <el-col :span="12">
+             <el-form-item label="登录等待(秒)">
+               <el-input-number
+                 v-model="recordingForm.manualLoginWaitSec"
+                 :min="0"
+                 :max="3600"
+                  :step="10"
+                  controls-position="right"
+                  style="width: 100%"
+                  :disabled="!recordingForm.manualLoginEnabled || recordingForm.manualLoginRequireConfirm"
+                />
+              </el-form-item>
+            </el-col>
+           <el-col :span="12">
+             <el-form-item label="登录后确认继续">
+               <el-switch
+                 v-model="recordingForm.manualLoginRequireConfirm"
+                 :disabled="!recordingForm.manualLoginEnabled"
+                 inline-prompt
+                 active-text="开启"
+                 inactive-text="关闭"
+               />
+             </el-form-item>
+           </el-col>
+            <el-col :span="12">
+              <el-form-item label="停止时关闭浏览器">
+                <el-switch v-model="recordingForm.closeBrowserOnStop" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12" v-hasPermi="['hrm:webCase:persistContext']">
+              <el-form-item label="保留浏览器状态">
+                <el-switch v-model="recordingForm.persistContextEnabled" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="24" v-if="recordingForm.persistContextEnabled" v-hasPermi="['hrm:webCase:persistContext']">
+              <el-form-item label="状态作用域">
+                <el-input v-model="recordingForm.persistContextKey" placeholder="可选：例如 testpartner.sm-os.com" />
+              </el-form-item>
+            </el-col>
+           <el-col :span="12">
+             <el-form-item label="启用断言录制">
+               <el-switch v-model="recordingForm.captureAssertions" />
+             </el-form-item>
+           </el-col>
           <el-col :span="12">
             <el-form-item label="断言归属方式">
               <el-switch
@@ -1248,6 +1438,7 @@
       append-to-body
       :close-on-click-modal="false"
       :close-on-press-escape="false"
+      @close="stopRecordingDetailPoll"
     >
       <template v-if="recordingDetail">
         <el-descriptions :column="4" border class="mb16">
@@ -1266,6 +1457,27 @@
         <el-alert v-if="recordingDetail.errorMessage" :title="recordingDetail.errorMessage" type="error" :closable="false" show-icon class="mb16" />
 
         <div class="recording-toolbar mb16">
+          <el-button @click="refreshRecordingDetail">刷新详情</el-button>
+          <el-button
+            v-if="canStopRecording(recordingDetail)"
+            type="warning"
+            icon="VideoPause"
+            @click="handleStopRecording(recordingDetail)"
+            v-hasPermi="['hrm:webCase:record']"
+          >
+            停止录制
+          </el-button>
+          <el-button
+            v-if="canCancelPreparedRecording(recordingDetail)"
+            type="warning"
+            plain
+            icon="CircleClose"
+            @click="handleCancelPreparedRecording(recordingDetail)"
+            v-hasPermi="['hrm:webCase:record']"
+          >
+            取消准备
+          </el-button>
+          <el-button type="danger" plain icon="Delete" @click="handleDeleteRecordingRecords(recordingDetail)" v-hasPermi="['hrm:webCase:remove']">删除记录</el-button>
           <el-button type="success" icon="VideoPlay" :disabled="!canUseRecordingResult(recordingDetail.status)" @click="openReplayDialog(recordingDetail)" v-hasPermi="['hrm:webCase:run']">回放录制</el-button>
           <el-button type="success" plain icon="Plus" :disabled="!canUseRecordingResult(recordingDetail.status)" @click="openRecordingActionDialog('create', recordingDetail)" v-hasPermi="['hrm:webCase:add']">保存为新用例</el-button>
           <el-button type="info" plain icon="DocumentAdd" :disabled="!canUseRecordingResult(recordingDetail.status)" @click="openRecordingActionDialog('append', recordingDetail)" v-hasPermi="['hrm:webCase:edit']">追加到用例</el-button>
@@ -1620,8 +1832,14 @@ import { showModulList } from "@/api/hrm/module.js";
 import {
   addWebCase,
   applyWebRecording,
+  cancelWebRecording,
+  cancelWebRun,
   delWebCase,
+  delWebRecording,
+  delWebRun,
   delWebRuntimeProfile,
+  continueWebRecording,
+  continueWebRun,
   getWebCase,
   getWebRecording,
   getWebRun,
@@ -1634,6 +1852,7 @@ import {
   addWebRuntimeProfile,
   saveWebRecordingAsCase,
   startWebRecording,
+  stopWebRun,
   stopWebRecording,
   updateWebRuntimeProfile,
   updateWebCase,
@@ -1777,6 +1996,8 @@ const runtimeProfileImportHost = ref("");
 
 const selectedCase = ref(null);
 const selectedCaseRows = ref([]);
+const selectedRunRows = ref([]);
+const selectedRecordingRows = ref([]);
 const runTargetCases = ref([]);
 const selectedRecording = ref(null);
 const recordingEvents = ref([]);
@@ -1785,6 +2006,9 @@ const recordingDetail = ref(null);
 const runDetail = ref(null);
 const replayResult = ref(null);
 const recordingDetailText = ref("");
+
+let runDetailTimer = null;
+let recordingDetailTimer = null;
 
 const loading = ref({
   page: false,
@@ -2288,6 +2512,11 @@ const runForm = ref({
   browserName: "chromium",
   headless: true,
   closeBrowserOnFinish: true,
+  persistContextEnabled: false,
+  persistContextKey: "",
+  manualLoginEnabled: false,
+  manualLoginRequireConfirm: false,
+  manualLoginWaitSec: 120,
   stepTimeoutMs: undefined,
   stepThinkTimeMs: undefined,
   runtimeProfileId: undefined,
@@ -2301,6 +2530,11 @@ const recordingForm = ref({
   browserName: "chromium",
   headless: false,
   startUrl: "",
+  persistContextEnabled: false,
+  persistContextKey: "",
+  manualLoginEnabled: false,
+  manualLoginRequireConfirm: false,
+  manualLoginWaitSec: 120,
   closeBrowserOnStop: true,
   captureAssertions: true,
   attachAssertionsToPreviousStep: true,
@@ -2514,6 +2748,92 @@ function formatDuration(value) {
   return `${minutes}m ${seconds}s`;
 }
 
+function parseBooleanFlag(value, defaultValue = false) {
+  if (value === undefined || value === null || value === "") return defaultValue;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = `${value}`.trim().toLowerCase();
+  if (["1", "true", "yes", "on", "enabled"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", "disabled"].includes(normalized)) return false;
+  return defaultValue;
+}
+
+function normalizeManualLoginWaitSec(value, defaultValue = 120) {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return defaultValue;
+  return Math.min(3600, Math.max(0, Math.round(raw)));
+}
+
+async function confirmAndContinueRunManualLogin({ runId, agentId, caseName }) {
+  try {
+    await ElMessageBox.confirm(
+      `浏览器已启动，请先手动完成登录，再点击继续。\n执行记录ID：${runId}${caseName ? `\n目标用例：${caseName}` : ""}`,
+      "等待手动登录",
+      {
+        confirmButtonText: "我已登录，继续执行",
+        cancelButtonText: "取消继续",
+        type: "warning",
+        closeOnClickModal: false,
+        closeOnPressEscape: false,
+        showClose: false,
+        distinguishCancelAndClose: true,
+      }
+    );
+  } catch {
+    try {
+      await cancelWebRun({
+        webCaseRunId: runId,
+        agentId: agentId || undefined,
+        reason: "用户取消继续执行",
+      });
+      ElMessage.info("已取消执行准备");
+    } catch (cancelError) {
+      const msg = cancelError?.response?.data?.msg || cancelError?.message || "取消执行准备失败";
+      ElMessage.warning(msg);
+    }
+    throw new Error("已取消继续执行");
+  }
+  return continueWebRun({
+    webCaseRunId: runId,
+    agentId: agentId || undefined,
+  });
+}
+
+async function confirmAndContinueRecordingManualLogin({ recordingId, agentId, sessionName }) {
+  try {
+    await ElMessageBox.confirm(
+      `浏览器已启动，请先手动完成登录，再点击继续录制。\n录制ID：${recordingId}${sessionName ? `\n录制名称：${sessionName}` : ""}`,
+      "等待手动登录",
+      {
+        confirmButtonText: "我已登录，继续录制",
+        cancelButtonText: "取消继续",
+        type: "warning",
+        closeOnClickModal: false,
+        closeOnPressEscape: false,
+        showClose: false,
+        distinguishCancelAndClose: true,
+      }
+    );
+  } catch {
+    try {
+      await cancelWebRecording({
+        recordingId,
+        agentId: agentId || undefined,
+        reason: "用户取消继续录制",
+      });
+      ElMessage.info("已取消录制准备");
+    } catch (cancelError) {
+      const msg = cancelError?.response?.data?.msg || cancelError?.message || "取消录制准备失败";
+      ElMessage.warning(msg);
+    }
+    throw new Error("已取消继续录制");
+  }
+  return continueWebRecording({
+    recordingId,
+    agentId: agentId || undefined,
+  });
+}
+
 function getRunStatusMeta(status) {
   return runStatusOptions.find((item) => item.value === status) || { label: `${status ?? "-"}`, type: "info" };
 }
@@ -2552,6 +2872,54 @@ function getRunRowFailureReason(row) {
   if (!reason || reason === "-") return `[${stepName}] 执行失败`;
   if (reason.includes(stepName)) return reason;
   return `[${stepName}] ${reason}`;
+}
+
+function getRunResultPayload(row) {
+  return isPlainObject(row?.result) ? row.result : {};
+}
+
+function isRunWaitingManualConfirm(row) {
+  const resultPayload = getRunResultPayload(row);
+  if (resultPayload.awaitingManualConfirm === true) return true;
+  const directGate = isPlainObject(resultPayload.manualLoginGate) ? resultPayload.manualLoginGate : null;
+  const runtimeDebug = isPlainObject(resultPayload.runtimeDebug) ? resultPayload.runtimeDebug : null;
+  const runtimeGate = isPlainObject(runtimeDebug?.manualLoginGate) ? runtimeDebug.manualLoginGate : null;
+  const gate = directGate || runtimeGate;
+  if (gate && gate.waitingConfirm === true) return true;
+  const statusText = `${resultPayload.manualLoginStatus || ""}`.trim().toLowerCase();
+  return statusText === "waiting_manual_login";
+}
+
+function canStopRun(row) {
+  return Number(row?.status) === 9 && !isRunWaitingManualConfirm(row);
+}
+
+function canCancelPreparedRun(row) {
+  return Number(row?.status) === 9 && isRunWaitingManualConfirm(row);
+}
+
+function getRecordingSummaryPayload(row) {
+  if (isPlainObject(row?.resultSummary)) return row.resultSummary;
+  if (isPlainObject(row?.result_summary)) return row.result_summary;
+  if (isPlainObject(row?.resultSummaryJson)) return row.resultSummaryJson;
+  if (isPlainObject(row?.result_summary_json)) return row.result_summary_json;
+  return {};
+}
+
+function isRecordingWaitingManualConfirm(row) {
+  const payload = getRecordingSummaryPayload(row);
+  const manualGate = isPlainObject(payload.manualLoginGate) ? payload.manualLoginGate : null;
+  if (manualGate && manualGate.waitingConfirm === true) return true;
+  const statusText = `${payload.status || ""}`.trim().toLowerCase();
+  return statusText === "waiting_manual_login";
+}
+
+function canStopRecording(row) {
+  return Number(row?.status) === 2 && !isRecordingWaitingManualConfirm(row);
+}
+
+function canCancelPreparedRecording(row) {
+  return Number(row?.status) === 2 && isRecordingWaitingManualConfirm(row);
 }
 
 function getProjectName(projectId) {
@@ -3017,7 +3385,11 @@ function handleCaseSelectVisibleChange(visible) {
 }
 
 function shouldStopRecordingPoll(status) {
-  return [3, 4].includes(Number(status));
+  return [3, 4, 5].includes(Number(status));
+}
+
+function shouldStopRunDetailPoll(status) {
+  return [1, 2, 3, 8].includes(Number(status));
 }
 
 function canUseRecordingResult(status) {
@@ -3540,7 +3912,7 @@ function getList() {
 
 function getRunList() {
   loading.value.runPage = true;
-  listWebRun(runQueryParams.value).then((response) => {
+  return listWebRun(runQueryParams.value).then((response) => {
     runRecordList.value = response.rows || [];
     runTotal.value = response.total || 0;
     syncCaseOptions(runRecordList.value);
@@ -3551,13 +3923,178 @@ function getRunList() {
 
 function getRecordingList() {
   loading.value.recordingPage = true;
-  listWebRecording(recordingQueryParams.value).then((response) => {
+  return listWebRecording(recordingQueryParams.value).then((response) => {
     recordingList.value = response.rows || [];
     recordingTotal.value = response.total || 0;
     syncCaseOptions(recordingList.value);
   }).finally(() => {
     loading.value.recordingPage = false;
   });
+}
+
+function collectRunRecordIds(row) {
+  if (row?.webCaseRunId) {
+    return [normalizeIdValue(row.webCaseRunId)].filter(Boolean);
+  }
+  const ids = selectedRunRows.value
+    .map((item) => normalizeIdValue(item?.webCaseRunId))
+    .filter(Boolean);
+  return Array.from(new Set(ids));
+}
+
+function collectRecordingIds(row) {
+  if (row?.recordingId) {
+    return [normalizeIdValue(row.recordingId)].filter(Boolean);
+  }
+  const ids = selectedRecordingRows.value
+    .map((item) => normalizeIdValue(item?.recordingId))
+    .filter(Boolean);
+  return Array.from(new Set(ids));
+}
+
+async function handleStopRun(row) {
+  const runId = normalizeIdValue(row?.webCaseRunId);
+  if (!runId) return;
+  try {
+    await ElMessageBox.confirm(`确认停止执行记录【${runId}】吗？`, "提示", { type: "warning" });
+  } catch {
+    return;
+  }
+  try {
+    const response = await stopWebRun({
+      webCaseRunId: runId,
+      agentId: row?.agentId || undefined,
+    });
+    ElMessage.success(response.msg || "已停止执行");
+    await getRunList();
+    await refreshRunDetail().catch(() => {});
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || "停止执行失败";
+    ElMessage.error(msg);
+  }
+}
+
+async function handleCancelPreparedRun(row) {
+  const runId = normalizeIdValue(row?.webCaseRunId);
+  if (!runId) return;
+  try {
+    await ElMessageBox.confirm(`确认取消执行准备【${runId}】吗？`, "提示", { type: "warning" });
+  } catch {
+    return;
+  }
+  try {
+    const response = await cancelWebRun({
+      webCaseRunId: runId,
+      agentId: row?.agentId || undefined,
+      reason: "已取消执行准备",
+    });
+    ElMessage.success(response.msg || "已取消执行准备");
+    await getRunList();
+    await refreshRunDetail().catch(() => {});
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || "取消执行准备失败";
+    ElMessage.error(msg);
+  }
+}
+
+async function handleDeleteRunRecords(row = null) {
+  const ids = collectRunRecordIds(row);
+  if (!ids.length) {
+    ElMessage.warning("请先选择要删除的执行记录");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(`确认删除 ${ids.length} 条执行记录吗？`, "提示", { type: "warning" });
+  } catch {
+    return;
+  }
+  try {
+    const response = await delWebRun(ids.join(","));
+    ElMessage.success(response.msg || "删除成功");
+    selectedRunRows.value = [];
+    if (runDetail.value?.webCaseRunId && ids.includes(normalizeIdValue(runDetail.value.webCaseRunId))) {
+      showRunDetailDialog.value = false;
+      runDetail.value = null;
+      stopRunDetailPoll();
+    }
+    await getRunList();
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || "删除执行记录失败";
+    ElMessage.error(msg);
+  }
+}
+
+async function handleStopRecording(row) {
+  const recordingId = normalizeIdValue(row?.recordingId);
+  if (!recordingId) return;
+  try {
+    await ElMessageBox.confirm(`确认停止录制【${recordingId}】吗？`, "提示", { type: "warning" });
+  } catch {
+    return;
+  }
+  try {
+    const response = await stopWebRecording({
+      recordingId,
+      agentId: row?.agentId || undefined,
+      closeBrowserOnStop: true,
+    });
+    ElMessage.success(response.msg || "已发送停止录制指令");
+    await getRecordingList();
+    await refreshRecordingDetail().catch(() => {});
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || "停止录制失败";
+    ElMessage.error(msg);
+  }
+}
+
+async function handleCancelPreparedRecording(row) {
+  const recordingId = normalizeIdValue(row?.recordingId);
+  if (!recordingId) return;
+  try {
+    await ElMessageBox.confirm(`确认取消录制准备【${recordingId}】吗？`, "提示", { type: "warning" });
+  } catch {
+    return;
+  }
+  try {
+    const response = await cancelWebRecording({
+      recordingId,
+      agentId: row?.agentId || undefined,
+      reason: "已取消录制准备",
+    });
+    ElMessage.success(response.msg || "已取消录制准备");
+    await getRecordingList();
+    await refreshRecordingDetail().catch(() => {});
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || "取消录制准备失败";
+    ElMessage.error(msg);
+  }
+}
+
+async function handleDeleteRecordingRecords(row = null) {
+  const ids = collectRecordingIds(row);
+  if (!ids.length) {
+    ElMessage.warning("请先选择要删除的录制记录");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(`确认删除 ${ids.length} 条录制记录吗？`, "提示", { type: "warning" });
+  } catch {
+    return;
+  }
+  try {
+    const response = await delWebRecording(ids.join(","));
+    ElMessage.success(response.msg || "删除成功");
+    selectedRecordingRows.value = [];
+    if (recordingDetail.value?.recordingId && ids.includes(normalizeIdValue(recordingDetail.value.recordingId))) {
+      showRecordingDetailDialog.value = false;
+      recordingDetail.value = null;
+      stopRecordingDetailPoll();
+    }
+    await getRecordingList();
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || "删除录制记录失败";
+    ElMessage.error(msg);
+  }
 }
 
 function clearInvalidRuntimeProfileBindings() {
@@ -3927,6 +4464,14 @@ function handleCaseSelectionChange(selection) {
   selectedCaseRows.value = Array.isArray(selection) ? selection.map((item) => normalizeCaseOption(item) || item) : [];
 }
 
+function handleRunSelectionChange(selection) {
+  selectedRunRows.value = Array.isArray(selection) ? selection : [];
+}
+
+function handleRecordingSelectionChange(selection) {
+  selectedRecordingRows.value = Array.isArray(selection) ? selection : [];
+}
+
 function initRunFormByCase(row) {
   const runtimeSettings = isPlainObject(row?.runtimeSettings || row?.runtime_settings) ? cloneData(row.runtimeSettings || row.runtime_settings) : {};
   const stepTimeoutCandidate = Number(
@@ -3956,11 +4501,55 @@ function initRunFormByCase(row) {
     || runtimeSettings.runtime_profile_id
     || runtimeSettings.cookieProfileId
     || runtimeSettings.cookie_profile_id;
+  const manualLoginEnabled = parseBooleanFlag(
+    runtimeSettings.manualLoginEnabled
+      ?? runtimeSettings.manual_login_enabled
+      ?? runtimeSettings.manualLoginGate
+      ?? runtimeSettings.manual_login_gate,
+    false
+  );
+  const manualLoginRequireConfirm = parseBooleanFlag(
+    runtimeSettings.manualLoginRequireConfirm
+      ?? runtimeSettings.manual_login_require_confirm
+      ?? runtimeSettings.manualLoginNeedConfirm
+      ?? runtimeSettings.manual_login_need_confirm,
+    false
+  );
+  const manualLoginWaitSec = normalizeManualLoginWaitSec(
+    runtimeSettings.manualLoginWaitSec
+      ?? runtimeSettings.manual_login_wait_sec
+      ?? runtimeSettings.manualLoginTimeoutSec
+      ?? runtimeSettings.manual_login_timeout_sec,
+    120
+  );
+  const closeBrowserOnFinish = parseBooleanFlag(
+    runtimeSettings.closeBrowserOnFinish ?? runtimeSettings.close_browser_on_finish,
+    true
+  );
+  const persistContextEnabled = parseBooleanFlag(
+    runtimeSettings.persistContextEnabled
+      ?? runtimeSettings.persist_context_enabled
+      ?? runtimeSettings.preserveBrowserContext
+      ?? runtimeSettings.preserve_browser_context
+      ?? runtimeSettings.keepBrowserCache
+      ?? runtimeSettings.keep_browser_cache,
+    false
+  );
+  const persistContextKey = `${runtimeSettings.persistContextKey
+    ?? runtimeSettings.persist_context_key
+    ?? runtimeSettings.preserveContextKey
+    ?? runtimeSettings.preserve_context_key
+    ?? ""}`.trim();
   runForm.value = {
     agentId: undefined,
     browserName: row?.browserName || "chromium",
     headless: row?.headless ?? true,
-    closeBrowserOnFinish: true,
+    closeBrowserOnFinish,
+    persistContextEnabled,
+    persistContextKey,
+    manualLoginEnabled,
+    manualLoginRequireConfirm: manualLoginEnabled ? manualLoginRequireConfirm : false,
+    manualLoginWaitSec,
     stepTimeoutMs: Number.isFinite(stepTimeoutCandidate) && stepTimeoutCandidate >= 500 ? Math.round(stepTimeoutCandidate) : undefined,
     stepThinkTimeMs: Number.isFinite(stepThinkCandidate) && stepThinkCandidate >= 0 ? Math.round(stepThinkCandidate) : undefined,
     runtimeProfileId: normalizeIdValue(runtimeProfileId),
@@ -3999,12 +4588,48 @@ function openRunHistory(row) {
   getRunList();
 }
 
+function stopRunDetailPoll() {
+  if (runDetailTimer) {
+    window.clearInterval(runDetailTimer);
+    runDetailTimer = null;
+  }
+}
+
+function refreshRunDetail() {
+  const runId = normalizeIdValue(runDetail.value?.webCaseRunId);
+  if (!runId || !showRunDetailDialog.value) {
+    return Promise.resolve(null);
+  }
+  return getWebRun(runId).then((response) => {
+    runDetail.value = response.data || null;
+    syncCaseOptions(runDetail.value);
+    if (shouldStopRunDetailPoll(runDetail.value?.status)) {
+      stopRunDetailPoll();
+    }
+    return runDetail.value;
+  });
+}
+
+function startRunDetailPoll() {
+  stopRunDetailPoll();
+  if (!runDetail.value?.webCaseRunId || shouldStopRunDetailPoll(runDetail.value?.status)) {
+    return;
+  }
+  runDetailTimer = window.setInterval(() => {
+    refreshRunDetail();
+  }, 3000);
+}
+
 function openRunDetail(row) {
+  const runId = normalizeIdValue(row?.webCaseRunId);
+  if (!runId) return;
+  stopRunDetailPoll();
   loading.value.runDetail = true;
-  getWebRun(row.webCaseRunId).then((response) => {
+  getWebRun(runId).then((response) => {
     runDetail.value = response.data || null;
     syncCaseOptions(runDetail.value);
     showRunDetailDialog.value = true;
+    startRunDetailPoll();
   }).finally(() => {
     loading.value.runDetail = false;
   });
@@ -4056,6 +4681,9 @@ async function submitRun() {
   if (cookieRules) {
     runtimeOverrides.cookieRules = cookieRules;
   }
+  const manualLoginEnabled = Boolean(runForm.value.manualLoginEnabled);
+  const manualLoginRequireConfirm = manualLoginEnabled && Boolean(runForm.value.manualLoginRequireConfirm);
+  const manualLoginWaitSec = normalizeManualLoginWaitSec(runForm.value.manualLoginWaitSec, 120);
 
   const previewTargets = runTargets.map((target, index) => ({
     label: `${target.caseName || target.webCaseId || `用例${index + 1}`}${target.webCaseId ? ` [${target.webCaseId}]` : ""}`,
@@ -4074,28 +4702,64 @@ async function submitRun() {
 
   loading.value.run = true;
   try {
+    if (manualLoginEnabled && !manualLoginRequireConfirm) {
+      ElMessage.info(`浏览器启动后将预留 ${manualLoginWaitSec} 秒手动登录时间，再开始正式执行`);
+    }
+    if (manualLoginRequireConfirm) {
+      ElMessage.info("已开启“登录后确认继续”：仅首条执行会暂停等待你确认，后续用例直接执行");
+    }
     let successCount = 0;
     let failedCount = 0;
+    let reuseRetainedSessionId = "";
     const runResponses = [];
-    for (const target of runTargets) {
+    for (let index = 0; index < runTargets.length; index++) {
+      const target = runTargets[index];
+      const enableManualForCurrent = manualLoginEnabled && (!manualLoginRequireConfirm || index === 0);
+      const requireConfirmForCurrent = manualLoginRequireConfirm && index === 0;
+      const runtimeOverridesForCurrent = { ...runtimeOverrides };
+      if (!runForm.value.closeBrowserOnFinish && reuseRetainedSessionId) {
+        runtimeOverridesForCurrent.reuseRetainedSessionId = reuseRetainedSessionId;
+      }
       const payload = {
         webCaseId: target.webCaseId,
         agentId: runForm.value.agentId,
         browserName: runForm.value.browserName,
         headless: runForm.value.headless,
         closeBrowserOnFinish: runForm.value.closeBrowserOnFinish,
+        persistContextEnabled: Boolean(runForm.value.persistContextEnabled),
+        persistContextKey: runForm.value.persistContextKey?.trim() || undefined,
+        manualLoginEnabled: enableManualForCurrent,
+        manualLoginRequireConfirm: requireConfirmForCurrent,
+        manualLoginWaitSec,
         runtimeProfileId: runForm.value.runtimeProfileId || undefined,
       };
-      if (Object.keys(runtimeOverrides).length) {
-        payload.runtimeOverrides = runtimeOverrides;
+      if (Object.keys(runtimeOverridesForCurrent).length) {
+        payload.runtimeOverrides = runtimeOverridesForCurrent;
       }
       try {
-        const response = await runWebCase(payload);
+        let response = await runWebCase(payload);
+        if (requireConfirmForCurrent) {
+          const runId = response?.data?.webCaseRunId;
+          if (!runId) {
+            throw new Error("执行准备成功但未返回执行记录ID，无法继续");
+          }
+          response = await confirmAndContinueRunManualLogin({
+            runId,
+            agentId: runForm.value.agentId,
+            caseName: target.caseName || `${target.webCaseId}`,
+          });
+        }
+        const retainedSessionId = `${response?.data?.result?.retainedSessionId || ""}`.trim();
+        reuseRetainedSessionId = (!runForm.value.closeBrowserOnFinish && retainedSessionId) ? retainedSessionId : "";
         successCount += 1;
         runResponses.push({ target, response });
       } catch (error) {
+        reuseRetainedSessionId = "";
         failedCount += 1;
         runResponses.push({ target, error });
+        if (requireConfirmForCurrent) {
+          break;
+        }
       }
     }
     showRunDialog.value = false;
@@ -4142,6 +4806,41 @@ function resetRecordingDialogState(row = null) {
     || runtimeSettings.runtime_profile_id
     || runtimeSettings.cookieProfileId
     || runtimeSettings.cookie_profile_id;
+  const manualLoginEnabled = parseBooleanFlag(
+    runtimeSettings.manualLoginEnabled
+      ?? runtimeSettings.manual_login_enabled
+      ?? runtimeSettings.manualLoginGate
+      ?? runtimeSettings.manual_login_gate,
+    false
+  );
+  const manualLoginRequireConfirm = parseBooleanFlag(
+    runtimeSettings.manualLoginRequireConfirm
+      ?? runtimeSettings.manual_login_require_confirm
+      ?? runtimeSettings.manualLoginNeedConfirm
+      ?? runtimeSettings.manual_login_need_confirm,
+    false
+  );
+  const manualLoginWaitSec = normalizeManualLoginWaitSec(
+    runtimeSettings.manualLoginWaitSec
+      ?? runtimeSettings.manual_login_wait_sec
+      ?? runtimeSettings.manualLoginTimeoutSec
+      ?? runtimeSettings.manual_login_timeout_sec,
+    120
+  );
+  const persistContextEnabled = parseBooleanFlag(
+    runtimeSettings.persistContextEnabled
+      ?? runtimeSettings.persist_context_enabled
+      ?? runtimeSettings.preserveBrowserContext
+      ?? runtimeSettings.preserve_browser_context
+      ?? runtimeSettings.keepBrowserCache
+      ?? runtimeSettings.keep_browser_cache,
+    false
+  );
+  const persistContextKey = `${runtimeSettings.persistContextKey
+    ?? runtimeSettings.persist_context_key
+    ?? runtimeSettings.preserveContextKey
+    ?? runtimeSettings.preserve_context_key
+    ?? ""}`.trim();
   recordingForm.value = {
     webCaseId: row?.webCaseId,
     sessionName: row ? `${row.caseName}-录制` : "",
@@ -4149,6 +4848,11 @@ function resetRecordingDialogState(row = null) {
     browserName: row?.browserName || "chromium",
     headless: false,
     startUrl: row?.startUrl || "",
+    persistContextEnabled,
+    persistContextKey,
+    manualLoginEnabled,
+    manualLoginRequireConfirm: manualLoginEnabled ? manualLoginRequireConfirm : false,
+    manualLoginWaitSec,
     closeBrowserOnStop: true,
     captureAssertions: true,
     attachAssertionsToPreviousStep: true,
@@ -4218,33 +4922,58 @@ async function startRecording() {
   if (!previewConfirmed) {
     return;
   }
+  const manualLoginEnabled = Boolean(recordingForm.value.manualLoginEnabled);
+  const manualLoginRequireConfirm = manualLoginEnabled && Boolean(recordingForm.value.manualLoginRequireConfirm);
+  const manualLoginWaitSec = normalizeManualLoginWaitSec(recordingForm.value.manualLoginWaitSec, 120);
 
   loading.value.recording = true;
-  startWebRecording({
-    webCaseId: recordingForm.value.webCaseId,
-    agentId: recordingForm.value.agentId,
-    sessionName: recordingForm.value.sessionName || undefined,
-    browserName: recordingForm.value.browserName,
-    headless: recordingForm.value.headless,
-    startUrl: recordingForm.value.startUrl,
-    runtimeProfileId: recordingForm.value.runtimeProfileId || undefined,
-    recordingOptions: {
-      closeBrowserOnStop: recordingForm.value.closeBrowserOnStop,
-      captureAssertions: recordingForm.value.captureAssertions,
-      assertionAttachMode: recordingForm.value.captureAssertions
-        ? (recordingForm.value.attachAssertionsToPreviousStep ? "inside_step" : "parallel_step")
-        : "parallel_step",
-      autoAssertTextOnClick: recordingForm.value.captureAssertions && recordingForm.value.autoAssertTextOnClick,
-    },
-  }).then((response) => {
+  if (manualLoginEnabled && !manualLoginRequireConfirm) {
+    ElMessage.info(`浏览器启动后将预留 ${manualLoginWaitSec} 秒手动登录时间，再开始录制`);
+  }
+  try {
+    const response = await startWebRecording({
+      webCaseId: recordingForm.value.webCaseId,
+      agentId: recordingForm.value.agentId,
+      sessionName: recordingForm.value.sessionName || undefined,
+      browserName: recordingForm.value.browserName,
+      headless: recordingForm.value.headless,
+      startUrl: recordingForm.value.startUrl,
+      persistContextEnabled: Boolean(recordingForm.value.persistContextEnabled),
+      persistContextKey: recordingForm.value.persistContextKey?.trim() || undefined,
+      manualLoginEnabled,
+      manualLoginRequireConfirm,
+      manualLoginWaitSec,
+      runtimeProfileId: recordingForm.value.runtimeProfileId || undefined,
+      recordingOptions: {
+        closeBrowserOnStop: recordingForm.value.closeBrowserOnStop,
+        captureAssertions: recordingForm.value.captureAssertions,
+        assertionAttachMode: recordingForm.value.captureAssertions
+          ? (recordingForm.value.attachAssertionsToPreviousStep ? "inside_step" : "parallel_step")
+          : "parallel_step",
+        autoAssertTextOnClick: recordingForm.value.captureAssertions && recordingForm.value.autoAssertTextOnClick,
+      },
+    });
     recordingForm.value.recordingId = response.data?.recordingId;
     ElMessage.success(response.msg || "录制已启动");
     refreshRecording();
     startRecordingPoll();
     getRecordingList();
-  }).finally(() => {
+    if (manualLoginRequireConfirm && recordingForm.value.recordingId) {
+      await confirmAndContinueRecordingManualLogin({
+        recordingId: recordingForm.value.recordingId,
+        agentId: recordingForm.value.agentId,
+        sessionName: recordingForm.value.sessionName,
+      });
+      ElMessage.success("已确认继续录制");
+      refreshRecording();
+      getRecordingList();
+    }
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || "录制启动失败";
+    ElMessage.error(msg);
+  } finally {
     loading.value.recording = false;
-  });
+  }
 }
 
 function stopRecording() {
@@ -4267,15 +4996,50 @@ function refreshRecording() {
   });
 }
 
+function stopRecordingDetailPoll() {
+  if (recordingDetailTimer) {
+    window.clearInterval(recordingDetailTimer);
+    recordingDetailTimer = null;
+  }
+}
+
+function refreshRecordingDetail() {
+  const recordingId = normalizeIdValue(recordingDetail.value?.recordingId);
+  if (!recordingId || !showRecordingDetailDialog.value) {
+    return Promise.resolve(null);
+  }
+  return fetchRecordingDetail(recordingId).then((detail) => {
+    recordingDetail.value = detail;
+    syncCaseOptions(detail);
+    selectedRecording.value = detail;
+    if (shouldStopRecordingPoll(detail?.status)) {
+      stopRecordingDetailPoll();
+    }
+    return detail;
+  });
+}
+
+function startRecordingDetailPoll() {
+  stopRecordingDetailPoll();
+  if (!recordingDetail.value?.recordingId || shouldStopRecordingPoll(recordingDetail.value?.status)) {
+    return;
+  }
+  recordingDetailTimer = window.setInterval(() => {
+    refreshRecordingDetail();
+  }, 3000);
+}
+
 function openRecordingDetail(recordingSource) {
   const recordingId = typeof recordingSource === "number" ? recordingSource : recordingSource?.recordingId;
   if (!recordingId) return;
+  stopRecordingDetailPoll();
   loading.value.recordingDetail = true;
   fetchRecordingDetail(recordingId).then((detail) => {
     recordingDetail.value = detail;
     syncCaseOptions(detail);
     selectedRecording.value = detail;
     showRecordingDetailDialog.value = true;
+    startRecordingDetailPoll();
   }).finally(() => {
     loading.value.recordingDetail = false;
   });
@@ -4507,6 +5271,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopRecordingPoll();
+  stopRunDetailPoll();
+  stopRecordingDetailPoll();
 });
 </script>
 

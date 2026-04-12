@@ -343,6 +343,7 @@ INSERT INTO sys_menu VALUES (1203,"详情",1199,4,"",null,null,1,0,"F","0","0","
 INSERT INTO sys_menu VALUES (1204,"执行",1199,5,"",null,null,1,0,"F","0","0","hrm:webCase:run","#","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1205,"录制",1199,6,"",null,null,1,0,"F","0","0","hrm:webCase:record","#","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1206,"历史",1199,7,"",null,null,1,0,"F","0","0","hrm:webCase:history","#","admin",sysdate(),"admin",null,"");
+INSERT INTO sys_menu VALUES (1215,"保留浏览器状态",1199,8,"",null,null,1,0,"F","0","0","hrm:webCase:persistContext","#","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1207,"桌面测试管理",1061,10,"desktopcase","hrm/desktopcase/index",null,1,0,"C","0","0","hrm:desktopCase:list","monitor","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1208,"新增",1207,1,"",null,null,1,0,"F","0","0","hrm:desktopCase:add","#","admin",sysdate(),"admin",null,"");
 INSERT INTO sys_menu VALUES (1209,"编辑",1207,2,"",null,null,1,0,"F","0","0","hrm:desktopCase:edit","#","admin",sysdate(),"admin",null,"");

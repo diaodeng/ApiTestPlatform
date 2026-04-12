@@ -235,8 +235,13 @@ class WebCaseRunRequestModel(WebJsonModel):
     browser_name: str | None = None
     headless: bool | None = None
     close_browser_on_finish: bool | None = None
+    persist_context_enabled: bool = False
+    persist_context_key: str | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     runtime_profile_id: str | None = None
+    manual_login_enabled: bool = False
+    manual_login_wait_sec: int = 120
+    manual_login_require_confirm: bool = False
     save_screenshot_on_failure: bool = True
     continue_on_failure: bool = False
     trigger_type: str = "manual"
@@ -298,9 +303,31 @@ class WebRecordingStartRequestModel(WebJsonModel):
     start_url: str
     browser_name: str = "chromium"
     headless: bool = False
+    persist_context_enabled: bool = False
+    persist_context_key: str | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     runtime_profile_id: str | None = None
+    manual_login_enabled: bool = False
+    manual_login_wait_sec: int = 120
+    manual_login_require_confirm: bool = False
     recording_options: WebRecordingOptionsModel = Field(default_factory=WebRecordingOptionsModel)
+
+
+class WebCaseRunContinueRequestModel(WebJsonModel):
+    web_case_run_id: int
+    agent_id: int | None = None
+    agent_code: str | None = None
+
+
+class WebCaseRunStopRequestModel(WebJsonModel):
+    web_case_run_id: int
+    agent_id: int | None = None
+    agent_code: str | None = None
+    reason: str | None = None
+
+
+class WebCaseRunCancelRequestModel(WebCaseRunStopRequestModel):
+    pass
 
 
 class WebRecordingStopRequestModel(WebJsonModel):
@@ -308,6 +335,19 @@ class WebRecordingStopRequestModel(WebJsonModel):
     agent_id: int | None = None
     agent_code: str | None = None
     close_browser_on_stop: bool | None = None
+
+
+class WebRecordingContinueRequestModel(WebJsonModel):
+    recording_id: int
+    agent_id: int | None = None
+    agent_code: str | None = None
+
+
+class WebRecordingCancelRequestModel(WebJsonModel):
+    recording_id: int
+    agent_id: int | None = None
+    agent_code: str | None = None
+    reason: str | None = None
 
 
 class WebRecordingApplyRequestModel(WebJsonModel):

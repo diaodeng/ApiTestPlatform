@@ -15,11 +15,16 @@ from module_hrm.entity.vo.web_case_vo import (
     AddWebCaseModel,
     WebCaseDetailModel,
     WebCasePageQueryModel,
+    WebCaseRunCancelRequestModel,
+    WebCaseRunStopRequestModel,
     WebRuntimeProfilePageQueryModel,
     WebRuntimeProfileSaveModel,
     WebCaseRunRecordPageQueryModel,
+    WebCaseRunContinueRequestModel,
     WebCaseRunRequestModel,
     WebRecordingApplyRequestModel,
+    WebRecordingCancelRequestModel,
+    WebRecordingContinueRequestModel,
     WebRecordingReplayRequestModel,
     WebRecordingSaveCaseRequestModel,
     WebRecordingSessionPageQueryModel,
@@ -35,6 +40,21 @@ webCaseController = APIRouter(
     prefix="/hrm/web-case",
     dependencies=[Depends(LoginService.get_current_user)],
 )
+
+PERSIST_CONTEXT_PERMISSION = "hrm:webCase:persistContext"
+
+
+def _has_persist_context_permission(current_user: CurrentUserModel) -> bool:
+    """判断当前用户是否允许使用保留浏览器状态能力。"""
+    user = getattr(current_user, "user", None)
+    if user is not None and getattr(user, "admin", False):
+        return True
+    permissions = set(current_user.permissions or [])
+    return (
+        PERSIST_CONTEXT_PERMISSION in permissions
+        or "*:*:*" in permissions
+        or "admin" in permissions
+    )
 
 
 @webCaseController.get(
@@ -243,6 +263,8 @@ async def run_web_case(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     try:
+        if run_request.persist_context_enabled and not _has_persist_context_permission(current_user):
+            return ResponseUtil.failure(msg="当前账号无权使用“保留浏览器状态”功能")
         result = await WebCaseService.run_web_case_services(
             query_db,
             run_request,
@@ -250,6 +272,66 @@ async def run_web_case(
             dept_id=current_user.user.dept_id,
             user_name=current_user.user.user_name,
         )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post(
+    "/run/continue",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:run"))],
+)
+@log_decorator(title="Web用例继续执行", business_type=0)
+async def continue_run_web_case(
+    request: Request,
+    continue_request: WebCaseRunContinueRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = await WebCaseService.continue_web_case_services(query_db, continue_request)
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post(
+    "/run/stop",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:run"))],
+)
+@log_decorator(title="Web用例停止执行", business_type=0)
+async def stop_run_web_case(
+    request: Request,
+    stop_request: WebCaseRunStopRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = await WebCaseService.stop_web_case_services(query_db, stop_request)
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post(
+    "/run/cancel",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:run"))],
+)
+@log_decorator(title="Web用例取消准备态", business_type=0)
+async def cancel_run_web_case(
+    request: Request,
+    cancel_request: WebCaseRunCancelRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = await WebCaseService.cancel_web_case_services(query_db, cancel_request)
         if result.is_success:
             return ResponseUtil.success(msg=result.message, data=result.result)
         return ResponseUtil.failure(msg=result.message, data=result.result)
@@ -295,6 +377,26 @@ async def get_run_record_detail(
         return ResponseUtil.error(msg=str(exc))
 
 
+@webCaseController.delete(
+    "/run/{web_case_run_ids}",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:remove"))],
+)
+@log_decorator(title="Web执行记录删除", business_type=3)
+async def delete_run_record(
+    request: Request,
+    web_case_run_ids: str,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = await WebCaseService.delete_run_record_services(query_db, web_case_run_ids)
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
 @webCaseController.post(
     "/recording/start",
     dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:record"))],
@@ -307,6 +409,8 @@ async def start_recording(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     try:
+        if start_request.persist_context_enabled and not _has_persist_context_permission(current_user):
+            return ResponseUtil.failure(msg="当前账号无权使用“保留浏览器状态”功能")
         result = await WebCaseService.start_recording_services(
             query_db,
             start_request,
@@ -317,6 +421,46 @@ async def start_recording(
         if result.is_success:
             return ResponseUtil.success(msg=result.message, data=result.result)
         return ResponseUtil.failure(msg=result.message)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post(
+    "/recording/continue",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:record"))],
+)
+@log_decorator(title="Web录制继续", business_type=0)
+async def continue_recording(
+    request: Request,
+    continue_request: WebRecordingContinueRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = await WebCaseService.continue_recording_services(query_db, continue_request)
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post(
+    "/recording/cancel",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:record"))],
+)
+@log_decorator(title="Web录制取消准备态", business_type=0)
+async def cancel_recording(
+    request: Request,
+    cancel_request: WebRecordingCancelRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = await WebCaseService.cancel_recording_services(query_db, cancel_request)
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
     except Exception as exc:
         logger.exception(exc)
         return ResponseUtil.error(msg=str(exc))
@@ -334,6 +478,26 @@ async def stop_recording(
 ):
     try:
         result = await WebCaseService.stop_recording_services(query_db, stop_request)
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.delete(
+    "/recording/{recording_ids}",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:remove"))],
+)
+@log_decorator(title="Web录制记录删除", business_type=3)
+async def delete_recording(
+    request: Request,
+    recording_ids: str,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = await WebCaseService.delete_recording_services(query_db, recording_ids)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)

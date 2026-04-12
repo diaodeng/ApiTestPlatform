@@ -6,6 +6,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
@@ -289,6 +290,96 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _resolve_manual_login_gate(runtime_options: dict[str, Any]) -> tuple[bool, int]:
+    """解析手动登录闸门配置，统一支持驼峰/下划线命名。"""
+    enabled_candidates = [
+        runtime_options.get("manualLoginEnabled"),
+        runtime_options.get("manual_login_enabled"),
+        runtime_options.get("manualLoginGate"),
+        runtime_options.get("manual_login_gate"),
+        runtime_options.get("waitForManualLogin"),
+        runtime_options.get("wait_for_manual_login"),
+    ]
+    enabled = False
+    for candidate in enabled_candidates:
+        if candidate not in (None, ""):
+            enabled = _as_bool(candidate, False)
+            break
+
+    wait_candidates = [
+        runtime_options.get("manualLoginWaitSec"),
+        runtime_options.get("manual_login_wait_sec"),
+        runtime_options.get("manualLoginTimeoutSec"),
+        runtime_options.get("manual_login_timeout_sec"),
+        runtime_options.get("manualLoginWaitSeconds"),
+        runtime_options.get("manual_login_wait_seconds"),
+    ]
+    wait_sec = 120
+    for candidate in wait_candidates:
+        if candidate not in (None, ""):
+            wait_sec = _as_int(candidate, 120)
+            break
+    wait_sec = max(0, min(wait_sec, 3600))
+    return enabled, wait_sec
+
+
+def _resolve_manual_login_require_confirm(runtime_options: dict[str, Any]) -> bool:
+    """解析手动登录是否需要显式确认继续。"""
+    candidates = [
+        runtime_options.get("manualLoginRequireConfirm"),
+        runtime_options.get("manual_login_require_confirm"),
+        runtime_options.get("manualLoginNeedConfirm"),
+        runtime_options.get("manual_login_need_confirm"),
+    ]
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return _as_bool(candidate, False)
+    return False
+
+
+async def _wait_manual_login_if_needed(
+    page: Any,
+    runtime_options: dict[str, Any],
+    *,
+    stage: str,
+) -> dict[str, Any]:
+    """在执行/录制前为手动登录预留等待窗口。"""
+    enabled, wait_sec = _resolve_manual_login_gate(runtime_options)
+    gate_result: dict[str, Any] = {
+        "enabled": enabled,
+        "waitSec": wait_sec,
+        "stage": stage,
+        "waitedSec": 0,
+    }
+    try:
+        gate_result["pageUrl"] = str(getattr(page, "url", "") or "")
+    except Exception:
+        gate_result["pageUrl"] = ""
+    if not enabled or wait_sec <= 0:
+        return gate_result
+
+    logger.info(f"[manual-login-gate] stage={stage}, wait_sec={wait_sec}, page={gate_result.get('pageUrl')}")
+    started_at = time.time()
+    await asyncio.sleep(wait_sec)
+    gate_result["waitedSec"] = max(0, int(round(time.time() - started_at)))
+    return gate_result
+
+
 def _resolve_runtime_settings(case_data: dict[str, Any], runtime_options: dict[str, Any]) -> dict[str, Any]:
     runtime_overrides = _as_dict(runtime_options.get("runtimeOverrides") or runtime_options.get("runtime_overrides"))
     case_runtime_settings = _as_dict(case_data.get("runtimeSettings") or case_data.get("runtime_settings"))
@@ -297,6 +388,113 @@ def _resolve_runtime_settings(case_data: dict[str, Any], runtime_options: dict[s
         **runtime_overrides,
         **runtime_options,
     }
+
+
+def _resolve_persist_context_settings(runtime_options: dict[str, Any]) -> tuple[bool, str]:
+    """解析是否启用浏览器状态保留，以及状态作用域键。"""
+    enabled_candidates = [
+        runtime_options.get("persistContextEnabled"),
+        runtime_options.get("persist_context_enabled"),
+        runtime_options.get("preserveBrowserContext"),
+        runtime_options.get("preserve_browser_context"),
+        runtime_options.get("keepBrowserCache"),
+        runtime_options.get("keep_browser_cache"),
+    ]
+    enabled = False
+    for candidate in enabled_candidates:
+        if candidate not in (None, ""):
+            enabled = _as_bool(candidate, False)
+            break
+
+    key_candidates = [
+        runtime_options.get("persistContextKey"),
+        runtime_options.get("persist_context_key"),
+        runtime_options.get("preserveContextKey"),
+        runtime_options.get("preserve_context_key"),
+    ]
+    scope_key = ""
+    for candidate in key_candidates:
+        text = str(candidate or "").strip()
+        if text:
+            scope_key = text
+            break
+    return enabled, scope_key
+
+
+def _resolve_reuse_retained_session_id(runtime_options: dict[str, Any]) -> str:
+    """解析跨用例复用浏览器会话ID。"""
+    candidates = [
+        runtime_options.get("reuseRetainedSessionId"),
+        runtime_options.get("reuse_retained_session_id"),
+        runtime_options.get("retainedSessionId"),
+        runtime_options.get("retained_session_id"),
+    ]
+    for candidate in candidates:
+        session_id = str(candidate or "").strip()
+        if session_id:
+            return session_id
+    return ""
+
+
+def _build_context_state_path(
+    runtime_options: dict[str, Any],
+    *,
+    browser_name: str,
+    start_url: str,
+    default_scope: str = "",
+) -> Path | None:
+    """生成上下文状态文件路径，用于跨次执行保留 Cookie/LocalStorage。"""
+    persist_enabled, scope_key = _resolve_persist_context_settings(runtime_options)
+    if not persist_enabled:
+        return None
+
+    runtime_profile_id = str(
+        runtime_options.get("runtimeProfileId")
+        or runtime_options.get("runtime_profile_id")
+        or ""
+    ).strip()
+    target_host = _host_from_url(start_url)
+    raw_scope = scope_key or runtime_profile_id or default_scope or target_host or "default"
+    safe_scope = re.sub(r"[^a-zA-Z0-9_.-]+", "_", raw_scope).strip("._-")
+    if not safe_scope:
+        safe_scope = "default"
+
+    safe_browser = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(browser_name or "chromium")).strip("._-") or "chromium"
+    storage_dir = Path(__file__).resolve().parents[1] / "storage" / "runtime" / "web-context-state"
+    return storage_dir / f"{safe_scope}.{safe_browser}.json"
+
+
+async def _create_browser_context(
+    browser: Any,
+    *,
+    runtime_options: dict[str, Any],
+    browser_name: str,
+    start_url: str,
+    default_scope: str = "",
+) -> tuple[Any, Path | None]:
+    """根据运行配置创建 BrowserContext（可选恢复历史状态）。"""
+    state_path = _build_context_state_path(
+        runtime_options,
+        browser_name=browser_name,
+        start_url=start_url,
+        default_scope=default_scope,
+    )
+    context_kwargs: dict[str, Any] = {"ignore_https_errors": True}
+    if state_path is not None and state_path.exists():
+        context_kwargs["storage_state"] = str(state_path)
+    context = await browser.new_context(**context_kwargs)
+    return context, state_path
+
+
+async def _save_context_state_if_needed(context: Any, state_path: Path | None) -> None:
+    """在关闭上下文前落盘状态，便于下次恢复登录态。"""
+    if context is None or state_path is None:
+        return
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        await context.storage_state(path=str(state_path))
+    except Exception as exc:
+        logger.debug(f"保存浏览器上下文状态失败: {exc}")
 
 
 def _step_timeout_ms(step: dict[str, Any], runtime_options: dict[str, Any], case_data: dict[str, Any]) -> int:
@@ -755,9 +953,12 @@ class RecorderSession:
     browser: Any = None
     context: Any = None
     page: Any = None
+    context_state_path: Path | None = None
     event_index: int = 0
     events: list[dict[str, Any]] = field(default_factory=list)
     active: bool = True
+    capture_enabled: bool = False
+    manual_login_pending: bool = False
 
     async def emit(self, payload: dict[str, Any], event_type: str = "record_event") -> None:
         if not self.active:
@@ -794,10 +995,13 @@ class RecorderSession:
         context = self.context
         browser = self.browser
         playwright = self.playwright
+        context_state_path = self.context_state_path
         self.page = None
         self.context = None
         self.browser = None
         self.playwright = None
+        self.context_state_path = None
+        await _save_context_state_if_needed(context, context_state_path)
         await _close_playwright_objects(page, context, browser, playwright)
 
 
@@ -808,23 +1012,91 @@ class RetainedRunSession:
     browser: Any = None
     context: Any = None
     page: Any = None
+    context_state_path: Path | None = None
 
     async def close(self) -> None:
         page = self.page
         context = self.context
         browser = self.browser
         playwright = self.playwright
+        context_state_path = self.context_state_path
         self.page = None
         self.context = None
         self.browser = None
         self.playwright = None
+        self.context_state_path = None
+        await _save_context_state_if_needed(context, context_state_path)
         await _close_playwright_objects(page, context, browser, playwright)
+
+
+@dataclass
+class PreparedRunSession:
+    run_id: int
+    case_data: dict[str, Any]
+    runtime_options: dict[str, Any]
+    effective_runtime: dict[str, Any]
+    steps: list[dict[str, Any]]
+    start_url: str
+    close_browser_on_finish: bool
+    playwright: Any = None
+    browser: Any = None
+    context: Any = None
+    page: Any = None
+    context_state_path: Path | None = None
+    cookie_variables: dict[str, Any] = field(default_factory=dict)
+    cookie_rules: list[dict[str, Any]] = field(default_factory=list)
+    runtime_debug: dict[str, Any] = field(default_factory=dict)
+
+    async def close(self) -> None:
+        page = self.page
+        context = self.context
+        browser = self.browser
+        playwright = self.playwright
+        context_state_path = self.context_state_path
+        self.page = None
+        self.context = None
+        self.browser = None
+        self.playwright = None
+        self.context_state_path = None
+        await _save_context_state_if_needed(context, context_state_path)
+        await _close_playwright_objects(page, context, browser, playwright)
+
+
+@dataclass
+class ActiveRunSession:
+    run_id: int
+    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    page: Any = None
+    context: Any = None
+    browser: Any = None
+    playwright: Any = None
+    context_state_path: Path | None = None
+
+    async def request_cancel(self) -> None:
+        self.cancel_event.set()
+        page = self.page
+        context = self.context
+        browser = self.browser
+        playwright = self.playwright
+        context_state_path = self.context_state_path
+        self.page = None
+        self.context = None
+        self.browser = None
+        self.playwright = None
+        self.context_state_path = None
+        await _save_context_state_if_needed(context, context_state_path)
+        await _close_playwright_objects(page, context, browser, playwright)
+
+    async def close(self) -> None:
+        await self.request_cancel()
 
 
 class WebTestService:
     _recorders: dict[int, RecorderSession] = {}
     _retained_sessions: dict[int, RecorderSession] = {}
     _retained_runs: dict[str, RetainedRunSession] = {}
+    _prepared_runs: dict[int, PreparedRunSession] = {}
+    _active_runs: dict[int, ActiveRunSession] = {}
     _lock = asyncio.Lock()
 
     @classmethod
@@ -832,8 +1104,20 @@ class WebTestService:
         command = req_data.get("command") or "run_case"
         if command == "run_case":
             return await cls._run_case(req_data)
+        if command == "prepare_run_case":
+            return await cls._prepare_run_case(req_data)
+        if command == "continue_run_case":
+            return await cls._continue_run_case(req_data)
+        if command == "stop_run_case":
+            return await cls._stop_run_case(req_data)
+        if command == "cancel_run_case":
+            return await cls._cancel_run_case(req_data)
         if command == "start_recording":
             return await cls._start_recording(req_data, event_sender)
+        if command == "continue_recording":
+            return await cls._continue_recording(req_data)
+        if command == "cancel_recording_prepare":
+            return await cls._cancel_recording_prepare(req_data)
         if command == "stop_recording":
             return await cls._stop_recording(req_data)
         return {
@@ -902,23 +1186,14 @@ class WebTestService:
                 headless=session.headless,
                 request_options=browser_request_options,
             )
-            session.context = await session.browser.new_context(ignore_https_errors=True)
-
-            async def _event_binding(source: Any, payload: Any) -> None:
-                payload_dict = _as_dict(payload)
-                if not payload_dict:
-                    return
-                await session.emit(payload_dict)
-
-            await session.context.expose_binding("__qtrRecordEvent", _event_binding)
-            options_json = json.dumps(session.options, ensure_ascii=False)
-            await session.context.add_init_script(f"window.__qtrRecordOptions__ = {options_json};")
-            await session.context.add_init_script(RECORDER_SCRIPT)
-            session.page = await session.context.new_page()
-            session.page.on(
-                "framenavigated",
-                lambda frame: asyncio.create_task(cls._handle_navigation(frame, session)),
+            session.context, session.context_state_path = await _create_browser_context(
+                session.browser,
+                runtime_options=effective_runtime,
+                browser_name=session.browser_name,
+                start_url=session.start_url,
+                default_scope=f"recording-{recording_id}",
             )
+            session.page = await session.context.new_page()
             cookie_variables = _resolve_runtime_variables(effective_runtime)
             cookie_rules = _normalize_cookie_rules(effective_runtime)
             if session.start_url:
@@ -929,23 +1204,62 @@ class WebTestService:
                     cookie_rules=cookie_rules,
                     variables=cookie_variables,
                 )
-            await session.page.goto(session.start_url)
-            await session.emit(
-                {
-                    "stepName": "打开页面",
-                    "actionType": "goto",
-                    "params": {"url": session.start_url},
-                    "assertions": [],
-                    "rawEvent": {"eventType": "goto"},
-                    "targetSnapshot": None,
-                }
-            )
+            if session.start_url:
+                await session.page.goto(session.start_url)
+
+            manual_login_enabled, manual_login_wait_sec = _resolve_manual_login_gate(effective_runtime)
+            manual_login_require_confirm = _resolve_manual_login_require_confirm(effective_runtime)
+            manual_gate_result: dict[str, Any] = {
+                "enabled": manual_login_enabled,
+                "waitSec": manual_login_wait_sec,
+                "requireConfirm": manual_login_require_confirm,
+                "waitingConfirm": False,
+                "stage": "before_recording",
+                "pageUrl": session.page.url if session.page else session.start_url,
+            }
+            if manual_login_enabled and manual_login_require_confirm:
+                session.manual_login_pending = True
+                manual_gate_result["waitingConfirm"] = True
+                await session.sender(
+                    {
+                        "type": "record_status",
+                        "recording_id": recording_id,
+                        "payload": {
+                            "status": "waiting_manual_login",
+                            "message": "浏览器已启动，请手动登录后点击继续录制",
+                            "manualLoginGate": manual_gate_result,
+                        },
+                    }
+                )
+            else:
+                manual_gate_result = await _wait_manual_login_if_needed(
+                    session.page,
+                    effective_runtime,
+                    stage="before_recording",
+                )
+                manual_gate_result["requireConfirm"] = False
+                if manual_gate_result.get("enabled"):
+                    await session.sender(
+                        {
+                            "type": "record_status",
+                            "recording_id": recording_id,
+                            "payload": {
+                                "status": "manual_login_ready",
+                                "message": "手动登录等待结束，开始录制",
+                                "manualLoginGate": manual_gate_result,
+                            },
+                        }
+                    )
+                await cls._enable_recording_capture(session)
             return {
                 "request_type": 3,
                 "command": "start_recording",
                 "success": True,
                 "status": "accepted",
                 "recording_id": recording_id,
+                "data": {
+                    "manualLoginGate": manual_gate_result,
+                },
             }
         except Exception as exc:
             logger.exception(exc)
@@ -968,6 +1282,115 @@ class WebTestService:
                 "command": "start_recording",
                 "success": False,
                 "status": "failed",
+                "message": str(exc),
+            }
+
+    @classmethod
+    async def _enable_recording_capture(cls, session: RecorderSession) -> None:
+        """给录制会话注入录制脚本并开始捕获事件。"""
+        if session.capture_enabled:
+            return
+        if session.context is None:
+            raise RuntimeError("录制上下文不存在，无法继续录制")
+        if session.page is None:
+            raise RuntimeError("录制页面不存在，无法继续录制")
+
+        async def _event_binding(source: Any, payload: Any) -> None:
+            payload_dict = _as_dict(payload)
+            if not payload_dict:
+                return
+            await session.emit(payload_dict)
+
+        await session.context.expose_binding("__qtrRecordEvent", _event_binding)
+        options_json = json.dumps(session.options, ensure_ascii=False)
+        await session.context.add_init_script(f"window.__qtrRecordOptions__ = {options_json};")
+        await session.context.add_init_script(RECORDER_SCRIPT)
+        try:
+            await session.page.evaluate("opts => { window.__qtrRecordOptions__ = opts; }", session.options)
+            await session.page.evaluate(RECORDER_SCRIPT)
+        except Exception as exc:
+            logger.debug(f"注入当前页面录制脚本失败: {exc}")
+        session.page.on(
+            "framenavigated",
+            lambda frame: asyncio.create_task(cls._handle_navigation(frame, session)),
+        )
+        await session.emit(
+            {
+                "stepName": "打开页面",
+                "actionType": "goto",
+                "params": {"url": session.start_url},
+                "assertions": [],
+                "rawEvent": {"eventType": "goto"},
+                "targetSnapshot": None,
+            }
+        )
+        session.capture_enabled = True
+
+    @classmethod
+    async def _continue_recording(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+        recording_id = int(req_data.get("recordingId") or 0)
+        if not recording_id:
+            return {
+                "request_type": 3,
+                "command": "continue_recording",
+                "success": False,
+                "status": "failed",
+                "message": "recordingId 不能为空",
+            }
+        async with cls._lock:
+            session = cls._recorders.get(recording_id)
+        if session is None:
+            return {
+                "request_type": 3,
+                "command": "continue_recording",
+                "success": False,
+                "status": "failed",
+                "message": "录制会话不存在",
+            }
+        if not session.manual_login_pending:
+            return {
+                "request_type": 3,
+                "command": "continue_recording",
+                "success": True,
+                "status": "accepted",
+                "recording_id": recording_id,
+                "message": "当前录制无需继续确认",
+            }
+        try:
+            session.manual_login_pending = False
+            await cls._enable_recording_capture(session)
+            await session.sender(
+                {
+                    "type": "record_status",
+                    "recording_id": recording_id,
+                    "payload": {
+                        "status": "manual_login_ready",
+                        "message": "已确认继续，开始录制",
+                        "manualLoginGate": {
+                            "enabled": True,
+                            "requireConfirm": True,
+                            "waitingConfirm": False,
+                            "stage": "before_recording",
+                            "pageUrl": session.page.url if session.page else session.start_url,
+                        },
+                    },
+                }
+            )
+            return {
+                "request_type": 3,
+                "command": "continue_recording",
+                "success": True,
+                "status": "accepted",
+                "recording_id": recording_id,
+            }
+        except Exception as exc:
+            logger.exception(exc)
+            return {
+                "request_type": 3,
+                "command": "continue_recording",
+                "success": False,
+                "status": "failed",
+                "recording_id": recording_id,
                 "message": str(exc),
             }
 
@@ -1040,10 +1463,14 @@ class WebTestService:
                 list(cls._recorders.values())
                 + list(cls._retained_sessions.values())
                 + list(cls._retained_runs.values())
+                + list(cls._prepared_runs.values())
+                + list(cls._active_runs.values())
             )
             cls._recorders.clear()
             cls._retained_sessions.clear()
             cls._retained_runs.clear()
+            cls._prepared_runs.clear()
+            cls._active_runs.clear()
 
         for session in sessions:
             try:
@@ -1052,7 +1479,33 @@ class WebTestService:
                 logger.exception(exc)
 
     @classmethod
-    async def _run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+    async def _prepare_run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        if run_id <= 0:
+            return {
+                "request_type": 3,
+                "command": "prepare_run_case",
+                "success": False,
+                "status": "failed",
+                "message": "webCaseRunId 不能为空",
+            }
+
+        async with cls._lock:
+            existing = cls._prepared_runs.get(run_id)
+        if existing is not None:
+            return {
+                "request_type": 3,
+                "command": "prepare_run_case",
+                "success": True,
+                "status": "waiting_manual_login",
+                "result": {
+                    "webCaseRunId": run_id,
+                    "pageUrl": existing.page.url if existing.page else existing.start_url,
+                    "runtimeDebug": existing.runtime_debug or {},
+                    "awaitingManualConfirm": True,
+                },
+            }
+
         case_data = _as_dict(req_data.get("caseData"))
         runtime_options = _as_dict(req_data.get("runtimeOptions"))
         effective_runtime = _resolve_runtime_settings(case_data, runtime_options)
@@ -1068,6 +1521,448 @@ class WebTestService:
         if not isinstance(steps, list):
             steps = []
 
+        prepared = PreparedRunSession(
+            run_id=run_id,
+            case_data=case_data,
+            runtime_options=runtime_options,
+            effective_runtime=effective_runtime,
+            steps=[_as_dict(step) for step in steps],
+            start_url=start_url,
+            close_browser_on_finish=close_browser_on_finish,
+        )
+        try:
+            prepared.playwright, prepared.browser = await start_playwright_browser(
+                browser_name,
+                headless=headless,
+                request_options=effective_runtime,
+            )
+            prepared.context, prepared.context_state_path = await _create_browser_context(
+                prepared.browser,
+                runtime_options=effective_runtime,
+                browser_name=browser_name,
+                start_url=start_url,
+                default_scope=f"run-{run_id}",
+            )
+            prepared.page = await prepared.context.new_page()
+            prepared.cookie_variables = _resolve_runtime_variables(effective_runtime)
+            prepared.cookie_rules = _normalize_cookie_rules(effective_runtime)
+            prepared.runtime_debug = {
+                "runtimeProfileId": runtime_options.get("runtimeProfileId") or runtime_options.get("runtime_profile_id"),
+                "cookieRuleCount": len(prepared.cookie_rules),
+                "cookieVariableKeys": sorted(prepared.cookie_variables.keys()),
+                "persistContextEnabled": prepared.context_state_path is not None,
+                "persistContextPath": str(prepared.context_state_path) if prepared.context_state_path is not None else "",
+            }
+            if start_url:
+                before_start_cookie_apply = await _apply_cookie_rules(
+                    prepared.context,
+                    target_url=start_url,
+                    stage="before_start",
+                    cookie_rules=prepared.cookie_rules,
+                    variables=prepared.cookie_variables,
+                )
+                prepared.runtime_debug["beforeStartCookieApply"] = before_start_cookie_apply or {
+                    "stage": "before_start",
+                    "targetUrl": start_url,
+                    "targetHost": _host_from_url(start_url),
+                    "appliedCount": 0,
+                    "rules": [],
+                    "appliedCookies": [],
+                }
+                prepared.runtime_debug["contextCookiesBeforeGoto"] = await _capture_context_cookies_for_debug(
+                    prepared.context,
+                    target_url=start_url,
+                )
+                await prepared.page.goto(start_url, timeout=_step_timeout_ms({}, effective_runtime, case_data))
+                prepared.runtime_debug["contextCookiesAfterGoto"] = await _capture_context_cookies_for_debug(
+                    prepared.context,
+                    target_url=start_url,
+                )
+            manual_login_enabled, manual_login_wait_sec = _resolve_manual_login_gate(effective_runtime)
+            prepared.runtime_debug["manualLoginGate"] = {
+                "enabled": manual_login_enabled,
+                "waitSec": manual_login_wait_sec,
+                "requireConfirm": True,
+                "waitingConfirm": True,
+                "stage": "before_case_steps",
+                "pageUrl": prepared.page.url if prepared.page else start_url,
+            }
+            prepared.runtime_debug.setdefault(
+                "beforeStartCookieApply",
+                {
+                    "stage": "before_start",
+                    "targetUrl": start_url,
+                    "targetHost": _host_from_url(start_url),
+                    "appliedCount": 0,
+                    "rules": [],
+                    "appliedCookies": [],
+                },
+            )
+            async with cls._lock:
+                cls._prepared_runs[run_id] = prepared
+            return {
+                "request_type": 3,
+                "command": "prepare_run_case",
+                "success": True,
+                "status": "waiting_manual_login",
+                "result": {
+                    "webCaseRunId": run_id,
+                    "pageUrl": prepared.page.url if prepared.page else start_url,
+                    "runtimeDebug": prepared.runtime_debug,
+                    "awaitingManualConfirm": True,
+                },
+                "message": "浏览器已就绪，请手动登录后继续执行",
+            }
+        except Exception as exc:
+            logger.exception(exc)
+            async with cls._lock:
+                cls._prepared_runs.pop(run_id, None)
+            await prepared.close()
+            return {
+                "request_type": 3,
+                "command": "prepare_run_case",
+                "success": False,
+                "status": "failed",
+                "message": str(exc),
+            }
+
+    @classmethod
+    async def _continue_run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        if run_id <= 0:
+            return {
+                "request_type": 3,
+                "command": "continue_run_case",
+                "success": False,
+                "status": "failed",
+                "message": "webCaseRunId 不能为空",
+            }
+        async with cls._lock:
+            prepared = cls._prepared_runs.pop(run_id, None)
+        if prepared is None:
+            return {
+                "request_type": 3,
+                "command": "continue_run_case",
+                "success": False,
+                "status": "failed",
+                "message": "未找到等待继续的执行会话",
+                "result": {"webCaseRunId": run_id},
+            }
+
+        page = prepared.page
+        context = prepared.context
+        browser = prepared.browser
+        playwright = prepared.playwright
+        context_state_path = prepared.context_state_path
+        case_data = prepared.case_data
+        effective_runtime = prepared.effective_runtime
+        steps = prepared.steps
+        start_url = prepared.start_url
+        cookie_rules = prepared.cookie_rules
+        cookie_variables = prepared.cookie_variables
+        runtime_debug = prepared.runtime_debug if isinstance(prepared.runtime_debug, dict) else {}
+        runtime_debug.setdefault(
+            "manualLoginGate",
+            {
+                "enabled": True,
+                "requireConfirm": True,
+                "waitingConfirm": False,
+                "stage": "before_case_steps",
+            },
+        )
+        runtime_debug["manualLoginGate"]["waitingConfirm"] = False
+        runtime_debug["manualLoginGate"]["confirmed"] = True
+        runtime_debug["manualLoginGate"]["confirmedAt"] = int(time.time())
+        runtime_debug.setdefault("persistContextEnabled", context_state_path is not None)
+        runtime_debug.setdefault("persistContextPath", str(context_state_path) if context_state_path is not None else "")
+
+        active_session = ActiveRunSession(
+            run_id=run_id,
+            page=page,
+            context=context,
+            browser=browser,
+            playwright=playwright,
+            context_state_path=context_state_path,
+        )
+        async with cls._lock:
+            cls._active_runs[run_id] = active_session
+
+        result_steps: list[dict[str, Any]] = []
+        response_payload: dict[str, Any]
+        retained_session_id: str | None = None
+        try:
+            overall_success = True
+            for step_index, raw_step in enumerate(steps):
+                if active_session.cancel_event.is_set():
+                    raise RuntimeError("执行已取消")
+                step = _as_dict(raw_step)
+                if not bool(step.get("enabled", True)):
+                    result_steps.append(
+                        {
+                            "stepId": step.get("stepId") or step.get("step_id"),
+                            "stepName": step.get("stepName") or step.get("step_name") or "step",
+                            "status": "skipped",
+                            "durationMs": 0,
+                            "message": "步骤已禁用",
+                            "pageUrl": page.url if page else start_url,
+                        }
+                    )
+                    continue
+
+                step_result = await cls._run_single_step(
+                    page,
+                    context,
+                    step,
+                    runtime_options=effective_runtime,
+                    case_data=case_data,
+                    cookie_rules=cookie_rules,
+                    cookie_variables=cookie_variables,
+                )
+                result_steps.append(step_result)
+                if active_session.cancel_event.is_set():
+                    step_result["message"] = "执行已取消"
+                    step_result["error"] = "执行已取消"
+                    step_result["errorMessage"] = "执行已取消"
+                    overall_success = False
+                    break
+                if step_result["status"] != "passed":
+                    overall_success = False
+                    if not _continue_on_failure(step, effective_runtime):
+                        break
+                think_time_ms = _step_think_time_ms(step, effective_runtime, case_data)
+                if think_time_ms > 0 and _has_following_enabled_step(steps, step_index):
+                    await asyncio.sleep(think_time_ms / 1000.0)
+                    step_result["thinkTimeMs"] = think_time_ms
+
+            runtime_debug.setdefault(
+                "beforeStartCookieApply",
+                {
+                    "stage": "before_start",
+                    "targetUrl": start_url,
+                    "targetHost": _host_from_url(start_url),
+                    "appliedCount": 0,
+                    "rules": [],
+                    "appliedCookies": [],
+                },
+            )
+            response_payload = {
+                "request_type": 3,
+                "command": "continue_run_case",
+                "success": overall_success,
+                "status": "success" if overall_success else "failed",
+                "result": {
+                    "steps": result_steps,
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                },
+            }
+        except Exception as exc:
+            logger.exception(exc)
+            runtime_debug.setdefault(
+                "beforeStartCookieApply",
+                {
+                    "stage": "before_start",
+                    "targetUrl": start_url,
+                    "targetHost": _host_from_url(start_url),
+                    "appliedCount": 0,
+                    "rules": [],
+                    "appliedCookies": [],
+                },
+            )
+            response_payload = {
+                "request_type": 3,
+                "command": "continue_run_case",
+                "success": False,
+                "status": "failed",
+                "message": "执行已取消" if active_session.cancel_event.is_set() else str(exc),
+                "result": {
+                    "steps": result_steps,
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                },
+            }
+        finally:
+            async with cls._lock:
+                cls._active_runs.pop(run_id, None)
+            cancelled = active_session.cancel_event.is_set()
+            if cancelled or prepared.close_browser_on_finish or browser is None or playwright is None:
+                await _save_context_state_if_needed(context, context_state_path)
+                await _close_playwright_objects(page, context, browser, playwright)
+            else:
+                retained_session_id = uuid.uuid4().hex
+                retained_session = RetainedRunSession(
+                    session_id=retained_session_id,
+                    playwright=playwright,
+                    browser=browser,
+                    context=context,
+                    page=page,
+                    context_state_path=context_state_path,
+                )
+                async with cls._lock:
+                    cls._retained_runs[retained_session_id] = retained_session
+
+        if isinstance(response_payload.get("result"), dict):
+            response_payload["result"]["browserRetained"] = retained_session_id is not None
+            if retained_session_id is not None:
+                response_payload["result"]["retainedSessionId"] = retained_session_id
+        return response_payload
+
+    @classmethod
+    async def _stop_run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        if run_id <= 0:
+            return {
+                "request_type": 3,
+                "command": "stop_run_case",
+                "success": False,
+                "status": "failed",
+                "message": "webCaseRunId 不能为空",
+            }
+        reason = str(req_data.get("reason") or "已手动停止执行").strip() or "已手动停止执行"
+
+        async with cls._lock:
+            active_session = cls._active_runs.pop(run_id, None)
+            prepared_session = cls._prepared_runs.pop(run_id, None)
+
+        released = False
+        if active_session is not None:
+            released = True
+            try:
+                await active_session.request_cancel()
+            except Exception as exc:
+                logger.exception(exc)
+        if prepared_session is not None:
+            released = True
+            try:
+                await prepared_session.close()
+            except Exception as exc:
+                logger.exception(exc)
+
+        return {
+            "request_type": 3,
+            "command": "stop_run_case",
+            "success": True,
+            "status": "stopped",
+            "message": reason if released else "执行会话已结束，无需停止",
+            "result": {
+                "webCaseRunId": run_id,
+                "released": released,
+                "reason": reason,
+            },
+        }
+
+    @classmethod
+    async def _cancel_run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        if run_id <= 0:
+            return {
+                "request_type": 3,
+                "command": "cancel_run_case",
+                "success": False,
+                "status": "failed",
+                "message": "webCaseRunId 不能为空",
+            }
+        reason = str(req_data.get("reason") or "已取消执行准备").strip() or "已取消执行准备"
+
+        async with cls._lock:
+            prepared_session = cls._prepared_runs.pop(run_id, None)
+            active_session = cls._active_runs.pop(run_id, None)
+
+        released = False
+        if prepared_session is not None:
+            released = True
+            try:
+                await prepared_session.close()
+            except Exception as exc:
+                logger.exception(exc)
+        elif active_session is not None:
+            # 并发场景下可能已经从“准备态”切到“执行中”，这里兜底中断，避免资源泄漏。
+            released = True
+            try:
+                await active_session.request_cancel()
+            except Exception as exc:
+                logger.exception(exc)
+
+        return {
+            "request_type": 3,
+            "command": "cancel_run_case",
+            "success": True,
+            "status": "cancelled",
+            "message": reason if released else "执行准备会话已结束",
+            "result": {
+                "webCaseRunId": run_id,
+                "released": released,
+                "reason": reason,
+            },
+        }
+
+    @classmethod
+    async def _cancel_recording_prepare(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+        recording_id = _as_int(req_data.get("recordingId"), 0)
+        if recording_id <= 0:
+            return {
+                "request_type": 3,
+                "command": "cancel_recording_prepare",
+                "success": False,
+                "status": "failed",
+                "message": "recordingId 不能为空",
+            }
+        reason = str(req_data.get("reason") or "已取消录制准备").strip() or "已取消录制准备"
+
+        async with cls._lock:
+            session = cls._recorders.pop(recording_id, None)
+            retained_session = cls._retained_sessions.pop(recording_id, None)
+
+        released = False
+        if session is not None:
+            released = True
+            try:
+                await session.disable_recording()
+            except Exception as exc:
+                logger.debug(f"取消录制准备时停用录制失败: {exc}")
+            try:
+                await session.close()
+            except Exception as exc:
+                logger.exception(exc)
+        if retained_session is not None:
+            released = True
+            try:
+                await retained_session.close()
+            except Exception as exc:
+                logger.exception(exc)
+
+        return {
+            "request_type": 3,
+            "command": "cancel_recording_prepare",
+            "success": True,
+            "status": "cancelled",
+            "message": reason if released else "录制准备会话已结束",
+            "result": {
+                "recordingId": recording_id,
+                "released": released,
+                "reason": reason,
+            },
+        }
+
+    @classmethod
+    async def _run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        case_data = _as_dict(req_data.get("caseData"))
+        runtime_options = _as_dict(req_data.get("runtimeOptions"))
+        effective_runtime = _resolve_runtime_settings(case_data, runtime_options)
+        browser_name = str(effective_runtime.get("browserName") or case_data.get("browserName") or "chromium")
+        headless = bool(effective_runtime.get("headless", case_data.get("headless", True)))
+        close_browser_on_finish = effective_runtime.get("closeBrowserOnFinish")
+        if close_browser_on_finish is None:
+            close_browser_on_finish = True
+        else:
+            close_browser_on_finish = bool(close_browser_on_finish)
+        start_url = str(effective_runtime.get("startUrl") or case_data.get("startUrl") or "")
+        reuse_retained_session_id = _resolve_reuse_retained_session_id(effective_runtime)
+        steps = case_data.get("steps") or []
+        if not isinstance(steps, list):
+            steps = []
+
         result_steps: list[dict[str, Any]] = []
         playwright = None
         browser = None
@@ -1075,23 +1970,69 @@ class WebTestService:
         page = None
         response_payload: dict[str, Any]
         retained_session_id: str | None = None
+        context_state_path: Path | None = None
         cookie_variables: dict[str, Any] = {}
         cookie_rules: list[dict[str, Any]] = []
         runtime_debug: dict[str, Any] = {}
+        active_session = ActiveRunSession(run_id=run_id) if run_id > 0 else None
         try:
-            playwright, browser = await start_playwright_browser(
-                browser_name,
-                headless=headless,
-                request_options=effective_runtime,
-            )
-            context = await browser.new_context(ignore_https_errors=True)
-            page = await context.new_page()
+            reused_session: RetainedRunSession | None = None
+            if reuse_retained_session_id:
+                async with cls._lock:
+                    reused_session = cls._retained_runs.pop(reuse_retained_session_id, None)
+            if (
+                reused_session is not None
+                and reused_session.playwright is not None
+                and reused_session.browser is not None
+                and reused_session.context is not None
+                and reused_session.page is not None
+            ):
+                playwright = reused_session.playwright
+                browser = reused_session.browser
+                context = reused_session.context
+                page = reused_session.page
+                context_state_path = reused_session.context_state_path
+                runtime_debug["reusedRetainedSession"] = True
+                runtime_debug["reuseRetainedSessionId"] = reuse_retained_session_id
+            else:
+                if reused_session is not None:
+                    await reused_session.close()
+                playwright, browser = await start_playwright_browser(
+                    browser_name,
+                    headless=headless,
+                    request_options=effective_runtime,
+                )
+                context, context_state_path = await _create_browser_context(
+                    browser,
+                    runtime_options=effective_runtime,
+                    browser_name=browser_name,
+                    start_url=start_url,
+                    default_scope=f"run-{run_id}" if run_id > 0 else "run-default",
+                )
+                page = await context.new_page()
+                runtime_debug["reusedRetainedSession"] = False
+                if reuse_retained_session_id:
+                    runtime_debug["reuseRetainedSessionId"] = reuse_retained_session_id
+                    runtime_debug["reuseRetainedSessionMiss"] = True
+
+            if active_session is not None:
+                active_session.page = page
+                active_session.context = context
+                active_session.browser = browser
+                active_session.playwright = playwright
+                active_session.context_state_path = context_state_path
+                async with cls._lock:
+                    cls._active_runs[run_id] = active_session
+
             cookie_variables = _resolve_runtime_variables(effective_runtime)
             cookie_rules = _normalize_cookie_rules(effective_runtime)
             runtime_debug = {
+                **runtime_debug,
                 "runtimeProfileId": runtime_options.get("runtimeProfileId") or runtime_options.get("runtime_profile_id"),
                 "cookieRuleCount": len(cookie_rules),
                 "cookieVariableKeys": sorted(cookie_variables.keys()),
+                "persistContextEnabled": context_state_path is not None,
+                "persistContextPath": str(context_state_path) if context_state_path is not None else "",
             }
             if start_url:
                 before_start_cookie_apply = await _apply_cookie_rules(
@@ -1119,8 +2060,15 @@ class WebTestService:
                     context,
                     target_url=start_url,
                 )
+            runtime_debug["manualLoginGate"] = await _wait_manual_login_if_needed(
+                page,
+                effective_runtime,
+                stage="before_case_steps",
+            )
             overall_success = True
             for step_index, raw_step in enumerate(steps):
+                if active_session is not None and active_session.cancel_event.is_set():
+                    raise RuntimeError("执行已取消")
                 step = _as_dict(raw_step)
                 if not bool(step.get("enabled", True)):
                     result_steps.append(
@@ -1145,6 +2093,12 @@ class WebTestService:
                     cookie_variables=cookie_variables,
                 )
                 result_steps.append(step_result)
+                if active_session is not None and active_session.cancel_event.is_set():
+                    step_result["message"] = "执行已取消"
+                    step_result["error"] = "执行已取消"
+                    step_result["errorMessage"] = "执行已取消"
+                    overall_success = False
+                    break
                 if step_result["status"] != "passed":
                     overall_success = False
                     if not _continue_on_failure(step, effective_runtime):
@@ -1162,6 +2116,15 @@ class WebTestService:
                     "appliedCount": 0,
                     "rules": [],
                     "appliedCookies": [],
+                },
+            )
+            runtime_debug.setdefault(
+                "manualLoginGate",
+                {
+                    "enabled": False,
+                    "waitSec": 0,
+                    "waitedSec": 0,
+                    "stage": "before_case_steps",
                 },
             )
             response_payload = {
@@ -1188,12 +2151,21 @@ class WebTestService:
                     "appliedCookies": [],
                 },
             )
+            runtime_debug.setdefault(
+                "manualLoginGate",
+                {
+                    "enabled": False,
+                    "waitSec": 0,
+                    "waitedSec": 0,
+                    "stage": "before_case_steps",
+                },
+            )
             response_payload = {
                 "request_type": 3,
                 "command": "run_case",
                 "success": False,
                 "status": "failed",
-                "message": str(exc),
+                "message": "执行已取消" if active_session is not None and active_session.cancel_event.is_set() else str(exc),
                 "result": {
                     "steps": result_steps,
                     "pageUrl": page.url if page else start_url,
@@ -1201,7 +2173,12 @@ class WebTestService:
                 },
             }
         finally:
-            if close_browser_on_finish or browser is None or playwright is None:
+            cancelled = active_session.cancel_event.is_set() if active_session is not None else False
+            if run_id > 0:
+                async with cls._lock:
+                    cls._active_runs.pop(run_id, None)
+            if cancelled or close_browser_on_finish or browser is None or playwright is None:
+                await _save_context_state_if_needed(context, context_state_path)
                 await _close_playwright_objects(page, context, browser, playwright)
             else:
                 retained_session_id = uuid.uuid4().hex
@@ -1211,6 +2188,7 @@ class WebTestService:
                     browser=browser,
                     context=context,
                     page=page,
+                    context_state_path=context_state_path,
                 )
                 page = None
                 context = None

@@ -31,14 +31,19 @@ from module_hrm.entity.vo.web_case_vo import (
     WebCaseModel,
     WebCasePageQueryModel,
     WebCaseRunDetailModel,
+    WebCaseRunCancelRequestModel,
     WebCaseRunRecordModel,
     WebCaseRunRecordPageQueryModel,
+    WebCaseRunContinueRequestModel,
+    WebCaseRunStopRequestModel,
     WebCaseRunRequestModel,
     WebLocatorModel,
     WebRuntimeProfileModel,
     WebRuntimeProfilePageQueryModel,
     WebRuntimeProfileSaveModel,
     WebRecordingApplyRequestModel,
+    WebRecordingCancelRequestModel,
+    WebRecordingContinueRequestModel,
     WebRecordingDetailModel,
     WebRecordingEventModel,
     WebRecordingReplayRequestModel,
@@ -130,6 +135,63 @@ class WebCaseService:
         if normalized in {"0", "false", "no", "off", "disabled"}:
             return False
         return default
+
+    @staticmethod
+    def _normalize_manual_login_wait_sec(value: Any, *, default: int = 120) -> int:
+        """标准化手动登录等待秒数，避免无效值导致执行链路异常。"""
+        try:
+            wait_sec = int(value)
+        except Exception:
+            wait_sec = int(default)
+        return max(0, min(wait_sec, 3600))
+
+    @staticmethod
+    def _parse_csv_int_ids(raw_ids: str) -> list[int]:
+        """将逗号分隔ID字符串转换为去重后的整型列表。"""
+        if not raw_ids:
+            return []
+        values: list[int] = []
+        for item in str(raw_ids).split(","):
+            text = str(item or "").strip()
+            if not text:
+                continue
+            try:
+                values.append(int(text))
+            except Exception:
+                continue
+        return sorted(set(values))
+
+    @classmethod
+    def _merge_run_result_payload(
+        cls,
+        run_record: HrmWebCaseRun,
+        extra_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """合并执行记录结果载荷，用于停止/取消时保留上下文信息。"""
+        merged_result = cls._loads(run_record.result_json, {})
+        if not isinstance(merged_result, dict):
+            merged_result = {}
+        if isinstance(extra_payload, dict):
+            merged_result.update(extra_payload)
+        return merged_result
+
+    @classmethod
+    def _is_run_waiting_manual_confirm(cls, run_record: HrmWebCaseRun) -> bool:
+        """判断执行记录是否处于“等待手工登录确认继续”状态。"""
+        result_payload = cls._loads(run_record.result_json, {})
+        if not isinstance(result_payload, dict):
+            return False
+        if result_payload.get("awaitingManualConfirm") is True:
+            return True
+        manual_gate = result_payload.get("manualLoginGate")
+        if not isinstance(manual_gate, dict):
+            runtime_debug = result_payload.get("runtimeDebug")
+            if isinstance(runtime_debug, dict):
+                manual_gate = runtime_debug.get("manualLoginGate")
+        if isinstance(manual_gate, dict) and manual_gate.get("waitingConfirm") is True:
+            return True
+        status_text = str(result_payload.get("manualLoginStatus") or "").strip().lower()
+        return status_text == "waiting_manual_login"
 
     @classmethod
     def _normalize_targets(cls, raw_targets: Any) -> list[str]:
@@ -670,6 +732,33 @@ class WebCaseService:
         return success, response_result, message
 
     @classmethod
+    def _extract_agent_webui_payload(cls, response) -> tuple[bool, str, dict[str, Any], str | None]:
+        """提取 Agent WebUI 响应中的成功态、状态码、结果与消息。"""
+        response_payload = response.response
+        success = True
+        status = ""
+        result: dict[str, Any] = {}
+        message: str | None = None
+        if isinstance(response_payload, AgentResponseWebUI):
+            success = bool(response_payload.success)
+            status = str(response_payload.status or "").strip().lower()
+            message = response_payload.message
+            if isinstance(response_payload.result, dict):
+                result = response_payload.result
+            elif isinstance(response_payload.data, dict):
+                result = response_payload.data
+        elif isinstance(response_payload, dict):
+            if "success" in response_payload:
+                success = bool(response_payload.get("success"))
+            status = str(response_payload.get("status") or "").strip().lower()
+            message = response_payload.get("message")
+            if isinstance(response_payload.get("result"), dict):
+                result = response_payload.get("result")
+            elif isinstance(response_payload.get("data"), dict):
+                result = response_payload.get("data")
+        return success, status, result, message
+
+    @classmethod
     def _build_fingerprint(cls, target_snapshot: WebTargetSnapshotModel) -> str:
         locator_items = [
             {
@@ -1008,6 +1097,87 @@ class WebCaseService:
             raise exc
 
     @classmethod
+    async def delete_run_record_services(cls, query_db: Session, web_case_run_ids: str) -> CrudResponseModel:
+        """删除执行记录，若仍在执行中会先尝试停止。"""
+        run_ids = cls._parse_csv_int_ids(web_case_run_ids)
+        if not run_ids:
+            return CrudResponseModel(is_success=False, message="传入执行记录ID为空")
+
+        run_records = WebCaseDao.list_run_records_by_ids(query_db, run_ids)
+        if not run_records:
+            return CrudResponseModel(is_success=False, message="执行记录不存在")
+
+        try:
+            for run_record in run_records:
+                if int(run_record.status or 0) != CaseRunStatus.running.value:
+                    continue
+                agent = cls._resolve_agent(query_db, run_record.agent_id, run_record.agent_code)
+                if agent is None or not agent.agent_code:
+                    continue
+                try:
+                    await send_message(
+                        agent.agent_code,
+                        {
+                            "requestType": TstepTypeEnum.webui.value,
+                            "command": "stop_run_case",
+                            "webCaseRunId": run_record.web_case_run_id,
+                            "reason": "执行记录删除时自动停止",
+                        },
+                        timeout_seconds=30,
+                    )
+                except Exception:
+                    logger.exception("删除执行记录时尝试停止运行失败")
+
+            for run_record in run_records:
+                WebCaseDao.delete_run_record(query_db, run_record.web_case_run_id)
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message=f"删除成功，共 {len(run_records)} 条执行记录")
+        except Exception as exc:
+            query_db.rollback()
+            raise exc
+
+    @classmethod
+    async def delete_recording_services(cls, query_db: Session, recording_ids: str) -> CrudResponseModel:
+        """删除录制记录，若仍在录制中会先尝试停止。"""
+        parsed_ids = cls._parse_csv_int_ids(recording_ids)
+        if not parsed_ids:
+            return CrudResponseModel(is_success=False, message="传入录制记录ID为空")
+
+        sessions = WebCaseDao.list_recording_sessions_by_ids(query_db, parsed_ids)
+        if not sessions:
+            return CrudResponseModel(is_success=False, message="录制会话不存在")
+
+        try:
+            for session_obj in sessions:
+                if int(session_obj.status or 0) != 2:
+                    continue
+                agent = cls._resolve_agent(query_db, session_obj.agent_id, session_obj.agent_code)
+                if agent is None or not agent.agent_code:
+                    continue
+                try:
+                    await send_message(
+                        agent.agent_code,
+                        {
+                            "requestType": TstepTypeEnum.webui.value,
+                            "command": "stop_recording",
+                            "recordingId": session_obj.recording_id,
+                            "closeBrowserOnStop": True,
+                        },
+                        timeout_seconds=30,
+                    )
+                except Exception:
+                    logger.exception("删除录制记录时尝试停止录制失败")
+
+            WebCaseDao.delete_recording_events_by_ids(query_db, [session.recording_id for session in sessions])
+            for session_obj in sessions:
+                WebCaseDao.delete_recording_session(query_db, session_obj.recording_id)
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message=f"删除成功，共 {len(sessions)} 条录制记录")
+        except Exception as exc:
+            query_db.rollback()
+            raise exc
+
+    @classmethod
     def _resolve_agent(cls, query_db: Session, agent_id: int | None, agent_code: str | None) -> AgentModel | None:
         try:
             if agent_code:
@@ -1101,6 +1271,17 @@ class WebCaseService:
             runtime_options_payload["runtimeOverrides"] = merged_runtime_overrides
         if request_model.runtime_profile_id:
             runtime_options_payload["runtimeProfileId"] = request_model.runtime_profile_id
+        manual_login_enabled = bool(request_model.manual_login_enabled)
+        manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
+        manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
+        persist_context_enabled = bool(request_model.persist_context_enabled)
+        persist_context_key = str(request_model.persist_context_key or "").strip()
+        runtime_options_payload["manualLoginEnabled"] = manual_login_enabled
+        runtime_options_payload["manualLoginWaitSec"] = manual_login_wait_sec
+        runtime_options_payload["manualLoginRequireConfirm"] = manual_login_require_confirm
+        runtime_options_payload["persistContextEnabled"] = persist_context_enabled
+        if persist_context_key:
+            runtime_options_payload["persistContextKey"] = persist_context_key
 
         session_name = request_model.session_name or f"录制-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         recording_options_payload = request_model.recording_options.model_dump(by_alias=True)
@@ -1144,7 +1325,10 @@ class WebCaseService:
         }
         if runtime_options_payload:
             message["runtimeOptions"] = runtime_options_payload
-        result = await send_message(agent.agent_code, message)
+        start_timeout_seconds: int | None = None
+        if manual_login_enabled:
+            start_timeout_seconds = max(120, manual_login_wait_sec + 90)
+        result = await send_message(agent.agent_code, message, timeout_seconds=start_timeout_seconds)
         if result.status_code != AgentResponseEnum.SUCCESS.value:
             WebCaseDao.update_recording_session(
                 query_db,
@@ -1162,6 +1346,115 @@ class WebCaseService:
             is_success=True,
             message="录制已启动",
             result={"recordingId": recording_session.recording_id},
+        )
+
+    @classmethod
+    async def continue_recording_services(
+        cls,
+        query_db: Session,
+        request_model: WebRecordingContinueRequestModel,
+    ) -> CrudResponseModel:
+        session_obj = WebCaseDao.get_recording_session(query_db, request_model.recording_id)
+        if session_obj is None:
+            return CrudResponseModel(is_success=False, message="录制会话不存在")
+
+        agent = cls._resolve_agent(
+            query_db,
+            request_model.agent_id or session_obj.agent_id,
+            request_model.agent_code or session_obj.agent_code,
+        )
+        if agent is None or not agent.agent_code:
+            return CrudResponseModel(is_success=False, message="未找到可用的Agent")
+
+        result = await send_message(
+            agent.agent_code,
+            {
+                "requestType": TstepTypeEnum.webui.value,
+                "command": "continue_recording",
+                "recordingId": session_obj.recording_id,
+            },
+            timeout_seconds=120,
+        )
+        if result.status_code != AgentResponseEnum.SUCCESS.value:
+            return CrudResponseModel(is_success=False, message=result.message)
+        return CrudResponseModel(
+            is_success=True,
+            message="已确认继续录制",
+            result={"recordingId": session_obj.recording_id},
+        )
+
+    @classmethod
+    async def cancel_recording_services(
+        cls,
+        query_db: Session,
+        request_model: WebRecordingCancelRequestModel,
+    ) -> CrudResponseModel:
+        """取消录制准备态并释放浏览器资源。"""
+        session_obj = WebCaseDao.get_recording_session(query_db, request_model.recording_id)
+        if session_obj is None:
+            return CrudResponseModel(is_success=False, message="录制会话不存在")
+
+        status_value = int(session_obj.status or 0)
+        if status_value != 2:
+            return CrudResponseModel(is_success=False, message="当前录制会话不处于可取消状态")
+
+        summary_payload = cls._loads(session_obj.result_summary_json, {})
+        waiting_confirm = False
+        if isinstance(summary_payload, dict):
+            manual_gate = summary_payload.get("manualLoginGate")
+            if isinstance(manual_gate, dict):
+                waiting_confirm = bool(manual_gate.get("waitingConfirm"))
+            waiting_confirm = waiting_confirm or str(summary_payload.get("status") or "").strip().lower() == "waiting_manual_login"
+        if not waiting_confirm:
+            return CrudResponseModel(is_success=False, message="当前录制会话不处于准备等待确认状态")
+
+        agent = cls._resolve_agent(
+            query_db,
+            request_model.agent_id or session_obj.agent_id,
+            request_model.agent_code or session_obj.agent_code,
+        )
+        if agent is None or not agent.agent_code:
+            return CrudResponseModel(is_success=False, message="未找到可用的Agent")
+
+        cancel_reason = str(request_model.reason or "已取消录制准备").strip() or "已取消录制准备"
+        cancel_message = {
+            "requestType": TstepTypeEnum.webui.value,
+            "command": "cancel_recording_prepare",
+            "recordingId": session_obj.recording_id,
+            "reason": cancel_reason,
+        }
+        result = await send_message(
+            agent.agent_code,
+            cancel_message,
+            timeout_seconds=90,
+        )
+        if result.status_code != AgentResponseEnum.SUCCESS.value:
+            return CrudResponseModel(is_success=False, message=result.message)
+
+        now = datetime.now()
+        WebCaseDao.update_recording_session(
+            query_db,
+            session_obj.recording_id,
+            {
+                "status": 5,
+                "ended_at": now,
+                "last_event_at": now,
+                "error_message": cancel_reason,
+                "result_summary_json": cls._dumps(
+                    {
+                        "status": "cancelled",
+                        "message": cancel_reason,
+                        "cancelledAt": now.isoformat(),
+                    }
+                ),
+                "update_time": now,
+            },
+        )
+        query_db.commit()
+        return CrudResponseModel(
+            is_success=True,
+            message="已取消录制准备",
+            result={"recordingId": session_obj.recording_id},
         )
 
     @classmethod
@@ -1460,18 +1753,121 @@ class WebCaseService:
             by_alias=True,
             exclude={"web_case_id", "agent_id", "agent_code", "runtime_profile_id", "runtime_overrides"},
         )
+        manual_login_enabled = bool(request_model.manual_login_enabled)
+        manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
+        manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
+        persist_context_enabled = bool(request_model.persist_context_enabled)
+        persist_context_key = str(request_model.persist_context_key or "").strip()
+        runtime_options["manualLoginEnabled"] = manual_login_enabled
+        runtime_options["manualLoginWaitSec"] = manual_login_wait_sec
+        runtime_options["manualLoginRequireConfirm"] = manual_login_require_confirm
+        runtime_options["persistContextEnabled"] = persist_context_enabled
+        if persist_context_key:
+            runtime_options["persistContextKey"] = persist_context_key
         if merged_runtime_overrides:
             runtime_options["runtimeOverrides"] = merged_runtime_overrides
         if request_model.runtime_profile_id:
             runtime_options["runtimeProfileId"] = request_model.runtime_profile_id
+
+        if manual_login_enabled and manual_login_require_confirm:
+            prepare_response = await send_message(
+                agent.agent_code,
+                {
+                    "requestType": TstepTypeEnum.webui.value,
+                    "command": "prepare_run_case",
+                    "webCaseRunId": run_record.web_case_run_id,
+                    "caseData": case_data,
+                    "runtimeOptions": runtime_options,
+                },
+                timeout_seconds=max(120, manual_login_wait_sec + 90),
+            )
+            if prepare_response.status_code != AgentResponseEnum.SUCCESS.value:
+                ended_at = datetime.now()
+                duration_ms = int((ended_at - started_at).total_seconds() * 1000)
+                WebCaseDao.update_run_record(
+                    query_db,
+                    run_record.web_case_run_id,
+                    {
+                        "status": CaseRunStatus.failed.value,
+                        "ended_at": ended_at,
+                        "duration_ms": duration_ms,
+                        "error_message": prepare_response.message,
+                        "update_by": user_name or run_record.update_by,
+                        "update_time": datetime.now(),
+                    },
+                )
+                query_db.commit()
+                return CrudResponseModel(is_success=False, message=prepare_response.message)
+
+            agent_success, agent_status, prepare_result, prepare_message = cls._extract_agent_webui_payload(prepare_response)
+            if not agent_success:
+                ended_at = datetime.now()
+                duration_ms = int((ended_at - started_at).total_seconds() * 1000)
+                failure_message = prepare_message or "执行准备失败"
+                WebCaseDao.update_run_record(
+                    query_db,
+                    run_record.web_case_run_id,
+                    {
+                        "status": CaseRunStatus.failed.value,
+                        "ended_at": ended_at,
+                        "duration_ms": duration_ms,
+                        "result_json": cls._dumps(prepare_result),
+                        "error_message": failure_message,
+                        "update_by": user_name or run_record.update_by,
+                        "update_time": datetime.now(),
+                    },
+                )
+                query_db.commit()
+                return CrudResponseModel(is_success=False, message=failure_message)
+
+            waiting_result = {
+                **(prepare_result if isinstance(prepare_result, dict) else {}),
+                "awaitingManualConfirm": True,
+                "manualLoginStatus": agent_status or "waiting_manual_login",
+            }
+            WebCaseDao.update_run_record(
+                query_db,
+                run_record.web_case_run_id,
+                {
+                    "status": CaseRunStatus.running.value,
+                    "result_json": cls._dumps(waiting_result),
+                    "error_message": None,
+                    "update_by": user_name or run_record.update_by,
+                    "update_time": datetime.now(),
+                },
+            )
+            query_db.commit()
+            return CrudResponseModel(
+                is_success=True,
+                message=prepare_message or "浏览器已就绪，请手动登录后继续执行",
+                result=WebCaseRunRecordModel(
+                    webCaseRunId=run_record.web_case_run_id,
+                    webCaseId=run_record.web_case_id,
+                    agentId=run_record.agent_id,
+                    agentCode=run_record.agent_code,
+                    triggerType=run_record.trigger_type,
+                    status=CaseRunStatus.running.value,
+                    startedAt=started_at,
+                    endedAt=None,
+                    durationMs=None,
+                    result=waiting_result,
+                    errorMessage=None,
+                ).model_dump(by_alias=True),
+            )
+
+        request_timeout_seconds: int | None = None
+        if manual_login_enabled:
+            request_timeout_seconds = max(120, manual_login_wait_sec + 600)
         response = await send_message(
             agent.agent_code,
             {
                 "requestType": TstepTypeEnum.webui.value,
                 "command": "run_case",
+                "webCaseRunId": run_record.web_case_run_id,
                 "caseData": case_data,
                 "runtimeOptions": runtime_options,
             },
+            timeout_seconds=request_timeout_seconds,
         )
         ended_at = datetime.now()
         duration_ms = int((ended_at - started_at).total_seconds() * 1000)
@@ -1527,6 +1923,209 @@ class WebCaseService:
                 result=response_result,
                 errorMessage=None if success else failure_message,
             ).model_dump(by_alias=True),
+        )
+
+    @classmethod
+    async def continue_web_case_services(
+        cls,
+        query_db: Session,
+        request_model: WebCaseRunContinueRequestModel,
+    ) -> CrudResponseModel:
+        run_record = WebCaseDao.get_run_record(query_db, request_model.web_case_run_id)
+        if run_record is None:
+            return CrudResponseModel(is_success=False, message="执行记录不存在")
+        if int(run_record.status or 0) != CaseRunStatus.running.value:
+            return CrudResponseModel(is_success=False, message="当前执行记录不处于可继续状态")
+
+        agent = cls._resolve_agent(
+            query_db,
+            request_model.agent_id or run_record.agent_id,
+            request_model.agent_code or run_record.agent_code,
+        )
+        if agent is None or not agent.agent_code:
+            return CrudResponseModel(is_success=False, message="未找到可用的Agent")
+
+        response = await send_message(
+            agent.agent_code,
+            {
+                "requestType": TstepTypeEnum.webui.value,
+                "command": "continue_run_case",
+                "webCaseRunId": run_record.web_case_run_id,
+            },
+            timeout_seconds=3600,
+        )
+        ended_at = datetime.now()
+        started_at = run_record.started_at or ended_at
+        duration_ms = int((ended_at - started_at).total_seconds() * 1000)
+
+        if response.status_code != AgentResponseEnum.SUCCESS.value:
+            WebCaseDao.update_run_record(
+                query_db,
+                run_record.web_case_run_id,
+                {
+                    "status": CaseRunStatus.failed.value,
+                    "ended_at": ended_at,
+                    "duration_ms": duration_ms,
+                    "error_message": response.message,
+                    "update_by": run_record.update_by,
+                    "update_time": datetime.now(),
+                },
+            )
+            query_db.commit()
+            return CrudResponseModel(is_success=False, message=response.message)
+
+        success, response_result, failure_message = cls._extract_webui_run_response(response)
+        run_status = CaseRunStatus.passed.value if success else CaseRunStatus.failed.value
+        WebCaseDao.update_run_record(
+            query_db,
+            run_record.web_case_run_id,
+            {
+                "status": run_status,
+                "ended_at": ended_at,
+                "duration_ms": duration_ms,
+                "result_json": cls._dumps(response_result),
+                "error_message": None if success else failure_message,
+                "update_by": run_record.update_by,
+                "update_time": datetime.now(),
+            },
+        )
+        if success:
+            detail = cls.web_case_detail_services(query_db, run_record.web_case_id)
+            if detail is not None:
+                cls._record_element_candidates(query_db, detail, response_result, run_record.manager, run_record.dept_id, run_record.update_by)
+        query_db.commit()
+
+        return CrudResponseModel(
+            is_success=success,
+            message="执行完成" if success else (failure_message or "执行失败"),
+            result=WebCaseRunRecordModel(
+                webCaseRunId=run_record.web_case_run_id,
+                webCaseId=run_record.web_case_id,
+                agentId=run_record.agent_id,
+                agentCode=run_record.agent_code,
+                triggerType=run_record.trigger_type,
+                status=run_status,
+                startedAt=started_at,
+                endedAt=ended_at,
+                durationMs=duration_ms,
+                result=response_result,
+                errorMessage=None if success else failure_message,
+            ).model_dump(by_alias=True),
+        )
+
+    @classmethod
+    async def _stop_or_cancel_web_case_services(
+        cls,
+        query_db: Session,
+        request_model: WebCaseRunStopRequestModel,
+        *,
+        command: str,
+        default_reason: str,
+        require_waiting_confirm: bool,
+    ) -> CrudResponseModel:
+        """通用执行中断逻辑：用于停止执行与取消准备态。"""
+        run_record = WebCaseDao.get_run_record(query_db, request_model.web_case_run_id)
+        if run_record is None:
+            return CrudResponseModel(is_success=False, message="执行记录不存在")
+        if int(run_record.status or 0) != CaseRunStatus.running.value:
+            return CrudResponseModel(is_success=False, message="当前执行记录不处于可中断状态")
+        if require_waiting_confirm and not cls._is_run_waiting_manual_confirm(run_record):
+            return CrudResponseModel(is_success=False, message="当前执行记录不处于准备等待确认状态")
+
+        agent = cls._resolve_agent(
+            query_db,
+            request_model.agent_id or run_record.agent_id,
+            request_model.agent_code or run_record.agent_code,
+        )
+        if agent is None or not agent.agent_code:
+            return CrudResponseModel(is_success=False, message="未找到可用的Agent")
+
+        cancel_reason = str(request_model.reason or default_reason).strip() or default_reason
+        response = await send_message(
+            agent.agent_code,
+            {
+                "requestType": TstepTypeEnum.webui.value,
+                "command": command,
+                "webCaseRunId": run_record.web_case_run_id,
+                "reason": cancel_reason,
+            },
+            timeout_seconds=120,
+        )
+        if response.status_code != AgentResponseEnum.SUCCESS.value:
+            return CrudResponseModel(is_success=False, message=response.message)
+
+        ended_at = datetime.now()
+        started_at = run_record.started_at or ended_at
+        duration_ms = int((ended_at - started_at).total_seconds() * 1000)
+        merged_result = cls._merge_run_result_payload(
+            run_record,
+            {
+                "cancelled": True,
+                "cancelReason": cancel_reason,
+                "cancelCommand": command,
+                "cancelledAt": ended_at.isoformat(),
+            },
+        )
+        WebCaseDao.update_run_record(
+            query_db,
+            run_record.web_case_run_id,
+            {
+                "status": CaseRunStatus.failed.value,
+                "ended_at": ended_at,
+                "duration_ms": duration_ms,
+                "result_json": cls._dumps(merged_result),
+                "error_message": cancel_reason,
+                "update_by": run_record.update_by,
+                "update_time": datetime.now(),
+            },
+        )
+        query_db.commit()
+        return CrudResponseModel(
+            is_success=True,
+            message=cancel_reason,
+            result=WebCaseRunRecordModel(
+                webCaseRunId=run_record.web_case_run_id,
+                webCaseId=run_record.web_case_id,
+                agentId=run_record.agent_id,
+                agentCode=run_record.agent_code,
+                triggerType=run_record.trigger_type,
+                status=CaseRunStatus.failed.value,
+                startedAt=started_at,
+                endedAt=ended_at,
+                durationMs=duration_ms,
+                result=merged_result,
+                errorMessage=cancel_reason,
+            ).model_dump(by_alias=True),
+        )
+
+    @classmethod
+    async def stop_web_case_services(
+        cls,
+        query_db: Session,
+        request_model: WebCaseRunStopRequestModel,
+    ) -> CrudResponseModel:
+        """停止执行中的Web用例。"""
+        return await cls._stop_or_cancel_web_case_services(
+            query_db,
+            request_model,
+            command="stop_run_case",
+            default_reason="已手动停止执行",
+            require_waiting_confirm=False,
+        )
+
+    @classmethod
+    async def cancel_web_case_services(
+        cls,
+        query_db: Session,
+        request_model: WebCaseRunCancelRequestModel,
+    ) -> CrudResponseModel:
+        """取消等待确认中的执行准备态。"""
+        return await cls._stop_or_cancel_web_case_services(
+            query_db,
+            request_model,
+            command="cancel_run_case",
+            default_reason="已取消执行准备",
+            require_waiting_confirm=True,
         )
 
     @classmethod
