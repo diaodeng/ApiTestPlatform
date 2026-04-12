@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -24,6 +26,30 @@ RECORDER_SCRIPT = """
   window.__qtrRecorderInstalled__ = true;
   window.__qtrRecordActive__ = window.__qtrRecordActive__ !== false;
   const cleanText = (value) => (value || "").replace(/\\s+/g, " ").trim().slice(0, 120);
+  const attr = (el, name) => cleanText(el.getAttribute(name) || "");
+  const options = window.__qtrRecordOptions__ && typeof window.__qtrRecordOptions__ === "object"
+    ? window.__qtrRecordOptions__
+    : {};
+  const captureAssertions = options.captureAssertions !== false && options.capture_assertions !== false;
+  const autoAssertTextOnClick = captureAssertions
+    && (options.autoAssertTextOnClick === true || options.auto_assert_text_on_click === true);
+  const assertionAttachMode = String(options.assertionAttachMode || options.assertion_attach_mode || "inside_step").toLowerCase();
+  const attachAssertToPreviousStep = !["parallel_step", "parallel", "separate_step"].includes(assertionAttachMode);
+  const quickAssertPickEnabled = captureAssertions;
+  const isQuickAssertEvent = (event) => !!(event && event.altKey);
+  const isStableToken = (value) => {
+    const text = cleanText(value);
+    if (!text || text.length < 2 || text.length > 80) return false;
+    // uuid / hash / long timestamp-like token is usually unstable for replay
+    if (/[0-9a-f]{10,}/i.test(text) || /\\d{6,}/.test(text)) return false;
+    return true;
+  };
+  const cssEscape = (value) => {
+    if (window.CSS && typeof window.CSS.escape === "function") {
+      return window.CSS.escape(value);
+    }
+    return String(value || "").replace(/([ !"#$%&'()*+,./:;<=>?@[\\\\\\]^`{|}~])/g, "\\\\$1");
+  };
   const inferRole = (el) => {
     const explicit = el.getAttribute("role");
     if (explicit) return explicit;
@@ -41,19 +67,39 @@ RECORDER_SCRIPT = """
     if (tag === "textarea") return "textbox";
     return "";
   };
+  const pushLocator = (locators, locatorType, locatorValue) => {
+    const key = `${locatorType}::${JSON.stringify(locatorValue || {})}`;
+    if (locators.some((item) => item.__key === key)) return;
+    locators.push({ locatorType, locatorValue, enabled: true, __key: key });
+  };
   const cssPath = (el) => {
     if (!(el instanceof Element)) return "";
+    const id = attr(el, "id");
+    if (isStableToken(id)) {
+      return `#${cssEscape(id)}`;
+    }
+    const testId = attr(el, "data-testid") || attr(el, "data-test");
+    if (isStableToken(testId)) {
+      return `[data-testid="${cssEscape(testId)}"]`;
+    }
+    const name = attr(el, "name");
+    if (isStableToken(name)) {
+      return `${(el.tagName || "div").toLowerCase()}[name="${cssEscape(name)}"]`;
+    }
     const parts = [];
     let current = el;
-    while (current && current.nodeType === 1 && parts.length < 5) {
+    while (current && current.nodeType === 1 && parts.length < 6) {
       let part = current.tagName.toLowerCase();
-      if (current.id) {
-        part += "#" + current.id;
+      const currentId = attr(current, "id");
+      if (isStableToken(currentId)) {
+        part += "#" + cssEscape(currentId);
         parts.unshift(part);
         break;
       }
-      const cls = Array.from(current.classList || []).slice(0, 2).join(".");
-      if (cls) part += "." + cls;
+      const stableClass = Array.from(current.classList || []).find((item) => isStableToken(item));
+      if (stableClass) part += "." + cssEscape(stableClass);
+      const currentName = attr(current, "name");
+      if (isStableToken(currentName)) part += `[name="${cssEscape(currentName)}"]`;
       const siblings = current.parentElement ? Array.from(current.parentElement.children).filter((item) => item.tagName === current.tagName) : [];
       if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
       parts.unshift(part);
@@ -61,31 +107,49 @@ RECORDER_SCRIPT = """
     }
     return parts.join(" > ");
   };
-  const buildLocators = (el) => {
+  const buildLocators = (el, mode = {}) => {
+    const preferStableLocators = mode && mode.preferStableLocators === true;
     const locators = [];
+    const id = attr(el, "id");
+    const nameAttr = attr(el, "name");
+    const testId = attr(el, "data-testid") || attr(el, "data-test");
+    const ariaLabel = cleanText(attr(el, "aria-label"));
     const role = inferRole(el);
     const text = cleanText(el.innerText || el.textContent || "");
-    const label = cleanText(el.getAttribute("aria-label") || el.labels?.[0]?.innerText || "");
+    const labelText = cleanText(el.labels?.[0]?.innerText || "");
+    const label = cleanText(ariaLabel || labelText || "");
     const placeholder = cleanText(el.getAttribute("placeholder") || "");
-    const testId = cleanText(el.getAttribute("data-testid") || el.getAttribute("data-test") || "");
+    if (isStableToken(testId)) pushLocator(locators, "test_id", { testId });
+    if (isStableToken(id)) pushLocator(locators, "id", { id });
+    if (isStableToken(nameAttr)) pushLocator(locators, "name", { name: nameAttr });
     if (role) {
       const roleValue = { role };
-      if (text) roleValue.name = text;
+      if (preferStableLocators) {
+        if (ariaLabel) roleValue.name = ariaLabel;
+        else if (labelText && labelText !== text) roleValue.name = labelText;
+      } else if (text) roleValue.name = text;
       else if (label) roleValue.name = label;
-      locators.push({ locatorType: "role", locatorValue: roleValue, priority: 0, enabled: true });
+      pushLocator(locators, "role", roleValue);
     }
-    if (label) locators.push({ locatorType: "label", locatorValue: { text: label, exact: true }, priority: 1, enabled: true });
-    if (placeholder) locators.push({ locatorType: "placeholder", locatorValue: { text: placeholder, exact: true }, priority: 2, enabled: true });
-    if (text) locators.push({ locatorType: "text", locatorValue: { text, exact: true }, priority: 3, enabled: true });
-    if (testId) locators.push({ locatorType: "test_id", locatorValue: { testId }, priority: 4, enabled: true });
+    if (label) pushLocator(locators, "label", { text: label, exact: true });
+    if (placeholder) pushLocator(locators, "placeholder", { text: placeholder, exact: true });
+    if (!preferStableLocators && text && text.length <= 80) pushLocator(locators, "text", { text, exact: true });
     const css = cssPath(el);
-    if (css) locators.push({ locatorType: "css", locatorValue: { selector: css }, priority: 5, enabled: true });
-    return locators;
+    if (css) pushLocator(locators, "css", { selector: css });
+    if (preferStableLocators && !locators.length && text && text.length <= 80) {
+      pushLocator(locators, "text", { text, exact: true });
+    }
+    return locators.map((item, index) => ({
+      locatorType: item.locatorType,
+      locatorValue: item.locatorValue,
+      priority: index,
+      enabled: true
+    }));
   };
-  const buildSnapshot = (el) => ({
+  const buildSnapshot = (el, mode = {}) => ({
     elementText: cleanText(el.innerText || el.textContent || ""),
     context: { pageUrl: window.location.href, frameUrl: window.location.href, frameChain: [], shadowChain: [] },
-    locators: buildLocators(el)
+    locators: buildLocators(el, mode)
   });
   const emit = (payload) => {
     if (window.__qtrRecordActive__ === false) {
@@ -99,12 +163,42 @@ RECORDER_SCRIPT = """
     const target = event.target instanceof Element ? event.target.closest("button, a, input, textarea, select, [role], [data-testid], [data-test], *") : null;
     if (!target) return;
     const text = cleanText(target.innerText || target.textContent || "");
-    const assertions = text ? [{ assertType: "text_contains", expected: text, enabled: true }] : [];
+    if (quickAssertPickEnabled && isQuickAssertEvent(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+        emit({
+          stepName: text
+            ? (attachAssertToPreviousStep ? `为上一步追加断言 文本包含 ${text}` : `断言文本包含 ${text}`)
+            : (attachAssertToPreviousStep ? "为上一步追加断言 元素可见" : "断言元素可见"),
+        actionType: text ? "assert_text_contains" : "wait_visible",
+        params: text ? { expected: text } : {},
+        assertions: [],
+        rawEvent: {
+          eventType: attachAssertToPreviousStep ? "assert_pick_attach_prev" : "assert_pick",
+          trigger: "alt_click",
+          tagName: target.tagName,
+          assertionAttachMode,
+          attachToPreviousStep: attachAssertToPreviousStep
+        },
+        targetSnapshot: buildSnapshot(target, { preferStableLocators: true })
+      });
+      return;
+    }
+    if (autoAssertTextOnClick && text) {
+      emit({
+        stepName: `断言文本包含 ${text}`,
+        actionType: "assert_text_contains",
+        params: { expected: text },
+        assertions: [],
+        rawEvent: { eventType: "auto_assert_before_click", tagName: target.tagName },
+        targetSnapshot: buildSnapshot(target)
+      });
+    }
     emit({
       stepName: text ? `点击 ${text}` : "点击元素",
       actionType: "click",
       params: {},
-      assertions,
+      assertions: [],
       rawEvent: { eventType: "click", tagName: target.tagName },
       targetSnapshot: buildSnapshot(target)
     });
@@ -182,6 +276,443 @@ def _as_dict(data: Any) -> dict[str, Any]:
     return {}
 
 
+def _as_list(data: Any) -> list[Any]:
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _resolve_runtime_settings(case_data: dict[str, Any], runtime_options: dict[str, Any]) -> dict[str, Any]:
+    runtime_overrides = _as_dict(runtime_options.get("runtimeOverrides") or runtime_options.get("runtime_overrides"))
+    case_runtime_settings = _as_dict(case_data.get("runtimeSettings") or case_data.get("runtime_settings"))
+    return {
+        **case_runtime_settings,
+        **runtime_overrides,
+        **runtime_options,
+    }
+
+
+def _step_timeout_ms(step: dict[str, Any], runtime_options: dict[str, Any], case_data: dict[str, Any]) -> int:
+    params = _as_dict(step.get("params"))
+    case_runtime = _as_dict(case_data.get("runtimeSettings") or case_data.get("runtime_settings"))
+    candidates = [
+        step.get("timeoutMs"),
+        step.get("timeout_ms"),
+        params.get("timeoutMs"),
+        params.get("timeout_ms"),
+        runtime_options.get("stepTimeoutMs"),
+        runtime_options.get("step_timeout_ms"),
+        runtime_options.get("timeoutMs"),
+        runtime_options.get("timeout_ms"),
+        case_runtime.get("stepTimeoutMs"),
+        case_runtime.get("step_timeout_ms"),
+        case_runtime.get("timeoutMs"),
+        case_runtime.get("timeout_ms"),
+        10000,
+    ]
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return max(_as_int(candidate, 10000), 500)
+    return 10000
+
+
+def _step_think_time_ms(step: dict[str, Any], runtime_options: dict[str, Any], case_data: dict[str, Any]) -> int:
+    params = _as_dict(step.get("params"))
+    case_runtime = _as_dict(case_data.get("runtimeSettings") or case_data.get("runtime_settings"))
+    candidates = [
+        step.get("thinkTimeMs"),
+        step.get("think_time_ms"),
+        params.get("thinkTimeMs"),
+        params.get("think_time_ms"),
+        runtime_options.get("stepThinkTimeMs"),
+        runtime_options.get("step_think_time_ms"),
+        runtime_options.get("thinkTimeMs"),
+        runtime_options.get("think_time_ms"),
+        case_runtime.get("stepThinkTimeMs"),
+        case_runtime.get("step_think_time_ms"),
+        case_runtime.get("thinkTimeMs"),
+        case_runtime.get("think_time_ms"),
+        0,
+    ]
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return max(_as_int(candidate, 0), 0)
+    return 0
+
+
+def _continue_on_failure(step: dict[str, Any], runtime_options: dict[str, Any]) -> bool:
+    if step.get("continueOnFailure") is not None:
+        return bool(step.get("continueOnFailure"))
+    if step.get("continue_on_failure") is not None:
+        return bool(step.get("continue_on_failure"))
+    return bool(runtime_options.get("continueOnFailure", False))
+
+
+def _has_following_enabled_step(steps: list[Any], current_index: int) -> bool:
+    for idx in range(current_index + 1, len(steps)):
+        candidate = _as_dict(steps[idx])
+        if bool(candidate.get("enabled", True)):
+            return True
+    return False
+
+
+_TEXT_SPACE_PATTERN = re.compile(r"\s+")
+
+
+def _normalize_assert_text(value: Any) -> str:
+    return _TEXT_SPACE_PATTERN.sub(" ", str(value or "")).strip()
+
+
+def _compact_assert_text(value: str) -> str:
+    return _TEXT_SPACE_PATTERN.sub("", value or "")
+
+
+def _text_contains(actual: str, expected: str) -> bool:
+    if expected in actual:
+        return True
+    expected_compact = _compact_assert_text(expected)
+    if not expected_compact:
+        return False
+    return expected_compact in _compact_assert_text(actual)
+
+
+def _text_equals(actual: str, expected: str) -> bool:
+    if actual == expected:
+        return True
+    expected_compact = _compact_assert_text(expected)
+    if not expected_compact:
+        return False
+    return _compact_assert_text(actual) == expected_compact
+
+
+async def _read_locator_text(locator: Any, *, timeout_ms: int | None = None) -> str:
+    kwargs: dict[str, Any] = {}
+    if timeout_ms and timeout_ms > 0:
+        kwargs["timeout"] = timeout_ms
+    try:
+        text = await locator.inner_text(**kwargs)
+    except Exception:
+        text = await locator.text_content(**kwargs)
+    return _normalize_assert_text(text)
+
+
+_ACTIONS_WITHOUT_TARGET = {
+    "goto",
+    "sleep",
+    "wait",
+    "assert_page_contains",
+    "assert_page_not_contains",
+    "assert_title_contains",
+    "assert_url_contains",
+}
+
+_LOCATOR_TYPE_WEIGHT = {
+    "test_id": 0,
+    "id": 1,
+    "name": 2,
+    "role": 3,
+    "label": 4,
+    "placeholder": 5,
+    "text": 6,
+    "css": 7,
+    "xpath": 8,
+}
+
+
+def _action_requires_locator(action_type: str) -> bool:
+    return str(action_type or "").strip().lower() not in _ACTIONS_WITHOUT_TARGET
+
+
+_VAR_PATTERN = re.compile(r"\$\{([a-zA-Z0-9_.-]+)\}|\{\{([a-zA-Z0-9_.-]+)\}\}")
+
+
+def _interpolate_string(value: str, variables: dict[str, Any]) -> str:
+    if not value:
+        return value
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1) or match.group(2) or ""
+        if key in variables:
+            return str(variables.get(key) or "")
+        return match.group(0)
+
+    return _VAR_PATTERN.sub(_replace, str(value))
+
+
+def _resolve_runtime_variables(runtime_options: dict[str, Any]) -> dict[str, Any]:
+    variables: dict[str, Any] = {}
+    for key in ("variables", "runtimeVariables", "runtime_variables", "cookieVariables", "cookie_variables"):
+        value = runtime_options.get(key)
+        if isinstance(value, dict):
+            variables.update(value)
+    return variables
+
+
+def _normalize_cookie_rules(runtime_options: dict[str, Any]) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    for key in ("cookieRules", "cookie_rules", "cookieScopes", "cookie_scopes", "cookieProfiles", "cookie_profiles"):
+        for item in _as_list(runtime_options.get(key)):
+            if not isinstance(item, dict):
+                continue
+            cookies = _as_list(item.get("cookies"))
+            if not cookies:
+                continue
+            match = _as_dict(item.get("match"))
+            for match_key in ("host", "domain", "urlContains", "url_contains", "urlRegex", "url_regex"):
+                if item.get(match_key) not in (None, "") and match_key not in match:
+                    match[match_key] = item.get(match_key)
+            apply_on = _as_list(item.get("applyOn") or item.get("apply_on"))
+            normalized_apply_on = {
+                str(entry).strip().lower()
+                for entry in apply_on
+                if str(entry).strip()
+            }
+            if not normalized_apply_on:
+                normalized_apply_on = {"before_start", "before_step", "before_goto"}
+            rules.append(
+                {
+                    "name": str(item.get("name") or f"rule_{len(rules) + 1}"),
+                    "match": match,
+                    "applyOn": normalized_apply_on,
+                    "cookies": cookies,
+                }
+            )
+    global_cookies = _as_list(runtime_options.get("cookies"))
+    if global_cookies:
+        rules.append(
+            {
+                "name": "global_cookies",
+                "match": {},
+                "applyOn": {"before_start", "before_step", "before_goto"},
+                "cookies": global_cookies,
+            }
+        )
+    return rules
+
+
+def _host_from_url(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _ensure_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if value in (None, ""):
+        return []
+    return [str(value)]
+
+
+def _rule_matches_url(rule: dict[str, Any], *, url: str, host: str, variables: dict[str, Any]) -> bool:
+    match = _as_dict(rule.get("match"))
+    if not match:
+        return True
+
+    host_values = _ensure_list(match.get("host")) + _ensure_list(match.get("domain"))
+    if host_values:
+        normalized = [_interpolate_string(item.lower(), variables) for item in host_values]
+        if not host:
+            return False
+        if not any(host == item or host.endswith(f".{item}") for item in normalized if item):
+            return False
+
+    contains_values = _ensure_list(match.get("urlContains") or match.get("url_contains"))
+    if contains_values:
+        normalized = [_interpolate_string(item, variables) for item in contains_values]
+        if not any(item and item in url for item in normalized):
+            return False
+
+    regex_values = _ensure_list(match.get("urlRegex") or match.get("url_regex"))
+    if regex_values:
+        matched = False
+        for item in regex_values:
+            pattern = _interpolate_string(item, variables)
+            if not pattern:
+                continue
+            try:
+                if re.search(pattern, url):
+                    matched = True
+                    break
+            except re.error:
+                continue
+        if not matched:
+            return False
+
+    return True
+
+
+def _normalize_cookie_item(
+    cookie_item: dict[str, Any],
+    *,
+    variables: dict[str, Any],
+    target_url: str,
+    target_host: str,
+    default_domain: str = "",
+) -> dict[str, Any] | None:
+    name = _interpolate_string(str(cookie_item.get("name") or ""), variables).strip()
+    if not name:
+        return None
+    value = _interpolate_string(str(cookie_item.get("value") or ""), variables)
+    if value == "":
+        return None
+
+    cookie_payload: dict[str, Any] = {"name": name, "value": value}
+
+    explicit_url = cookie_item.get("url")
+    explicit_domain = cookie_item.get("domain")
+    explicit_path = cookie_item.get("path")
+    default_domain_value = _interpolate_string(str(default_domain or ""), variables).strip().lstrip(".")
+
+    if explicit_url:
+        cookie_payload["url"] = _interpolate_string(str(explicit_url), variables)
+    elif explicit_domain:
+        cookie_payload["domain"] = _interpolate_string(str(explicit_domain), variables)
+        cookie_payload["path"] = _interpolate_string(str(explicit_path or "/"), variables)
+    elif default_domain_value:
+        cookie_payload["domain"] = default_domain_value
+        cookie_payload["path"] = _interpolate_string(str(explicit_path or "/"), variables)
+    elif target_url:
+        cookie_payload["url"] = target_url
+    elif target_host:
+        cookie_payload["domain"] = target_host
+        cookie_payload["path"] = "/"
+    else:
+        return None
+
+    if cookie_item.get("httpOnly") is not None:
+        cookie_payload["httpOnly"] = bool(cookie_item.get("httpOnly"))
+    if cookie_item.get("secure") is not None:
+        cookie_payload["secure"] = bool(cookie_item.get("secure"))
+    if cookie_item.get("sameSite") is not None:
+        same_site = str(cookie_item.get("sameSite") or "").strip().lower()
+        if same_site in {"lax", "strict", "none"}:
+            cookie_payload["sameSite"] = same_site.capitalize()
+    if cookie_item.get("expires") not in (None, ""):
+        cookie_payload["expires"] = _as_int(cookie_item.get("expires"))
+    return cookie_payload
+
+
+def _summarize_cookie_for_debug(cookie_item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": str(cookie_item.get("name") or ""),
+        "domain": cookie_item.get("domain"),
+        "path": cookie_item.get("path"),
+        "url": cookie_item.get("url"),
+        "httpOnly": bool(cookie_item.get("httpOnly")) if cookie_item.get("httpOnly") is not None else None,
+        "secure": bool(cookie_item.get("secure")) if cookie_item.get("secure") is not None else None,
+        "sameSite": cookie_item.get("sameSite"),
+        "expires": cookie_item.get("expires"),
+    }
+
+
+async def _capture_context_cookies_for_debug(context: Any, *, target_url: str) -> list[dict[str, Any]]:
+    if context is None:
+        return []
+    try:
+        if target_url:
+            cookies = await context.cookies([target_url])
+        else:
+            cookies = await context.cookies()
+    except Exception:
+        return []
+    result: list[dict[str, Any]] = []
+    for item in _as_list(cookies):
+        cookie_item = _as_dict(item)
+        if not cookie_item:
+            continue
+        result.append(
+            {
+                "name": str(cookie_item.get("name") or ""),
+                "domain": cookie_item.get("domain"),
+                "path": cookie_item.get("path"),
+                "httpOnly": bool(cookie_item.get("httpOnly")) if cookie_item.get("httpOnly") is not None else None,
+                "secure": bool(cookie_item.get("secure")) if cookie_item.get("secure") is not None else None,
+                "sameSite": cookie_item.get("sameSite"),
+                "expires": cookie_item.get("expires"),
+            }
+        )
+    return result
+
+
+async def _apply_cookie_rules(
+    context: Any,
+    *,
+    target_url: str,
+    stage: str,
+    cookie_rules: list[dict[str, Any]],
+    variables: dict[str, Any],
+) -> dict[str, Any] | None:
+    if context is None or not cookie_rules:
+        return None
+
+    stage_name = str(stage or "").strip().lower()
+    host = _host_from_url(target_url)
+    cookies_to_apply: list[dict[str, Any]] = []
+    applied_rule_names: list[str] = []
+
+    for rule in cookie_rules:
+        apply_on = set(rule.get("applyOn") or set())
+        if stage_name and apply_on and stage_name not in apply_on:
+            continue
+        if not _rule_matches_url(rule, url=target_url, host=host, variables=variables):
+            continue
+
+        rule_match = _as_dict(rule.get("match"))
+        default_domain_candidates = _ensure_list(rule_match.get("domain")) + _ensure_list(rule_match.get("host"))
+        default_domain = ""
+        for candidate in default_domain_candidates:
+            normalized_candidate = _interpolate_string(str(candidate or ""), variables).strip().lstrip(".").lower()
+            if normalized_candidate:
+                default_domain = normalized_candidate
+                break
+
+        applied_rule_names.append(str(rule.get("name") or "rule"))
+        for raw_cookie in _as_list(rule.get("cookies")):
+            cookie_def = _as_dict(raw_cookie)
+            if not cookie_def:
+                continue
+            normalized_cookie = _normalize_cookie_item(
+                cookie_def,
+                variables=variables,
+                target_url=target_url,
+                target_host=host,
+                default_domain=default_domain,
+            )
+            if normalized_cookie is not None:
+                cookies_to_apply.append(normalized_cookie)
+
+    if not cookies_to_apply:
+        return None
+
+    deduped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for item in cookies_to_apply:
+        domain_or_url = str(item.get("domain") or item.get("url") or "")
+        path = str(item.get("path") or "/")
+        deduped[(str(item.get("name")), domain_or_url, path)] = item
+
+    final_payload = list(deduped.values())
+    if not final_payload:
+        return None
+    await context.add_cookies(final_payload)
+    return {
+        "stage": stage_name,
+        "targetUrl": target_url,
+        "targetHost": host,
+        "appliedCount": len(final_payload),
+        "rules": applied_rule_names,
+        "appliedCookies": [_summarize_cookie_for_debug(item) for item in final_payload],
+    }
+
+
 async def _close_playwright_objects(
     page: Any,
     context: Any,
@@ -219,6 +750,7 @@ class RecorderSession:
     headless: bool
     start_url: str
     options: dict[str, Any]
+    runtime_options: dict[str, Any] = field(default_factory=dict)
     playwright: Any = None
     browser: Any = None
     context: Any = None
@@ -351,14 +883,24 @@ class WebTestService:
                 headless=bool(req_data.get("headless", False)),
                 start_url=str(req_data.get("startUrl") or ""),
                 options=_as_dict(req_data.get("recordingOptions")),
+                runtime_options=_as_dict(req_data.get("runtimeOptions")),
             )
             cls._recorders[recording_id] = session
 
         try:
+            runtime_overrides = _as_dict(session.runtime_options.get("runtimeOverrides") or session.runtime_options.get("runtime_overrides"))
+            effective_runtime = {
+                **runtime_overrides,
+                **session.runtime_options,
+            }
+            browser_request_options = {
+                **session.options,
+                **effective_runtime,
+            }
             session.playwright, session.browser = await start_playwright_browser(
                 session.browser_name,
                 headless=session.headless,
-                request_options=session.options,
+                request_options=browser_request_options,
             )
             session.context = await session.browser.new_context(ignore_https_errors=True)
 
@@ -369,12 +911,24 @@ class WebTestService:
                 await session.emit(payload_dict)
 
             await session.context.expose_binding("__qtrRecordEvent", _event_binding)
+            options_json = json.dumps(session.options, ensure_ascii=False)
+            await session.context.add_init_script(f"window.__qtrRecordOptions__ = {options_json};")
             await session.context.add_init_script(RECORDER_SCRIPT)
             session.page = await session.context.new_page()
             session.page.on(
                 "framenavigated",
                 lambda frame: asyncio.create_task(cls._handle_navigation(frame, session)),
             )
+            cookie_variables = _resolve_runtime_variables(effective_runtime)
+            cookie_rules = _normalize_cookie_rules(effective_runtime)
+            if session.start_url:
+                await _apply_cookie_rules(
+                    session.context,
+                    target_url=session.start_url,
+                    stage="before_start",
+                    cookie_rules=cookie_rules,
+                    variables=cookie_variables,
+                )
             await session.page.goto(session.start_url)
             await session.emit(
                 {
@@ -501,14 +1055,15 @@ class WebTestService:
     async def _run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
         case_data = _as_dict(req_data.get("caseData"))
         runtime_options = _as_dict(req_data.get("runtimeOptions"))
-        browser_name = str(runtime_options.get("browserName") or case_data.get("browserName") or "chromium")
-        headless = bool(runtime_options.get("headless", case_data.get("headless", True)))
-        close_browser_on_finish = runtime_options.get("closeBrowserOnFinish")
+        effective_runtime = _resolve_runtime_settings(case_data, runtime_options)
+        browser_name = str(effective_runtime.get("browserName") or case_data.get("browserName") or "chromium")
+        headless = bool(effective_runtime.get("headless", case_data.get("headless", True)))
+        close_browser_on_finish = effective_runtime.get("closeBrowserOnFinish")
         if close_browser_on_finish is None:
             close_browser_on_finish = True
         else:
             close_browser_on_finish = bool(close_browser_on_finish)
-        start_url = str(case_data.get("startUrl") or "")
+        start_url = str(effective_runtime.get("startUrl") or case_data.get("startUrl") or "")
         steps = case_data.get("steps") or []
         if not isinstance(steps, list):
             steps = []
@@ -520,41 +1075,130 @@ class WebTestService:
         page = None
         response_payload: dict[str, Any]
         retained_session_id: str | None = None
+        cookie_variables: dict[str, Any] = {}
+        cookie_rules: list[dict[str, Any]] = []
+        runtime_debug: dict[str, Any] = {}
         try:
             playwright, browser = await start_playwright_browser(
                 browser_name,
                 headless=headless,
-                request_options=runtime_options,
+                request_options=effective_runtime,
             )
             context = await browser.new_context(ignore_https_errors=True)
             page = await context.new_page()
+            cookie_variables = _resolve_runtime_variables(effective_runtime)
+            cookie_rules = _normalize_cookie_rules(effective_runtime)
+            runtime_debug = {
+                "runtimeProfileId": runtime_options.get("runtimeProfileId") or runtime_options.get("runtime_profile_id"),
+                "cookieRuleCount": len(cookie_rules),
+                "cookieVariableKeys": sorted(cookie_variables.keys()),
+            }
             if start_url:
-                await page.goto(start_url)
+                before_start_cookie_apply = await _apply_cookie_rules(
+                    context,
+                    target_url=start_url,
+                    stage="before_start",
+                    cookie_rules=cookie_rules,
+                    variables=cookie_variables,
+                )
+                runtime_debug["beforeStartCookieApply"] = before_start_cookie_apply or {
+                    "stage": "before_start",
+                    "targetUrl": start_url,
+                    "targetHost": _host_from_url(start_url),
+                    "appliedCount": 0,
+                    "rules": [],
+                    "appliedCookies": [],
+                }
+                runtime_debug["contextCookiesBeforeGoto"] = await _capture_context_cookies_for_debug(
+                    context,
+                    target_url=start_url,
+                )
+            if start_url:
+                await page.goto(start_url, timeout=_step_timeout_ms({}, effective_runtime, case_data))
+                runtime_debug["contextCookiesAfterGoto"] = await _capture_context_cookies_for_debug(
+                    context,
+                    target_url=start_url,
+                )
             overall_success = True
-            for raw_step in steps:
+            for step_index, raw_step in enumerate(steps):
                 step = _as_dict(raw_step)
-                step_result = await cls._run_single_step(page, step)
+                if not bool(step.get("enabled", True)):
+                    result_steps.append(
+                        {
+                            "stepId": step.get("stepId") or step.get("step_id"),
+                            "stepName": step.get("stepName") or step.get("step_name") or "step",
+                            "status": "skipped",
+                            "durationMs": 0,
+                            "message": "步骤已禁用",
+                            "pageUrl": page.url if page else start_url,
+                        }
+                    )
+                    continue
+
+                step_result = await cls._run_single_step(
+                    page,
+                    context,
+                    step,
+                    runtime_options=effective_runtime,
+                    case_data=case_data,
+                    cookie_rules=cookie_rules,
+                    cookie_variables=cookie_variables,
+                )
                 result_steps.append(step_result)
                 if step_result["status"] != "passed":
                     overall_success = False
-                    if not bool(runtime_options.get("continueOnFailure", False)):
+                    if not _continue_on_failure(step, effective_runtime):
                         break
+                think_time_ms = _step_think_time_ms(step, effective_runtime, case_data)
+                if think_time_ms > 0 and _has_following_enabled_step(steps, step_index):
+                    await asyncio.sleep(think_time_ms / 1000.0)
+                    step_result["thinkTimeMs"] = think_time_ms
+            runtime_debug.setdefault(
+                "beforeStartCookieApply",
+                {
+                    "stage": "before_start",
+                    "targetUrl": start_url,
+                    "targetHost": _host_from_url(start_url),
+                    "appliedCount": 0,
+                    "rules": [],
+                    "appliedCookies": [],
+                },
+            )
             response_payload = {
                 "request_type": 3,
                 "command": "run_case",
                 "success": overall_success,
                 "status": "success" if overall_success else "failed",
-                "result": {"steps": result_steps, "pageUrl": page.url if page else start_url},
+                "result": {
+                    "steps": result_steps,
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                },
             }
         except Exception as exc:
             logger.exception(exc)
+            runtime_debug.setdefault(
+                "beforeStartCookieApply",
+                {
+                    "stage": "before_start",
+                    "targetUrl": start_url,
+                    "targetHost": _host_from_url(start_url),
+                    "appliedCount": 0,
+                    "rules": [],
+                    "appliedCookies": [],
+                },
+            )
             response_payload = {
                 "request_type": 3,
                 "command": "run_case",
                 "success": False,
                 "status": "failed",
                 "message": str(exc),
-                "result": {"steps": result_steps, "pageUrl": page.url if page else start_url},
+                "result": {
+                    "steps": result_steps,
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                },
             }
         finally:
             if close_browser_on_finish or browser is None or playwright is None:
@@ -582,63 +1226,180 @@ class WebTestService:
         return response_payload
 
     @classmethod
-    async def _run_single_step(cls, page: Any, step: dict[str, Any]) -> dict[str, Any]:
-        action_type = str(step.get("actionType") or step.get("action_type") or "")
+    async def _run_single_step(
+        cls,
+        page: Any,
+        context: Any,
+        step: dict[str, Any],
+        *,
+        runtime_options: dict[str, Any],
+        case_data: dict[str, Any],
+        cookie_rules: list[dict[str, Any]],
+        cookie_variables: dict[str, Any],
+    ) -> dict[str, Any]:
+        action_type = str(step.get("actionType") or step.get("action_type") or "").strip().lower()
         step_id = step.get("stepId") or step.get("step_id")
         step_name = step.get("stepName") or step.get("step_name") or action_type or "step"
         params = _as_dict(step.get("params"))
         assertions = step.get("assertions") or []
+        timeout_ms = _step_timeout_ms(step, runtime_options, case_data)
         started_at = time.perf_counter()
         attempts: list[dict[str, Any]] = []
+        cookie_apply: dict[str, Any] | None = None
         try:
+            if action_type == "goto":
+                cookie_apply = await _apply_cookie_rules(
+                    context,
+                    target_url=str(params.get("url") or ""),
+                    stage="before_goto",
+                    cookie_rules=cookie_rules,
+                    variables=cookie_variables,
+                )
+            else:
+                cookie_apply = await _apply_cookie_rules(
+                    context,
+                    target_url=str(page.url or ""),
+                    stage="before_step",
+                    cookie_rules=cookie_rules,
+                    variables=cookie_variables,
+                )
             locator = None
-            if action_type != "goto":
-                locator, attempts = await cls._resolve_locator(page, step)
-            await cls._execute_action(page, locator, action_type, params)
-            await cls._execute_assertions(page, locator, assertions)
+            if _action_requires_locator(action_type):
+                locator, attempts = await cls._resolve_locator(page, step, timeout_ms)
+            await asyncio.wait_for(
+                cls._execute_action(
+                    page,
+                    locator,
+                    action_type,
+                    params,
+                    timeout_ms=timeout_ms,
+                ),
+                timeout=timeout_ms / 1000.0,
+            )
+            await asyncio.wait_for(
+                cls._execute_assertions(page, locator, assertions, timeout_ms=timeout_ms),
+                timeout=timeout_ms / 1000.0,
+            )
             return {
                 "stepId": step_id,
                 "stepName": step_name,
                 "status": "passed",
                 "durationMs": int((time.perf_counter() - started_at) * 1000),
                 "attempts": attempts,
+                "cookieApply": cookie_apply,
                 "pageUrl": page.url,
             }
         except Exception as exc:
             logger.exception(exc)
+            error_message = str(exc or "").strip()
+            if not error_message:
+                if isinstance(exc, asyncio.TimeoutError):
+                    error_message = f"步骤执行超时（>{timeout_ms}ms）"
+                else:
+                    error_message = f"{exc.__class__.__name__}"
             return {
                 "stepId": step_id,
                 "stepName": step_name,
                 "status": "failed",
                 "durationMs": int((time.perf_counter() - started_at) * 1000),
                 "attempts": attempts,
+                "cookieApply": cookie_apply,
                 "pageUrl": page.url,
-                "error": str(exc),
+                "error": error_message,
+                "errorMessage": error_message,
+                "message": error_message,
+                "errorType": exc.__class__.__name__,
             }
 
     @classmethod
-    async def _resolve_locator(cls, page: Any, step: dict[str, Any]) -> tuple[Any, list[dict[str, Any]]]:
-        target_snapshot = _as_dict(step.get("targetSnapshot"))
-        locators = target_snapshot.get("locators") or []
-        attempts: list[dict[str, Any]] = []
-        for raw_locator in locators:
+    async def _resolve_locator(cls, page: Any, step: dict[str, Any], timeout_ms: int) -> tuple[Any, list[dict[str, Any]]]:
+        target_snapshot = _as_dict(step.get("targetSnapshot") or step.get("target_snapshot"))
+        raw_locators = target_snapshot.get("locators") or []
+        if not raw_locators:
+            raise RuntimeError("当前步骤缺少定位器配置")
+
+        normalized_candidates: list[dict[str, Any]] = []
+        for index, raw_locator in enumerate(raw_locators):
             locator_def = _as_dict(raw_locator)
-            locator_type = str(locator_def.get("locatorType") or locator_def.get("locator_type") or "")
-            locator_value = _as_dict(locator_def.get("locatorValue"))
-            try:
-                locator = cls._build_locator(page, locator_type, locator_value)
-                count = await locator.count()
-                attempts.append({"locatorType": locator_type, "locatorValue": locator_value, "count": count})
-                if count > 0:
-                    return locator.first, attempts
-            except Exception as exc:
-                attempts.append({"locatorType": locator_type, "locatorValue": locator_value, "error": str(exc)})
-        raise RuntimeError(f"未定位到步骤元素: {json.dumps(attempts, ensure_ascii=False)}")
+            if locator_def.get("enabled") is False:
+                continue
+            locator_type = str(locator_def.get("locatorType") or locator_def.get("locator_type") or "").strip().lower()
+            if not locator_type:
+                continue
+            locator_value_source = locator_def.get("locatorValue")
+            if locator_value_source is None:
+                locator_value_source = locator_def.get("locator_value")
+            if isinstance(locator_value_source, dict):
+                locator_value = _as_dict(locator_value_source)
+            elif locator_type in {"css", "xpath"} and locator_value_source not in (None, ""):
+                locator_value = {"selector": str(locator_value_source)}
+            else:
+                locator_value = {}
+            normalized_candidates.append(
+                {
+                    "locatorType": locator_type,
+                    "locatorValue": locator_value,
+                    "priority": _as_int(locator_def.get("priority"), index),
+                    "index": index,
+                }
+            )
+
+        if not normalized_candidates:
+            raise RuntimeError("当前步骤没有可用(启用)定位器")
+
+        normalized_candidates.sort(
+            key=lambda item: (
+                _as_int(item.get("priority"), 999),
+                _LOCATOR_TYPE_WEIGHT.get(str(item.get("locatorType") or ""), 99),
+                _as_int(item.get("index"), 0),
+            )
+        )
+
+        attempts: list[dict[str, Any]] = [
+            {
+                "locatorType": item.get("locatorType"),
+                "locatorValue": item.get("locatorValue"),
+                "priority": item.get("priority"),
+                "tries": 0,
+            }
+            for item in normalized_candidates
+        ]
+
+        started_at = time.perf_counter()
+        deadline = started_at + (max(timeout_ms, 500) / 1000.0)
+        while time.perf_counter() < deadline:
+            for attempt in attempts:
+                locator_type = str(attempt.get("locatorType") or "")
+                locator_value = _as_dict(attempt.get("locatorValue"))
+                attempt["tries"] = _as_int(attempt.get("tries"), 0) + 1
+                remaining_ms = int((deadline - time.perf_counter()) * 1000)
+                if remaining_ms <= 0:
+                    break
+                probe_timeout = max(min(remaining_ms, 350), 50)
+                try:
+                    locator = cls._build_locator(page, locator_type, locator_value)
+                    candidate = locator.first
+                    await candidate.wait_for(state="attached", timeout=probe_timeout)
+                    count = await locator.count()
+                    attempt["count"] = count
+                    if count > 0:
+                        return candidate, attempts
+                    attempt["message"] = "未匹配到元素"
+                except Exception as exc:
+                    attempt["error"] = str(exc)
+            await asyncio.sleep(0.05)
+
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        raise RuntimeError(f"未在 {elapsed_ms}ms 内定位到步骤元素: {json.dumps(attempts, ensure_ascii=False)}")
 
     @classmethod
     def _build_locator(cls, page: Any, locator_type: str, locator_value: dict[str, Any]) -> Any:
         if locator_type == "role":
-            return page.get_by_role(locator_value.get("role", ""), name=locator_value.get("name"), exact=locator_value.get("exact", False))
+            return page.get_by_role(
+                locator_value.get("role", ""),
+                name=locator_value.get("name"),
+                exact=locator_value.get("exact", False),
+            )
         if locator_type == "label":
             return page.get_by_label(locator_value.get("text", ""), exact=locator_value.get("exact", False))
         if locator_type == "placeholder":
@@ -647,56 +1408,250 @@ class WebTestService:
             return page.get_by_text(locator_value.get("text", ""), exact=locator_value.get("exact", False))
         if locator_type == "test_id":
             return page.get_by_test_id(locator_value.get("testId", ""))
+        if locator_type == "id":
+            element_id = str(locator_value.get("id") or "").strip()
+            if not element_id:
+                raise RuntimeError("id 定位器缺少 id 参数")
+            safe_id = element_id.replace('"', '\\"')
+            return page.locator(f'[id="{safe_id}"]')
+        if locator_type == "name":
+            element_name = str(locator_value.get("name") or "").strip()
+            if not element_name:
+                raise RuntimeError("name 定位器缺少 name 参数")
+            safe_name = element_name.replace('"', '\\"')
+            return page.locator(f'[name="{safe_name}"]')
         selector = locator_value.get("selector", "")
+        selector = str(selector or "").strip()
+        if not selector:
+            raise RuntimeError(f"{locator_type} 定位器缺少 selector 参数")
         if locator_type == "xpath":
             return page.locator(f"xpath={selector}")
         return page.locator(selector)
 
     @classmethod
-    async def _execute_action(cls, page: Any, locator: Any, action_type: str, params: dict[str, Any]) -> None:
+    async def _execute_action(
+        cls,
+        page: Any,
+        locator: Any,
+        action_type: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int,
+    ) -> None:
         if action_type == "goto":
-            await page.goto(str(params.get("url") or ""))
+            await page.goto(str(params.get("url") or ""), timeout=timeout_ms)
             return
+        if action_type in {"sleep", "wait"}:
+            wait_ms = _as_int(params.get("waitMs") or params.get("wait_ms") or params.get("durationMs") or params.get("duration_ms"), 0)
+            if wait_ms > 0:
+                await asyncio.sleep(wait_ms / 1000.0)
+            return
+        if action_type in {"assert_page_contains", "assert_page_not_contains"}:
+            expected = str(params.get("text") or params.get("expected") or "").strip()
+            if not expected:
+                raise AssertionError(f"{action_type} 需要 text/expected 参数")
+            page_text = (await page.locator("body").inner_text(timeout=timeout_ms) or "").strip()
+            if action_type == "assert_page_contains" and expected not in page_text:
+                raise AssertionError(f"assert_page_contains failed: expected={expected}")
+            if action_type == "assert_page_not_contains" and expected in page_text:
+                raise AssertionError(f"assert_page_not_contains failed: expected_not_contains={expected}")
+            return
+        if action_type == "assert_title_contains":
+            expected = str(params.get("title") or params.get("text") or params.get("expected") or "").strip()
+            if not expected:
+                raise AssertionError("assert_title_contains 需要 title/text/expected 参数")
+            actual_title = await page.title()
+            if expected not in str(actual_title or ""):
+                raise AssertionError(f"assert_title_contains failed: expected={expected}, actual={actual_title}")
+            return
+        if action_type == "assert_url_contains":
+            expected = str(params.get("urlPart") or params.get("url_part") or params.get("text") or params.get("expected") or "").strip()
+            if not expected:
+                raise AssertionError("assert_url_contains 需要 urlPart/text/expected 参数")
+            if expected not in str(page.url or ""):
+                raise AssertionError(f"assert_url_contains failed: expected={expected}, actual={page.url}")
+            return
+
+        if locator is None:
+            raise RuntimeError(f"动作 {action_type} 需要有效定位器")
         if action_type == "click":
-            await locator.click()
+            await locator.click(timeout=timeout_ms)
+            return
+        if action_type == "double_click":
+            await locator.dblclick(timeout=timeout_ms)
+            return
+        if action_type == "hover":
+            await locator.hover(timeout=timeout_ms)
+            return
+        if action_type == "clear":
+            await locator.fill("", timeout=timeout_ms)
             return
         if action_type == "fill":
-            await locator.fill(str(params.get("value") or ""))
+            await locator.fill(str(params.get("value") or ""), timeout=timeout_ms)
             return
         if action_type == "press":
-            await locator.press(str(params.get("key") or "Enter"))
+            await locator.press(str(params.get("key") or "Enter"), timeout=timeout_ms)
             return
         if action_type == "check":
-            await locator.check()
+            await locator.check(timeout=timeout_ms)
             return
         if action_type == "uncheck":
-            await locator.uncheck()
+            await locator.uncheck(timeout=timeout_ms)
             return
         if action_type == "select_option":
             values = params.get("values") or []
             if not isinstance(values, list):
                 values = [values]
-            await locator.select_option(values)
+            await locator.select_option(values, timeout=timeout_ms)
+            return
+        if action_type == "wait_visible":
+            await locator.wait_for(state="visible", timeout=timeout_ms)
+            return
+        if action_type == "wait_hidden":
+            await locator.wait_for(state="hidden", timeout=timeout_ms)
+            return
+        if action_type == "assert_text_equals":
+            text = await _read_locator_text(locator, timeout_ms=timeout_ms)
+            expected = _normalize_assert_text(params.get("expected") or params.get("text") or "")
+            if not _text_equals(text, expected):
+                raise AssertionError(f"assert_text_equals failed: expected={expected}, actual={text}")
+            return
+        if action_type == "assert_text_contains":
+            text = await _read_locator_text(locator, timeout_ms=timeout_ms)
+            expected = _normalize_assert_text(params.get("expected") or params.get("text") or "")
+            if not _text_contains(text, expected):
+                raise AssertionError(f"assert_text_contains failed: expected={expected}, actual={text}")
             return
         raise RuntimeError(f"unsupported action type: {action_type}")
 
     @classmethod
-    async def _execute_assertions(cls, page: Any, locator: Any, assertions: list[Any]) -> None:
-        for raw_assertion in assertions:
+    def _assertion_wait_ms(cls, assertion: dict[str, Any], step_timeout_ms: int) -> int:
+        candidates = [
+            assertion.get("waitMs"),
+            assertion.get("wait_ms"),
+            assertion.get("timeoutMs"),
+            assertion.get("timeout_ms"),
+        ]
+        for candidate in candidates:
+            if candidate not in (None, ""):
+                configured = _as_int(candidate, 0)
+                if configured > 0:
+                    return max(configured, 500)
+        return max(_as_int(step_timeout_ms, 10000), 500)
+
+    @classmethod
+    async def _resolve_assertion_locator(
+        cls,
+        page: Any,
+        step_locator: Any,
+        assertion: dict[str, Any],
+        timeout_ms: int,
+    ) -> Any:
+        target_snapshot = _as_dict(assertion.get("targetSnapshot") or assertion.get("target_snapshot"))
+        if target_snapshot.get("locators"):
+            resolved_locator, _ = await cls._resolve_locator(
+                page,
+                {"targetSnapshot": target_snapshot},
+                timeout_ms=max(timeout_ms, 500),
+            )
+            return resolved_locator
+        return step_locator
+
+    @classmethod
+    async def _check_assertion_once(
+        cls,
+        page: Any,
+        step_locator: Any,
+        assertion: dict[str, Any],
+        *,
+        assert_type: str,
+        expected: Any,
+        timeout_ms: int,
+    ) -> None:
+        current_locator = step_locator
+        if assert_type in {"text_contains", "text_equals", "visible"}:
+            current_locator = await cls._resolve_assertion_locator(page, step_locator, assertion, timeout_ms)
+            if current_locator is None:
+                raise AssertionError(f"{assert_type} 断言需要有效定位器")
+
+        if assert_type == "text_contains":
+            text = await _read_locator_text(current_locator, timeout_ms=max(min(timeout_ms, 1200), 120))
+            expected_text = _normalize_assert_text(expected)
+            if not _text_contains(text, expected_text):
+                raise AssertionError(f"text_contains failed: expected={expected}, actual={text}")
+            return
+        if assert_type == "text_equals":
+            text = await _read_locator_text(current_locator, timeout_ms=max(min(timeout_ms, 1200), 120))
+            expected_text = _normalize_assert_text(expected)
+            if not _text_equals(text, expected_text):
+                raise AssertionError(f"text_equals failed: expected={expected}, actual={text}")
+            return
+        if assert_type == "visible":
+            await current_locator.wait_for(state="visible", timeout=max(min(timeout_ms, 1500), 120))
+            return
+        if assert_type == "url_contains":
+            if str(expected or "") not in page.url:
+                raise AssertionError(f"url_contains failed: expected={expected}, actual={page.url}")
+            return
+        if assert_type == "page_contains":
+            page_text = (await page.locator("body").inner_text(timeout=max(min(timeout_ms, 1200), 120)) or "").strip()
+            if str(expected or "") not in page_text:
+                raise AssertionError(f"page_contains failed: expected={expected}")
+            return
+        if assert_type == "title_contains":
+            title = await page.title()
+            if str(expected or "") not in str(title or ""):
+                raise AssertionError(f"title_contains failed: expected={expected}, actual={title}")
+            return
+        if assert_type == "url_equals":
+            if str(page.url or "") != str(expected or ""):
+                raise AssertionError(f"url_equals failed: expected={expected}, actual={page.url}")
+            return
+        raise AssertionError(f"unsupported assertion type: {assert_type}")
+
+    @classmethod
+    async def _execute_assertions(cls, page: Any, locator: Any, assertions: list[Any], *, timeout_ms: int) -> None:
+        supported_types = {
+            "text_contains",
+            "text_equals",
+            "visible",
+            "url_contains",
+            "page_contains",
+            "title_contains",
+            "url_equals",
+        }
+        for index, raw_assertion in enumerate(assertions, start=1):
             assertion = _as_dict(raw_assertion)
-            assert_type = str(assertion.get("assertType") or assertion.get("assert_type") or "")
+            if assertion.get("enabled") is False:
+                continue
+            assert_type = str(assertion.get("assertType") or assertion.get("assert_type") or "").strip().lower()
+            if not assert_type:
+                continue
+            if assert_type not in supported_types:
+                raise AssertionError(f"unsupported assertion type: {assert_type}")
+
             expected = assertion.get("expected")
-            if assert_type == "text_contains":
-                text = (await locator.text_content() or "").strip()
-                if str(expected or "") not in text:
-                    raise AssertionError(f"text_contains failed: expected={expected}, actual={text}")
-            elif assert_type == "text_equals":
-                text = (await locator.text_content() or "").strip()
-                if text != str(expected or ""):
-                    raise AssertionError(f"text_equals failed: expected={expected}, actual={text}")
-            elif assert_type == "visible":
-                if not await locator.is_visible():
-                    raise AssertionError("visible assertion failed")
-            elif assert_type == "url_contains":
-                if str(expected or "") not in page.url:
-                    raise AssertionError(f"url_contains failed: expected={expected}, actual={page.url}")
+            assertion_wait_ms = cls._assertion_wait_ms(assertion, timeout_ms)
+            deadline = time.perf_counter() + (assertion_wait_ms / 1000.0)
+            last_error: Exception | None = None
+            while time.perf_counter() < deadline:
+                remaining_ms = int((deadline - time.perf_counter()) * 1000)
+                probe_timeout = max(min(remaining_ms, 1200), 120)
+                try:
+                    await cls._check_assertion_once(
+                        page,
+                        locator,
+                        assertion,
+                        assert_type=assert_type,
+                        expected=expected,
+                        timeout_ms=probe_timeout,
+                    )
+                    last_error = None
+                    break
+                except Exception as exc:
+                    last_error = exc
+                await asyncio.sleep(0.1)
+
+            if last_error is not None:
+                error_message = str(last_error or "").strip() or f"{assert_type} assertion failed"
+                raise AssertionError(f"断言#{index}失败: {error_message}") from last_error

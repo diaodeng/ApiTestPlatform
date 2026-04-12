@@ -46,6 +46,37 @@ export function runWebCase(data) {
   })
 }
 
+export function listWebRuntimeProfile(query) {
+  return request({
+    url: '/hrm/web-case/runtime-profile/list',
+    method: 'get',
+    params: query
+  })
+}
+
+export function addWebRuntimeProfile(data) {
+  return request({
+    url: '/hrm/web-case/runtime-profile',
+    method: 'post',
+    data
+  })
+}
+
+export function updateWebRuntimeProfile(data) {
+  return request({
+    url: '/hrm/web-case/runtime-profile',
+    method: 'put',
+    data
+  })
+}
+
+export function delWebRuntimeProfile(profileId) {
+  return request({
+    url: '/hrm/web-case/runtime-profile/' + profileId,
+    method: 'delete'
+  })
+}
+
 export function getWebRun(webCaseRunId) {
   return request({
     url: '/hrm/web-case/run/' + webCaseRunId,

@@ -435,27 +435,68 @@ class DesktopCaseService:
         return None
 
     @classmethod
+    def _is_generic_success_message(cls, message: str | None) -> bool:
+        normalized = str(message or "").strip().lower()
+        return normalized in {"操作成功", "success", "ok", "执行成功", "执行完成"}
+
+    @classmethod
+    def _infer_run_success_from_result(cls, response_result: dict[str, Any]) -> bool | None:
+        if not isinstance(response_result, dict):
+            return None
+        raw_success = response_result.get("success")
+        if isinstance(raw_success, bool):
+            return raw_success
+
+        step_results = response_result.get("steps")
+        if not isinstance(step_results, list) or not step_results:
+            return None
+
+        for item in step_results:
+            if not isinstance(item, dict):
+                continue
+            step_status = item.get("status")
+            if step_status in ("passed", "success", 1, "ok", True, "skipped", "skip"):
+                continue
+            return False
+        return True
+
+    @classmethod
     def _extract_desktop_run_response(cls, response) -> tuple[bool, dict[str, Any], str | None]:
         response_payload = response.response
         response_result: dict[str, Any] = {}
         success = True
-        message = response.message
+        message: str | None = None
+        payload_status = ""
         if isinstance(response_payload, AgentResponseWebUI):
             success = bool(response_payload.success)
+            payload_status = str(response_payload.status or "").strip().lower()
             if isinstance(response_payload.result, dict):
                 response_result = response_payload.result
             elif isinstance(response_payload.data, dict):
                 response_result = response_payload.data
-            message = response_payload.message or message
+            message = response_payload.message
         elif isinstance(response_payload, dict):
-            success = bool(response_payload.get("success", True))
+            if "success" in response_payload:
+                success = bool(response_payload.get("success"))
+            payload_status = str(response_payload.get("status") or "").strip().lower()
             if isinstance(response_payload.get("result"), dict):
                 response_result = response_payload["result"]
             elif isinstance(response_payload.get("data"), dict):
                 response_result = response_payload["data"]
-            message = response_payload.get("message") or message
-        if not success and not message:
-            message = cls._extract_run_error_message(response_result) or "执行失败"
+            message = response_payload.get("message")
+
+        inferred_success = cls._infer_run_success_from_result(response_result)
+        if inferred_success is not None:
+            success = inferred_success
+        elif payload_status in {"failed", "fail", "error"}:
+            success = False
+
+        if not success:
+            extracted_error = cls._extract_run_error_message(response_result)
+            if extracted_error and (not message or cls._is_generic_success_message(message)):
+                message = extracted_error
+            if not message or cls._is_generic_success_message(message):
+                message = extracted_error or "执行失败"
         return success, response_result, message
 
     @classmethod
@@ -1536,6 +1577,7 @@ class DesktopCaseService:
             by_alias=True,
             exclude={"desktop_case_id", "agent_id", "agent_code"},
         )
+        run_timeout_sec = max(int(request_model.run_timeout_sec or 120), 1)
         response = await send_message(
             agent.agent_code,
             {
@@ -1544,6 +1586,7 @@ class DesktopCaseService:
                 "caseData": cls._hydrate_case_assets_for_agent(query_db, detail),
                 "runtimeOptions": runtime_options,
             },
+            timeout_seconds=run_timeout_sec,
         )
         ended_at = datetime.now()
         duration_ms = int((ended_at - started_at).total_seconds() * 1000)

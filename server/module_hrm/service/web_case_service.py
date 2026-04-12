@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from module_admin.entity.do.config_do import SysConfig
 from module_hrm.dao.web_case_dao import WebCaseDao
 from module_hrm.entity.do.web_case_do import (
     HrmWebCase,
@@ -33,6 +35,9 @@ from module_hrm.entity.vo.web_case_vo import (
     WebCaseRunRecordPageQueryModel,
     WebCaseRunRequestModel,
     WebLocatorModel,
+    WebRuntimeProfileModel,
+    WebRuntimeProfilePageQueryModel,
+    WebRuntimeProfileSaveModel,
     WebRecordingApplyRequestModel,
     WebRecordingDetailModel,
     WebRecordingEventModel,
@@ -55,6 +60,22 @@ class WebCaseService:
     """Web 测试模块服务层。"""
 
     ELEMENT_PROMOTION_THRESHOLD = 3
+    RUNTIME_PROFILE_CONFIG_KEY_PREFIX = "hrm.web.runtime.profile."
+    RUNTIME_VARIABLE_KEYS = (
+        "variables",
+        "runtimeVariables",
+        "runtime_variables",
+        "cookieVariables",
+        "cookie_variables",
+    )
+    RUNTIME_COOKIE_RULE_KEYS = (
+        "cookieRules",
+        "cookie_rules",
+        "cookieScopes",
+        "cookie_scopes",
+        "cookieProfiles",
+        "cookie_profiles",
+    )
 
     @staticmethod
     def _dumps(value: Any) -> str | None:
@@ -74,6 +95,231 @@ class WebCaseService:
             return json.loads(value)
         except Exception:
             return default
+
+    @classmethod
+    def _runtime_profile_config_key(cls, profile_id: str) -> str:
+        return f"{cls.RUNTIME_PROFILE_CONFIG_KEY_PREFIX}{profile_id}"
+
+    @classmethod
+    def _runtime_profile_id_from_key(cls, config_key: str | None) -> str:
+        key = str(config_key or "")
+        if key.startswith(cls.RUNTIME_PROFILE_CONFIG_KEY_PREFIX):
+            return key[len(cls.RUNTIME_PROFILE_CONFIG_KEY_PREFIX):]
+        return key
+
+    @staticmethod
+    def _to_optional_int(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _to_bool(value: Any, *, default: bool = True) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "disabled"}:
+            return False
+        return default
+
+    @classmethod
+    def _normalize_targets(cls, raw_targets: Any) -> list[str]:
+        values: list[str] = []
+        if isinstance(raw_targets, list):
+            values = [str(item or "").strip().lower() for item in raw_targets]
+        elif isinstance(raw_targets, str):
+            values = [item.strip().lower() for item in raw_targets.split(",")]
+        elif raw_targets not in (None, ""):
+            values = [str(raw_targets).strip().lower()]
+        normalized = [item for item in values if item]
+        if not normalized:
+            return ["web"]
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in normalized:
+            if item in seen:
+                continue
+            seen.add(item)
+            result.append(item)
+        return result
+
+    @classmethod
+    def _collect_runtime_variables(cls, runtime_overrides: dict[str, Any] | None) -> dict[str, Any]:
+        source = runtime_overrides or {}
+        if not isinstance(source, dict):
+            return {}
+        result: dict[str, Any] = {}
+        for key in cls.RUNTIME_VARIABLE_KEYS:
+            value = source.get(key)
+            if isinstance(value, dict):
+                result.update(value)
+        return result
+
+    @classmethod
+    def _collect_cookie_rules(cls, runtime_overrides: dict[str, Any] | None) -> list[dict[str, Any]]:
+        source = runtime_overrides or {}
+        if not isinstance(source, dict):
+            return []
+        result: list[dict[str, Any]] = []
+        for key in cls.RUNTIME_COOKIE_RULE_KEYS:
+            value = source.get(key)
+            if isinstance(value, list):
+                result.extend([item for item in value if isinstance(item, dict)])
+        return result
+
+    @classmethod
+    def _merge_runtime_overrides(
+        cls,
+        base_runtime_overrides: dict[str, Any] | None,
+        override_runtime_overrides: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        base = base_runtime_overrides if isinstance(base_runtime_overrides, dict) else {}
+        override = override_runtime_overrides if isinstance(override_runtime_overrides, dict) else {}
+        merged: dict[str, Any] = {**base}
+        for key, value in override.items():
+            if value is not None:
+                merged[key] = value
+
+        merged_variables = cls._collect_runtime_variables(base)
+        merged_variables.update(cls._collect_runtime_variables(override))
+        if merged_variables:
+            merged["variables"] = merged_variables
+        for key in cls.RUNTIME_VARIABLE_KEYS:
+            if key != "variables":
+                merged.pop(key, None)
+
+        merged_rules = cls._collect_cookie_rules(base) + cls._collect_cookie_rules(override)
+        if merged_rules:
+            merged["cookieRules"] = merged_rules
+        for key in cls.RUNTIME_COOKIE_RULE_KEYS:
+            if key != "cookieRules":
+                merged.pop(key, None)
+        return merged
+
+    @classmethod
+    def _normalize_runtime_profile_payload(cls, payload: dict[str, Any] | None) -> dict[str, Any]:
+        source = payload if isinstance(payload, dict) else {}
+        runtime_overrides = cls._loads(
+            source.get("runtimeOverrides") if source.get("runtimeOverrides") is not None else source.get("runtime_overrides"),
+            {},
+        )
+        if not isinstance(runtime_overrides, dict):
+            runtime_overrides = {}
+        variables = cls._loads(source.get("variables"), {})
+        if not isinstance(variables, dict):
+            variables = {}
+        cookie_rules = cls._loads(source.get("cookieRules") if source.get("cookieRules") is not None else source.get("cookie_rules"), [])
+        if not isinstance(cookie_rules, list):
+            cookie_rules = []
+
+        profile_name = str(source.get("profileName") or source.get("profile_name") or "").strip()
+        profile_type = str(source.get("profileType") or source.get("profile_type") or "runtime").strip().lower() or "runtime"
+        profile_id = str(source.get("profileId") or source.get("profile_id") or "").strip()
+
+        try:
+            sort = int(source.get("sort") or 0)
+        except Exception:
+            sort = 0
+
+        project_id = source.get("projectId")
+        if project_id is None:
+            project_id = source.get("project_id")
+        module_id = source.get("moduleId")
+        if module_id is None:
+            module_id = source.get("module_id")
+
+        return {
+            "profileId": profile_id or None,
+            "profileName": profile_name,
+            "profileType": profile_type,
+            "targets": cls._normalize_targets(source.get("targets")),
+            "enabled": cls._to_bool(source.get("enabled"), default=True),
+            "projectId": cls._to_optional_int(project_id),
+            "moduleId": cls._to_optional_int(module_id),
+            "sort": max(sort, 0),
+            "runtimeOverrides": runtime_overrides,
+            "variables": variables,
+            "cookieRules": [item for item in cookie_rules if isinstance(item, dict)],
+            "remark": source.get("remark"),
+        }
+
+    @classmethod
+    def _build_runtime_profile_model_from_config(cls, config: SysConfig) -> WebRuntimeProfileModel | None:
+        payload = cls._loads(getattr(config, "config_value", None), {})
+        if not isinstance(payload, dict):
+            payload = {}
+        if not payload.get("profileId") and not payload.get("profile_id"):
+            payload["profileId"] = cls._runtime_profile_id_from_key(getattr(config, "config_key", ""))
+        if not payload.get("profileName") and not payload.get("profile_name"):
+            payload["profileName"] = getattr(config, "config_name", "") or ""
+        if payload.get("remark") in (None, ""):
+            payload["remark"] = getattr(config, "remark", None)
+        normalized = cls._normalize_runtime_profile_payload(payload)
+        if not normalized.get("profileId"):
+            return None
+        return WebRuntimeProfileModel(
+            **normalized,
+            createBy=getattr(config, "create_by", None),
+            updateBy=getattr(config, "update_by", None),
+            createTime=getattr(config, "create_time", None),
+            updateTime=getattr(config, "update_time", None),
+        )
+
+    @classmethod
+    def _compose_runtime_overrides_from_profile(cls, profile_model: WebRuntimeProfileModel) -> dict[str, Any]:
+        runtime_overrides = (
+            dict(profile_model.runtime_overrides)
+            if isinstance(profile_model.runtime_overrides, dict)
+            else {}
+        )
+        if profile_model.variables:
+            existing_variables = cls._collect_runtime_variables(runtime_overrides)
+            runtime_overrides["variables"] = {**existing_variables, **profile_model.variables}
+        if profile_model.cookie_rules:
+            existing_rules = cls._collect_cookie_rules(runtime_overrides)
+            runtime_overrides["cookieRules"] = [*existing_rules, *profile_model.cookie_rules]
+        for key in cls.RUNTIME_VARIABLE_KEYS:
+            if key != "variables":
+                runtime_overrides.pop(key, None)
+        for key in cls.RUNTIME_COOKIE_RULE_KEYS:
+            if key != "cookieRules":
+                runtime_overrides.pop(key, None)
+        return runtime_overrides
+
+    @classmethod
+    def _resolve_runtime_profile_runtime_overrides(
+        cls,
+        query_db: Session,
+        profile_id: str | None,
+    ) -> dict[str, Any]:
+        profile_id_value = str(profile_id or "").strip()
+        if not profile_id_value:
+            return {}
+
+        config_key = cls._runtime_profile_config_key(profile_id_value)
+        config_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+        if config_row is None:
+            raise ValueError("所选Cookie配置不存在，请刷新后重试")
+
+        profile_model = cls._build_runtime_profile_model_from_config(config_row)
+        if profile_model is None:
+            raise ValueError("所选Cookie配置无效，请检查配置内容")
+        if not profile_model.enabled:
+            raise ValueError("所选Cookie配置已停用")
+
+        targets = set(cls._normalize_targets(profile_model.targets))
+        if not {"web", "all", "*"}.intersection(targets):
+            raise ValueError("所选Cookie配置不支持Web链路")
+        return cls._compose_runtime_overrides_from_profile(profile_model)
 
     @classmethod
     def _build_case_model(cls, web_case: HrmWebCase) -> WebCaseModel:
@@ -175,6 +421,79 @@ class WebCaseService:
         return result
 
     @classmethod
+    def _is_recording_assert_pick_event(cls, payload: dict[str, Any]) -> bool:
+        if not payload:
+            return False
+        raw_event = cls._loads(payload.get("rawEvent") or payload.get("raw_event"), {})
+        if isinstance(raw_event, dict):
+            event_type = str(raw_event.get("eventType") or raw_event.get("event_type") or "").strip().lower()
+            if event_type == "assert_pick_attach_prev":
+                return True
+            if event_type == "assert_pick":
+                attach_mode = str(raw_event.get("assertionAttachMode") or raw_event.get("assertion_attach_mode") or "").strip().lower()
+                if attach_mode == "inside_step":
+                    return True
+            if raw_event.get("attachToPreviousStep") is True or raw_event.get("attach_to_previous_step") is True:
+                return True
+        return False
+
+    @classmethod
+    def _build_assertion_from_recording_payload(cls, payload: dict[str, Any]) -> WebAssertionModel | None:
+        action_type = str(payload.get("actionType") or payload.get("action_type") or "").strip().lower()
+        params = cls._loads(payload.get("params"), {})
+        if not isinstance(params, dict):
+            params = {}
+
+        assert_type = ""
+        expected: Any = None
+        actual_source: str | None = None
+        if action_type == "assert_text_contains":
+            assert_type = "text_contains"
+            expected = params.get("expected") or params.get("text")
+            actual_source = "text"
+        elif action_type == "assert_text_equals":
+            assert_type = "text_equals"
+            expected = params.get("expected") or params.get("text")
+            actual_source = "text"
+        elif action_type in {"wait_visible", "assert_visible"}:
+            assert_type = "visible"
+        else:
+            return None
+
+        target_snapshot = payload.get("targetSnapshot")
+        if target_snapshot is None:
+            target_snapshot = payload.get("target_snapshot")
+
+        wait_ms = params.get("waitMs")
+        if wait_ms in (None, ""):
+            wait_ms = params.get("wait_ms")
+
+        assertion_payload = {
+            "assertType": assert_type,
+            "expected": expected,
+            "actualSource": actual_source,
+            "enabled": True,
+            "waitMs": wait_ms if wait_ms not in (None, "") else None,
+            "targetSnapshot": target_snapshot,
+        }
+        try:
+            return WebAssertionModel.model_validate(assertion_payload)
+        except Exception:
+            logger.warning("录制断言转换失败，已忽略")
+            return None
+
+    @classmethod
+    def _attach_recording_assertion_to_previous_step(cls, steps: list[WebStepModel], payload: dict[str, Any]) -> bool:
+        if not steps:
+            return False
+        assertion_model = cls._build_assertion_from_recording_payload(payload)
+        if assertion_model is None:
+            return False
+        previous_step = steps[-1]
+        previous_step.assertions.append(assertion_model)
+        return True
+
+    @classmethod
     def _normalize_recording_step(cls, payload: dict[str, Any], step_index: int) -> WebStepModel | None:
         if not payload:
             return None
@@ -195,8 +514,12 @@ class WebCaseService:
     @classmethod
     def _build_steps_from_recording_events(cls, events: list[HrmWebRecordingEvent]) -> list[WebStepModel]:
         steps: list[WebStepModel] = []
-        for index, event in enumerate(events, start=1):
-            step = cls._normalize_recording_step(cls._loads(event.payload_json, {}), index)
+        for event in events:
+            payload = cls._loads(event.payload_json, {})
+            if cls._is_recording_assert_pick_event(payload):
+                if cls._attach_recording_assertion_to_previous_step(steps, payload):
+                    continue
+            step = cls._normalize_recording_step(payload, len(steps) + 1)
             if step is not None:
                 steps.append(step)
         return steps
@@ -245,46 +568,105 @@ class WebCaseService:
     def _extract_run_error_message(cls, response_result: dict[str, Any]) -> str | None:
         if not isinstance(response_result, dict):
             return None
+        step_results = response_result.get("steps")
+        if isinstance(step_results, list):
+            for item in step_results:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("status") in ("passed", "success", 1, "ok", "skipped", "skip"):
+                    continue
+                step_name = str(item.get("stepName") or item.get("step_name") or item.get("stepId") or "未知步骤").strip()
+                reason_candidates = (
+                    item.get("error"),
+                    item.get("errorMessage"),
+                    item.get("message"),
+                    item.get("reason"),
+                    item.get("errorType"),
+                    item.get("error_type"),
+                )
+                reason = ""
+                for candidate in reason_candidates:
+                    candidate_text = str(candidate or "").strip()
+                    if candidate_text:
+                        reason = candidate_text
+                        break
+                if reason and step_name and step_name not in reason:
+                    return f"[{step_name}] {reason}"
+                if reason:
+                    return reason
+                return f"[{step_name}] 执行失败（无详细错误）"
+
         for key in ("error", "errorMessage", "message"):
             value = response_result.get(key)
-            if value:
-                return str(value)
+            value_text = str(value or "").strip()
+            if value_text:
+                return value_text
+        return None
+
+    @classmethod
+    def _is_generic_success_message(cls, message: str | None) -> bool:
+        normalized = str(message or "").strip().lower()
+        return normalized in {"操作成功", "success", "ok", "执行成功", "执行完成"}
+
+    @classmethod
+    def _infer_run_success_from_result(cls, response_result: dict[str, Any]) -> bool | None:
+        if not isinstance(response_result, dict):
+            return None
+        raw_success = response_result.get("success")
+        if isinstance(raw_success, bool):
+            return raw_success
 
         step_results = response_result.get("steps")
-        if not isinstance(step_results, list):
+        if not isinstance(step_results, list) or not step_results:
             return None
+
         for item in step_results:
             if not isinstance(item, dict):
                 continue
-            if item.get("status") in ("passed", "success", 1, "ok"):
+            step_status = item.get("status")
+            if step_status in ("passed", "success", 1, "ok", True, "skipped", "skip"):
                 continue
-            return str(item.get("error") or item.get("message") or item.get("stepName") or "步骤执行失败")
-        return None
+            return False
+        return True
 
     @classmethod
     def _extract_webui_run_response(cls, response) -> tuple[bool, dict[str, Any], str | None]:
         response_payload = response.response
         response_result: dict[str, Any] = {}
         success = True
-        message = response.message
+        message: str | None = None
+        payload_status = ""
 
         if isinstance(response_payload, AgentResponseWebUI):
             success = bool(response_payload.success)
+            payload_status = str(response_payload.status or "").strip().lower()
             if isinstance(response_payload.result, dict):
                 response_result = response_payload.result
             elif isinstance(response_payload.data, dict):
                 response_result = response_payload.data
-            message = response_payload.message or message
+            message = response_payload.message
         elif isinstance(response_payload, dict):
-            success = bool(response_payload.get("success", True))
+            if "success" in response_payload:
+                success = bool(response_payload.get("success"))
+            payload_status = str(response_payload.get("status") or "").strip().lower()
             if isinstance(response_payload.get("result"), dict):
                 response_result = response_payload["result"]
             elif isinstance(response_payload.get("data"), dict):
                 response_result = response_payload["data"]
-            message = response_payload.get("message") or message
+            message = response_payload.get("message")
 
-        if not success and not message:
-            message = cls._extract_run_error_message(response_result) or "执行失败"
+        inferred_success = cls._infer_run_success_from_result(response_result)
+        if inferred_success is not None:
+            success = inferred_success
+        elif payload_status in {"failed", "fail", "error"}:
+            success = False
+
+        if not success:
+            extracted_error = cls._extract_run_error_message(response_result)
+            if extracted_error and (not message or cls._is_generic_success_message(message)):
+                message = extracted_error
+            if not message or cls._is_generic_success_message(message):
+                message = extracted_error or "执行失败"
         return success, response_result, message
 
     @classmethod
@@ -381,6 +763,136 @@ class WebCaseService:
         data_scope_sql=True,
     ) -> PageResponseModel:
         return WebCaseDao.get_web_case_list(query_db, query_object, data_scope_sql)
+
+    @classmethod
+    def list_runtime_profile_services(
+        cls,
+        query_db: Session,
+        query_object: WebRuntimeProfilePageQueryModel,
+    ) -> list[WebRuntimeProfileModel]:
+        records = (
+            query_db.query(SysConfig)
+            .filter(SysConfig.config_key.like(f"{cls.RUNTIME_PROFILE_CONFIG_KEY_PREFIX}%"))
+            .order_by(SysConfig.update_time.desc(), SysConfig.config_id.desc())
+            .all()
+        )
+        result: list[WebRuntimeProfileModel] = []
+        name_keyword = str(query_object.profile_name or "").strip().lower()
+        target_filter = str(query_object.target or "").strip().lower()
+        for item in records:
+            profile = cls._build_runtime_profile_model_from_config(item)
+            if profile is None:
+                continue
+            if name_keyword and name_keyword not in str(profile.profile_name or "").lower():
+                continue
+            if query_object.enabled is not None and bool(profile.enabled) != bool(query_object.enabled):
+                continue
+            if query_object.project_id is not None and profile.project_id not in (None, int(query_object.project_id)):
+                continue
+            if query_object.module_id is not None and profile.module_id not in (None, int(query_object.module_id)):
+                continue
+            if target_filter and target_filter not in cls._normalize_targets(profile.targets):
+                continue
+            result.append(profile)
+        result.sort(
+            key=lambda profile: (
+                int(profile.sort or 0),
+                str(profile.profile_name or ""),
+                str(profile.profile_id or ""),
+            )
+        )
+        return result
+
+    @classmethod
+    def save_runtime_profile_services(
+        cls,
+        query_db: Session,
+        profile_model: WebRuntimeProfileSaveModel,
+        *,
+        user_name: str | None,
+        require_existing: bool,
+    ) -> CrudResponseModel:
+        normalized = cls._normalize_runtime_profile_payload(profile_model.model_dump(by_alias=True))
+        profile_name = str(normalized.get("profileName") or "").strip()
+        if not profile_name:
+            return CrudResponseModel(is_success=False, message="配置名称不能为空")
+
+        provided_profile_id = str(normalized.get("profileId") or "").strip()
+        profile_id = provided_profile_id or uuid.uuid4().hex
+        config_key = cls._runtime_profile_config_key(profile_id)
+
+        current_time = datetime.now()
+        existed_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+        if require_existing and existed_row is None:
+            return CrudResponseModel(is_success=False, message="配置不存在或已被删除")
+        if (not require_existing) and existed_row is not None and not provided_profile_id:
+            profile_id = uuid.uuid4().hex
+            config_key = cls._runtime_profile_config_key(profile_id)
+            existed_row = None
+
+        payload_to_save = {
+            **normalized,
+            "profileId": profile_id,
+            "schemaVersion": 1,
+            "updatedAt": current_time.isoformat(),
+            "updatedBy": user_name or (existed_row.update_by if existed_row else "system"),
+        }
+        if existed_row is None:
+            payload_to_save["createdAt"] = current_time.isoformat()
+            payload_to_save["createdBy"] = user_name or "system"
+
+        try:
+            if existed_row is None:
+                query_db.add(
+                    SysConfig(
+                        config_name=profile_name,
+                        config_key=config_key,
+                        config_value=cls._dumps(payload_to_save),
+                        config_type="N",
+                        create_by=user_name or "system",
+                        update_by=user_name or "system",
+                        remark=normalized.get("remark") or "Web运行Cookie配置",
+                    )
+                )
+            else:
+                existed_row.config_name = profile_name
+                existed_row.config_value = cls._dumps(payload_to_save)
+                existed_row.remark = normalized.get("remark") or existed_row.remark
+                existed_row.update_by = user_name or existed_row.update_by or "system"
+                existed_row.update_time = current_time
+
+            query_db.commit()
+            saved_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+            saved_model = cls._build_runtime_profile_model_from_config(saved_row) if saved_row is not None else None
+            return CrudResponseModel(
+                is_success=True,
+                message="保存成功",
+                result=saved_model.model_dump(mode="json", by_alias=True) if saved_model else None,
+            )
+        except Exception as exc:
+            query_db.rollback()
+            raise exc
+
+    @classmethod
+    def delete_runtime_profile_services(
+        cls,
+        query_db: Session,
+        profile_id: str,
+    ) -> CrudResponseModel:
+        profile_id_value = str(profile_id or "").strip()
+        if not profile_id_value:
+            return CrudResponseModel(is_success=False, message="配置ID不能为空")
+        config_key = cls._runtime_profile_config_key(profile_id_value)
+        existed_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+        if existed_row is None:
+            return CrudResponseModel(is_success=False, message="配置不存在或已被删除")
+        try:
+            query_db.delete(existed_row)
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message="删除成功")
+        except Exception as exc:
+            query_db.rollback()
+            raise exc
 
     @classmethod
     def web_case_detail_services(cls, query_db: Session, web_case_id: int) -> WebCaseDetailModel | None:
@@ -576,7 +1088,24 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
+        try:
+            profile_runtime_overrides = cls._resolve_runtime_profile_runtime_overrides(
+                query_db,
+                request_model.runtime_profile_id,
+            )
+        except ValueError as exc:
+            return CrudResponseModel(is_success=False, message=str(exc))
+        merged_runtime_overrides = cls._merge_runtime_overrides(profile_runtime_overrides, request_model.runtime_overrides)
+        runtime_options_payload: dict[str, Any] = {}
+        if merged_runtime_overrides:
+            runtime_options_payload["runtimeOverrides"] = merged_runtime_overrides
+        if request_model.runtime_profile_id:
+            runtime_options_payload["runtimeProfileId"] = request_model.runtime_profile_id
+
         session_name = request_model.session_name or f"录制-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        recording_options_payload = request_model.recording_options.model_dump(by_alias=True)
+        if runtime_options_payload:
+            recording_options_payload["runtimeOptions"] = runtime_options_payload
         recording_session = HrmWebRecordingSession(
             session_name=session_name,
             start_url=request_model.start_url,
@@ -585,7 +1114,7 @@ class WebCaseService:
             web_case_id=request_model.web_case_id,
             agent_id=agent.agent_id,
             agent_code=agent.agent_code,
-            options_json=cls._dumps(request_model.recording_options.model_dump(by_alias=True)),
+            options_json=cls._dumps(recording_options_payload),
             status=2,
             started_at=datetime.now(),
             last_event_at=datetime.now(),
@@ -613,6 +1142,8 @@ class WebCaseService:
             "headless": recording_session.headless,
             "recordingOptions": request_model.recording_options.model_dump(by_alias=True),
         }
+        if runtime_options_payload:
+            message["runtimeOptions"] = runtime_options_payload
         result = await send_message(agent.agent_code, message)
         if result.status_code != AgentResponseEnum.SUCCESS.value:
             WebCaseDao.update_recording_session(
@@ -898,6 +1429,15 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
+        try:
+            profile_runtime_overrides = cls._resolve_runtime_profile_runtime_overrides(
+                query_db,
+                request_model.runtime_profile_id,
+            )
+        except ValueError as exc:
+            return CrudResponseModel(is_success=False, message=str(exc))
+        merged_runtime_overrides = cls._merge_runtime_overrides(profile_runtime_overrides, request_model.runtime_overrides)
+
         started_at = datetime.now()
         run_record = HrmWebCaseRun(
             web_case_id=int(detail.web_case_id),
@@ -918,8 +1458,12 @@ class WebCaseService:
         runtime_options = request_model.model_dump(
             mode="json",
             by_alias=True,
-            exclude={"web_case_id", "agent_id", "agent_code"},
+            exclude={"web_case_id", "agent_id", "agent_code", "runtime_profile_id", "runtime_overrides"},
         )
+        if merged_runtime_overrides:
+            runtime_options["runtimeOverrides"] = merged_runtime_overrides
+        if request_model.runtime_profile_id:
+            runtime_options["runtimeProfileId"] = request_model.runtime_profile_id
         response = await send_message(
             agent.agent_code,
             {

@@ -15,6 +15,8 @@ from module_hrm.entity.vo.web_case_vo import (
     AddWebCaseModel,
     WebCaseDetailModel,
     WebCasePageQueryModel,
+    WebRuntimeProfilePageQueryModel,
+    WebRuntimeProfileSaveModel,
     WebCaseRunRecordPageQueryModel,
     WebCaseRunRequestModel,
     WebRecordingApplyRequestModel,
@@ -132,6 +134,95 @@ async def delete_web_case(
 ):
     try:
         result = WebCaseService.delete_web_case_services(query_db, web_case_ids)
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.get(
+    "/runtime-profile/list",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:list"))],
+)
+async def list_runtime_profile(
+    request: Request,
+    page_query: WebRuntimeProfilePageQueryModel = Depends(WebRuntimeProfilePageQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = WebCaseService.list_runtime_profile_services(query_db, page_query)
+        return ResponseUtil.success(data=[item.model_dump(mode="json", by_alias=True) for item in result])
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post(
+    "/runtime-profile",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:edit"))],
+)
+@log_decorator(title="Web运行配置新增", business_type=1)
+async def add_runtime_profile(
+    request: Request,
+    profile_model: WebRuntimeProfileSaveModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    try:
+        result = WebCaseService.save_runtime_profile_services(
+            query_db,
+            profile_model,
+            user_name=current_user.user.user_name,
+            require_existing=False,
+        )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.put(
+    "/runtime-profile",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:edit"))],
+)
+@log_decorator(title="Web运行配置更新", business_type=2)
+async def update_runtime_profile(
+    request: Request,
+    profile_model: WebRuntimeProfileSaveModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    try:
+        result = WebCaseService.save_runtime_profile_services(
+            query_db,
+            profile_model,
+            user_name=current_user.user.user_name,
+            require_existing=True,
+        )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.delete(
+    "/runtime-profile/{profile_id}",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:edit"))],
+)
+@log_decorator(title="Web运行配置删除", business_type=3)
+async def delete_runtime_profile(
+    request: Request,
+    profile_id: str,
+    query_db: Session = Depends(get_db),
+):
+    try:
+        result = WebCaseService.delete_runtime_profile_services(query_db, profile_id)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)

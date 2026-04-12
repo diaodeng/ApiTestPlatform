@@ -1058,6 +1058,56 @@ class DesktopRecorderSession:
     record_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     annotation_active: bool = False
     last_viewport_payload: dict[str, Any] | None = None
+    sender_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
+    sender_worker: asyncio.Task | None = None
+    pre_action_capture: dict[str, Any] | None = None
+
+    async def start_sender_worker(self) -> None:
+        if self.sender_worker is not None and not self.sender_worker.done():
+            return
+        self.sender_worker = asyncio.create_task(self._sender_loop())
+
+    async def _sender_loop(self) -> None:
+        while self.active or not self.sender_queue.empty():
+            try:
+                message = await asyncio.wait_for(self.sender_queue.get(), timeout=0.2)
+            except asyncio.TimeoutError:
+                continue
+            try:
+                await self.sender(message)
+            except Exception as exc:
+                logger.warning(f"录制事件发送失败，将重试: {exc}")
+                resent = False
+                for retry_idx in range(3):
+                    await asyncio.sleep(min(0.2 * (retry_idx + 1), 1.0))
+                    try:
+                        await self.sender(message)
+                        resent = True
+                        break
+                    except Exception as retry_exc:
+                        logger.warning(f"录制事件第{retry_idx + 1}次重试失败: {retry_exc}")
+                if not resent and self.active:
+                    await self.sender_queue.put(message)
+                    await asyncio.sleep(0.2)
+            finally:
+                self.sender_queue.task_done()
+
+    async def wait_sender_queue(self, timeout_sec: float | None = None) -> None:
+        try:
+            if timeout_sec is None:
+                await self.sender_queue.join()
+            else:
+                await asyncio.wait_for(self.sender_queue.join(), timeout=timeout_sec)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "录制事件队列在超时时间内未完全发送，remaining={}",
+                self.sender_queue.qsize(),
+            )
+
+    async def _enqueue_message(self, message: dict[str, Any]) -> None:
+        if not self.active:
+            return
+        await self.sender_queue.put(message)
 
     async def emit(self, payload: dict[str, Any], event_type: str = "desktop_record_event") -> None:
         if not self.active:
@@ -1065,7 +1115,7 @@ class DesktopRecorderSession:
         self.event_index += 1
         if event_type == "desktop_record_event":
             self.events.append(payload)
-        await self.sender(
+        await self._enqueue_message(
             {
                 "type": event_type,
                 "recording_id": self.recording_id,
@@ -1075,7 +1125,7 @@ class DesktopRecorderSession:
         )
 
     async def emit_status(self, payload: dict[str, Any]) -> None:
-        await self.sender(
+        await self._enqueue_message(
             {
                 "type": "desktop_record_status",
                 "recording_id": self.recording_id,
@@ -1307,6 +1357,43 @@ class DesktopRecorderSession:
         logical_x, logical_y = viewport.actual_to_logical(x, y)
         return logical_x, logical_y, viewport
 
+    async def _capture_pre_action_snapshot(self, x: int, y: int) -> None:
+        if not self.active:
+            return
+        try:
+            screenshot, viewport = await _capture_screen_async(self.options)
+        except Exception as exc:
+            logger.debug(f"预采集点击截图失败: {exc}")
+            return
+        self.pre_action_capture = {
+            "captured_at": time.perf_counter(),
+            "x": int(x),
+            "y": int(y),
+            "screenshot": screenshot,
+            "viewport": viewport,
+        }
+
+    def _consume_pre_action_snapshot(self, capture_x: int | None, capture_y: int | None):
+        if capture_x is None or capture_y is None:
+            return None
+        snapshot = self.pre_action_capture
+        self.pre_action_capture = None
+        if not isinstance(snapshot, dict):
+            return None
+        captured_at = float(snapshot.get("captured_at") or 0.0)
+        if captured_at <= 0 or time.perf_counter() - captured_at > 1.5:
+            return None
+        snapshot_x = _as_int(snapshot.get("x"))
+        snapshot_y = _as_int(snapshot.get("y"))
+        tolerance = max(self._drag_threshold() * 2, 24)
+        if abs(snapshot_x - int(capture_x)) > tolerance or abs(snapshot_y - int(capture_y)) > tolerance:
+            return None
+        screenshot = snapshot.get("screenshot")
+        viewport = snapshot.get("viewport")
+        if screenshot is None or viewport is None:
+            return None
+        return screenshot, viewport
+
     async def _build_recorded_step(
         self,
         *,
@@ -1318,10 +1405,15 @@ class DesktopRecorderSession:
         capture_y: int | None = None,
         return_context: bool = False,
     ) -> dict[str, Any] | tuple[dict[str, Any], Any, DesktopViewport]:
-        capture_delay_ms = max(_as_int(self.options.get("captureDelayMs"), 400), 0)
-        if capture_delay_ms > 0:
-            await asyncio.sleep(capture_delay_ms / 1000.0)
-        screenshot, viewport = await _capture_screen_async(self.options)
+        capture_before_action = bool(self.options.get("captureBeforeAction", True))
+        pre_capture = self._consume_pre_action_snapshot(capture_x, capture_y) if capture_before_action else None
+        if pre_capture is not None:
+            screenshot, viewport = pre_capture
+        else:
+            capture_delay_ms = max(_as_int(self.options.get("captureDelayMs"), 400), 0)
+            if capture_delay_ms > 0 and not capture_before_action:
+                await asyncio.sleep(capture_delay_ms / 1000.0)
+            screenshot, viewport = await _capture_screen_async(self.options)
         viewport_payload = viewport.to_payload()
         target_image = None
         if (
@@ -1638,7 +1730,7 @@ class DesktopRecorderSession:
         x_int = int(x)
         y_int = int(y)
         if pressed:
-            logical_x, logical_y, viewport = self._actual_to_logical_point(x_int, y_int)
+            logical_x, logical_y, _ = self._actual_to_logical_point(x_int, y_int)
             if logical_x is None or logical_y is None:
                 self.pressed_button = None
                 self.mouse_down_position = None
@@ -1650,6 +1742,7 @@ class DesktopRecorderSession:
             self.last_mouse_position = (x_int, y_int)
             self.mouse_down_at = time.perf_counter()
             self.mouse_dragging = False
+            self._schedule(self._capture_pre_action_snapshot(logical_x, logical_y))
             return
 
         start_position = self.mouse_down_position or (x_int, y_int)
@@ -1694,7 +1787,7 @@ class DesktopRecorderSession:
     def _on_mouse_scroll(self, x, y, dx, dy) -> None:
         if not self.active or self.annotation_active:
             return
-        logical_x, logical_y, viewport = self._actual_to_logical_point(int(x), int(y))
+        logical_x, logical_y, _ = self._actual_to_logical_point(int(x), int(y))
         if logical_x is None or logical_y is None:
             return
         self._schedule(self.handle_scroll(logical_x, logical_y, int(dx), int(dy)))
@@ -1737,9 +1830,12 @@ class DesktopRecorderSession:
         self.active = False
         self.annotation_active = False
         self.pending_click = None
+        self.pre_action_capture = None
         self.modifier_keys.clear()
         mouse_listener = self.mouse_listener
         keyboard_listener = self.keyboard_listener
+        sender_worker = self.sender_worker
+        self.sender_worker = None
         self.mouse_listener = None
         self.keyboard_listener = None
         if mouse_listener is not None:
@@ -1756,6 +1852,21 @@ class DesktopRecorderSession:
         if close_process:
             self.process = None
             await asyncio.to_thread(_close_process, process)
+        await self.wait_sender_queue(timeout_sec=2.0)
+        if sender_worker is not None:
+            if not sender_worker.done():
+                try:
+                    await asyncio.wait_for(sender_worker, timeout=2.0)
+                except asyncio.TimeoutError:
+                    sender_worker.cancel()
+                except Exception:
+                    sender_worker.cancel()
+            try:
+                await sender_worker
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.debug(f"录制事件发送协程关闭时异常: {exc}")
         if cancel_recording_annotation is not None:
             try:
                 cancel_recording_annotation()
@@ -1828,6 +1939,7 @@ class DesktopTestService:
 
         try:
             _ensure_dependencies(need_recording=True)
+            await session.start_sender_worker()
             if session.app_path:
                 session.process = await asyncio.to_thread(_launch_process, session.app_path, session.app_args)
                 startup_delay_ms = max(_as_int(session.options.get("appStartupDelayMs"), 1200), 0)
@@ -1897,6 +2009,8 @@ class DesktopTestService:
 
         try:
             await session.flush_pending_events()
+            session.active = False
+            await session.wait_sender_queue(timeout_sec=8.0)
             await session.sender(
                 {
                     "type": "desktop_record_finished",
@@ -1951,6 +2065,38 @@ class DesktopTestService:
             if candidate not in (None, ""):
                 return max(_as_int(candidate, 10000), 500)
         return 10000
+
+    @classmethod
+    def _step_think_time_ms(cls, step: dict[str, Any], runtime_options: dict[str, Any], case_data: dict[str, Any]) -> int:
+        params = _as_dict(step.get("params"))
+        runtime_settings = _as_dict(case_data.get("runtimeSettings"))
+        candidates = [
+            step.get("thinkTimeMs"),
+            step.get("think_time_ms"),
+            params.get("thinkTimeMs"),
+            params.get("think_time_ms"),
+            runtime_options.get("stepThinkTimeMs"),
+            runtime_options.get("step_think_time_ms"),
+            runtime_options.get("thinkTimeMs"),
+            runtime_options.get("think_time_ms"),
+            runtime_settings.get("stepThinkTimeMs"),
+            runtime_settings.get("step_think_time_ms"),
+            runtime_settings.get("thinkTimeMs"),
+            runtime_settings.get("think_time_ms"),
+            0,
+        ]
+        for candidate in candidates:
+            if candidate not in (None, ""):
+                return max(_as_int(candidate, 0), 0)
+        return 0
+
+    @classmethod
+    def _has_following_enabled_step(cls, steps: list[Any], current_index: int) -> bool:
+        for idx in range(current_index + 1, len(steps)):
+            step = _as_dict(steps[idx])
+            if bool(step.get("enabled", True)):
+                return True
+        return False
 
     @classmethod
     def _continue_on_failure(cls, step: dict[str, Any], runtime_options: dict[str, Any]) -> bool:
@@ -2175,7 +2321,7 @@ class DesktopTestService:
                     await asyncio.sleep(startup_delay_ms / 1000.0)
             _resolve_viewport(effective_runtime)
 
-            for raw_step in steps:
+            for step_index, raw_step in enumerate(steps):
                 step = _as_dict(raw_step)
                 if not bool(step.get("enabled", True)):
                     result_steps.append(
@@ -2197,6 +2343,10 @@ class DesktopTestService:
                     last_error = step_result.get("error") or step_result.get("message") or "步骤执行失败"
                     if not cls._continue_on_failure(step, effective_runtime):
                         break
+                think_time_ms = cls._step_think_time_ms(step, effective_runtime, case_data)
+                if think_time_ms > 0 and cls._has_following_enabled_step(steps, step_index):
+                    await asyncio.sleep(think_time_ms / 1000.0)
+                    step_result["thinkTimeMs"] = think_time_ms
         except Exception as exc:
             logger.exception(exc)
             overall_success = False
