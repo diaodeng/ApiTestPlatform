@@ -126,6 +126,12 @@ class WebCaseDao:
         return db.query(HrmWebRecordingSession).filter(HrmWebRecordingSession.recording_id == recording_id).first()
 
     @classmethod
+    def list_recording_sessions_by_ids(cls, db: Session, recording_ids: list[int]) -> list[HrmWebRecordingSession]:
+        if not recording_ids:
+            return []
+        return db.query(HrmWebRecordingSession).filter(HrmWebRecordingSession.recording_id.in_(recording_ids)).all()
+
+    @classmethod
     def list_recording_sessions(cls, db: Session, page_object: WebRecordingSessionPageQueryModel):
         query = (
             db.query(HrmWebRecordingSession)
@@ -158,6 +164,26 @@ class WebCaseDao:
         )
 
     @classmethod
+    def delete_recording_events(cls, db: Session, recording_id: int) -> None:
+        db.query(HrmWebRecordingEvent).filter(HrmWebRecordingEvent.recording_id == recording_id).delete(
+            synchronize_session=False
+        )
+
+    @classmethod
+    def delete_recording_events_by_ids(cls, db: Session, recording_ids: list[int]) -> None:
+        if not recording_ids:
+            return
+        db.query(HrmWebRecordingEvent).filter(HrmWebRecordingEvent.recording_id.in_(recording_ids)).delete(
+            synchronize_session=False
+        )
+
+    @classmethod
+    def delete_recording_session(cls, db: Session, recording_id: int) -> None:
+        db.query(HrmWebRecordingSession).filter(HrmWebRecordingSession.recording_id == recording_id).delete(
+            synchronize_session=False
+        )
+
+    @classmethod
     def create_run_record(cls, db: Session, run_data: HrmWebCaseRun) -> HrmWebCaseRun:
         db.add(run_data)
         db.flush()
@@ -170,6 +196,18 @@ class WebCaseDao:
     @classmethod
     def get_run_record(cls, db: Session, web_case_run_id: int):
         return db.query(HrmWebCaseRun).filter(HrmWebCaseRun.web_case_run_id == web_case_run_id).first()
+
+    @classmethod
+    def list_run_records_by_ids(cls, db: Session, run_ids: list[int]) -> list[HrmWebCaseRun]:
+        if not run_ids:
+            return []
+        return db.query(HrmWebCaseRun).filter(HrmWebCaseRun.web_case_run_id.in_(run_ids)).all()
+
+    @classmethod
+    def delete_run_record(cls, db: Session, web_case_run_id: int) -> None:
+        db.query(HrmWebCaseRun).filter(HrmWebCaseRun.web_case_run_id == web_case_run_id).delete(
+            synchronize_session=False
+        )
 
     @classmethod
     def list_run_records(cls, db: Session, page_object: WebCaseRunRecordPageQueryModel):
