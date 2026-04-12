@@ -73,6 +73,148 @@ RECORDER_SCRIPT = """
     if (locators.some((item) => item.__key === key)) return;
     locators.push({ locatorType, locatorValue, enabled: true, __key: key });
   };
+  const collectByText = (expectedText, exact = true) => {
+    const value = cleanText(expectedText);
+    if (!value) return [];
+    return Array.from(document.querySelectorAll("body *")).filter((node) => {
+      if (!(node instanceof Element)) return false;
+      const text = cleanText(node.innerText || node.textContent || "");
+      if (!text) return false;
+      if (exact) return text === value;
+      return text.includes(value);
+    });
+  };
+  const collectByXpath = (selector) => {
+    const value = String(selector || "").trim();
+    if (!value) return [];
+    const matches = [];
+    try {
+      const result = document.evaluate(value, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      for (let i = 0; i < result.snapshotLength; i += 1) {
+        const node = result.snapshotItem(i);
+        if (node instanceof Element) matches.push(node);
+      }
+    } catch (_error) {
+      return [];
+    }
+    return matches;
+  };
+  const resolveLocatorMatches = (locatorType, locatorValue = {}) => {
+    const type = String(locatorType || "").toLowerCase();
+    const value = locatorValue && typeof locatorValue === "object" ? locatorValue : {};
+    if (type === "test_id") {
+      const testId = cleanText(value.testId || "");
+      if (!testId) return [];
+      const safeTestId = cssEscape(testId);
+      return Array.from(document.querySelectorAll(`[data-testid="${safeTestId}"], [data-test="${safeTestId}"]`));
+    }
+    if (type === "id") {
+      const id = cleanText(value.id || "");
+      if (!id) return [];
+      return Array.from(document.querySelectorAll(`[id="${cssEscape(id)}"]`));
+    }
+    if (type === "name") {
+      const name = cleanText(value.name || "");
+      if (!name) return [];
+      return Array.from(document.querySelectorAll(`[name="${cssEscape(name)}"]`));
+    }
+    if (type === "css") {
+      const selector = String(value.selector || "").trim();
+      if (!selector) return [];
+      try {
+        return Array.from(document.querySelectorAll(selector));
+      } catch (_error) {
+        return [];
+      }
+    }
+    if (type === "xpath") {
+      return collectByXpath(value.selector);
+    }
+    if (type === "placeholder") {
+      const placeholder = cleanText(value.text || "");
+      if (!placeholder) return [];
+      return Array.from(document.querySelectorAll(`[placeholder="${cssEscape(placeholder)}"]`));
+    }
+    if (type === "text") {
+      const textValue = cleanText(value.text || "");
+      const exact = value.exact !== false;
+      return collectByText(textValue, exact);
+    }
+    if (type === "label") {
+      const expected = cleanText(value.text || "");
+      if (!expected) return [];
+      const exact = value.exact !== false;
+      return Array.from(document.querySelectorAll("input, textarea, select, button, a, [aria-label], [role]")).filter((node) => {
+        if (!(node instanceof Element)) return false;
+        const aria = cleanText(node.getAttribute("aria-label") || "");
+        const labelText = cleanText(node.labels?.[0]?.innerText || "");
+        const text = cleanText(node.innerText || node.textContent || "");
+        const name = cleanText(aria || labelText || text);
+        if (!name) return false;
+        if (exact) return name === expected;
+        return name.includes(expected);
+      });
+    }
+    if (type === "role") {
+      const role = cleanText(value.role || "").toLowerCase();
+      if (!role) return [];
+      const expectedName = cleanText(value.name || "");
+      const exact = value.exact !== false;
+      return Array.from(document.querySelectorAll("body *")).filter((node) => {
+        if (!(node instanceof Element)) return false;
+        if (inferRole(node) !== role) return false;
+        if (!expectedName) return true;
+        const aria = cleanText(node.getAttribute("aria-label") || "");
+        const labelText = cleanText(node.labels?.[0]?.innerText || "");
+        const text = cleanText(node.innerText || node.textContent || "");
+        const name = cleanText(aria || labelText || text);
+        if (!name) return false;
+        if (exact) return name === expectedName;
+        return name.includes(expectedName);
+      });
+    }
+    return [];
+  };
+  const locateTargetIndex = (target, matches) => {
+    if (!(target instanceof Element)) return -1;
+    if (!Array.isArray(matches) || !matches.length) return -1;
+    const exactIndex = matches.findIndex((item) => item === target);
+    if (exactIndex >= 0) return exactIndex;
+    const ancestorIndex = matches.findIndex((item) => item instanceof Element && item.contains(target));
+    if (ancestorIndex >= 0) return ancestorIndex;
+    const descendantIndex = matches.findIndex((item) => item instanceof Element && target.contains(item));
+    return descendantIndex;
+  };
+  const analyzeLocator = (target, locatorType, locatorValue) => {
+    const value = locatorValue && typeof locatorValue === "object" ? { ...locatorValue } : {};
+    const matches = resolveLocatorMatches(locatorType, value);
+    const matchCount = matches.length;
+    const targetIndex = locateTargetIndex(target, matches);
+    let uniqueness = "missing";
+    let indexed = false;
+    if (matchCount === 1 && targetIndex >= 0) {
+      uniqueness = "unique";
+    } else if (matchCount > 1 && targetIndex >= 0) {
+      if (value.nth === undefined && value.index === undefined) {
+        value.nth = targetIndex;
+        indexed = true;
+      } else {
+        indexed = true;
+      }
+      uniqueness = indexed ? "indexed" : "ambiguous";
+    } else if (matchCount > 1) {
+      uniqueness = "ambiguous";
+    }
+    const usable = targetIndex >= 0 && (matchCount === 1 || indexed);
+    return {
+      locatorType,
+      locatorValue: value,
+      matchCount,
+      targetIndex,
+      uniqueness,
+      usable
+    };
+  };
   const cssPath = (el) => {
     if (!(el instanceof Element)) return "";
     const id = attr(el, "id");
@@ -140,11 +282,24 @@ RECORDER_SCRIPT = """
     if (preferStableLocators && !locators.length && text && text.length <= 80) {
       pushLocator(locators, "text", { text, exact: true });
     }
-    return locators.map((item, index) => ({
+    const analyzed = locators.map((item, index) => ({
+      ...analyzeLocator(el, item.locatorType, item.locatorValue),
+      sourcePriority: index
+    }));
+    analyzed.sort((a, b) => {
+      const scoreA = a.usable ? (a.uniqueness === "unique" ? 0 : 1) : 2;
+      const scoreB = b.usable ? (b.uniqueness === "unique" ? 0 : 1) : 2;
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      return a.sourcePriority - b.sourcePriority;
+    });
+    return analyzed.map((item, index) => ({
       locatorType: item.locatorType,
       locatorValue: item.locatorValue,
       priority: index,
-      enabled: true
+      enabled: true,
+      matchCount: item.matchCount,
+      targetIndex: item.targetIndex,
+      uniqueness: item.uniqueness
     }));
   };
   const buildSnapshot = (el, mode = {}) => ({
@@ -615,12 +770,12 @@ _LOCATOR_TYPE_WEIGHT = {
     "test_id": 0,
     "id": 1,
     "name": 2,
-    "role": 3,
-    "label": 4,
-    "placeholder": 5,
-    "text": 6,
-    "css": 7,
-    "xpath": 8,
+    "css": 3,
+    "xpath": 4,
+    "role": 5,
+    "label": 6,
+    "placeholder": 7,
+    "text": 8,
 }
 
 
@@ -1103,11 +1258,11 @@ class WebTestService:
     async def handle_request(cls, req_data: dict[str, Any], event_sender: EventSender | None = None) -> dict[str, Any]:
         command = req_data.get("command") or "run_case"
         if command == "run_case":
-            return await cls._run_case(req_data)
+            return await cls._run_case(req_data, event_sender)
         if command == "prepare_run_case":
-            return await cls._prepare_run_case(req_data)
+            return await cls._prepare_run_case(req_data, event_sender)
         if command == "continue_run_case":
-            return await cls._continue_run_case(req_data)
+            return await cls._continue_run_case(req_data, event_sender)
         if command == "stop_run_case":
             return await cls._stop_run_case(req_data)
         if command == "cancel_run_case":
@@ -1127,6 +1282,98 @@ class WebTestService:
             "status": "failed",
             "message": f"unsupported webui command: {command}",
         }
+
+    @classmethod
+    async def _emit_run_event(
+        cls,
+        event_sender: EventSender | None,
+        *,
+        event_type: str,
+        run_id: int,
+        payload: dict[str, Any] | None = None,
+        message: str | None = None,
+    ) -> None:
+        """发送执行中间态事件，发送失败不影响主流程。"""
+        if event_sender is None or run_id <= 0:
+            return
+        event_payload = {
+            "type": event_type,
+            "web_case_run_id": run_id,
+            "payload": payload if isinstance(payload, dict) else {},
+        }
+        if message:
+            event_payload["message"] = message
+        try:
+            await event_sender(event_payload)
+        except Exception as exc:
+            logger.debug(f"发送执行中间态事件失败: run_id={run_id}, type={event_type}, error={exc}")
+
+    @staticmethod
+    def _count_enabled_steps(steps: list[Any]) -> int:
+        """统计启用步骤数，用于实时进度展示。"""
+        return sum(1 for item in steps if bool(_as_dict(item).get("enabled", True)))
+
+    @staticmethod
+    def _build_step_start_payload(
+        step: dict[str, Any],
+        *,
+        step_index: int,
+        total_steps: int,
+        finished_steps: int,
+        page_url: str,
+    ) -> dict[str, Any]:
+        """构造步骤开始事件的载荷。"""
+        return {
+            "phase": "step_started",
+            "step": {
+                "stepId": step.get("stepId") or step.get("step_id"),
+                "stepIndex": step_index,
+                "stepName": step.get("stepName") or step.get("step_name") or f"step-{step_index}",
+                "status": "running",
+                "durationMs": 0,
+                "pageUrl": page_url,
+                "message": "执行中",
+            },
+            "currentStep": {
+                "stepId": step.get("stepId") or step.get("step_id"),
+                "stepIndex": step_index,
+                "stepName": step.get("stepName") or step.get("step_name") or f"step-{step_index}",
+                "status": "running",
+            },
+            "progress": {
+                "totalSteps": total_steps,
+                "finishedSteps": finished_steps,
+                "runningStepIndex": step_index,
+            },
+            "pageUrl": page_url,
+        }
+
+    @staticmethod
+    def _build_step_finished_payload(
+        step_result: dict[str, Any],
+        *,
+        step_index: int,
+        total_steps: int,
+        finished_steps: int,
+    ) -> dict[str, Any]:
+        """构造步骤完成事件的载荷。"""
+        payload: dict[str, Any] = {
+            "phase": "step_finished",
+            "step": step_result,
+            "progress": {
+                "totalSteps": total_steps,
+                "finishedSteps": finished_steps,
+                "runningStepIndex": None,
+            },
+            "pageUrl": step_result.get("pageUrl"),
+        }
+        payload["currentStep"] = {
+            "stepId": step_result.get("stepId") or step_result.get("step_id"),
+            "stepIndex": step_result.get("stepIndex") or step_result.get("step_index") or step_index,
+            "stepName": step_result.get("stepName") or step_result.get("step_name") or f"step-{step_index}",
+            "status": step_result.get("status"),
+        }
+        return payload
 
     @classmethod
     async def _start_recording(cls, req_data: dict[str, Any], event_sender: EventSender | None) -> dict[str, Any]:
@@ -1479,7 +1726,11 @@ class WebTestService:
                 logger.exception(exc)
 
     @classmethod
-    async def _prepare_run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+    async def _prepare_run_case(
+        cls,
+        req_data: dict[str, Any],
+        event_sender: EventSender | None = None,
+    ) -> dict[str, Any]:
         run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
         if run_id <= 0:
             return {
@@ -1600,6 +1851,20 @@ class WebTestService:
             )
             async with cls._lock:
                 cls._prepared_runs[run_id] = prepared
+            await cls._emit_run_event(
+                event_sender,
+                event_type="web_run_status",
+                run_id=run_id,
+                payload={
+                    "phase": "waiting_manual_confirm",
+                    "awaitingManualConfirm": True,
+                    "manualLoginStatus": "waiting_manual_login",
+                    "pageUrl": prepared.page.url if prepared.page else start_url,
+                    "runtimeDebug": prepared.runtime_debug,
+                    "resultPatch": {"awaitingManualConfirm": True, "manualLoginStatus": "waiting_manual_login"},
+                },
+                message="浏览器已就绪，等待手动登录确认",
+            )
             return {
                 "request_type": 3,
                 "command": "prepare_run_case",
@@ -1618,6 +1883,17 @@ class WebTestService:
             async with cls._lock:
                 cls._prepared_runs.pop(run_id, None)
             await prepared.close()
+            await cls._emit_run_event(
+                event_sender,
+                event_type="web_run_error",
+                run_id=run_id,
+                payload={
+                    "phase": "prepare_failed",
+                    "awaitingManualConfirm": False,
+                    "manualLoginStatus": "prepare_failed",
+                },
+                message=str(exc),
+            )
             return {
                 "request_type": 3,
                 "command": "prepare_run_case",
@@ -1627,7 +1903,11 @@ class WebTestService:
             }
 
     @classmethod
-    async def _continue_run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+    async def _continue_run_case(
+        cls,
+        req_data: dict[str, Any],
+        event_sender: EventSender | None = None,
+    ) -> dict[str, Any]:
         run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
         if run_id <= 0:
             return {
@@ -1688,6 +1968,26 @@ class WebTestService:
             cls._active_runs[run_id] = active_session
 
         result_steps: list[dict[str, Any]] = []
+        total_steps = len(steps)
+        finished_steps = 0
+        await cls._emit_run_event(
+            event_sender,
+            event_type="web_run_status",
+            run_id=run_id,
+            payload={
+                "phase": "running",
+                "awaitingManualConfirm": False,
+                "manualLoginStatus": "confirmed",
+                "pageUrl": page.url if page else start_url,
+                "runtimeDebug": runtime_debug,
+                "progress": {
+                    "totalSteps": total_steps,
+                    "finishedSteps": finished_steps,
+                    "runningStepIndex": None,
+                },
+            },
+            message="已确认继续执行",
+        )
         response_payload: dict[str, Any]
         retained_session_id: str | None = None
         try:
@@ -1696,19 +1996,44 @@ class WebTestService:
                 if active_session.cancel_event.is_set():
                     raise RuntimeError("执行已取消")
                 step = _as_dict(raw_step)
+                step_display_index = step_index + 1
                 if not bool(step.get("enabled", True)):
-                    result_steps.append(
-                        {
-                            "stepId": step.get("stepId") or step.get("step_id"),
-                            "stepName": step.get("stepName") or step.get("step_name") or "step",
-                            "status": "skipped",
-                            "durationMs": 0,
-                            "message": "步骤已禁用",
-                            "pageUrl": page.url if page else start_url,
-                        }
+                    skipped_result = {
+                        "stepId": step.get("stepId") or step.get("step_id"),
+                        "stepIndex": step_display_index,
+                        "stepName": step.get("stepName") or step.get("step_name") or "step",
+                        "status": "skipped",
+                        "durationMs": 0,
+                        "message": "步骤已禁用",
+                        "pageUrl": page.url if page else start_url,
+                    }
+                    result_steps.append(skipped_result)
+                    finished_steps += 1
+                    await cls._emit_run_event(
+                        event_sender,
+                        event_type="web_run_step",
+                        run_id=run_id,
+                        payload=cls._build_step_finished_payload(
+                            skipped_result,
+                            step_index=step_display_index,
+                            total_steps=total_steps,
+                            finished_steps=finished_steps,
+                        ),
                     )
                     continue
 
+                await cls._emit_run_event(
+                    event_sender,
+                    event_type="web_run_step",
+                    run_id=run_id,
+                    payload=cls._build_step_start_payload(
+                        step,
+                        step_index=step_display_index,
+                        total_steps=total_steps,
+                        finished_steps=finished_steps,
+                        page_url=page.url if page else start_url,
+                    ),
+                )
                 step_result = await cls._run_single_step(
                     page,
                     context,
@@ -1718,11 +2043,26 @@ class WebTestService:
                     cookie_rules=cookie_rules,
                     cookie_variables=cookie_variables,
                 )
-                result_steps.append(step_result)
+                step_result["stepIndex"] = step_display_index
                 if active_session.cancel_event.is_set():
                     step_result["message"] = "执行已取消"
                     step_result["error"] = "执行已取消"
                     step_result["errorMessage"] = "执行已取消"
+                    step_result["status"] = "failed"
+                result_steps.append(step_result)
+                finished_steps += 1
+                await cls._emit_run_event(
+                    event_sender,
+                    event_type="web_run_step",
+                    run_id=run_id,
+                    payload=cls._build_step_finished_payload(
+                        step_result,
+                        step_index=step_display_index,
+                        total_steps=total_steps,
+                        finished_steps=finished_steps,
+                    ),
+                )
+                if active_session.cancel_event.is_set():
                     overall_success = False
                     break
                 if step_result["status"] != "passed":
@@ -1756,6 +2096,24 @@ class WebTestService:
                     "runtimeDebug": runtime_debug,
                 },
             }
+            await cls._emit_run_event(
+                event_sender,
+                event_type="web_run_finished",
+                run_id=run_id,
+                payload={
+                    "phase": "finished",
+                    "success": overall_success,
+                    "steps": result_steps,
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                    "progress": {
+                        "totalSteps": total_steps,
+                        "finishedSteps": finished_steps,
+                        "runningStepIndex": None,
+                    },
+                },
+                message="执行完成" if overall_success else "执行失败",
+            )
         except Exception as exc:
             logger.exception(exc)
             runtime_debug.setdefault(
@@ -1781,6 +2139,24 @@ class WebTestService:
                     "runtimeDebug": runtime_debug,
                 },
             }
+            await cls._emit_run_event(
+                event_sender,
+                event_type="web_run_error",
+                run_id=run_id,
+                payload={
+                    "phase": "failed",
+                    "success": False,
+                    "steps": result_steps,
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                    "progress": {
+                        "totalSteps": total_steps,
+                        "finishedSteps": finished_steps,
+                        "runningStepIndex": None,
+                    },
+                },
+                message=response_payload.get("message") or str(exc),
+            )
         finally:
             async with cls._lock:
                 cls._active_runs.pop(run_id, None)
@@ -1945,7 +2321,11 @@ class WebTestService:
         }
 
     @classmethod
-    async def _run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+    async def _run_case(
+        cls,
+        req_data: dict[str, Any],
+        event_sender: EventSender | None = None,
+    ) -> dict[str, Any]:
         run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
         case_data = _as_dict(req_data.get("caseData"))
         runtime_options = _as_dict(req_data.get("runtimeOptions"))
@@ -1964,6 +2344,8 @@ class WebTestService:
             steps = []
 
         result_steps: list[dict[str, Any]] = []
+        total_steps = len(steps)
+        finished_steps = 0
         playwright = None
         browser = None
         context = None
@@ -2065,24 +2447,66 @@ class WebTestService:
                 effective_runtime,
                 stage="before_case_steps",
             )
+            await cls._emit_run_event(
+                event_sender,
+                event_type="web_run_status",
+                run_id=run_id,
+                payload={
+                    "phase": "running",
+                    "awaitingManualConfirm": False,
+                    "manualLoginStatus": "running",
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                    "progress": {
+                        "totalSteps": total_steps,
+                        "finishedSteps": finished_steps,
+                        "runningStepIndex": None,
+                    },
+                },
+            )
             overall_success = True
             for step_index, raw_step in enumerate(steps):
                 if active_session is not None and active_session.cancel_event.is_set():
                     raise RuntimeError("执行已取消")
                 step = _as_dict(raw_step)
+                step_display_index = step_index + 1
                 if not bool(step.get("enabled", True)):
-                    result_steps.append(
-                        {
-                            "stepId": step.get("stepId") or step.get("step_id"),
-                            "stepName": step.get("stepName") or step.get("step_name") or "step",
-                            "status": "skipped",
-                            "durationMs": 0,
-                            "message": "步骤已禁用",
-                            "pageUrl": page.url if page else start_url,
-                        }
+                    skipped_result = {
+                        "stepId": step.get("stepId") or step.get("step_id"),
+                        "stepIndex": step_display_index,
+                        "stepName": step.get("stepName") or step.get("step_name") or "step",
+                        "status": "skipped",
+                        "durationMs": 0,
+                        "message": "步骤已禁用",
+                        "pageUrl": page.url if page else start_url,
+                    }
+                    result_steps.append(skipped_result)
+                    finished_steps += 1
+                    await cls._emit_run_event(
+                        event_sender,
+                        event_type="web_run_step",
+                        run_id=run_id,
+                        payload=cls._build_step_finished_payload(
+                            skipped_result,
+                            step_index=step_display_index,
+                            total_steps=total_steps,
+                            finished_steps=finished_steps,
+                        ),
                     )
                     continue
 
+                await cls._emit_run_event(
+                    event_sender,
+                    event_type="web_run_step",
+                    run_id=run_id,
+                    payload=cls._build_step_start_payload(
+                        step,
+                        step_index=step_display_index,
+                        total_steps=total_steps,
+                        finished_steps=finished_steps,
+                        page_url=page.url if page else start_url,
+                    ),
+                )
                 step_result = await cls._run_single_step(
                     page,
                     context,
@@ -2092,11 +2516,26 @@ class WebTestService:
                     cookie_rules=cookie_rules,
                     cookie_variables=cookie_variables,
                 )
-                result_steps.append(step_result)
+                step_result["stepIndex"] = step_display_index
                 if active_session is not None and active_session.cancel_event.is_set():
                     step_result["message"] = "执行已取消"
                     step_result["error"] = "执行已取消"
                     step_result["errorMessage"] = "执行已取消"
+                    step_result["status"] = "failed"
+                result_steps.append(step_result)
+                finished_steps += 1
+                await cls._emit_run_event(
+                    event_sender,
+                    event_type="web_run_step",
+                    run_id=run_id,
+                    payload=cls._build_step_finished_payload(
+                        step_result,
+                        step_index=step_display_index,
+                        total_steps=total_steps,
+                        finished_steps=finished_steps,
+                    ),
+                )
+                if active_session is not None and active_session.cancel_event.is_set():
                     overall_success = False
                     break
                 if step_result["status"] != "passed":
@@ -2138,6 +2577,24 @@ class WebTestService:
                     "runtimeDebug": runtime_debug,
                 },
             }
+            await cls._emit_run_event(
+                event_sender,
+                event_type="web_run_finished",
+                run_id=run_id,
+                payload={
+                    "phase": "finished",
+                    "success": overall_success,
+                    "steps": result_steps,
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                    "progress": {
+                        "totalSteps": total_steps,
+                        "finishedSteps": finished_steps,
+                        "runningStepIndex": None,
+                    },
+                },
+                message="执行完成" if overall_success else "执行失败",
+            )
         except Exception as exc:
             logger.exception(exc)
             runtime_debug.setdefault(
@@ -2172,6 +2629,24 @@ class WebTestService:
                     "runtimeDebug": runtime_debug,
                 },
             }
+            await cls._emit_run_event(
+                event_sender,
+                event_type="web_run_error",
+                run_id=run_id,
+                payload={
+                    "phase": "failed",
+                    "success": False,
+                    "steps": result_steps,
+                    "pageUrl": page.url if page else start_url,
+                    "runtimeDebug": runtime_debug,
+                    "progress": {
+                        "totalSteps": total_steps,
+                        "finishedSteps": finished_steps,
+                        "runningStepIndex": None,
+                    },
+                },
+                message=response_payload.get("message") or str(exc),
+            )
         finally:
             cancelled = active_session.cancel_event.is_set() if active_session is not None else False
             if run_id > 0:
@@ -2291,6 +2766,7 @@ class WebTestService:
 
     @classmethod
     async def _resolve_locator(cls, page: Any, step: dict[str, Any], timeout_ms: int) -> tuple[Any, list[dict[str, Any]]]:
+        """解析步骤定位器，优先唯一命中，禁止多匹配时默认取 first。"""
         target_snapshot = _as_dict(step.get("targetSnapshot") or step.get("target_snapshot"))
         raw_locators = target_snapshot.get("locators") or []
         if not raw_locators:
@@ -2319,6 +2795,9 @@ class WebTestService:
                     "locatorValue": locator_value,
                     "priority": _as_int(locator_def.get("priority"), index),
                     "index": index,
+                    "uniqueness": str(locator_def.get("uniqueness") or "").strip().lower(),
+                    "targetIndex": locator_def.get("targetIndex", locator_def.get("target_index")),
+                    "matchCount": locator_def.get("matchCount", locator_def.get("match_count")),
                 }
             )
 
@@ -2338,6 +2817,9 @@ class WebTestService:
                 "locatorType": item.get("locatorType"),
                 "locatorValue": item.get("locatorValue"),
                 "priority": item.get("priority"),
+                "uniqueness": item.get("uniqueness"),
+                "targetIndex": item.get("targetIndex"),
+                "matchCount": item.get("matchCount"),
                 "tries": 0,
             }
             for item in normalized_candidates
@@ -2356,55 +2838,83 @@ class WebTestService:
                 probe_timeout = max(min(remaining_ms, 350), 50)
                 try:
                     locator = cls._build_locator(page, locator_type, locator_value)
-                    candidate = locator.first
-                    await candidate.wait_for(state="attached", timeout=probe_timeout)
+                    await locator.first.wait_for(state="attached", timeout=probe_timeout)
                     count = await locator.count()
                     attempt["count"] = count
-                    if count > 0:
-                        return candidate, attempts
+                    if count == 1:
+                        return locator.first, attempts
+                    if count > 1:
+                        attempt["message"] = f"匹配到多个元素({count})"
+                        continue
                     attempt["message"] = "未匹配到元素"
                 except Exception as exc:
                     attempt["error"] = str(exc)
             await asyncio.sleep(0.05)
 
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        if any(_as_int(item.get("count"), 0) > 1 for item in attempts):
+            raise RuntimeError(
+                f"未在 {elapsed_ms}ms 内唯一定位到步骤元素(存在多元素歧义): {json.dumps(attempts, ensure_ascii=False)}"
+            )
         raise RuntimeError(f"未在 {elapsed_ms}ms 内定位到步骤元素: {json.dumps(attempts, ensure_ascii=False)}")
 
     @classmethod
     def _build_locator(cls, page: Any, locator_type: str, locator_value: dict[str, Any]) -> Any:
+        """根据定位器类型构建 Playwright Locator，并应用可选 nth/index 精准索引。"""
+        locator: Any
         if locator_type == "role":
-            return page.get_by_role(
+            locator = page.get_by_role(
                 locator_value.get("role", ""),
                 name=locator_value.get("name"),
                 exact=locator_value.get("exact", False),
             )
-        if locator_type == "label":
-            return page.get_by_label(locator_value.get("text", ""), exact=locator_value.get("exact", False))
-        if locator_type == "placeholder":
-            return page.get_by_placeholder(locator_value.get("text", ""), exact=locator_value.get("exact", False))
-        if locator_type == "text":
-            return page.get_by_text(locator_value.get("text", ""), exact=locator_value.get("exact", False))
-        if locator_type == "test_id":
-            return page.get_by_test_id(locator_value.get("testId", ""))
-        if locator_type == "id":
+        elif locator_type == "label":
+            locator = page.get_by_label(locator_value.get("text", ""), exact=locator_value.get("exact", False))
+        elif locator_type == "placeholder":
+            locator = page.get_by_placeholder(locator_value.get("text", ""), exact=locator_value.get("exact", False))
+        elif locator_type == "text":
+            locator = page.get_by_text(locator_value.get("text", ""), exact=locator_value.get("exact", False))
+        elif locator_type == "test_id":
+            locator = page.get_by_test_id(locator_value.get("testId", ""))
+        elif locator_type == "id":
             element_id = str(locator_value.get("id") or "").strip()
             if not element_id:
                 raise RuntimeError("id 定位器缺少 id 参数")
             safe_id = element_id.replace('"', '\\"')
-            return page.locator(f'[id="{safe_id}"]')
-        if locator_type == "name":
+            locator = page.locator(f'[id="{safe_id}"]')
+        elif locator_type == "name":
             element_name = str(locator_value.get("name") or "").strip()
             if not element_name:
                 raise RuntimeError("name 定位器缺少 name 参数")
             safe_name = element_name.replace('"', '\\"')
-            return page.locator(f'[name="{safe_name}"]')
-        selector = locator_value.get("selector", "")
-        selector = str(selector or "").strip()
-        if not selector:
-            raise RuntimeError(f"{locator_type} 定位器缺少 selector 参数")
-        if locator_type == "xpath":
-            return page.locator(f"xpath={selector}")
-        return page.locator(selector)
+            locator = page.locator(f'[name="{safe_name}"]')
+        else:
+            selector = locator_value.get("selector", "")
+            selector = str(selector or "").strip()
+            if not selector:
+                raise RuntimeError(f"{locator_type} 定位器缺少 selector 参数")
+            if locator_type == "xpath":
+                locator = page.locator(f"xpath={selector}")
+            else:
+                locator = page.locator(selector)
+        locator_index = cls._resolve_locator_index(locator_value)
+        if locator_index is not None:
+            return locator.nth(locator_index)
+        return locator
+
+    @staticmethod
+    def _resolve_locator_index(locator_value: dict[str, Any]) -> int | None:
+        """从定位器参数中提取显式索引，支持 nth/index/targetIndex。"""
+        for key in ("nth", "index", "targetIndex", "target_index"):
+            if key not in locator_value:
+                continue
+            candidate = locator_value.get(key)
+            if candidate in (None, ""):
+                continue
+            index = _as_int(candidate, -1)
+            if index >= 0:
+                return index
+        return None
 
     @classmethod
     async def _execute_action(

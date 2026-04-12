@@ -1,7 +1,28 @@
-import request from '@/utils/request'
+﻿import request from '@/utils/request'
+
+const WEB_CASE_SILENT_HEADERS = {
+  showErrorMessage: false,
+  showErrorNotification: false
+}
+
+/**
+ * Web 用例页面会在调用点统一 catch 并提示；这里关闭全局拦截器二次弹错。
+ * @param {import('axios').AxiosRequestConfig} config axios 请求配置
+ * @returns {Promise<any>} 请求结果
+ */
+function webCaseRequest(config) {
+  const headers = {
+    ...WEB_CASE_SILENT_HEADERS,
+    ...(config.headers || {})
+  }
+  return request({
+    ...config,
+    headers
+  })
+}
 
 export function listWebCase(query) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/list',
     method: 'get',
     params: query
@@ -9,14 +30,14 @@ export function listWebCase(query) {
 }
 
 export function getWebCase(webCaseId) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/' + webCaseId,
     method: 'get'
   })
 }
 
 export function addWebCase(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case',
     method: 'post',
     data
@@ -24,7 +45,7 @@ export function addWebCase(data) {
 }
 
 export function updateWebCase(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case',
     method: 'put',
     data
@@ -32,14 +53,14 @@ export function updateWebCase(data) {
 }
 
 export function delWebCase(webCaseId) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/' + webCaseId,
     method: 'delete'
   })
 }
 
 export function runWebCase(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/run',
     method: 'post',
     data
@@ -47,7 +68,7 @@ export function runWebCase(data) {
 }
 
 export function continueWebRun(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/run/continue',
     method: 'post',
     data
@@ -55,7 +76,7 @@ export function continueWebRun(data) {
 }
 
 export function stopWebRun(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/run/stop',
     method: 'post',
     data
@@ -63,7 +84,7 @@ export function stopWebRun(data) {
 }
 
 export function cancelWebRun(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/run/cancel',
     method: 'post',
     data
@@ -71,14 +92,14 @@ export function cancelWebRun(data) {
 }
 
 export function delWebRun(webCaseRunIds) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/run/' + webCaseRunIds,
     method: 'delete'
   })
 }
 
 export function listWebRuntimeProfile(query) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/runtime-profile/list',
     method: 'get',
     params: query
@@ -86,7 +107,7 @@ export function listWebRuntimeProfile(query) {
 }
 
 export function addWebRuntimeProfile(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/runtime-profile',
     method: 'post',
     data
@@ -94,7 +115,7 @@ export function addWebRuntimeProfile(data) {
 }
 
 export function updateWebRuntimeProfile(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/runtime-profile',
     method: 'put',
     data
@@ -102,21 +123,21 @@ export function updateWebRuntimeProfile(data) {
 }
 
 export function delWebRuntimeProfile(profileId) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/runtime-profile/' + profileId,
     method: 'delete'
   })
 }
 
 export function getWebRun(webCaseRunId) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/run/' + webCaseRunId,
     method: 'get'
   })
 }
 
 export function listWebRecording(query) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/list',
     method: 'get',
     params: query
@@ -124,14 +145,14 @@ export function listWebRecording(query) {
 }
 
 export function getWebRecording(recordingId) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/' + recordingId,
     method: 'get'
   })
 }
 
 export function startWebRecording(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/start',
     method: 'post',
     data
@@ -139,7 +160,7 @@ export function startWebRecording(data) {
 }
 
 export function continueWebRecording(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/continue',
     method: 'post',
     data
@@ -147,7 +168,7 @@ export function continueWebRecording(data) {
 }
 
 export function cancelWebRecording(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/cancel',
     method: 'post',
     data
@@ -155,7 +176,7 @@ export function cancelWebRecording(data) {
 }
 
 export function stopWebRecording(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/stop',
     method: 'post',
     data
@@ -163,14 +184,14 @@ export function stopWebRecording(data) {
 }
 
 export function delWebRecording(recordingIds) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/' + recordingIds,
     method: 'delete'
   })
 }
 
 export function applyWebRecording(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/apply',
     method: 'post',
     data
@@ -178,7 +199,7 @@ export function applyWebRecording(data) {
 }
 
 export function saveWebRecordingAsCase(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/save-as-case',
     method: 'post',
     data
@@ -186,7 +207,7 @@ export function saveWebRecordingAsCase(data) {
 }
 
 export function replayWebRecording(data) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/recording/replay',
     method: 'post',
     data
@@ -194,9 +215,10 @@ export function replayWebRecording(data) {
 }
 
 export function listWebRun(query) {
-  return request({
+  return webCaseRequest({
     url: '/hrm/web-case/run/list',
     method: 'get',
     params: query
   })
 }
+

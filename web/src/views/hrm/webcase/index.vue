@@ -1092,7 +1092,14 @@
           <el-switch v-model="runForm.persistContextEnabled" />
         </el-form-item>
         <el-form-item v-if="runForm.persistContextEnabled" label="状态作用域" v-hasPermi="['hrm:webCase:persistContext']">
-          <el-input v-model="runForm.persistContextKey" placeholder="可选：例如 testpartner.sm-os.com" />
+          <el-select v-model="runForm.persistContextKey" clearable filterable style="width: 100%" placeholder="请选择状态作用域">
+            <el-option
+              v-for="item in availablePersistScopesForRun"
+              :key="item.key"
+              :label="formatPersistScopeLabel(item)"
+              :value="item.key"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="Cookie配置">
           <el-row :gutter="10" style="width: 100%">
@@ -1240,7 +1247,7 @@
           <el-table-column label="步骤" prop="stepName" min-width="220" />
           <el-table-column label="状态" width="110">
             <template #default="scope">
-                <el-tag :type="isPassedStepStatus(scope.row.status) ? 'success' : 'danger'">{{ scope.row.status || "-" }}</el-tag>
+                <el-tag :type="getStepStatusTagType(scope.row.status)">{{ scope.row.status || "-" }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="耗时" width="110">
@@ -1362,7 +1369,14 @@
             </el-col>
             <el-col :span="24" v-if="recordingForm.persistContextEnabled" v-hasPermi="['hrm:webCase:persistContext']">
               <el-form-item label="状态作用域">
-                <el-input v-model="recordingForm.persistContextKey" placeholder="可选：例如 testpartner.sm-os.com" />
+                <el-select v-model="recordingForm.persistContextKey" clearable filterable style="width: 100%" placeholder="请选择状态作用域">
+                  <el-option
+                    v-for="item in availablePersistScopesForRecording"
+                    :key="item.key"
+                    :label="formatPersistScopeLabel(item)"
+                    :value="item.key"
+                  />
+                </el-select>
               </el-form-item>
             </el-col>
            <el-col :span="12">
@@ -1660,7 +1674,7 @@
           <el-table-column label="步骤" prop="stepName" min-width="220" />
           <el-table-column label="状态" width="110">
             <template #default="scope">
-                <el-tag :type="isPassedStepStatus(scope.row.status) ? 'success' : 'danger'">{{ scope.row.status || "-" }}</el-tag>
+                <el-tag :type="getStepStatusTagType(scope.row.status)">{{ scope.row.status || "-" }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="耗时" width="110">
@@ -1803,6 +1817,48 @@
                       />
                     </el-col>
                   </el-row>
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="状态作用域">
+                  <div style="width: 100%">
+                    <div class="runtime-profile-toolbar mb8">
+                      <span class="step-detail-tip">用于保留浏览器状态的作用域键，下拉可在执行/录制时直接选择。</span>
+                      <el-button type="primary" plain @click="addPersistContextScopeRow">新增作用域</el-button>
+                    </div>
+                    <el-table :data="runtimeProfileForm.persistContextScopes" border max-height="220px">
+                      <el-table-column label="作用域Key" min-width="180">
+                        <template #default="scope">
+                          <el-input v-model="scope.row.key" placeholder="例如 testpartner.sm-os.com" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="显示名称" min-width="160">
+                        <template #default="scope">
+                          <el-input v-model="scope.row.label" placeholder="可选：例如 SM测试环境" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="匹配域名(逗号分隔)" min-width="220">
+                        <template #default="scope">
+                          <el-input v-model="scope.row.hostPatternsText" placeholder="可选：sm-os.com,testpartner.sm-os.com" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="启用" width="90">
+                        <template #default="scope">
+                          <el-switch v-model="scope.row.enabled" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="备注" min-width="160">
+                        <template #default="scope">
+                          <el-input v-model="scope.row.remark" placeholder="可选" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="操作" width="80" fixed="right">
+                        <template #default="scope">
+                          <el-button link type="danger" @click="removePersistContextScopeRow(scope.$index)">删除</el-button>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                  </div>
                 </el-form-item>
               </el-col>
               <el-col :span="24">
@@ -2211,13 +2267,62 @@ function createDefaultContext() {
   };
 }
 
+/**
+ * 解析定位器索引元信息，支持 nth/index/targetIndex 等字段。
+ * @param {any} locatorValue 定位器参数
+ * @returns {{nth?: number, index?: number, targetIndex?: number, matchCount?: number, uniqueness?: string}}
+ */
+function extractLocatorMeta(locatorValue) {
+  const value = isPlainObject(locatorValue) ? locatorValue : {};
+  const result = {};
+  for (const key of ["nth", "index", "targetIndex", "target_index"]) {
+    const raw = value[key];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed >= 0) {
+      if (key === "target_index") result.targetIndex = parsed;
+      else result[key] = parsed;
+      break;
+    }
+  }
+  const rawMatchCount = value.matchCount ?? value.match_count;
+  if (rawMatchCount !== undefined && rawMatchCount !== null && rawMatchCount !== "") {
+    const parsedMatchCount = Number(rawMatchCount);
+    if (Number.isInteger(parsedMatchCount) && parsedMatchCount >= 0) {
+      result.matchCount = parsedMatchCount;
+    }
+  }
+  const uniqueness = `${value.uniqueness ?? ""}`.trim();
+  if (uniqueness) {
+    result.uniqueness = uniqueness;
+  }
+  return result;
+}
+
+/**
+ * 获取定位器最终使用的索引值。
+ * @param {any} locatorValue 定位器参数
+ * @returns {number | null}
+ */
+function resolveLocatorIndex(locatorValue) {
+  const meta = extractLocatorMeta(locatorValue);
+  for (const key of ["nth", "index", "targetIndex"]) {
+    if (Number.isInteger(meta[key]) && meta[key] >= 0) {
+      return meta[key];
+    }
+  }
+  return null;
+}
+
 function normalizeLocatorValue(locatorType, locatorValue) {
+  const meta = extractLocatorMeta(locatorValue);
   if (locatorType === "role") {
     const value = isPlainObject(locatorValue) ? locatorValue : {};
     return {
       role: value.role || "",
       name: value.name || "",
       exact: Boolean(value.exact),
+      ...meta,
     };
   }
   if (["label", "placeholder", "text"].includes(locatorType)) {
@@ -2225,33 +2330,38 @@ function normalizeLocatorValue(locatorType, locatorValue) {
     return {
       text: value.text || "",
       exact: Boolean(value.exact),
+      ...meta,
     };
   }
   if (locatorType === "test_id") {
     const value = isPlainObject(locatorValue) ? locatorValue : {};
     return {
       testId: value.testId || "",
+      ...meta,
     };
   }
   if (locatorType === "id") {
     const value = isPlainObject(locatorValue) ? locatorValue : {};
     return {
       id: value.id || "",
+      ...meta,
     };
   }
   if (locatorType === "name") {
     const value = isPlainObject(locatorValue) ? locatorValue : {};
     return {
       name: value.name || "",
+      ...meta,
     };
   }
   if (["css", "xpath"].includes(locatorType)) {
     if (typeof locatorValue === "string") {
-      return { selector: locatorValue };
+      return { selector: locatorValue, ...meta };
     }
     const value = isPlainObject(locatorValue) ? locatorValue : {};
     return {
       selector: value.selector || "",
+      ...meta,
     };
   }
   return isPlainObject(locatorValue) ? cloneData(locatorValue) : {};
@@ -2455,6 +2565,56 @@ function normalizeCase(data = {}) {
   };
 }
 
+function normalizePersistScopeHostPatterns(rawValue) {
+  let candidates = [];
+  if (Array.isArray(rawValue)) {
+    candidates = rawValue;
+  } else if (typeof rawValue === "string") {
+    candidates = rawValue.split(",");
+  } else if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
+    candidates = [rawValue];
+  }
+  const seen = new Set();
+  return candidates
+    .map((item) => `${item ?? ""}`.trim().toLowerCase())
+    .filter((item) => {
+      if (!item || seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
+function normalizePersistContextScope(scope = {}) {
+  const key = `${scope.key ?? scope.scopeKey ?? scope.scope_key ?? scope.persistContextKey ?? scope.persist_context_key ?? ""}`.trim();
+  if (!key) return null;
+  const hostPatterns = normalizePersistScopeHostPatterns(
+    scope.hostPatterns ?? scope.host_patterns ?? scope.host ?? scope.domain
+  );
+  return {
+    key,
+    label: `${scope.label ?? scope.name ?? key}`.trim() || key,
+    hostPatterns,
+    hostPatternsText: hostPatterns.join(","),
+    enabled: parseBooleanFlag(scope.enabled, true),
+    remark: `${scope.remark ?? ""}`.trim(),
+  };
+}
+
+function normalizePersistContextScopeList(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  const seen = new Set();
+  const result = [];
+  rawList.forEach((item) => {
+    const normalized = normalizePersistContextScope(item);
+    if (!normalized) return;
+    const keyLower = normalized.key.toLowerCase();
+    if (seen.has(keyLower)) return;
+    seen.add(keyLower);
+    result.push(normalized);
+  });
+  return result;
+}
+
 function createEmptyRuntimeProfile() {
   return {
     profileId: undefined,
@@ -2468,6 +2628,7 @@ function createEmptyRuntimeProfile() {
     runtimeOverridesText: "",
     variablesText: "",
     cookieRulesText: "",
+    persistContextScopes: [],
     remark: "",
   };
 }
@@ -2483,6 +2644,9 @@ function normalizeRuntimeProfile(profile = {}) {
   const cookieRules = Array.isArray(profile.cookieRules || profile.cookie_rules)
     ? cloneData(profile.cookieRules || profile.cookie_rules)
     : [];
+  const persistContextScopes = normalizePersistContextScopeList(
+    profile.persistContextScopes || profile.persist_context_scopes
+  );
   const targets = Array.isArray(profile.targets) && profile.targets.length
     ? profile.targets.map((item) => `${item}`.trim().toLowerCase()).filter(Boolean)
     : ["web"];
@@ -2500,6 +2664,7 @@ function normalizeRuntimeProfile(profile = {}) {
     runtimeOverridesText: Object.keys(runtimeOverrides).length ? safeJsonStringify(runtimeOverrides) : "",
     variablesText: Object.keys(variables).length ? safeJsonStringify(variables) : "",
     cookieRulesText: cookieRules.length ? safeJsonStringify(cookieRules) : "",
+    persistContextScopes,
     remark: profile.remark || "",
     createTime: profile.createTime || profile.create_time,
     updateTime: profile.updateTime || profile.update_time,
@@ -2616,6 +2781,81 @@ const availableRuntimeProfilesForRun = computed(() => runtimeProfiles.value.filt
 const availableRuntimeProfilesForRecording = computed(() => runtimeProfiles.value.filter(
   (item) => item.enabled !== false && profileSupportsWeb(item) && isRuntimeProfileScopeMatch(item, recordingScopeProjectId.value, recordingScopeModuleId.value)
 ));
+
+function collectPersistScopeOptions(profiles, currentKey = "") {
+  const rows = [];
+  const seen = new Set();
+  const profileList = Array.isArray(profiles) ? profiles : [];
+  profileList.forEach((profile) => {
+    const scopes = normalizePersistContextScopeList(profile?.persistContextScopes || profile?.persist_context_scopes);
+    scopes.forEach((scope) => {
+      if (!scope?.key || scope.enabled === false) return;
+      const keyLower = `${scope.key}`.toLowerCase();
+      if (seen.has(keyLower)) return;
+      seen.add(keyLower);
+      rows.push({
+        ...scope,
+        sourceProfileName: profile?.profileName || "",
+        sourceProfileId: profile?.profileId || profile?.profile_id || "",
+      });
+    });
+  });
+  const current = `${currentKey || ""}`.trim();
+  if (current && !rows.some((item) => `${item.key}`.toLowerCase() === current.toLowerCase())) {
+    rows.unshift({
+      key: current,
+      label: current,
+      hostPatterns: [],
+      hostPatternsText: "",
+      enabled: true,
+      remark: "",
+      sourceProfileName: "",
+      sourceProfileId: "",
+    });
+  }
+  return rows;
+}
+
+function formatPersistScopeLabel(scope) {
+  const label = `${scope?.label || scope?.key || ""}`.trim() || `${scope?.key || ""}`.trim();
+  const key = `${scope?.key || ""}`.trim();
+  const profileName = `${scope?.sourceProfileName || ""}`.trim();
+  const hostPatterns = normalizePersistScopeHostPatterns(scope?.hostPatterns || scope?.hostPatternsText);
+  const hostText = hostPatterns.length ? hostPatterns.join(",") : "";
+  const extra = [profileName, hostText].filter(Boolean).join(" | ");
+  if (!extra) {
+    return label === key || !key ? label : `${label} [${key}]`;
+  }
+  return label === key || !key ? `${label} (${extra})` : `${label} [${key}] (${extra})`;
+}
+
+function hasPersistScopeOption(options, key) {
+  const normalizedKey = `${key || ""}`.trim().toLowerCase();
+  if (!normalizedKey) return false;
+  return (Array.isArray(options) ? options : []).some((item) => `${item?.key || ""}`.trim().toLowerCase() === normalizedKey);
+}
+
+const availablePersistScopesForRun = computed(() => {
+  const selectedProfileId = normalizeIdValue(runForm.value.runtimeProfileId);
+  if (selectedProfileId) {
+    const selectedProfile = availableRuntimeProfilesForRun.value.find((item) => isSameId(item.profileId, selectedProfileId));
+    if (selectedProfile) {
+      return collectPersistScopeOptions([selectedProfile], runForm.value.persistContextKey);
+    }
+  }
+  return collectPersistScopeOptions(availableRuntimeProfilesForRun.value, runForm.value.persistContextKey);
+});
+
+const availablePersistScopesForRecording = computed(() => {
+  const selectedProfileId = normalizeIdValue(recordingForm.value.runtimeProfileId);
+  if (selectedProfileId) {
+    const selectedProfile = availableRuntimeProfilesForRecording.value.find((item) => isSameId(item.profileId, selectedProfileId));
+    if (selectedProfile) {
+      return collectPersistScopeOptions([selectedProfile], recordingForm.value.persistContextKey);
+    }
+  }
+  return collectPersistScopeOptions(availableRuntimeProfilesForRecording.value, recordingForm.value.persistContextKey);
+});
 
 const caseDialogTitle = computed(() => `${form.value.webCaseId ? "编辑" : "新增"} Web 用例`);
 const currentStep = computed(() => form.value.steps[selectedStepIndex.value] || null);
@@ -2842,12 +3082,35 @@ function getRecordingStatusMeta(status) {
   return recordingStatusOptions.find((item) => item.value === status) || { label: `${status ?? "-"}`, type: "info" };
 }
 
+function normalizeStepStatus(status) {
+  return `${status ?? ""}`.trim().toLowerCase();
+}
+
 function isPassedStepStatus(status) {
-  return ["passed", "success", "ok", 1, true].includes(status);
+  const normalized = normalizeStepStatus(status);
+  return ["passed", "success", "ok"].includes(normalized) || status === 1 || status === true;
+}
+
+function isSkippedStepStatus(status) {
+  const normalized = normalizeStepStatus(status);
+  return ["skipped", "skip", "disabled"].includes(normalized);
+}
+
+function isRunningStepStatus(status) {
+  const normalized = normalizeStepStatus(status);
+  return ["running", "in_progress", "processing"].includes(normalized);
+}
+
+function getStepStatusTagType(status) {
+  if (isPassedStepStatus(status)) return "success";
+  if (isSkippedStepStatus(status)) return "info";
+  if (isRunningStepStatus(status)) return "warning";
+  return "danger";
 }
 
 function getStepFailureReason(step) {
-  if (!step || isPassedStepStatus(step.status)) return "-";
+  if (!step) return "-";
+  if (isPassedStepStatus(step.status) || isSkippedStepStatus(step.status) || isRunningStepStatus(step.status)) return "-";
   const candidates = [step.error, step.errorMessage, step.message, step.reason, step.errorType, step.error_type];
   for (const item of candidates) {
     const text = `${item ?? ""}`.trim();
@@ -2858,7 +3121,12 @@ function getStepFailureReason(step) {
 
 function getFirstFailedStep(resultPayload) {
   const steps = Array.isArray(resultPayload?.steps) ? resultPayload.steps : [];
-  return steps.find((item) => item && !isPassedStepStatus(item.status) && !["skipped", "skip"].includes(`${item.status ?? ""}`.toLowerCase()));
+  return steps.find(
+    (item) => item
+      && !isPassedStepStatus(item.status)
+      && !isSkippedStepStatus(item.status)
+      && !isRunningStepStatus(item.status)
+  );
 }
 
 function getRunRowFailureReason(row) {
@@ -3398,22 +3666,24 @@ function canUseRecordingResult(status) {
 
 function describeLocator(locator) {
   if (!locator) return "未设置定位器";
+  const resolvedIndex = resolveLocatorIndex(locator.locatorValue);
+  const indexSuffix = resolvedIndex === null ? "" : ` / nth=${resolvedIndex}`;
   if (locator.locatorType === "role") {
-    return `role=${locator.locatorValue.role || "-"} / name=${locator.locatorValue.name || "-"}`;
+    return `role=${locator.locatorValue.role || "-"} / name=${locator.locatorValue.name || "-"}${indexSuffix}`;
   }
   if (["label", "placeholder", "text"].includes(locator.locatorType)) {
-    return `${locator.locatorType}=${locator.locatorValue.text || "-"}`;
+    return `${locator.locatorType}=${locator.locatorValue.text || "-"}${indexSuffix}`;
   }
   if (locator.locatorType === "test_id") {
-    return `testId=${locator.locatorValue.testId || "-"}`;
+    return `testId=${locator.locatorValue.testId || "-"}${indexSuffix}`;
   }
   if (locator.locatorType === "id") {
-    return `id=${locator.locatorValue.id || "-"}`;
+    return `id=${locator.locatorValue.id || "-"}${indexSuffix}`;
   }
   if (locator.locatorType === "name") {
-    return `name=${locator.locatorValue.name || "-"}`;
+    return `name=${locator.locatorValue.name || "-"}${indexSuffix}`;
   }
-  return `${locator.locatorType}=${locator.locatorValue.selector || "-"}`;
+  return `${locator.locatorType}=${locator.locatorValue.selector || "-"}${indexSuffix}`;
 }
 
 function describeStepTarget(step) {
@@ -4343,6 +4613,49 @@ function applyRuntimeProfileQuickImport() {
   ElMessage.success(`已导入 ${cookies.length} 个 Cookie${useSetCookie ? "（Set-Cookie）" : ""}`);
 }
 
+function addPersistContextScopeRow() {
+  if (!Array.isArray(runtimeProfileForm.value.persistContextScopes)) {
+    runtimeProfileForm.value.persistContextScopes = [];
+  }
+  runtimeProfileForm.value.persistContextScopes.push({
+    key: "",
+    label: "",
+    hostPatterns: [],
+    hostPatternsText: "",
+    enabled: true,
+    remark: "",
+  });
+}
+
+function removePersistContextScopeRow(index) {
+  if (!Array.isArray(runtimeProfileForm.value.persistContextScopes)) return;
+  runtimeProfileForm.value.persistContextScopes.splice(index, 1);
+}
+
+function buildPersistContextScopesPayload(scopes) {
+  const source = Array.isArray(scopes) ? scopes : [];
+  const result = [];
+  const seen = new Set();
+  source.forEach((item) => {
+    const scope = normalizePersistContextScope({
+      ...item,
+      hostPatterns: normalizePersistScopeHostPatterns(item?.hostPatternsText || item?.hostPatterns),
+    });
+    if (!scope) return;
+    const keyLower = `${scope.key}`.toLowerCase();
+    if (seen.has(keyLower)) return;
+    seen.add(keyLower);
+    result.push({
+      key: scope.key,
+      label: scope.label || scope.key,
+      hostPatterns: normalizePersistScopeHostPatterns(scope.hostPatterns),
+      enabled: scope.enabled !== false,
+      remark: scope.remark || undefined,
+    });
+  });
+  return result;
+}
+
 function buildRuntimeProfilePayload() {
   const profileName = `${runtimeProfileForm.value.profileName || ""}`.trim();
   if (!profileName) {
@@ -4351,6 +4664,7 @@ function buildRuntimeProfilePayload() {
   const runtimeOverrides = parseOptionalJsonObject(runtimeProfileForm.value.runtimeOverridesText, "运行覆盖") || {};
   const variables = parseOptionalJsonObject(runtimeProfileForm.value.variablesText, "变量") || {};
   const cookieRules = parseOptionalJsonArray(runtimeProfileForm.value.cookieRulesText, "Cookie规则") || [];
+  const persistContextScopes = buildPersistContextScopesPayload(runtimeProfileForm.value.persistContextScopes);
   const targets = normalizeRuntimeTargets(runtimeProfileForm.value.targets);
   return {
     profileId: runtimeProfileForm.value.profileId || undefined,
@@ -4364,6 +4678,7 @@ function buildRuntimeProfilePayload() {
     runtimeOverrides,
     variables,
     cookieRules,
+    persistContextScopes,
     remark: runtimeProfileForm.value.remark || undefined,
   };
 }
@@ -5260,6 +5575,36 @@ watch(() => runtimeProfileForm.value.projectId, (projectId) => {
     runtimeProfileForm.value.moduleId = undefined;
   }
 });
+
+watch(
+  () => [runForm.value.persistContextEnabled, runForm.value.runtimeProfileId, availablePersistScopesForRun.value.length],
+  () => {
+    if (!runForm.value.persistContextEnabled) return;
+    const key = `${runForm.value.persistContextKey || ""}`.trim();
+    if (!key && availablePersistScopesForRun.value.length) {
+      runForm.value.persistContextKey = availablePersistScopesForRun.value[0].key;
+      return;
+    }
+    if (key && !hasPersistScopeOption(availablePersistScopesForRun.value, key)) {
+      runForm.value.persistContextKey = "";
+    }
+  }
+);
+
+watch(
+  () => [recordingForm.value.persistContextEnabled, recordingForm.value.runtimeProfileId, availablePersistScopesForRecording.value.length],
+  () => {
+    if (!recordingForm.value.persistContextEnabled) return;
+    const key = `${recordingForm.value.persistContextKey || ""}`.trim();
+    if (!key && availablePersistScopesForRecording.value.length) {
+      recordingForm.value.persistContextKey = availablePersistScopesForRecording.value[0].key;
+      return;
+    }
+    if (key && !hasPersistScopeOption(availablePersistScopesForRecording.value, key)) {
+      recordingForm.value.persistContextKey = "";
+    }
+  }
+);
 
 onMounted(async () => {
   await loadBaseData();

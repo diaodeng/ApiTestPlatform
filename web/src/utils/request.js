@@ -11,6 +11,37 @@ let downloadLoadingInstance;
 // 是否显示重新登录
 export let isRelogin = { show: false };
 
+/**
+ * 判断请求是否禁用全局错误提示（ElMessage）。
+ * @param {import('axios').AxiosRequestConfig | undefined} config 请求配置
+ * @returns {boolean} true=显示全局提示，false=静默
+ */
+const shouldUseGlobalMessage = (config) => {
+  const headers = (config && config.headers) || {}
+  const headerValue = headers.showErrorMessage
+  const configValue = config && config.showErrorMessage
+  const explicitValue = headerValue !== undefined ? headerValue : configValue
+  if (explicitValue === false || explicitValue === 0 || explicitValue === '0') return false
+  if (typeof explicitValue === 'string' && explicitValue.toLowerCase() === 'false') return false
+  return true
+}
+
+/**
+ * 判断请求是否禁用全局通知提示（ElNotification）。
+ * @param {import('axios').AxiosRequestConfig | undefined} config 请求配置
+ * @returns {boolean} true=显示全局通知，false=静默
+ */
+const shouldUseGlobalNotification = (config) => {
+  const headers = (config && config.headers) || {}
+  const headerValue = headers.showErrorNotification
+  const configValue = config && config.showErrorNotification
+  const explicitValue = headerValue !== undefined ? headerValue : configValue
+  if (explicitValue === undefined) return shouldUseGlobalMessage(config)
+  if (explicitValue === false || explicitValue === 0 || explicitValue === '0') return false
+  if (typeof explicitValue === 'string' && explicitValue.toLowerCase() === 'false') return false
+  return true
+}
+
 axios.defaults.headers['Content-Type'] = 'application/json;charset=utf-8'
 // 创建axios实例
 const service = axios.create({
@@ -99,13 +130,19 @@ service.interceptors.response.use(res => {
     }
       return Promise.reject('无效的会话，或者会话已过期，请重新登录。')
     } else if (code === 500) {
-      ElMessage({ message: msg, type: 'error' })
+      if (shouldUseGlobalMessage(res.config)) {
+        ElMessage({ message: msg, type: 'error' })
+      }
       return Promise.reject(new Error(msg))
     } else if (code === 601) {
-      ElMessage({ message: msg, type: 'warning' })
+      if (shouldUseGlobalMessage(res.config)) {
+        ElMessage({ message: msg, type: 'warning' })
+      }
       return Promise.reject(new Error(msg))
     } else if (code !== 200) {
-      ElNotification.error({ title: msg })
+      if (shouldUseGlobalNotification(res.config)) {
+        ElNotification.error({ title: msg })
+      }
       return Promise.reject('error')
     } else {
       return  Promise.resolve(res.data)
@@ -127,7 +164,9 @@ service.interceptors.response.use(res => {
           message = "系统接口" + error.response.status + "异常";}
 
     }
-    ElMessage({ message: message, type: 'error', duration: 5 * 1000 })
+    if (shouldUseGlobalMessage(error.config)) {
+      ElMessage({ message: message, type: 'error', duration: 5 * 1000 })
+    }
     return Promise.reject(error)
   }
 )

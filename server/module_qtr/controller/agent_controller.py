@@ -61,6 +61,9 @@ def _dispatch_agent_event(db: Session, agent_code: str, message_data: dict[str, 
     if message_type in ("record_event", "record_status", "record_finished", "record_error"):
         WebCaseService.handle_agent_recording_event(db, agent_code, message_data)
         return True
+    if message_type in ("web_run_step", "web_run_status", "web_run_finished", "web_run_error"):
+        WebCaseService.handle_agent_run_event(db, agent_code, message_data)
+        return True
     if message_type in (
         "desktop_record_event",
         "desktop_record_status",
