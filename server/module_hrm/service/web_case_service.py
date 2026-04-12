@@ -27,6 +27,9 @@ from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.entity.vo.web_case_vo import (
     AddWebCaseModel,
     WebAssertionModel,
+    WebBrowserSessionModel,
+    WebBrowserSessionPageQueryModel,
+    WebBrowserSessionSaveModel,
     WebCaseDetailModel,
     WebCaseModel,
     WebCasePageQueryModel,
@@ -66,6 +69,7 @@ class WebCaseService:
 
     ELEMENT_PROMOTION_THRESHOLD = 3
     RUNTIME_PROFILE_CONFIG_KEY_PREFIX = "hrm.web.runtime.profile."
+    BROWSER_SESSION_CONFIG_KEY_PREFIX = "hrm.web.browser.session."
     RUNTIME_VARIABLE_KEYS = (
         "variables",
         "runtimeVariables",
@@ -110,6 +114,19 @@ class WebCaseService:
         key = str(config_key or "")
         if key.startswith(cls.RUNTIME_PROFILE_CONFIG_KEY_PREFIX):
             return key[len(cls.RUNTIME_PROFILE_CONFIG_KEY_PREFIX):]
+        return key
+
+    @classmethod
+    def _browser_session_config_key(cls, session_id: str) -> str:
+        """根据SessionID生成浏览器会话配置键。"""
+        return f"{cls.BROWSER_SESSION_CONFIG_KEY_PREFIX}{session_id}"
+
+    @classmethod
+    def _browser_session_id_from_key(cls, config_key: str | None) -> str:
+        """从配置键中提取浏览器会话ID。"""
+        key = str(config_key or "")
+        if key.startswith(cls.BROWSER_SESSION_CONFIG_KEY_PREFIX):
+            return key[len(cls.BROWSER_SESSION_CONFIG_KEY_PREFIX):]
         return key
 
     @staticmethod
@@ -374,6 +391,41 @@ class WebCaseService:
         return normalized
 
     @classmethod
+    def _resolve_persist_context_hosts(
+        cls,
+        runtime_overrides: dict[str, Any] | None,
+        persist_context_key: str | None,
+    ) -> list[str]:
+        """根据作用域Key解析要持久化的域名列表；空列表表示全域持久化。"""
+        source = runtime_overrides if isinstance(runtime_overrides, dict) else {}
+        for key in (
+            "persistContextHosts",
+            "persist_context_hosts",
+            "persistContextHostPatterns",
+            "persist_context_host_patterns",
+        ):
+            hosts = cls._normalize_host_patterns(source.get(key))
+            if hosts:
+                return hosts
+
+        scope_key = str(persist_context_key or "").strip().lower()
+        if not scope_key:
+            return []
+        normalized_scopes = cls._normalize_persist_context_scopes(
+            source.get("persistContextScopes")
+            if source.get("persistContextScopes") is not None
+            else source.get("persist_context_scopes")
+        )
+        for scope in normalized_scopes:
+            item_key = str(scope.get("key") or "").strip().lower()
+            if not item_key or item_key != scope_key:
+                continue
+            if scope.get("enabled") is False:
+                return []
+            return cls._normalize_host_patterns(scope.get("hostPatterns"))
+        return []
+
+    @classmethod
     def _merge_runtime_overrides(
         cls,
         base_runtime_overrides: dict[str, Any] | None,
@@ -401,6 +453,421 @@ class WebCaseService:
             if key != "cookieRules":
                 merged.pop(key, None)
         return merged
+
+    @classmethod
+    def _normalize_storage_state_payload(cls, raw_state: Any) -> dict[str, Any]:
+        """标准化 storage_state，仅保留 cookies/origins 结构。"""
+        state = raw_state if isinstance(raw_state, dict) else {}
+        cookies = [item for item in state.get("cookies", []) if isinstance(item, dict)] if isinstance(state.get("cookies"), list) else []
+        origins = [item for item in state.get("origins", []) if isinstance(item, dict)] if isinstance(state.get("origins"), list) else []
+        return {
+            "cookies": cookies,
+            "origins": origins,
+        }
+
+    @classmethod
+    def _extract_runtime_debug_payload(cls, payload: dict[str, Any] | None) -> dict[str, Any]:
+        """提取 runtimeDebug 结构，统一兼容驼峰/下划线命名。"""
+        source = payload if isinstance(payload, dict) else {}
+        runtime_debug = source.get("runtimeDebug")
+        if runtime_debug is None:
+            runtime_debug = source.get("runtime_debug")
+        if isinstance(runtime_debug, dict):
+            return runtime_debug
+        return {}
+
+    @staticmethod
+    def _pick_first_non_empty_text(*values: Any) -> str:
+        """返回首个非空字符串值，找不到则返回空串。"""
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
+    @classmethod
+    def _pick_runtime_option_value(
+        cls,
+        runtime_debug: dict[str, Any] | None,
+        runtime_options: dict[str, Any] | None,
+        keys: tuple[str, ...],
+    ) -> Any:
+        """按给定键名顺序从 runtimeDebug/runtimeOptions 中取值。"""
+        for source in (runtime_debug, runtime_options):
+            if not isinstance(source, dict):
+                continue
+            for key in keys:
+                value = source.get(key)
+                if value not in (None, ""):
+                    return value
+        return None
+
+    @classmethod
+    def _resolve_runtime_hosts(
+        cls,
+        runtime_debug: dict[str, Any] | None,
+        runtime_options: dict[str, Any] | None,
+    ) -> list[str]:
+        """解析运行态上报中的持久化域名范围。"""
+        for source in (runtime_debug, runtime_options):
+            if not isinstance(source, dict):
+                continue
+            for key in (
+                "persistContextHosts",
+                "persist_context_hosts",
+                "persistContextHostPatterns",
+                "persist_context_host_patterns",
+            ):
+                hosts = cls._normalize_host_patterns(source.get(key))
+                if hosts:
+                    return hosts
+        return []
+
+    @classmethod
+    def _extract_persist_final_state(
+        cls,
+        payload: dict[str, Any] | None,
+        runtime_options: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """从事件中提取最终 storage_state；未上报时返回 None。"""
+        runtime_debug = cls._extract_runtime_debug_payload(payload)
+        raw_state = cls._pick_runtime_option_value(
+            runtime_debug,
+            runtime_options,
+            (
+                "persistContextFinalState",
+                "persist_context_final_state",
+            ),
+        )
+        if raw_state is None:
+            return None
+        normalized = cls._normalize_storage_state_payload(cls._loads(raw_state, {}))
+        return normalized
+
+    @classmethod
+    def _find_browser_session_by_scope_key(
+        cls,
+        query_db: Session,
+        scope_key: str,
+        *,
+        project_id: int | None,
+        module_id: int | None,
+        browser_name: str | None,
+    ) -> tuple[SysConfig | None, WebBrowserSessionModel | None]:
+        """根据 scope_key 反查最匹配的 Browser Session 配置。"""
+        scope_key_text = str(scope_key or "").strip().lower()
+        if not scope_key_text:
+            return None, None
+
+        records = (
+            query_db.query(SysConfig)
+            .filter(SysConfig.config_key.like(f"{cls.BROWSER_SESSION_CONFIG_KEY_PREFIX}%"))
+            .order_by(SysConfig.update_time.desc(), SysConfig.config_id.desc())
+            .all()
+        )
+        target_browser = str(browser_name or "").strip().lower()
+        best_pair: tuple[SysConfig | None, WebBrowserSessionModel | None] = (None, None)
+        best_score = -1
+        for row in records:
+            model = cls._build_browser_session_model_from_config(row)
+            if model is None:
+                continue
+            model_scope = str(model.scope_key or model.session_id or "").strip().lower()
+            if not model_scope or model_scope != scope_key_text:
+                continue
+            score = 0
+            if project_id is not None:
+                score += 3 if model.project_id == project_id else (1 if model.project_id is None else 0)
+            if module_id is not None:
+                score += 3 if model.module_id == module_id else (1 if model.module_id is None else 0)
+            if target_browser:
+                model_browser = str(model.browser_name or "").strip().lower()
+                score += 2 if model_browser == target_browser else (1 if not model_browser else 0)
+            if score > best_score:
+                best_score = score
+                best_pair = (row, model)
+        return best_pair
+
+    @classmethod
+    def _upsert_browser_session_from_runtime(
+        cls,
+        query_db: Session,
+        *,
+        session_id: str | None,
+        scope_key: str | None,
+        browser_name: str | None,
+        host_patterns: list[str] | None,
+        project_id: int | None,
+        module_id: int | None,
+        storage_state: dict[str, Any],
+        user_name: str | None,
+    ) -> None:
+        """将运行结束态写回 Browser Session（存在则更新，不存在则创建）。"""
+        normalized_state = cls._normalize_storage_state_payload(storage_state)
+        session_id_text = str(session_id or "").strip()
+        scope_key_text = str(scope_key or "").strip()
+        browser_name_text = str(browser_name or "").strip().lower() or None
+        normalized_hosts = cls._normalize_host_patterns(host_patterns or [])
+
+        existed_row: SysConfig | None = None
+        existed_model: WebBrowserSessionModel | None = None
+        target_session_id = session_id_text
+        if target_session_id:
+            config_key = cls._browser_session_config_key(target_session_id)
+            existed_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+            existed_model = cls._build_browser_session_model_from_config(existed_row) if existed_row is not None else None
+
+        if existed_row is None and scope_key_text:
+            existed_row, existed_model = cls._find_browser_session_by_scope_key(
+                query_db,
+                scope_key_text,
+                project_id=project_id,
+                module_id=module_id,
+                browser_name=browser_name_text,
+            )
+            if existed_model is not None:
+                target_session_id = str(existed_model.session_id or "").strip() or target_session_id
+
+        if not target_session_id:
+            target_session_id = uuid.uuid4().hex
+        if not scope_key_text:
+            scope_key_text = str(existed_model.scope_key if existed_model else "").strip() or target_session_id
+
+        merged_hosts = cls._normalize_host_patterns(
+            (existed_model.host_patterns if existed_model and existed_model.host_patterns else normalized_hosts)
+            or normalized_hosts
+        )
+        target_session_name = (
+            str(existed_model.session_name if existed_model else "").strip()
+            or f"Auto-{scope_key_text}"
+        )
+        target_project_id = cls._to_optional_int(
+            existed_model.project_id if existed_model and existed_model.project_id is not None else project_id
+        )
+        target_module_id = cls._to_optional_int(
+            existed_model.module_id if existed_model and existed_model.module_id is not None else module_id
+        )
+        target_browser_name = browser_name_text or (
+            str(existed_model.browser_name or "").strip().lower() if existed_model else None
+        )
+        target_enabled = bool(existed_model.enabled) if existed_model is not None else True
+        target_sort = int(existed_model.sort or 0) if existed_model is not None else 0
+        target_remark = (
+            str(existed_model.remark if existed_model else "").strip()
+            or "Web运行链路自动同步"
+        )
+
+        current_time = datetime.now()
+        payload_to_save = {
+            "sessionId": target_session_id,
+            "sessionName": target_session_name,
+            "scopeKey": scope_key_text,
+            "enabled": target_enabled,
+            "projectId": target_project_id,
+            "moduleId": target_module_id,
+            "browserName": target_browser_name,
+            "sort": max(target_sort, 0),
+            "hostPatterns": merged_hosts,
+            "storageState": normalized_state,
+            "remark": target_remark,
+            "schemaVersion": 1,
+            "updatedAt": current_time.isoformat(),
+            "updatedBy": user_name or (existed_row.update_by if existed_row is not None else "system"),
+        }
+        if existed_row is None:
+            payload_to_save["createdAt"] = current_time.isoformat()
+            payload_to_save["createdBy"] = user_name or "system"
+            query_db.add(
+                SysConfig(
+                    config_name=target_session_name,
+                    config_key=cls._browser_session_config_key(target_session_id),
+                    config_value=cls._dumps(payload_to_save),
+                    config_type="N",
+                    create_by=user_name or "system",
+                    update_by=user_name or "system",
+                    remark=target_remark,
+                )
+            )
+            return
+
+        existed_row.config_name = target_session_name
+        existed_row.config_value = cls._dumps(payload_to_save)
+        existed_row.remark = existed_row.remark or target_remark
+        existed_row.update_by = user_name or existed_row.update_by or "system"
+        existed_row.update_time = current_time
+
+    @classmethod
+    def _sync_runtime_state_to_browser_session(
+        cls,
+        query_db: Session,
+        *,
+        payload: dict[str, Any] | None,
+        runtime_options: dict[str, Any] | None,
+        default_session_id: str | None,
+        default_scope_key: str | None,
+        default_browser_name: str | None,
+        default_project_id: int | None,
+        default_module_id: int | None,
+        user_name: str | None,
+        scene_label: str,
+    ) -> None:
+        """将客户端上报的最终浏览器状态同步回 Browser Session。"""
+        runtime_debug = cls._extract_runtime_debug_payload(payload)
+        auto_sync_flag = cls._pick_runtime_option_value(
+            runtime_debug,
+            runtime_options,
+            (
+                "persistContextAutoSyncSession",
+                "persist_context_auto_sync_session",
+                "persistContextSyncToSession",
+                "persist_context_sync_to_session",
+            ),
+        )
+        if not cls._to_bool(auto_sync_flag, default=False):
+            return
+
+        final_state = cls._extract_persist_final_state(payload, runtime_options)
+        if final_state is None:
+            return
+
+        session_id = cls._pick_first_non_empty_text(
+            cls._pick_runtime_option_value(
+                runtime_debug,
+                runtime_options,
+                (
+                    "browserSessionId",
+                    "browser_session_id",
+                    "persistContextSessionId",
+                    "persist_context_session_id",
+                    "sessionProfileId",
+                    "session_profile_id",
+                ),
+            ),
+            default_session_id,
+        )
+        scope_key = cls._pick_first_non_empty_text(
+            cls._pick_runtime_option_value(
+                runtime_debug,
+                runtime_options,
+                (
+                    "persistContextKey",
+                    "persist_context_key",
+                    "preserveContextKey",
+                    "preserve_context_key",
+                ),
+            ),
+            default_scope_key,
+        )
+        if not session_id and not scope_key:
+            return
+
+        browser_name = cls._pick_first_non_empty_text(
+            cls._pick_runtime_option_value(
+                runtime_debug,
+                runtime_options,
+                (
+                    "browserName",
+                    "browser_name",
+                ),
+            ),
+            default_browser_name,
+        )
+        host_patterns = cls._resolve_runtime_hosts(runtime_debug, runtime_options)
+        try:
+            cls._upsert_browser_session_from_runtime(
+                query_db,
+                session_id=session_id or None,
+                scope_key=scope_key or None,
+                browser_name=browser_name or None,
+                host_patterns=host_patterns,
+                project_id=default_project_id,
+                module_id=default_module_id,
+                storage_state=final_state,
+                user_name=user_name,
+            )
+            query_db.commit()
+        except Exception as exc:
+            query_db.rollback()
+            logger.warning(f"[{scene_label}] 自动同步 Browser Session 失败: {exc}")
+
+    @classmethod
+    def _normalize_browser_session_payload(cls, payload: dict[str, Any] | None) -> dict[str, Any]:
+        """标准化浏览器Session配置载荷。"""
+        source = payload if isinstance(payload, dict) else {}
+        session_id = str(source.get("sessionId") or source.get("session_id") or "").strip()
+        session_name = str(source.get("sessionName") or source.get("session_name") or "").strip()
+        scope_key = str(
+            source.get("scopeKey")
+            or source.get("scope_key")
+            or source.get("persistContextKey")
+            or source.get("persist_context_key")
+            or session_id
+            or ""
+        ).strip()
+        browser_name = str(source.get("browserName") or source.get("browser_name") or "").strip().lower()
+        host_patterns = cls._normalize_host_patterns(
+            source.get("hostPatterns")
+            if source.get("hostPatterns") is not None
+            else source.get("host_patterns")
+        )
+        if not host_patterns:
+            host_patterns = cls._normalize_host_patterns(source.get("host") or source.get("domain"))
+        storage_state = cls._normalize_storage_state_payload(
+            cls._loads(
+                source.get("storageState")
+                if source.get("storageState") is not None
+                else source.get("storage_state"),
+                {},
+            )
+        )
+        try:
+            sort = int(source.get("sort") or 0)
+        except Exception:
+            sort = 0
+        project_id = source.get("projectId")
+        if project_id is None:
+            project_id = source.get("project_id")
+        module_id = source.get("moduleId")
+        if module_id is None:
+            module_id = source.get("module_id")
+        return {
+            "sessionId": session_id or None,
+            "sessionName": session_name,
+            "scopeKey": scope_key,
+            "enabled": cls._to_bool(source.get("enabled"), default=True),
+            "projectId": cls._to_optional_int(project_id),
+            "moduleId": cls._to_optional_int(module_id),
+            "browserName": browser_name or None,
+            "sort": max(sort, 0),
+            "hostPatterns": host_patterns,
+            "storageState": storage_state,
+            "remark": source.get("remark"),
+        }
+
+    @classmethod
+    def _build_browser_session_model_from_config(cls, config: SysConfig) -> WebBrowserSessionModel | None:
+        """将系统配置行转换为浏览器Session模型。"""
+        payload = cls._loads(getattr(config, "config_value", None), {})
+        if not isinstance(payload, dict):
+            payload = {}
+        if not payload.get("sessionId") and not payload.get("session_id"):
+            payload["sessionId"] = cls._browser_session_id_from_key(getattr(config, "config_key", ""))
+        if not payload.get("sessionName") and not payload.get("session_name"):
+            payload["sessionName"] = getattr(config, "config_name", "") or ""
+        if payload.get("remark") in (None, ""):
+            payload["remark"] = getattr(config, "remark", None)
+        normalized = cls._normalize_browser_session_payload(payload)
+        if not normalized.get("sessionId"):
+            return None
+        if not normalized.get("scopeKey"):
+            normalized["scopeKey"] = normalized.get("sessionId")
+        return WebBrowserSessionModel(
+            **normalized,
+            createBy=getattr(config, "create_by", None),
+            updateBy=getattr(config, "update_by", None),
+            createTime=getattr(config, "create_time", None),
+            updateTime=getattr(config, "update_time", None),
+        )
 
     @classmethod
     def _normalize_runtime_profile_payload(cls, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -491,6 +958,11 @@ class WebCaseService:
         if profile_model.cookie_rules:
             existing_rules = cls._collect_cookie_rules(runtime_overrides)
             runtime_overrides["cookieRules"] = [*existing_rules, *profile_model.cookie_rules]
+        if profile_model.persist_context_scopes:
+            runtime_overrides["persistContextScopes"] = [
+                item.model_dump(by_alias=True) if hasattr(item, "model_dump") else item
+                for item in profile_model.persist_context_scopes
+            ]
         for key in cls.RUNTIME_VARIABLE_KEYS:
             if key != "variables":
                 runtime_overrides.pop(key, None)
@@ -524,6 +996,41 @@ class WebCaseService:
         if not {"web", "all", "*"}.intersection(targets):
             raise ValueError("所选Cookie配置不支持Web链路")
         return cls._compose_runtime_overrides_from_profile(profile_model)
+
+    @classmethod
+    def _resolve_browser_session_runtime_overrides(
+        cls,
+        query_db: Session,
+        session_id: str | None,
+    ) -> dict[str, Any]:
+        """解析浏览器Session并转换为运行时覆盖配置。"""
+        session_id_value = str(session_id or "").strip()
+        if not session_id_value:
+            return {}
+
+        config_key = cls._browser_session_config_key(session_id_value)
+        config_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+        if config_row is None:
+            raise ValueError("所选浏览器Session不存在，请刷新后重试")
+
+        session_model = cls._build_browser_session_model_from_config(config_row)
+        if session_model is None:
+            raise ValueError("所选浏览器Session无效，请检查配置内容")
+        if not session_model.enabled:
+            raise ValueError("所选浏览器Session已停用")
+
+        scope_key = str(session_model.scope_key or session_model.session_id or "").strip()
+        runtime_overrides: dict[str, Any] = {
+            "persistContextEnabled": True,
+        }
+        if scope_key:
+            runtime_overrides["persistContextKey"] = scope_key
+        host_patterns = cls._normalize_host_patterns(session_model.host_patterns)
+        if host_patterns:
+            runtime_overrides["persistContextHosts"] = host_patterns
+        if session_model.storage_state:
+            runtime_overrides["persistContextSeedState"] = cls._normalize_storage_state_payload(session_model.storage_state)
+        return runtime_overrides
 
     @classmethod
     def _build_case_model(cls, web_case: HrmWebCase) -> WebCaseModel:
@@ -1126,6 +1633,147 @@ class WebCaseService:
             raise exc
 
     @classmethod
+    def list_browser_session_services(
+        cls,
+        query_db: Session,
+        query_object: WebBrowserSessionPageQueryModel,
+    ) -> list[WebBrowserSessionModel]:
+        """查询浏览器Session配置列表。"""
+        records = (
+            query_db.query(SysConfig)
+            .filter(SysConfig.config_key.like(f"{cls.BROWSER_SESSION_CONFIG_KEY_PREFIX}%"))
+            .order_by(SysConfig.update_time.desc(), SysConfig.config_id.desc())
+            .all()
+        )
+        result: list[WebBrowserSessionModel] = []
+        name_keyword = str(query_object.session_name or "").strip().lower()
+        browser_filter = str(query_object.browser_name or "").strip().lower()
+        session_id_filter = str(query_object.session_id or "").strip().lower()
+        for item in records:
+            session_model = cls._build_browser_session_model_from_config(item)
+            if session_model is None:
+                continue
+            if name_keyword and name_keyword not in str(session_model.session_name or "").lower():
+                continue
+            if session_id_filter and session_id_filter != str(session_model.session_id or "").lower():
+                continue
+            if query_object.enabled is not None and bool(session_model.enabled) != bool(query_object.enabled):
+                continue
+            if query_object.project_id is not None and session_model.project_id not in (None, int(query_object.project_id)):
+                continue
+            if query_object.module_id is not None and session_model.module_id not in (None, int(query_object.module_id)):
+                continue
+            if browser_filter and str(session_model.browser_name or "").lower() not in ("", browser_filter):
+                continue
+            result.append(session_model)
+        result.sort(
+            key=lambda item: (
+                int(item.sort or 0),
+                str(item.session_name or ""),
+                str(item.session_id or ""),
+            )
+        )
+        return result
+
+    @classmethod
+    def save_browser_session_services(
+        cls,
+        query_db: Session,
+        session_model: WebBrowserSessionSaveModel,
+        *,
+        user_name: str | None,
+        require_existing: bool,
+    ) -> CrudResponseModel:
+        """保存浏览器Session配置。"""
+        normalized = cls._normalize_browser_session_payload(session_model.model_dump(by_alias=True))
+        session_name = str(normalized.get("sessionName") or "").strip()
+        if not session_name:
+            return CrudResponseModel(is_success=False, message="Session名称不能为空")
+
+        provided_session_id = str(normalized.get("sessionId") or "").strip()
+        target_session_id = provided_session_id or uuid.uuid4().hex
+        scope_key = str(normalized.get("scopeKey") or "").strip() or target_session_id
+        normalized["scopeKey"] = scope_key
+
+        config_key = cls._browser_session_config_key(target_session_id)
+        current_time = datetime.now()
+        existed_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+        if require_existing and existed_row is None:
+            return CrudResponseModel(is_success=False, message="浏览器Session不存在或已被删除")
+        if (not require_existing) and existed_row is not None and not provided_session_id:
+            target_session_id = uuid.uuid4().hex
+            normalized["sessionId"] = target_session_id
+            normalized["scopeKey"] = scope_key or target_session_id
+            config_key = cls._browser_session_config_key(target_session_id)
+            existed_row = None
+
+        payload_to_save = {
+            **normalized,
+            "sessionId": target_session_id,
+            "scopeKey": normalized.get("scopeKey") or target_session_id,
+            "schemaVersion": 1,
+            "updatedAt": current_time.isoformat(),
+            "updatedBy": user_name or (existed_row.update_by if existed_row else "system"),
+        }
+        if existed_row is None:
+            payload_to_save["createdAt"] = current_time.isoformat()
+            payload_to_save["createdBy"] = user_name or "system"
+
+        try:
+            if existed_row is None:
+                query_db.add(
+                    SysConfig(
+                        config_name=session_name,
+                        config_key=config_key,
+                        config_value=cls._dumps(payload_to_save),
+                        config_type="N",
+                        create_by=user_name or "system",
+                        update_by=user_name or "system",
+                        remark=normalized.get("remark") or "Web浏览器Session配置",
+                    )
+                )
+            else:
+                existed_row.config_name = session_name
+                existed_row.config_value = cls._dumps(payload_to_save)
+                existed_row.remark = normalized.get("remark") or existed_row.remark
+                existed_row.update_by = user_name or existed_row.update_by or "system"
+                existed_row.update_time = current_time
+
+            query_db.commit()
+            saved_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+            saved_model = cls._build_browser_session_model_from_config(saved_row) if saved_row is not None else None
+            return CrudResponseModel(
+                is_success=True,
+                message="保存成功",
+                result=saved_model.model_dump(mode="json", by_alias=True) if saved_model else None,
+            )
+        except Exception as exc:
+            query_db.rollback()
+            raise exc
+
+    @classmethod
+    def delete_browser_session_services(
+        cls,
+        query_db: Session,
+        session_id: str,
+    ) -> CrudResponseModel:
+        """删除浏览器Session配置。"""
+        session_id_value = str(session_id or "").strip()
+        if not session_id_value:
+            return CrudResponseModel(is_success=False, message="Session ID不能为空")
+        config_key = cls._browser_session_config_key(session_id_value)
+        existed_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+        if existed_row is None:
+            return CrudResponseModel(is_success=False, message="浏览器Session不存在或已被删除")
+        try:
+            query_db.delete(existed_row)
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message="删除成功")
+        except Exception as exc:
+            query_db.rollback()
+            raise exc
+
+    @classmethod
     def web_case_detail_services(cls, query_db: Session, web_case_id: int) -> WebCaseDetailModel | None:
         web_case = WebCaseDao.get_web_case_by_id(query_db, web_case_id)
         if web_case is None:
@@ -1405,25 +2053,45 @@ class WebCaseService:
                 query_db,
                 request_model.runtime_profile_id,
             )
+            browser_session_runtime_overrides = cls._resolve_browser_session_runtime_overrides(
+                query_db,
+                request_model.browser_session_id,
+            )
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
-        merged_runtime_overrides = cls._merge_runtime_overrides(profile_runtime_overrides, request_model.runtime_overrides)
+        merged_runtime_overrides = cls._merge_runtime_overrides(profile_runtime_overrides, browser_session_runtime_overrides)
+        merged_runtime_overrides = cls._merge_runtime_overrides(merged_runtime_overrides, request_model.runtime_overrides)
         runtime_options_payload: dict[str, Any] = {}
         if merged_runtime_overrides:
             runtime_options_payload["runtimeOverrides"] = merged_runtime_overrides
         if request_model.runtime_profile_id:
             runtime_options_payload["runtimeProfileId"] = request_model.runtime_profile_id
+        browser_session_id = str(request_model.browser_session_id or "").strip()
+        if browser_session_id:
+            runtime_options_payload["browserSessionId"] = browser_session_id
         manual_login_enabled = bool(request_model.manual_login_enabled)
         manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
         manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
-        persist_context_enabled = bool(request_model.persist_context_enabled)
-        persist_context_key = str(request_model.persist_context_key or "").strip()
+        persist_context_enabled = bool(request_model.persist_context_enabled or browser_session_id)
+        persist_context_auto_sync_session = bool(
+            persist_context_enabled and request_model.persist_context_auto_sync_session
+        )
+        persist_context_key = str(
+            request_model.persist_context_key
+            or browser_session_runtime_overrides.get("persistContextKey")
+            or ""
+        ).strip()
         runtime_options_payload["manualLoginEnabled"] = manual_login_enabled
         runtime_options_payload["manualLoginWaitSec"] = manual_login_wait_sec
         runtime_options_payload["manualLoginRequireConfirm"] = manual_login_require_confirm
         runtime_options_payload["persistContextEnabled"] = persist_context_enabled
+        runtime_options_payload["persistContextAutoSyncSession"] = persist_context_auto_sync_session
         if persist_context_key:
             runtime_options_payload["persistContextKey"] = persist_context_key
+        if persist_context_enabled:
+            persist_context_hosts = cls._resolve_persist_context_hosts(merged_runtime_overrides, persist_context_key)
+            if persist_context_hosts:
+                runtime_options_payload["persistContextHosts"] = persist_context_hosts
 
         session_name = request_model.session_name or f"录制-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         recording_options_payload = request_model.recording_options.model_dump(by_alias=True)
@@ -1634,16 +2302,39 @@ class WebCaseService:
         )
         if result.status_code != AgentResponseEnum.SUCCESS.value:
             return CrudResponseModel(is_success=False, message=result.message)
+        if isinstance(result.response, AgentResponseWebUI) and result.response.success is False:
+            return CrudResponseModel(
+                is_success=False,
+                message=result.response.message or "客户端停止录制失败",
+            )
 
+        now = datetime.now()
+        stop_summary_payload: dict[str, Any] = {
+            "status": "stop_requested",
+            "message": "录制停止指令已发送",
+            "stopRequestedAt": now.isoformat(),
+        }
+        if isinstance(result.response, AgentResponseWebUI) and isinstance(result.response.data, dict):
+            stop_summary_payload["stopResult"] = result.response.data
         update_data = {
             "status": 5,
-            "ended_at": datetime.now(),
-            "last_event_at": datetime.now(),
+            "ended_at": now,
+            "last_event_at": now,
+            "result_summary_json": cls._dumps(stop_summary_payload),
         }
         if updated_options is not None:
             update_data["options_json"] = cls._dumps(updated_options)
-        WebCaseDao.update_recording_session(query_db, session_obj.recording_id, update_data)
+        affected_rows = (
+            query_db.query(HrmWebRecordingSession)
+            .filter(
+                HrmWebRecordingSession.recording_id == session_obj.recording_id,
+                HrmWebRecordingSession.status.in_([2]),
+            )
+            .update(update_data)
+        )
         query_db.commit()
+        if affected_rows <= 0:
+            return CrudResponseModel(is_success=True, message="录制会话已结束")
         return CrudResponseModel(is_success=True, message="录制停止指令已发送")
 
     @classmethod
@@ -1869,9 +2560,14 @@ class WebCaseService:
                 query_db,
                 request_model.runtime_profile_id,
             )
+            browser_session_runtime_overrides = cls._resolve_browser_session_runtime_overrides(
+                query_db,
+                request_model.browser_session_id,
+            )
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
-        merged_runtime_overrides = cls._merge_runtime_overrides(profile_runtime_overrides, request_model.runtime_overrides)
+        merged_runtime_overrides = cls._merge_runtime_overrides(profile_runtime_overrides, browser_session_runtime_overrides)
+        merged_runtime_overrides = cls._merge_runtime_overrides(merged_runtime_overrides, request_model.runtime_overrides)
 
         started_at = datetime.now()
         run_record = HrmWebCaseRun(
@@ -1893,19 +2589,34 @@ class WebCaseService:
         runtime_options = request_model.model_dump(
             mode="json",
             by_alias=True,
-            exclude={"web_case_id", "agent_id", "agent_code", "runtime_profile_id", "runtime_overrides"},
+            exclude={"web_case_id", "agent_id", "agent_code", "runtime_profile_id", "runtime_overrides", "browser_session_id"},
         )
         manual_login_enabled = bool(request_model.manual_login_enabled)
         manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
         manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
-        persist_context_enabled = bool(request_model.persist_context_enabled)
-        persist_context_key = str(request_model.persist_context_key or "").strip()
+        browser_session_id = str(request_model.browser_session_id or "").strip()
+        persist_context_enabled = bool(request_model.persist_context_enabled or browser_session_id)
+        persist_context_auto_sync_session = bool(
+            persist_context_enabled and request_model.persist_context_auto_sync_session
+        )
+        persist_context_key = str(
+            request_model.persist_context_key
+            or browser_session_runtime_overrides.get("persistContextKey")
+            or ""
+        ).strip()
         runtime_options["manualLoginEnabled"] = manual_login_enabled
         runtime_options["manualLoginWaitSec"] = manual_login_wait_sec
         runtime_options["manualLoginRequireConfirm"] = manual_login_require_confirm
         runtime_options["persistContextEnabled"] = persist_context_enabled
+        runtime_options["persistContextAutoSyncSession"] = persist_context_auto_sync_session
+        if browser_session_id:
+            runtime_options["browserSessionId"] = browser_session_id
         if persist_context_key:
             runtime_options["persistContextKey"] = persist_context_key
+        if persist_context_enabled:
+            persist_context_hosts = cls._resolve_persist_context_hosts(merged_runtime_overrides, persist_context_key)
+            if persist_context_hosts:
+                runtime_options["persistContextHosts"] = persist_context_hosts
         if merged_runtime_overrides:
             runtime_options["runtimeOverrides"] = merged_runtime_overrides
         if request_model.runtime_profile_id:
@@ -2395,6 +3106,12 @@ class WebCaseService:
 
         message_type = message_data.get("type")
         payload = message_data.get("payload") or {}
+        recording_options = cls._loads(session_obj.options_json, {})
+        runtime_options = {}
+        if isinstance(recording_options, dict):
+            runtime_options = cls._loads(recording_options.get("runtimeOptions"), {})
+            if not isinstance(runtime_options, dict):
+                runtime_options = {}
         now = datetime.now()
 
         if message_type == "record_event":
@@ -2426,6 +3143,12 @@ class WebCaseService:
             return
 
         if message_type == "record_finished":
+            summary_payload = payload if isinstance(payload, dict) else {}
+            if not summary_payload.get("status"):
+                summary_payload = {
+                    **summary_payload,
+                    "status": "finished",
+                }
             WebCaseDao.update_recording_session(
                 query_db,
                 int(recording_id),
@@ -2433,15 +3156,48 @@ class WebCaseService:
                     "status": 3,
                     "ended_at": now,
                     "last_event_at": now,
-                    "result_summary_json": cls._dumps(payload),
+                    "result_summary_json": cls._dumps(summary_payload),
                     "error_message": None,
                     "update_time": now,
                 },
             )
             query_db.commit()
+            web_case = (
+                WebCaseDao.get_web_case_by_id(query_db, int(session_obj.web_case_id))
+                if session_obj.web_case_id
+                else None
+            )
+            cls._sync_runtime_state_to_browser_session(
+                query_db,
+                payload=summary_payload,
+                runtime_options=runtime_options,
+                default_session_id=cls._pick_first_non_empty_text(
+                    runtime_options.get("browserSessionId"),
+                    runtime_options.get("browser_session_id"),
+                ),
+                default_scope_key=cls._pick_first_non_empty_text(
+                    runtime_options.get("persistContextKey"),
+                    runtime_options.get("persist_context_key"),
+                ),
+                default_browser_name=cls._pick_first_non_empty_text(
+                    runtime_options.get("browserName"),
+                    runtime_options.get("browser_name"),
+                    session_obj.browser_name,
+                ),
+                default_project_id=getattr(web_case, "project_id", None),
+                default_module_id=getattr(web_case, "module_id", None),
+                user_name=session_obj.update_by or session_obj.create_by,
+                scene_label=f"recording-{recording_id}",
+            )
             return
 
         if message_type == "record_error":
+            summary_payload = payload if isinstance(payload, dict) else {}
+            if not summary_payload.get("status"):
+                summary_payload = {
+                    **summary_payload,
+                    "status": "failed",
+                }
             WebCaseDao.update_recording_session(
                 query_db,
                 int(recording_id),
@@ -2450,11 +3206,38 @@ class WebCaseService:
                     "ended_at": now,
                     "last_event_at": now,
                     "error_message": message_data.get("message") or payload.get("message"),
-                    "result_summary_json": cls._dumps(payload),
+                    "result_summary_json": cls._dumps(summary_payload),
                     "update_time": now,
                 },
             )
             query_db.commit()
+            web_case = (
+                WebCaseDao.get_web_case_by_id(query_db, int(session_obj.web_case_id))
+                if session_obj.web_case_id
+                else None
+            )
+            cls._sync_runtime_state_to_browser_session(
+                query_db,
+                payload=summary_payload,
+                runtime_options=runtime_options,
+                default_session_id=cls._pick_first_non_empty_text(
+                    runtime_options.get("browserSessionId"),
+                    runtime_options.get("browser_session_id"),
+                ),
+                default_scope_key=cls._pick_first_non_empty_text(
+                    runtime_options.get("persistContextKey"),
+                    runtime_options.get("persist_context_key"),
+                ),
+                default_browser_name=cls._pick_first_non_empty_text(
+                    runtime_options.get("browserName"),
+                    runtime_options.get("browser_name"),
+                    session_obj.browser_name,
+                ),
+                default_project_id=getattr(web_case, "project_id", None),
+                default_module_id=getattr(web_case, "module_id", None),
+                user_name=session_obj.update_by or session_obj.create_by,
+                scene_label=f"recording-{recording_id}",
+            )
             return
 
         if message_type == "record_status":
@@ -2591,6 +3374,38 @@ class WebCaseService:
             update_data["duration_ms"] = max(0, int((now - started_at).total_seconds() * 1000))
             WebCaseDao.update_run_record(query_db, run_id_int, update_data)
             query_db.commit()
+            runtime_debug_fallback = (
+                result_payload.get("runtimeDebug")
+                if isinstance(result_payload.get("runtimeDebug"), dict)
+                else {}
+            )
+            web_case = (
+                WebCaseDao.get_web_case_by_id(query_db, int(run_record.web_case_id))
+                if run_record.web_case_id
+                else None
+            )
+            cls._sync_runtime_state_to_browser_session(
+                query_db,
+                payload=payload,
+                runtime_options=runtime_debug_fallback,
+                default_session_id=cls._pick_first_non_empty_text(
+                    runtime_debug_fallback.get("browserSessionId"),
+                    runtime_debug_fallback.get("browser_session_id"),
+                ),
+                default_scope_key=cls._pick_first_non_empty_text(
+                    runtime_debug_fallback.get("persistContextKey"),
+                    runtime_debug_fallback.get("persist_context_key"),
+                ),
+                default_browser_name=cls._pick_first_non_empty_text(
+                    runtime_debug_fallback.get("browserName"),
+                    runtime_debug_fallback.get("browser_name"),
+                    getattr(web_case, "browser_name", None),
+                ),
+                default_project_id=getattr(web_case, "project_id", None),
+                default_module_id=getattr(web_case, "module_id", None),
+                user_name=run_record.update_by or run_record.create_by,
+                scene_label=f"run-{run_id_int}",
+            )
             return
 
         if message_type == "web_run_finished":
@@ -2617,3 +3432,35 @@ class WebCaseService:
             update_data["duration_ms"] = max(0, int((now - started_at).total_seconds() * 1000))
             WebCaseDao.update_run_record(query_db, run_id_int, update_data)
             query_db.commit()
+            runtime_debug_fallback = (
+                result_payload.get("runtimeDebug")
+                if isinstance(result_payload.get("runtimeDebug"), dict)
+                else {}
+            )
+            web_case = (
+                WebCaseDao.get_web_case_by_id(query_db, int(run_record.web_case_id))
+                if run_record.web_case_id
+                else None
+            )
+            cls._sync_runtime_state_to_browser_session(
+                query_db,
+                payload=payload,
+                runtime_options=runtime_debug_fallback,
+                default_session_id=cls._pick_first_non_empty_text(
+                    runtime_debug_fallback.get("browserSessionId"),
+                    runtime_debug_fallback.get("browser_session_id"),
+                ),
+                default_scope_key=cls._pick_first_non_empty_text(
+                    runtime_debug_fallback.get("persistContextKey"),
+                    runtime_debug_fallback.get("persist_context_key"),
+                ),
+                default_browser_name=cls._pick_first_non_empty_text(
+                    runtime_debug_fallback.get("browserName"),
+                    runtime_debug_fallback.get("browser_name"),
+                    getattr(web_case, "browser_name", None),
+                ),
+                default_project_id=getattr(web_case, "project_id", None),
+                default_module_id=getattr(web_case, "module_id", None),
+                user_name=run_record.update_by or run_record.create_by,
+                scene_label=f"run-{run_id_int}",
+            )

@@ -47,6 +47,9 @@
           <el-col :span="2">
             <el-button type="info" plain icon="Setting" @click="openRuntimeProfileDialog" v-hasPermi="['hrm:webCase:edit']">Cookie配置</el-button>
           </el-col>
+          <el-col :span="2">
+            <el-button type="info" plain icon="Lock" @click="openBrowserSessionDialog" v-hasPermi="['hrm:webCase:persistContext']">浏览器Session</el-button>
+          </el-col>
         </el-row>
 
         <el-table
@@ -1088,8 +1091,28 @@
         <el-form-item label="每条后重启浏览器">
           <el-switch v-model="runForm.closeBrowserOnFinish" />
         </el-form-item>
+        <el-form-item label="浏览器Session" v-hasPermi="['hrm:webCase:persistContext']">
+          <el-row :gutter="10" style="width: 100%">
+            <el-col :span="18">
+              <el-select v-model="runForm.browserSessionId" clearable filterable style="width: 100%" placeholder="可选：选择浏览器Session">
+                <el-option
+                  v-for="item in availableBrowserSessionsForRun"
+                  :key="item.sessionId"
+                  :label="formatBrowserSessionLabel(item)"
+                  :value="item.sessionId"
+                />
+              </el-select>
+            </el-col>
+            <el-col :span="6">
+              <el-button style="width: 100%" @click="openBrowserSessionDialog">管理Session</el-button>
+            </el-col>
+          </el-row>
+        </el-form-item>
         <el-form-item label="保留浏览器状态" v-hasPermi="['hrm:webCase:persistContext']">
           <el-switch v-model="runForm.persistContextEnabled" />
+        </el-form-item>
+        <el-form-item v-if="runForm.persistContextEnabled" label="自动同步Session" v-hasPermi="['hrm:webCase:persistContext']">
+          <el-switch v-model="runForm.persistContextAutoSyncSession" />
         </el-form-item>
         <el-form-item v-if="runForm.persistContextEnabled" label="状态作用域" v-hasPermi="['hrm:webCase:persistContext']">
           <el-select v-model="runForm.persistContextKey" clearable filterable style="width: 100%" placeholder="请选择状态作用域">
@@ -1100,23 +1123,6 @@
               :value="item.key"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item label="Cookie配置">
-          <el-row :gutter="10" style="width: 100%">
-            <el-col :span="18">
-              <el-select v-model="runForm.runtimeProfileId" clearable filterable style="width: 100%" placeholder="可选：选择公共Cookie配置">
-                <el-option
-                  v-for="item in availableRuntimeProfilesForRun"
-                  :key="item.profileId"
-                  :label="formatRuntimeProfileLabel(item)"
-                  :value="item.profileId"
-                />
-              </el-select>
-            </el-col>
-            <el-col :span="6">
-              <el-button style="width: 100%" @click="openRuntimeProfileDialog">管理配置</el-button>
-            </el-col>
-          </el-row>
         </el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
@@ -1149,7 +1155,7 @@
         </el-form-item>
         <el-form-item>
           <span class="step-detail-tip">
-            已选配置会在执行时自动注入 Cookie。开启“登录后确认继续”后，会先启动浏览器等待你手动登录，确认后才继续；批量执行仅首条触发确认。关闭“每条后重启浏览器”可在批量执行中复用同一浏览器会话。
+            开启“登录后确认继续”后，会先启动浏览器等待你手动登录，确认后才继续；批量执行仅首条触发确认。关闭“每条后重启浏览器”可在批量执行中复用同一浏览器会话。
           </span>
         </el-form-item>
         <el-row :gutter="12">
@@ -1164,22 +1170,6 @@
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="Cookie变量(JSON)">
-          <el-input
-            v-model="runForm.cookieVariablesText"
-            type="textarea"
-            :rows="4"
-            placeholder='可选，例如：{"token":"xxx","sid":"yyy"}'
-          />
-        </el-form-item>
-        <el-form-item label="Cookie规则(JSON)">
-          <el-input
-            v-model="runForm.cookieRulesText"
-            type="textarea"
-            :rows="6"
-            placeholder='可选数组，例如：[{"name":"主站登录","match":{"host":"example.com"},"cookies":[{"name":"token","value":"${token}"}]}]'
-          />
-        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showRunDialog = false">取消</el-button>
@@ -1309,22 +1299,22 @@
               <el-input v-model="recordingForm.startUrl" placeholder="https://example.com" />
             </el-form-item>
           </el-col>
-           <el-col :span="24">
-             <el-form-item label="Cookie配置">
+           <el-col :span="24" v-hasPermi="['hrm:webCase:persistContext']">
+             <el-form-item label="浏览器Session">
                <el-row :gutter="10" style="width: 100%">
                  <el-col :span="18">
-                  <el-select v-model="recordingForm.runtimeProfileId" clearable filterable style="width: 100%" placeholder="可选：录制前注入公共Cookie配置">
-                    <el-option
-                      v-for="item in availableRuntimeProfilesForRecording"
-                      :key="item.profileId"
-                      :label="formatRuntimeProfileLabel(item)"
-                      :value="item.profileId"
-                    />
-                  </el-select>
-                </el-col>
-                <el-col :span="6">
-                  <el-button style="width: 100%" @click="openRuntimeProfileDialog">管理配置</el-button>
-                </el-col>
+                   <el-select v-model="recordingForm.browserSessionId" clearable filterable style="width: 100%" placeholder="可选：选择浏览器Session">
+                     <el-option
+                       v-for="item in availableBrowserSessionsForRecording"
+                       :key="item.sessionId"
+                       :label="formatBrowserSessionLabel(item)"
+                       :value="item.sessionId"
+                     />
+                   </el-select>
+                 </el-col>
+                 <el-col :span="6">
+                   <el-button style="width: 100%" @click="openBrowserSessionDialog">管理Session</el-button>
+                 </el-col>
                </el-row>
              </el-form-item>
            </el-col>
@@ -1365,6 +1355,11 @@
             <el-col :span="12" v-hasPermi="['hrm:webCase:persistContext']">
               <el-form-item label="保留浏览器状态">
                 <el-switch v-model="recordingForm.persistContextEnabled" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="24" v-if="recordingForm.persistContextEnabled" v-hasPermi="['hrm:webCase:persistContext']">
+              <el-form-item label="自动同步Session">
+                <el-switch v-model="recordingForm.persistContextAutoSyncSession" />
               </el-form-item>
             </el-col>
             <el-col :span="24" v-if="recordingForm.persistContextEnabled" v-hasPermi="['hrm:webCase:persistContext']">
@@ -1876,6 +1871,139 @@
         <el-button type="primary" :loading="loading.runtimeProfileSave" @click="saveRuntimeProfile">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="showBrowserSessionDialog"
+      title="浏览器Session管理"
+      width="1240px"
+      destroy-on-close
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <el-row :gutter="16">
+        <el-col :span="10">
+          <div class="runtime-profile-toolbar mb12">
+            <el-input v-model="browserSessionKeyword" clearable placeholder="按名称/作用域筛选Session" />
+            <el-button type="primary" @click="createBrowserSessionDraft">新建</el-button>
+            <el-button @click="loadBrowserSessions">刷新</el-button>
+          </div>
+          <el-table
+            v-loading="loading.browserSession"
+            :data="filteredBrowserSessions"
+            border
+            row-key="sessionId"
+            highlight-current-row
+            max-height="520px"
+            @current-change="handleBrowserSessionRowChange"
+          >
+            <el-table-column label="名称" min-width="180" show-overflow-tooltip>
+              <template #default="scope">{{ scope.row.sessionName || "-" }}</template>
+            </el-table-column>
+            <el-table-column label="作用域Key" min-width="180" show-overflow-tooltip>
+              <template #default="scope">{{ scope.row.scopeKey || "-" }}</template>
+            </el-table-column>
+            <el-table-column label="适用范围" min-width="150" show-overflow-tooltip>
+              <template #default="scope">{{ formatRuntimeProfileScope(scope.row) }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="scope">
+                <el-tag :type="scope.row.enabled === false ? 'info' : 'success'">{{ scope.row.enabled === false ? "停用" : "启用" }}</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-col>
+        <el-col :span="14">
+          <el-form :model="browserSessionForm" label-width="120px">
+            <el-row :gutter="12">
+              <el-col :span="12">
+                <el-form-item label="Session名称">
+                  <el-input v-model="browserSessionForm.sessionName" placeholder="例如：SM测试登录态" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="作用域Key">
+                  <el-input v-model="browserSessionForm.scopeKey" placeholder="例如：testpartner.sm-os.com" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="是否启用">
+                  <el-switch v-model="browserSessionForm.enabled" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="绑定浏览器">
+                  <el-select v-model="browserSessionForm.browserName" clearable style="width: 100%" placeholder="可选：仅匹配指定浏览器">
+                    <el-option v-for="item in browserOptions" :key="item.value" :label="item.label" :value="item.value" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="项目(可选)">
+                  <el-select v-model="browserSessionForm.projectId" clearable filterable style="width: 100%">
+                    <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="模块(可选)">
+                  <el-select v-model="browserSessionForm.moduleId" clearable filterable style="width: 100%">
+                    <el-option v-for="item in filteredBrowserSessionModules" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="排序">
+                  <el-input-number v-model="browserSessionForm.sort" :min="0" :step="1" controls-position="right" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="匹配域名">
+                  <el-input v-model="browserSessionForm.hostPatternsText" placeholder="可选：sm-os.com,*.sm-os.com" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="快速导入">
+                  <el-row :gutter="8" style="width: 100%">
+                    <el-col :span="24">
+                      <el-button style="width: 100%" @click="applyBrowserSessionQuickImport">解析并填充StorageState</el-button>
+                    </el-col>
+                    <el-col :span="24" class="mt8">
+                      <el-input
+                        v-model="browserSessionImportText"
+                        type="textarea"
+                        :rows="4"
+                        placeholder="支持 storage_state JSON、Cookie: a=1; b=2、Set-Cookie 响应头，或完整请求头文本"
+                      />
+                    </el-col>
+                  </el-row>
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="StorageState(JSON)">
+                  <el-input
+                    v-model="browserSessionForm.storageStateText"
+                    type="textarea"
+                    :rows="12"
+                    placeholder='例如：{"cookies":[],"origins":[]}'
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="备注">
+                  <el-input v-model="browserSessionForm.remark" type="textarea" :rows="2" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </el-form>
+        </el-col>
+      </el-row>
+      <template #footer>
+        <el-button @click="showBrowserSessionDialog = false">关闭</el-button>
+        <el-button type="danger" :disabled="!browserSessionForm.sessionId" @click="deleteBrowserSession">删除</el-button>
+        <el-button type="primary" :loading="loading.browserSessionSave" @click="saveBrowserSession">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1887,9 +2015,11 @@ import { listProject } from "@/api/hrm/project.js";
 import { showModulList } from "@/api/hrm/module.js";
 import {
   addWebCase,
+  addWebBrowserSession,
   applyWebRecording,
   cancelWebRecording,
   cancelWebRun,
+  delWebBrowserSession,
   delWebCase,
   delWebRecording,
   delWebRun,
@@ -1899,6 +2029,7 @@ import {
   getWebCase,
   getWebRecording,
   getWebRun,
+  listWebBrowserSession,
   listWebRuntimeProfile,
   listWebCase,
   listWebRecording,
@@ -1910,6 +2041,7 @@ import {
   startWebRecording,
   stopWebRun,
   stopWebRecording,
+  updateWebBrowserSession,
   updateWebRuntimeProfile,
   updateWebCase,
 } from "@/api/hrm/web_case.js";
@@ -2049,6 +2181,9 @@ const runtimeProfiles = ref([]);
 const runtimeProfileKeyword = ref("");
 const runtimeProfileImportText = ref("");
 const runtimeProfileImportHost = ref("");
+const browserSessions = ref([]);
+const browserSessionKeyword = ref("");
+const browserSessionImportText = ref("");
 
 const selectedCase = ref(null);
 const selectedCaseRows = ref([]);
@@ -2079,6 +2214,8 @@ const loading = ref({
   replay: false,
   runtimeProfile: false,
   runtimeProfileSave: false,
+  browserSession: false,
+  browserSessionSave: false,
 });
 
 const queryParams = ref({
@@ -2115,6 +2252,7 @@ const showReplayDialog = ref(false);
 const showReplayResultDialog = ref(false);
 const showStepDetailDialog = ref(false);
 const showRuntimeProfileDialog = ref(false);
+const showBrowserSessionDialog = ref(false);
 
 const caseEditorTab = ref("visual");
 const recordingDetailTab = ref("steps");
@@ -2671,22 +2809,81 @@ function normalizeRuntimeProfile(profile = {}) {
   };
 }
 
+function normalizeStorageStatePayload(rawState) {
+  let state = rawState;
+  if (typeof rawState === "string" && rawState.trim()) {
+    try {
+      state = JSON.parse(rawState);
+    } catch (error) {
+      state = {};
+    }
+  }
+  const value = isPlainObject(state) ? state : {};
+  const cookies = Array.isArray(value.cookies) ? value.cookies.filter((item) => isPlainObject(item)).map((item) => cloneData(item)) : [];
+  const origins = Array.isArray(value.origins) ? value.origins.filter((item) => isPlainObject(item)).map((item) => cloneData(item)) : [];
+  return {
+    cookies,
+    origins,
+  };
+}
+
+function createEmptyBrowserSession() {
+  return {
+    sessionId: undefined,
+    sessionName: "",
+    scopeKey: "",
+    enabled: true,
+    projectId: undefined,
+    moduleId: undefined,
+    browserName: "",
+    sort: 0,
+    hostPatternsText: "",
+    storageStateText: safeJsonStringify({ cookies: [], origins: [] }),
+    remark: "",
+  };
+}
+
+function normalizeBrowserSession(session = {}) {
+  const base = createEmptyBrowserSession();
+  const hostPatterns = normalizePersistScopeHostPatterns(
+    session.hostPatterns ?? session.host_patterns ?? session.host ?? session.domain
+  );
+  const storageState = normalizeStorageStatePayload(session.storageState ?? session.storage_state);
+  const scopeKey = `${session.scopeKey ?? session.scope_key ?? session.persistContextKey ?? session.persist_context_key ?? ""}`.trim();
+  return {
+    ...base,
+    ...session,
+    sessionId: normalizeIdValue(session.sessionId || session.session_id),
+    sessionName: `${session.sessionName || session.session_name || ""}`.trim(),
+    scopeKey: scopeKey || normalizeIdValue(session.sessionId || session.session_id) || "",
+    enabled: parseBooleanFlag(session.enabled, true),
+    projectId: normalizeIdValue(session.projectId || session.project_id),
+    moduleId: normalizeIdValue(session.moduleId || session.module_id),
+    browserName: `${session.browserName || session.browser_name || ""}`.trim().toLowerCase(),
+    sort: Number.isFinite(Number(session.sort)) ? Math.max(Math.round(Number(session.sort)), 0) : 0,
+    hostPatternsText: hostPatterns.join(","),
+    storageStateText: safeJsonStringify(storageState),
+    remark: `${session.remark || ""}`.trim(),
+    createTime: session.createTime || session.create_time,
+    updateTime: session.updateTime || session.update_time,
+  };
+}
+
 const form = ref(createEmptyCase());
 const runForm = ref({
   agentId: undefined,
   browserName: "chromium",
   headless: true,
   closeBrowserOnFinish: true,
+  browserSessionId: undefined,
   persistContextEnabled: false,
+  persistContextAutoSyncSession: true,
   persistContextKey: "",
   manualLoginEnabled: false,
   manualLoginRequireConfirm: false,
   manualLoginWaitSec: 120,
   stepTimeoutMs: undefined,
   stepThinkTimeMs: undefined,
-  runtimeProfileId: undefined,
-  cookieVariablesText: "",
-  cookieRulesText: "",
 });
 const recordingForm = ref({
   webCaseId: undefined,
@@ -2695,7 +2892,9 @@ const recordingForm = ref({
   browserName: "chromium",
   headless: false,
   startUrl: "",
+  browserSessionId: undefined,
   persistContextEnabled: false,
+  persistContextAutoSyncSession: true,
   persistContextKey: "",
   manualLoginEnabled: false,
   manualLoginRequireConfirm: false,
@@ -2704,10 +2903,10 @@ const recordingForm = ref({
   captureAssertions: true,
   attachAssertionsToPreviousStep: true,
   autoAssertTextOnClick: false,
-  runtimeProfileId: undefined,
   recordingId: undefined,
 });
 const runtimeProfileForm = ref(createEmptyRuntimeProfile());
+const browserSessionForm = ref(createEmptyBrowserSession());
 const recordingActionMode = ref("create");
 const recordingActionForm = ref({
   recordingId: undefined,
@@ -2762,10 +2961,25 @@ const filteredRuntimeProfileModules = computed(() => {
   return moduleOptions.value.filter((item) => isSameId(item.projectId, runtimeProfileForm.value.projectId));
 });
 
+const filteredBrowserSessionModules = computed(() => {
+  if (!browserSessionForm.value.projectId) return moduleOptions.value;
+  return moduleOptions.value.filter((item) => isSameId(item.projectId, browserSessionForm.value.projectId));
+});
+
 const filteredRuntimeProfiles = computed(() => {
   const keyword = `${runtimeProfileKeyword.value || ""}`.trim().toLowerCase();
   if (!keyword) return runtimeProfiles.value;
   return runtimeProfiles.value.filter((item) => `${item.profileName || ""}`.toLowerCase().includes(keyword));
+});
+
+const filteredBrowserSessions = computed(() => {
+  const keyword = `${browserSessionKeyword.value || ""}`.trim().toLowerCase();
+  if (!keyword) return browserSessions.value;
+  return browserSessions.value.filter((item) => {
+    const sessionName = `${item.sessionName || ""}`.toLowerCase();
+    const scopeKey = `${item.scopeKey || ""}`.toLowerCase();
+    return sessionName.includes(keyword) || scopeKey.includes(keyword);
+  });
 });
 
 const runScopeProjectId = computed(() => runTargetCases.value?.[0]?.projectId || selectedCase.value?.projectId);
@@ -2782,22 +2996,38 @@ const availableRuntimeProfilesForRecording = computed(() => runtimeProfiles.valu
   (item) => item.enabled !== false && profileSupportsWeb(item) && isRuntimeProfileScopeMatch(item, recordingScopeProjectId.value, recordingScopeModuleId.value)
 ));
 
-function collectPersistScopeOptions(profiles, currentKey = "") {
+const availableBrowserSessionsForRun = computed(() => browserSessions.value.filter(
+  (item) => item.enabled !== false
+    && isRuntimeProfileScopeMatch(item, runScopeProjectId.value, runScopeModuleId.value)
+    && isBrowserSessionBrowserMatch(item, runForm.value.browserName)
+));
+
+const availableBrowserSessionsForRecording = computed(() => browserSessions.value.filter(
+  (item) => item.enabled !== false
+    && isRuntimeProfileScopeMatch(item, recordingScopeProjectId.value, recordingScopeModuleId.value)
+    && isBrowserSessionBrowserMatch(item, recordingForm.value.browserName)
+));
+
+function collectPersistScopeOptionsFromSessions(sessions, currentKey = "") {
   const rows = [];
   const seen = new Set();
-  const profileList = Array.isArray(profiles) ? profiles : [];
-  profileList.forEach((profile) => {
-    const scopes = normalizePersistContextScopeList(profile?.persistContextScopes || profile?.persist_context_scopes);
-    scopes.forEach((scope) => {
-      if (!scope?.key || scope.enabled === false) return;
-      const keyLower = `${scope.key}`.toLowerCase();
-      if (seen.has(keyLower)) return;
-      seen.add(keyLower);
-      rows.push({
-        ...scope,
-        sourceProfileName: profile?.profileName || "",
-        sourceProfileId: profile?.profileId || profile?.profile_id || "",
-      });
+  const sessionList = Array.isArray(sessions) ? sessions : [];
+  sessionList.forEach((session) => {
+    const scopeKey = `${session?.scopeKey || session?.sessionId || ""}`.trim();
+    if (!scopeKey) return;
+    const keyLower = scopeKey.toLowerCase();
+    if (seen.has(keyLower)) return;
+    seen.add(keyLower);
+    const hostPatterns = normalizePersistScopeHostPatterns(session?.hostPatternsText || session?.hostPatterns);
+    rows.push({
+      key: scopeKey,
+      label: `${session?.sessionName || scopeKey}`.trim() || scopeKey,
+      hostPatterns,
+      hostPatternsText: hostPatterns.join(","),
+      enabled: session?.enabled !== false,
+      remark: `${session?.remark || ""}`.trim(),
+      sourceSessionName: `${session?.sessionName || ""}`.trim(),
+      sourceSessionId: `${session?.sessionId || ""}`.trim(),
     });
   });
   const current = `${currentKey || ""}`.trim();
@@ -2809,8 +3039,8 @@ function collectPersistScopeOptions(profiles, currentKey = "") {
       hostPatternsText: "",
       enabled: true,
       remark: "",
-      sourceProfileName: "",
-      sourceProfileId: "",
+      sourceSessionName: "",
+      sourceSessionId: "",
     });
   }
   return rows;
@@ -2819,10 +3049,10 @@ function collectPersistScopeOptions(profiles, currentKey = "") {
 function formatPersistScopeLabel(scope) {
   const label = `${scope?.label || scope?.key || ""}`.trim() || `${scope?.key || ""}`.trim();
   const key = `${scope?.key || ""}`.trim();
-  const profileName = `${scope?.sourceProfileName || ""}`.trim();
+  const sessionName = `${scope?.sourceSessionName || ""}`.trim();
   const hostPatterns = normalizePersistScopeHostPatterns(scope?.hostPatterns || scope?.hostPatternsText);
   const hostText = hostPatterns.length ? hostPatterns.join(",") : "";
-  const extra = [profileName, hostText].filter(Boolean).join(" | ");
+  const extra = [sessionName, hostText].filter(Boolean).join(" | ");
   if (!extra) {
     return label === key || !key ? label : `${label} [${key}]`;
   }
@@ -2836,25 +3066,11 @@ function hasPersistScopeOption(options, key) {
 }
 
 const availablePersistScopesForRun = computed(() => {
-  const selectedProfileId = normalizeIdValue(runForm.value.runtimeProfileId);
-  if (selectedProfileId) {
-    const selectedProfile = availableRuntimeProfilesForRun.value.find((item) => isSameId(item.profileId, selectedProfileId));
-    if (selectedProfile) {
-      return collectPersistScopeOptions([selectedProfile], runForm.value.persistContextKey);
-    }
-  }
-  return collectPersistScopeOptions(availableRuntimeProfilesForRun.value, runForm.value.persistContextKey);
+  return collectPersistScopeOptionsFromSessions(availableBrowserSessionsForRun.value, runForm.value.persistContextKey);
 });
 
 const availablePersistScopesForRecording = computed(() => {
-  const selectedProfileId = normalizeIdValue(recordingForm.value.runtimeProfileId);
-  if (selectedProfileId) {
-    const selectedProfile = availableRuntimeProfilesForRecording.value.find((item) => isSameId(item.profileId, selectedProfileId));
-    if (selectedProfile) {
-      return collectPersistScopeOptions([selectedProfile], recordingForm.value.persistContextKey);
-    }
-  }
-  return collectPersistScopeOptions(availableRuntimeProfilesForRecording.value, recordingForm.value.persistContextKey);
+  return collectPersistScopeOptionsFromSessions(availableBrowserSessionsForRecording.value, recordingForm.value.persistContextKey);
 });
 
 const caseDialogTitle = computed(() => `${form.value.webCaseId ? "编辑" : "新增"} Web 用例`);
@@ -2942,6 +3158,14 @@ const recordingLiveStatusText = computed(() => {
     return "请先填写录制参数后启动录制。";
   }
   if (recordingDetail.value?.status === 5) {
+    const summaryPayload = getRecordingSummaryPayload(recordingDetail.value);
+    const summaryStatus = `${summaryPayload?.status || ""}`.trim().toLowerCase();
+    if (["cancelled", "canceled"].includes(summaryStatus)) {
+      return "录制已取消。";
+    }
+    if (["stopped", "finished", "failed"].includes(summaryStatus)) {
+      return "录制已结束。";
+    }
     return "停止指令已发送，正在等待录制结果落盘。";
   }
   return `录制状态：${recordingLiveStatusMeta.value.label}`;
@@ -3237,6 +3461,14 @@ function isRuntimeProfileScopeMatch(profile, projectId, moduleId) {
   return true;
 }
 
+function isBrowserSessionBrowserMatch(session, browserName) {
+  const sessionBrowser = `${session?.browserName || ""}`.trim().toLowerCase();
+  if (!sessionBrowser) return true;
+  const targetBrowser = `${browserName || ""}`.trim().toLowerCase();
+  if (!targetBrowser) return true;
+  return sessionBrowser === targetBrowser;
+}
+
 function formatRuntimeProfileScope(profile) {
   const projectName = profile?.projectId ? (getProjectName(profile.projectId) || profile.projectId) : "全局";
   const moduleName = profile?.moduleId ? (getModuleName(profile.moduleId) || profile.moduleId) : "全部模块";
@@ -3246,6 +3478,15 @@ function formatRuntimeProfileScope(profile) {
 function formatRuntimeProfileLabel(profile) {
   const name = profile?.profileName || profile?.profileId || "未命名配置";
   return `${name}（${formatRuntimeProfileScope(profile)}）`;
+}
+
+function formatBrowserSessionLabel(session) {
+  const name = `${session?.sessionName || session?.scopeKey || session?.sessionId || "未命名Session"}`.trim();
+  const browserValue = `${session?.browserName || ""}`.trim().toLowerCase();
+  const browserLabel = browserValue
+    ? (browserOptions.find((item) => item.value === browserValue)?.label || browserValue)
+    : "";
+  return `${name}（${formatRuntimeProfileScope(session)}${browserLabel ? ` / ${browserLabel}` : ""}）`;
 }
 
 const runtimeVariableKeys = ["variables", "runtimeVariables", "runtime_variables", "cookieVariables", "cookie_variables"];
@@ -3652,8 +3893,20 @@ function handleCaseSelectVisibleChange(visible) {
   }
 }
 
-function shouldStopRecordingPoll(status) {
-  return [3, 4, 5].includes(Number(status));
+function shouldStopRecordingPoll(detailOrStatus) {
+  if (isPlainObject(detailOrStatus)) {
+    const status = Number(detailOrStatus.status);
+    if ([3, 4].includes(status)) {
+      return true;
+    }
+    if (status !== 5) {
+      return false;
+    }
+    const summaryPayload = getRecordingSummaryPayload(detailOrStatus);
+    const summaryStatus = `${summaryPayload?.status || ""}`.trim().toLowerCase();
+    return ["cancelled", "canceled", "stopped", "finished", "failed"].includes(summaryStatus);
+  }
+  return [3, 4].includes(Number(detailOrStatus));
 }
 
 function shouldStopRunDetailPoll(status) {
@@ -4368,15 +4621,19 @@ async function handleDeleteRecordingRecords(row = null) {
 }
 
 function clearInvalidRuntimeProfileBindings() {
-  const ids = new Set(runtimeProfiles.value.map((item) => normalizeIdValue(item.profileId)).filter(Boolean));
-  if (runForm.value.runtimeProfileId && !ids.has(normalizeIdValue(runForm.value.runtimeProfileId))) {
-    runForm.value.runtimeProfileId = undefined;
-  }
-  if (recordingForm.value.runtimeProfileId && !ids.has(normalizeIdValue(recordingForm.value.runtimeProfileId))) {
-    recordingForm.value.runtimeProfileId = undefined;
-  }
-  if (runtimeProfileForm.value.profileId && !ids.has(normalizeIdValue(runtimeProfileForm.value.profileId))) {
+  const runtimeIds = new Set(runtimeProfiles.value.map((item) => normalizeIdValue(item.profileId)).filter(Boolean));
+  if (runtimeProfileForm.value.profileId && !runtimeIds.has(normalizeIdValue(runtimeProfileForm.value.profileId))) {
     runtimeProfileForm.value = createEmptyRuntimeProfile();
+  }
+  const sessionIds = new Set(browserSessions.value.map((item) => normalizeIdValue(item.sessionId)).filter(Boolean));
+  if (runForm.value.browserSessionId && !sessionIds.has(normalizeIdValue(runForm.value.browserSessionId))) {
+    runForm.value.browserSessionId = undefined;
+  }
+  if (recordingForm.value.browserSessionId && !sessionIds.has(normalizeIdValue(recordingForm.value.browserSessionId))) {
+    recordingForm.value.browserSessionId = undefined;
+  }
+  if (browserSessionForm.value.sessionId && !sessionIds.has(normalizeIdValue(browserSessionForm.value.sessionId))) {
+    browserSessionForm.value = createEmptyBrowserSession();
   }
 }
 
@@ -4402,6 +4659,37 @@ function loadRuntimeProfiles() {
   });
 }
 
+function createBrowserSessionDraft() {
+  browserSessionForm.value = createEmptyBrowserSession();
+  browserSessionImportText.value = "";
+}
+
+function handleBrowserSessionRowChange(row) {
+  if (!row) return;
+  browserSessionForm.value = normalizeBrowserSession(row);
+}
+
+function loadBrowserSessions() {
+  loading.value.browserSession = true;
+  return listWebBrowserSession({ isPage: false }).then((response) => {
+    const rows = Array.isArray(response?.data) ? response.data : [];
+    browserSessions.value = rows.map((item) => normalizeBrowserSession(item));
+    clearInvalidRuntimeProfileBindings();
+  }).finally(() => {
+    loading.value.browserSession = false;
+  });
+}
+
+function openBrowserSessionDialog() {
+  showBrowserSessionDialog.value = true;
+  if (!browserSessions.value.length) {
+    loadBrowserSessions();
+  }
+  if (!browserSessionForm.value.sessionId) {
+    createBrowserSessionDraft();
+  }
+}
+
 function openRuntimeProfileDialog() {
   showRuntimeProfileDialog.value = true;
   if (!runtimeProfiles.value.length) {
@@ -4410,6 +4698,69 @@ function openRuntimeProfileDialog() {
   if (!runtimeProfileForm.value.profileId) {
     createRuntimeProfileDraft();
   }
+}
+
+function buildBrowserSessionPayload() {
+  const sessionName = `${browserSessionForm.value.sessionName || ""}`.trim();
+  if (!sessionName) {
+    throw new Error("Session名称不能为空");
+  }
+  const scopeKey = `${browserSessionForm.value.scopeKey || ""}`.trim();
+  if (!scopeKey) {
+    throw new Error("作用域Key不能为空");
+  }
+  const storageState = parseOptionalJsonObject(browserSessionForm.value.storageStateText, "StorageState") || {};
+  return {
+    sessionId: browserSessionForm.value.sessionId || undefined,
+    sessionName,
+    scopeKey,
+    enabled: browserSessionForm.value.enabled !== false,
+    projectId: browserSessionForm.value.projectId || undefined,
+    moduleId: browserSessionForm.value.moduleId || undefined,
+    browserName: `${browserSessionForm.value.browserName || ""}`.trim().toLowerCase() || undefined,
+    sort: Math.max(Math.round(Number(browserSessionForm.value.sort) || 0), 0),
+    hostPatterns: normalizePersistScopeHostPatterns(browserSessionForm.value.hostPatternsText),
+    storageState: normalizeStorageStatePayload(storageState),
+    remark: browserSessionForm.value.remark || undefined,
+  };
+}
+
+function saveBrowserSession() {
+  let payload;
+  try {
+    payload = buildBrowserSessionPayload();
+  } catch (error) {
+    ElMessage.error(error.message);
+    return;
+  }
+  loading.value.browserSessionSave = true;
+  const request = payload.sessionId ? updateWebBrowserSession(payload) : addWebBrowserSession(payload);
+  request.then((response) => {
+    const saved = normalizeBrowserSession(response?.data || payload);
+    ElMessage.success(response?.msg || "保存成功");
+    return loadBrowserSessions().then(() => {
+      const hit = browserSessions.value.find((item) => isSameId(item.sessionId, saved.sessionId));
+      browserSessionForm.value = normalizeBrowserSession(hit || saved);
+    });
+  }).finally(() => {
+    loading.value.browserSessionSave = false;
+  });
+}
+
+function deleteBrowserSession() {
+  const sessionId = browserSessionForm.value.sessionId;
+  if (!sessionId) {
+    ElMessage.warning("请先选择要删除的Session");
+    return;
+  }
+  ElMessageBox.confirm(`确认删除Session【${browserSessionForm.value.sessionName || sessionId}】吗？`, "提示", { type: "warning" })
+    .then(() => delWebBrowserSession(sessionId))
+    .then(async () => {
+      ElMessage.success("删除成功");
+      createBrowserSessionDraft();
+      await loadBrowserSessions();
+    })
+    .catch(() => {});
 }
 
 function extractCookieContentFromImport(rawText) {
@@ -4613,6 +4964,41 @@ function applyRuntimeProfileQuickImport() {
   ElMessage.success(`已导入 ${cookies.length} 个 Cookie${useSetCookie ? "（Set-Cookie）" : ""}`);
 }
 
+function applyBrowserSessionQuickImport() {
+  const rawText = `${browserSessionImportText.value || ""}`.trim();
+  if (!rawText) {
+    ElMessage.warning("请先粘贴 Cookie/Set-Cookie/StorageState 内容");
+    return;
+  }
+  try {
+    const parsed = JSON.parse(rawText);
+    if (isPlainObject(parsed) && (Array.isArray(parsed.cookies) || Array.isArray(parsed.origins))) {
+      const normalized = normalizeStorageStatePayload(parsed);
+      browserSessionForm.value.storageStateText = safeJsonStringify(normalized);
+      ElMessage.success(`已导入 StorageState：cookies ${normalized.cookies.length} 条，origins ${normalized.origins.length} 条`);
+      return;
+    }
+  } catch (error) {
+    // ignore: 继续按Cookie文本解析
+  }
+
+  const setCookieLines = extractSetCookieLinesFromImport(rawText);
+  const cookiesFromSetCookie = setCookieLines.map((line) => parseSetCookieLine(line)).filter(Boolean);
+  const cookieText = extractCookieContentFromImport(rawText);
+  const cookiesFromCookieHeader = parseCookiePairs(cookieText);
+  const useSetCookie = cookiesFromSetCookie.length > 0;
+  const cookies = useSetCookie ? cookiesFromSetCookie : cookiesFromCookieHeader;
+  if (!cookies.length) {
+    ElMessage.error("未识别到可用数据，请粘贴 Cookie/Set-Cookie 或 storage_state JSON");
+    return;
+  }
+  browserSessionForm.value.storageStateText = safeJsonStringify({
+    cookies,
+    origins: [],
+  });
+  ElMessage.success(`已导入 ${cookies.length} 个 Cookie${useSetCookie ? "（Set-Cookie）" : ""}`);
+}
+
 function addPersistContextScopeRow() {
   if (!Array.isArray(runtimeProfileForm.value.persistContextScopes)) {
     runtimeProfileForm.value.persistContextScopes = [];
@@ -4789,6 +5175,14 @@ function handleRecordingSelectionChange(selection) {
 
 function initRunFormByCase(row) {
   const runtimeSettings = isPlainObject(row?.runtimeSettings || row?.runtime_settings) ? cloneData(row.runtimeSettings || row.runtime_settings) : {};
+  const browserSessionId = normalizeIdValue(
+    runtimeSettings.browserSessionId
+      ?? runtimeSettings.browser_session_id
+      ?? runtimeSettings.persistContextSessionId
+      ?? runtimeSettings.persist_context_session_id
+      ?? runtimeSettings.sessionProfileId
+      ?? runtimeSettings.session_profile_id
+  );
   const stepTimeoutCandidate = Number(
     runtimeSettings.stepTimeoutMs
       ?? runtimeSettings.step_timeout_ms
@@ -4801,21 +5195,6 @@ function initRunFormByCase(row) {
       ?? runtimeSettings.thinkTimeMs
       ?? runtimeSettings.think_time_ms
   );
-  const cookieVariables = runtimeSettings.variables
-    || runtimeSettings.runtimeVariables
-    || runtimeSettings.runtime_variables
-    || runtimeSettings.cookieVariables
-    || runtimeSettings.cookie_variables;
-  const cookieRules = runtimeSettings.cookieRules
-    || runtimeSettings.cookie_rules
-    || runtimeSettings.cookieScopes
-    || runtimeSettings.cookie_scopes
-    || runtimeSettings.cookieProfiles
-    || runtimeSettings.cookie_profiles;
-  const runtimeProfileId = runtimeSettings.runtimeProfileId
-    || runtimeSettings.runtime_profile_id
-    || runtimeSettings.cookieProfileId
-    || runtimeSettings.cookie_profile_id;
   const manualLoginEnabled = parseBooleanFlag(
     runtimeSettings.manualLoginEnabled
       ?? runtimeSettings.manual_login_enabled
@@ -4850,6 +5229,13 @@ function initRunFormByCase(row) {
       ?? runtimeSettings.keep_browser_cache,
     false
   );
+  const persistContextAutoSyncSession = parseBooleanFlag(
+    runtimeSettings.persistContextAutoSyncSession
+      ?? runtimeSettings.persist_context_auto_sync_session
+      ?? runtimeSettings.persistContextSyncToSession
+      ?? runtimeSettings.persist_context_sync_to_session,
+    true
+  );
   const persistContextKey = `${runtimeSettings.persistContextKey
     ?? runtimeSettings.persist_context_key
     ?? runtimeSettings.preserveContextKey
@@ -4860,16 +5246,15 @@ function initRunFormByCase(row) {
     browserName: row?.browserName || "chromium",
     headless: row?.headless ?? true,
     closeBrowserOnFinish,
-    persistContextEnabled,
+    browserSessionId,
+    persistContextEnabled: Boolean(persistContextEnabled || browserSessionId),
+    persistContextAutoSyncSession,
     persistContextKey,
     manualLoginEnabled,
     manualLoginRequireConfirm: manualLoginEnabled ? manualLoginRequireConfirm : false,
     manualLoginWaitSec,
     stepTimeoutMs: Number.isFinite(stepTimeoutCandidate) && stepTimeoutCandidate >= 500 ? Math.round(stepTimeoutCandidate) : undefined,
     stepThinkTimeMs: Number.isFinite(stepThinkCandidate) && stepThinkCandidate >= 0 ? Math.round(stepThinkCandidate) : undefined,
-    runtimeProfileId: normalizeIdValue(runtimeProfileId),
-    cookieVariablesText: isPlainObject(cookieVariables) && Object.keys(cookieVariables).length ? safeJsonStringify(cookieVariables) : "",
-    cookieRulesText: Array.isArray(cookieRules) && cookieRules.length ? safeJsonStringify(cookieRules) : "",
   };
 }
 
@@ -4963,16 +5348,6 @@ async function submitRun() {
     return;
   }
 
-  let cookieVariables;
-  let cookieRules;
-  try {
-    cookieVariables = parseOptionalJsonObject(runForm.value.cookieVariablesText, "Cookie变量");
-    cookieRules = parseOptionalJsonArray(runForm.value.cookieRulesText, "Cookie规则");
-  } catch (error) {
-    ElMessage.error(error.message);
-    return;
-  }
-
   const runtimeOverrides = {};
   if (runForm.value.stepTimeoutMs !== undefined && runForm.value.stepTimeoutMs !== null && runForm.value.stepTimeoutMs !== "") {
     const stepTimeoutMs = Math.round(Number(runForm.value.stepTimeoutMs));
@@ -4990,30 +5365,9 @@ async function submitRun() {
     }
     runtimeOverrides.stepThinkTimeMs = stepThinkTimeMs;
   }
-  if (cookieVariables) {
-    runtimeOverrides.variables = cookieVariables;
-  }
-  if (cookieRules) {
-    runtimeOverrides.cookieRules = cookieRules;
-  }
   const manualLoginEnabled = Boolean(runForm.value.manualLoginEnabled);
   const manualLoginRequireConfirm = manualLoginEnabled && Boolean(runForm.value.manualLoginRequireConfirm);
   const manualLoginWaitSec = normalizeManualLoginWaitSec(runForm.value.manualLoginWaitSec, 120);
-
-  const previewTargets = runTargets.map((target, index) => ({
-    label: `${target.caseName || target.webCaseId || `用例${index + 1}`}${target.webCaseId ? ` [${target.webCaseId}]` : ""}`,
-    targetUrl: `${target.startUrl || selectedCase.value?.startUrl || ""}`.trim(),
-  })).filter((item) => item.targetUrl);
-  const previewConfirmed = await confirmCookiePreviewBeforeStart({
-    mode: "run",
-    targets: previewTargets,
-    runtimeProfileId: runForm.value.runtimeProfileId,
-    runtimeOverrides,
-    stage: "before_start",
-  });
-  if (!previewConfirmed) {
-    return;
-  }
 
   loading.value.run = true;
   try {
@@ -5041,12 +5395,16 @@ async function submitRun() {
         browserName: runForm.value.browserName,
         headless: runForm.value.headless,
         closeBrowserOnFinish: runForm.value.closeBrowserOnFinish,
-        persistContextEnabled: Boolean(runForm.value.persistContextEnabled),
+        browserSessionId: runForm.value.browserSessionId || undefined,
+        persistContextEnabled: Boolean(runForm.value.persistContextEnabled || runForm.value.browserSessionId),
+        persistContextAutoSyncSession: Boolean(
+          (runForm.value.persistContextEnabled || runForm.value.browserSessionId)
+          && runForm.value.persistContextAutoSyncSession
+        ),
         persistContextKey: runForm.value.persistContextKey?.trim() || undefined,
         manualLoginEnabled: enableManualForCurrent,
         manualLoginRequireConfirm: requireConfirmForCurrent,
         manualLoginWaitSec,
-        runtimeProfileId: runForm.value.runtimeProfileId || undefined,
       };
       if (Object.keys(runtimeOverridesForCurrent).length) {
         payload.runtimeOverrides = runtimeOverridesForCurrent;
@@ -5117,10 +5475,14 @@ function resetRecordingDialogState(row = null) {
   recordingDetail.value = null;
   recordingDetailText.value = "";
   const runtimeSettings = isPlainObject(row?.runtimeSettings || row?.runtime_settings) ? cloneData(row.runtimeSettings || row.runtime_settings) : {};
-  const runtimeProfileId = runtimeSettings.runtimeProfileId
-    || runtimeSettings.runtime_profile_id
-    || runtimeSettings.cookieProfileId
-    || runtimeSettings.cookie_profile_id;
+  const browserSessionId = normalizeIdValue(
+    runtimeSettings.browserSessionId
+      ?? runtimeSettings.browser_session_id
+      ?? runtimeSettings.persistContextSessionId
+      ?? runtimeSettings.persist_context_session_id
+      ?? runtimeSettings.sessionProfileId
+      ?? runtimeSettings.session_profile_id
+  );
   const manualLoginEnabled = parseBooleanFlag(
     runtimeSettings.manualLoginEnabled
       ?? runtimeSettings.manual_login_enabled
@@ -5151,6 +5513,13 @@ function resetRecordingDialogState(row = null) {
       ?? runtimeSettings.keep_browser_cache,
     false
   );
+  const persistContextAutoSyncSession = parseBooleanFlag(
+    runtimeSettings.persistContextAutoSyncSession
+      ?? runtimeSettings.persist_context_auto_sync_session
+      ?? runtimeSettings.persistContextSyncToSession
+      ?? runtimeSettings.persist_context_sync_to_session,
+    true
+  );
   const persistContextKey = `${runtimeSettings.persistContextKey
     ?? runtimeSettings.persist_context_key
     ?? runtimeSettings.preserveContextKey
@@ -5163,7 +5532,9 @@ function resetRecordingDialogState(row = null) {
     browserName: row?.browserName || "chromium",
     headless: false,
     startUrl: row?.startUrl || "",
-    persistContextEnabled,
+    browserSessionId,
+    persistContextEnabled: Boolean(persistContextEnabled || browserSessionId),
+    persistContextAutoSyncSession,
     persistContextKey,
     manualLoginEnabled,
     manualLoginRequireConfirm: manualLoginEnabled ? manualLoginRequireConfirm : false,
@@ -5172,7 +5543,6 @@ function resetRecordingDialogState(row = null) {
     captureAssertions: true,
     attachAssertionsToPreviousStep: true,
     autoAssertTextOnClick: false,
-    runtimeProfileId: normalizeIdValue(runtimeProfileId),
     recordingId: undefined,
   };
 }
@@ -5203,7 +5573,7 @@ function updateLiveRecording(detail) {
   recordingEvents.value = detail.events || [];
   liveRecordingSteps.value = detail.steps || [];
   recordingDetailText.value = safeJsonStringify(detail);
-  if (shouldStopRecordingPoll(detail.status)) {
+  if (shouldStopRecordingPoll(detail)) {
     stopRecordingPoll();
   }
 }
@@ -5222,21 +5592,6 @@ async function startRecording() {
     return;
   }
 
-  const previewConfirmed = await confirmCookiePreviewBeforeStart({
-    mode: "recording",
-    targets: [
-      {
-        label: recordingLinkedCaseLabel.value || "录制起始页",
-        targetUrl: `${recordingForm.value.startUrl || ""}`.trim(),
-      },
-    ],
-    runtimeProfileId: recordingForm.value.runtimeProfileId,
-    runtimeOverrides: {},
-    stage: "before_start",
-  });
-  if (!previewConfirmed) {
-    return;
-  }
   const manualLoginEnabled = Boolean(recordingForm.value.manualLoginEnabled);
   const manualLoginRequireConfirm = manualLoginEnabled && Boolean(recordingForm.value.manualLoginRequireConfirm);
   const manualLoginWaitSec = normalizeManualLoginWaitSec(recordingForm.value.manualLoginWaitSec, 120);
@@ -5253,12 +5608,16 @@ async function startRecording() {
       browserName: recordingForm.value.browserName,
       headless: recordingForm.value.headless,
       startUrl: recordingForm.value.startUrl,
-      persistContextEnabled: Boolean(recordingForm.value.persistContextEnabled),
+      browserSessionId: recordingForm.value.browserSessionId || undefined,
+      persistContextEnabled: Boolean(recordingForm.value.persistContextEnabled || recordingForm.value.browserSessionId),
+      persistContextAutoSyncSession: Boolean(
+        (recordingForm.value.persistContextEnabled || recordingForm.value.browserSessionId)
+        && recordingForm.value.persistContextAutoSyncSession
+      ),
       persistContextKey: recordingForm.value.persistContextKey?.trim() || undefined,
       manualLoginEnabled,
       manualLoginRequireConfirm,
       manualLoginWaitSec,
-      runtimeProfileId: recordingForm.value.runtimeProfileId || undefined,
       recordingOptions: {
         closeBrowserOnStop: recordingForm.value.closeBrowserOnStop,
         captureAssertions: recordingForm.value.captureAssertions,
@@ -5327,7 +5686,7 @@ function refreshRecordingDetail() {
     recordingDetail.value = detail;
     syncCaseOptions(detail);
     selectedRecording.value = detail;
-    if (shouldStopRecordingPoll(detail?.status)) {
+    if (shouldStopRecordingPoll(detail)) {
       stopRecordingDetailPoll();
     }
     return detail;
@@ -5336,7 +5695,7 @@ function refreshRecordingDetail() {
 
 function startRecordingDetailPoll() {
   stopRecordingDetailPoll();
-  if (!recordingDetail.value?.recordingId || shouldStopRecordingPoll(recordingDetail.value?.status)) {
+  if (!recordingDetail.value?.recordingId || shouldStopRecordingPoll(recordingDetail.value)) {
     return;
   }
   recordingDetailTimer = window.setInterval(() => {
@@ -5576,8 +5935,40 @@ watch(() => runtimeProfileForm.value.projectId, (projectId) => {
   }
 });
 
+watch(() => browserSessionForm.value.projectId, (projectId) => {
+  if (!projectId) {
+    browserSessionForm.value.moduleId = undefined;
+    return;
+  }
+  if (!filteredBrowserSessionModules.value.some((item) => isSameId(item.moduleId, browserSessionForm.value.moduleId))) {
+    browserSessionForm.value.moduleId = undefined;
+  }
+});
+
+watch(() => runForm.value.browserSessionId, (sessionId) => {
+  const normalizedSessionId = normalizeIdValue(sessionId);
+  if (!normalizedSessionId) return;
+  const selectedSession = browserSessions.value.find((item) => isSameId(item.sessionId, normalizedSessionId));
+  runForm.value.persistContextEnabled = true;
+  runForm.value.persistContextAutoSyncSession = true;
+  if (selectedSession?.scopeKey) {
+    runForm.value.persistContextKey = selectedSession.scopeKey;
+  }
+});
+
+watch(() => recordingForm.value.browserSessionId, (sessionId) => {
+  const normalizedSessionId = normalizeIdValue(sessionId);
+  if (!normalizedSessionId) return;
+  const selectedSession = browserSessions.value.find((item) => isSameId(item.sessionId, normalizedSessionId));
+  recordingForm.value.persistContextEnabled = true;
+  recordingForm.value.persistContextAutoSyncSession = true;
+  if (selectedSession?.scopeKey) {
+    recordingForm.value.persistContextKey = selectedSession.scopeKey;
+  }
+});
+
 watch(
-  () => [runForm.value.persistContextEnabled, runForm.value.runtimeProfileId, availablePersistScopesForRun.value.length],
+  () => [runForm.value.persistContextEnabled, availablePersistScopesForRun.value.length],
   () => {
     if (!runForm.value.persistContextEnabled) return;
     const key = `${runForm.value.persistContextKey || ""}`.trim();
@@ -5592,7 +5983,7 @@ watch(
 );
 
 watch(
-  () => [recordingForm.value.persistContextEnabled, recordingForm.value.runtimeProfileId, availablePersistScopesForRecording.value.length],
+  () => [recordingForm.value.persistContextEnabled, availablePersistScopesForRecording.value.length],
   () => {
     if (!recordingForm.value.persistContextEnabled) return;
     const key = `${recordingForm.value.persistContextKey || ""}`.trim();
@@ -5609,6 +6000,7 @@ watch(
 onMounted(async () => {
   await loadBaseData();
   await loadRuntimeProfiles().catch(() => {});
+  await loadBrowserSessions().catch(() => {});
   createRuntimeProfileDraft();
   resetForm();
   getList();

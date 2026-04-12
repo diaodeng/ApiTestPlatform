@@ -129,6 +129,37 @@ export function delWebRuntimeProfile(profileId) {
   })
 }
 
+export function listWebBrowserSession(query) {
+  return webCaseRequest({
+    url: '/hrm/web-case/browser-session/list',
+    method: 'get',
+    params: query
+  })
+}
+
+export function addWebBrowserSession(data) {
+  return webCaseRequest({
+    url: '/hrm/web-case/browser-session',
+    method: 'post',
+    data
+  })
+}
+
+export function updateWebBrowserSession(data) {
+  return webCaseRequest({
+    url: '/hrm/web-case/browser-session',
+    method: 'put',
+    data
+  })
+}
+
+export function delWebBrowserSession(sessionId) {
+  return webCaseRequest({
+    url: '/hrm/web-case/browser-session/' + sessionId,
+    method: 'delete'
+  })
+}
+
 export function getWebRun(webCaseRunId) {
   return webCaseRequest({
     url: '/hrm/web-case/run/' + webCaseRunId,
