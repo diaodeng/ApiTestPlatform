@@ -245,6 +245,7 @@ class WebCaseRunRequestModel(WebJsonModel):
     browser_name: str | None = None
     headless: bool | None = None
     close_browser_on_finish: bool | None = None
+    state_source_type: str | None = None
     persist_context_enabled: bool = False
     persist_context_auto_sync_session: bool = True
     persist_context_key: str | None = None
@@ -363,6 +364,7 @@ class WebRecordingStartRequestModel(WebJsonModel):
     start_url: str
     browser_name: str = "chromium"
     headless: bool = False
+    state_source_type: str | None = None
     persist_context_enabled: bool = False
     persist_context_auto_sync_session: bool = True
     persist_context_key: str | None = None

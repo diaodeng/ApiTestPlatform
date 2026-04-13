@@ -142,7 +142,9 @@ def _resolve_browser_spec(browser_name: str | None) -> BrowserSpec:
     spec = _BROWSER_SPECS.get(normalized)
     if spec is None:
         supported = ", ".join(sorted(_BROWSER_SPECS))
-        raise RuntimeError(f"unsupported browser: {browser_name}, supported: {supported}")
+        raise RuntimeError(
+            f"unsupported browser: {browser_name}, supported: {supported}"
+        )
     return spec
 
 
@@ -233,7 +235,9 @@ def _list_install_event_listeners() -> list[InstallStatusCallback]:
         return list(_INSTALL_EVENT_LISTENERS)
 
 
-def _emit_install_status(message: str, *, callback: InstallStatusCallback | None = None) -> None:
+def _emit_install_status(
+    message: str, *, callback: InstallStatusCallback | None = None
+) -> None:
     """
     广播安装状态日志。
 
@@ -388,9 +392,7 @@ def _load_async_playwright_factory():
     try:
         module = importlib.import_module("playwright.async_api")
     except Exception as exc:
-        raise RuntimeError(
-            "playwright Python 包未安装，无法执行 Web 操作"
-        ) from exc
+        raise RuntimeError("playwright Python 包未安装，无法执行 Web 操作") from exc
     return getattr(module, "async_playwright")
 
 
@@ -400,7 +402,9 @@ def _compute_playwright_driver_command() -> tuple[str, str]:
     except Exception as exc:
         raise RuntimeError("未找到 Playwright 驱动，无法自动安装浏览器") from exc
 
-    compute_driver_executable = getattr(driver_module, "compute_driver_executable", None)
+    compute_driver_executable = getattr(
+        driver_module, "compute_driver_executable", None
+    )
     if compute_driver_executable is None:
         raise RuntimeError("当前 Playwright 版本缺少 driver 安装入口")
 
@@ -429,7 +433,9 @@ def _summarize_install_lines(lines: list[str]) -> str:
     :param lines: 安装输出行列表。
     :return: 最后 20 行非空文本摘要。
     """
-    normalized_lines = [str(line or "").strip() for line in lines if str(line or "").strip()]
+    normalized_lines = [
+        str(line or "").strip() for line in lines if str(line or "").strip()
+    ]
     if not normalized_lines:
         return ""
     return "\n".join(normalized_lines[-20:])
@@ -486,9 +492,7 @@ def _run_install_command(
     summary = _summarize_install_lines(output_lines)
     if summary:
         raise RuntimeError(f"Playwright 浏览器安装失败:\n{summary}")
-    raise RuntimeError(
-        f"Playwright 浏览器安装失败，退出码: {return_code}"
-    )
+    raise RuntimeError(f"Playwright 浏览器安装失败，退出码: {return_code}")
 
 
 async def _install_browser(
@@ -508,7 +512,9 @@ async def _install_browser(
     env = os.environ.copy()
     env.update(plan.install_env)
     command = [node_path, cli_path, "install", plan.install_name]
-    resolved_download_host = str(plan.install_env.get("PLAYWRIGHT_DOWNLOAD_HOST") or "").strip()
+    resolved_download_host = str(
+        plan.install_env.get("PLAYWRIGHT_DOWNLOAD_HOST") or ""
+    ).strip()
     resolved_proxy = _resolve_proxy_text(plan.install_env)
 
     async with _INSTALL_LOCK:
@@ -573,6 +579,7 @@ async def _launch_browser_instance(
 
     launch_kwargs = dict(plan.launch_kwargs)
     launch_kwargs["headless"] = headless
+    launch_kwargs["args"] = ["--window-size=1920,1080"]
     return await launcher.launch(**launch_kwargs)
 
 
@@ -678,7 +685,9 @@ def install_playwright_browser_sync(
         loop = None
 
     if loop and loop.is_running():
-        raise RuntimeError("当前线程已有事件循环，请使用异步接口 install_playwright_browser")
+        raise RuntimeError(
+            "当前线程已有事件循环，请使用异步接口 install_playwright_browser"
+        )
 
     asyncio.run(
         install_playwright_browser(

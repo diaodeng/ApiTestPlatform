@@ -5,6 +5,7 @@ import json
 import uuid
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
@@ -152,6 +153,19 @@ class WebCaseService:
         if normalized in {"0", "false", "no", "off", "disabled"}:
             return False
         return default
+
+    @staticmethod
+    def _normalize_state_source_type(value: Any) -> str:
+        """
+        标准化状态来源类型。
+
+        :param value: 前端或运行态传入的状态来源类型。
+        :return: 仅返回 session/cookie/none 三种值。
+        """
+        normalized = str(value or "").strip().lower()
+        if normalized in {"session", "cookie"}:
+            return normalized
+        return "none"
 
     @staticmethod
     def _normalize_manual_login_wait_sec(value: Any, *, default: int = 120) -> int:
@@ -580,6 +594,256 @@ class WebCaseService:
         normalized = cls._normalize_storage_state_payload(cls._loads(raw_state, {}))
         return normalized
 
+    @staticmethod
+    def _extract_cookie_host_from_url(url: Any) -> str:
+        """从Cookie URL中提取主机名，失败时返回空串。"""
+        text = str(url or "").strip()
+        if not text:
+            return ""
+        try:
+            return str(urlparse(text).hostname or "").strip().lower()
+        except Exception:
+            return ""
+
+    @classmethod
+    def _normalize_cookie_from_storage_state(
+        cls,
+        raw_cookie: dict[str, Any] | None,
+        *,
+        fallback_host: str | None,
+    ) -> dict[str, Any] | None:
+        """
+        将 storage_state 中的单条 Cookie 标准化为 runtime profile cookie 规则条目。
+
+        :param raw_cookie: 原始 Cookie 字典。
+        :param fallback_host: 缺少 domain/url 时用于兜底的主机名。
+        :return: 规范化后的 Cookie；无效时返回 None。
+        """
+        source = raw_cookie if isinstance(raw_cookie, dict) else {}
+        name = str(source.get("name") or "").strip()
+        if not name:
+            return None
+        value = str(source.get("value") or "")
+        cookie: dict[str, Any] = {
+            "name": name,
+            "value": value,
+        }
+
+        path = str(source.get("path") or "/").strip() or "/"
+        domain = str(source.get("domain") or "").strip()
+        url_value = str(source.get("url") or "").strip()
+        if domain:
+            cookie["domain"] = domain
+            cookie["path"] = path
+        elif url_value:
+            cookie["url"] = url_value
+        else:
+            host = str(fallback_host or "").strip().lower().lstrip(".")
+            if host:
+                cookie["domain"] = host
+                cookie["path"] = path
+
+        if "httpOnly" in source:
+            cookie["httpOnly"] = bool(source.get("httpOnly"))
+        elif "http_only" in source:
+            cookie["httpOnly"] = bool(source.get("http_only"))
+
+        if "secure" in source:
+            cookie["secure"] = bool(source.get("secure"))
+
+        same_site = source.get("sameSite")
+        if same_site is None:
+            same_site = source.get("same_site")
+        if same_site not in (None, ""):
+            cookie["sameSite"] = str(same_site)
+
+        expires_raw = source.get("expires")
+        if expires_raw not in (None, ""):
+            try:
+                expires_value = float(expires_raw)
+                if expires_value == expires_value and expires_value != float("inf") and expires_value != float("-inf"):
+                    cookie["expires"] = int(expires_value)
+            except Exception:
+                pass
+        return cookie
+
+    @classmethod
+    def _build_cookie_rule_from_storage_state(
+        cls,
+        *,
+        final_state: dict[str, Any] | None,
+        host_patterns: list[str] | None,
+        scene_label: str,
+    ) -> dict[str, Any] | None:
+        """
+        根据最终 storage_state 构建可落库的 Cookie 规则。
+
+        :param final_state: 客户端上报的最终浏览器状态。
+        :param host_patterns: 运行态解析出的主机范围。
+        :param scene_label: 场景标识，用于日志追踪。
+        :return: Cookie规则；无可用 Cookie 时返回 None。
+        """
+        state = final_state if isinstance(final_state, dict) else {}
+        raw_cookies = state.get("cookies")
+        cookie_list = raw_cookies if isinstance(raw_cookies, list) else []
+        normalized_hosts = cls._normalize_host_patterns(host_patterns or [])
+        fallback_host = normalized_hosts[0] if normalized_hosts else ""
+
+        cookies: list[dict[str, Any]] = []
+        derived_hosts: list[str] = list(normalized_hosts)
+        seen_derived: set[str] = set(derived_hosts)
+
+        for raw_cookie in cookie_list:
+            cookie = cls._normalize_cookie_from_storage_state(raw_cookie, fallback_host=fallback_host)
+            if not cookie:
+                continue
+            cookies.append(cookie)
+            cookie_domain = str(cookie.get("domain") or "").strip().lower().lstrip(".")
+            cookie_url_host = cls._extract_cookie_host_from_url(cookie.get("url"))
+            for host in (cookie_domain, cookie_url_host):
+                if not host or host in seen_derived:
+                    continue
+                seen_derived.add(host)
+                derived_hosts.append(host)
+
+        if not cookies:
+            logger.info(f"[{scene_label}] 本次未捕获到可同步的Cookie，跳过Cookie配置更新")
+            return None
+
+        rule_name = f"自动同步Cookie-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        rule: dict[str, Any] = {
+            "name": rule_name,
+            "enabled": True,
+            "applyOn": ["before_start"],
+            "cookies": cookies,
+        }
+        if derived_hosts:
+            rule["match"] = {
+                "host": derived_hosts,
+            }
+        return rule
+
+    @classmethod
+    def _sync_runtime_state_to_runtime_profile(
+        cls,
+        query_db: Session,
+        *,
+        profile_id: str | None,
+        final_state: dict[str, Any] | None,
+        host_patterns: list[str] | None,
+        default_project_id: int | None,
+        default_module_id: int | None,
+        user_name: str | None,
+        scene_label: str,
+    ) -> bool:
+        """
+        将最终浏览器状态同步到指定 Cookie 配置（runtime profile）。
+
+        :param query_db: 数据库会话。
+        :param profile_id: Cookie配置ID，空值表示自动新建配置。
+        :param final_state: 最终 storage_state。
+        :param host_patterns: 域名范围。
+        :param default_project_id: 默认项目ID。
+        :param default_module_id: 默认模块ID。
+        :param user_name: 操作人。
+        :param scene_label: 场景标识。
+        :return: True 表示已更新配置，False 表示无需更新。
+        """
+        profile_id_value = str(profile_id or "").strip()
+
+        cookie_rule = cls._build_cookie_rule_from_storage_state(
+            final_state=final_state,
+            host_patterns=host_patterns,
+            scene_label=scene_label,
+        )
+        if cookie_rule is None:
+            return False
+
+        config_row: SysConfig | None = None
+        if profile_id_value:
+            config_key = cls._runtime_profile_config_key(profile_id_value)
+            config_row = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+
+        current_time = datetime.now()
+        if config_row is None:
+            if not profile_id_value:
+                profile_id_value = uuid.uuid4().hex
+            profile_name = f"Auto-Cookie-{current_time.strftime('%Y%m%d%H%M%S')}"
+            payload_to_save = {
+                "profileId": profile_id_value,
+                "profileName": profile_name,
+                "profileType": "runtime",
+                "targets": ["web"],
+                "enabled": True,
+                "projectId": cls._to_optional_int(default_project_id),
+                "moduleId": cls._to_optional_int(default_module_id),
+                "sort": 0,
+                "runtimeOverrides": {},
+                "variables": {},
+                "cookieRules": [cookie_rule],
+                "persistContextScopes": [],
+                "remark": "自动同步生成",
+                "schemaVersion": 1,
+                "createdAt": current_time.isoformat(),
+                "createdBy": user_name or "system",
+                "updatedAt": current_time.isoformat(),
+                "updatedBy": user_name or "system",
+            }
+            query_db.add(
+                SysConfig(
+                    config_name=profile_name,
+                    config_key=cls._runtime_profile_config_key(profile_id_value),
+                    config_value=cls._dumps(payload_to_save),
+                    config_type="N",
+                    create_by=user_name or "system",
+                    update_by=user_name or "system",
+                    remark="自动同步生成",
+                )
+            )
+            logger.info(
+                f"[{scene_label}] 已自动创建Cookie配置 profile_id={profile_id_value}，cookie_count={len(cookie_rule.get('cookies') or [])}"
+            )
+            return True
+
+        current_payload = cls._loads(getattr(config_row, "config_value", None), {})
+        if not isinstance(current_payload, dict):
+            current_payload = {}
+        normalized_payload = cls._normalize_runtime_profile_payload(current_payload)
+        profile_name = str(normalized_payload.get("profileName") or config_row.config_name or "").strip() or profile_id_value
+        runtime_overrides = (
+            dict(normalized_payload.get("runtimeOverrides"))
+            if isinstance(normalized_payload.get("runtimeOverrides"), dict)
+            else {}
+        )
+        for key in cls.RUNTIME_COOKIE_RULE_KEYS:
+            runtime_overrides.pop(key, None)
+
+        payload_to_save = {
+            **normalized_payload,
+            "profileId": profile_id_value,
+            "profileName": profile_name,
+            "runtimeOverrides": runtime_overrides,
+            "cookieRules": [cookie_rule],
+            "schemaVersion": 1,
+            "updatedAt": current_time.isoformat(),
+            "updatedBy": user_name or config_row.update_by or "system",
+        }
+
+        created_at = current_payload.get("createdAt") or current_payload.get("created_at")
+        created_by = current_payload.get("createdBy") or current_payload.get("created_by")
+        if created_at:
+            payload_to_save["createdAt"] = created_at
+        if created_by:
+            payload_to_save["createdBy"] = created_by
+
+        config_row.config_name = profile_name
+        config_row.config_value = cls._dumps(payload_to_save)
+        config_row.remark = normalized_payload.get("remark") or config_row.remark
+        config_row.update_by = user_name or config_row.update_by or "system"
+        config_row.update_time = current_time
+        logger.info(f"[{scene_label}] 已同步Cookie到配置 profile_id={profile_id_value}，cookie_count={len(cookie_rule.get('cookies') or [])}")
+        return True
+
     @classmethod
     def _find_browser_session_by_scope_key(
         cls,
@@ -747,7 +1011,7 @@ class WebCaseService:
         user_name: str | None,
         scene_label: str,
     ) -> None:
-        """将客户端上报的最终浏览器状态同步回 Browser Session。"""
+        """将客户端上报的最终浏览器状态同步回 Browser Session 或 Cookie 配置。"""
         runtime_debug = cls._extract_runtime_debug_payload(payload)
         auto_sync_flag = cls._pick_runtime_option_value(
             runtime_debug,
@@ -781,6 +1045,35 @@ class WebCaseService:
             ),
             default_session_id,
         )
+        runtime_profile_id = cls._pick_first_non_empty_text(
+            cls._pick_runtime_option_value(
+                runtime_debug,
+                runtime_options,
+                (
+                    "runtimeProfileId",
+                    "runtime_profile_id",
+                ),
+            )
+        )
+        raw_state_source_type = str(
+            cls._pick_runtime_option_value(
+                runtime_debug,
+                runtime_options,
+                (
+                    "stateSourceType",
+                    "state_source_type",
+                ),
+            )
+            or ""
+        ).strip().lower()
+        state_source_type = cls._normalize_state_source_type(raw_state_source_type)
+        if not raw_state_source_type:
+            if session_id:
+                state_source_type = "session"
+            elif runtime_profile_id:
+                state_source_type = "cookie"
+            else:
+                state_source_type = "none"
         scope_key = cls._pick_first_non_empty_text(
             cls._pick_runtime_option_value(
                 runtime_debug,
@@ -806,16 +1099,36 @@ class WebCaseService:
             ),
             default_browser_name,
         )
-        if not session_id and not scope_key:
-            scope_key = cls._build_auto_persist_scope_key(
-                project_id=default_project_id,
-                module_id=default_module_id,
-                browser_name=browser_name or default_browser_name,
-            )
-            logger.info(f"[{scene_label}] 未指定作用域与Session，自动生成作用域: {scope_key}")
-
         host_patterns = cls._resolve_runtime_hosts(runtime_debug, runtime_options)
         try:
+            if state_source_type == "none":
+                logger.info(f"[{scene_label}] 状态来源为 none，跳过浏览器状态同步")
+                return
+
+            if state_source_type == "cookie":
+                synced = cls._sync_runtime_state_to_runtime_profile(
+                    query_db,
+                    profile_id=runtime_profile_id or None,
+                    final_state=final_state,
+                    host_patterns=host_patterns,
+                    default_project_id=default_project_id,
+                    default_module_id=default_module_id,
+                    user_name=user_name,
+                    scene_label=scene_label,
+                )
+                if synced:
+                    query_db.commit()
+                return
+
+            # session 分支：支持“未选择Session但开启保留状态”时自动创建。
+            if not session_id and not scope_key:
+                scope_key = cls._build_auto_persist_scope_key(
+                    project_id=default_project_id,
+                    module_id=default_module_id,
+                    browser_name=browser_name or default_browser_name,
+                )
+                logger.info(f"[{scene_label}] 未指定作用域与Session，自动生成作用域: {scope_key}")
+
             cls._upsert_browser_session_from_runtime(
                 query_db,
                 session_id=session_id or None,
@@ -830,7 +1143,7 @@ class WebCaseService:
             query_db.commit()
         except Exception as exc:
             query_db.rollback()
-            logger.warning(f"[{scene_label}] 自动同步 Browser Session 失败: {exc}")
+            logger.warning(f"[{scene_label}] 自动同步浏览器状态失败: {exc}")
 
     @classmethod
     def _normalize_browser_session_payload(cls, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -2090,14 +2403,25 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
+        state_source_type = cls._normalize_state_source_type(request_model.state_source_type)
+        browser_session_id = (
+            str(request_model.browser_session_id or "").strip()
+            if state_source_type == "session"
+            else ""
+        )
+        runtime_profile_id = (
+            str(request_model.runtime_profile_id or "").strip()
+            if state_source_type == "cookie"
+            else ""
+        )
         try:
             profile_runtime_overrides = cls._resolve_runtime_profile_runtime_overrides(
                 query_db,
-                request_model.runtime_profile_id,
+                runtime_profile_id,
             )
             browser_session_runtime_overrides = cls._resolve_browser_session_runtime_overrides(
                 query_db,
-                request_model.browser_session_id,
+                browser_session_id,
             )
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
@@ -2106,15 +2430,16 @@ class WebCaseService:
         runtime_options_payload: dict[str, Any] = {}
         if merged_runtime_overrides:
             runtime_options_payload["runtimeOverrides"] = merged_runtime_overrides
-        if request_model.runtime_profile_id:
-            runtime_options_payload["runtimeProfileId"] = request_model.runtime_profile_id
-        browser_session_id = str(request_model.browser_session_id or "").strip()
-        if browser_session_id:
-            runtime_options_payload["browserSessionId"] = browser_session_id
+        runtime_options_payload["stateSourceType"] = state_source_type
+        runtime_options_payload["browserSessionId"] = browser_session_id
+        runtime_options_payload["runtimeProfileId"] = runtime_profile_id
         manual_login_enabled = bool(request_model.manual_login_enabled)
         manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
         manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
-        persist_context_enabled = bool(request_model.persist_context_enabled or browser_session_id)
+        persist_context_enabled = bool(
+            state_source_type in {"session", "cookie"}
+            and request_model.persist_context_enabled
+        )
         persist_context_auto_sync_session = bool(
             persist_context_enabled and request_model.persist_context_auto_sync_session
         )
@@ -2597,14 +2922,25 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
+        state_source_type = cls._normalize_state_source_type(request_model.state_source_type)
+        browser_session_id = (
+            str(request_model.browser_session_id or "").strip()
+            if state_source_type == "session"
+            else ""
+        )
+        runtime_profile_id = (
+            str(request_model.runtime_profile_id or "").strip()
+            if state_source_type == "cookie"
+            else ""
+        )
         try:
             profile_runtime_overrides = cls._resolve_runtime_profile_runtime_overrides(
                 query_db,
-                request_model.runtime_profile_id,
+                runtime_profile_id,
             )
             browser_session_runtime_overrides = cls._resolve_browser_session_runtime_overrides(
                 query_db,
-                request_model.browser_session_id,
+                browser_session_id,
             )
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
@@ -2636,8 +2972,10 @@ class WebCaseService:
         manual_login_enabled = bool(request_model.manual_login_enabled)
         manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
         manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
-        browser_session_id = str(request_model.browser_session_id or "").strip()
-        persist_context_enabled = bool(request_model.persist_context_enabled or browser_session_id)
+        persist_context_enabled = bool(
+            state_source_type in {"session", "cookie"}
+            and request_model.persist_context_enabled
+        )
         persist_context_auto_sync_session = bool(
             persist_context_enabled and request_model.persist_context_auto_sync_session
         )
@@ -2649,10 +2987,11 @@ class WebCaseService:
         runtime_options["manualLoginEnabled"] = manual_login_enabled
         runtime_options["manualLoginWaitSec"] = manual_login_wait_sec
         runtime_options["manualLoginRequireConfirm"] = manual_login_require_confirm
+        runtime_options["stateSourceType"] = state_source_type
         runtime_options["persistContextEnabled"] = persist_context_enabled
         runtime_options["persistContextAutoSyncSession"] = persist_context_auto_sync_session
-        if browser_session_id:
-            runtime_options["browserSessionId"] = browser_session_id
+        runtime_options["browserSessionId"] = browser_session_id
+        runtime_options["runtimeProfileId"] = runtime_profile_id
         if persist_context_key:
             runtime_options["persistContextKey"] = persist_context_key
         if persist_context_enabled:
@@ -2661,8 +3000,6 @@ class WebCaseService:
                 runtime_options["persistContextHosts"] = persist_context_hosts
         if merged_runtime_overrides:
             runtime_options["runtimeOverrides"] = merged_runtime_overrides
-        if request_model.runtime_profile_id:
-            runtime_options["runtimeProfileId"] = request_model.runtime_profile_id
 
         if manual_login_enabled and manual_login_require_confirm:
             prepare_response = await send_message(
