@@ -185,6 +185,8 @@ class ThemeConfigModel(BaseModel):
 class AgentBrowserConfigModel(BaseModel):
     auto_install: bool = True
     install_dir: str = ""
+    playwright_download_host: str = ""
+    playwright_download_proxy: str = ""
     chromium_executable_path: str = ""
     firefox_executable_path: str = ""
     webkit_executable_path: str = ""

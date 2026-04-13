@@ -485,6 +485,42 @@ class WebCaseService:
                 return text
         return ""
 
+    @staticmethod
+    def _normalize_scope_token(value: Any, *, default: str) -> str:
+        """
+        标准化作用域键片段，仅保留字母数字与 `-`、`_`。
+
+        :param value: 原始片段值。
+        :param default: 当片段为空时使用的默认值。
+        :return: 规范化后的片段文本。
+        """
+        raw = str(value or "").strip().lower()
+        if not raw:
+            raw = default
+        normalized = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "-" for ch in raw).strip("-_")
+        return normalized or default
+
+    @classmethod
+    def _build_auto_persist_scope_key(
+        cls,
+        *,
+        project_id: int | None,
+        module_id: int | None,
+        browser_name: str | None,
+    ) -> str:
+        """
+        生成首次自动同步场景下的默认作用域键。
+
+        :param project_id: 项目ID，用于提升同项目内复用稳定性。
+        :param module_id: 模块ID，用于提升同模块内复用稳定性。
+        :param browser_name: 浏览器名称。
+        :return: 可复用的默认作用域键。
+        """
+        project_token = f"p{project_id}" if project_id is not None else "p0"
+        module_token = f"m{module_id}" if module_id is not None else "m0"
+        browser_token = cls._normalize_scope_token(browser_name, default="chromium")
+        return f"auto-{project_token}-{module_token}-{browser_token}"
+
     @classmethod
     def _pick_runtime_option_value(
         cls,
@@ -758,8 +794,6 @@ class WebCaseService:
             ),
             default_scope_key,
         )
-        if not session_id and not scope_key:
-            return
 
         browser_name = cls._pick_first_non_empty_text(
             cls._pick_runtime_option_value(
@@ -772,6 +806,14 @@ class WebCaseService:
             ),
             default_browser_name,
         )
+        if not session_id and not scope_key:
+            scope_key = cls._build_auto_persist_scope_key(
+                project_id=default_project_id,
+                module_id=default_module_id,
+                browser_name=browser_name or default_browser_name,
+            )
+            logger.info(f"[{scene_label}] 未指定作用域与Session，自动生成作用域: {scope_key}")
+
         host_patterns = cls._resolve_runtime_hosts(runtime_debug, runtime_options)
         try:
             cls._upsert_browser_session_from_runtime(
