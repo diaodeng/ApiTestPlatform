@@ -97,7 +97,7 @@ class PosStartService:
     @classmethod
     def _rules(cls):
         return [
-            LocalEnvRule(),
+            # LocalEnvRule(),
             UatNoLocalRule(),
             NoRemoteRule(),
             MismatchRule(),

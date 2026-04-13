@@ -528,24 +528,184 @@ async def _wait_manual_login_if_needed(
     if not enabled or wait_sec <= 0:
         return gate_result
 
-    logger.info(f"[manual-login-gate] stage={stage}, wait_sec={wait_sec}, page={gate_result.get('pageUrl')}")
+    logger.info(
+        f"[manual-login-gate] stage={stage}, wait_sec={wait_sec}, page={gate_result.get('pageUrl')}"
+    )
     started_at = time.time()
     await asyncio.sleep(wait_sec)
     gate_result["waitedSec"] = max(0, int(round(time.time() - started_at)))
     return gate_result
 
 
-def _resolve_runtime_settings(case_data: dict[str, Any], runtime_options: dict[str, Any]) -> dict[str, Any]:
-    runtime_overrides = _as_dict(runtime_options.get("runtimeOverrides") or runtime_options.get("runtime_overrides"))
-    case_runtime_settings = _as_dict(case_data.get("runtimeSettings") or case_data.get("runtime_settings"))
-    return {
+def _resolve_runtime_settings(
+    case_data: dict[str, Any], runtime_options: dict[str, Any]
+) -> dict[str, Any]:
+    """合并用例运行时配置，并按状态来源策略清理 session/cookie 相关字段。"""
+    runtime_overrides = _as_dict(
+        runtime_options.get("runtimeOverrides")
+        or runtime_options.get("runtime_overrides")
+    )
+    case_runtime_settings = _as_dict(
+        case_data.get("runtimeSettings") or case_data.get("runtime_settings")
+    )
+    merged = {
         **case_runtime_settings,
         **runtime_overrides,
         **runtime_options,
     }
+    return _apply_state_source_runtime_policy(merged, runtime_options)
 
 
-def _resolve_persist_context_settings(runtime_options: dict[str, Any]) -> tuple[bool, str]:
+_SESSION_ID_KEYS = (
+    "browserSessionId",
+    "browser_session_id",
+    "persistContextSessionId",
+    "persist_context_session_id",
+    "sessionProfileId",
+    "session_profile_id",
+)
+_PROFILE_ID_KEYS = (
+    "runtimeProfileId",
+    "runtime_profile_id",
+    "cookieProfileId",
+    "cookie_profile_id",
+)
+_SESSION_SEED_KEYS = (
+    "persistContextSeedState",
+    "persist_context_seed_state",
+    "persistContextSeedStorageState",
+    "persist_context_seed_storage_state",
+)
+_SESSION_SCOPE_KEYS = (
+    "persistContextKey",
+    "persist_context_key",
+    "preserveContextKey",
+    "preserve_context_key",
+    "persistContextHosts",
+    "persist_context_hosts",
+    "persistContextHostPatterns",
+    "persist_context_host_patterns",
+)
+_COOKIE_RULE_KEYS = (
+    "cookieRules",
+    "cookie_rules",
+    "cookieScopes",
+    "cookie_scopes",
+    "cookieProfiles",
+    "cookie_profiles",
+    "cookies",
+)
+
+
+def _drop_runtime_keys(runtime_settings: dict[str, Any], keys: tuple[str, ...]) -> None:
+    """从运行时配置中移除指定字段。"""
+    for key in keys:
+        runtime_settings.pop(key, None)
+
+
+def _normalize_state_source_type(value: Any) -> str:
+    """标准化状态来源类型，仅保留 session/cookie/none。"""
+    normalized = str(value or "").strip().lower()
+    if normalized in {"session", "cookie"}:
+        return normalized
+    if normalized == "none":
+        return "none"
+    return ""
+
+
+def _resolve_runtime_profile_id(runtime_options: dict[str, Any]) -> str:
+    """解析 Cookie 配置 ID。"""
+    for key in _PROFILE_ID_KEYS:
+        profile_id = str(runtime_options.get(key) or "").strip()
+        if profile_id:
+            return profile_id
+    return ""
+
+
+def _resolve_state_source_type(
+    runtime_options: dict[str, Any],
+    *,
+    fallback_runtime: dict[str, Any] | None = None,
+) -> str:
+    """解析状态来源类型；未显式设置时根据 ID 推断。"""
+    for source in (runtime_options, fallback_runtime or {}):
+        normalized = _normalize_state_source_type(
+            source.get("stateSourceType") or source.get("state_source_type")
+        )
+        if normalized:
+            return normalized
+
+    if _resolve_browser_session_id(runtime_options):
+        return "session"
+    if _resolve_runtime_profile_id(runtime_options):
+        return "cookie"
+    if fallback_runtime:
+        if _resolve_browser_session_id(fallback_runtime):
+            return "session"
+        if _resolve_runtime_profile_id(fallback_runtime):
+            return "cookie"
+    return "none"
+
+
+def _apply_state_source_runtime_policy(
+    merged_runtime: dict[str, Any],
+    runtime_options: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    按状态来源策略清理运行时配置，确保“使用来源”和“是否保留状态”解耦。
+
+    规则：
+    - none: 不使用 session/cookie，并禁用状态保留。
+    - session: 仅使用 session（可不选具体项）；不应用 cookie 配置。
+    - cookie: 仅使用 cookie 配置（可不选具体项）；不应用 session 配置。
+    """
+    runtime_settings = dict(merged_runtime or {})
+    state_source_type = _resolve_state_source_type(
+        runtime_options, fallback_runtime=runtime_settings
+    )
+    selected_session_id = _resolve_browser_session_id(runtime_options)
+    selected_profile_id = _resolve_runtime_profile_id(runtime_options)
+
+    runtime_settings["stateSourceType"] = state_source_type
+
+    if state_source_type == "none":
+        _drop_runtime_keys(
+            runtime_settings,
+            _SESSION_ID_KEYS
+            + _PROFILE_ID_KEYS
+            + _SESSION_SEED_KEYS
+            + _SESSION_SCOPE_KEYS
+            + _COOKIE_RULE_KEYS,
+        )
+        runtime_settings["persistContextEnabled"] = False
+        runtime_settings["persistContextAutoSyncSession"] = False
+        runtime_settings["persistContextSyncToSession"] = False
+        return runtime_settings
+
+    if state_source_type == "session":
+        _drop_runtime_keys(runtime_settings, _PROFILE_ID_KEYS + _COOKIE_RULE_KEYS)
+        if selected_session_id:
+            runtime_settings["browserSessionId"] = selected_session_id
+        else:
+            _drop_runtime_keys(
+                runtime_settings,
+                _SESSION_ID_KEYS + _SESSION_SEED_KEYS + _SESSION_SCOPE_KEYS,
+            )
+        return runtime_settings
+
+    _drop_runtime_keys(
+        runtime_settings, _SESSION_ID_KEYS + _SESSION_SEED_KEYS + _SESSION_SCOPE_KEYS
+    )
+    if selected_profile_id:
+        runtime_settings["runtimeProfileId"] = selected_profile_id
+    else:
+        _drop_runtime_keys(runtime_settings, _PROFILE_ID_KEYS + _COOKIE_RULE_KEYS)
+    return runtime_settings
+
+
+def _resolve_persist_context_settings(
+    runtime_options: dict[str, Any],
+) -> tuple[bool, str]:
     """解析是否启用浏览器状态保留，以及状态作用域键。"""
     enabled_candidates = [
         runtime_options.get("persistContextEnabled"),
@@ -578,22 +738,16 @@ def _resolve_persist_context_settings(runtime_options: dict[str, Any]) -> tuple[
 
 def _resolve_browser_session_id(runtime_options: dict[str, Any]) -> str:
     """解析浏览器 Session ID。"""
-    candidates = [
-        runtime_options.get("browserSessionId"),
-        runtime_options.get("browser_session_id"),
-        runtime_options.get("persistContextSessionId"),
-        runtime_options.get("persist_context_session_id"),
-        runtime_options.get("sessionProfileId"),
-        runtime_options.get("session_profile_id"),
-    ]
-    for candidate in candidates:
-        session_id = str(candidate or "").strip()
+    for key in _SESSION_ID_KEYS:
+        session_id = str(runtime_options.get(key) or "").strip()
         if session_id:
             return session_id
     return ""
 
 
-def _resolve_persist_context_auto_sync_session(runtime_options: dict[str, Any], *, persist_enabled: bool) -> bool:
+def _resolve_persist_context_auto_sync_session(
+    runtime_options: dict[str, Any], *, persist_enabled: bool
+) -> bool:
     """解析是否启用“运行结束自动同步到 Browser Session”。"""
     if not persist_enabled:
         return False
@@ -618,15 +772,21 @@ def _attach_runtime_persist_debug(
     context_state_path: Path | None = None,
 ) -> None:
     """补齐 runtimeDebug 中与浏览器状态同步相关的字段。"""
+    runtime_debug["stateSourceType"] = _resolve_state_source_type(runtime_options)
+    runtime_debug["runtimeProfileId"] = _resolve_runtime_profile_id(runtime_options)
     _, persist_context_key = _resolve_persist_context_settings(runtime_options)
     runtime_debug["browserSessionId"] = _resolve_browser_session_id(runtime_options)
     runtime_debug["persistContextKey"] = persist_context_key
     runtime_debug["persistContextEnabled"] = bool(persist_enabled)
-    runtime_debug["persistContextAutoSyncSession"] = _resolve_persist_context_auto_sync_session(
-        runtime_options,
-        persist_enabled=persist_enabled,
+    runtime_debug["persistContextAutoSyncSession"] = (
+        _resolve_persist_context_auto_sync_session(
+            runtime_options,
+            persist_enabled=persist_enabled,
+        )
     )
-    runtime_debug["persistContextHosts"] = _resolve_persist_context_hosts(runtime_options)
+    runtime_debug["persistContextHosts"] = _resolve_persist_context_hosts(
+        runtime_options
+    )
     runtime_debug["browserName"] = str(browser_name or "").strip().lower()
     if context_state_path is not None:
         runtime_debug["persistContextPath"] = str(context_state_path)
@@ -652,7 +812,11 @@ async def _append_persist_final_state_for_sync(
     try:
         storage_state = await _capture_storage_state_payload(context)
         persist_hosts = _resolve_persist_context_hosts(runtime_options)
-        final_state = _filter_storage_state_payload(storage_state, persist_hosts) if persist_hosts else storage_state
+        final_state = (
+            _filter_storage_state_payload(storage_state, persist_hosts)
+            if persist_hosts
+            else storage_state
+        )
         runtime_debug["persistContextFinalState"] = final_state
     except Exception as exc:
         logger.debug(f"采集最终浏览器状态失败: {exc}")
@@ -789,7 +953,9 @@ async def _save_storage_state_payload(context: Any, state_path: Path) -> None:
         await context.storage_state(path=str(state_path))
 
 
-def _filter_storage_state_payload(storage_state: dict[str, Any], hosts: list[str]) -> dict[str, Any]:
+def _filter_storage_state_payload(
+    storage_state: dict[str, Any], hosts: list[str]
+) -> dict[str, Any]:
     """按域名过滤 storage_state（cookies + origins）。"""
     if not hosts:
         return storage_state
@@ -839,19 +1005,25 @@ def _build_context_state_path(
     if not persist_enabled:
         return None
 
-    runtime_profile_id = str(
-        runtime_options.get("runtimeProfileId")
-        or runtime_options.get("runtime_profile_id")
-        or ""
-    ).strip()
+    runtime_profile_id = _resolve_runtime_profile_id(runtime_options)
     target_host = _host_from_url(start_url)
-    raw_scope = scope_key or runtime_profile_id or default_scope or target_host or "default"
+    raw_scope = (
+        scope_key or runtime_profile_id or default_scope or target_host or "default"
+    )
     safe_scope = re.sub(r"[^a-zA-Z0-9_.-]+", "_", raw_scope).strip("._-")
     if not safe_scope:
         safe_scope = "default"
 
-    safe_browser = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(browser_name or "chromium")).strip("._-") or "chromium"
-    storage_dir = Path(__file__).resolve().parents[1] / "storage" / "runtime" / "web-context-state"
+    safe_browser = (
+        re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(browser_name or "chromium")).strip("._-")
+        or "chromium"
+    )
+    storage_dir = (
+        Path(__file__).resolve().parents[1]
+        / "storage"
+        / "runtime"
+        / "web-context-state"
+    )
     return storage_dir / f"{safe_scope}.{safe_browser}.json"
 
 
@@ -899,7 +1071,9 @@ def _resolve_seed_storage_state(runtime_options: dict[str, Any]) -> dict[str, An
     return {}
 
 
-def _seed_context_state_file_if_needed(runtime_options: dict[str, Any], state_path: Path | None) -> None:
+def _seed_context_state_file_if_needed(
+    runtime_options: dict[str, Any], state_path: Path | None
+) -> None:
     """当本地状态文件不存在时，使用运行时下发的seed state初始化。"""
     if state_path is None or state_path.exists():
         return
@@ -908,7 +1082,9 @@ def _seed_context_state_file_if_needed(runtime_options: dict[str, Any], state_pa
         return
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps(seed_state, ensure_ascii=False), encoding="utf-8")
+        state_path.write_text(
+            json.dumps(seed_state, ensure_ascii=False), encoding="utf-8"
+        )
     except Exception as exc:
         logger.debug(f"写入浏览器上下文seed state失败: {exc}")
 
@@ -929,9 +1105,14 @@ async def _create_browser_context(
         default_scope=default_scope,
     )
     context_kwargs: dict[str, Any] = {"ignore_https_errors": True}
+    context_kwargs["no_viewport"] = {"width": 1920, "height": 1080}
+    seed_state = _resolve_seed_storage_state(runtime_options)
     _seed_context_state_file_if_needed(runtime_options, state_path)
     if state_path is not None and state_path.exists():
         context_kwargs["storage_state"] = str(state_path)
+    elif seed_state:
+        # 当未启用“保留浏览器状态”时，仍允许使用一次性 session/cookie 初始状态。
+        context_kwargs["storage_state"] = seed_state
     context = await browser.new_context(**context_kwargs)
     return context, state_path
 
@@ -951,16 +1132,22 @@ async def _save_context_state_if_needed(
         if persist_hosts:
             storage_state = await _capture_storage_state_payload(context)
             filtered_state = _filter_storage_state_payload(storage_state, persist_hosts)
-            state_path.write_text(json.dumps(filtered_state, ensure_ascii=False), encoding="utf-8")
+            state_path.write_text(
+                json.dumps(filtered_state, ensure_ascii=False), encoding="utf-8"
+            )
         else:
             await _save_storage_state_payload(context, state_path)
     except Exception as exc:
         logger.debug(f"保存浏览器上下文状态失败: {exc}")
 
 
-def _step_timeout_ms(step: dict[str, Any], runtime_options: dict[str, Any], case_data: dict[str, Any]) -> int:
+def _step_timeout_ms(
+    step: dict[str, Any], runtime_options: dict[str, Any], case_data: dict[str, Any]
+) -> int:
     params = _as_dict(step.get("params"))
-    case_runtime = _as_dict(case_data.get("runtimeSettings") or case_data.get("runtime_settings"))
+    case_runtime = _as_dict(
+        case_data.get("runtimeSettings") or case_data.get("runtime_settings")
+    )
     candidates = [
         step.get("timeoutMs"),
         step.get("timeout_ms"),
@@ -982,9 +1169,13 @@ def _step_timeout_ms(step: dict[str, Any], runtime_options: dict[str, Any], case
     return 10000
 
 
-def _step_think_time_ms(step: dict[str, Any], runtime_options: dict[str, Any], case_data: dict[str, Any]) -> int:
+def _step_think_time_ms(
+    step: dict[str, Any], runtime_options: dict[str, Any], case_data: dict[str, Any]
+) -> int:
     params = _as_dict(step.get("params"))
-    case_runtime = _as_dict(case_data.get("runtimeSettings") or case_data.get("runtime_settings"))
+    case_runtime = _as_dict(
+        case_data.get("runtimeSettings") or case_data.get("runtime_settings")
+    )
     candidates = [
         step.get("thinkTimeMs"),
         step.get("think_time_ms"),
@@ -1107,7 +1298,13 @@ def _interpolate_string(value: str, variables: dict[str, Any]) -> str:
 
 def _resolve_runtime_variables(runtime_options: dict[str, Any]) -> dict[str, Any]:
     variables: dict[str, Any] = {}
-    for key in ("variables", "runtimeVariables", "runtime_variables", "cookieVariables", "cookie_variables"):
+    for key in (
+        "variables",
+        "runtimeVariables",
+        "runtime_variables",
+        "cookieVariables",
+        "cookie_variables",
+    ):
         value = runtime_options.get(key)
         if isinstance(value, dict):
             variables.update(value)
@@ -1116,7 +1313,14 @@ def _resolve_runtime_variables(runtime_options: dict[str, Any]) -> dict[str, Any
 
 def _normalize_cookie_rules(runtime_options: dict[str, Any]) -> list[dict[str, Any]]:
     rules: list[dict[str, Any]] = []
-    for key in ("cookieRules", "cookie_rules", "cookieScopes", "cookie_scopes", "cookieProfiles", "cookie_profiles"):
+    for key in (
+        "cookieRules",
+        "cookie_rules",
+        "cookieScopes",
+        "cookie_scopes",
+        "cookieProfiles",
+        "cookie_profiles",
+    ):
         for item in _as_list(runtime_options.get(key)):
             if not isinstance(item, dict):
                 continue
@@ -1124,14 +1328,19 @@ def _normalize_cookie_rules(runtime_options: dict[str, Any]) -> list[dict[str, A
             if not cookies:
                 continue
             match = _as_dict(item.get("match"))
-            for match_key in ("host", "domain", "urlContains", "url_contains", "urlRegex", "url_regex"):
+            for match_key in (
+                "host",
+                "domain",
+                "urlContains",
+                "url_contains",
+                "urlRegex",
+                "url_regex",
+            ):
                 if item.get(match_key) not in (None, "") and match_key not in match:
                     match[match_key] = item.get(match_key)
             apply_on = _as_list(item.get("applyOn") or item.get("apply_on"))
             normalized_apply_on = {
-                str(entry).strip().lower()
-                for entry in apply_on
-                if str(entry).strip()
+                str(entry).strip().lower() for entry in apply_on if str(entry).strip()
             }
             if not normalized_apply_on:
                 normalized_apply_on = {"before_start", "before_step", "before_goto"}
@@ -1171,20 +1380,28 @@ def _ensure_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _rule_matches_url(rule: dict[str, Any], *, url: str, host: str, variables: dict[str, Any]) -> bool:
+def _rule_matches_url(
+    rule: dict[str, Any], *, url: str, host: str, variables: dict[str, Any]
+) -> bool:
     match = _as_dict(rule.get("match"))
     if not match:
         return True
 
     host_values = _ensure_list(match.get("host")) + _ensure_list(match.get("domain"))
     if host_values:
-        normalized = [_interpolate_string(item.lower(), variables) for item in host_values]
+        normalized = [
+            _interpolate_string(item.lower(), variables) for item in host_values
+        ]
         if not host:
             return False
-        if not any(host == item or host.endswith(f".{item}") for item in normalized if item):
+        if not any(
+            host == item or host.endswith(f".{item}") for item in normalized if item
+        ):
             return False
 
-    contains_values = _ensure_list(match.get("urlContains") or match.get("url_contains"))
+    contains_values = _ensure_list(
+        match.get("urlContains") or match.get("url_contains")
+    )
     if contains_values:
         normalized = [_interpolate_string(item, variables) for item in contains_values]
         if not any(item and item in url for item in normalized):
@@ -1229,16 +1446,22 @@ def _normalize_cookie_item(
     explicit_url = cookie_item.get("url")
     explicit_domain = cookie_item.get("domain")
     explicit_path = cookie_item.get("path")
-    default_domain_value = _interpolate_string(str(default_domain or ""), variables).strip().lstrip(".")
+    default_domain_value = (
+        _interpolate_string(str(default_domain or ""), variables).strip().lstrip(".")
+    )
 
     if explicit_url:
         cookie_payload["url"] = _interpolate_string(str(explicit_url), variables)
     elif explicit_domain:
         cookie_payload["domain"] = _interpolate_string(str(explicit_domain), variables)
-        cookie_payload["path"] = _interpolate_string(str(explicit_path or "/"), variables)
+        cookie_payload["path"] = _interpolate_string(
+            str(explicit_path or "/"), variables
+        )
     elif default_domain_value:
         cookie_payload["domain"] = default_domain_value
-        cookie_payload["path"] = _interpolate_string(str(explicit_path or "/"), variables)
+        cookie_payload["path"] = _interpolate_string(
+            str(explicit_path or "/"), variables
+        )
     elif target_url:
         cookie_payload["url"] = target_url
     elif target_host:
@@ -1266,14 +1489,20 @@ def _summarize_cookie_for_debug(cookie_item: dict[str, Any]) -> dict[str, Any]:
         "domain": cookie_item.get("domain"),
         "path": cookie_item.get("path"),
         "url": cookie_item.get("url"),
-        "httpOnly": bool(cookie_item.get("httpOnly")) if cookie_item.get("httpOnly") is not None else None,
-        "secure": bool(cookie_item.get("secure")) if cookie_item.get("secure") is not None else None,
+        "httpOnly": bool(cookie_item.get("httpOnly"))
+        if cookie_item.get("httpOnly") is not None
+        else None,
+        "secure": bool(cookie_item.get("secure"))
+        if cookie_item.get("secure") is not None
+        else None,
         "sameSite": cookie_item.get("sameSite"),
         "expires": cookie_item.get("expires"),
     }
 
 
-async def _capture_context_cookies_for_debug(context: Any, *, target_url: str) -> list[dict[str, Any]]:
+async def _capture_context_cookies_for_debug(
+    context: Any, *, target_url: str
+) -> list[dict[str, Any]]:
     if context is None:
         return []
     try:
@@ -1293,8 +1522,12 @@ async def _capture_context_cookies_for_debug(context: Any, *, target_url: str) -
                 "name": str(cookie_item.get("name") or ""),
                 "domain": cookie_item.get("domain"),
                 "path": cookie_item.get("path"),
-                "httpOnly": bool(cookie_item.get("httpOnly")) if cookie_item.get("httpOnly") is not None else None,
-                "secure": bool(cookie_item.get("secure")) if cookie_item.get("secure") is not None else None,
+                "httpOnly": bool(cookie_item.get("httpOnly"))
+                if cookie_item.get("httpOnly") is not None
+                else None,
+                "secure": bool(cookie_item.get("secure"))
+                if cookie_item.get("secure") is not None
+                else None,
                 "sameSite": cookie_item.get("sameSite"),
                 "expires": cookie_item.get("expires"),
             }
@@ -1326,10 +1559,17 @@ async def _apply_cookie_rules(
             continue
 
         rule_match = _as_dict(rule.get("match"))
-        default_domain_candidates = _ensure_list(rule_match.get("domain")) + _ensure_list(rule_match.get("host"))
+        default_domain_candidates = _ensure_list(
+            rule_match.get("domain")
+        ) + _ensure_list(rule_match.get("host"))
         default_domain = ""
         for candidate in default_domain_candidates:
-            normalized_candidate = _interpolate_string(str(candidate or ""), variables).strip().lstrip(".").lower()
+            normalized_candidate = (
+                _interpolate_string(str(candidate or ""), variables)
+                .strip()
+                .lstrip(".")
+                .lower()
+            )
             if normalized_candidate:
                 default_domain = normalized_candidate
                 break
@@ -1422,7 +1662,9 @@ class RecorderSession:
     capture_enabled: bool = False
     manual_login_pending: bool = False
 
-    async def emit(self, payload: dict[str, Any], event_type: str = "record_event") -> None:
+    async def emit(
+        self, payload: dict[str, Any], event_type: str = "record_event"
+    ) -> None:
         if not self.active:
             return
         self.event_index += 1
@@ -1447,7 +1689,9 @@ class RecorderSession:
                 logger.debug(f"禁用后续页面录制脚本失败: {exc}")
         if self.page is not None:
             try:
-                await self.page.evaluate("() => { window.__qtrRecordActive__ = false; }")
+                await self.page.evaluate(
+                    "() => { window.__qtrRecordActive__ = false; }"
+                )
             except Exception as exc:
                 logger.debug(f"禁用当前页面录制脚本失败: {exc}")
 
@@ -1463,7 +1707,9 @@ class RecorderSession:
         self.browser = None
         self.playwright = None
         self.context_state_path = None
-        await _save_context_state_if_needed(context, context_state_path, self.persist_context_runtime)
+        await _save_context_state_if_needed(
+            context, context_state_path, self.persist_context_runtime
+        )
         await _close_playwright_objects(page, context, browser, playwright)
 
 
@@ -1488,7 +1734,9 @@ class RetainedRunSession:
         self.browser = None
         self.playwright = None
         self.context_state_path = None
-        await _save_context_state_if_needed(context, context_state_path, self.persist_context_runtime)
+        await _save_context_state_if_needed(
+            context, context_state_path, self.persist_context_runtime
+        )
         await _close_playwright_objects(page, context, browser, playwright)
 
 
@@ -1522,7 +1770,9 @@ class PreparedRunSession:
         self.browser = None
         self.playwright = None
         self.context_state_path = None
-        await _save_context_state_if_needed(context, context_state_path, self.persist_context_runtime)
+        await _save_context_state_if_needed(
+            context, context_state_path, self.persist_context_runtime
+        )
         await _close_playwright_objects(page, context, browser, playwright)
 
 
@@ -1549,7 +1799,9 @@ class ActiveRunSession:
         self.browser = None
         self.playwright = None
         self.context_state_path = None
-        await _save_context_state_if_needed(context, context_state_path, self.persist_context_runtime)
+        await _save_context_state_if_needed(
+            context, context_state_path, self.persist_context_runtime
+        )
         await _close_playwright_objects(page, context, browser, playwright)
 
     async def close(self) -> None:
@@ -1565,7 +1817,9 @@ class WebTestService:
     _lock = asyncio.Lock()
 
     @classmethod
-    async def handle_request(cls, req_data: dict[str, Any], event_sender: EventSender | None = None) -> dict[str, Any]:
+    async def handle_request(
+        cls, req_data: dict[str, Any], event_sender: EventSender | None = None
+    ) -> dict[str, Any]:
         command = req_data.get("command") or "run_case"
         if command == "run_case":
             return await cls._run_case(req_data, event_sender)
@@ -1616,7 +1870,9 @@ class WebTestService:
         try:
             await event_sender(event_payload)
         except Exception as exc:
-            logger.debug(f"发送执行中间态事件失败: run_id={run_id}, type={event_type}, error={exc}")
+            logger.debug(
+                f"发送执行中间态事件失败: run_id={run_id}, type={event_type}, error={exc}"
+            )
 
     @staticmethod
     def _count_enabled_steps(steps: list[Any]) -> int:
@@ -1638,7 +1894,9 @@ class WebTestService:
             "step": {
                 "stepId": step.get("stepId") or step.get("step_id"),
                 "stepIndex": step_index,
-                "stepName": step.get("stepName") or step.get("step_name") or f"step-{step_index}",
+                "stepName": step.get("stepName")
+                or step.get("step_name")
+                or f"step-{step_index}",
                 "status": "running",
                 "durationMs": 0,
                 "pageUrl": page_url,
@@ -1647,7 +1905,9 @@ class WebTestService:
             "currentStep": {
                 "stepId": step.get("stepId") or step.get("step_id"),
                 "stepIndex": step_index,
-                "stepName": step.get("stepName") or step.get("step_name") or f"step-{step_index}",
+                "stepName": step.get("stepName")
+                or step.get("step_name")
+                or f"step-{step_index}",
                 "status": "running",
             },
             "progress": {
@@ -1679,14 +1939,20 @@ class WebTestService:
         }
         payload["currentStep"] = {
             "stepId": step_result.get("stepId") or step_result.get("step_id"),
-            "stepIndex": step_result.get("stepIndex") or step_result.get("step_index") or step_index,
-            "stepName": step_result.get("stepName") or step_result.get("step_name") or f"step-{step_index}",
+            "stepIndex": step_result.get("stepIndex")
+            or step_result.get("step_index")
+            or step_index,
+            "stepName": step_result.get("stepName")
+            or step_result.get("step_name")
+            or f"step-{step_index}",
             "status": step_result.get("status"),
         }
         return payload
 
     @classmethod
-    async def _start_recording(cls, req_data: dict[str, Any], event_sender: EventSender | None) -> dict[str, Any]:
+    async def _start_recording(
+        cls, req_data: dict[str, Any], event_sender: EventSender | None
+    ) -> dict[str, Any]:
         if event_sender is None:
             return {
                 "request_type": 3,
@@ -1729,7 +1995,10 @@ class WebTestService:
             cls._recorders[recording_id] = session
 
         try:
-            runtime_overrides = _as_dict(session.runtime_options.get("runtimeOverrides") or session.runtime_options.get("runtime_overrides"))
+            runtime_overrides = _as_dict(
+                session.runtime_options.get("runtimeOverrides")
+                or session.runtime_options.get("runtime_overrides")
+            )
             effective_runtime = {
                 **runtime_overrides,
                 **session.runtime_options,
@@ -1765,8 +2034,12 @@ class WebTestService:
             if session.start_url:
                 await session.page.goto(session.start_url)
 
-            manual_login_enabled, manual_login_wait_sec = _resolve_manual_login_gate(effective_runtime)
-            manual_login_require_confirm = _resolve_manual_login_require_confirm(effective_runtime)
+            manual_login_enabled, manual_login_wait_sec = _resolve_manual_login_gate(
+                effective_runtime
+            )
+            manual_login_require_confirm = _resolve_manual_login_require_confirm(
+                effective_runtime
+            )
             manual_gate_result: dict[str, Any] = {
                 "enabled": manual_login_enabled,
                 "waitSec": manual_login_wait_sec,
@@ -1861,10 +2134,14 @@ class WebTestService:
 
         await session.context.expose_binding("__qtrRecordEvent", _event_binding)
         options_json = json.dumps(session.options, ensure_ascii=False)
-        await session.context.add_init_script(f"window.__qtrRecordOptions__ = {options_json};")
+        await session.context.add_init_script(
+            f"window.__qtrRecordOptions__ = {options_json};"
+        )
         await session.context.add_init_script(RECORDER_SCRIPT)
         try:
-            await session.page.evaluate("opts => { window.__qtrRecordOptions__ = opts; }", session.options)
+            await session.page.evaluate(
+                "opts => { window.__qtrRecordOptions__ = opts; }", session.options
+            )
             await session.page.evaluate(RECORDER_SCRIPT)
         except Exception as exc:
             logger.debug(f"注入当前页面录制脚本失败: {exc}")
@@ -1929,7 +2206,9 @@ class WebTestService:
                             "requireConfirm": True,
                             "waitingConfirm": False,
                             "stage": "before_recording",
-                            "pageUrl": session.page.url if session.page else session.start_url,
+                            "pageUrl": session.page.url
+                            if session.page
+                            else session.start_url,
                         },
                     },
                 }
@@ -1954,7 +2233,11 @@ class WebTestService:
 
     @classmethod
     async def _handle_navigation(cls, frame: Any, session: RecorderSession) -> None:
-        if not session.active or session.page is None or frame != session.page.main_frame:
+        if (
+            not session.active
+            or session.page is None
+            or frame != session.page.main_frame
+        ):
             return
         await session.emit(
             {
@@ -2062,7 +2345,9 @@ class WebTestService:
         req_data: dict[str, Any],
         event_sender: EventSender | None = None,
     ) -> dict[str, Any]:
-        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        run_id = _as_int(
+            req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0
+        )
         if run_id <= 0:
             return {
                 "request_type": 3,
@@ -2082,7 +2367,9 @@ class WebTestService:
                 "status": "waiting_manual_login",
                 "result": {
                     "webCaseRunId": run_id,
-                    "pageUrl": existing.page.url if existing.page else existing.start_url,
+                    "pageUrl": existing.page.url
+                    if existing.page
+                    else existing.start_url,
                     "runtimeDebug": existing.runtime_debug or {},
                     "awaitingManualConfirm": True,
                 },
@@ -2091,14 +2378,22 @@ class WebTestService:
         case_data = _as_dict(req_data.get("caseData"))
         runtime_options = _as_dict(req_data.get("runtimeOptions"))
         effective_runtime = _resolve_runtime_settings(case_data, runtime_options)
-        browser_name = str(effective_runtime.get("browserName") or case_data.get("browserName") or "chromium")
-        headless = bool(effective_runtime.get("headless", case_data.get("headless", True)))
+        browser_name = str(
+            effective_runtime.get("browserName")
+            or case_data.get("browserName")
+            or "chromium"
+        )
+        headless = bool(
+            effective_runtime.get("headless", case_data.get("headless", True))
+        )
         close_browser_on_finish = effective_runtime.get("closeBrowserOnFinish")
         if close_browser_on_finish is None:
             close_browser_on_finish = True
         else:
             close_browser_on_finish = bool(close_browser_on_finish)
-        start_url = str(effective_runtime.get("startUrl") or case_data.get("startUrl") or "")
+        start_url = str(
+            effective_runtime.get("startUrl") or case_data.get("startUrl") or ""
+        )
         steps = case_data.get("steps") or []
         if not isinstance(steps, list):
             steps = []
@@ -2119,7 +2414,10 @@ class WebTestService:
                 headless=headless,
                 request_options=effective_runtime,
             )
-            prepared.context, prepared.context_state_path = await _create_browser_context(
+            (
+                prepared.context,
+                prepared.context_state_path,
+            ) = await _create_browser_context(
                 prepared.browser,
                 runtime_options=effective_runtime,
                 browser_name=browser_name,
@@ -2130,7 +2428,8 @@ class WebTestService:
             prepared.cookie_variables = _resolve_runtime_variables(effective_runtime)
             prepared.cookie_rules = _normalize_cookie_rules(effective_runtime)
             prepared.runtime_debug = {
-                "runtimeProfileId": runtime_options.get("runtimeProfileId") or runtime_options.get("runtime_profile_id"),
+                "stateSourceType": _resolve_state_source_type(effective_runtime),
+                "runtimeProfileId": _resolve_runtime_profile_id(effective_runtime),
                 "cookieRuleCount": len(prepared.cookie_rules),
                 "cookieVariableKeys": sorted(prepared.cookie_variables.keys()),
             }
@@ -2149,24 +2448,36 @@ class WebTestService:
                     cookie_rules=prepared.cookie_rules,
                     variables=prepared.cookie_variables,
                 )
-                prepared.runtime_debug["beforeStartCookieApply"] = before_start_cookie_apply or {
-                    "stage": "before_start",
-                    "targetUrl": start_url,
-                    "targetHost": _host_from_url(start_url),
-                    "appliedCount": 0,
-                    "rules": [],
-                    "appliedCookies": [],
-                }
-                prepared.runtime_debug["contextCookiesBeforeGoto"] = await _capture_context_cookies_for_debug(
+                prepared.runtime_debug["beforeStartCookieApply"] = (
+                    before_start_cookie_apply
+                    or {
+                        "stage": "before_start",
+                        "targetUrl": start_url,
+                        "targetHost": _host_from_url(start_url),
+                        "appliedCount": 0,
+                        "rules": [],
+                        "appliedCookies": [],
+                    }
+                )
+                prepared.runtime_debug[
+                    "contextCookiesBeforeGoto"
+                ] = await _capture_context_cookies_for_debug(
                     prepared.context,
                     target_url=start_url,
                 )
-                await prepared.page.goto(start_url, timeout=_step_timeout_ms({}, effective_runtime, case_data))
-                prepared.runtime_debug["contextCookiesAfterGoto"] = await _capture_context_cookies_for_debug(
+                await prepared.page.goto(
+                    start_url,
+                    timeout=_step_timeout_ms({}, effective_runtime, case_data),
+                )
+                prepared.runtime_debug[
+                    "contextCookiesAfterGoto"
+                ] = await _capture_context_cookies_for_debug(
                     prepared.context,
                     target_url=start_url,
                 )
-            manual_login_enabled, manual_login_wait_sec = _resolve_manual_login_gate(effective_runtime)
+            manual_login_enabled, manual_login_wait_sec = _resolve_manual_login_gate(
+                effective_runtime
+            )
             prepared.runtime_debug["manualLoginGate"] = {
                 "enabled": manual_login_enabled,
                 "waitSec": manual_login_wait_sec,
@@ -2198,7 +2509,10 @@ class WebTestService:
                     "manualLoginStatus": "waiting_manual_login",
                     "pageUrl": prepared.page.url if prepared.page else start_url,
                     "runtimeDebug": prepared.runtime_debug,
-                    "resultPatch": {"awaitingManualConfirm": True, "manualLoginStatus": "waiting_manual_login"},
+                    "resultPatch": {
+                        "awaitingManualConfirm": True,
+                        "manualLoginStatus": "waiting_manual_login",
+                    },
                 },
                 message="浏览器已就绪，等待手动登录确认",
             )
@@ -2245,7 +2559,9 @@ class WebTestService:
         req_data: dict[str, Any],
         event_sender: EventSender | None = None,
     ) -> dict[str, Any]:
-        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        run_id = _as_int(
+            req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0
+        )
         if run_id <= 0:
             return {
                 "request_type": 3,
@@ -2277,7 +2593,9 @@ class WebTestService:
         start_url = prepared.start_url
         cookie_rules = prepared.cookie_rules
         cookie_variables = prepared.cookie_variables
-        runtime_debug = prepared.runtime_debug if isinstance(prepared.runtime_debug, dict) else {}
+        runtime_debug = (
+            prepared.runtime_debug if isinstance(prepared.runtime_debug, dict) else {}
+        )
         runtime_debug.setdefault(
             "manualLoginGate",
             {
@@ -2293,7 +2611,11 @@ class WebTestService:
         _attach_runtime_persist_debug(
             runtime_debug,
             effective_runtime,
-            browser_name=str(effective_runtime.get("browserName") or case_data.get("browserName") or ""),
+            browser_name=str(
+                effective_runtime.get("browserName")
+                or case_data.get("browserName")
+                or ""
+            ),
             persist_enabled=context_state_path is not None,
             context_state_path=context_state_path,
         )
@@ -2344,7 +2666,9 @@ class WebTestService:
                     skipped_result = {
                         "stepId": step.get("stepId") or step.get("step_id"),
                         "stepIndex": step_display_index,
-                        "stepName": step.get("stepName") or step.get("step_name") or "step",
+                        "stepName": step.get("stepName")
+                        or step.get("step_name")
+                        or "step",
                         "status": "skipped",
                         "durationMs": 0,
                         "message": "步骤已禁用",
@@ -2487,7 +2811,9 @@ class WebTestService:
                 "command": "continue_run_case",
                 "success": False,
                 "status": "failed",
-                "message": "执行已取消" if active_session.cancel_event.is_set() else str(exc),
+                "message": "执行已取消"
+                if active_session.cancel_event.is_set()
+                else str(exc),
                 "result": {
                     "steps": result_steps,
                     "pageUrl": page.url if page else start_url,
@@ -2516,8 +2842,15 @@ class WebTestService:
             async with cls._lock:
                 cls._active_runs.pop(run_id, None)
             cancelled = active_session.cancel_event.is_set()
-            if cancelled or prepared.close_browser_on_finish or browser is None or playwright is None:
-                await _save_context_state_if_needed(context, context_state_path, effective_runtime)
+            if (
+                cancelled
+                or prepared.close_browser_on_finish
+                or browser is None
+                or playwright is None
+            ):
+                await _save_context_state_if_needed(
+                    context, context_state_path, effective_runtime
+                )
                 await _close_playwright_objects(page, context, browser, playwright)
             else:
                 retained_session_id = uuid.uuid4().hex
@@ -2534,14 +2867,18 @@ class WebTestService:
                     cls._retained_runs[retained_session_id] = retained_session
 
         if isinstance(response_payload.get("result"), dict):
-            response_payload["result"]["browserRetained"] = retained_session_id is not None
+            response_payload["result"]["browserRetained"] = (
+                retained_session_id is not None
+            )
             if retained_session_id is not None:
                 response_payload["result"]["retainedSessionId"] = retained_session_id
         return response_payload
 
     @classmethod
     async def _stop_run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
-        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        run_id = _as_int(
+            req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0
+        )
         if run_id <= 0:
             return {
                 "request_type": 3,
@@ -2550,7 +2887,9 @@ class WebTestService:
                 "status": "failed",
                 "message": "webCaseRunId 不能为空",
             }
-        reason = str(req_data.get("reason") or "已手动停止执行").strip() or "已手动停止执行"
+        reason = (
+            str(req_data.get("reason") or "已手动停止执行").strip() or "已手动停止执行"
+        )
 
         async with cls._lock:
             active_session = cls._active_runs.pop(run_id, None)
@@ -2585,7 +2924,9 @@ class WebTestService:
 
     @classmethod
     async def _cancel_run_case(cls, req_data: dict[str, Any]) -> dict[str, Any]:
-        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        run_id = _as_int(
+            req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0
+        )
         if run_id <= 0:
             return {
                 "request_type": 3,
@@ -2594,7 +2935,9 @@ class WebTestService:
                 "status": "failed",
                 "message": "webCaseRunId 不能为空",
             }
-        reason = str(req_data.get("reason") or "已取消执行准备").strip() or "已取消执行准备"
+        reason = (
+            str(req_data.get("reason") or "已取消执行准备").strip() or "已取消执行准备"
+        )
 
         async with cls._lock:
             prepared_session = cls._prepared_runs.pop(run_id, None)
@@ -2629,7 +2972,9 @@ class WebTestService:
         }
 
     @classmethod
-    async def _cancel_recording_prepare(cls, req_data: dict[str, Any]) -> dict[str, Any]:
+    async def _cancel_recording_prepare(
+        cls, req_data: dict[str, Any]
+    ) -> dict[str, Any]:
         recording_id = _as_int(req_data.get("recordingId"), 0)
         if recording_id <= 0:
             return {
@@ -2639,7 +2984,9 @@ class WebTestService:
                 "status": "failed",
                 "message": "recordingId 不能为空",
             }
-        reason = str(req_data.get("reason") or "已取消录制准备").strip() or "已取消录制准备"
+        reason = (
+            str(req_data.get("reason") or "已取消录制准备").strip() or "已取消录制准备"
+        )
 
         async with cls._lock:
             session = cls._recorders.pop(recording_id, None)
@@ -2682,19 +3029,31 @@ class WebTestService:
         req_data: dict[str, Any],
         event_sender: EventSender | None = None,
     ) -> dict[str, Any]:
-        run_id = _as_int(req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0)
+        run_id = _as_int(
+            req_data.get("webCaseRunId") or req_data.get("web_case_run_id"), 0
+        )
         case_data = _as_dict(req_data.get("caseData"))
         runtime_options = _as_dict(req_data.get("runtimeOptions"))
         effective_runtime = _resolve_runtime_settings(case_data, runtime_options)
-        browser_name = str(effective_runtime.get("browserName") or case_data.get("browserName") or "chromium")
-        headless = bool(effective_runtime.get("headless", case_data.get("headless", True)))
+        browser_name = str(
+            effective_runtime.get("browserName")
+            or case_data.get("browserName")
+            or "chromium"
+        )
+        headless = bool(
+            effective_runtime.get("headless", case_data.get("headless", True))
+        )
         close_browser_on_finish = effective_runtime.get("closeBrowserOnFinish")
         if close_browser_on_finish is None:
             close_browser_on_finish = True
         else:
             close_browser_on_finish = bool(close_browser_on_finish)
-        start_url = str(effective_runtime.get("startUrl") or case_data.get("startUrl") or "")
-        reuse_retained_session_id = _resolve_reuse_retained_session_id(effective_runtime)
+        start_url = str(
+            effective_runtime.get("startUrl") or case_data.get("startUrl") or ""
+        )
+        reuse_retained_session_id = _resolve_reuse_retained_session_id(
+            effective_runtime
+        )
         steps = case_data.get("steps") or []
         if not isinstance(steps, list):
             steps = []
@@ -2712,12 +3071,18 @@ class WebTestService:
         cookie_variables: dict[str, Any] = {}
         cookie_rules: list[dict[str, Any]] = []
         runtime_debug: dict[str, Any] = {}
-        active_session = ActiveRunSession(run_id=run_id, persist_context_runtime=effective_runtime) if run_id > 0 else None
+        active_session = (
+            ActiveRunSession(run_id=run_id, persist_context_runtime=effective_runtime)
+            if run_id > 0
+            else None
+        )
         try:
             reused_session: RetainedRunSession | None = None
             if reuse_retained_session_id:
                 async with cls._lock:
-                    reused_session = cls._retained_runs.pop(reuse_retained_session_id, None)
+                    reused_session = cls._retained_runs.pop(
+                        reuse_retained_session_id, None
+                    )
             if (
                 reused_session is not None
                 and reused_session.playwright is not None
@@ -2766,7 +3131,8 @@ class WebTestService:
             cookie_rules = _normalize_cookie_rules(effective_runtime)
             runtime_debug = {
                 **runtime_debug,
-                "runtimeProfileId": runtime_options.get("runtimeProfileId") or runtime_options.get("runtime_profile_id"),
+                "stateSourceType": _resolve_state_source_type(effective_runtime),
+                "runtimeProfileId": _resolve_runtime_profile_id(effective_runtime),
                 "cookieRuleCount": len(cookie_rules),
                 "cookieVariableKeys": sorted(cookie_variables.keys()),
             }
@@ -2793,13 +3159,20 @@ class WebTestService:
                     "rules": [],
                     "appliedCookies": [],
                 }
-                runtime_debug["contextCookiesBeforeGoto"] = await _capture_context_cookies_for_debug(
+                runtime_debug[
+                    "contextCookiesBeforeGoto"
+                ] = await _capture_context_cookies_for_debug(
                     context,
                     target_url=start_url,
                 )
             if start_url:
-                await page.goto(start_url, timeout=_step_timeout_ms({}, effective_runtime, case_data))
-                runtime_debug["contextCookiesAfterGoto"] = await _capture_context_cookies_for_debug(
+                await page.goto(
+                    start_url,
+                    timeout=_step_timeout_ms({}, effective_runtime, case_data),
+                )
+                runtime_debug[
+                    "contextCookiesAfterGoto"
+                ] = await _capture_context_cookies_for_debug(
                     context,
                     target_url=start_url,
                 )
@@ -2835,7 +3208,9 @@ class WebTestService:
                     skipped_result = {
                         "stepId": step.get("stepId") or step.get("step_id"),
                         "stepIndex": step_display_index,
-                        "stepName": step.get("stepName") or step.get("step_name") or "step",
+                        "stepName": step.get("stepName")
+                        or step.get("step_name")
+                        or "step",
                         "status": "skipped",
                         "durationMs": 0,
                         "message": "步骤已禁用",
@@ -2995,7 +3370,9 @@ class WebTestService:
                 "command": "run_case",
                 "success": False,
                 "status": "failed",
-                "message": "执行已取消" if active_session is not None and active_session.cancel_event.is_set() else str(exc),
+                "message": "执行已取消"
+                if active_session is not None and active_session.cancel_event.is_set()
+                else str(exc),
                 "result": {
                     "steps": result_steps,
                     "pageUrl": page.url if page else start_url,
@@ -3021,12 +3398,23 @@ class WebTestService:
                 message=response_payload.get("message") or str(exc),
             )
         finally:
-            cancelled = active_session.cancel_event.is_set() if active_session is not None else False
+            cancelled = (
+                active_session.cancel_event.is_set()
+                if active_session is not None
+                else False
+            )
             if run_id > 0:
                 async with cls._lock:
                     cls._active_runs.pop(run_id, None)
-            if cancelled or close_browser_on_finish or browser is None or playwright is None:
-                await _save_context_state_if_needed(context, context_state_path, effective_runtime)
+            if (
+                cancelled
+                or close_browser_on_finish
+                or browser is None
+                or playwright is None
+            ):
+                await _save_context_state_if_needed(
+                    context, context_state_path, effective_runtime
+                )
                 await _close_playwright_objects(page, context, browser, playwright)
             else:
                 retained_session_id = uuid.uuid4().hex
@@ -3047,7 +3435,9 @@ class WebTestService:
                     cls._retained_runs[retained_session_id] = retained_session
 
         if isinstance(response_payload.get("result"), dict):
-            response_payload["result"]["browserRetained"] = retained_session_id is not None
+            response_payload["result"]["browserRetained"] = (
+                retained_session_id is not None
+            )
             if retained_session_id is not None:
                 response_payload["result"]["retainedSessionId"] = retained_session_id
         return response_payload
@@ -3064,9 +3454,13 @@ class WebTestService:
         cookie_rules: list[dict[str, Any]],
         cookie_variables: dict[str, Any],
     ) -> dict[str, Any]:
-        action_type = str(step.get("actionType") or step.get("action_type") or "").strip().lower()
+        action_type = (
+            str(step.get("actionType") or step.get("action_type") or "").strip().lower()
+        )
         step_id = step.get("stepId") or step.get("step_id")
-        step_name = step.get("stepName") or step.get("step_name") or action_type or "step"
+        step_name = (
+            step.get("stepName") or step.get("step_name") or action_type or "step"
+        )
         params = _as_dict(step.get("params"))
         assertions = step.get("assertions") or []
         timeout_ms = _step_timeout_ms(step, runtime_options, case_data)
@@ -3143,9 +3537,13 @@ class WebTestService:
             }
 
     @classmethod
-    async def _resolve_locator(cls, page: Any, step: dict[str, Any], timeout_ms: int) -> tuple[Any, list[dict[str, Any]]]:
+    async def _resolve_locator(
+        cls, page: Any, step: dict[str, Any], timeout_ms: int
+    ) -> tuple[Any, list[dict[str, Any]]]:
         """解析步骤定位器，优先唯一命中，禁止多匹配时默认取 first。"""
-        target_snapshot = _as_dict(step.get("targetSnapshot") or step.get("target_snapshot"))
+        target_snapshot = _as_dict(
+            step.get("targetSnapshot") or step.get("target_snapshot")
+        )
         raw_locators = target_snapshot.get("locators") or []
         if not raw_locators:
             raise RuntimeError("当前步骤缺少定位器配置")
@@ -3155,7 +3553,15 @@ class WebTestService:
             locator_def = _as_dict(raw_locator)
             if locator_def.get("enabled") is False:
                 continue
-            locator_type = str(locator_def.get("locatorType") or locator_def.get("locator_type") or "").strip().lower()
+            locator_type = (
+                str(
+                    locator_def.get("locatorType")
+                    or locator_def.get("locator_type")
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
             if not locator_type:
                 continue
             locator_value_source = locator_def.get("locatorValue")
@@ -3163,7 +3569,10 @@ class WebTestService:
                 locator_value_source = locator_def.get("locator_value")
             if isinstance(locator_value_source, dict):
                 locator_value = _as_dict(locator_value_source)
-            elif locator_type in {"css", "xpath"} and locator_value_source not in (None, ""):
+            elif locator_type in {"css", "xpath"} and locator_value_source not in (
+                None,
+                "",
+            ):
                 locator_value = {"selector": str(locator_value_source)}
             else:
                 locator_value = {}
@@ -3173,9 +3582,15 @@ class WebTestService:
                     "locatorValue": locator_value,
                     "priority": _as_int(locator_def.get("priority"), index),
                     "index": index,
-                    "uniqueness": str(locator_def.get("uniqueness") or "").strip().lower(),
-                    "targetIndex": locator_def.get("targetIndex", locator_def.get("target_index")),
-                    "matchCount": locator_def.get("matchCount", locator_def.get("match_count")),
+                    "uniqueness": str(locator_def.get("uniqueness") or "")
+                    .strip()
+                    .lower(),
+                    "targetIndex": locator_def.get(
+                        "targetIndex", locator_def.get("target_index")
+                    ),
+                    "matchCount": locator_def.get(
+                        "matchCount", locator_def.get("match_count")
+                    ),
                 }
             )
 
@@ -3216,7 +3631,9 @@ class WebTestService:
                 probe_timeout = max(min(remaining_ms, 350), 50)
                 try:
                     locator = cls._build_locator(page, locator_type, locator_value)
-                    await locator.first.wait_for(state="attached", timeout=probe_timeout)
+                    await locator.first.wait_for(
+                        state="attached", timeout=probe_timeout
+                    )
                     count = await locator.count()
                     attempt["count"] = count
                     if count == 1:
@@ -3234,10 +3651,14 @@ class WebTestService:
             raise RuntimeError(
                 f"未在 {elapsed_ms}ms 内唯一定位到步骤元素(存在多元素歧义): {json.dumps(attempts, ensure_ascii=False)}"
             )
-        raise RuntimeError(f"未在 {elapsed_ms}ms 内定位到步骤元素: {json.dumps(attempts, ensure_ascii=False)}")
+        raise RuntimeError(
+            f"未在 {elapsed_ms}ms 内定位到步骤元素: {json.dumps(attempts, ensure_ascii=False)}"
+        )
 
     @classmethod
-    def _build_locator(cls, page: Any, locator_type: str, locator_value: dict[str, Any]) -> Any:
+    def _build_locator(
+        cls, page: Any, locator_type: str, locator_value: dict[str, Any]
+    ) -> Any:
         """根据定位器类型构建 Playwright Locator，并应用可选 nth/index 精准索引。"""
         locator: Any
         if locator_type == "role":
@@ -3247,11 +3668,17 @@ class WebTestService:
                 exact=locator_value.get("exact", False),
             )
         elif locator_type == "label":
-            locator = page.get_by_label(locator_value.get("text", ""), exact=locator_value.get("exact", False))
+            locator = page.get_by_label(
+                locator_value.get("text", ""), exact=locator_value.get("exact", False)
+            )
         elif locator_type == "placeholder":
-            locator = page.get_by_placeholder(locator_value.get("text", ""), exact=locator_value.get("exact", False))
+            locator = page.get_by_placeholder(
+                locator_value.get("text", ""), exact=locator_value.get("exact", False)
+            )
         elif locator_type == "text":
-            locator = page.get_by_text(locator_value.get("text", ""), exact=locator_value.get("exact", False))
+            locator = page.get_by_text(
+                locator_value.get("text", ""), exact=locator_value.get("exact", False)
+            )
         elif locator_type == "test_id":
             locator = page.get_by_test_id(locator_value.get("testId", ""))
         elif locator_type == "id":
@@ -3308,7 +3735,13 @@ class WebTestService:
             await page.goto(str(params.get("url") or ""), timeout=timeout_ms)
             return
         if action_type in {"sleep", "wait"}:
-            wait_ms = _as_int(params.get("waitMs") or params.get("wait_ms") or params.get("durationMs") or params.get("duration_ms"), 0)
+            wait_ms = _as_int(
+                params.get("waitMs")
+                or params.get("wait_ms")
+                or params.get("durationMs")
+                or params.get("duration_ms"),
+                0,
+            )
             if wait_ms > 0:
                 await asyncio.sleep(wait_ms / 1000.0)
             return
@@ -3316,26 +3749,51 @@ class WebTestService:
             expected = str(params.get("text") or params.get("expected") or "").strip()
             if not expected:
                 raise AssertionError(f"{action_type} 需要 text/expected 参数")
-            page_text = (await page.locator("body").inner_text(timeout=timeout_ms) or "").strip()
+            page_text = (
+                await page.locator("body").inner_text(timeout=timeout_ms) or ""
+            ).strip()
             if action_type == "assert_page_contains" and expected not in page_text:
-                raise AssertionError(f"assert_page_contains failed: expected={expected}")
+                raise AssertionError(
+                    f"assert_page_contains failed: expected={expected}"
+                )
             if action_type == "assert_page_not_contains" and expected in page_text:
-                raise AssertionError(f"assert_page_not_contains failed: expected_not_contains={expected}")
+                raise AssertionError(
+                    f"assert_page_not_contains failed: expected_not_contains={expected}"
+                )
             return
         if action_type == "assert_title_contains":
-            expected = str(params.get("title") or params.get("text") or params.get("expected") or "").strip()
+            expected = str(
+                params.get("title")
+                or params.get("text")
+                or params.get("expected")
+                or ""
+            ).strip()
             if not expected:
-                raise AssertionError("assert_title_contains 需要 title/text/expected 参数")
+                raise AssertionError(
+                    "assert_title_contains 需要 title/text/expected 参数"
+                )
             actual_title = await page.title()
             if expected not in str(actual_title or ""):
-                raise AssertionError(f"assert_title_contains failed: expected={expected}, actual={actual_title}")
+                raise AssertionError(
+                    f"assert_title_contains failed: expected={expected}, actual={actual_title}"
+                )
             return
         if action_type == "assert_url_contains":
-            expected = str(params.get("urlPart") or params.get("url_part") or params.get("text") or params.get("expected") or "").strip()
+            expected = str(
+                params.get("urlPart")
+                or params.get("url_part")
+                or params.get("text")
+                or params.get("expected")
+                or ""
+            ).strip()
             if not expected:
-                raise AssertionError("assert_url_contains 需要 urlPart/text/expected 参数")
+                raise AssertionError(
+                    "assert_url_contains 需要 urlPart/text/expected 参数"
+                )
             if expected not in str(page.url or ""):
-                raise AssertionError(f"assert_url_contains failed: expected={expected}, actual={page.url}")
+                raise AssertionError(
+                    f"assert_url_contains failed: expected={expected}, actual={page.url}"
+                )
             return
 
         if locator is None:
@@ -3378,15 +3836,23 @@ class WebTestService:
             return
         if action_type == "assert_text_equals":
             text = await _read_locator_text(locator, timeout_ms=timeout_ms)
-            expected = _normalize_assert_text(params.get("expected") or params.get("text") or "")
+            expected = _normalize_assert_text(
+                params.get("expected") or params.get("text") or ""
+            )
             if not _text_equals(text, expected):
-                raise AssertionError(f"assert_text_equals failed: expected={expected}, actual={text}")
+                raise AssertionError(
+                    f"assert_text_equals failed: expected={expected}, actual={text}"
+                )
             return
         if action_type == "assert_text_contains":
             text = await _read_locator_text(locator, timeout_ms=timeout_ms)
-            expected = _normalize_assert_text(params.get("expected") or params.get("text") or "")
+            expected = _normalize_assert_text(
+                params.get("expected") or params.get("text") or ""
+            )
             if not _text_contains(text, expected):
-                raise AssertionError(f"assert_text_contains failed: expected={expected}, actual={text}")
+                raise AssertionError(
+                    f"assert_text_contains failed: expected={expected}, actual={text}"
+                )
             return
         raise RuntimeError(f"unsupported action type: {action_type}")
 
@@ -3413,7 +3879,9 @@ class WebTestService:
         assertion: dict[str, Any],
         timeout_ms: int,
     ) -> Any:
-        target_snapshot = _as_dict(assertion.get("targetSnapshot") or assertion.get("target_snapshot"))
+        target_snapshot = _as_dict(
+            assertion.get("targetSnapshot") or assertion.get("target_snapshot")
+        )
         if target_snapshot.get("locators"):
             resolved_locator, _ = await cls._resolve_locator(
                 page,
@@ -3436,42 +3904,65 @@ class WebTestService:
     ) -> None:
         current_locator = step_locator
         if assert_type in {"text_contains", "text_equals", "visible"}:
-            current_locator = await cls._resolve_assertion_locator(page, step_locator, assertion, timeout_ms)
+            current_locator = await cls._resolve_assertion_locator(
+                page, step_locator, assertion, timeout_ms
+            )
             if current_locator is None:
                 raise AssertionError(f"{assert_type} 断言需要有效定位器")
 
         if assert_type == "text_contains":
-            text = await _read_locator_text(current_locator, timeout_ms=max(min(timeout_ms, 1200), 120))
+            text = await _read_locator_text(
+                current_locator, timeout_ms=max(min(timeout_ms, 1200), 120)
+            )
             expected_text = _normalize_assert_text(expected)
             if not _text_contains(text, expected_text):
-                raise AssertionError(f"text_contains failed: expected={expected}, actual={text}")
+                raise AssertionError(
+                    f"text_contains failed: expected={expected}, actual={text}"
+                )
             return
         if assert_type == "text_equals":
-            text = await _read_locator_text(current_locator, timeout_ms=max(min(timeout_ms, 1200), 120))
+            text = await _read_locator_text(
+                current_locator, timeout_ms=max(min(timeout_ms, 1200), 120)
+            )
             expected_text = _normalize_assert_text(expected)
             if not _text_equals(text, expected_text):
-                raise AssertionError(f"text_equals failed: expected={expected}, actual={text}")
+                raise AssertionError(
+                    f"text_equals failed: expected={expected}, actual={text}"
+                )
             return
         if assert_type == "visible":
-            await current_locator.wait_for(state="visible", timeout=max(min(timeout_ms, 1500), 120))
+            await current_locator.wait_for(
+                state="visible", timeout=max(min(timeout_ms, 1500), 120)
+            )
             return
         if assert_type == "url_contains":
             if str(expected or "") not in page.url:
-                raise AssertionError(f"url_contains failed: expected={expected}, actual={page.url}")
+                raise AssertionError(
+                    f"url_contains failed: expected={expected}, actual={page.url}"
+                )
             return
         if assert_type == "page_contains":
-            page_text = (await page.locator("body").inner_text(timeout=max(min(timeout_ms, 1200), 120)) or "").strip()
+            page_text = (
+                await page.locator("body").inner_text(
+                    timeout=max(min(timeout_ms, 1200), 120)
+                )
+                or ""
+            ).strip()
             if str(expected or "") not in page_text:
                 raise AssertionError(f"page_contains failed: expected={expected}")
             return
         if assert_type == "title_contains":
             title = await page.title()
             if str(expected or "") not in str(title or ""):
-                raise AssertionError(f"title_contains failed: expected={expected}, actual={title}")
+                raise AssertionError(
+                    f"title_contains failed: expected={expected}, actual={title}"
+                )
             return
         if assert_type == "url_equals":
             if str(page.url or "") != str(expected or ""):
-                raise AssertionError(f"url_equals failed: expected={expected}, actual={page.url}")
+                raise AssertionError(
+                    f"url_equals failed: expected={expected}, actual={page.url}"
+                )
             return
         raise AssertionError(f"unsupported assertion type: {assert_type}")
 
@@ -3516,7 +4007,11 @@ class WebTestService:
             assertion = _as_dict(raw_assertion)
             if assertion.get("enabled") is False:
                 continue
-            assert_type = str(assertion.get("assertType") or assertion.get("assert_type") or "").strip().lower()
+            assert_type = (
+                str(assertion.get("assertType") or assertion.get("assert_type") or "")
+                .strip()
+                .lower()
+            )
             if not assert_type:
                 continue
             if assert_type not in supported_types:
@@ -3524,11 +4019,15 @@ class WebTestService:
 
             expected = assertion.get("expected")
             assertion_wait_ms = cls._assertion_wait_ms(assertion, timeout_ms)
-            assertion_label = cls._format_assertion_label(index, assert_type, expected, assertion)
+            assertion_label = cls._format_assertion_label(
+                index, assert_type, expected, assertion
+            )
             if step_deadline is not None:
                 step_remaining_ms = int((step_deadline - time.perf_counter()) * 1000)
                 if step_remaining_ms <= 0:
-                    raise AssertionError(f"{assertion_label}未开始执行：步骤总超时（>{timeout_ms}ms）")
+                    raise AssertionError(
+                        f"{assertion_label}未开始执行：步骤总超时（>{timeout_ms}ms）"
+                    )
                 assertion_wait_ms = max(min(assertion_wait_ms, step_remaining_ms), 120)
             deadline = time.perf_counter() + (assertion_wait_ms / 1000.0)
             last_error: Exception | None = None
@@ -3560,12 +4059,16 @@ class WebTestService:
             if passed:
                 continue
             if step_deadline is not None and time.perf_counter() >= step_deadline:
-                last_message = str(last_error or "").strip() or f"{assert_type} assertion failed"
+                last_message = (
+                    str(last_error or "").strip() or f"{assert_type} assertion failed"
+                )
                 raise AssertionError(
                     f"{assertion_label}超时：步骤总超时（>{timeout_ms}ms），最后错误：{last_message}"
                 ) from last_error
             if last_error is not None:
-                last_message = str(last_error or "").strip() or f"{assert_type} assertion failed"
+                last_message = (
+                    str(last_error or "").strip() or f"{assert_type} assertion failed"
+                )
                 raise AssertionError(
                     f"{assertion_label}超时（{assertion_wait_ms}ms），最后错误：{last_message}"
                 ) from last_error
