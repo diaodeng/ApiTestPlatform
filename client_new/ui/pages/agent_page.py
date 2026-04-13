@@ -53,9 +53,33 @@ class AgentLogPane(QWidget):
         self.clear_btn.clicked.connect(self.clear)
 
     def set_text(self, text: str):
+        """
+        覆盖日志文本内容。
+
+        :param text: 完整日志文本。
+        """
         self.editor.setPlainText(text or "")
 
+    def append_text(self, text: str):
+        """
+        追加一行日志文本。
+
+        :param text: 待追加内容。
+        """
+        message = str(text or "").strip()
+        if not message:
+            return
+        if self.editor.toPlainText():
+            self.editor.appendPlainText(message)
+        else:
+            self.editor.setPlainText(message)
+        scrollbar = self.editor.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     def clear(self):
+        """
+        清空日志区域。
+        """
         self.editor.clear()
 
     def _copy(self):
@@ -71,6 +95,7 @@ class AgentPage(QWidget):
     stop_clicked = Signal()
     save_clicked = Signal(dict)
     sync_config_clicked = Signal()
+    manual_browser_download_clicked = Signal(str, dict)
 
     def __init__(self):
         super().__init__()
@@ -83,6 +108,8 @@ class AgentPage(QWidget):
         self._config_sync_last_sync_at = ""
         self._sync_in_progress = False
         self._server_manage_dialog = None
+        self._browser_setting_dialog = None
+        self._manual_download_in_progress = False
         self.controller = None
         self._runtime_initialized = False
         self._runtime_init_scheduled = False
@@ -256,23 +283,59 @@ class AgentPage(QWidget):
                 self._server_manage_dialog = None
 
     def _open_browser_setting_dialog(self):
+        """
+        打开浏览器设置弹窗，并处理保存/手动下载事件。
+        """
         if self.controller is None and not self._runtime_initialized:
             self._initialize_runtime()
         from ui.dialogs.agent_browser_setting_dialog import AgentBrowserSettingDialog
 
         dialog = AgentBrowserSettingDialog(self._browser_config, self)
-        if not dialog.exec():
-            return
+        dialog.manual_download_requested.connect(
+            lambda browser_name, payload: self._handle_manual_download(dialog, browser_name, payload)
+        )
+        self._browser_setting_dialog = dialog
+        self._sync_browser_setting_dialog_state()
+        try:
+            if not dialog.exec():
+                return
 
-        data = dialog.get_data()
-        if data is None:
-            return
+            data = dialog.get_data()
+            if data is None:
+                return
 
-        self._browser_config = AgentBrowserConfigModel.model_validate(data)
-        self._save_quick_settings()
+            self._browser_config = AgentBrowserConfigModel.model_validate(data)
+            self._save_quick_settings()
+        finally:
+            if self._browser_setting_dialog is dialog:
+                self._browser_setting_dialog = None
 
     def _on_server_text_changed(self, _text: str):
         self._update_server_meta()
+
+    def _handle_manual_download(
+        self,
+        dialog,
+        browser_name: str,
+        payload: dict,
+    ):
+        """
+        处理手动下载浏览器请求。
+
+        :param dialog: 当前浏览器设置对话框实例。
+        :param browser_name: 目标浏览器名称。
+        :param payload: 对话框收集到的浏览器配置。
+        """
+        try:
+            self._browser_config = AgentBrowserConfigModel.model_validate(payload or {})
+        except Exception as exc:
+            dialog.set_manual_download_state(False, f"配置错误: {exc}")
+            return
+
+        self._save_quick_settings()
+        target_browser = str(browser_name or "chromium").strip().lower() or "chromium"
+        self.set_manual_downloading(True, f"正在下载 {target_browser} ...")
+        self.manual_browser_download_clicked.emit(target_browser, self._browser_config.model_dump())
 
     def _save_quick_settings(self, *_args):
         if self._quick_save_guard:
@@ -295,6 +358,13 @@ class AgentPage(QWidget):
         }
 
     def apply_config(self, config, connection_state: str, local_mac: str):
+        """
+        将配置数据渲染到 Agent 页面。
+
+        :param config: Agent 配置模型。
+        :param connection_state: 当前连接状态。
+        :param local_mac: 本机 MAC。
+        """
         self.proxy_state = connection_state
         self._server_list = dict(config.server_list or {})
         browser_config = getattr(config, "browser", None)
@@ -320,6 +390,7 @@ class AgentPage(QWidget):
 
         self._update_server_meta()
         self._sync_server_manage_dialog_state()
+        self._sync_browser_setting_dialog_state()
         self._apply_state_text(connection_state)
 
     def set_running(self, running: bool):
@@ -333,6 +404,14 @@ class AgentPage(QWidget):
 
     def set_response_text(self, text: str):
         self.response_log.set_text(text)
+
+    def append_response_text(self, text: str):
+        """
+        向响应日志追加文本。
+
+        :param text: 追加的日志内容。
+        """
+        self.response_log.append_text(text)
 
     def clear_logs(self):
         self.request_log.clear()
@@ -437,6 +516,9 @@ class AgentPage(QWidget):
         self.sync_config_clicked.emit()
 
     def _sync_server_manage_dialog_state(self):
+        """
+        同步服务器管理弹窗的状态标记。
+        """
         if not self._server_manage_dialog:
             return
         self._server_manage_dialog.set_sync_state(
@@ -445,6 +527,31 @@ class AgentPage(QWidget):
             self._config_sync_url,
         )
         self._server_manage_dialog.set_config_syncing(self._sync_in_progress)
+
+    def _sync_browser_setting_dialog_state(self):
+        """
+        同步浏览器设置弹窗的手动下载状态。
+        """
+        if not self._browser_setting_dialog:
+            return
+        self._browser_setting_dialog.set_manual_download_state(
+            self._manual_download_in_progress,
+            "下载中..." if self._manual_download_in_progress else "未开始",
+        )
+
+    def set_manual_downloading(self, downloading: bool, message: str = ""):
+        """
+        更新手动下载状态并回写到弹窗。
+
+        :param downloading: 是否下载中。
+        :param message: 要展示的状态文案。
+        """
+        self._manual_download_in_progress = bool(downloading)
+        if self._browser_setting_dialog:
+            self._browser_setting_dialog.set_manual_download_state(
+                self._manual_download_in_progress,
+                message or ("下载中..." if self._manual_download_in_progress else "未开始"),
+            )
 
     def showEvent(self, event):
         super().showEvent(event)

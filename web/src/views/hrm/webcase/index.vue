@@ -5575,6 +5575,7 @@ function updateLiveRecording(detail) {
   recordingDetailText.value = safeJsonStringify(detail);
   if (shouldStopRecordingPoll(detail)) {
     stopRecordingPoll();
+    loadBrowserSessions().catch(() => {});
   }
 }
 
@@ -5660,6 +5661,7 @@ function stopRecording() {
     ElMessage.success(response.msg || "已发送停止录制指令");
     refreshRecording();
     getRecordingList();
+    loadBrowserSessions().catch(() => {});
   });
 }
 

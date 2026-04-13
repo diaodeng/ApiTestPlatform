@@ -56,23 +56,59 @@ def _summarize_message(message: Any) -> str:
     return json.dumps(_sanitize_log_value(message or {}), ensure_ascii=False)
 
 
-def _dispatch_agent_event(db: Session, agent_code: str, message_data: dict[str, Any]) -> bool:
+def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool:
+    """
+    分发 Agent 事件到对应业务处理器（使用短生命周期数据库会话）。
+
+    说明：
+    WebSocket 链路是长连接，若复用同一个数据库会话，可能在某些数据库隔离级别下
+    读不到连接建立后新写入的记录（例如新建录制会话），导致“录制会话不存在”误判。
+    因此这里为每条事件创建独立会话，确保读取到最新已提交数据。
+
+    :param agent_code: Agent 编码。
+    :param message_data: Agent 上报的事件消息体。
+    :return: 是否已识别并处理该事件类型。
+    """
     message_type = message_data.get("type")
-    if message_type in ("record_event", "record_status", "record_finished", "record_error"):
-        WebCaseService.handle_agent_recording_event(db, agent_code, message_data)
-        return True
-    if message_type in ("web_run_step", "web_run_status", "web_run_finished", "web_run_error"):
-        WebCaseService.handle_agent_run_event(db, agent_code, message_data)
-        return True
-    if message_type in (
+    known_types = {
+        "record_event",
+        "record_status",
+        "record_finished",
+        "record_error",
+        "web_run_step",
+        "web_run_status",
+        "web_run_finished",
+        "web_run_error",
         "desktop_record_event",
         "desktop_record_status",
         "desktop_record_finished",
         "desktop_record_error",
-    ):
-        DesktopCaseService.handle_agent_recording_event(db, agent_code, message_data)
-        return True
-    return False
+    }
+    if message_type not in known_types:
+        return False
+
+    event_db = SessionLocal()
+    try:
+        if message_type in ("record_event", "record_status", "record_finished", "record_error"):
+            WebCaseService.handle_agent_recording_event(event_db, agent_code, message_data)
+            return True
+        if message_type in ("web_run_step", "web_run_status", "web_run_finished", "web_run_error"):
+            WebCaseService.handle_agent_run_event(event_db, agent_code, message_data)
+            return True
+        if message_type in (
+            "desktop_record_event",
+            "desktop_record_status",
+            "desktop_record_finished",
+            "desktop_record_error",
+        ):
+            DesktopCaseService.handle_agent_recording_event(event_db, agent_code, message_data)
+            return True
+    except Exception as exc:
+        event_db.rollback()
+        logger.exception(f"处理Agent事件失败，agent={agent_code}, type={message_type}, error={exc}")
+    finally:
+        event_db.close()
+    return True
 
 
 def change_agent_status(current_db, agent):
@@ -235,7 +271,7 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
             logger.debug(f"收到消息：{_summarize_message(message_data)}")
             if message_data.get("type") in ("ping", "pong"):
                 agent_status[agent_code]["heart_status"] = True
-            elif _dispatch_agent_event(db, agent_code, message_data):
+            elif _dispatch_agent_event(agent_code, message_data):
                 continue
             # 检查消息类型是否为分片
             elif message_data.get("type") == "response_chunk":
@@ -291,7 +327,7 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                             current_event["chunks"].get(i, "") for i in range(current_event["total"])
                         )
                         event_data = decompress_str_to_dict(complete_message)
-                        if not _dispatch_agent_event(db, agent_code, event_data):
+                        if not _dispatch_agent_event(agent_code, event_data):
                             logger.warning(f"收到未知事件分片类型: {event_data.get('type')}")
                     finally:
                         event_chunks.pop(chunk_id, None)
