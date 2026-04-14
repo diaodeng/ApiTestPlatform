@@ -140,6 +140,9 @@ class WebRecordingOptionsModel(WebJsonModel):
     save_html_snapshot: bool = False
     text_assertion_max_length: int = 120
     close_browser_on_stop: bool | None = None
+    window_maximize: bool = False
+    window_width: int | None = None
+    window_height: int | None = None
     prefer_locator_order: list[str] = Field(
         default_factory=lambda: ["role", "label", "placeholder", "text", "test_id", "css", "xpath"]
     )
