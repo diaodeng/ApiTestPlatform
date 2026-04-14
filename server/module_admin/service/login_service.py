@@ -12,7 +12,10 @@ from config.env import AppConfig, JwtConfig, RedisInitKeyConfig
 from config.get_db import get_db
 from exceptions.exception import AuthException, LoginException
 from module_admin.service.api_key_service import ApiKeyService
+from module_admin.dao.dept_dao import DeptDao
 from module_admin.dao.login_dao import login_by_account
+from module_admin.dao.post_dao import PostDao
+from module_admin.dao.role_dao import RoleDao
 from module_admin.dao.user_dao import UserDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.login_vo import SmsCode, UserLogin, UserRegister
@@ -63,6 +66,148 @@ class LoginService:
     """
     登录模块服务层
     """
+    REGISTER_DEFAULT_DEPT_ID_KEY = "sys.account.registerDefaultDeptId"
+    REGISTER_DEFAULT_ROLE_IDS_KEY = "sys.account.registerDefaultRoleIds"
+    REGISTER_DEFAULT_POST_IDS_KEY = "sys.account.registerDefaultPostIds"
+
+    @classmethod
+    async def __get_sys_config_value(cls, request: Request, config_key: str) -> Optional[str]:
+        """
+        获取系统参数缓存值
+        :param request: Request对象
+        :param config_key: 参数键名
+        :return: 参数值字符串，不存在时返回None
+        """
+        config_value = await request.app.state.redis.get(
+            f"{RedisInitKeyConfig.SYS_CONFIG.get('key')}:{config_key}"
+        )
+        if config_value is None:
+            return None
+        if isinstance(config_value, bytes):
+            return config_value.decode("utf-8")
+        return str(config_value)
+
+    @classmethod
+    def __parse_positive_int(cls, raw_value: Optional[str], config_key: str) -> Optional[int]:
+        """
+        解析正整数参数值
+        :param raw_value: 参数原始值
+        :param config_key: 参数键名
+        :return: 正整数结果，解析失败返回None
+        """
+        if raw_value is None:
+            return None
+        value = raw_value.strip()
+        if not value:
+            return None
+        if not value.isdigit():
+            logger.warning(f"注册默认配置无效，{config_key} 不是正整数：{raw_value}")
+            return None
+        number = int(value)
+        if number <= 0:
+            logger.warning(f"注册默认配置无效，{config_key} 必须大于0：{raw_value}")
+            return None
+        return number
+
+    @classmethod
+    def __parse_positive_int_list(cls, raw_value: Optional[str], config_key: str) -> list[int]:
+        """
+        解析逗号分隔的正整数列表参数值
+        :param raw_value: 参数原始值
+        :param config_key: 参数键名
+        :return: 去重后的正整数列表
+        """
+        if raw_value is None:
+            return []
+        value = raw_value.replace("，", ",").strip()
+        if not value:
+            return []
+        parsed_ids = []
+        parsed_id_set = set()
+        for item in value.split(","):
+            current_item = item.strip()
+            if not current_item:
+                continue
+            if not current_item.isdigit() or int(current_item) <= 0:
+                logger.warning(f"注册默认配置无效，{config_key} 包含非法ID：{current_item}")
+                continue
+            current_id = int(current_item)
+            if current_id in parsed_id_set:
+                continue
+            parsed_ids.append(current_id)
+            parsed_id_set.add(current_id)
+
+        return parsed_ids
+
+    @classmethod
+    def __get_valid_default_dept_id(cls, query_db: Session, dept_id: Optional[int]) -> Optional[int]:
+        """
+        校验默认部门配置是否有效
+        :param query_db: orm对象
+        :param dept_id: 默认部门id
+        :return: 有效部门id，无效返回None
+        """
+        if not dept_id:
+            return None
+        if DeptDao.get_dept_by_id(query_db, dept_id):
+            return dept_id
+        logger.warning(f"注册默认配置无效，部门不存在或不可用：dept_id={dept_id}")
+        return None
+
+    @classmethod
+    def __filter_valid_default_role_ids(cls, query_db: Session, role_ids: list[int]) -> list[int]:
+        """
+        过滤有效的默认角色id列表
+        :param query_db: orm对象
+        :param role_ids: 默认角色id列表
+        :return: 有效角色id列表
+        """
+        valid_role_ids = []
+        for role_id in role_ids:
+            if RoleDao.get_role_by_id(query_db, role_id):
+                valid_role_ids.append(role_id)
+            else:
+                logger.warning(f"注册默认配置无效，角色不存在或不可用：role_id={role_id}")
+
+        return valid_role_ids
+
+    @classmethod
+    def __filter_valid_default_post_ids(cls, query_db: Session, post_ids: list[int]) -> list[int]:
+        """
+        过滤有效的默认岗位id列表
+        :param query_db: orm对象
+        :param post_ids: 默认岗位id列表
+        :return: 有效岗位id列表
+        """
+        valid_post_ids = []
+        for post_id in post_ids:
+            if PostDao.get_post_by_id(query_db, post_id):
+                valid_post_ids.append(post_id)
+            else:
+                logger.warning(f"注册默认配置无效，岗位不存在或不可用：post_id={post_id}")
+
+        return valid_post_ids
+
+    @classmethod
+    async def __get_register_default_assignments(cls, request: Request, query_db: Session) -> dict:
+        """
+        获取注册默认部门、角色、岗位配置
+        :param request: Request对象
+        :param query_db: orm对象
+        :return: 默认配置字典（dept_id、role_ids、post_ids）
+        """
+        default_dept_value = await cls.__get_sys_config_value(request, cls.REGISTER_DEFAULT_DEPT_ID_KEY)
+        default_role_ids_value = await cls.__get_sys_config_value(request, cls.REGISTER_DEFAULT_ROLE_IDS_KEY)
+        default_post_ids_value = await cls.__get_sys_config_value(request, cls.REGISTER_DEFAULT_POST_IDS_KEY)
+        parsed_dept_id = cls.__parse_positive_int(default_dept_value, cls.REGISTER_DEFAULT_DEPT_ID_KEY)
+        parsed_role_ids = cls.__parse_positive_int_list(default_role_ids_value, cls.REGISTER_DEFAULT_ROLE_IDS_KEY)
+        parsed_post_ids = cls.__parse_positive_int_list(default_post_ids_value, cls.REGISTER_DEFAULT_POST_IDS_KEY)
+
+        return {
+            "dept_id": cls.__get_valid_default_dept_id(query_db, parsed_dept_id),
+            "role_ids": cls.__filter_valid_default_role_ids(query_db, parsed_role_ids),
+            "post_ids": cls.__filter_valid_default_post_ids(query_db, parsed_post_ids),
+        }
 
     @classmethod
     async def authenticate_user(cls, request: Request, query_db: Session, login_user: UserLogin):
@@ -465,10 +610,14 @@ class LoginService:
                     elif user_register.code != str(captcha_value):
                         logger.warning("验证码错误")
                         return CrudResponseModel(is_success=False, message='验证码错误')
+                default_assignments = await cls.__get_register_default_assignments(request, query_db)
                 add_user = AddUserModel(
                     userName=user_register.username,
                     nickName=user_register.username,
-                    password=PwdUtil.get_password_hash(user_register.password)
+                    password=PwdUtil.get_password_hash(user_register.password),
+                    deptId=default_assignments.get('dept_id'),
+                    roleIds=default_assignments.get('role_ids'),
+                    postIds=default_assignments.get('post_ids')
                 )
                 result = UserService.add_user_services(query_db, add_user)
                 return result

@@ -720,6 +720,9 @@ insert into sys_config values(4, '账号自助-验证码开关',           'sys.
 insert into sys_config values(5, '账号自助-是否开启用户注册功能', 'sys.account.registerUser',      'false',         'Y', 'admin', sysdate(), '', null, '是否开启注册用户功能（true开启，false关闭）');
 insert into sys_config values(6, '用户登录-黑名单列表',           'sys.login.blackIPList',         '',              'Y', 'admin', sysdate(), '', null, '设置登录IP黑名单限制，多个匹配项以;分隔，支持匹配（*通配、网段）');
 insert into sys_config values(7, '桌面测试-默认视觉比对配置',     'hrm.desktop.compare.default',   '{"useHash":true,"useSsim":true,"useOcr":false,"useLocalDiff":true,"useFullDiff":true,"hashThreshold":6,"ssimThreshold":0.995,"pixelDiffThreshold":0.01,"templateThreshold":0.9,"preprocessGrayscale":true,"preprocessBlur":true,"blurKernel":3,"searchIntervalMs":250}', 'Y', 'admin', sysdate(), '', null, '桌面测试默认视觉比对配置 JSON，可在系统参数中修改，执行时也可覆盖');
+insert into sys_config values(8, '账号自助-注册默认部门ID',        'sys.account.registerDefaultDeptId', '',            'Y', 'admin', sysdate(), '', null, '注册时默认部门ID，留空则不设置，示例：103');
+insert into sys_config values(9, '账号自助-注册默认角色ID列表',    'sys.account.registerDefaultRoleIds', '',            'Y', 'admin', sysdate(), '', null, '注册时默认角色ID列表，逗号分隔，留空则不设置，示例：2,3');
+insert into sys_config values(10, '账号自助-注册默认岗位ID列表',   'sys.account.registerDefaultPostIds', '',            'Y', 'admin', sysdate(), '', null, '注册时默认岗位ID列表，逗号分隔，留空则不设置，示例：1,4');
 
 
 -- ----------------------------
