@@ -29,3 +29,7 @@ class FlowItem:
     response_body: str = ""
     response_content_type: str = ""
     duration_ms: int | None = None
+    breakpoint_matched: bool = False
+    breakpoint_stage: str = ""
+    breakpoint_paused: bool = False
+    breakpoint_status_text: str = ""

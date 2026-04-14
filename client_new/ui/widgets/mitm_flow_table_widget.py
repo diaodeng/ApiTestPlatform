@@ -1,15 +1,15 @@
-from PySide6.QtCore import QEvent, QSortFilterProxyModel, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QSize, QSortFilterProxyModel, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QHBoxLayout,
     QHeaderView,
-    QLabel,
     QLineEdit,
     QPushButton,
     QStyle,
     QStyledItemDelegate,
+    QStyleOptionButton,
     QStyleOptionViewItem,
     QTableView,
     QVBoxLayout,
@@ -98,6 +98,81 @@ class FlowRowDelegate(QStyledItemDelegate):
             )
 
         super().paint(painter, opt, index)
+
+
+class BreakpointActionDelegate(QStyledItemDelegate):
+    action_clicked = Signal(object)
+
+    def paint(self, painter, option, index):
+        """
+        在断点列绘制“继续请求/继续响应”按钮样式。
+        :param painter: Qt painter
+        :param option: 绘制选项
+        :param index: 当前单元格索引
+        :return:
+        """
+        action_state = index.data(FlowTableModel.BREAKPOINT_ACTION_ROLE)
+        if index.column() != 8 or not action_state:
+            super().paint(painter, option, index)
+            return
+
+        button_option = QStyleOptionButton()
+        button_option.rect = option.rect.adjusted(6, 4, -6, -4)
+        button_option.state = QStyle.State_Enabled
+        if option.state & QStyle.State_MouseOver:
+            button_option.state |= QStyle.State_MouseOver
+        style = option.widget.style() if option.widget else None
+        if not style:
+            return
+
+        if action_state in {"play_request", "play_response"}:
+            button_option.icon = style.standardIcon(QStyle.SP_MediaPlay)
+            button_option.iconSize = QSize(
+                max(int(button_option.rect.width() * 0.5), 12),
+                max(int(button_option.rect.height() * 0.5), 12),
+            )
+            style.drawControl(QStyle.CE_PushButton, button_option, painter)
+            return
+
+        if action_state == "pause_wait_response":
+            button_option.icon = style.standardIcon(QStyle.SP_MediaPause)
+            button_option.state &= ~QStyle.State_Enabled
+            button_option.iconSize = QSize(
+                max(int(button_option.rect.width() * 0.5), 12),
+                max(int(button_option.rect.height() * 0.5), 12),
+            )
+            style.drawControl(QStyle.CE_PushButton, button_option, painter)
+            return
+
+        super().paint(painter, option, index)
+
+    def editorEvent(self, event, model, option, index):
+        """
+        处理断点按钮点击事件。
+        :param event: 鼠标事件
+        :param model: 表格模型
+        :param option: 绘制选项
+        :param index: 当前单元格索引
+        :return: 是否已处理
+        """
+        if index.column() != 8:
+            return super().editorEvent(event, model, option, index)
+        action_state = index.data(FlowTableModel.BREAKPOINT_ACTION_ROLE)
+        if action_state not in {"play_request", "play_response"}:
+            return super().editorEvent(event, model, option, index)
+        event_pos = None
+        if hasattr(event, "position"):
+            event_pos = event.position().toPoint()
+        elif hasattr(event, "pos"):
+            event_pos = event.pos()
+        if (
+            event.type() == QEvent.MouseButtonRelease
+            and event_pos is not None
+            and option.rect.contains(event_pos)
+        ):
+            self.action_clicked.emit(index)
+            return True
+        return super().editorEvent(event, model, option, index)
 
 
 class FlowFilterProxyModel(QSortFilterProxyModel):
@@ -194,6 +269,8 @@ class FlowFilterProxyModel(QSortFilterProxyModel):
 class FlowTableWidget(QWidget):
     flow_selected = Signal(object)
     stats_changed = Signal(int, int)
+    breakpoint_rule_changed = Signal(bool, str)
+    breakpoint_continue_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -202,6 +279,7 @@ class FlowTableWidget(QWidget):
         self.proxy_model = FlowFilterProxyModel(self)
         self.proxy_model.setSourceModel(self.model)
         self._selected_flow_id = ""
+        self._breakpoint_sync_guard = False
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(
@@ -212,7 +290,18 @@ class FlowTableWidget(QWidget):
         self.method_filter = MenuSelectButton(
             "方法",
             [("全部方法", "ALL")]
-            + [(method, method) for method in ("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD")],
+            + [
+                (method, method)
+                for method in (
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "DELETE",
+                    "PATCH",
+                    "OPTIONS",
+                    "HEAD",
+                )
+            ],
             self,
         )
         self.method_filter.setMinimumWidth(110)
@@ -232,12 +321,20 @@ class FlowTableWidget(QWidget):
         self.status_filter.setMinimumWidth(110)
 
         self.failed_only_checkbox = QCheckBox("只看失败请求")
+        self.breakpoint_enabled_checkbox = QCheckBox("启用断点")
+        self.breakpoint_input = QLineEdit()
+        self.breakpoint_input.setPlaceholderText(
+            "输入断点接口关键字（包含匹配），如 /pos/token"
+        )
+        self.breakpoint_input.setEnabled(False)
         self.clear_filter_btn = QPushButton("清除筛选")
-        self.count_label = QLabel("记录 0 条")
+        # self.count_label = QLabel("记录 0 条")
 
         self.table = HoverTableView()
         self.table.setModel(self.proxy_model)
         self.table.setItemDelegate(FlowRowDelegate(self.table))
+        self.breakpoint_action_delegate = BreakpointActionDelegate(self.table)
+        self.table.setItemDelegateForColumn(8, self.breakpoint_action_delegate)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setAlternatingRowColors(False)
@@ -264,11 +361,15 @@ class FlowTableWidget(QWidget):
             6, QHeaderView.ResizeToContents
         )
         self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(
+            8, QHeaderView.ResizeToContents
+        )
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setShowGrid(False)
         self.table.setSortingEnabled(False)
         self.table.setColumnWidth(2, 160)
         self.table.setColumnWidth(7, 160)
+        self.table.setColumnWidth(8, 120)
 
         toolbar_layout = QHBoxLayout()
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
@@ -278,7 +379,10 @@ class FlowTableWidget(QWidget):
         toolbar_layout.addWidget(self.status_filter)
         toolbar_layout.addWidget(self.failed_only_checkbox)
         toolbar_layout.addWidget(self.clear_filter_btn)
-        toolbar_layout.addWidget(self.count_label)
+        toolbar_layout.addWidget(self.breakpoint_enabled_checkbox)
+        toolbar_layout.addWidget(self.breakpoint_input, 1)
+
+        # toolbar_layout.addWidget(self.count_label)
         toolbar_layout.addStretch()
 
         layout = QVBoxLayout()
@@ -300,8 +404,15 @@ class FlowTableWidget(QWidget):
         self.method_filter.value_changed.connect(self._apply_filters)
         self.status_filter.value_changed.connect(self._apply_filters)
         self.failed_only_checkbox.toggled.connect(self._apply_filters)
+        self.breakpoint_enabled_checkbox.toggled.connect(
+            self._on_breakpoint_enabled_toggled
+        )
+        self.breakpoint_input.returnPressed.connect(self._emit_breakpoint_rule_changed)
         self.clear_filter_btn.clicked.connect(self._clear_filters)
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self.breakpoint_action_delegate.action_clicked.connect(
+            self._on_breakpoint_action_clicked
+        )
         ThemeManager.instance().theme_changed.connect(self._apply_theme)
 
     def _on_model_changed(self):
@@ -322,6 +433,46 @@ class FlowTableWidget(QWidget):
         self.status_filter.set_current_data("ALL", emit_signal=False)
         self.failed_only_checkbox.setChecked(False)
         self._apply_filters()
+
+    def _on_breakpoint_enabled_toggled(self, enabled: bool):
+        """
+        断点开关变化时同步控件状态。
+        :param enabled: 是否启用断点
+        :return:
+        """
+        self.breakpoint_input.setEnabled(enabled)
+        if self._breakpoint_sync_guard:
+            return
+        if not enabled:
+            self._emit_breakpoint_rule_changed()
+
+    def _emit_breakpoint_rule_changed(self):
+        """
+        派发断点规则变更事件。
+        :return:
+        """
+        if self._breakpoint_sync_guard:
+            return
+        enabled = self.breakpoint_enabled_checkbox.isChecked()
+        pattern = self.breakpoint_input.text().strip() if enabled else ""
+        self.breakpoint_rule_changed.emit(enabled, pattern)
+
+    def _on_breakpoint_action_clicked(self, proxy_index):
+        """
+        处理断点列按钮点击，通知上层执行放行。
+        :param proxy_index: 代理模型索引
+        :return:
+        """
+        if not proxy_index or not proxy_index.isValid():
+            return
+        source_index = self.proxy_model.mapToSource(proxy_index)
+        if not source_index.isValid():
+            return
+        item = self.model.get_item(source_index.row())
+        if not item or not item.breakpoint_paused:
+            return
+        self.table.selectRow(proxy_index.row())
+        self.breakpoint_continue_requested.emit(item)
 
     def _on_selection_changed(self, *_args):
         selected_rows = self.table.selectionModel().selectedRows()
@@ -369,10 +520,10 @@ class FlowTableWidget(QWidget):
     def _refresh_stats(self):
         visible_count = self.proxy_model.rowCount()
         total_count = self.model.total_count()
-        if visible_count == total_count:
-            self.count_label.setText(f"记录 {total_count} 条")
-        else:
-            self.count_label.setText(f"显示 {visible_count} / 总计 {total_count}")
+        # if visible_count == total_count:
+        #     self.count_label.setText(f"记录 {total_count} 条")
+        # else:
+        #     self.count_label.setText(f"显示 {visible_count} / 总计 {total_count}")
         self.stats_changed.emit(visible_count, total_count)
 
     def clear(self):
@@ -384,6 +535,28 @@ class FlowTableWidget(QWidget):
         self.table.clearSelection()
         self.model.clear()
         self.flow_selected.emit(None)
+
+    def set_breakpoint_rule(self, enabled: bool, pattern: str):
+        """
+        外部设置断点规则，避免触发重复保存。
+        :param enabled: 是否启用
+        :param pattern: 匹配关键字
+        :return:
+        """
+        self._breakpoint_sync_guard = True
+        self.breakpoint_enabled_checkbox.setChecked(bool(enabled))
+        self.breakpoint_input.setText(str(pattern or ""))
+        self.breakpoint_input.setEnabled(bool(enabled))
+        self._breakpoint_sync_guard = False
+
+    def set_record_limit(self, limit: int):
+        """
+        设置抓包记录最大保留条数。
+        :param limit: 最大条数
+        :return:
+        """
+        self.model.set_max_records(limit)
+        self._refresh_stats()
 
     def _apply_theme(self, *_args):
         tokens = ThemeManager.instance().tokens()

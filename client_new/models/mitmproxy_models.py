@@ -7,12 +7,15 @@ from models.mitmproxy_common import FlowItem
 
 class FlowTableModel(QAbstractTableModel):
     changed = Signal()
-    HEADERS = ["时间", "方法", "域名", "路径", "状态", "耗时", "大小", "Content-Type"]
+    BREAKPOINT_ACTION_ROLE = Qt.UserRole + 101
+    FLOW_ITEM_ROLE = Qt.UserRole + 102
+    HEADERS = ["时间", "方法", "域名", "路径", "状态", "耗时", "大小", "Content-Type", "断点放行"]
 
     def __init__(self):
         super().__init__()
         self._data = []
         self._map = {}
+        self._max_records = 500
 
     def rowCount(self, parent=None):
         return len(self._data)
@@ -46,6 +49,8 @@ class FlowTableModel(QAbstractTableModel):
                 return self._simplify_content_type(
                     item.response_content_type or item.request_content_type
                 )
+            elif col == 8:
+                return ""
 
         if role == Qt.ToolTipRole:
             col = index.column()
@@ -55,6 +60,14 @@ class FlowTableModel(QAbstractTableModel):
                 return item.path or "-"
             if col == 7:
                 return item.response_content_type or item.request_content_type or "-"
+            if col == 8:
+                return item.breakpoint_status_text or "-"
+
+        if role == self.BREAKPOINT_ACTION_ROLE and index.column() == 8:
+            return self._resolve_breakpoint_action(item)
+
+        if role == self.FLOW_ITEM_ROLE:
+            return item
 
         if role == Qt.ForegroundRole and item.status_code is not None:
             if item.status_code >= 500:
@@ -73,6 +86,7 @@ class FlowTableModel(QAbstractTableModel):
     # ===== 新增 =====
     def add_flow(self, item):
         logger.debug(f"抓取到数据了{item}")
+        self._trim_before_add(1)
         self.beginInsertRows(QModelIndex(), len(self._data), len(self._data))
         self._data.append(item)
         self._map[item.id] = len(self._data) - 1
@@ -102,6 +116,22 @@ class FlowTableModel(QAbstractTableModel):
         self.endResetModel()
         self.changed.emit()
 
+    def set_max_records(self, max_records: int):
+        """
+        设置流量列表最大保留条数，超限时自动丢弃最旧记录。
+        :param max_records: 最大条数
+        :return:
+        """
+        resolved = 500
+        try:
+            resolved = int(max_records)
+        except Exception:
+            resolved = 500
+        if resolved <= 0:
+            resolved = 500
+        self._max_records = resolved
+        self._trim_before_add(0)
+
     def get_item(self, row: int):
         if 0 <= row < len(self._data):
             return self._data[row]
@@ -126,3 +156,44 @@ class FlowTableModel(QAbstractTableModel):
         if not raw:
             return "-"
         return raw.split(";", 1)[0].strip()
+
+    def _resolve_breakpoint_action(self, item: FlowItem) -> str:
+        """
+        计算断点列按钮文案。
+        :param item: 流量对象
+        :return: 按钮文案，不可放行时返回空串
+        """
+        if not item.breakpoint_matched:
+            return ""
+        if item.breakpoint_stage == "request" and item.breakpoint_paused:
+            return "play_request"
+        if item.breakpoint_stage == "request" and not item.breakpoint_paused:
+            return "pause_wait_response"
+        if item.breakpoint_stage == "response" and item.breakpoint_paused:
+            return "play_response"
+        return ""
+
+    def _trim_before_add(self, incoming_count: int):
+        """
+        在新增流量前按上限裁剪旧数据。
+        :param incoming_count: 即将新增条数
+        :return:
+        """
+        total_after_add = len(self._data) + max(incoming_count, 0)
+        overflow_count = total_after_add - self._max_records
+        if overflow_count <= 0:
+            return
+        remove_count = min(overflow_count, len(self._data))
+        if remove_count <= 0:
+            return
+        self.beginRemoveRows(QModelIndex(), 0, remove_count - 1)
+        del self._data[:remove_count]
+        self.endRemoveRows()
+        self._rebuild_map()
+
+    def _rebuild_map(self):
+        """
+        根据当前数据重建 id 到行号的索引。
+        :return:
+        """
+        self._map = {item.id: index for index, item in enumerate(self._data)}

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from controller.mitm_controller import MitmController
 from server.config import MitmproxyConfig
+from ui.dialogs.mitm_breakpoint_edit_dialog import MitmBreakpointEditDialog
 from ui.dialogs.mitm_setting_dialog import MitmSettingDialog
 from ui.widgets.mitm_flow_main_widget import FlowMainWidget
 from ui.widgets.process_selector_widget import ProcessSelectorWidget
@@ -230,6 +231,14 @@ class MitmWidget(QWidget):
         )
         self._update_mode_hint(config)
         self._update_app_flow_visibility(config)
+        if self.flow_widget is not None:
+            self.flow_widget.table.set_record_limit(
+                int(getattr(config, "flow_record_limit", 500) or 500)
+            )
+            self.flow_widget.table.set_breakpoint_rule(
+                bool(getattr(config, "breakpoint_enabled", False)),
+                str(getattr(config, "breakpoint_pattern", "") or ""),
+            )
         self._refresh_web_controls()
         self._apply_state_text(proxy_state)
 
@@ -424,9 +433,56 @@ class MitmWidget(QWidget):
 
         self.flow_widget = FlowMainWidget(self.flow_container)
         self.flow_widget.table.stats_changed.connect(self._update_flow_stats)
+        self.flow_widget.table.breakpoint_rule_changed.connect(
+            self._on_breakpoint_rule_changed
+        )
+        self.flow_widget.table.breakpoint_continue_requested.connect(
+            self._on_breakpoint_continue_requested
+        )
         self.flow_container_layout.insertWidget(0, self.flow_widget, 1)
         self.flow_placeholder.hide()
         self.clear_btn.setEnabled(self._app_flow_visible)
         self.detail_toggle_btn.setEnabled(self._app_flow_visible)
         self.flow_widget.set_detail_visible(self._detail_visible)
+        self.flow_widget.table.set_record_limit(
+            int(getattr(self.config, "flow_record_limit", 500) or 500)
+        )
+        self.flow_widget.table.set_breakpoint_rule(
+            bool(getattr(self.config, "breakpoint_enabled", False)),
+            str(getattr(self.config, "breakpoint_pattern", "") or ""),
+        )
         return self.flow_widget
+
+    def _on_breakpoint_rule_changed(self, enabled: bool, pattern: str):
+        """
+        断点规则变更后同步保存配置并下发给运行时。
+        :param enabled: 是否启用断点
+        :param pattern: 断点匹配关键字
+        :return:
+        """
+        data = self.config.model_dump()
+        data["breakpoint_enabled"] = bool(enabled)
+        data["breakpoint_pattern"] = str(pattern or "")
+        self.save_clicked.emit(data)
+
+    def _on_breakpoint_continue_requested(self, flow_item):
+        """
+        处理流量行的断点放行请求，弹窗编辑后通知 controller 放行。
+        :param flow_item: 当前流量对象
+        :return:
+        """
+        if not flow_item:
+            return
+        if not self.controller:
+            return
+        stage = str(getattr(flow_item, "breakpoint_stage", "") or "").strip().lower()
+        if stage not in {"request", "response"}:
+            return
+        dialog = MitmBreakpointEditDialog(flow_item, self)
+        if not dialog.exec():
+            return
+        self.controller.continue_flow_breakpoint(
+            str(getattr(flow_item, "id", "") or ""),
+            stage,
+            dialog.get_payload(),
+        )

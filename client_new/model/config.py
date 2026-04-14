@@ -48,6 +48,9 @@ class MitmProxyConfigModel(BaseModel):
     open_include: bool = False
     open_exclude: bool = False
     mock_server: str = "https://testautoapi.rta-os.com/hrm/mock"
+    breakpoint_enabled: bool = False
+    breakpoint_pattern: str = ""
+    flow_record_limit: int = 500
 
     model_config = {
         "extra": "allow"  # 允许未知字段
