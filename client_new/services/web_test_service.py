@@ -315,6 +315,124 @@ RECORDER_SCRIPT = """
       window.__qtrRecordEvent(payload);
     }
   };
+  const toPositiveInt = (value) => {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) return 0;
+    const roundedValue = Math.round(numberValue);
+    return roundedValue > 0 ? roundedValue : 0;
+  };
+  const readWindowMetrics = () => ({
+    innerWidth: toPositiveInt(window.innerWidth),
+    innerHeight: toPositiveInt(window.innerHeight),
+    outerWidth: toPositiveInt(window.outerWidth),
+    outerHeight: toPositiveInt(window.outerHeight),
+    availWidth: toPositiveInt((window.screen && window.screen.availWidth) || 0),
+    availHeight: toPositiveInt((window.screen && window.screen.availHeight) || 0),
+    screenWidth: toPositiveInt((window.screen && window.screen.width) || 0),
+    screenHeight: toPositiveInt((window.screen && window.screen.height) || 0)
+  });
+  const resolveWindowResizeDebounceMs = () => {
+    const candidate = Number(options.windowResizeDebounceMs ?? options.window_resize_debounce_ms ?? 450);
+    if (!Number.isFinite(candidate)) return 450;
+    return Math.max(120, Math.min(Math.round(candidate), 5000));
+  };
+  const resolveWindowResizeIgnoreMs = () => {
+    const candidate = Number(options.windowResizeIgnoreInitialMs ?? options.window_resize_ignore_initial_ms ?? 1000);
+    if (!Number.isFinite(candidate)) return 1000;
+    return Math.max(0, Math.min(Math.round(candidate), 10000));
+  };
+  const isTopLevelWindow = (() => {
+    try {
+      return window.top === window;
+    } catch (_error) {
+      return true;
+    }
+  })();
+  const captureWindowResize = isTopLevelWindow
+    && options.captureWindowResize !== false
+    && options.capture_window_resize !== false;
+  const windowResizeDebounceMs = resolveWindowResizeDebounceMs();
+  const windowResizeIgnoreMs = resolveWindowResizeIgnoreMs();
+  const windowCaptureStartedAt = Date.now();
+  let windowResizeTimer = null;
+  let lastWindowStepSignature = "";
+  const isNearScreenBounds = (value, target, tolerance = 20) => {
+    if (!value || !target) return false;
+    return Math.abs(value - target) <= tolerance || value > target;
+  };
+  const isLikelyMaximized = (metrics) => {
+    const targetWidth = metrics.availWidth || metrics.screenWidth || 0;
+    const targetHeight = metrics.availHeight || metrics.screenHeight || 0;
+    if (!targetWidth || !targetHeight) return false;
+    const widthMatched = isNearScreenBounds(metrics.outerWidth, targetWidth)
+      || isNearScreenBounds(metrics.innerWidth, targetWidth);
+    const heightMatched = isNearScreenBounds(metrics.outerHeight, targetHeight)
+      || isNearScreenBounds(metrics.innerHeight, targetHeight);
+    return widthMatched && heightMatched;
+  };
+  const signatureFromWindowAction = (actionType, params = {}) => {
+    if (actionType === "window_maximize") return "window_maximize";
+    return `set_window_size:${toPositiveInt(params.width)}x${toPositiveInt(params.height)}`;
+  };
+  const buildWindowResizePayload = (eventType) => {
+    const metrics = readWindowMetrics();
+    const width = metrics.innerWidth;
+    const height = metrics.innerHeight;
+    if (!width || !height) return null;
+    const maximized = isLikelyMaximized(metrics);
+    if (maximized) {
+      return {
+        signature: signatureFromWindowAction("window_maximize"),
+        payload: {
+          stepName: "窗口最大化",
+          actionType: "window_maximize",
+          params: {},
+          assertions: [],
+          rawEvent: { eventType, windowMetrics: metrics },
+          targetSnapshot: null
+        }
+      };
+    }
+    return {
+      signature: signatureFromWindowAction("set_window_size", { width, height }),
+      payload: {
+        stepName: `设置窗口尺寸 ${width}x${height}`,
+        actionType: "set_window_size",
+        params: { width, height },
+        assertions: [],
+        rawEvent: { eventType, windowMetrics: metrics },
+        targetSnapshot: null
+      }
+    };
+  };
+  const emitWindowResizeStep = (eventType) => {
+    if (!captureWindowResize) return;
+    if (Date.now() - windowCaptureStartedAt < windowResizeIgnoreMs) return;
+    const resizeEvent = buildWindowResizePayload(eventType);
+    if (!resizeEvent) return;
+    if (resizeEvent.signature === lastWindowStepSignature) return;
+    lastWindowStepSignature = resizeEvent.signature;
+    emit(resizeEvent.payload);
+  };
+  const scheduleWindowResizeStep = (eventType) => {
+    if (!captureWindowResize) return;
+    if (windowResizeTimer !== null) {
+      clearTimeout(windowResizeTimer);
+    }
+    windowResizeTimer = window.setTimeout(() => {
+      windowResizeTimer = null;
+      emitWindowResizeStep(eventType);
+    }, windowResizeDebounceMs);
+  };
+  if (captureWindowResize) {
+    const initialWindowEvent = buildWindowResizePayload("window_initial_snapshot");
+    if (initialWindowEvent) {
+      lastWindowStepSignature = initialWindowEvent.signature;
+    }
+    window.addEventListener("resize", () => {
+      scheduleWindowResizeStep("window_resize");
+    }, true);
+  }
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest("button, a, input, textarea, select, [role], [data-testid], [data-test], *") : null;
     if (!target) return;
