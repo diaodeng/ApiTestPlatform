@@ -161,6 +161,34 @@ class MitmController(QObject):
         except Exception as e:
             logger.exception(f"停止 mitmproxy 失败: {e}")
 
+    def continue_flow_breakpoint(self, flow_id: str, stage: str, payload: dict | None = None):
+        """
+        放行指定流量断点，并携带可选的请求/响应覆盖数据。
+        :param flow_id: 流量id
+        :param stage: 断点阶段（request/response）
+        :param payload: 覆盖数据
+        :return:
+        """
+        if not self._is_helper_running():
+            logger.warning("放行断点失败：mitmproxy helper 未运行")
+            return
+        if self.helper_state not in {"starting", "running"}:
+            logger.warning(f"放行断点失败：当前状态不支持放行，state={self.helper_state}")
+            return
+        normalized_flow_id = str(flow_id or "").strip()
+        normalized_stage = str(stage or "").strip().lower()
+        if not normalized_flow_id or normalized_stage not in {"request", "response"}:
+            logger.warning(
+                f"放行断点失败：参数无效 flow_id={normalized_flow_id}, stage={normalized_stage}"
+            )
+            return
+        self._send_command(
+            "continue_flow",
+            flow_id=normalized_flow_id,
+            stage=normalized_stage,
+            payload=payload or {},
+        )
+
     def save(self, data):
         try:
             old_config = self.config
@@ -576,6 +604,8 @@ class MitmController(QObject):
                 if message.get("cmd") in {"start", "stop"}:
                     self.helper_state = "stopped"
                     self._sync_ui_state()
+            elif message.get("cmd") == "continue_flow":
+                logger.info(message.get("message", "断点已放行"))
             return
 
         if msg_type == "error":
@@ -655,6 +685,10 @@ class MitmController(QObject):
             response_body=payload.get("response_body", ""),
             response_content_type=payload.get("response_content_type", ""),
             duration_ms=payload.get("duration_ms"),
+            breakpoint_matched=bool(payload.get("breakpoint_matched", False)),
+            breakpoint_stage=payload.get("breakpoint_stage", ""),
+            breakpoint_paused=bool(payload.get("breakpoint_paused", False)),
+            breakpoint_status_text=payload.get("breakpoint_status_text", ""),
         )
 
     def _on_helper_finished(self, exit_code: int, exit_status):

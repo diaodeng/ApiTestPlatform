@@ -74,6 +74,7 @@ class MitmSettingDialog(QDialog):
 
         self.port_input = QLineEdit()
         self.web_port_input = QLineEdit()
+        self.flow_record_limit_input = QLineEdit()
         self.startup_mode_select = QComboBox()
         self.startup_mode_select.addItem("dump", "dump")
         self.startup_mode_select.addItem("web", "web")
@@ -106,6 +107,7 @@ class MitmSettingDialog(QDialog):
 
         layout.addRow("代理端口", self.port_input)
         layout.addRow("Web 端口", self.web_port_input)
+        layout.addRow("抓包记录上限", self.flow_record_limit_input)
         layout.addRow("启动方式", self.startup_mode_select)
         layout.addRow("模式", mode_row)
         layout.addRow("配置目录", self.config_dir_input)
@@ -141,6 +143,9 @@ class MitmSettingDialog(QDialog):
         box = QGroupBox("路径匹配")
         layout = QFormLayout(box)
 
+        self.breakpoint_enabled_checkbox = QCheckBox("启用断点拦截")
+        self.breakpoint_input = QLineEdit()
+        self.breakpoint_input.setPlaceholderText("输入要断点的接口关键字，如 /pos/token")
         self.include_checkbox = QCheckBox("启用包含规则")
         self.exclude_checkbox = QCheckBox("启用排除规则")
         self.include_input = QTextEdit()
@@ -148,6 +153,8 @@ class MitmSettingDialog(QDialog):
         self.exclude_input = QTextEdit()
         self.exclude_input.setMinimumHeight(90)
 
+        layout.addRow("", self.breakpoint_enabled_checkbox)
+        layout.addRow("断点接口", self.breakpoint_input)
         layout.addRow("", self.include_checkbox)
         layout.addRow("包含路径", self.include_input)
         layout.addRow("", self.exclude_checkbox)
@@ -183,6 +190,9 @@ class MitmSettingDialog(QDialog):
 
         self.port_input.setText(str(d.port))
         self.web_port_input.setText(str(d.web_port))
+        self.flow_record_limit_input.setText(
+            str(getattr(d, "flow_record_limit", 500) or 500)
+        )
         self.startup_mode_select.setCurrentText(
             str(getattr(d, "startup_mode", "dump") or "dump")
         )
@@ -202,6 +212,10 @@ class MitmSettingDialog(QDialog):
         self.headers_input.setPlainText(d.add_headers)
         self.body_input.setPlainText(d.add_body)
 
+        self.breakpoint_enabled_checkbox.setChecked(
+            bool(getattr(d, "breakpoint_enabled", False))
+        )
+        self.breakpoint_input.setText(str(getattr(d, "breakpoint_pattern", "") or ""))
         self.include_checkbox.setChecked(d.open_include)
         self.exclude_checkbox.setChecked(d.open_exclude)
         self.include_input.setPlainText(d.include)
@@ -244,6 +258,10 @@ class MitmSettingDialog(QDialog):
             {
                 "port": int(self.port_input.text()),
                 "web_port": int(self.web_port_input.text()),
+                "flow_record_limit": self._parse_positive_int(
+                    self.flow_record_limit_input.text().strip(),
+                    "抓包记录上限",
+                ),
                 "startup_mode": self.startup_mode_select.currentData(),
                 "proxy_model": self.mode_select.currentText(),
                 "proxy_model_value": self.mode_value_input.value(),
@@ -257,6 +275,8 @@ class MitmSettingDialog(QDialog):
                 "mock_server": self.mock_server_input.text().strip(),
                 "add_headers": self.headers_input.toPlainText(),
                 "add_body": self.body_input.toPlainText(),
+                "breakpoint_enabled": self.breakpoint_enabled_checkbox.isChecked(),
+                "breakpoint_pattern": self.breakpoint_input.text().strip(),
                 "open_include": self.include_checkbox.isChecked(),
                 "open_exclude": self.exclude_checkbox.isChecked(),
                 "include": self.include_input.toPlainText(),
@@ -287,3 +307,20 @@ class MitmSettingDialog(QDialog):
                 if part:
                     items.append(part)
         return items
+
+    def _parse_positive_int(self, value: str, field_name: str) -> int:
+        """
+        解析正整数输入。
+        :param value: 输入文本
+        :param field_name: 字段名称
+        :return: 正整数值
+        """
+        if not value:
+            raise ValueError(f"{field_name}不能为空")
+        try:
+            number = int(value)
+        except Exception as e:
+            raise ValueError(f"{field_name}必须是整数") from e
+        if number <= 0:
+            raise ValueError(f"{field_name}必须大于0")
+        return number

@@ -86,6 +86,72 @@ class HelperProtocol:
             self._stdout.flush()
 
 
+class BreakpointManager:
+    def __init__(self):
+        self._waiters: dict[tuple[str, str], asyncio.Future] = {}
+
+    async def wait_for_continue(self, flow_id: str, stage: str) -> dict:
+        """
+        在事件循环线程中等待指定流量断点放行。
+        :param flow_id: 流量id
+        :param stage: 断点阶段（request/response）
+        :return: 放行时携带的覆盖数据
+        """
+        loop = asyncio.get_running_loop()
+        key = (flow_id, stage)
+        future = loop.create_future()
+        old_future = self._waiters.get(key)
+        if old_future and not old_future.done():
+            old_future.set_result({})
+        self._waiters[key] = future
+        try:
+            result = await future
+            return result if isinstance(result, dict) else {}
+        finally:
+            self._waiters.pop(key, None)
+
+    def continue_flow(
+        self,
+        flow_id: str,
+        stage: str,
+        payload: dict | None = None,
+    ) -> tuple[bool, str]:
+        """
+        放行指定流量断点。
+        :param flow_id: 流量id
+        :param stage: 断点阶段（request/response）
+        :param payload: 覆盖请求/响应数据
+        :return: 放行结果
+        """
+        key = (flow_id, stage)
+        future = self._waiters.get(key)
+        resolved_stage = stage
+        if not future:
+            for (wait_flow_id, wait_stage), wait_future in self._waiters.items():
+                if wait_flow_id == flow_id and not wait_future.done():
+                    future = wait_future
+                    resolved_stage = wait_stage
+                    break
+        if not future:
+            return False, "未找到可放行的断点，可能已被处理"
+        if future.done():
+            return False, "断点已放行"
+        future.set_result(payload or {})
+        return True, f"已放行 stage={resolved_stage}"
+
+    def release_all(self, payload: dict | None = None):
+        """
+        释放全部等待中的断点，通常用于停止代理时兜底。
+        :param payload: 释放时传递给等待方的数据
+        :return:
+        """
+        data = payload or {}
+        for key, future in list(self._waiters.items()):
+            if not future.done():
+                future.set_result(data)
+            self._waiters.pop(key, None)
+
+
 class HelperRuntime:
     def __init__(self, protocol: HelperProtocol):
         self.protocol = protocol
@@ -98,6 +164,7 @@ class HelperRuntime:
         self._session_future: concurrent.futures.Future | None = None
         self._config: MitmProxyConfigModel | None = None
         self._stop_requested = False
+        self._breakpoint_manager = BreakpointManager()
         self._start_loop_thread()
 
     @property
@@ -172,6 +239,52 @@ class HelperRuntime:
         )
         return True, "配置已更新"
 
+    def continue_flow(
+        self,
+        flow_id: str,
+        stage: str,
+        payload: dict | None = None,
+    ) -> tuple[bool, str]:
+        """
+        放行处于断点暂停状态的请求或响应。
+        :param flow_id: 流量id
+        :param stage: 断点阶段（request/response）
+        :param payload: 覆盖请求/响应数据
+        :return: 放行结果
+        """
+        normalized_flow_id = str(flow_id or "").strip()
+        normalized_stage = str(stage or "").strip().lower()
+        if not normalized_flow_id:
+            return False, "flow_id 不能为空"
+        if normalized_stage not in {"request", "response"}:
+            return False, "stage 仅支持 request 或 response"
+
+        with self._lock:
+            loop = self._loop
+            state = self._state
+
+        if not loop or state == "stopped":
+            return False, "mitmproxy 未运行"
+
+        result_future: concurrent.futures.Future = concurrent.futures.Future()
+
+        def _resume():
+            try:
+                ok, message = self._breakpoint_manager.continue_flow(
+                    normalized_flow_id,
+                    normalized_stage,
+                    payload if isinstance(payload, dict) else {},
+                )
+                result_future.set_result((ok, message))
+            except Exception as e:
+                result_future.set_result((False, f"放行失败: {e}"))
+
+        loop.call_soon_threadsafe(_resume)
+        try:
+            return result_future.result(timeout=2.0)
+        except concurrent.futures.TimeoutError:
+            return False, "放行超时"
+
     def shutdown(self, timeout: float = 5.0) -> tuple[bool, str]:
         ok, message = self.stop(timeout)
 
@@ -238,6 +351,7 @@ class HelperRuntime:
                 loop.close()
 
     def _request_session_shutdown(self, master: mitm_master.Master):
+        self._breakpoint_manager.release_all({"release_reason": "shutdown"})
         proxyserver = master.addons.get("proxyserver")
         if proxyserver:
             asyncio_utils.create_task(
@@ -335,7 +449,12 @@ class HelperRuntime:
                 with_dumper=False,
             )
 
-        master.addons.add(MockHandle(flow_dispatcher=self._dispatch_flow))
+        master.addons.add(
+            MockHandle(
+                flow_dispatcher=self._dispatch_flow,
+                breakpoint_manager=self._breakpoint_manager,
+            )
+        )
         return master
 
     async def _run_session(self, config: MitmProxyConfigModel):
@@ -471,6 +590,12 @@ def main():
                     ok, message = runtime.stop(float(command.get("timeout", 10.0)))
                 elif cmd == "update":
                     ok, message = runtime.update_config(command.get("config") or {})
+                elif cmd == "continue_flow":
+                    ok, message = runtime.continue_flow(
+                        command.get("flow_id", ""),
+                        command.get("stage", ""),
+                        command.get("payload") or {},
+                    )
                 elif cmd == "shutdown":
                     ok, message = runtime.shutdown(float(command.get("timeout", 10.0)))
                     protocol.send("result", cmd=cmd, ok=ok, message=message)
