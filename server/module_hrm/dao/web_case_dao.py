@@ -43,7 +43,7 @@ class WebCaseDao:
                 HrmWebCase.status == page_object.status if page_object.status else True,
                 data_scope_sql,
             )
-            .order_by(HrmWebCase.sort.asc(), HrmWebCase.update_time.desc(), HrmWebCase.create_time.desc())
+            .order_by(HrmWebCase.create_time.desc(), HrmWebCase.update_time.desc())
         )
         return PageUtil.paginate(query, page_object.page_num, page_object.page_size, page_object.is_page)
 
@@ -144,7 +144,10 @@ class WebCaseDao:
                 if page_object.session_name
                 else True,
             )
-            .order_by(HrmWebRecordingSession.create_time.desc())
+            .order_by(
+                HrmWebRecordingSession.create_time.desc(),
+                HrmWebRecordingSession.update_time.desc(),
+            )
         )
         return PageUtil.paginate(query, page_object.page_num, page_object.page_size, page_object.is_page)
 
@@ -220,7 +223,10 @@ class WebCaseDao:
                 HrmWebCaseRun.status == page_object.status if page_object.status else True,
                 HrmWebCaseRun.trigger_type == page_object.trigger_type if page_object.trigger_type else True,
             )
-            .order_by(HrmWebCaseRun.started_at.desc(), HrmWebCaseRun.create_time.desc())
+            .order_by(
+                HrmWebCaseRun.create_time.desc(),
+                HrmWebCaseRun.update_time.desc(),
+            )
         )
         return PageUtil.paginate(query, page_object.page_num, page_object.page_size, page_object.is_page)
 

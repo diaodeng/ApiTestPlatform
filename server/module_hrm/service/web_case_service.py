@@ -941,11 +941,12 @@ class WebCaseService:
             str(existed_model.session_name if existed_model else "").strip()
             or f"Auto-{scope_key_text}"
         )
+        # 已有 session 配置时，保持原有 project/module，不随运行链路覆盖。
         target_project_id = cls._to_optional_int(
-            existed_model.project_id if existed_model and existed_model.project_id is not None else project_id
+            existed_model.project_id if existed_model is not None else project_id
         )
         target_module_id = cls._to_optional_int(
-            existed_model.module_id if existed_model and existed_model.module_id is not None else module_id
+            existed_model.module_id if existed_model is not None else module_id
         )
         target_browser_name = browser_name_text or (
             str(existed_model.browser_name or "").strip().lower() if existed_model else None

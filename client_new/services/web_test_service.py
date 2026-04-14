@@ -1505,6 +1505,70 @@ async def _maximize_or_resize_window(
     )
 
 
+async def _apply_recording_window_preferences(
+    page: Any,
+    options: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """
+    在录制开始前应用窗口偏好（最大化或指定尺寸）。
+
+    :param page: 当前录制页面对象。
+    :param options: 录制配置（recordingOptions）。
+    """
+    if page is None:
+        return None
+    option_data = _as_dict(options)
+    maximize = _as_bool(
+        option_data.get("windowMaximize")
+        if option_data.get("windowMaximize") is not None
+        else option_data.get("window_maximize"),
+        False,
+    )
+    if maximize:
+        await _maximize_or_resize_window(
+            page,
+            params={},
+            maximize=True,
+        )
+        return {
+            "stepName": "窗口最大化",
+            "actionType": "window_maximize",
+            "params": {},
+            "assertions": [],
+            "rawEvent": {"eventType": "recording_option_window_maximize"},
+            "targetSnapshot": None,
+        }
+
+    width = _as_int(
+        option_data.get("windowWidth")
+        if option_data.get("windowWidth") is not None
+        else option_data.get("window_width"),
+        0,
+    )
+    height = _as_int(
+        option_data.get("windowHeight")
+        if option_data.get("windowHeight") is not None
+        else option_data.get("window_height"),
+        0,
+    )
+    if width <= 0 or height <= 0:
+        return None
+
+    await _maximize_or_resize_window(
+        page,
+        params={"width": width, "height": height},
+        maximize=False,
+    )
+    return {
+        "stepName": f"设置窗口尺寸 {width}x{height}",
+        "actionType": "set_window_size",
+        "params": {"width": width, "height": height},
+        "assertions": [],
+        "rawEvent": {"eventType": "recording_option_set_window_size"},
+        "targetSnapshot": None,
+    }
+
+
 _ACTIONS_WITHOUT_TARGET = {
     "goto",
     "window_maximize",
@@ -2275,6 +2339,12 @@ class WebTestService:
                 default_scope=f"recording-{recording_id}",
             )
             session.page = await session.context.new_page()
+            window_step = await _apply_recording_window_preferences(
+                session.page,
+                session.options,
+            )
+            if window_step:
+                await session.emit(window_step)
             cookie_variables = _resolve_runtime_variables(effective_runtime)
             cookie_rules = _normalize_cookie_rules(effective_runtime)
             if session.start_url:

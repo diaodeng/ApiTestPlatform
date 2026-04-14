@@ -857,407 +857,551 @@
                         :row-class-name="getStepRowClassName"
                         @row-click="handleStepRowClick"
                     >
-                        <el-table-column label="序号" width="120" fixed="left">
+                        <el-table-column label="序号" width="140" fixed="left">
                             <template #default="scope">
                                 <div class="step-order-cell">
                                     <span>#{{ scope.$index + 1 }}</span>
-                                    <el-tag
+                                    <el-switch
+                                        v-model="scope.row.enabled"
                                         size="small"
-                                        :type="
-                                            scope.row.enabled
-                                                ? 'success'
-                                                : 'info'
-                                        "
-                                        >{{
-                                            scope.row.enabled ? "启用" : "停用"
-                                        }}</el-tag
-                                    >
+                                        inline-prompt
+                                        active-text="启"
+                                        inactive-text="停"
+                                        @click.stop
+                                    />
                                 </div>
                             </template>
                         </el-table-column>
                         <el-table-column label="动作" width="170">
                             <template #default="scope">
-                                <el-select
-                                    v-model="scope.row.actionType"
-                                    filterable
-                                    style="width: 100%"
-                                    @click.stop
-                                    @change="
-                                        handleStepActionTypeChange(scope.row)
+                                <div
+                                    class="step-edit-cell"
+                                    @click.stop="
+                                        startStepCellEditing(
+                                            scope.$index,
+                                            'actionType',
+                                        )
                                     "
-                                >
-                                    <el-option
-                                        v-for="item in actionOptions"
-                                        :key="item.value"
-                                        :label="item.label"
-                                        :value="item.value"
-                                    />
-                                </el-select>
-                            </template>
-                        </el-table-column>
-                        <el-table-column label="步骤名称" min-width="220">
-                            <template #default="scope">
-                                <el-input
-                                    v-model="scope.row.stepName"
-                                    @click.stop
-                                    placeholder="请输入步骤名称"
-                                />
-                            </template>
-                        </el-table-column>
-                        <el-table-column label="定位信息" min-width="320">
-                            <template #default="scope">
-                                <template
-                                    v-if="
-                                        stepNeedsTarget(scope.row.actionType) &&
-                                        getPrimaryLocator(scope.row)
-                                    "
-                                >
-                                    <div class="step-inline-target" @click.stop>
-                                        <el-select
-                                            :model-value="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorType
-                                            "
-                                            style="width: 110px"
-                                            @update:model-value="
-                                                updatePrimaryLocatorType(
-                                                    scope.row,
-                                                    $event,
-                                                )
-                                            "
-                                        >
-                                            <el-option
-                                                v-for="item in locatorTypeOptions"
-                                                :key="item.value"
-                                                :label="item.label"
-                                                :value="item.value"
-                                            />
-                                        </el-select>
-                                        <template
-                                            v-if="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorType === 'role'
-                                            "
-                                        >
-                                            <el-input
-                                                :model-value="
-                                                    getPrimaryLocator(scope.row)
-                                                        ?.locatorValue?.role ||
-                                                    ''
-                                                "
-                                                placeholder="角色"
-                                                @update:model-value="
-                                                    updatePrimaryLocatorValue(
-                                                        scope.row,
-                                                        'role',
-                                                        $event,
-                                                    )
-                                                "
-                                            />
-                                            <el-input
-                                                :model-value="
-                                                    getPrimaryLocator(scope.row)
-                                                        ?.locatorValue?.name ||
-                                                    ''
-                                                "
-                                                placeholder="名称"
-                                                @update:model-value="
-                                                    updatePrimaryLocatorValue(
-                                                        scope.row,
-                                                        'name',
-                                                        $event,
-                                                    )
-                                                "
-                                            />
-                                        </template>
-                                        <el-input
-                                            v-else-if="
-                                                [
-                                                    'label',
-                                                    'placeholder',
-                                                    'text',
-                                                ].includes(
-                                                    getPrimaryLocator(scope.row)
-                                                        ?.locatorType,
-                                                )
-                                            "
-                                            :model-value="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorValue?.text || ''
-                                            "
-                                            placeholder="定位文本"
-                                            @update:model-value="
-                                                updatePrimaryLocatorValue(
-                                                    scope.row,
-                                                    'text',
-                                                    $event,
-                                                )
-                                            "
-                                        />
-                                        <el-input
-                                            v-else-if="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorType === 'test_id'
-                                            "
-                                            :model-value="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorValue?.testId || ''
-                                            "
-                                            placeholder="Test ID"
-                                            @update:model-value="
-                                                updatePrimaryLocatorValue(
-                                                    scope.row,
-                                                    'testId',
-                                                    $event,
-                                                )
-                                            "
-                                        />
-                                        <el-input
-                                            v-else-if="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorType === 'id'
-                                            "
-                                            :model-value="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorValue?.id || ''
-                                            "
-                                            placeholder="元素 id"
-                                            @update:model-value="
-                                                updatePrimaryLocatorValue(
-                                                    scope.row,
-                                                    'id',
-                                                    $event,
-                                                )
-                                            "
-                                        />
-                                        <el-input
-                                            v-else-if="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorType === 'name'
-                                            "
-                                            :model-value="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorValue?.name || ''
-                                            "
-                                            placeholder="元素 name"
-                                            @update:model-value="
-                                                updatePrimaryLocatorValue(
-                                                    scope.row,
-                                                    'name',
-                                                    $event,
-                                                )
-                                            "
-                                        />
-                                        <el-input
-                                            v-else
-                                            :model-value="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorValue?.selector ||
-                                                ''
-                                            "
-                                            :placeholder="
-                                                getPrimaryLocator(scope.row)
-                                                    ?.locatorType === 'xpath'
-                                                    ? '//*[@id=&quot;login&quot;]'
-                                                    : '.login-button'
-                                            "
-                                            @update:model-value="
-                                                updatePrimaryLocatorValue(
-                                                    scope.row,
-                                                    'selector',
-                                                    $event,
-                                                )
-                                            "
-                                        />
-                                    </div>
-                                </template>
-                                <span v-else class="step-cell-placeholder"
-                                    >当前动作无需定位器</span
-                                >
-                            </template>
-                        </el-table-column>
-                        <el-table-column label="输入/参数" min-width="260">
-                            <template #default="scope">
-                                <template
-                                    v-if="scope.row.actionType === 'goto'"
-                                >
-                                    <el-input
-                                        v-model="scope.row.params.url"
-                                        @click.stop
-                                        placeholder="https://example.com/path"
-                                    />
-                                </template>
-                                <template
-                                    v-else-if="
-                                        scope.row.actionType ===
-                                        'set_window_size'
-                                    "
-                                >
-                                    <el-row
-                                        :gutter="8"
-                                        style="width: 100%"
-                                        @click.stop
-                                    >
-                                        <el-col :span="12">
-                                            <el-input-number
-                                                v-model="scope.row.params.width"
-                                                :min="1"
-                                                :step="100"
-                                                controls-position="right"
-                                                style="width: 100%"
-                                                placeholder="宽度"
-                                            />
-                                        </el-col>
-                                        <el-col :span="12">
-                                            <el-input-number
-                                                v-model="scope.row.params.height"
-                                                :min="1"
-                                                :step="100"
-                                                controls-position="right"
-                                                style="width: 100%"
-                                                placeholder="高度"
-                                            />
-                                        </el-col>
-                                    </el-row>
-                                </template>
-                                <template
-                                    v-else-if="scope.row.actionType === 'fill'"
-                                >
-                                    <el-input
-                                        v-model="scope.row.params.value"
-                                        @click.stop
-                                        placeholder="请输入内容"
-                                    />
-                                </template>
-                                <template
-                                    v-else-if="scope.row.actionType === 'press'"
                                 >
                                     <el-select
-                                        v-model="scope.row.params.key"
+                                        v-if="
+                                            isStepCellEditing(
+                                                scope.$index,
+                                                'actionType',
+                                            )
+                                        "
+                                        v-model="scope.row.actionType"
                                         filterable
-                                        allow-create
-                                        default-first-option
                                         style="width: 100%"
-                                        placeholder="选择或输入按键"
                                         @click.stop
+                                        @change="
+                                            handleStepActionTypeChange(
+                                                scope.row,
+                                            );
+                                            finishStepCellEditing();
+                                        "
+                                        @visible-change="
+                                            (visible) => {
+                                                if (!visible)
+                                                    finishStepCellEditing();
+                                            }
+                                        "
                                     >
                                         <el-option
-                                            v-for="item in keyboardKeyOptions"
+                                            v-for="item in actionOptions"
                                             :key="item.value"
                                             :label="item.label"
                                             :value="item.value"
                                         />
                                     </el-select>
-                                </template>
-                                <template
-                                    v-else-if="
-                                        scope.row.actionType === 'select_option'
-                                    "
-                                >
-                                    <el-select
-                                        v-model="scope.row.params.values"
-                                        multiple
-                                        filterable
-                                        allow-create
-                                        default-first-option
-                                        collapse-tags
-                                        collapse-tags-tooltip
-                                        style="width: 100%"
-                                        placeholder="输入或选择选项值"
-                                        @click.stop
-                                    />
-                                </template>
-                                <template
-                                    v-else-if="
-                                        ['sleep', 'wait'].includes(
-                                            scope.row.actionType,
+                                    <span v-else class="step-cell-text">
+                                        {{ getActionLabel(scope.row.actionType) }}
+                                    </span>
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="步骤名称" min-width="220">
+                            <template #default="scope">
+                                <div
+                                    class="step-edit-cell"
+                                    @click.stop="
+                                        startStepCellEditing(
+                                            scope.$index,
+                                            'stepName',
                                         )
                                     "
                                 >
-                                    <el-input-number
-                                        v-model="scope.row.params.waitMs"
-                                        :min="0"
-                                        :step="100"
-                                        controls-position="right"
-                                        style="width: 100%"
-                                    />
-                                </template>
-                                <template
-                                    v-else-if="
-                                        [
-                                            'assert_page_contains',
-                                            'assert_page_not_contains',
-                                        ].includes(scope.row.actionType)
-                                    "
-                                >
                                     <el-input
-                                        v-model="scope.row.params.text"
+                                        v-if="
+                                            isStepCellEditing(
+                                                scope.$index,
+                                                'stepName',
+                                            )
+                                        "
+                                        v-model="scope.row.stepName"
                                         @click.stop
-                                        placeholder="请输入断言文本"
+                                        @blur="finishStepCellEditing"
+                                        placeholder="请输入步骤名称"
                                     />
-                                </template>
-                                <template
-                                    v-else-if="
-                                        scope.row.actionType ===
-                                        'assert_title_contains'
-                                    "
-                                >
-                                    <el-input
-                                        v-model="scope.row.params.title"
-                                        @click.stop
-                                        placeholder="请输入页面标题关键字"
-                                    />
-                                </template>
-                                <template
-                                    v-else-if="
-                                        scope.row.actionType ===
-                                        'assert_url_contains'
-                                    "
-                                >
-                                    <el-input
-                                        v-model="scope.row.params.urlPart"
-                                        @click.stop
-                                        placeholder="请输入URL关键字"
-                                    />
-                                </template>
-                                <template
-                                    v-else-if="
-                                        [
-                                            'assert_text_equals',
-                                            'assert_text_contains',
-                                        ].includes(scope.row.actionType)
-                                    "
-                                >
-                                    <el-input
-                                        v-model="scope.row.params.expected"
-                                        @click.stop
-                                        placeholder="请输入元素文本期望值"
-                                    />
-                                </template>
-                                <span v-else class="step-cell-placeholder"
-                                    >当前动作无额外参数</span
-                                >
+                                    <span v-else class="step-cell-text">
+                                        {{ scope.row.stepName || "-" }}
+                                    </span>
+                                </div>
                             </template>
                         </el-table-column>
-                        <el-table-column label="操作" width="290" fixed="right">
+                        <el-table-column label="定位信息" min-width="320">
+                            <template #default="scope">
+                                <div
+                                    class="step-edit-cell"
+                                    @click.stop="
+                                        startStepCellEditing(
+                                            scope.$index,
+                                            'target',
+                                        )
+                                    "
+                                >
+                                    <template
+                                        v-if="
+                                            isStepCellEditing(
+                                                scope.$index,
+                                                'target',
+                                            )
+                                        "
+                                    >
+                                        <template
+                                            v-if="
+                                                stepNeedsTarget(
+                                                    scope.row.actionType,
+                                                ) &&
+                                                getPrimaryLocator(scope.row)
+                                            "
+                                        >
+                                            <div class="step-inline-target" @click.stop>
+                                                <el-select
+                                                    :model-value="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorType
+                                                    "
+                                                    style="width: 110px"
+                                                    @update:model-value="
+                                                        updatePrimaryLocatorType(
+                                                            scope.row,
+                                                            $event,
+                                                        )
+                                                    "
+                                                >
+                                                    <el-option
+                                                        v-for="item in locatorTypeOptions"
+                                                        :key="item.value"
+                                                        :label="item.label"
+                                                        :value="item.value"
+                                                    />
+                                                </el-select>
+                                                <template
+                                                    v-if="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorType ===
+                                                        'role'
+                                                    "
+                                                >
+                                                    <el-input
+                                                        :model-value="
+                                                            getPrimaryLocator(
+                                                                scope.row,
+                                                            )?.locatorValue
+                                                                ?.role || ''
+                                                        "
+                                                        placeholder="角色"
+                                                        @update:model-value="
+                                                            updatePrimaryLocatorValue(
+                                                                scope.row,
+                                                                'role',
+                                                                $event,
+                                                            )
+                                                        "
+                                                    />
+                                                    <el-input
+                                                        :model-value="
+                                                            getPrimaryLocator(
+                                                                scope.row,
+                                                            )?.locatorValue
+                                                                ?.name || ''
+                                                        "
+                                                        placeholder="名称"
+                                                        @update:model-value="
+                                                            updatePrimaryLocatorValue(
+                                                                scope.row,
+                                                                'name',
+                                                                $event,
+                                                            )
+                                                        "
+                                                    />
+                                                </template>
+                                                <el-input
+                                                    v-else-if="
+                                                        [
+                                                            'label',
+                                                            'placeholder',
+                                                            'text',
+                                                        ].includes(
+                                                            getPrimaryLocator(
+                                                                scope.row,
+                                                            )?.locatorType,
+                                                        )
+                                                    "
+                                                    :model-value="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorValue
+                                                            ?.text || ''
+                                                    "
+                                                    placeholder="定位文本"
+                                                    @update:model-value="
+                                                        updatePrimaryLocatorValue(
+                                                            scope.row,
+                                                            'text',
+                                                            $event,
+                                                        )
+                                                    "
+                                                />
+                                                <el-input
+                                                    v-else-if="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorType ===
+                                                        'test_id'
+                                                    "
+                                                    :model-value="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorValue
+                                                            ?.testId || ''
+                                                    "
+                                                    placeholder="Test ID"
+                                                    @update:model-value="
+                                                        updatePrimaryLocatorValue(
+                                                            scope.row,
+                                                            'testId',
+                                                            $event,
+                                                        )
+                                                    "
+                                                />
+                                                <el-input
+                                                    v-else-if="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorType === 'id'
+                                                    "
+                                                    :model-value="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorValue?.id ||
+                                                        ''
+                                                    "
+                                                    placeholder="元素 id"
+                                                    @update:model-value="
+                                                        updatePrimaryLocatorValue(
+                                                            scope.row,
+                                                            'id',
+                                                            $event,
+                                                        )
+                                                    "
+                                                />
+                                                <el-input
+                                                    v-else-if="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorType ===
+                                                        'name'
+                                                    "
+                                                    :model-value="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorValue
+                                                            ?.name || ''
+                                                    "
+                                                    placeholder="元素 name"
+                                                    @update:model-value="
+                                                        updatePrimaryLocatorValue(
+                                                            scope.row,
+                                                            'name',
+                                                            $event,
+                                                        )
+                                                    "
+                                                />
+                                                <el-input
+                                                    v-else
+                                                    :model-value="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorValue
+                                                            ?.selector || ''
+                                                    "
+                                                    :placeholder="
+                                                        getPrimaryLocator(
+                                                            scope.row,
+                                                        )?.locatorType ===
+                                                        'xpath'
+                                                            ? '//*[@id=&quot;login&quot;]'
+                                                            : '.login-button'
+                                                    "
+                                                    @update:model-value="
+                                                        updatePrimaryLocatorValue(
+                                                            scope.row,
+                                                            'selector',
+                                                            $event,
+                                                        )
+                                                    "
+                                                />
+                                            </div>
+                                        </template>
+                                        <span v-else class="step-cell-placeholder"
+                                            >当前动作无需定位器</span
+                                        >
+                                    </template>
+                                    <span v-else class="step-cell-text">
+                                        {{ describeStepTarget(scope.row) }}
+                                    </span>
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="输入/参数" min-width="260">
+                            <template #default="scope">
+                                <div
+                                    class="step-edit-cell"
+                                    @click.stop="
+                                        startStepCellEditing(
+                                            scope.$index,
+                                            'params',
+                                        )
+                                    "
+                                >
+                                    <template
+                                        v-if="
+                                            isStepCellEditing(
+                                                scope.$index,
+                                                'params',
+                                            )
+                                        "
+                                    >
+                                        <template
+                                            v-if="scope.row.actionType === 'goto'"
+                                        >
+                                            <el-input
+                                                v-model="scope.row.params.url"
+                                                @click.stop
+                                                @blur="finishStepCellEditing"
+                                                placeholder="https://example.com/path"
+                                            />
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                scope.row.actionType ===
+                                                'set_window_size'
+                                            "
+                                        >
+                                            <el-row
+                                                :gutter="8"
+                                                style="width: 100%"
+                                                @click.stop
+                                            >
+                                                <el-col :span="12">
+                                                    <el-input-number
+                                                        v-model="
+                                                            scope.row.params.width
+                                                        "
+                                                        :min="1"
+                                                        :step="100"
+                                                        controls-position="right"
+                                                        style="width: 100%"
+                                                        placeholder="宽度"
+                                                    />
+                                                </el-col>
+                                                <el-col :span="12">
+                                                    <el-input-number
+                                                        v-model="
+                                                            scope.row.params.height
+                                                        "
+                                                        :min="1"
+                                                        :step="100"
+                                                        controls-position="right"
+                                                        style="width: 100%"
+                                                        placeholder="高度"
+                                                    />
+                                                </el-col>
+                                            </el-row>
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                scope.row.actionType === 'fill'
+                                            "
+                                        >
+                                            <el-input
+                                                v-model="scope.row.params.value"
+                                                @click.stop
+                                                @blur="finishStepCellEditing"
+                                                placeholder="请输入内容"
+                                            />
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                scope.row.actionType === 'press'
+                                            "
+                                        >
+                                            <el-select
+                                                v-model="scope.row.params.key"
+                                                filterable
+                                                allow-create
+                                                default-first-option
+                                                style="width: 100%"
+                                                placeholder="选择或输入按键"
+                                                @click.stop
+                                                @visible-change="
+                                                    (visible) => {
+                                                        if (!visible)
+                                                            finishStepCellEditing();
+                                                    }
+                                                "
+                                            >
+                                                <el-option
+                                                    v-for="item in keyboardKeyOptions"
+                                                    :key="item.value"
+                                                    :label="item.label"
+                                                    :value="item.value"
+                                                />
+                                            </el-select>
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                scope.row.actionType ===
+                                                'select_option'
+                                            "
+                                        >
+                                            <el-select
+                                                v-model="scope.row.params.values"
+                                                multiple
+                                                filterable
+                                                allow-create
+                                                default-first-option
+                                                collapse-tags
+                                                collapse-tags-tooltip
+                                                style="width: 100%"
+                                                placeholder="输入或选择选项值"
+                                                @click.stop
+                                            />
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                ['sleep', 'wait'].includes(
+                                                    scope.row.actionType,
+                                                )
+                                            "
+                                        >
+                                            <el-input-number
+                                                v-model="
+                                                    scope.row.params.waitMs
+                                                "
+                                                :min="0"
+                                                :step="100"
+                                                controls-position="right"
+                                                style="width: 100%"
+                                            />
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                [
+                                                    'assert_page_contains',
+                                                    'assert_page_not_contains',
+                                                ].includes(scope.row.actionType)
+                                            "
+                                        >
+                                            <el-input
+                                                v-model="scope.row.params.text"
+                                                @click.stop
+                                                @blur="finishStepCellEditing"
+                                                placeholder="请输入断言文本"
+                                            />
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                scope.row.actionType ===
+                                                'assert_title_contains'
+                                            "
+                                        >
+                                            <el-input
+                                                v-model="
+                                                    scope.row.params.title
+                                                "
+                                                @click.stop
+                                                @blur="finishStepCellEditing"
+                                                placeholder="请输入页面标题关键字"
+                                            />
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                scope.row.actionType ===
+                                                'assert_url_contains'
+                                            "
+                                        >
+                                            <el-input
+                                                v-model="
+                                                    scope.row.params.urlPart
+                                                "
+                                                @click.stop
+                                                @blur="finishStepCellEditing"
+                                                placeholder="请输入URL关键字"
+                                            />
+                                        </template>
+                                        <template
+                                            v-else-if="
+                                                [
+                                                    'assert_text_equals',
+                                                    'assert_text_contains',
+                                                ].includes(scope.row.actionType)
+                                            "
+                                        >
+                                            <el-input
+                                                v-model="
+                                                    scope.row.params.expected
+                                                "
+                                                @click.stop
+                                                @blur="finishStepCellEditing"
+                                                placeholder="请输入元素文本期望值"
+                                            />
+                                        </template>
+                                        <span v-else class="step-cell-placeholder"
+                                            >当前动作无额外参数</span
+                                        >
+                                    </template>
+                                    <span v-else class="step-cell-text">
+                                        {{ summarizeStepParams(scope.row) }}
+                                    </span>
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="190" fixed="right">
                             <template #default="scope">
                                 <div class="step-op-buttons">
                                     <el-button
                                         link
                                         type="primary"
                                         icon="Plus"
+                                        title="前插"
                                         @click.stop="insertStep(scope.$index)"
-                                        >前插</el-button
-                                    >
+                                    />
                                     <el-button
                                         link
                                         icon="Top"
+                                        title="上移"
                                         :disabled="scope.$index === 0"
                                         @click.stop="moveStep(scope.$index, -1)"
                                     />
                                     <el-button
                                         link
                                         icon="Bottom"
+                                        title="下移"
                                         :disabled="
                                             scope.$index ===
                                             form.steps.length - 1
@@ -1268,15 +1412,16 @@
                                         link
                                         type="primary"
                                         icon="EditPen"
+                                        title="编辑"
                                         @click.stop="
                                             openStepDetailByIndex(scope.$index)
                                         "
-                                        >编辑</el-button
-                                    >
+                                    />
                                     <el-button
                                         link
                                         type="danger"
                                         icon="Delete"
+                                        title="删除"
                                         @click.stop="removeStep(scope.$index)"
                                     />
                                 </div>
@@ -3284,6 +3429,49 @@
                                         </el-form-item>
                                     </el-col>
                                     <el-col :span="6">
+                                        <el-form-item label="窗口最大化">
+                                            <el-switch
+                                                v-model="
+                                                    recordingForm.windowMaximize
+                                                "
+                                            />
+                                        </el-form-item>
+                                    </el-col>
+                                    <el-col :span="6">
+                                        <el-form-item label="窗口宽度">
+                                            <el-input-number
+                                                v-model="
+                                                    recordingForm.windowWidth
+                                                "
+                                                :min="1"
+                                                :step="100"
+                                                controls-position="right"
+                                                style="width: 100%"
+                                                :disabled="
+                                                    recordingForm.windowMaximize
+                                                "
+                                                placeholder="例如 1600"
+                                            />
+                                        </el-form-item>
+                                    </el-col>
+                                    <el-col :span="6">
+                                        <el-form-item label="窗口高度">
+                                            <el-input-number
+                                                v-model="
+                                                    recordingForm.windowHeight
+                                                "
+                                                :min="1"
+                                                :step="100"
+                                                controls-position="right"
+                                                style="width: 100%"
+                                                :disabled="
+                                                    recordingForm.windowMaximize
+                                                "
+                                                placeholder="例如 900"
+                                            />
+                                        </el-form-item>
+                                    </el-col>
+                                    <el-col :span="6">
                                         <el-form-item
                                             class="label-nowrap"
                                             label="停止时关闭浏览器"
@@ -4876,6 +5064,7 @@ const recordingDetailTab = ref("steps");
 const runAdvancedPanels = ref([]);
 const recordingAdvancedPanels = ref([]);
 const selectedStepIndex = ref(-1);
+const stepEditingCell = ref({ index: -1, field: "" });
 const stepsText = ref("[]");
 let recordingTimer = null;
 
@@ -5670,6 +5859,9 @@ const recordingForm = ref({
     manualLoginEnabled: false,
     manualLoginRequireConfirm: false,
     manualLoginWaitSec: 120,
+    windowMaximize: false,
+    windowWidth: undefined,
+    windowHeight: undefined,
     closeBrowserOnStop: true,
     captureAssertions: true,
     attachAssertionsToPreviousStep: true,
@@ -6095,6 +6287,18 @@ function normalizeManualLoginWaitSec(value, defaultValue = 120) {
     const raw = Number(value);
     if (!Number.isFinite(raw)) return defaultValue;
     return Math.min(3600, Math.max(0, Math.round(raw)));
+}
+
+function normalizeOptionalPositiveInt(value) {
+    if (value === undefined || value === null || value === "") {
+        return undefined;
+    }
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) {
+        return undefined;
+    }
+    const rounded = Math.round(raw);
+    return rounded > 0 ? rounded : undefined;
 }
 
 function normalizeStateSourceType(value) {
@@ -7189,10 +7393,33 @@ function selectStep(index) {
     selectedStepIndex.value = index;
 }
 
+function startStepCellEditing(index, field) {
+    if (index < 0 || index >= form.value.steps.length) {
+        return;
+    }
+    selectedStepIndex.value = index;
+    stepEditingCell.value = {
+        index,
+        field: `${field || ""}`.trim(),
+    };
+}
+
+function finishStepCellEditing() {
+    stepEditingCell.value = { index: -1, field: "" };
+}
+
+function isStepCellEditing(index, field) {
+    return (
+        stepEditingCell.value.index === index &&
+        stepEditingCell.value.field === `${field || ""}`.trim()
+    );
+}
+
 function openStepDetailByIndex(index) {
     if (index < 0 || index >= form.value.steps.length) {
         return;
     }
+    finishStepCellEditing();
     form.value.steps[index] = normalizeStep(form.value.steps[index], index);
     if (stepNeedsTarget(form.value.steps[index]?.actionType)) {
         getPrimaryLocator(form.value.steps[index]);
@@ -7206,7 +7433,10 @@ function handleStepRowClick(row) {
     if (index === -1) {
         return;
     }
-    openStepDetailByIndex(index);
+    selectedStepIndex.value = index;
+    if (stepEditingCell.value.index !== index) {
+        finishStepCellEditing();
+    }
 }
 
 function getStepRowClassName({ row }) {
@@ -7218,6 +7448,7 @@ function getStepRowClassName({ row }) {
 function addStep(actionType = "click") {
     form.value.steps.push(createDefaultStep(actionType));
     selectedStepIndex.value = form.value.steps.length - 1;
+    finishStepCellEditing();
 }
 
 function insertStep(index, actionType = "click") {
@@ -7227,6 +7458,7 @@ function insertStep(index, actionType = "click") {
     );
     form.value.steps.splice(insertIndex, 0, createDefaultStep(actionType));
     selectedStepIndex.value = insertIndex;
+    finishStepCellEditing();
 }
 
 function copyStep(index) {
@@ -7242,9 +7474,11 @@ function removeStep(index) {
     form.value.steps.splice(index, 1);
     if (!form.value.steps.length) {
         selectedStepIndex.value = -1;
+        finishStepCellEditing();
         return;
     }
     selectedStepIndex.value = Math.min(index, form.value.steps.length - 1);
+    finishStepCellEditing();
 }
 
 function moveStep(index, direction) {
@@ -7254,6 +7488,7 @@ function moveStep(index, direction) {
     [steps[index], steps[targetIndex]] = [steps[targetIndex], steps[index]];
     form.value.steps = steps;
     selectedStepIndex.value = targetIndex;
+    finishStepCellEditing();
 }
 
 function addLocator(step) {
@@ -7667,6 +7902,7 @@ function prepareStepForSubmit(step, index) {
 function resetForm() {
     form.value = createEmptyCase();
     selectedStepIndex.value = -1;
+    finishStepCellEditing();
     caseEditorTab.value = "visual";
     syncStepsTextFromForm();
 }
@@ -9125,6 +9361,25 @@ function resetRecordingDialogState(row = null) {
             runtimeSettings.manual_login_timeout_sec,
         120,
     );
+    const windowMaximize = parseBooleanFlag(
+        runtimeSettings.windowMaximize ??
+            runtimeSettings.window_maximize ??
+            runtimeSettings.recordWindowMaximize ??
+            runtimeSettings.record_window_maximize,
+        false,
+    );
+    const windowWidth = normalizeOptionalPositiveInt(
+        runtimeSettings.windowWidth ??
+            runtimeSettings.window_width ??
+            runtimeSettings.recordWindowWidth ??
+            runtimeSettings.record_window_width,
+    );
+    const windowHeight = normalizeOptionalPositiveInt(
+        runtimeSettings.windowHeight ??
+            runtimeSettings.window_height ??
+            runtimeSettings.recordWindowHeight ??
+            runtimeSettings.record_window_height,
+    );
     const persistContextEnabled = parseBooleanFlag(
         runtimeSettings.persistContextEnabled ??
             runtimeSettings.persist_context_enabled ??
@@ -9159,6 +9414,9 @@ function resetRecordingDialogState(row = null) {
             ? manualLoginRequireConfirm
             : false,
         manualLoginWaitSec,
+        windowMaximize,
+        windowWidth,
+        windowHeight,
         closeBrowserOnStop: true,
         captureAssertions: true,
         attachAssertionsToPreviousStep: true,
@@ -9242,6 +9500,29 @@ async function startRecording() {
             persistContextEnabled &&
             recordingForm.value.persistContextAutoSyncSession,
     );
+    const windowMaximize = Boolean(recordingForm.value.windowMaximize);
+    const hasWindowWidthInput =
+        recordingForm.value.windowWidth !== undefined &&
+        recordingForm.value.windowWidth !== null &&
+        recordingForm.value.windowWidth !== "";
+    const hasWindowHeightInput =
+        recordingForm.value.windowHeight !== undefined &&
+        recordingForm.value.windowHeight !== null &&
+        recordingForm.value.windowHeight !== "";
+    let windowWidth = normalizeOptionalPositiveInt(recordingForm.value.windowWidth);
+    let windowHeight = normalizeOptionalPositiveInt(
+        recordingForm.value.windowHeight,
+    );
+    if (!windowMaximize && (hasWindowWidthInput || hasWindowHeightInput)) {
+        if (!windowWidth || !windowHeight) {
+            ElMessage.error("录制窗口宽高必须同时为正整数，或清空后使用默认尺寸");
+            return;
+        }
+    }
+    if (windowMaximize) {
+        windowWidth = undefined;
+        windowHeight = undefined;
+    }
 
     loading.value.recording = true;
     if (manualLoginEnabled && !manualLoginRequireConfirm) {
@@ -9276,6 +9557,9 @@ async function startRecording() {
                 autoAssertTextOnClick:
                     recordingForm.value.captureAssertions &&
                     recordingForm.value.autoAssertTextOnClick,
+                windowMaximize,
+                windowWidth,
+                windowHeight,
             },
         });
         recordingForm.value.recordingId = response.data?.recordingId;
@@ -9805,6 +10089,20 @@ onBeforeUnmount(() => {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+}
+
+.step-edit-cell {
+    width: 100%;
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+}
+
+.step-cell-text {
+    width: 100%;
+    color: var(--el-text-color-regular);
+    line-height: 1.5;
+    word-break: break-all;
 }
 
 .step-inline-target {
