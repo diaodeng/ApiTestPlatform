@@ -579,7 +579,6 @@ async def _launch_browser_instance(
 
     launch_kwargs = dict(plan.launch_kwargs)
     launch_kwargs["headless"] = headless
-    launch_kwargs["args"] = ["--window-size=1920,1080"]
     return await launcher.launch(**launch_kwargs)
 
 

@@ -1105,7 +1105,8 @@ async def _create_browser_context(
         default_scope=default_scope,
     )
     context_kwargs: dict[str, Any] = {"ignore_https_errors": True}
-    context_kwargs["no_viewport"] = {"width": 1920, "height": 1080}
+    # 关闭固定 viewport，避免用户手动调整窗口后页面内容尺寸不变。
+    context_kwargs["no_viewport"] = True
     seed_state = _resolve_seed_storage_state(runtime_options)
     _seed_context_state_file_if_needed(runtime_options, state_path)
     if state_path is not None and state_path.exists():
@@ -1253,8 +1254,261 @@ async def _read_locator_text(locator: Any, *, timeout_ms: int | None = None) -> 
     return _normalize_assert_text(text)
 
 
+def _normalize_window_dimension(
+    value: Any,
+    *,
+    default: int,
+    minimum: int = 200,
+    maximum: int = 10000,
+) -> int:
+    """标准化窗口宽高，避免非法尺寸导致浏览器动作异常。"""
+    resolved = _as_int(value, default)
+    if resolved <= 0:
+        resolved = default
+    return max(minimum, min(resolved, maximum))
+
+
+async def _collect_page_window_metrics(page: Any) -> dict[str, int]:
+    """采集页面可用窗口尺寸信息，用于窗口最大化/调整尺寸。"""
+    payload: dict[str, Any] = {}
+    try:
+        raw = await page.evaluate(
+            "() => ({"
+            "innerWidth: window.innerWidth || 0,"
+            "innerHeight: window.innerHeight || 0,"
+            "availWidth: (window.screen && window.screen.availWidth) || 0,"
+            "availHeight: (window.screen && window.screen.availHeight) || 0"
+            "})"
+        )
+        if isinstance(raw, dict):
+            payload = raw
+    except Exception:
+        payload = {}
+
+    viewport = getattr(page, "viewport_size", None)
+    if isinstance(viewport, dict):
+        payload.setdefault("innerWidth", viewport.get("width") or 0)
+        payload.setdefault("innerHeight", viewport.get("height") or 0)
+
+    inner_width = _normalize_window_dimension(
+        payload.get("innerWidth"),
+        default=1280,
+    )
+    inner_height = _normalize_window_dimension(
+        payload.get("innerHeight"),
+        default=720,
+    )
+    avail_width = _normalize_window_dimension(
+        payload.get("availWidth"),
+        default=inner_width,
+    )
+    avail_height = _normalize_window_dimension(
+        payload.get("availHeight"),
+        default=inner_height,
+    )
+    return {
+        "innerWidth": inner_width,
+        "innerHeight": inner_height,
+        "availWidth": avail_width,
+        "availHeight": avail_height,
+    }
+
+
+async def _set_page_viewport_size_if_possible(page: Any, *, width: int, height: int) -> None:
+    """尽力同步页面 viewport 尺寸，保证可视内容尺寸与窗口动作一致。"""
+    try:
+        await page.set_viewport_size({"width": int(width), "height": int(height)})
+    except Exception as exc:
+        logger.debug(f"同步页面 viewport 失败: {exc}")
+
+
+async def _set_chromium_window_bounds(
+    page: Any,
+    *,
+    width: int,
+    height: int,
+    maximize: bool = False,
+) -> bool:
+    """
+    通过 CDP 调整 Chromium 窗口大小；非 Chromium 内核会自动跳过。
+
+    :param page: 当前页面对象。
+    :param width: 目标窗口宽度（maximize=False 时生效）。
+    :param height: 目标窗口高度（maximize=False 时生效）。
+    :param maximize: 是否执行窗口最大化。
+    :return: 是否已通过 CDP 成功设置窗口尺寸/状态。
+    """
+    context_ref = getattr(page, "context", None)
+    context = None
+    if callable(context_ref):
+        try:
+            context = context_ref()
+        except Exception as exc:
+            logger.debug(f"读取 page.context() 失败，跳过 CDP 窗口调整: {exc}")
+            return False
+    else:
+        context = context_ref
+    if context is None:
+        logger.debug("当前 page 未提供 context，跳过 CDP 窗口调整")
+        return False
+
+    new_cdp_session = getattr(context, "new_cdp_session", None)
+    if not callable(new_cdp_session):
+        logger.debug("当前 context 不支持 new_cdp_session，跳过 CDP 窗口调整")
+        return False
+
+    session = None
+    try:
+        session = await new_cdp_session(page)
+    except Exception as exc:
+        logger.debug(f"创建 CDP 会话失败，跳过 CDP 窗口调整: {exc}")
+        return False
+
+    try:
+        window_id = 0
+        try:
+            target_info = await session.send("Browser.getWindowForTarget")
+            if isinstance(target_info, dict):
+                window_id = _as_int(target_info.get("windowId"), 0)
+        except Exception as exc:
+            logger.debug(f"获取 CDP windowId 失败: {exc}")
+
+        if window_id <= 0:
+            target_id = ""
+            try:
+                target_meta = await session.send("Target.getTargetInfo")
+                if isinstance(target_meta, dict):
+                    target_info = target_meta.get("targetInfo")
+                    if isinstance(target_info, dict):
+                        target_id = str(target_info.get("targetId") or "").strip()
+            except Exception as exc:
+                logger.debug(f"读取 CDP targetId 失败: {exc}")
+
+            if target_id:
+                try:
+                    target_info = await session.send(
+                        "Browser.getWindowForTarget",
+                        {"targetId": target_id},
+                    )
+                    if isinstance(target_info, dict):
+                        window_id = _as_int(target_info.get("windowId"), 0)
+                except Exception as exc:
+                    logger.debug(f"通过 targetId 获取 CDP windowId 失败: {exc}")
+
+        if window_id <= 0:
+            logger.debug("未获取到可用 CDP windowId，跳过窗口调整")
+            return False
+
+        bounds: dict[str, Any]
+        if maximize:
+            # 某些环境需要先恢复 normal，再切换 maximized 才生效。
+            try:
+                await session.send(
+                    "Browser.setWindowBounds",
+                    {"windowId": window_id, "bounds": {"windowState": "normal"}},
+                )
+            except Exception:
+                pass
+            bounds = {"windowState": "maximized"}
+        else:
+            bounds = {
+                "windowState": "normal",
+                "width": int(width),
+                "height": int(height),
+            }
+        await session.send(
+            "Browser.setWindowBounds",
+            {"windowId": window_id, "bounds": bounds},
+        )
+        return True
+    except Exception as exc:
+        logger.debug(f"通过 CDP 调整窗口失败: {exc}")
+        return False
+    finally:
+        if session is not None:
+            detach = getattr(session, "detach", None)
+            if callable(detach):
+                try:
+                    await detach()
+                except Exception:
+                    pass
+
+
+def _resolve_window_size_from_params(
+    params: dict[str, Any],
+    *,
+    default_width: int,
+    default_height: int,
+) -> tuple[int, int]:
+    """从步骤参数中解析窗口尺寸，支持 width/height 与别名字段。"""
+    width = _normalize_window_dimension(
+        params.get("width")
+        or params.get("windowWidth")
+        or params.get("window_width")
+        or params.get("viewportWidth")
+        or params.get("viewport_width"),
+        default=default_width,
+    )
+    height = _normalize_window_dimension(
+        params.get("height")
+        or params.get("windowHeight")
+        or params.get("window_height")
+        or params.get("viewportHeight")
+        or params.get("viewport_height"),
+        default=default_height,
+    )
+    return width, height
+
+
+async def _maximize_or_resize_window(
+    page: Any,
+    *,
+    params: dict[str, Any],
+    maximize: bool,
+) -> None:
+    """
+    调整浏览器窗口大小，并同步页面 viewport。
+
+    :param page: 当前页面对象。
+    :param params: 步骤参数（仅在 set_window_size 时读取 width/height）。
+    :param maximize: True 表示最大化窗口；False 表示按指定尺寸调整。
+    """
+    metrics = await _collect_page_window_metrics(page)
+    if maximize:
+        target_width = metrics["availWidth"]
+        target_height = metrics["availHeight"]
+    else:
+        target_width, target_height = _resolve_window_size_from_params(
+            params,
+            default_width=metrics["innerWidth"],
+            default_height=metrics["innerHeight"],
+        )
+
+    resized_by_cdp = await _set_chromium_window_bounds(
+        page,
+        width=target_width,
+        height=target_height,
+        maximize=maximize,
+    )
+    if resized_by_cdp:
+        return
+
+    if maximize:
+        logger.debug("当前浏览器不支持 CDP 最大化，回退为调整页面 viewport")
+    else:
+        logger.debug("当前浏览器不支持 CDP 调整窗口尺寸，回退为调整页面 viewport")
+
+    await _set_page_viewport_size_if_possible(
+        page,
+        width=target_width,
+        height=target_height,
+    )
+
+
 _ACTIONS_WITHOUT_TARGET = {
     "goto",
+    "window_maximize",
+    "set_window_size",
     "sleep",
     "wait",
     "assert_page_contains",
@@ -3733,6 +3987,20 @@ class WebTestService:
     ) -> None:
         if action_type == "goto":
             await page.goto(str(params.get("url") or ""), timeout=timeout_ms)
+            return
+        if action_type == "window_maximize":
+            await _maximize_or_resize_window(
+                page,
+                params=params,
+                maximize=True,
+            )
+            return
+        if action_type == "set_window_size":
+            await _maximize_or_resize_window(
+                page,
+                params=params,
+                maximize=False,
+            )
             return
         if action_type in {"sleep", "wait"}:
             wait_ms = _as_int(

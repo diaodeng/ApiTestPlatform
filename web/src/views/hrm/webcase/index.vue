@@ -1088,6 +1088,39 @@
                                     />
                                 </template>
                                 <template
+                                    v-else-if="
+                                        scope.row.actionType ===
+                                        'set_window_size'
+                                    "
+                                >
+                                    <el-row
+                                        :gutter="8"
+                                        style="width: 100%"
+                                        @click.stop
+                                    >
+                                        <el-col :span="12">
+                                            <el-input-number
+                                                v-model="scope.row.params.width"
+                                                :min="1"
+                                                :step="100"
+                                                controls-position="right"
+                                                style="width: 100%"
+                                                placeholder="宽度"
+                                            />
+                                        </el-col>
+                                        <el-col :span="12">
+                                            <el-input-number
+                                                v-model="scope.row.params.height"
+                                                :min="1"
+                                                :step="100"
+                                                controls-position="right"
+                                                style="width: 100%"
+                                                placeholder="高度"
+                                            />
+                                        </el-col>
+                                    </el-row>
+                                </template>
+                                <template
                                     v-else-if="scope.row.actionType === 'fill'"
                                 >
                                     <el-input
@@ -1385,6 +1418,37 @@
                                     placeholder="https://example.com/path"
                                 />
                             </el-form-item>
+                        </el-col>
+                        <el-col
+                            v-else-if="
+                                currentStep.actionType === 'set_window_size'
+                            "
+                            :span="24"
+                        >
+                            <el-row :gutter="12">
+                                <el-col :span="12">
+                                    <el-form-item label="窗口宽度">
+                                        <el-input-number
+                                            v-model="currentStep.params.width"
+                                            :min="1"
+                                            :step="100"
+                                            controls-position="right"
+                                            style="width: 100%"
+                                        />
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="12">
+                                    <el-form-item label="窗口高度">
+                                        <el-input-number
+                                            v-model="currentStep.params.height"
+                                            :min="1"
+                                            :step="100"
+                                            controls-position="right"
+                                            style="width: 100%"
+                                        />
+                                    </el-form-item>
+                                </el-col>
+                            </el-row>
                         </el-col>
                         <el-col
                             v-else-if="currentStep.actionType === 'fill'"
@@ -4613,6 +4677,8 @@ const runtimeTargetOptions = [
 
 const actionOptions = [
     { label: "打开页面", value: "goto" },
+    { label: "窗口最大化", value: "window_maximize" },
+    { label: "设置窗口尺寸", value: "set_window_size" },
     { label: "点击元素", value: "click" },
     { label: "双击元素", value: "double_click" },
     { label: "悬停元素", value: "hover" },
@@ -5169,6 +5235,8 @@ function normalizeAssertion(assertion = {}) {
 function stepNeedsTarget(actionType) {
     return ![
         "goto",
+        "window_maximize",
+        "set_window_size",
         "sleep",
         "wait",
         "assert_page_contains",
@@ -5200,6 +5268,34 @@ function normalizeStepParams(actionType, params) {
     const waitMs = Number(data.waitMs ?? data.wait_ms ?? 0);
     if (actionType === "goto") {
         return { url: data.url || "", thinkTimeMs };
+    }
+    if (actionType === "window_maximize") {
+        return { thinkTimeMs };
+    }
+    if (actionType === "set_window_size") {
+        const width = Number(
+            data.width ??
+                data.windowWidth ??
+                data.window_width ??
+                data.viewportWidth ??
+                data.viewport_width,
+        );
+        const height = Number(
+            data.height ??
+                data.windowHeight ??
+                data.window_height ??
+                data.viewportHeight ??
+                data.viewport_height,
+        );
+        return {
+            width:
+                Number.isFinite(width) && width > 0 ? Math.round(width) : 1920,
+            height:
+                Number.isFinite(height) && height > 0
+                    ? Math.round(height)
+                    : 1080,
+            thinkTimeMs,
+        };
     }
     if (actionType === "fill") {
         return { value: data.value ?? "", thinkTimeMs };
@@ -6967,6 +7063,14 @@ function describeLocator(locator) {
 function describeStepTarget(step) {
     if (!stepNeedsTarget(step.actionType)) {
         if (step.actionType === "goto") return step.params?.url || "页面跳转";
+        if (step.actionType === "window_maximize") return "窗口最大化";
+        if (step.actionType === "set_window_size") {
+            const width = Number(step.params?.width ?? 0) || 0;
+            const height = Number(step.params?.height ?? 0) || 0;
+            return width > 0 && height > 0
+                ? `窗口尺寸 ${width}x${height}`
+                : "窗口尺寸调整";
+        }
         if (["sleep", "wait"].includes(step.actionType))
             return `等待 ${Number(step.params?.waitMs ?? 0) || 0}ms`;
         if (step.actionType === "assert_page_contains")
@@ -6998,6 +7102,15 @@ function summarizeStepParams(step) {
         thinkTimeMs > 0 ? `${text || "-"} / 思考${thinkTimeMs}ms` : text || "-";
     if (step.actionType === "goto")
         return appendThinkTime(step.params?.url || "-");
+    if (step.actionType === "window_maximize")
+        return appendThinkTime("最大化窗口");
+    if (step.actionType === "set_window_size") {
+        const width = Number(step.params?.width ?? 0) || 0;
+        const height = Number(step.params?.height ?? 0) || 0;
+        return appendThinkTime(
+            width > 0 && height > 0 ? `${width}x${height}` : "自定义窗口尺寸",
+        );
+    }
     if (step.actionType === "fill")
         return appendThinkTime(step.params?.value || "-");
     if (step.actionType === "press")
@@ -7357,6 +7470,15 @@ function getCaseValidationError() {
         if (!step.actionType) return `步骤${index + 1}缺少动作类型`;
         if (step.actionType === "goto" && !step.params.url?.trim())
             return `步骤${index + 1}缺少跳转地址`;
+        if (
+            step.actionType === "set_window_size" &&
+            (!Number.isFinite(Number(step.params.width)) ||
+                Number(step.params.width) <= 0 ||
+                !Number.isFinite(Number(step.params.height)) ||
+                Number(step.params.height) <= 0)
+        ) {
+            return `步骤${index + 1}窗口尺寸必须为正整数`;
+        }
         if (step.actionType === "press" && !step.params.key?.trim())
             return `步骤${index + 1}缺少按键值`;
         if (
@@ -7466,6 +7588,18 @@ function buildStepParamsForSubmit(step) {
         thinkTimeMs > 0 ? { ...payload, thinkTimeMs } : payload;
     if (step.actionType === "goto") {
         return withThinkTime({ url: step.params.url || "" });
+    }
+    if (step.actionType === "window_maximize") {
+        return withThinkTime({});
+    }
+    if (step.actionType === "set_window_size") {
+        return withThinkTime({
+            width: Math.max(Math.round(Number(step.params?.width ?? 1920) || 1920), 1),
+            height: Math.max(
+                Math.round(Number(step.params?.height ?? 1080) || 1080),
+                1,
+            ),
+        });
     }
     if (step.actionType === "fill") {
         return withThinkTime({ value: step.params.value ?? "" });
