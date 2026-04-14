@@ -63,7 +63,7 @@ class MockHandle:
                 separator="=",
             ),
             request_body=self._format_content(
-                flow.request.raw_content or b"",
+                self._resolve_message_content(flow.request),
                 flow.request.headers.get("content-type", ""),
             ),
             request_content_type=flow.request.headers.get("content-type", ""),
@@ -139,7 +139,7 @@ class MockHandle:
                 self._iter_items(flow.response.headers)
             )
             item.response_body = self._format_content(
-                flow.response.raw_content or b"",
+                self._resolve_message_content(flow.response),
                 flow.response.headers.get("content-type", ""),
             )
             item.response_content_type = flow.response.headers.get("content-type", "")
@@ -257,6 +257,47 @@ class MockHandle:
             return list(mapping.items(multi=True))
         except TypeError:
             return list(mapping.items())
+
+    def _resolve_message_content(self, message) -> bytes:
+        """获取 HTTP 消息内容，优先使用 mitmproxy 解码后的 body，失败时回退原始字节。"""
+        if message is None:
+            return b""
+
+        get_content = getattr(message, "get_content", None)
+        if callable(get_content):
+            content = None
+            try:
+                content = get_content(strict=False)
+            except TypeError:
+                try:
+                    content = get_content()
+                except Exception:
+                    content = None
+            except Exception:
+                content = None
+            if isinstance(content, bytes):
+                return content
+            if isinstance(content, bytearray):
+                return bytes(content)
+            if isinstance(content, str):
+                return content.encode("utf-8", errors="replace")
+
+        content = getattr(message, "content", None)
+        if isinstance(content, bytes):
+            return content
+        if isinstance(content, bytearray):
+            return bytes(content)
+        if isinstance(content, str):
+            return content.encode("utf-8", errors="replace")
+
+        raw_content = getattr(message, "raw_content", None)
+        if isinstance(raw_content, bytes):
+            return raw_content
+        if isinstance(raw_content, bytearray):
+            return bytes(raw_content)
+        if isinstance(raw_content, str):
+            return raw_content.encode("utf-8", errors="replace")
+        return b""
 
     def _format_headers(self, items, separator=": ") -> str:
         lines = []
