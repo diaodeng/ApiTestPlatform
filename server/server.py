@@ -3,22 +3,19 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-# from module_hrm.controller.celery_controller import celeryController
 from common.permission.sync import sync_registered_menus
 from config.env import AppConfig
 from config.get_db import init_create_table
-from config.get_qtr_scheduler import qtr_scheduler_util as QtrSchedulerUtil
 from config.get_redis import RedisUtil
-from config.get_scheduler import sys_scheduler_util as SysSchedulerUtil
 from exceptions.handle import handle_exception
 from middlewares.handle import handle_middleware
+from module_admin.controller.api_key_controller import apiKeyController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.common_controller import commonController
 from module_admin.controller.config_controller import configController
 from module_admin.controller.dept_controller import deptController
 from module_admin.controller.dict_controller import dictController
-from module_admin.controller.api_key_controller import apiKeyController
 from module_admin.controller.job_controller import jobController
 from module_admin.controller.log_controller import logController
 from module_admin.controller.login_controller import loginController
@@ -74,8 +71,6 @@ async def lifespan(app: FastAPI):
         app.state.redis = await RedisUtil.create_redis_pool()
         await RedisUtil.init_sys_dict(app.state.redis)
         await RedisUtil.init_sys_config(app.state.redis)
-        await SysSchedulerUtil.init_system_scheduler()
-        await QtrSchedulerUtil.init_qtr_scheduler()
         await startup_handler()
         metrics_thread = PushMetrics()
         metrics_thread.start()
@@ -85,8 +80,6 @@ async def lifespan(app: FastAPI):
             metrics_thread.stop()
         except Exception:
             pass
-        await SysSchedulerUtil.close_scheduler()
-        await QtrSchedulerUtil.close_scheduler()
         await RedisUtil.close_redis_pool(app)
 
     except Exception:
@@ -151,7 +144,6 @@ controller_list = [
     {'router': webCaseController, 'tags': ['HRM-Web测试管理']},
     {'router': desktopCaseAssetController, 'tags': ['HRM-桌面测试资源']},
     {'router': desktopCaseController, 'tags': ['HRM-桌面测试管理']},
-    # {'router': celeryController, 'tags': ['celery']},
 ]
 
 for controller in controller_list:

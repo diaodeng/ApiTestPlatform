@@ -1,142 +1,70 @@
 from sqlalchemy.orm import Session
 
-from module_admin.dao.job_log_dao import JobLogDao
-from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.entity.vo.job_vo import (
-    DeleteJobLogModel,
-    DeleteJobModel,
-    EditJobModel,
-    JobLogModel,
-    JobLogPageQueryModel,
-    JobLogQueryModel,
-    JobModel,
-    JobPageQueryModel,
-    JobQueryModel,
-)
-from module_admin.service.dict_service import DictDataService, Request
-from utils.common_util import export_list2excel
+from module_admin.entity.vo.job_vo import DeleteJobLogModel, JobLogPageQueryModel
+from module_task.celery_job_service import CeleryJobService
 
 
 class JobLogService:
     """
-    定时任务日志管理模块服务层
+    系统任务日志服务（owner_type=sys）。
     """
+
+    OWNER_TYPE = "sys"
 
     @classmethod
     def get_job_log_list_services(cls, query_db: Session, query_object: JobLogPageQueryModel, is_page: bool = False):
         """
-        获取定时任务日志列表信息service
-        :param query_db: orm对象
-        :param query_object: 查询参数对象
-        :param is_page: 是否开启分页
-        :return: 定时任务日志列表信息对象
-        """
-        job_log_list_result = JobLogDao.get_job_log_list(query_db, query_object, is_page)
+        获取系统任务日志列表。
 
-        return job_log_list_result
-
-    @classmethod
-    def add_job_log_services(cls, query_db: Session, page_object: JobLogModel):
+        :param query_db: 数据库会话。
+        :param query_object: 查询模型。
+        :param is_page: 是否分页。
+        :return: 分页结果或列表结果。
         """
-        新增定时任务日志信息service
-        :param query_db: orm对象
-        :param page_object: 新增定时任务日志对象
-        :return: 新增定时任务日志校验结果
-        """
-        try:
-            JobLogDao.add_job_log_dao(query_db, page_object)
-            query_db.commit()
-            result = {'is_success': True, 'message': '新增成功'}
-        except Exception as e:
-            query_db.rollback()
-            result = {'is_success': False, 'message': str(e)}
-
-        return CrudResponseModel(**result)
+        return CeleryJobService.get_job_log_list_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            query_object=query_object,
+            data_scope_sql=True,
+            is_page=is_page,
+        )
 
     @classmethod
     def delete_job_log_services(cls, query_db: Session, page_object: DeleteJobLogModel):
         """
-        删除定时任务日志信息service
-        :param query_db: orm对象
-        :param page_object: 删除定时任务日志对象
-        :return: 删除定时任务日志校验结果
+        删除系统任务日志。
+
+        :param query_db: 数据库会话。
+        :param page_object: 删除模型。
+        :return: CRUD 响应。
         """
-        if page_object.job_log_ids.split(','):
-            job_log_id_list = page_object.job_log_ids.split(',')
-            try:
-                for job_log_id in job_log_id_list:
-                    JobLogDao.delete_job_log_dao(query_db, JobLogModel(jobLogId=job_log_id))
-                query_db.commit()
-                result = {'is_success': True, 'message': '删除成功'}
-            except Exception as e:
-                query_db.rollback()
-                raise e
-        else:
-            result = {'is_success': False, 'message': '传入定时任务日志id为空'}
-        return CrudResponseModel(**result)
+        return CeleryJobService.delete_job_log_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            page_object=page_object,
+        )
 
     @classmethod
     def clear_job_log_services(cls, query_db: Session):
         """
-        清除定时任务日志信息service
-        :param query_db: orm对象
-        :return: 清除定时任务日志校验结果
-        """
-        try:
-            JobLogDao.clear_job_log_dao(query_db)
-            query_db.commit()
-            result = {'is_success': True, 'message': '清除成功'}
-        except Exception as e:
-            query_db.rollback()
-            raise e
+        清空系统任务日志。
 
-        return CrudResponseModel(**result)
+        :param query_db: 数据库会话。
+        :return: CRUD 响应。
+        """
+        return CeleryJobService.clear_job_log_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            data_scope_sql=True,
+        )
 
     @staticmethod
-    async def export_job_log_list_services(request: Request, job_log_list: list):
+    async def export_job_log_list_services(request, job_log_list: list):
         """
-        导出定时任务日志信息service
-        :param request: Request对象
-        :param job_log_list: 定时任务日志信息列表
-        :return: 定时任务日志信息对应excel的二进制数据
+        导出系统任务日志。
+
+        :param request: 请求对象（兼容原签名，当前未使用）。
+        :param job_log_list: 日志列表。
+        :return: Excel 二进制内容。
         """
-        # 创建一个映射字典，将英文键映射到中文键
-        mapping_dict = {
-            "jobLogId": "任务日志编码",
-            "jobName": "任务名称",
-            "jobGroup": "任务组名",
-            "jobExecutor": "任务执行器",
-            "invokeTarget": "调用目标字符串",
-            "jobArgs": "位置参数",
-            "jobKwargs": "关键字参数",
-            "jobTrigger": "任务触发器",
-            "jobMessage": "日志信息",
-            "status": "执行状态",
-            "exceptionInfo": "异常信息",
-            "createTime": "创建时间",
-        }
-
-        data = job_log_list
-        job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
-                                                                                        dict_type='sys_job_group')
-        job_group_option = [{'label': item.get('dictLabel'), 'value': item.get('dictValue')} for item in job_group_list]
-        job_group_option_dict = {item.get('value'): item for item in job_group_option}
-        job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
-                                                                                           dict_type='sys_job_executor')
-        job_executor_option = [{'label': item.get('dictLabel'), 'value': item.get('dictValue')} for item in job_executor_list]
-        job_executor_option_dict = {item.get('value'): item for item in job_executor_option}
-
-        for item in data:
-            if item.get('status') == '0':
-                item['status'] = '正常'
-            else:
-                item['status'] = '暂停'
-            if str(item.get('jobGroup')) in job_group_option_dict.keys():
-                item['jobGroup'] = job_group_option_dict.get(str(item.get('jobGroup'))).get('label')
-            if str(item.get('jobExecutor')) in job_executor_option_dict.keys():
-                item['jobExecutor'] = job_executor_option_dict.get(str(item.get('jobExecutor'))).get('label')
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
-                    data]
-        binary_data = export_list2excel(new_data)
-
-        return binary_data
+        return await CeleryJobService.export_job_log_list_services(job_log_list)

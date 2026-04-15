@@ -1,211 +1,127 @@
 from sqlalchemy.orm import Session
 
-from config.get_scheduler import sys_scheduler_util as SchedulerUtil
-from module_admin.dao.job_dao import JobDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.entity.vo.job_vo import (
-    DeleteJobLogModel,
-    DeleteJobModel,
-    EditJobModel,
-    JobLogModel,
-    JobLogPageQueryModel,
-    JobLogQueryModel,
-    JobModel,
-    JobPageQueryModel,
-    JobQueryModel,
-)
-from module_admin.service.dict_service import DictDataService, Request
-from utils.common_util import CamelCaseUtil, export_list2excel
+from module_admin.entity.vo.job_vo import DeleteJobModel, EditJobModel, JobModel, JobPageQueryModel, RunJobModel
+from module_task.celery_job_service import CeleryJobService
 
 
 class JobService:
     """
-    定时任务管理模块服务层
+    系统任务服务（owner_type=sys）。
     """
+
+    OWNER_TYPE = "sys"
 
     @classmethod
     def get_job_list_services(cls, query_db: Session, query_object: JobPageQueryModel, is_page: bool = False):
         """
-        获取定时任务列表信息service
-        :param query_db: orm对象
-        :param query_object: 查询参数对象
-        :param is_page: 是否开启分页
-        :return: 定时任务列表信息对象
-        """
-        job_list_result = JobDao.get_job_list(query_db, query_object, is_page)
+        获取系统任务列表。
 
-        return job_list_result
+        :param query_db: 数据库会话。
+        :param query_object: 查询模型。
+        :param is_page: 是否分页。
+        :return: 分页结果或列表结果。
+        """
+        return CeleryJobService.get_job_list_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            query_object=query_object,
+            data_scope_sql=True,
+            is_page=is_page,
+        )
 
     @classmethod
     def add_job_services(cls, query_db: Session, page_object: JobModel):
         """
-        新增定时任务信息service
-        :param query_db: orm对象
-        :param page_object: 新增定时任务对象
-        :return: 新增定时任务校验结果
-        """
-        job = JobDao.get_job_detail_by_info(query_db, page_object)
-        if job:
-            result = {'is_success': False, 'message': '定时任务已存在'}
-        else:
-            try:
-                JobDao.add_job_dao(query_db, page_object)
-                job_info = JobDao.get_job_detail_by_info(query_db, page_object)
-                if job_info.status == '0':
-                    SchedulerUtil.add_scheduler_job(job_info=job_info)
-                query_db.commit()
-                result = {'is_success': True, 'message': '新增成功'}
-            except Exception as e:
-                query_db.rollback()
-                raise e
+        新增系统任务。
 
-        return CrudResponseModel(**result)
+        :param query_db: 数据库会话。
+        :param page_object: 新增模型。
+        :return: CRUD 响应。
+        """
+        return CeleryJobService.add_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
 
     @classmethod
     def edit_job_services(cls, query_db: Session, page_object: EditJobModel):
         """
-        编辑定时任务信息service
-        :param query_db: orm对象
-        :param page_object: 编辑定时任务对象
-        :return: 编辑定时任务校验结果
-        """
-        edit_job = page_object.model_dump(exclude_unset=True)
-        job_info = cls.job_detail_services(query_db, edit_job.get('job_id'))
-        if job_info:
-            try:
-                JobDao.edit_job_dao(query_db, edit_job)
-                query_job = SchedulerUtil.get_scheduler_job(job_id=edit_job.get('job_id'))
-                if query_job:
-                    SchedulerUtil.remove_scheduler_job(job_id=edit_job.get('job_id'))
-                if edit_job.get('status') == '0':
-                    job_info = cls.job_detail_services(query_db, edit_job.get('job_id'))
-                    SchedulerUtil.add_scheduler_job(job_info=job_info)
-                query_db.commit()
-                result = {'is_success': True, 'message': '更新成功'}
-            except Exception as e:
-                query_db.rollback()
-                raise e
-        else:
-            result = {'is_success': False, 'message': '定时任务不存在'}
+        编辑系统任务。
 
-        return CrudResponseModel(**result)
+        :param query_db: 数据库会话。
+        :param page_object: 编辑模型。
+        :return: CRUD 响应。
+        """
+        return CeleryJobService.edit_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
+
+    @classmethod
+    def change_status(cls, query_db: Session, task_id: int, enabled: bool, update_by: str = ""):
+        """
+        修改系统任务启停状态。
+
+        :param query_db: 数据库会话。
+        :param task_id: 任务ID。
+        :param enabled: 是否启用。
+        :param update_by: 更新人。
+        :return: CRUD 响应。
+        """
+        return CeleryJobService.change_status_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            task_id=task_id,
+            enabled=enabled,
+            update_by=update_by,
+        )
 
     @classmethod
     def execute_job_once_services(cls, query_db: Session, page_object: JobModel):
         """
-        执行一次定时任务service
-        :param query_db: orm对象
-        :param page_object: 定时任务对象
-        :return: 执行一次定时任务结果
-        """
-        query_job = SchedulerUtil.get_scheduler_job(job_id=page_object.job_id)
-        if query_job:
-            SchedulerUtil.remove_scheduler_job(job_id=page_object.job_id)
-        job_info = cls.job_detail_services(query_db, page_object.job_id)
-        if job_info:
-            SchedulerUtil.execute_scheduler_job_once(job_info=job_info)
-            result = {'is_success': True, 'message': '执行成功'}
-        else:
-            result = {'is_success': False, 'message': '定时任务不存在'}
+        手动执行一次系统任务。
 
-        return CrudResponseModel(**result)
+        :param query_db: 数据库会话。
+        :param page_object: 任务模型（仅需 task_id）。
+        :return: CRUD 响应。
+        """
+        if not page_object.task_id:
+            return CrudResponseModel(is_success=False, message="task_id 不能为空")
+        run_model = RunJobModel(taskId=page_object.task_id)
+        return CeleryJobService.execute_job_once_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            page_object=run_model,
+        )
 
     @classmethod
     def delete_job_services(cls, query_db: Session, page_object: DeleteJobModel):
         """
-        删除定时任务信息service
-        :param query_db: orm对象
-        :param page_object: 删除定时任务对象
-        :return: 删除定时任务校验结果
+        删除系统任务。
+
+        :param query_db: 数据库会话。
+        :param page_object: 删除模型。
+        :return: CRUD 响应。
         """
-        if page_object.job_ids.split(','):
-            job_id_list = page_object.job_ids.split(',')
-            try:
-                for job_id in job_id_list:
-                    JobDao.delete_job_dao(query_db, JobModel(jobId=job_id))
-                    SchedulerUtil.remove_scheduler_job(job_id)
-                query_db.commit()
-                result = {'is_success': True, 'message': '删除成功'}
-            except Exception as e:
-                query_db.rollback()
-                raise e
-        else:
-            result = {'is_success': False, 'message': '传入定时任务id为空'}
-        return CrudResponseModel(**result)
+        return CeleryJobService.delete_job_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            page_object=page_object,
+        )
 
     @classmethod
-    def job_detail_services(cls, query_db: Session, job_id: int):
+    def job_detail_services(cls, query_db: Session, task_id: int):
         """
-        获取定时任务详细信息service
-        :param query_db: orm对象
-        :param job_id: 定时任务id
-        :return: 定时任务id对应的信息
-        """
-        job = JobDao.get_job_detail_by_id(query_db, job_id=job_id)
-        result = JobModel(**CamelCaseUtil.transform_result(job))
+        查询系统任务详情。
 
-        return result
+        :param query_db: 数据库会话。
+        :param task_id: 任务ID。
+        :return: 任务详情。
+        """
+        return CeleryJobService.job_detail_services(query_db=query_db, owner_type=cls.OWNER_TYPE, task_id=task_id)
 
     @staticmethod
-    async def export_job_list_services(request: Request, job_list: list):
+    async def export_job_list_services(request, job_list: list):
         """
-        导出定时任务信息service
-        :param request: Request对象
-        :param job_list: 定时任务信息列表
-        :return: 定时任务信息对应excel的二进制数据
+        导出系统任务列表。
+
+        :param request: 请求对象（兼容原签名，当前未使用）。
+        :param job_list: 任务列表。
+        :return: Excel 二进制内容。
         """
-        # 创建一个映射字典，将英文键映射到中文键
-        mapping_dict = {
-            "jobId": "任务编码",
-            "jobName": "任务名称",
-            "jobGroup": "任务组名",
-            "jobExecutor": "任务执行器",
-            "invokeTarget": "调用目标字符串",
-            "jobArgs": "位置参数",
-            "jobKwargs": "关键字参数",
-            "cronExpression": "cron执行表达式",
-            "misfirePolicy": "计划执行错误策略",
-            "concurrent": "是否并发执行",
-            "status": "状态",
-            "createBy": "创建者",
-            "createTime": "创建时间",
-            "updateBy": "更新者",
-            "updateTime": "更新时间",
-            "remark": "备注",
-        }
-
-        data = job_list
-        job_group_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
-                                                                                        dict_type='sys_job_group')
-        job_group_option = [{'label': item.get('dictLabel'), 'value': item.get('dictValue')} for item in job_group_list]
-        job_group_option_dict = {item.get('value'): item for item in job_group_option}
-        job_executor_list = await DictDataService.query_dict_data_list_from_cache_services(request.app.state.redis,
-                                                                                           dict_type='sys_job_executor')
-        job_executor_option = [{'label': item.get('dictLabel'), 'value': item.get('dictValue')} for item in
-                               job_executor_list]
-        job_executor_option_dict = {item.get('value'): item for item in job_executor_option}
-
-        for item in data:
-            if item.get('status') == '0':
-                item['status'] = '正常'
-            else:
-                item['status'] = '暂停'
-            if str(item.get('jobGroup')) in job_group_option_dict.keys():
-                item['jobGroup'] = job_group_option_dict.get(str(item.get('jobGroup'))).get('label')
-            if str(item.get('jobExecutor')) in job_executor_option_dict.keys():
-                item['jobExecutor'] = job_executor_option_dict.get(str(item.get('jobExecutor'))).get('label')
-            if item.get('misfirePolicy') == '1':
-                item['misfirePolicy'] = '立即执行'
-            elif item.get('misfirePolicy') == '2':
-                item['misfirePolicy'] = '执行一次'
-            else:
-                item['misfirePolicy'] = '放弃执行'
-            if item.get('concurrent') == '0':
-                item['concurrent'] = '允许'
-            else:
-                item['concurrent'] = '禁止'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
-                    data]
-        binary_data = export_list2excel(new_data)
-
-        return binary_data
+        return await CeleryJobService.export_job_list_services(job_list)

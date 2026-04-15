@@ -6,8 +6,8 @@ readme = "README.md"
 target-version = "py310"  # 目标版本，ruff语法检测使用
 requires-python = ">=3.10"  # 打包进入资源提示，最低版本要求  .python-version中是运行时版本切换（uv使用相关），这三个应该一致
 dependencies = [
-    "apscheduler==3.10.4",
     "bcrypt==4.1.2",
+    "celery==5.4.0",
     "datetime==5.4",
     "fastapi[all]==0.109.1",
     "httpx[http2]==0.27.0",
