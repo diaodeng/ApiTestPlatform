@@ -14,6 +14,7 @@ env_debug = environ.get("QTRDEBUG", "false").lower() == "true"
 log_to_console = environ.get("LOG_TO_CONSOLE", "false").lower() == "true"
 level_name = "DEBUG" if env_debug else "INFO"
 logger.level(level_name)
+use_enqueue = os.name != "nt"
 
 logger.remove()
 if log_to_console:
@@ -23,7 +24,7 @@ logger.add(
     rotation="00:00",
     encoding="utf-8",
     retention="7 days",
-    enqueue=True,
+    enqueue=use_enqueue,
     filter=lambda record: record["extra"].get("name", "") != "mock_request",
 )
 logger.add(
@@ -31,7 +32,7 @@ logger.add(
     rotation="00:00",
     encoding="utf-8",
     retention="30 days",
-    enqueue=True,
+    enqueue=use_enqueue,
     filter=lambda record: record["level"].no >= logging.ERROR,
 )
 
@@ -42,7 +43,7 @@ logger_mock.add(
     rotation="00:00",
     encoding="utf-8",
     retention="7 days",
-    enqueue=True,
+    enqueue=use_enqueue,
     filter=lambda record: record["extra"].get("name", "") == "mock_request",
 )
 

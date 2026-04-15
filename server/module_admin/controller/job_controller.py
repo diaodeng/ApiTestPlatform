@@ -92,19 +92,19 @@ async def edit_system_job(
 
 @jobController.put("/job/changeStatus", dependencies=[Depends(CheckUserInterfaceAuth("monitor:job:changeStatus"))])
 @log_decorator(title="定时任务管理", business_type=2)
-async def edit_system_job(
+async def change_status_system_job(
     request: Request,
     edit_job: EditJobModel,
     query_db: Session = Depends(get_db),
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     try:
-        job_info = EditJobModel()
-        job_info.status = edit_job.status
-        job_info.job_id = edit_job.job_id
-        job_info.update_by = current_user.user.user_name
-        job_info.update_time = datetime.now()
-        edit_job_result = JobService.edit_job_services(query_db, job_info)
+        edit_job_result = JobService.change_status(
+            query_db=query_db,
+            task_id=edit_job.task_id,
+            enabled=bool(edit_job.enabled),
+            update_by=current_user.user.user_name,
+        )
         if edit_job_result.is_success:
             logger.info(edit_job_result.message)
             return ResponseUtil.success(msg=edit_job_result.message)

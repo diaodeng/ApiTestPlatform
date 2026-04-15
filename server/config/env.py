@@ -1,6 +1,5 @@
 import argparse
 import os
-import sys
 from functools import lru_cache
 
 from dotenv import load_dotenv
@@ -210,24 +209,17 @@ class GetConfig:
         """
         解析命令行参数
         """
-        if 'uvicorn' in sys.argv[0]:
-            # 使用uvicorn启动时，命令行参数需要按照uvicorn的文档进行配置，无法自定义参数
-            pass
-        else:
-            # 使用argparse定义命令行参数
-            parser = argparse.ArgumentParser(description='命令行参数')
-            parser.add_argument('--env', type=str, default='', help='运行环境')
-            # 解析命令行参数
-            args = parser.parse_args()
-            # 设置环境变量，如果未设置命令行参数，默认APP_ENV为dev
-            os.environ['APP_ENV'] = args.env if args.env else 'dev'
+        # 只解析本项目支持的 --env 参数，其余参数交由外部命令（如 celery/uvicorn）自行处理。
+        parser = argparse.ArgumentParser(description='命令行参数', add_help=False)
+        parser.add_argument('--env', type=str, default='', help='运行环境')
+        args, _ = parser.parse_known_args()
+        if args.env:
+            os.environ['APP_ENV'] = args.env
+        elif not os.environ.get('APP_ENV'):
+            os.environ['APP_ENV'] = 'dev'
         # 读取运行环境
-        run_env = os.environ.get('APP_ENV', '')
-        # 运行环境未指定时默认加载.env.dev
-        env_file = '.env.dev'
-        # 运行环境不为空时按命令行参数加载对应.env文件
-        if run_env != '':
-            env_file = f'.env.{run_env}'
+        run_env = (os.environ.get('APP_ENV', '') or 'dev').strip()
+        env_file = f'.env.{run_env}'
         # 加载配置
 
         if os.path.exists(env_file):

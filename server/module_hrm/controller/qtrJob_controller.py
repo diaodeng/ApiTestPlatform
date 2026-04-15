@@ -5,12 +5,10 @@ from fastapi.requests import Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
-from config.get_qtr_scheduler import qtr_scheduler_util
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import CurrentUserModel, LoginService
-from module_hrm.entity.do.job_do import QtrJob, QtrJobLog
 from module_hrm.entity.vo.job_vo import (
     DeleteJobLogModel,
     DeleteJobModel,
@@ -21,6 +19,7 @@ from module_hrm.entity.vo.job_vo import (
 )
 from module_hrm.service.job_log_service import JobLogService
 from module_hrm.service.job_service import JobService
+from module_task.celery_job_models import CeleryPeriodicTask
 from utils.common_util import bytes2file_response
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -34,7 +33,9 @@ qtrJobController = APIRouter(prefix='/qtr', dependencies=[Depends(LoginService.g
 async def get_qtr_job_list(request: Request,
                            job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_query),
                            query_db: Session = Depends(get_db),
-                           data_scope_sql = Depends(GetDataScope(QtrJob, user_alias='manager'))
+                           data_scope_sql = Depends(
+                               GetDataScope(CeleryPeriodicTask, user_alias='owner_user_id', dept_alias='owner_dept_id')
+                           )
                            ):
     try:
         # 获取分页数据
@@ -51,20 +52,47 @@ async def get_qtr_job_list(request: Request,
                       dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:list'))])
 async def get_scheduler_job_list(request: Request,
                                  job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_query),
-                                 query_db: Session = Depends(get_db)):
+                                 query_db: Session = Depends(get_db),
+                                 data_scope_sql = Depends(
+                                     GetDataScope(
+                                         CeleryPeriodicTask,
+                                         user_alias='owner_user_id',
+                                         dept_alias='owner_dept_id',
+                                     )
+                                 )):
+    """
+    获取当前启用的 Celery 定时任务快照列表。
+
+    :param request: FastAPI 请求对象。
+    :param job_page_query: 任务筛选参数，接口会强制查询启用状态任务。
+    :param query_db: 数据库会话。
+    :param data_scope_sql: 当前用户可见任务的数据权限表达式。
+    :return: 任务调度快照数据，兼容前端展示所需字段。
+    """
     try:
-        # 获取分页数据,scheduler加载的任务
-        notice_page_query_result = qtr_scheduler_util.get_job_list()
+        job_page_query.enabled = True
+        notice_page_query_result = JobService.get_job_list_services(
+            query_db,
+            job_page_query,
+            data_scope_sql,
+            is_page=False,
+        )
         logger.info('获取成功')
-        return ResponseUtil.success(data=[{"id": i.id,
-                                           "name": i.name,
-                                           "func": i.func,
-                                           "args": i.args,
-                                           "kwargs": i.kwargs,
-                                           "executor": i.executor,
-                                           "next_run_time": i.next_run_time,
-                                           "trigger": i.trigger
-                                           } for i in notice_page_query_result])
+        return ResponseUtil.success(
+            data=[
+                {
+                    "id": i.get("taskId"),
+                    "name": i.get("taskName"),
+                    "func": i.get("taskKey"),
+                    "args": i.get("taskArgs"),
+                    "kwargs": i.get("taskKwargs"),
+                    "queue": i.get("queueName"),
+                    "next_run_time": None,
+                    "trigger": i.get("scheduleType"),
+                }
+                for i in notice_page_query_result
+            ]
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -77,8 +105,8 @@ async def add_qtr_job(request: Request, add_job: JobModel, query_db: Session = D
     try:
         add_job.create_by = current_user.user.user_name
         add_job.update_by = current_user.user.user_name
-        add_job.dept_id = current_user.user.dept_id
-        add_job.manager = current_user.user.user_id
+        add_job.owner_dept_id = current_user.user.dept_id
+        add_job.owner_user_id = current_user.user.user_id
 
         add_job_result = JobService.add_job_services(query_db, add_job, current_user)
         if add_job_result.is_success:
@@ -118,15 +146,15 @@ async def edit_qtr_job(request: Request,
 async def change_status_qtr_job(request: Request, edit_job: EditJobModel, query_db: Session = Depends(get_db),
                                 current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
     try:
-
-        job_info = EditJobModel()
-        job_info.status = edit_job.status
-        job_info.job_id = edit_job.job_id
-        job_info.update_by = current_user.user.user_name
-        job_info.update_time = datetime.now()
-        JobService.change_status(query_db, job_info)
-
-        return ResponseUtil.success(msg="JOB状态修改成功")
+        change_result = JobService.change_status(
+            query_db=query_db,
+            task_id=edit_job.task_id,
+            enabled=bool(edit_job.enabled),
+            update_by=current_user.user.user_name,
+        )
+        if change_result.is_success:
+            return ResponseUtil.success(msg=change_result.message)
+        return ResponseUtil.failure(msg=change_result.message)
 
     except Exception as e:
         logger.exception(e)
@@ -170,12 +198,25 @@ async def delete_qtr_job(request: Request, job_ids: str, query_db: Session = Dep
 @log_decorator(title='定时任务管理', business_type=1)
 async def stop_job(request: Request, add_job: JobModel, query_db: Session = Depends(get_db),
                    current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
-    try:
-        add_job.create_by = current_user.user.user_name
-        add_job.update_by = current_user.user.user_name
-        qtr_scheduler_util.remove_scheduler_job(add_job.job_id)
+    """
+    手动停止指定 QTR 任务（将状态更新为暂停）。
 
-        return ResponseUtil.success(msg=f"停止任务{add_job.job_id}异常")
+    :param request: FastAPI 请求对象。
+    :param add_job: 任务请求体，仅使用 task_id 字段。
+    :param query_db: 数据库会话。
+    :param current_user: 当前登录用户，用于审计字段。
+    :return: 停止结果响应。
+    """
+    try:
+        change_result = JobService.change_status(
+            query_db=query_db,
+            task_id=add_job.task_id,
+            enabled=False,
+            update_by=current_user.user.user_name,
+        )
+        if change_result.is_success:
+            return ResponseUtil.success(msg=f"停止任务{add_job.task_id}成功")
+        return ResponseUtil.failure(msg=change_result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -198,7 +239,13 @@ async def query_detail_qtr_job(request: Request, job_id: int, query_db: Session 
 async def export_qtr_job_list(request: Request,
                               job_page_query: JobPageQueryModel = Depends(JobPageQueryModel.as_form),
                               query_db: Session = Depends(get_db),
-                              data_scope_sql = Depends(GetDataScope(QtrJob, user_alias='manager'))
+                              data_scope_sql = Depends(
+                                  GetDataScope(
+                                      CeleryPeriodicTask,
+                                      user_alias='owner_user_id',
+                                      dept_alias='owner_dept_id',
+                                  )
+                              )
                               ):
     try:
         # 获取全量数据
@@ -217,12 +264,19 @@ async def export_qtr_job_list(request: Request,
 async def get_qtr_job_log_list(request: Request,
                                job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_query),
                                query_db: Session = Depends(get_db),
-                               # data_scope_sql: DataScopeExpr = Depends(GetDataScope(''))
+                               data_scope_sql = Depends(
+                                   GetDataScope(
+                                       CeleryPeriodicTask,
+                                       user_alias='owner_user_id',
+                                       dept_alias='owner_dept_id',
+                                   )
+                               )
                                ):
     try:
         # 获取分页数据
-        job_log_page_query_result = JobLogService.get_job_log_list_services(query_db, job_log_page_query,
-                                                                            True, is_page=True)
+        job_log_page_query_result = JobLogService.get_job_log_list_services(
+            query_db, job_log_page_query, data_scope_sql, is_page=True
+        )
         logger.info('获取成功')
         return ResponseUtil.success(model_content=job_log_page_query_result)
     except Exception as e:
@@ -249,9 +303,15 @@ async def delete_qtr_job_log(request: Request, job_log_ids: str, query_db: Sessi
 
 @qtrJobController.post("/jobLog/clean", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:remove'))])
 @log_decorator(title='定时任务日志管理', business_type=9)
-async def clear_qtr_job_log(request: Request, query_db: Session = Depends(get_db)):
+async def clear_qtr_job_log(
+    request: Request,
+    query_db: Session = Depends(get_db),
+    data_scope_sql = Depends(
+        GetDataScope(CeleryPeriodicTask, user_alias='owner_user_id', dept_alias='owner_dept_id')
+    ),
+):
     try:
-        clear_job_log_result = JobLogService.clear_job_log_services(query_db)
+        clear_job_log_result = JobLogService.clear_job_log_services(query_db, data_scope_sql)
         if clear_job_log_result.is_success:
             logger.info(clear_job_log_result.message)
             return ResponseUtil.success(msg=clear_job_log_result.message)
@@ -268,7 +328,13 @@ async def clear_qtr_job_log(request: Request, query_db: Session = Depends(get_db
 async def export_qtr_job_log_list(request: Request,
                                   job_log_page_query: JobLogPageQueryModel = Depends(JobLogPageQueryModel.as_form),
                                   query_db: Session = Depends(get_db),
-                                  data_scope_sql = Depends(GetDataScope(QtrJobLog, user_alias='manager'))
+                                  data_scope_sql = Depends(
+                                      GetDataScope(
+                                          CeleryPeriodicTask,
+                                          user_alias='owner_user_id',
+                                          dept_alias='owner_dept_id',
+                                      )
+                                  )
                                   ):
     try:
         # 获取全量数据
