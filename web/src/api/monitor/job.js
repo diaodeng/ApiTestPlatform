@@ -44,10 +44,10 @@ export function delJob(jobId) {
 }
 
 // 任务状态修改
-export function changeJobStatus(jobId, status) {
+export function changeJobStatus(taskId, enabled) {
   const data = {
-    jobId,
-    status
+    taskId,
+    enabled
   }
   return request({
     url: '/monitor/job/changeStatus',
@@ -58,10 +58,9 @@ export function changeJobStatus(jobId, status) {
 
 
 // 定时任务立即执行一次
-export function runJob(jobId, jobGroup) {
+export function runJob(taskId) {
   const data = {
-    jobId,
-    jobGroup
+    taskId
   }
   return request({
     url: '/monitor/job/run',

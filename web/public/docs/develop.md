@@ -75,6 +75,8 @@ npm run build:prod 或 yarn build:prod
 
 # 运行后端
 python3 app.py --env=prod
+celery -A config.celery_app.celery_app beat -l info --scheduler config.celery_scheduler:DatabaseScheduler
+celery -A config.celery_app.celery_app worker -l info -Q sys,qtr,celery --concurrency=4
 ```
 
 #### 客户端
