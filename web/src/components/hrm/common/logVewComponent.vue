@@ -170,10 +170,11 @@ watch(
     (newLogs) => {
       logLines.value = [];
       if (!newLogs) return
-      splitLogText(props.logs).forEach(line => {
+      splitLogText(newLogs).forEach(line => {
         logLines.value.push(parseLogLine(line));
       });
-    }
+    },
+    {immediate: true}
 )
 
 </script>
