@@ -8,6 +8,7 @@ from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.job_vo import (
+    ControlRunningTaskModel,
     DeleteJobLogModel,
     DeleteJobModel,
     EditJobModel,
@@ -39,6 +40,91 @@ async def get_system_job_list(
         notice_page_query_result = JobService.get_job_list_services(query_db, job_page_query, is_page=True)
         logger.info("获取成功")
         return ResponseUtil.success(model_content=notice_page_query_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@jobController.get("/job/taskKeys", dependencies=[Depends(CheckUserInterfaceAuth("monitor:job:query"))])
+async def get_system_task_key_options(request: Request):
+    """
+    获取系统任务可选注册键列表。
+
+    :param request: FastAPI 请求对象。
+    :return: 任务注册键选项列表。
+    """
+    try:
+        task_keys = JobService.list_registered_task_keys()
+        return ResponseUtil.success(
+            data=[{"label": key, "value": key} for key in task_keys]
+        )
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@jobController.get("/job/running", dependencies=[Depends(CheckUserInterfaceAuth("monitor:job:query"))])
+async def get_running_system_job_list(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取系统任务当前运行态快照（运行中/待执行/待调度）。
+
+    :param request: FastAPI 请求对象。
+    :param query_db: 数据库会话。
+    :return: 运行态任务列表。
+    """
+    try:
+        running_tasks = JobService.list_running_jobs_services(query_db)
+        return ResponseUtil.success(data=running_tasks)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@jobController.put("/job/running/cancel", dependencies=[Depends(CheckUserInterfaceAuth("monitor:job:changeStatus"))])
+@log_decorator(title="定时任务管理", business_type=2)
+async def cancel_running_system_job(
+    request: Request,
+    page_object: ControlRunningTaskModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    取消系统运行态任务（撤销尚未执行的任务）。
+
+    :param request: FastAPI 请求对象。
+    :param page_object: 任务控制请求体（celery_task_id）。
+    :param query_db: 数据库会话。
+    :return: 控制结果。
+    """
+    try:
+        cancel_result = JobService.cancel_running_job_services(query_db, page_object)
+        if cancel_result.is_success:
+            return ResponseUtil.success(msg=cancel_result.message)
+        return ResponseUtil.failure(msg=cancel_result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@jobController.put("/job/running/terminate", dependencies=[Depends(CheckUserInterfaceAuth("monitor:job:changeStatus"))])
+@log_decorator(title="定时任务管理", business_type=2)
+async def terminate_running_system_job(
+    request: Request,
+    page_object: ControlRunningTaskModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    终止系统运行态任务（尝试中断运行中任务）。
+
+    :param request: FastAPI 请求对象。
+    :param page_object: 任务控制请求体（celery_task_id）。
+    :param query_db: 数据库会话。
+    :return: 控制结果。
+    """
+    try:
+        terminate_result = JobService.terminate_running_job_services(query_db, page_object)
+        if terminate_result.is_success:
+            return ResponseUtil.success(msg=terminate_result.message)
+        return ResponseUtil.failure(msg=terminate_result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

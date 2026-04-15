@@ -86,3 +86,29 @@ export function runJob(taskId) {
     data: data
   })
 }
+
+// 查询运行中的任务
+export function listRunningJobs() {
+  return request({
+    url: '/qtr/job/running',
+    method: 'get'
+  })
+}
+
+// 取消运行中的任务（撤销未执行任务）
+export function cancelRunningJob(celeryTaskId) {
+  return request({
+    url: '/qtr/job/running/cancel',
+    method: 'put',
+    data: { celeryTaskId }
+  })
+}
+
+// 终止运行中的任务（尝试中断运行中任务）
+export function terminateRunningJob(celeryTaskId) {
+  return request({
+    url: '/qtr/job/running/terminate',
+    method: 'put',
+    data: { celeryTaskId }
+  })
+}

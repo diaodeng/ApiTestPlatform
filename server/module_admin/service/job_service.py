@@ -1,7 +1,14 @@
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.entity.vo.job_vo import DeleteJobModel, EditJobModel, JobModel, JobPageQueryModel, RunJobModel
+from module_admin.entity.vo.job_vo import (
+    ControlRunningTaskModel,
+    DeleteJobModel,
+    EditJobModel,
+    JobModel,
+    JobPageQueryModel,
+    RunJobModel,
+)
 from module_task.celery_job_service import CeleryJobService
 
 
@@ -11,6 +18,7 @@ class JobService:
     """
 
     OWNER_TYPE = "sys"
+    SYS_QUEUE = "sys"
 
     @classmethod
     def get_job_list_services(cls, query_db: Session, query_object: JobPageQueryModel, is_page: bool = False):
@@ -39,6 +47,8 @@ class JobService:
         :param page_object: 新增模型。
         :return: CRUD 响应。
         """
+        page_object.queue_name = cls.SYS_QUEUE
+        page_object.task_args = "[]"
         return CeleryJobService.add_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
 
     @classmethod
@@ -50,6 +60,8 @@ class JobService:
         :param page_object: 编辑模型。
         :return: CRUD 响应。
         """
+        page_object.queue_name = cls.SYS_QUEUE
+        page_object.task_args = "[]"
         return CeleryJobService.edit_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
 
     @classmethod
@@ -115,6 +127,58 @@ class JobService:
         """
         return CeleryJobService.job_detail_services(query_db=query_db, owner_type=cls.OWNER_TYPE, task_id=task_id)
 
+    @classmethod
+    def list_running_jobs_services(cls, query_db: Session) -> list[dict]:
+        """
+        获取系统任务运行态快照。
+
+        :param query_db: 数据库会话。
+        :return: 运行态任务列表。
+        """
+        return CeleryJobService.list_running_job_tasks_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            data_scope_sql=True,
+        )
+
+    @classmethod
+    def cancel_running_job_services(cls, query_db: Session, page_object: ControlRunningTaskModel) -> CrudResponseModel:
+        """
+        取消系统任务执行（撤销未执行任务）。
+
+        :param query_db: 数据库会话。
+        :param page_object: 控制任务请求模型。
+        :return: CRUD 响应。
+        """
+        return CeleryJobService.revoke_running_job_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            page_object=page_object,
+            terminate=False,
+            data_scope_sql=True,
+        )
+
+    @classmethod
+    def terminate_running_job_services(
+        cls,
+        query_db: Session,
+        page_object: ControlRunningTaskModel,
+    ) -> CrudResponseModel:
+        """
+        终止系统任务执行（尝试强制终止运行中任务）。
+
+        :param query_db: 数据库会话。
+        :param page_object: 控制任务请求模型。
+        :return: CRUD 响应。
+        """
+        return CeleryJobService.revoke_running_job_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            page_object=page_object,
+            terminate=True,
+            data_scope_sql=True,
+        )
+
     @staticmethod
     async def export_job_list_services(request, job_list: list):
         """
@@ -125,3 +189,12 @@ class JobService:
         :return: Excel 二进制内容。
         """
         return await CeleryJobService.export_job_list_services(job_list)
+
+    @staticmethod
+    def list_registered_task_keys() -> list[str]:
+        """
+        获取任务注册键列表。
+
+        :return: 任务注册键字符串列表。
+        """
+        return CeleryJobService.list_registered_task_keys()

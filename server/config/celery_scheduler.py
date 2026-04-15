@@ -150,12 +150,19 @@ class DatabaseScheduler(Scheduler):
 
             next_schedule = {}
             next_fingerprints: dict[str, str] = {}
+            has_invalid_updates = False
 
             for task_row in periodic_rows:
                 entry_name = self._build_entry_name(task_row.task_id)
                 try:
                     schedule_obj = self._build_schedule_obj(task_row)
                 except Exception as exc:
+                    # 非法表达式会导致任务长期停留在 enabled 状态并持续刷日志，这里自动停用并标记原因。
+                    task_row.enabled = False
+                    task_row.last_status = "failed"
+                    task_row.last_message = f"调度配置错误: {exc}"
+                    task_row.update_time = datetime.now()
+                    has_invalid_updates = True
                     logger.warning(f"任务[{entry_name}] 调度解析失败，已跳过: {exc}")
                     continue
 
@@ -203,6 +210,9 @@ class DatabaseScheduler(Scheduler):
             removed_entries = sorted(set(self.schedule.keys()) - set(next_schedule.keys()))
             if removed_entries:
                 logger.info(f"Celery Beat 同步移除任务: {removed_entries}")
+
+            if has_invalid_updates:
+                session.commit()
 
             self.schedule.clear()
             self.schedule.update(next_schedule)

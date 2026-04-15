@@ -95,23 +95,25 @@
     />
 
     <el-dialog title="执行日志详情" v-model="open" width="760px" append-to-body>
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="日志ID">{{ form.logId }}</el-descriptions-item>
-        <el-descriptions-item label="任务ID">{{ form.taskId }}</el-descriptions-item>
-        <el-descriptions-item label="任务名称">{{ form.taskName }}</el-descriptions-item>
-        <el-descriptions-item label="任务注册键">{{ form.taskKey }}</el-descriptions-item>
-        <el-descriptions-item label="触发方式">{{ form.triggerType }}</el-descriptions-item>
-        <el-descriptions-item label="执行状态">{{ form.status }}</el-descriptions-item>
-        <el-descriptions-item label="调度快照" :span="2">{{ form.scheduleDesc }}</el-descriptions-item>
-        <el-descriptions-item label="开始时间">{{ parseTime(form.startedAt) }}</el-descriptions-item>
-        <el-descriptions-item label="结束时间">{{ parseTime(form.finishedAt) }}</el-descriptions-item>
-        <el-descriptions-item label="耗时(ms)">{{ form.durationMs }}</el-descriptions-item>
-        <el-descriptions-item label="日志时间">{{ parseTime(form.createTime) }}</el-descriptions-item>
-        <el-descriptions-item label="位置参数" :span="2">{{ form.taskArgs }}</el-descriptions-item>
-        <el-descriptions-item label="关键字参数" :span="2">{{ form.taskKwargs }}</el-descriptions-item>
-        <el-descriptions-item label="日志信息" :span="2">{{ form.message }}</el-descriptions-item>
-        <el-descriptions-item label="异常信息" :span="2">{{ form.exceptionInfo }}</el-descriptions-item>
-      </el-descriptions>
+      <div class="job-log-detail-body">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="日志ID">{{ form.logId }}</el-descriptions-item>
+          <el-descriptions-item label="任务ID">{{ form.taskId }}</el-descriptions-item>
+          <el-descriptions-item label="任务名称">{{ form.taskName }}</el-descriptions-item>
+          <el-descriptions-item label="任务注册键">{{ form.taskKey }}</el-descriptions-item>
+          <el-descriptions-item label="触发方式">{{ form.triggerType }}</el-descriptions-item>
+          <el-descriptions-item label="执行状态">{{ form.status }}</el-descriptions-item>
+          <el-descriptions-item label="调度快照" :span="2">{{ form.scheduleDesc }}</el-descriptions-item>
+          <el-descriptions-item label="开始时间">{{ parseTime(form.startedAt) }}</el-descriptions-item>
+          <el-descriptions-item label="结束时间">{{ parseTime(form.finishedAt) }}</el-descriptions-item>
+          <el-descriptions-item label="耗时(ms)">{{ form.durationMs }}</el-descriptions-item>
+          <el-descriptions-item label="日志时间">{{ parseTime(form.createTime) }}</el-descriptions-item>
+          <el-descriptions-item label="位置参数" :span="2">{{ form.taskArgs }}</el-descriptions-item>
+          <el-descriptions-item label="关键字参数" :span="2">{{ form.taskKwargs }}</el-descriptions-item>
+          <el-descriptions-item label="日志信息" :span="2">{{ form.message }}</el-descriptions-item>
+          <el-descriptions-item label="异常信息" :span="2">{{ form.exceptionInfo }}</el-descriptions-item>
+        </el-descriptions>
+      </div>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="open = false">关 闭</el-button>
@@ -230,7 +232,16 @@ function handleExport() {
 
 (() => {
   const taskId = route.params && route.params.jobId;
+  const routeTaskName = typeof route.query?.taskName === "string" ? route.query.taskName.trim() : "";
+  if (routeTaskName) {
+    queryParams.value.taskName = routeTaskName;
+  }
   if (taskId !== undefined && taskId !== "0") {
+    queryParams.value.taskId = taskId;
+    if (queryParams.value.taskName) {
+      getList();
+      return;
+    }
     getJob(taskId).then((response) => {
       queryParams.value.taskName = response.data.taskName;
       queryParams.value.taskId = response.data.taskId;
@@ -241,3 +252,24 @@ function handleExport() {
   }
 })();
 </script>
+
+<style scoped>
+.job-log-detail-body {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.job-log-detail-body :deep(.el-descriptions) {
+  width: 100%;
+}
+
+.job-log-detail-body :deep(.el-descriptions__table) {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.job-log-detail-body :deep(.el-descriptions__cell) {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+</style>
