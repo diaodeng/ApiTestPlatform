@@ -29,6 +29,13 @@ function expressionChange() {
     isShow.value = false;
     // 获取规则数组[0秒、1分、2时、3日、4月、5星期、6年]
     let ruleArr = props.ex.split(' ');
+    if (ruleArr.length === 5) {
+        // 兼容 Celery 原生 5 位表达式（分 时 日 月 周）
+        ruleArr = ['0', ruleArr[0], ruleArr[1], ruleArr[2], ruleArr[3], ruleArr[4], '*'];
+    } else if (ruleArr.length === 6) {
+        // 兼容无年份 Quartz（秒 分 时 日 月 周）
+        ruleArr = [...ruleArr, '*'];
+    }
     // 用于记录进入循环的次数
     let nums = 0;
     // 用于暂时存符号时间规则结果的数组

@@ -60,7 +60,6 @@ let id = 1;
 
 
 function parseLogLine(line: string): ParsedLog | null {
-  console.log(line)
   // 根据常见日志格式写一个正则
   // const regex = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \| (\w+)\s* \| ([^:]+):([^:]+):(\d+) - (.*)$/
   const regex = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})(\s\|\s)([A-Z]+)(\s+)(\|\s)([^:]+:[^:]+:\d+)(\s-\s)(.*)$/

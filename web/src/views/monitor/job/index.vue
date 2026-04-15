@@ -65,6 +65,11 @@
           日志
         </el-button>
       </el-col>
+      <el-col :span="1.5">
+        <el-button type="primary" plain icon="VideoPlay" @click="handleOpenRunningJobs" v-hasPermi="['monitor:job:query']">
+          执行中
+        </el-button>
+      </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
     </el-row>
 
@@ -72,8 +77,7 @@
       <el-table-column type="selection" width="55" align="center" />
       <el-table-column label="任务ID" width="90" align="center" prop="taskId" />
       <el-table-column label="任务名称" align="center" prop="taskName" :show-overflow-tooltip="true" />
-      <el-table-column label="注册键" align="center" prop="taskKey" :show-overflow-tooltip="true" />
-      <el-table-column label="队列" align="center" prop="queueName" width="120" />
+      <el-table-column label="任务注册键" align="center" prop="taskKey" :show-overflow-tooltip="true" />
       <el-table-column label="调度类型" align="center" width="110">
         <template #default="scope">
           {{ scheduleTypeLabel(scope.row.scheduleType) }}
@@ -96,7 +100,7 @@
           <el-switch v-model="scope.row.enabled" @change="handleStatusChange(scope.row)" />
         </template>
       </el-table-column>
-      <el-table-column label="操作" align="center" width="220" class-name="small-padding fixed-width">
+      <el-table-column label="操作" align="center" width="270" class-name="small-padding fixed-width">
         <template #default="scope">
           <el-tooltip content="修改" placement="top">
             <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['monitor:job:edit']" />
@@ -115,6 +119,9 @@
           </el-tooltip>
           <el-tooltip content="任务详细" placement="top">
             <el-button link type="primary" icon="View" @click="handleView(scope.row)" v-hasPermi="['monitor:job:query']" />
+          </el-tooltip>
+          <el-tooltip content="查看日志" placement="top">
+            <el-button link type="primary" icon="Operation" @click="handleJobLog(scope.row)" v-hasPermi="['monitor:job:query']" />
           </el-tooltip>
         </template>
       </el-table-column>
@@ -138,12 +145,9 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="任务注册键" prop="taskKey">
-              <el-input v-model="form.taskKey" placeholder="例如：module_task.scheduler_test.job" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="队列" prop="queueName">
-              <el-input v-model="form.queueName" placeholder="默认 sys" />
+              <el-select v-model="form.taskKey" filterable placeholder="请选择任务注册键">
+                <el-option v-for="item in taskKeyOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -155,7 +159,7 @@
           </el-col>
           <el-col :span="24" v-if="form.scheduleType === 'crontab'">
             <el-form-item label="Cron表达式" prop="cronExpression">
-              <el-input v-model="form.cronExpression" placeholder="支持 5 位 crontab 或 6/7 位 Quartz">
+              <el-input v-model="form.cronExpression" placeholder="请输入 Celery 兼容 5 位 Cron（分 时 日 月 周）">
                 <template #append>
                   <el-button type="primary" @click="handleShowCron">生成表达式</el-button>
                 </template>
@@ -185,19 +189,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item label="位置参数(JSON)" prop="taskArgs">
-              <AceEditor
-                v-model:content="form.taskArgs"
-                lang="json"
-                themes="monokai"
-                height="180px"
-                width="700px"
-                placeholder="请输入 JSON 数组，例如 []"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="关键字参数(JSON)" prop="taskKwargs">
+            <el-form-item label="任务参数" prop="taskKwargs">
               <AceEditor
                 v-model:content="form.taskKwargs"
                 lang="json"
@@ -242,12 +234,40 @@
       <crontab ref="crontabRef" @hide="openCron = false" @fill="crontabFill" :expression="expression" />
     </el-dialog>
 
+    <el-dialog title="执行中任务" v-model="runningOpen" width="980px" append-to-body>
+      <el-button type="primary" plain icon="Refresh" @click="getRunningJobs" :loading="runningLoading" style="margin-bottom: 12px">
+        刷新
+      </el-button>
+      <el-table :data="runningTasks" v-loading="runningLoading" max-height="460">
+        <el-table-column label="Celery任务ID" prop="celeryTaskId" min-width="260" :show-overflow-tooltip="true" />
+        <el-table-column label="任务ID" prop="taskId" width="90" />
+        <el-table-column label="任务名称" prop="taskName" min-width="160" :show-overflow-tooltip="true" />
+        <el-table-column label="状态" prop="runtimeStateLabel" width="100" />
+        <el-table-column label="Worker" prop="worker" min-width="170" :show-overflow-tooltip="true" />
+        <el-table-column label="开始时间" prop="startedAt" min-width="150" />
+        <el-table-column label="操作" width="170" fixed="right">
+          <template #default="scope">
+            <el-button link type="warning" @click="handleCancelRunningJob(scope.row)" v-hasPermi="['monitor:job:changeStatus']">
+              取消
+            </el-button>
+            <el-button link type="danger" @click="handleTerminateRunningJob(scope.row)" v-hasPermi="['monitor:job:changeStatus']">
+              终止
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="runningOpen = false">关 闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <el-dialog title="任务详细" v-model="openView" width="760px" append-to-body>
       <el-descriptions :column="2" border>
         <el-descriptions-item label="任务ID">{{ form.taskId }}</el-descriptions-item>
         <el-descriptions-item label="任务名称">{{ form.taskName }}</el-descriptions-item>
         <el-descriptions-item label="任务注册键">{{ form.taskKey }}</el-descriptions-item>
-        <el-descriptions-item label="队列">{{ form.queueName }}</el-descriptions-item>
         <el-descriptions-item label="调度类型">{{ scheduleTypeLabel(form.scheduleType) }}</el-descriptions-item>
         <el-descriptions-item label="调度表达式">{{ scheduleDisplay(form) }}</el-descriptions-item>
         <el-descriptions-item label="最近状态">{{ form.lastStatus || "未执行" }}</el-descriptions-item>
@@ -256,8 +276,7 @@
         <el-descriptions-item label="是否启用">{{ form.enabled ? "启用" : "停用" }}</el-descriptions-item>
         <el-descriptions-item label="允许并发">{{ form.allowConcurrent ? "是" : "否" }}</el-descriptions-item>
         <el-descriptions-item label="锁超时(秒)">{{ form.lockTtlSeconds }}</el-descriptions-item>
-        <el-descriptions-item label="位置参数" :span="2">{{ form.taskArgs }}</el-descriptions-item>
-        <el-descriptions-item label="关键字参数" :span="2">{{ form.taskKwargs }}</el-descriptions-item>
+        <el-descriptions-item label="任务参数" :span="2">{{ form.taskKwargs }}</el-descriptions-item>
       </el-descriptions>
       <template #footer>
         <div class="dialog-footer">
@@ -269,7 +288,19 @@
 </template>
 
 <script setup name="Job">
-import { addJob, changeJobStatus, delJob, getJob, listJob, runJob, updateJob } from "@/api/monitor/job";
+import {
+  addJob,
+  cancelRunningJob,
+  changeJobStatus,
+  delJob,
+  getJob,
+  listJob,
+  listRunningJobs,
+  listTaskKeyOptions,
+  runJob,
+  terminateRunningJob,
+  updateJob,
+} from "@/api/monitor/job";
 import Crontab from "@/components/Crontab";
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
 
@@ -288,6 +319,10 @@ const title = ref("");
 const openView = ref(false);
 const openCron = ref(false);
 const expression = ref("");
+const taskKeyOptions = ref([]);
+const runningOpen = ref(false);
+const runningLoading = ref(false);
+const runningTasks = ref([]);
 
 const scheduleTypeOptions = [
   { label: "Cron", value: "crontab" },
@@ -300,19 +335,6 @@ const intervalPeriodOptions = [
   { label: "小时", value: "hours" },
   { label: "天", value: "days" },
 ];
-
-const validateJsonArray = (rule, value, callback) => {
-  try {
-    const parsed = JSON.parse(value || "[]");
-    if (!Array.isArray(parsed)) {
-      callback(new Error("必须是 JSON 数组"));
-      return;
-    }
-    callback();
-  } catch (error) {
-    callback(new Error("JSON 格式不正确"));
-  }
-};
 
 const validateJsonObject = (rule, value, callback) => {
   try {
@@ -358,24 +380,27 @@ const data = reactive({
   },
   rules: {
     taskName: [{ required: true, message: "任务名称不能为空", trigger: "blur" }],
-    taskKey: [{ required: true, message: "任务注册键不能为空", trigger: "blur" }],
+    taskKey: [{ required: true, message: "任务注册键不能为空", trigger: "change" }],
     scheduleType: [{ required: true, message: "调度类型不能为空", trigger: "change" }],
     cronExpression: [{ validator: validateSchedule, trigger: "blur" }],
     intervalEvery: [{ validator: validateSchedule, trigger: "change" }],
     intervalPeriod: [{ validator: validateSchedule, trigger: "change" }],
     oneOffEta: [{ validator: validateSchedule, trigger: "change" }],
-    taskArgs: [{ validator: validateJsonArray, trigger: "blur" }],
     taskKwargs: [{ validator: validateJsonObject, trigger: "blur" }],
   },
 });
 
 const { queryParams, form, rules } = toRefs(data);
 
+function defaultTaskKey() {
+  return taskKeyOptions.value?.[0]?.value || "module_task.scheduler_test.job";
+}
+
 function defaultForm() {
   return {
     taskId: undefined,
     taskName: undefined,
-    taskKey: "module_task.scheduler_test.job",
+    taskKey: defaultTaskKey(),
     queueName: "sys",
     scheduleType: "crontab",
     cronExpression: "0 0 * * *",
@@ -395,9 +420,10 @@ function normalizeFormData(data) {
   return {
     ...defaultForm(),
     ...data,
-    taskArgs: data?.taskArgs || "[]",
+    taskArgs: "[]",
     taskKwargs: data?.taskKwargs || "{}",
-    queueName: data?.queueName || "sys",
+    queueName: "sys",
+    taskKey: data?.taskKey || defaultTaskKey(),
   };
 }
 
@@ -423,6 +449,15 @@ function statusTagType(status) {
   if (status === "running") return "warning";
   if (status === "skipped") return "info";
   return "";
+}
+
+function getTaskKeyOptions() {
+  listTaskKeyOptions().then((response) => {
+    taskKeyOptions.value = response.data || [];
+    if (!form.value.taskId && !form.value.taskKey) {
+      form.value.taskKey = defaultTaskKey();
+    }
+  });
 }
 
 function getList() {
@@ -504,7 +539,51 @@ function crontabFill(value) {
 
 function handleJobLog(row) {
   const taskId = row?.taskId || 0;
-  router.push("/monitor/job-log/index/" + taskId);
+  const taskName = row?.taskName;
+  router.push({
+    path: "/monitor/job-log/index/" + taskId,
+    query: taskName ? { taskName } : undefined,
+  });
+}
+
+function handleOpenRunningJobs() {
+  runningOpen.value = true;
+  getRunningJobs();
+}
+
+function getRunningJobs() {
+  runningLoading.value = true;
+  listRunningJobs()
+    .then((response) => {
+      runningTasks.value = response.data || [];
+    })
+    .finally(() => {
+      runningLoading.value = false;
+    });
+}
+
+function handleCancelRunningJob(row) {
+  if (!row?.celeryTaskId) return;
+  proxy.$modal
+    .confirm(`确认要取消任务 "${row.taskName || row.taskId || row.celeryTaskId}" 吗?`)
+    .then(() => cancelRunningJob(row.celeryTaskId))
+    .then(() => {
+      proxy.$modal.msgSuccess("已发送取消指令");
+      getRunningJobs();
+    })
+    .catch(() => {});
+}
+
+function handleTerminateRunningJob(row) {
+  if (!row?.celeryTaskId) return;
+  proxy.$modal
+    .confirm(`确认要终止任务 "${row.taskName || row.taskId || row.celeryTaskId}" 吗?`)
+    .then(() => terminateRunningJob(row.celeryTaskId))
+    .then(() => {
+      proxy.$modal.msgSuccess("已发送终止指令");
+      getRunningJobs();
+    })
+    .catch(() => {});
 }
 
 function handleAdd() {
@@ -528,6 +607,8 @@ function submitForm() {
     if (!valid) return;
 
     const payload = { ...form.value };
+    payload.queueName = "sys";
+    payload.taskArgs = "[]";
     if (payload.scheduleType !== "crontab") payload.cronExpression = undefined;
     if (payload.scheduleType !== "interval") {
       payload.intervalEvery = undefined;
@@ -574,5 +655,6 @@ function handleExport() {
 }
 
 reset();
+getTaskKeyOptions();
 getList();
 </script>

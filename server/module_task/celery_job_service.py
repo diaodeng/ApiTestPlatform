@@ -1,3 +1,6 @@
+import ast
+import json
+import os
 from datetime import datetime, time
 
 from sqlalchemy.orm import Session
@@ -12,6 +15,7 @@ from module_task.celery_contract import (
 )
 from module_task.celery_job_models import CeleryPeriodicTask, CeleryTaskExecutionLog
 from module_task.celery_job_vo import (
+    ControlRunningTaskModel,
     DeleteJobLogModel,
     DeleteJobModel,
     EditJobModel,
@@ -20,6 +24,7 @@ from module_task.celery_job_vo import (
     JobPageQueryModel,
     RunJobModel,
 )
+from module_task.celery_schedule_parser import normalize_cron_expression, parse_cron_to_schedule
 from utils.common_util import CamelCaseUtil, export_list2excel
 from utils.page_util import PageResponseModel
 
@@ -31,6 +36,18 @@ class CeleryJobService:
 
     SCHEDULE_TYPES = {"crontab", "interval", "once"}
     INTERVAL_PERIODS = {"seconds", "minutes", "hours", "days"}
+
+    @classmethod
+    def list_registered_task_keys(cls) -> list[str]:
+        """
+        获取当前进程已注册的任务键列表。
+
+        :return: 任务注册键字符串列表。
+        """
+        from module_task import scheduler_promo, scheduler_qtr, scheduler_test  # noqa: F401
+        from module_task.task_register import JOB_REGISTRY
+
+        return sorted(JOB_REGISTRY.keys())
 
     @classmethod
     def _validate_owner_type(cls, owner_type: str) -> str:
@@ -59,6 +76,108 @@ class CeleryJobService:
         begin = datetime.combine(datetime.strptime(begin_time, "%Y-%m-%d"), time(0, 0, 0))
         end = datetime.combine(datetime.strptime(end_time, "%Y-%m-%d"), time(23, 59, 59))
         return begin, end
+
+    @classmethod
+    def _safe_load_structured_data(cls, raw_value):
+        """
+        尝试将 inspect 返回的字符串/对象转换为结构化对象。
+
+        :param raw_value: inspect 原始字段值。
+        :return: 解析后的对象，失败时返回原值。
+        """
+        if isinstance(raw_value, (dict, list, tuple)):
+            return raw_value
+        if not isinstance(raw_value, str):
+            return raw_value
+
+        text = raw_value.strip()
+        if not text:
+            return raw_value
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+        try:
+            return ast.literal_eval(text)
+        except Exception:
+            pass
+        return raw_value
+
+    @classmethod
+    def _extract_runtime_payload(cls, task_meta: dict) -> dict | None:
+        """
+        从 Celery inspect 任务元信息中提取统一 payload。
+
+        :param task_meta: inspect 任务元信息。
+        :return: payload 字典，无法提取时返回 None。
+        """
+        args_obj = cls._safe_load_structured_data(task_meta.get("args"))
+        payload = None
+
+        if isinstance(args_obj, tuple):
+            args_obj = list(args_obj)
+        if isinstance(args_obj, list) and args_obj:
+            candidate = args_obj[0]
+            candidate = cls._safe_load_structured_data(candidate)
+            if isinstance(candidate, dict):
+                payload = candidate
+        elif isinstance(args_obj, dict):
+            payload = args_obj
+
+        if payload:
+            return payload
+
+        kwargs_obj = cls._safe_load_structured_data(task_meta.get("kwargs"))
+        if isinstance(kwargs_obj, dict):
+            nested_payload = kwargs_obj.get("payload")
+            if isinstance(nested_payload, dict):
+                return nested_payload
+        return None
+
+    @classmethod
+    def _iter_runtime_snapshot(cls):
+        """
+        读取 Celery inspect 运行时快照。
+
+        :return: (state, worker, task_meta) 迭代器。
+        """
+        inspector = celery_app.control.inspect(timeout=1.0)
+        snapshot_map = {
+            "active": inspector.active() or {},
+            "reserved": inspector.reserved() or {},
+            "scheduled": inspector.scheduled() or {},
+        }
+
+        for state, worker_map in snapshot_map.items():
+            for worker_name, tasks in (worker_map or {}).items():
+                for task_item in tasks or []:
+                    if (
+                        state == "scheduled"
+                        and isinstance(task_item, dict)
+                        and isinstance(task_item.get("request"), dict)
+                    ):
+                        task_meta = dict(task_item.get("request") or {})
+                        task_meta["eta"] = task_item.get("eta") or task_meta.get("eta")
+                    else:
+                        task_meta = dict(task_item or {})
+                    task_meta["runtimeState"] = state
+                    task_meta["worker"] = worker_name
+                    yield state, worker_name, task_meta
+
+    @classmethod
+    def _format_runtime_start_time(cls, raw_value) -> str | None:
+        """
+        格式化 Celery inspect 的开始时间字段。
+
+        :param raw_value: 原始 time_start 值。
+        :return: 格式化后的时间字符串。
+        """
+        if raw_value is None:
+            return None
+        try:
+            return datetime.fromtimestamp(float(raw_value)).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return str(raw_value)
 
     @classmethod
     def _serialize_task(cls, row: CeleryPeriodicTask | dict) -> dict:
@@ -191,7 +310,10 @@ class CeleryJobService:
             cron_expression = (model_data.get("cron_expression") or "").strip()
             if not cron_expression:
                 raise ValueError("crontab 类型任务必须填写 cron_expression")
-            payload["cron_expression"] = cron_expression
+            normalized_cron_expression = normalize_cron_expression(cron_expression)
+            # 保存前做一次解析校验，避免非法表达式进入调度器。
+            parse_cron_to_schedule(normalized_cron_expression)
+            payload["cron_expression"] = normalized_cron_expression
             payload["interval_every"] = None
             payload["interval_period"] = None
             payload["one_off_eta"] = None
@@ -513,6 +635,159 @@ class CeleryJobService:
         if not row:
             return None
         return cls._serialize_task(row)
+
+    @classmethod
+    def list_running_job_tasks_services(
+        cls,
+        query_db: Session,
+        owner_type: str,
+        data_scope_sql=True,
+    ) -> list[dict]:
+        """
+        查询 Celery 运行中/排队中的任务快照。
+
+        :param query_db: 数据库会话。
+        :param owner_type: 任务归属类型。
+        :param data_scope_sql: 数据权限表达式。
+        :return: 运行态任务列表。
+        """
+        owner_type = cls._validate_owner_type(owner_type)
+        allowed_task_ids = {
+            row[0]
+            for row in query_db.query(CeleryPeriodicTask.task_id)
+            .filter(
+                CeleryPeriodicTask.owner_type == owner_type,
+                data_scope_sql,
+            )
+            .all()
+        }
+
+        state_label_map = {
+            "active": "运行中",
+            "reserved": "待执行",
+            "scheduled": "待调度",
+        }
+        result = []
+        seen = set()
+        for state, worker_name, task_meta in cls._iter_runtime_snapshot():
+            task_name = str(task_meta.get("name") or task_meta.get("task") or "")
+            if task_name != CELERY_EXECUTE_JOB_TASK:
+                continue
+            payload = cls._extract_runtime_payload(task_meta)
+            if not isinstance(payload, dict):
+                continue
+
+            payload_owner = str(payload.get("owner_type") or "").strip().lower()
+            if payload_owner and payload_owner != owner_type:
+                continue
+
+            try:
+                task_id = int(payload.get("task_id") or 0)
+            except Exception:
+                task_id = 0
+            if task_id and task_id not in allowed_task_ids:
+                continue
+            if not task_id and payload_owner != owner_type:
+                continue
+
+            celery_task_id = str(task_meta.get("id") or "").strip()
+            if not celery_task_id:
+                continue
+            dedupe_key = (celery_task_id, state)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            result.append(
+                {
+                    "celeryTaskId": celery_task_id,
+                    "taskId": task_id,
+                    "taskName": payload.get("task_name") or "",
+                    "taskKey": payload.get("task_key") or "",
+                    "queueName": payload.get("queue_name") or "",
+                    "triggerType": payload.get("trigger_type") or "",
+                    "scheduleDesc": payload.get("schedule_desc") or "",
+                    "runtimeState": state,
+                    "runtimeStateLabel": state_label_map.get(state, state),
+                    "worker": worker_name,
+                    "startedAt": cls._format_runtime_start_time(task_meta.get("time_start")),
+                    "eta": task_meta.get("eta"),
+                    "acknowledged": bool(task_meta.get("acknowledged", False)),
+                }
+            )
+
+        state_sort_order = {"active": 0, "reserved": 1, "scheduled": 2}
+        result.sort(
+            key=lambda item: (
+                state_sort_order.get(item.get("runtimeState"), 99),
+                item.get("startedAt") or "",
+                item.get("celeryTaskId") or "",
+            )
+        )
+        return result
+
+    @classmethod
+    def revoke_running_job_services(
+        cls,
+        query_db: Session,
+        owner_type: str,
+        page_object: ControlRunningTaskModel,
+        terminate: bool = False,
+        data_scope_sql=True,
+    ) -> CrudResponseModel:
+        """
+        取消或终止运行态任务。
+
+        :param query_db: 数据库会话。
+        :param owner_type: 任务归属类型。
+        :param page_object: 控制请求模型。
+        :param terminate: True 表示终止运行进程，False 表示仅取消。
+        :param data_scope_sql: 数据权限表达式。
+        :return: CRUD 响应。
+        """
+        owner_type = cls._validate_owner_type(owner_type)
+        celery_task_id = str(page_object.celery_task_id or "").strip()
+        if not celery_task_id:
+            return CrudResponseModel(is_success=False, message="celery_task_id 不能为空")
+
+        running_tasks = cls.list_running_job_tasks_services(
+            query_db=query_db,
+            owner_type=owner_type,
+            data_scope_sql=data_scope_sql,
+        )
+        target = next((item for item in running_tasks if item.get("celeryTaskId") == celery_task_id), None)
+        if not target:
+            return CrudResponseModel(is_success=False, message="任务不存在或已执行完成")
+
+        control_kwargs = {"terminate": bool(terminate)}
+        if terminate:
+            control_kwargs["signal"] = "SIGTERM"
+        celery_app.control.revoke(celery_task_id, **control_kwargs)
+
+        task_id = int(target.get("taskId") or 0)
+        if task_id:
+            try:
+                query_db.query(CeleryPeriodicTask).filter(
+                    CeleryPeriodicTask.owner_type == owner_type,
+                    CeleryPeriodicTask.task_id == task_id,
+                ).update(
+                    {
+                        "last_status": "revoked",
+                        "last_message": "任务已手动终止" if terminate else "任务已手动取消",
+                        "update_time": datetime.now(),
+                    }
+                )
+                query_db.commit()
+            except Exception:
+                query_db.rollback()
+
+        action_text = "终止" if terminate else "取消"
+        if terminate and os.name == "nt":
+            return CrudResponseModel(
+                is_success=True,
+                message=f"已发送任务{action_text}指令（Windows/solo 模式下运行中任务可能不会立即结束）",
+            )
+        return CrudResponseModel(is_success=True, message=f"已发送任务{action_text}指令")
 
     @classmethod
     def get_job_log_list_services(

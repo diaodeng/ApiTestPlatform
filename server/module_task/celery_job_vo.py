@@ -122,6 +122,15 @@ class RunJobModel(BaseModel):
     task_id: int
 
 
+class ControlRunningTaskModel(BaseModel):
+    """
+    控制运行中 Celery 任务请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    celery_task_id: str
+
+
 class JobLogModel(BaseModel):
     """
     Celery 任务日志模型。

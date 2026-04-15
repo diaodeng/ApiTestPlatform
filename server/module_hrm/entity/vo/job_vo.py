@@ -1,4 +1,5 @@
 from module_task.celery_job_vo import (
+    ControlRunningTaskModel,
     DeleteJobLogModel,
     DeleteJobModel,
     EditJobModel,
@@ -12,6 +13,7 @@ from module_task.celery_job_vo import (
 )
 
 __all__ = [
+    "ControlRunningTaskModel",
     "DeleteJobLogModel",
     "DeleteJobModel",
     "EditJobModel",

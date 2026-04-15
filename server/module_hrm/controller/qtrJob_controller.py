@@ -10,6 +10,7 @@ from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.service.login_service import CurrentUserModel, LoginService
 from module_hrm.entity.vo.job_vo import (
+    ControlRunningTaskModel,
     DeleteJobLogModel,
     DeleteJobModel,
     EditJobModel,
@@ -93,6 +94,88 @@ async def get_scheduler_job_list(request: Request,
                 for i in notice_page_query_result
             ]
         )
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@qtrJobController.get("/job/running", dependencies=[Depends(CheckUserInterfaceAuth("qtr:job:query"))])
+async def get_running_qtr_job_list(
+    request: Request,
+    query_db: Session = Depends(get_db),
+    data_scope_sql=Depends(
+        GetDataScope(CeleryPeriodicTask, user_alias='owner_user_id', dept_alias='owner_dept_id')
+    ),
+):
+    """
+    获取 QTR 任务当前运行态快照（运行中/待执行/待调度）。
+
+    :param request: FastAPI 请求对象。
+    :param query_db: 数据库会话。
+    :param data_scope_sql: 当前用户可见任务的数据权限表达式。
+    :return: 运行态任务列表。
+    """
+    try:
+        running_tasks = JobService.list_running_jobs_services(query_db, data_scope_sql)
+        return ResponseUtil.success(data=running_tasks)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@qtrJobController.put("/job/running/cancel", dependencies=[Depends(CheckUserInterfaceAuth("qtr:job:run"))])
+@log_decorator(title='定时任务管理', business_type=2)
+async def cancel_running_qtr_job(
+    request: Request,
+    page_object: ControlRunningTaskModel,
+    query_db: Session = Depends(get_db),
+    data_scope_sql=Depends(
+        GetDataScope(CeleryPeriodicTask, user_alias='owner_user_id', dept_alias='owner_dept_id')
+    ),
+):
+    """
+    取消 QTR 运行态任务（撤销尚未执行的任务）。
+
+    :param request: FastAPI 请求对象。
+    :param page_object: 任务控制请求体（celery_task_id）。
+    :param query_db: 数据库会话。
+    :param data_scope_sql: 当前用户可见任务的数据权限表达式。
+    :return: 控制结果。
+    """
+    try:
+        cancel_result = JobService.cancel_running_job_services(query_db, page_object, data_scope_sql)
+        if cancel_result.is_success:
+            return ResponseUtil.success(msg=cancel_result.message)
+        return ResponseUtil.failure(msg=cancel_result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@qtrJobController.put("/job/running/terminate", dependencies=[Depends(CheckUserInterfaceAuth("qtr:job:run"))])
+@log_decorator(title='定时任务管理', business_type=2)
+async def terminate_running_qtr_job(
+    request: Request,
+    page_object: ControlRunningTaskModel,
+    query_db: Session = Depends(get_db),
+    data_scope_sql=Depends(
+        GetDataScope(CeleryPeriodicTask, user_alias='owner_user_id', dept_alias='owner_dept_id')
+    ),
+):
+    """
+    终止 QTR 运行态任务（尝试中断运行中任务）。
+
+    :param request: FastAPI 请求对象。
+    :param page_object: 任务控制请求体（celery_task_id）。
+    :param query_db: 数据库会话。
+    :param data_scope_sql: 当前用户可见任务的数据权限表达式。
+    :return: 控制结果。
+    """
+    try:
+        terminate_result = JobService.terminate_running_job_services(query_db, page_object, data_scope_sql)
+        if terminate_result.is_success:
+            return ResponseUtil.success(msg=terminate_result.message)
+        return ResponseUtil.failure(msg=terminate_result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
