@@ -1,340 +1,214 @@
 <template>
   <div class="app-container">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
-      <el-form-item label="任务名称" prop="jobName">
+      <el-form-item label="任务名称" prop="taskName">
         <el-input
-            v-model="queryParams.jobName"
-            placeholder="请输入任务名称"
-            clearable
-            style="width: 200px"
-            @keyup.enter="handleQuery"
+          v-model="queryParams.taskName"
+          placeholder="请输入任务名称"
+          clearable
+          style="width: 220px"
+          @keyup.enter="handleQuery"
         />
       </el-form-item>
-      <el-form-item label="任务组名" prop="jobGroup">
-        <el-select v-model="queryParams.jobGroup" placeholder="请选择任务组名" clearable style="width: 200px">
-          <el-option
-              v-for="dict in sys_job_group"
-              :key="dict.value"
-              :label="dict.label"
-              :value="dict.value"
-          />
+      <el-form-item label="调度类型" prop="scheduleType">
+        <el-select v-model="queryParams.scheduleType" clearable placeholder="请选择" style="width: 160px">
+          <el-option v-for="item in scheduleTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="任务状态" prop="status">
-        <el-select v-model="queryParams.status" placeholder="请选择任务状态" clearable style="width: 200px">
-          <el-option
-              v-for="dict in sys_job_status"
-              :key="dict.value"
-              :label="dict.label"
-              :value="dict.value"
-          />
+      <el-form-item label="启用状态" prop="enabled">
+        <el-select v-model="queryParams.enabled" clearable placeholder="请选择" style="width: 160px">
+          <el-option label="启用" :value="true" />
+          <el-option label="停用" :value="false" />
         </el-select>
       </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
-        <el-button type="warning" icon="Search" @click="handleQueryScheduler" title="显示scheduler加载的任务"
-                   v-show="false">搜索
-        </el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
       </el-form-item>
     </el-form>
 
     <el-row :gutter="10" class="mb8">
       <el-col :span="1.5">
-        <el-button
-            type="primary"
-            plain
-            icon="Plus"
-            @click="handleAdd"
-            v-hasPermi="['qtr:job:add']"
-        >新增
+        <el-button type="primary" plain icon="Plus" @click="handleAdd" v-hasPermi="['qtr:job:add']">新增</el-button>
+      </el-col>
+      <el-col :span="1.5">
+        <el-button type="success" plain icon="Edit" :disabled="single" @click="handleUpdate" v-hasPermi="['qtr:job:edit']">
+          修改
         </el-button>
       </el-col>
       <el-col :span="1.5">
         <el-button
-            type="success"
-            plain
-            icon="Edit"
-            :disabled="single"
-            @click="handleUpdate"
-            v-hasPermi="['qtr:job:edit']"
-        >修改
+          type="danger"
+          plain
+          icon="Delete"
+          :disabled="multiple"
+          @click="handleDelete"
+          v-hasPermi="['qtr:job:remove']"
+        >
+          删除
         </el-button>
       </el-col>
       <el-col :span="1.5">
-        <el-button
-            type="danger"
-            plain
-            icon="Delete"
-            :disabled="multiple"
-            @click="handleDelete"
-            v-hasPermi="['qtr:job:remove']"
-        >删除
-        </el-button>
+        <el-button type="warning" plain icon="Download" @click="handleExport" v-hasPermi="['qtr:job:export']">导出</el-button>
       </el-col>
       <el-col :span="1.5">
-        <el-button
-            type="warning"
-            plain
-            icon="Download"
-            @click="handleExport"
-            v-hasPermi="['qtr:job:export']"
-        >导出
-        </el-button>
-      </el-col>
-      <el-col :span="1.5">
-        <el-button
-            type="info"
-            plain
-            icon="Operation"
-            @click="handleJobLog"
-            v-hasPermi="['qtr:job:query']"
-        >日志
-        </el-button>
+        <el-button type="info" plain icon="Operation" @click="handleJobLog" v-hasPermi="['qtr:job:query']">日志</el-button>
       </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
     </el-row>
 
     <el-table v-loading="loading" :data="jobList" @selection-change="handleSelectionChange">
-      <el-table-column type="selection" width="55" align="center"/>
-      <el-table-column label="任务编号" width="100" align="center" prop="jobId"/>
-      <el-table-column label="任务名称" align="center" prop="jobName" :show-overflow-tooltip="true"/>
-      <el-table-column label="任务组名" align="center" prop="jobGroup">
+      <el-table-column type="selection" width="55" align="center" />
+      <el-table-column label="任务ID" width="110" align="center" prop="taskId" />
+      <el-table-column label="任务名称" align="center" prop="taskName" :show-overflow-tooltip="true" />
+      <el-table-column label="注册键" align="center" prop="taskKey" :show-overflow-tooltip="true" />
+      <el-table-column label="队列" align="center" prop="queueName" width="120" />
+      <el-table-column label="调度类型" align="center" width="110">
         <template #default="scope">
-          <dict-tag :options="sys_job_group" :value="scope.row.jobGroup"/>
+          {{ scheduleTypeLabel(scope.row.scheduleType) }}
         </template>
       </el-table-column>
-      <el-table-column label="调用目标字符串" align="center" prop="invokeTarget" :show-overflow-tooltip="true"/>
-      <el-table-column label="cron执行表达式" align="center" prop="cronExpression" :show-overflow-tooltip="true"/>
-      <el-table-column prop="status" label="执行状态" align="center" width="70">
+      <el-table-column label="调度表达式" align="center" min-width="220" :show-overflow-tooltip="true">
         <template #default="scope">
-          <dict-tag :options="job_run_status" :value="scope.row.runStatus"/>
+          {{ scheduleDisplay(scope.row) }}
         </template>
       </el-table-column>
-      <el-table-column label="状态" align="center">
+      <el-table-column label="最近状态" align="center" width="100">
         <template #default="scope">
-          <el-switch
-              v-model="scope.row.status"
-              active-value="0"
-              inactive-value="1"
-              @change="handleStatusChange(scope.row)"
-          ></el-switch>
+          <el-tag :type="statusTagType(scope.row.lastStatus)">
+            {{ scope.row.lastStatus || "未执行" }}
+          </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" align="center" width="200" class-name="small-padding fixed-width">
+      <el-table-column label="启用" align="center" width="90">
         <template #default="scope">
-
-          <el-tooltip content="停止进行中的任务" placement="top">
-            <el-button link type="danger" icon="SwitchButton" @click="stopJobHandler(scope.row)"
-                       v-hasPermi="['qtr:job:edit']" v-show="false"></el-button>
-          </el-tooltip>
+          <el-switch v-model="scope.row.enabled" @change="handleStatusChange(scope.row)" />
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" align="center" width="220" class-name="small-padding fixed-width">
+        <template #default="scope">
           <el-tooltip content="修改" placement="top">
-            <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)"
-                       v-hasPermi="['qtr:job:edit']"></el-button>
+            <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['qtr:job:edit']" />
           </el-tooltip>
           <el-tooltip content="删除" placement="top">
-            <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
-                       v-hasPermi="['qtr:job:remove']"></el-button>
+            <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['qtr:job:remove']" />
           </el-tooltip>
           <el-tooltip content="执行一次" placement="top">
-            <el-button link type="primary" icon="CaretRight" @click="handleRun(scope.row)"
-                       v-hasPermi="['qtr:job:run']"></el-button>
+            <el-button link type="primary" icon="CaretRight" @click="handleRun(scope.row)" v-hasPermi="['qtr:job:run']" />
           </el-tooltip>
           <el-tooltip content="任务详细" placement="top">
-            <el-button link type="primary" icon="View" @click="handleView(scope.row)"
-                       v-hasPermi="['qtr:job:query']"></el-button>
-          </el-tooltip>
-          <el-tooltip content="调度日志" placement="top">
-            <el-button link type="primary" icon="Operation" @click="handleJobLog(scope.row)"
-                       v-hasPermi="['qtr:job:query']"></el-button>
+            <el-button link type="primary" icon="View" @click="handleView(scope.row)" v-hasPermi="['qtr:job:query']" />
           </el-tooltip>
         </template>
       </el-table-column>
     </el-table>
 
     <pagination
-        v-show="total > 0"
-        :total="total"
-        v-model:page="queryParams.pageNum"
-        v-model:limit="queryParams.pageSize"
-        @pagination="getList"
+      v-show="total > 0"
+      :total="total"
+      v-model:page="queryParams.pageNum"
+      v-model:limit="queryParams.pageSize"
+      @pagination="getList"
     />
 
-    <!-- 添加或修改定时任务对话框 基础操作 -->
-    <el-dialog :title="title" v-model="open" width="820px" append-to-body>
+    <el-dialog :title="title" v-model="open" width="860px" append-to-body>
       <el-form ref="jobRef" :model="form" :rules="rules" label-width="120px">
         <el-row>
-          <el-col :span="24">
-            <el-form-item label="任务名称" prop="jobName">
-              <el-input v-model="form.jobName" placeholder="请输入任务名称"/>
+          <el-col :span="12">
+            <el-form-item label="任务名称" prop="taskName">
+              <el-input v-model="form.taskName" placeholder="请输入任务名称" />
             </el-form-item>
           </el-col>
-          <el-col :span="24">
-            <el-form-item label="测试数据" prop="testData">
-              <RunDataConfig v-model:run-ids="runIds" v-model:run-type="runType"></RunDataConfig>
+          <el-col :span="12">
+            <el-form-item label="任务注册键" prop="taskKey">
+              <el-input v-model="form.taskKey" placeholder="例如：module_task.scheduler_qtr.job_run_test" />
             </el-form-item>
           </el-col>
-          <el-col :span="24">
-            <RunConfig label-width="120px"
-                       v-model:config-data="runConfigDataRef"
-                       @update="updateRunConfigData"
-            ></RunConfig>
+          <el-col :span="12">
+            <el-form-item label="队列" prop="queueName">
+              <el-input v-model="form.queueName" placeholder="默认 qtr" />
+            </el-form-item>
           </el-col>
-          <el-col :span="24">
-            <el-form-item label="cron表达式" prop="cronExpression">
-              <el-input v-model="form.cronExpression" placeholder="请输入cron执行表达式">
+          <el-col :span="12">
+            <el-form-item label="调度类型" prop="scheduleType">
+              <el-select v-model="form.scheduleType" placeholder="请选择">
+                <el-option v-for="item in scheduleTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="24" v-if="form.scheduleType === 'crontab'">
+            <el-form-item label="Cron表达式" prop="cronExpression">
+              <el-input v-model="form.cronExpression" placeholder="支持 5 位 crontab 或 6/7 位 Quartz">
                 <template #append>
-                  <el-button type="primary" @click="handleShowCron">
-                    生成表达式
-                    <i class="el-icon-time el-icon--right"></i>
-                  </el-button>
+                  <el-button type="primary" @click="handleShowCron">生成表达式</el-button>
                 </template>
               </el-input>
             </el-form-item>
           </el-col>
-          <el-col :span="24" v-if="form.jobId !== undefined">
-            <el-form-item label="状态">
-              <el-radio-group v-model="form.status">
-                <el-radio
-                    v-for="dict in sys_job_status"
-                    :key="dict.value"
-                    :value="dict.value"
-                >{{ dict.label }}
-                </el-radio>
-              </el-radio-group>
+          <el-col :span="12" v-if="form.scheduleType === 'interval'">
+            <el-form-item label="间隔步长" prop="intervalEvery">
+              <el-input-number v-model="form.intervalEvery" :min="1" controls-position="right" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="执行策略" prop="misfirePolicy">
-              <el-radio-group v-model="form.misfirePolicy">
-                <el-radio-button value="1">立即执行</el-radio-button>
-                <el-radio-button value="2">执行一次</el-radio-button>
-                <el-radio-button value="3">放弃执行</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="是否并发" prop="concurrent">
-              <el-radio-group v-model="form.concurrent">
-                <el-radio-button value="0">允许</el-radio-button>
-                <el-radio-button value="1">禁止</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm">确 定</el-button>
-          <el-button @click="cancel">取 消</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <!-- 添加或修改定时任务对话框 高级操作 -->
-    <el-dialog :title="title" v-model="openAdvanced" width="820px" append-to-body>
-      <el-form ref="jobRef" :model="form" :rules="rules" label-width="120px">
-        <el-row>
-          <el-col :span="24">
-            <el-form-item label="任务名称" prop="jobName">
-              <el-input v-model="form.jobName" placeholder="请输入任务名称"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="任务分组" prop="jobGroup">
-              <el-select v-model="form.jobGroup" placeholder="请选择">
-                <el-option
-                    v-for="dict in sys_job_group"
-                    :key="dict.value"
-                    :label="dict.label"
-                    :value="dict.value"
-                ></el-option>
+          <el-col :span="12" v-if="form.scheduleType === 'interval'">
+            <el-form-item label="间隔单位" prop="intervalPeriod">
+              <el-select v-model="form.intervalPeriod" placeholder="请选择">
+                <el-option v-for="item in intervalPeriodOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="任务执行器" prop="jobGroup">
-              <el-select v-model="form.jobExecutor" placeholder="请选择任务执行器">
-                <el-option
-                    v-for="dict in sys_job_executor"
-                    :key="dict.value"
-                    :label="dict.label"
-                    :value="dict.value"
-                ></el-option>
-              </el-select>
+          <el-col :span="24" v-if="form.scheduleType === 'once'">
+            <el-form-item label="触发时间" prop="oneOffEta">
+              <el-date-picker
+                v-model="form.oneOffEta"
+                type="datetime"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                placeholder="请选择单次执行时间"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item prop="invokeTarget">
-              <template #label>
-                        <span>
-                           调用方法
-                           <el-tooltip placement="top">
-                              <template #content>
-                                 <div>
-                                    Bean调用示例：ryTask.ryParams('ry')
-                                    <br/>Class类调用示例：com.ruoyi.quartz.task.RyTask.ryParams('ry')
-                                    <br/>参数说明：支持字符串，布尔类型，长整型，浮点型，整型
-                                 </div>
-                              </template>
-                              <el-icon><question-filled/></el-icon>
-                           </el-tooltip>
-                        </span>
-              </template>
-              <el-input v-model="form.invokeTarget" placeholder="请输入调用目标字符串"/>
+            <el-form-item label="位置参数(JSON)" prop="taskArgs">
+              <AceEditor
+                v-model:content="form.taskArgs"
+                lang="json"
+                themes="monokai"
+                height="180px"
+                width="700px"
+                placeholder="请输入 JSON 数组，例如 []"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item label="位置参数" prop="jobArgs">
-              <el-input v-model="form.jobArgs" placeholder="请输入位置参数"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="关键字参数" prop="jobKwargs">
-              <!--                  <el-input v-model="form.jobKwargs" placeholder="请输入关键字参数" />-->
-              <AceEditor v-model:content="form.jobKwargs" lang="json" themes="monokai" height="300px" width="670px"
-                         placeholder="请输入关键字参数"></AceEditor>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="cron表达式" prop="cronExpression">
-              <el-input v-model="form.cronExpression" placeholder="请输入cron执行表达式">
-                <template #append>
-                  <el-button type="primary" @click="handleShowCron">
-                    生成表达式
-                    <i class="el-icon-time el-icon--right"></i>
-                  </el-button>
-                </template>
-              </el-input>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24" v-if="form.jobId !== undefined">
-            <el-form-item label="状态">
-              <el-radio-group v-model="form.status">
-                <el-radio
-                    v-for="dict in sys_job_status"
-                    :key="dict.value"
-                    :value="dict.value"
-                >{{ dict.label }}
-                </el-radio>
-              </el-radio-group>
+            <el-form-item label="关键字参数(JSON)" prop="taskKwargs">
+              <AceEditor
+                v-model:content="form.taskKwargs"
+                lang="json"
+                themes="monokai"
+                height="220px"
+                width="700px"
+                placeholder='请输入 JSON 对象，例如 {"ids":[1,2]}'
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="执行策略" prop="misfirePolicy">
-              <el-radio-group v-model="form.misfirePolicy">
-                <el-radio-button value="1">立即执行</el-radio-button>
-                <el-radio-button value="2">执行一次</el-radio-button>
-                <el-radio-button value="3">放弃执行</el-radio-button>
-              </el-radio-group>
+            <el-form-item label="允许并发" prop="allowConcurrent">
+              <el-switch v-model="form.allowConcurrent" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="是否并发" prop="concurrent">
-              <el-radio-group v-model="form.concurrent">
-                <el-radio-button value="0">允许</el-radio-button>
-                <el-radio-button value="1">禁止</el-radio-button>
-              </el-radio-group>
+            <el-form-item label="锁超时(秒)" prop="lockTtlSeconds">
+              <el-input-number v-model="form.lockTtlSeconds" :min="30" controls-position="right" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="启用状态" prop="enabled">
+              <el-switch v-model="form.enabled" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="备注" prop="remark">
+              <el-input v-model="form.remark" type="textarea" :rows="2" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -348,61 +222,26 @@
     </el-dialog>
 
     <el-dialog title="Cron表达式生成器" v-model="openCron" append-to-body destroy-on-close>
-      <crontab ref="crontabRef" @hide="openCron=false" @fill="crontabFill" :expression="expression"></crontab>
+      <crontab ref="crontabRef" @hide="openCron = false" @fill="crontabFill" :expression="expression" />
     </el-dialog>
 
-    <!-- 任务日志详细 -->
-    <el-dialog title="任务详细" v-model="openView" width="700px" append-to-body>
-      <el-form :model="form" label-width="120px">
-        <el-row>
-          <el-col :span="12">
-            <el-form-item label="任务编号：">{{ form.jobId }}</el-form-item>
-            <el-form-item label="任务名称：">{{ form.jobName }}</el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="任务分组：">{{ jobGroupFormat(form) }}</el-form-item>
-            <el-form-item label="创建时间：">{{ parseTime(form.createTime) }}</el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="cron表达式：">{{ form.cronExpression }}</el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="下次执行时间：">{{ parseTime(form.nextValidTime) }}</el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="任务执行器：">{{ jobExecutorFormat(form) }}</el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="调用目标方法：">{{ form.invokeTarget }}</el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="位置参数：">{{ form.jobArgs }}</el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="关键字参数：" style="line-break: anywhere">{{ form.jobKwargs }}</el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="任务状态：">
-              <div v-if="form.status == 0">正常</div>
-              <div v-else-if="form.status == 1">暂停</div>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="是否并发：">
-              <div v-if="form.concurrent == 0">允许</div>
-              <div v-else-if="form.concurrent == 1">禁止</div>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="执行策略：">
-              <div v-if="form.misfirePolicy == '0'">默认策略</div>
-              <div v-else-if="form.misfirePolicy == '1'">立即执行</div>
-              <div v-else-if="form.misfirePolicy == '2'">执行一次</div>
-              <div v-else-if="form.misfirePolicy == '3'">放弃执行</div>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
+    <el-dialog title="任务详细" v-model="openView" width="760px" append-to-body>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="任务ID">{{ form.taskId }}</el-descriptions-item>
+        <el-descriptions-item label="任务名称">{{ form.taskName }}</el-descriptions-item>
+        <el-descriptions-item label="任务注册键">{{ form.taskKey }}</el-descriptions-item>
+        <el-descriptions-item label="队列">{{ form.queueName }}</el-descriptions-item>
+        <el-descriptions-item label="调度类型">{{ scheduleTypeLabel(form.scheduleType) }}</el-descriptions-item>
+        <el-descriptions-item label="调度表达式">{{ scheduleDisplay(form) }}</el-descriptions-item>
+        <el-descriptions-item label="最近状态">{{ form.lastStatus || "未执行" }}</el-descriptions-item>
+        <el-descriptions-item label="最近执行">{{ parseTime(form.lastRunAt) }}</el-descriptions-item>
+        <el-descriptions-item label="累计执行次数">{{ form.runCount }}</el-descriptions-item>
+        <el-descriptions-item label="是否启用">{{ form.enabled ? "启用" : "停用" }}</el-descriptions-item>
+        <el-descriptions-item label="允许并发">{{ form.allowConcurrent ? "是" : "否" }}</el-descriptions-item>
+        <el-descriptions-item label="锁超时(秒)">{{ form.lockTtlSeconds }}</el-descriptions-item>
+        <el-descriptions-item label="位置参数" :span="2">{{ form.taskArgs }}</el-descriptions-item>
+        <el-descriptions-item label="关键字参数" :span="2">{{ form.taskKwargs }}</el-descriptions-item>
+      </el-descriptions>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="openView = false">关 闭</el-button>
@@ -413,37 +252,16 @@
 </template>
 
 <script setup name="QtrJob">
-import {ElMessage} from "element-plus";
-import RunConfig from "@/components/hrm/common/run/run-config.vue";
-import {
-  listJob,
-  getJob,
-  delJob,
-  addJob,
-  updateJob,
-  runJob,
-  changeJobStatus,
-  stopJob,
-  listSchdulerJob
-} from "@/api/qtr/job.js";
-import Crontab from '@/components/Crontab/index.vue'
+import { addJob, changeJobStatus, delJob, getJob, listJob, runJob, updateJob } from "@/api/qtr/job.js";
+import Crontab from "@/components/Crontab/index.vue";
 import AceEditor from "@/components/hrm/common/ace-editor.vue";
-import RunDataConfig from "@/components/hrm/common/run/run-data-config.vue";
-import {RunTypeEnum} from "@/components/hrm/enum.js";
-import {initRunConfig} from "@/components/hrm/data-template.js";
+import { initRunConfig } from "@/components/hrm/data-template.js";
 
 const router = useRouter();
-const {proxy} = getCurrentInstance();
-const {
-  sys_job_group,
-  sys_job_status,
-  sys_job_executor
-} = proxy.useDict("sys_job_group", "sys_job_status", "sys_job_executor");
-const {job_run_status} = proxy.useDict("job_run_status");
+const { proxy } = getCurrentInstance();
 
 const jobList = ref([]);
 const open = ref(false);
-const openAdvanced = ref(false);  // 高级配置弹窗
 const loading = ref(true);
 const showSearch = ref(true);
 const ids = ref([]);
@@ -454,290 +272,291 @@ const title = ref("");
 const openView = ref(false);
 const openCron = ref(false);
 const expression = ref("");
-const runConfigDataRef = computed(() => {
-  return form.value.jobKwargs ? JSON.parse(form.value.jobKwargs) : JSON.parse(JSON.stringify(initRunConfig));
-});
-const runType = computed({
-  get(){
-  return form.value.jobKwargs && JSON.parse(form.value.jobKwargs).runType ? JSON.parse(form.value.jobKwargs).runType : RunTypeEnum.case;
-  },
-  set(newValue){
-    let kw = JSON.parse(form.value.jobKwargs || '{}');
-    kw.runType = newValue;
-    form.value.jobKwargs = JSON.stringify(kw);
-  }
-});
-const runIds = computed({
-  get(){
-    return form.value.jobKwargs && JSON.parse(form.value.jobKwargs).ids ? JSON.parse(form.value.jobKwargs).ids : [];
-  },
-  set(newValue){
-    let kw = JSON.parse(form.value.jobKwargs || '{}');
-    kw.ids = newValue;
-    form.value.jobKwargs = JSON.stringify(kw);
-  }
-});
 
-/*
-* 验证测试数据不能为空
-* */
-const validateTestData = (rule, value, callback) => {
-  if (!runIds.value || runIds.value.length <= 0 || !runType.value){
-    callback(new Error('请选择测试数据'));
+const scheduleTypeOptions = [
+  { label: "Cron", value: "crontab" },
+  { label: "间隔", value: "interval" },
+  { label: "单次", value: "once" },
+];
+const intervalPeriodOptions = [
+  { label: "秒", value: "seconds" },
+  { label: "分", value: "minutes" },
+  { label: "小时", value: "hours" },
+  { label: "天", value: "days" },
+];
+
+const validateJsonArray = (rule, value, callback) => {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    if (!Array.isArray(parsed)) {
+      callback(new Error("必须是 JSON 数组"));
+      return;
+    }
+    callback();
+  } catch (error) {
+    callback(new Error("JSON 格式不正确"));
+  }
+};
+
+const validateJsonObject = (rule, value, callback) => {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+      callback(new Error("必须是 JSON 对象"));
+      return;
+    }
+    callback();
+  } catch (error) {
+    callback(new Error("JSON 格式不正确"));
+  }
+};
+
+const validateSchedule = (rule, value, callback) => {
+  if (form.value.scheduleType === "crontab" && !form.value.cronExpression) {
+    callback(new Error("Cron 表达式不能为空"));
+    return;
+  }
+  if (form.value.scheduleType === "interval" && !form.value.intervalEvery) {
+    callback(new Error("间隔步长不能为空"));
+    return;
+  }
+  if (form.value.scheduleType === "interval" && !form.value.intervalPeriod) {
+    callback(new Error("间隔单位不能为空"));
+    return;
+  }
+  if (form.value.scheduleType === "once" && !form.value.oneOffEta) {
+    callback(new Error("触发时间不能为空"));
+    return;
   }
   callback();
-}
+};
 
 const data = reactive({
-  form: {
-    jobGroup: 'sqlalchemy',
-    jobExecutor: 'default',
-    cronExpression: '0 0 0 1 1 ?',
-    jobArgs: "",
-    jobKwargs: "",
-    jobId: undefined,
-    jobName: undefined,
-    invokeTarget: "module_task.scheduler_qtr.job_run_test",
-    misfirePolicy: "1",
-    concurrent: "1",
-    status: "0"
-  },
+  form: {},
   queryParams: {
     pageNum: 1,
     pageSize: 10,
-    jobName: undefined,
-    jobGroup: undefined,
-    status: undefined,
-    jobExecutor: undefined,
-    cronExpression: undefined
+    taskName: undefined,
+    scheduleType: undefined,
+    enabled: undefined,
   },
   rules: {
-    jobName: [{required: true, message: "任务名称不能为空", trigger: "blur"}],
-    testData: [{required: true, message: "测试数据不能为空", trigger: "blur", validator: validateTestData}],
-    invokeTarget: [{required: true, message: "调用目标字符串不能为空", trigger: "blur"}],
-    cronExpression: [{required: true, message: "cron执行表达式不能为空", trigger: "change"}]
+    taskName: [{ required: true, message: "任务名称不能为空", trigger: "blur" }],
+    taskKey: [{ required: true, message: "任务注册键不能为空", trigger: "blur" }],
+    scheduleType: [{ required: true, message: "调度类型不能为空", trigger: "change" }],
+    cronExpression: [{ validator: validateSchedule, trigger: "blur" }],
+    intervalEvery: [{ validator: validateSchedule, trigger: "change" }],
+    intervalPeriod: [{ validator: validateSchedule, trigger: "change" }],
+    oneOffEta: [{ validator: validateSchedule, trigger: "change" }],
+    taskArgs: [{ validator: validateJsonArray, trigger: "blur" }],
+    taskKwargs: [{ validator: validateJsonObject, trigger: "blur" }],
+  },
+});
+
+const { queryParams, form, rules } = toRefs(data);
+
+function defaultForm() {
+  return {
+    taskId: undefined,
+    taskName: undefined,
+    taskKey: "module_task.scheduler_qtr.job_run_test",
+    queueName: "qtr",
+    scheduleType: "crontab",
+    cronExpression: "0 0 * * *",
+    intervalEvery: 1,
+    intervalPeriod: "minutes",
+    oneOffEta: undefined,
+    taskArgs: "[]",
+    taskKwargs: JSON.stringify(initRunConfig, null, 2),
+    enabled: true,
+    allowConcurrent: false,
+    lockTtlSeconds: 3600,
+    remark: "",
+  };
+}
+
+function normalizeFormData(data) {
+  return {
+    ...defaultForm(),
+    ...data,
+    taskArgs: data?.taskArgs || "[]",
+    taskKwargs: data?.taskKwargs || JSON.stringify(initRunConfig, null, 2),
+    queueName: data?.queueName || "qtr",
+  };
+}
+
+function scheduleTypeLabel(value) {
+  const found = scheduleTypeOptions.find((item) => item.value === value);
+  return found ? found.label : value || "-";
+}
+
+function scheduleDisplay(row) {
+  if (!row) return "-";
+  if (row.scheduleType === "interval") {
+    return `every ${row.intervalEvery} ${row.intervalPeriod}`;
   }
-});
+  if (row.scheduleType === "once") {
+    return row.oneOffEta || "-";
+  }
+  return row.cronExpression || "-";
+}
 
-const {form, queryParams, rules} = toRefs(data);
+function statusTagType(status) {
+  if (status === "success") return "success";
+  if (status === "failed") return "danger";
+  if (status === "running") return "warning";
+  if (status === "skipped") return "info";
+  return "";
+}
 
-const runConfigRules = ref({
-  env: [{required: true, message: "运行环境不能为空", trigger: 'blur'}],
-});
-
-
-
-
-/** 查询定时任务列表 */
 function getList() {
   loading.value = true;
-  listJob(queryParams.value).then(response => {
-    jobList.value = response.rows;
-    total.value = response.total;
-    loading.value = false;
-  });
+  listJob(queryParams.value)
+    .then((response) => {
+      jobList.value = response.rows;
+      total.value = response.total;
+    })
+    .finally(() => {
+      loading.value = false;
+    });
 }
 
-function handleQueryScheduler() {
-  loading.value = true;
-  listSchdulerJob(queryParams.value).then(response => {
-    console.log(response);
-  }).finally(() => {
-    loading.value = false;
-  });
-}
-
-/** 任务组名字典翻译 */
-function jobGroupFormat(row, column) {
-  return proxy.selectDictLabel(sys_job_group.value, row.jobGroup);
-}
-
-/** 任务执行器名字典翻译 */
-function jobExecutorFormat(row, column) {
-  return proxy.selectDictLabel(sys_job_executor.value, row.jobExecutor);
-}
-
-/** 取消按钮 */
 function cancel() {
   open.value = false;
   reset();
 }
 
-/** 表单重置 */
 function reset() {
-  form.value = {
-    jobId: undefined,
-    jobName: undefined,
-    jobGroup: "sqlalchemy",
-    jobExecutor: "default",
-    invokeTarget: 'module_task.scheduler_qtr.job_run_test',
-    cronExpression: '0 0 0 1 1 ?',
-    misfirePolicy: "2",
-    concurrent: "1",
-    status: "0",
-    jobArgs: "",
-    jobKwargs: "",
-  };
+  form.value = defaultForm();
   proxy.resetForm("jobRef");
 }
 
-/** 搜索按钮操作 */
 function handleQuery() {
   queryParams.value.pageNum = 1;
   getList();
 }
 
-/** 重置按钮操作 */
 function resetQuery() {
   proxy.resetForm("queryRef");
   handleQuery();
 }
 
-// 多选框选中数据
 function handleSelectionChange(selection) {
-  ids.value = selection.map(item => item.jobId);
-  single.value = selection.length != 1;
+  ids.value = selection.map((item) => item.taskId);
+  single.value = selection.length !== 1;
   multiple.value = !selection.length;
 }
 
-// 更多操作触发
-function handleCommand(command, row) {
-  switch (command) {
-    case "handleRun":
-      handleRun(row);
-      break;
-    case "handleView":
-      handleView(row);
-      break;
-    case "handleJobLog":
-      handleJobLog(row);
-      break;
-    default:
-      break;
-  }
-}
-
-// 任务状态修改
 function handleStatusChange(row) {
-  let text = row.status === "0" ? "启用" : "停用";
-  proxy.$modal.confirm('确认要"' + text + '""' + row.jobName + '"任务吗?').then(function () {
-    return changeJobStatus(row.jobId, row.status);
-  }).then(() => {
-    proxy.$modal.msgSuccess(text + "成功");
-  }).catch(function () {
-    row.status = row.status === "0" ? "1" : "0";
-  });
+  const text = row.enabled ? "启用" : "停用";
+  proxy.$modal
+    .confirm(`确认要${text}任务"${row.taskName}"吗?`)
+    .then(() => changeJobStatus(row.taskId, row.enabled))
+    .then(() => {
+      proxy.$modal.msgSuccess(`${text}成功`);
+    })
+    .catch(() => {
+      row.enabled = !row.enabled;
+    });
 }
 
-/* 立即执行一次 */
 function handleRun(row) {
-  proxy.$modal.confirm('确认要立即执行一次"' + row.jobName + '"任务吗?').then(function () {
-    return runJob(row.jobId, row.jobGroup);
-  }).then(() => {
-    proxy.$modal.msgSuccess("执行成功");
-  })
-      .catch(() => {
-      });
+  proxy.$modal
+    .confirm(`确认要立即执行一次"${row.taskName}"任务吗?`)
+    .then(() => runJob(row.taskId))
+    .then(() => {
+      proxy.$modal.msgSuccess("任务已提交执行");
+    })
+    .catch(() => {});
 }
 
-/** 任务详细信息 */
 function handleView(row) {
-  getJob(row.jobId).then(response => {
-    form.value = response.data;
+  getJob(row.taskId).then((response) => {
+    form.value = normalizeFormData(response.data);
     openView.value = true;
   });
 }
 
-/** cron表达式按钮操作 */
 function handleShowCron() {
   expression.value = form.value.cronExpression;
   openCron.value = true;
 }
 
-/** 确定后回传值 */
 function crontabFill(value) {
   form.value.cronExpression = value;
 }
 
-/** 任务日志列表查询 */
 function handleJobLog(row) {
-  const jobId = row.jobId || 0;
-  router.push('/qtr/qtr-job-log/index/' + jobId)
+  const taskId = row?.taskId || 0;
+  router.push("/qtr/qtr-job-log/index/" + taskId);
 }
 
-/** 新增按钮操作 */
 function handleAdd() {
   reset();
   open.value = true;
   title.value = "添加任务";
 }
 
-/** 修改按钮操作 */
 function handleUpdate(row) {
   reset();
-  const jobId = row.jobId || ids.value;
-  getJob(jobId).then(response => {
-    form.value = response.data;
+  const taskId = row?.taskId || ids.value[0];
+  getJob(taskId).then((response) => {
+    form.value = normalizeFormData(response.data);
     open.value = true;
     title.value = "修改任务";
   });
 }
 
-/** 提交按钮 */
 function submitForm() {
-  proxy.$refs["jobRef"].validate(valid => {
-    if (valid) {
-      if (form.value.jobId != undefined) {
-        updateJob(form.value).then(response => {
-          proxy.$modal.msgSuccess("修改成功");
-          open.value = false;
-          getList();
-        });
-      } else {
-        addJob(form.value).then(response => {
-          proxy.$modal.msgSuccess("新增成功");
-          open.value = false;
-          getList();
-        });
-      }
+  proxy.$refs["jobRef"].validate((valid) => {
+    if (!valid) return;
+
+    const payload = { ...form.value };
+    if (payload.scheduleType !== "crontab") payload.cronExpression = undefined;
+    if (payload.scheduleType !== "interval") {
+      payload.intervalEvery = undefined;
+      payload.intervalPeriod = undefined;
+    }
+    if (payload.scheduleType !== "once") payload.oneOffEta = undefined;
+
+    if (payload.taskId !== undefined) {
+      updateJob(payload).then(() => {
+        proxy.$modal.msgSuccess("修改成功");
+        open.value = false;
+        getList();
+      });
+    } else {
+      addJob(payload).then(() => {
+        proxy.$modal.msgSuccess("新增成功");
+        open.value = false;
+        getList();
+      });
     }
   });
 }
 
-/*
-* 停止进行中的任务
-* */
-function stopJobHandler(row) {
-  stopJob({"jobId": row.jobId}).then(response => {
-    ElMessage.success("完成停止");
-  }).catch(error => {
-    console.log(error);
-    ElMessage.error("停止异常");
-  })
-}
-
-/** 删除按钮操作 */
 function handleDelete(row) {
-  const jobIds = row.jobId || ids.value;
-  proxy.$modal.confirm('是否确认删除定时任务编号为"' + jobIds + '"的数据项?').then(function () {
-    return delJob(jobIds);
-  }).then(() => {
-    getList();
-    proxy.$modal.msgSuccess("删除成功");
-  }).catch(() => {
-  });
+  const taskIds = row?.taskId || ids.value.join(",");
+  proxy.$modal
+    .confirm(`是否确认删除任务编号为"${taskIds}"的数据项?`)
+    .then(() => delJob(taskIds))
+    .then(() => {
+      getList();
+      proxy.$modal.msgSuccess("删除成功");
+    })
+    .catch(() => {});
 }
 
-/** 导出按钮操作 */
 function handleExport() {
-  proxy.download("qtr/job/export", {
-    ...queryParams.value,
-  }, `job_${new Date().getTime()}.xlsx`);
+  proxy.download(
+    "qtr/job/export",
+    {
+      ...queryParams.value,
+    },
+    `job_${new Date().getTime()}.xlsx`
+  );
 }
 
-function updateRunConfigData(configData) {
-  form.value.jobKwargs = configData ? JSON.stringify(configData) : ""
-}
-
+reset();
 getList();
 </script>
