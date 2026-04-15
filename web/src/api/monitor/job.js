@@ -9,6 +9,14 @@ export function listJob(query) {
   })
 }
 
+// 查询任务注册键选项
+export function listTaskKeyOptions() {
+  return request({
+    url: '/monitor/job/taskKeys',
+    method: 'get'
+  })
+}
+
 // 查询定时任务调度详细
 export function getJob(jobId) {
   return request({
@@ -66,5 +74,31 @@ export function runJob(taskId) {
     url: '/monitor/job/run',
     method: 'put',
     data: data
+  })
+}
+
+// 查询运行中的任务
+export function listRunningJobs() {
+  return request({
+    url: '/monitor/job/running',
+    method: 'get'
+  })
+}
+
+// 取消运行中的任务（撤销未执行任务）
+export function cancelRunningJob(celeryTaskId) {
+  return request({
+    url: '/monitor/job/running/cancel',
+    method: 'put',
+    data: { celeryTaskId }
+  })
+}
+
+// 终止运行中的任务（尝试中断运行中任务）
+export function terminateRunningJob(celeryTaskId) {
+  return request({
+    url: '/monitor/job/running/terminate',
+    method: 'put',
+    data: { celeryTaskId }
   })
 }

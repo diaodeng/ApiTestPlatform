@@ -1,15 +1,6 @@
 <template>
     <div>
         <el-tabs type="border-card">
-            <el-tab-pane label="秒" v-if="shouldHide('second')">
-                <CrontabSecond
-                    @update="updateCrontabValue"
-                    :check="checkNumber"
-                    :cron="crontabValueObj"
-                    ref="cronsecond"
-                />
-            </el-tab-pane>
-
             <el-tab-pane label="分钟" v-if="shouldHide('min')">
                 <CrontabMin
                     @update="updateCrontabValue"
@@ -54,15 +45,6 @@
                     ref="cronweek"
                 />
             </el-tab-pane>
-
-            <el-tab-pane label="年" v-if="shouldHide('year')">
-                <CrontabYear
-                    @update="updateCrontabValue"
-                    :check="checkNumber"
-                    :cron="crontabValueObj"
-                    ref="cronyear"
-                />
-            </el-tab-pane>
         </el-tabs>
 
         <div class="popup-main">
@@ -78,10 +60,6 @@
                     </thead>
                     <tbody>
                     <tr>
-                      <td>
-                            <span v-if="crontabValueObj.second.length < 10">{{crontabValueObj.second}}</span>
-                            <el-tooltip v-else :content="crontabValueObj.second" placement="top"><span>{{crontabValueObj.second}}</span></el-tooltip>
-                        </td>
                         <td>
                             <span v-if="crontabValueObj.min.length < 10">{{crontabValueObj.min}}</span>
                             <el-tooltip v-else :content="crontabValueObj.min" placement="top"><span>{{crontabValueObj.min}}</span></el-tooltip>
@@ -101,10 +79,6 @@
                         <td>
                             <span v-if="crontabValueObj.week.length < 10">{{crontabValueObj.week}}</span>
                             <el-tooltip v-else :content="crontabValueObj.week" placement="top"><span>{{crontabValueObj.week}}</span></el-tooltip>
-                        </td>
-                        <td>
-                            <span v-if="crontabValueObj.year.length < 10">{{crontabValueObj.year}}</span>
-                            <el-tooltip v-else :content="crontabValueObj.year" placement="top"><span>{{crontabValueObj.year}}</span></el-tooltip>
                         </td>
                         <td class="result">
                             <span v-if="crontabValueString.length < 90">{{crontabValueString}}</span>
@@ -127,13 +101,11 @@
 </template>
 
 <script setup>
-import CrontabSecond from "./second.vue"
 import CrontabMin from "./min.vue"
 import CrontabHour from "./hour.vue"
 import CrontabDay from "./day.vue"
 import CrontabMonth from "./month.vue"
 import CrontabWeek from "./week.vue"
-import CrontabYear from "./year.vue"
 import CrontabResult from "./result.vue"
 const { proxy } = getCurrentInstance()
 const emit = defineEmits(['hide', 'fill'])
@@ -147,33 +119,75 @@ const props = defineProps({
         default: ""
     }
 })
-const tabTitles = ref(["秒", "分钟", "小时", "日", "月", "周", "年"])
-const tabActive = ref(0)
+const tabTitles = ref(["分钟", "小时", "日", "月", "周"])
 const hideComponent = ref([])
 const expression = ref('')
+const unsupportedTokenPattern = /[LW#]/
 const crontabValueObj = ref({
-    second: "*",
     min: "*",
     hour: "*",
     day: "*",
     month: "*",
-    week: "?",
-    year: "*",
+    week: "*",
 })
+
+function convertWeekTokenToCelery(token) {
+    if (!/^\d+$/.test(token)) {
+        return token
+    }
+    const num = Number(token)
+    if (num === 0 || num === 7) {
+        return "0"
+    }
+    if (num >= 1 && num <= 6) {
+        return String(num - 1)
+    }
+    return token
+}
+
+function convertWeekTokenToUi(token) {
+    if (!/^\d+$/.test(token)) {
+        return token
+    }
+    const num = Number(token)
+    if (num === 0 || num === 7) {
+        return "1"
+    }
+    if (num >= 1 && num <= 6) {
+        return String(num + 1)
+    }
+    return token
+}
+
+function normalizeWeekField(fieldValue, tokenConverter) {
+    if (!fieldValue || fieldValue === "?") {
+        return "*"
+    }
+    return fieldValue
+        .split(",")
+        .map((segment) => {
+            const value = segment.trim()
+            if (!value) {
+                return value
+            }
+            if (value.includes("-")) {
+                const [start, end] = value.split("-", 2).map((item) => tokenConverter(item.trim()))
+                return `${start}-${end}`
+            }
+            if (value.includes("/")) {
+                const [base, step] = value.split("/", 2)
+                return `${tokenConverter(base.trim())}/${step.trim()}`
+            }
+            return tokenConverter(value)
+        })
+        .join(",")
+}
+
 const crontabValueString = computed(() => {
     const obj = crontabValueObj.value
-    return obj.second
-        + " "
-        + obj.min
-        + " "
-        + obj.hour
-        + " "
-        + obj.day
-        + " "
-        + obj.month
-        + " "
-        + obj.week
-        + (obj.year === "" ? "" : " " + obj.year)
+    const dayValue = (obj.day || "*") === "?" ? "*" : (obj.day || "*")
+    const weekValue = normalizeWeekField(obj.week || "*", convertWeekTokenToCelery)
+    return `${obj.min || "*"} ${obj.hour || "*"} ${dayValue} ${obj.month || "*"} ${weekValue}`
 })
 watch(()=>expression.value, () => resolveExp())
 function shouldHide(key) {
@@ -181,30 +195,36 @@ function shouldHide(key) {
 }
 function resolveExp() {
     // 反解析 表达式
-    if (expression.value) {
-        const arr = expression.value.split(/\s+/)
-        if (arr.length >= 6) {
-            //6 位以上是合法表达式
-            let obj = {
-                second: arr[0],
-                min: arr[1],
-                hour: arr[2],
-                day: arr[3],
-                month: arr[4],
-                week: arr[5],
-                year: arr[6] ? arr[6] : ""
-            }
-            crontabValueObj.value = {...obj};
-        }
-    } else {
-        // 没有传入的表达式 则还原
+    if (!expression.value) {
         clearCron()
+        return
     }
+
+    const arr = expression.value.trim().split(/\s+/)
+    if (arr.length === 5) {
+        crontabValueObj.value = {
+            min: arr[0] || "*",
+            hour: arr[1] || "*",
+            day: arr[2] || "*",
+            month: arr[3] || "*",
+            week: normalizeWeekField(arr[4] || "*", convertWeekTokenToUi)
+        }
+        return
+    }
+    if (arr.length >= 6) {
+        // 兼容历史 Quartz 形式（秒 分 时 日 月 周 [年]）
+        crontabValueObj.value = {
+            min: arr[1] || "*",
+            hour: arr[2] || "*",
+            day: arr[3] || "*",
+            month: arr[4] || "*",
+            week: normalizeWeekField(arr[5] || "*", convertWeekTokenToUi)
+        }
+        return
+    }
+    clearCron()
 }
-// tab切换值
-function tabCheck(index) {
-    tabActive.value = index
-}
+
 // 由子组件触发，更改表达式组成的字段值
 function updateCrontabValue(name, value, from) {
     console.log(name + ": " + value + ": " + from)
@@ -225,21 +245,38 @@ function checkNumber(value, minLimit, maxLimit) {
 function hidePopup() {
     emit("hide")
 }
+
+function validateCeleryExpression() {
+    const dayValue = crontabValueObj.value.day || "*"
+    const weekValue = crontabValueObj.value.week || "*"
+    if (unsupportedTokenPattern.test(dayValue)) {
+        return "日字段不支持 L/W/#，请改用普通 cron 语法"
+    }
+    if (unsupportedTokenPattern.test(weekValue)) {
+        return "周字段不支持 L/W/#，请改用普通 cron 语法"
+    }
+    return ""
+}
+
 // 填充表达式
 function submitFill() {
+    const validateMessage = validateCeleryExpression()
+    if (validateMessage) {
+        proxy.$modal.msgError(validateMessage)
+        return
+    }
     emit("fill", crontabValueString.value)
     hidePopup()
 }
+
 function clearCron() {
     // 还原选择项
     crontabValueObj.value = {
-        second: "*",
         min: "*",
         hour: "*",
         day: "*",
         month: "*",
-        week: "?",
-        year: "*",
+        week: "*",
     }
 }
 onMounted(() => {

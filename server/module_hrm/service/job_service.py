@@ -1,9 +1,18 @@
+import json
+
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.entity.vo.job_vo import DeleteJobModel, EditJobModel, JobModel, JobPageQueryModel, RunJobModel
+from module_hrm.entity.vo.job_vo import (
+    ControlRunningTaskModel,
+    DeleteJobModel,
+    EditJobModel,
+    JobModel,
+    JobPageQueryModel,
+    RunJobModel,
+)
 from module_task.celery_job_service import CeleryJobService
 
 
@@ -13,6 +22,8 @@ class JobService:
     """
 
     OWNER_TYPE = "qtr"
+    QTR_QUEUE = "qtr"
+    QTR_TASK_KEY = "module_task.scheduler_qtr.job_run_test"
 
     @classmethod
     def get_job_list_services(
@@ -49,10 +60,19 @@ class JobService:
         :param user_info: 当前用户信息。
         :return: CRUD 响应。
         """
+        task_params = page_object.task_kwargs or "{}"
+        task_params = json.loads(task_params)
+        task_params["userName"] = user_info.user.user_name
+        task_params["userId"] = user_info.user.user_id
+        task_params["runner"] = user_info.user.user_id
+        task_params["deptId"] = user_info.user.dept_id
+        page_object.task_kwargs = json.dumps(task_params, ensure_ascii=False)
+
         page_object.owner_user_id = user_info.user.user_id
         page_object.owner_dept_id = user_info.user.dept_id
-        if not page_object.queue_name:
-            page_object.queue_name = "qtr"
+        page_object.queue_name = cls.QTR_QUEUE
+        page_object.task_key = cls.QTR_TASK_KEY
+        page_object.task_args = "[]"
         return CeleryJobService.add_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
 
     @classmethod
@@ -69,8 +89,9 @@ class JobService:
             page_object.owner_user_id = user_info.user.user_id
         if page_object.owner_dept_id is None:
             page_object.owner_dept_id = user_info.user.dept_id
-        if not page_object.queue_name:
-            page_object.queue_name = "qtr"
+        page_object.queue_name = cls.QTR_QUEUE
+        page_object.task_key = cls.QTR_TASK_KEY
+        page_object.task_args = "[]"
         return CeleryJobService.edit_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
 
     @classmethod
@@ -135,6 +156,67 @@ class JobService:
         :return: 任务详情。
         """
         return CeleryJobService.job_detail_services(query_db=query_db, owner_type=cls.OWNER_TYPE, task_id=task_id)
+
+    @classmethod
+    def list_running_jobs_services(cls, query_db: Session, data_scope_sql: DataScopeExpr) -> list[dict]:
+        """
+        获取 QTR 任务运行态快照。
+
+        :param query_db: 数据库会话。
+        :param data_scope_sql: 数据权限表达式。
+        :return: 运行态任务列表。
+        """
+        return CeleryJobService.list_running_job_tasks_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            data_scope_sql=data_scope_sql,
+        )
+
+    @classmethod
+    def cancel_running_job_services(
+        cls,
+        query_db: Session,
+        page_object: ControlRunningTaskModel,
+        data_scope_sql: DataScopeExpr,
+    ) -> CrudResponseModel:
+        """
+        取消 QTR 任务执行（撤销未执行任务）。
+
+        :param query_db: 数据库会话。
+        :param page_object: 控制任务请求模型。
+        :param data_scope_sql: 数据权限表达式。
+        :return: CRUD 响应。
+        """
+        return CeleryJobService.revoke_running_job_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            page_object=page_object,
+            terminate=False,
+            data_scope_sql=data_scope_sql,
+        )
+
+    @classmethod
+    def terminate_running_job_services(
+        cls,
+        query_db: Session,
+        page_object: ControlRunningTaskModel,
+        data_scope_sql: DataScopeExpr,
+    ) -> CrudResponseModel:
+        """
+        终止 QTR 任务执行（尝试强制终止运行中任务）。
+
+        :param query_db: 数据库会话。
+        :param page_object: 控制任务请求模型。
+        :param data_scope_sql: 数据权限表达式。
+        :return: CRUD 响应。
+        """
+        return CeleryJobService.revoke_running_job_services(
+            query_db=query_db,
+            owner_type=cls.OWNER_TYPE,
+            page_object=page_object,
+            terminate=True,
+            data_scope_sql=data_scope_sql,
+        )
 
     @staticmethod
     async def export_job_list_services(request, job_list: list):
