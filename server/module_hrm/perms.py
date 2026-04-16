@@ -180,12 +180,12 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         4,
         remark="用例管理菜单",
     ),
-    M("hrm.plan", "测试计划", "qtr", "skill", 5, parent_key="hrm.root", remark="测试计划菜单组"),
+    M("hrm.plan", "测试计划", "suite", "skill", 5, parent_key="hrm.root", remark="测试计划菜单组"),
     C(
         "hrm.suite",
         "测试套件",
         "hrm.plan",
-        "suite",
+        "/qtr/suite",
         "qtr/suite/index",
         "qtr:suite:list",
         "swagger",
@@ -214,7 +214,7 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         6,
         remark="报告管理菜单",
     ),
-    M("hrm.env_group", "环境管理", "hrm", "size", 7, parent_key="hrm.root", remark="环境管理菜单组"),
+    M("hrm.env_group", "环境管理", "envs", "size", 7, parent_key="hrm.root", remark="环境管理菜单组"),
     C(
         "hrm.env",
         "环境管理",

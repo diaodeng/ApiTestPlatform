@@ -38,12 +38,30 @@ RECORDER_SCRIPT = """
   const attachAssertToPreviousStep = !["parallel_step", "parallel", "separate_step"].includes(assertionAttachMode);
   const quickAssertPickEnabled = captureAssertions;
   const isQuickAssertEvent = (event) => !!(event && event.altKey);
+  const DYNAMIC_CLASS_TOKENS = new Set([
+    "on", "off",
+    "active", "hover", "focus", "focused",
+    "open", "opened", "close", "closed",
+    "show", "shown", "hide", "hidden",
+    "selected", "current", "checked", "unchecked",
+    "expanded", "collapsed",
+    "enter", "leave", "entering", "leaving",
+    "visible", "invisible",
+    "animating", "transition"
+  ]);
+  const DYNAMIC_CLASS_PATTERN = /(?:^|[-_])(active|hover|focus|open|close|show|hide|selected|current|checked|expanded|collapsed|visible|hidden|enter|leave|animate|transition|motion|on|off)(?:$|[-_])/i;
   const isStableToken = (value) => {
     const text = cleanText(value);
     if (!text || text.length < 2 || text.length > 80) return false;
     // uuid / hash / long timestamp-like token is usually unstable for replay
     if (/[0-9a-f]{10,}/i.test(text) || /\\d{6,}/.test(text)) return false;
     return true;
+  };
+  const isDynamicClassToken = (value) => {
+    const text = cleanText(value).toLowerCase();
+    if (!text) return true;
+    if (DYNAMIC_CLASS_TOKENS.has(text)) return true;
+    return DYNAMIC_CLASS_PATTERN.test(text);
   };
   const cssEscape = (value) => {
     if (window.CSS && typeof window.CSS.escape === "function") {
@@ -239,7 +257,7 @@ RECORDER_SCRIPT = """
         parts.unshift(part);
         break;
       }
-      const stableClass = Array.from(current.classList || []).find((item) => isStableToken(item));
+      const stableClass = Array.from(current.classList || []).find((item) => isStableToken(item) && !isDynamicClassToken(item));
       if (stableClass) part += "." + cssEscape(stableClass);
       const currentName = attr(current, "name");
       if (isStableToken(currentName)) part += `[name="${cssEscape(currentName)}"]`;
@@ -314,6 +332,12 @@ RECORDER_SCRIPT = """
     if (typeof window.__qtrRecordEvent === "function") {
       window.__qtrRecordEvent(payload);
     }
+  };
+  const resolveClickTarget = (event) => {
+    if (!event) return null;
+    if (event.target instanceof Element) return event.target;
+    const parentElement = event.target && event.target.parentElement;
+    return parentElement instanceof Element ? parentElement : null;
   };
   const toPositiveInt = (value) => {
     const numberValue = Number(value);
@@ -434,7 +458,7 @@ RECORDER_SCRIPT = """
     }, true);
   }
   document.addEventListener("click", (event) => {
-    const target = event.target instanceof Element ? event.target.closest("button, a, input, textarea, select, [role], [data-testid], [data-test], *") : null;
+    const target = resolveClickTarget(event);
     if (!target) return;
     const text = cleanText(target.innerText || target.textContent || "");
     if (quickAssertPickEnabled && isQuickAssertEvent(event)) {
@@ -1703,12 +1727,12 @@ _LOCATOR_TYPE_WEIGHT = {
     "test_id": 0,
     "id": 1,
     "name": 2,
-    "css": 3,
-    "xpath": 4,
-    "role": 5,
-    "label": 6,
-    "placeholder": 7,
-    "text": 8,
+    "role": 3,
+    "label": 4,
+    "placeholder": 5,
+    "text": 6,
+    "css": 7,
+    "xpath": 8,
 }
 
 
@@ -3982,9 +4006,12 @@ class WebTestService:
     async def _resolve_locator(
         cls, page: Any, step: dict[str, Any], timeout_ms: int
     ) -> tuple[Any, list[dict[str, Any]]]:
-        """解析步骤定位器，优先唯一命中，禁止多匹配时默认取 first。"""
+        """解析步骤定位器，优先真实唯一命中，其次可见唯一，最后才使用显式索引兜底。"""
         target_snapshot = _as_dict(
             step.get("targetSnapshot") or step.get("target_snapshot")
+        )
+        target_text = _normalize_assert_text(
+            target_snapshot.get("elementText") or target_snapshot.get("element_text")
         )
         raw_locators = target_snapshot.get("locators") or []
         if not raw_locators:
@@ -4062,6 +4089,8 @@ class WebTestService:
 
         started_at = time.perf_counter()
         deadline = started_at + (max(timeout_ms, 500) / 1000.0)
+        indexed_fallback: Any | None = None
+        indexed_fallback_hint = ""
         while time.perf_counter() < deadline:
             for attempt in attempts:
                 locator_type = str(attempt.get("locatorType") or "")
@@ -4072,16 +4101,82 @@ class WebTestService:
                     break
                 probe_timeout = max(min(remaining_ms, 350), 50)
                 try:
-                    locator = cls._build_locator(page, locator_type, locator_value)
+                    # 先按“基础定位器（不带nth/index）”判断真实命中数量，避免误把索引后的单条当成唯一元素。
+                    locator = cls._build_locator(
+                        page, locator_type, locator_value, apply_index=False
+                    )
                     await locator.first.wait_for(
                         state="attached", timeout=probe_timeout
                     )
-                    count = await locator.count()
-                    attempt["count"] = count
-                    if count == 1:
+                    raw_count = await locator.count()
+                    attempt["rawCount"] = raw_count
+                    if raw_count == 1:
                         return locator.first, attempts
-                    if count > 1:
-                        attempt["message"] = f"匹配到多个元素({count})"
+
+                    if raw_count > 1:
+                        try:
+                            visible_locator = locator.locator(":visible")
+                            visible_count = await visible_locator.count()
+                            attempt["visibleCount"] = visible_count
+                            if visible_count == 1:
+                                await visible_locator.first.wait_for(
+                                    state="visible", timeout=probe_timeout
+                                )
+                                attempt["message"] = (
+                                    f"匹配到多个元素({raw_count})，已收敛到唯一可见元素"
+                                )
+                                return visible_locator.first, attempts
+                        except Exception as visible_exc:
+                            attempt["visibleError"] = str(visible_exc)
+
+                        if target_text:
+                            try:
+                                text_locator = locator.filter(has_text=target_text)
+                                text_count = await text_locator.count()
+                                attempt["textCount"] = text_count
+                                if text_count == 1:
+                                    await text_locator.first.wait_for(
+                                        state="attached", timeout=probe_timeout
+                                    )
+                                    attempt["message"] = (
+                                        f"匹配到多个元素({raw_count})，已通过录制文本收敛"
+                                    )
+                                    return text_locator.first, attempts
+
+                                visible_text_locator = text_locator.locator(":visible")
+                                visible_text_count = await visible_text_locator.count()
+                                attempt["visibleTextCount"] = visible_text_count
+                                if visible_text_count == 1:
+                                    await visible_text_locator.first.wait_for(
+                                        state="visible", timeout=probe_timeout
+                                    )
+                                    attempt["message"] = (
+                                        f"匹配到多个元素({raw_count})，已通过可见文本收敛"
+                                    )
+                                    return visible_text_locator.first, attempts
+                            except Exception as text_exc:
+                                attempt["textError"] = str(text_exc)
+
+                        locator_index = cls._resolve_locator_index(locator_value)
+                        if locator_index is not None and 0 <= locator_index < raw_count:
+                            try:
+                                indexed_candidate = locator.nth(locator_index)
+                                await indexed_candidate.wait_for(
+                                    state="attached", timeout=probe_timeout
+                                )
+                                attempt["fallbackIndex"] = locator_index
+                                attempt["message"] = (
+                                    f"匹配到多个元素({raw_count})，记录了索引兜底 nth={locator_index}"
+                                )
+                                if indexed_fallback is None:
+                                    indexed_fallback = indexed_candidate
+                                    indexed_fallback_hint = (
+                                        f"{locator_type}#nth={locator_index}"
+                                    )
+                            except Exception as index_exc:
+                                attempt["indexError"] = str(index_exc)
+                        else:
+                            attempt["message"] = f"匹配到多个元素({raw_count})"
                         continue
                     attempt["message"] = "未匹配到元素"
                 except Exception as exc:
@@ -4089,7 +4184,19 @@ class WebTestService:
             await asyncio.sleep(0.05)
 
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-        if any(_as_int(item.get("count"), 0) > 1 for item in attempts):
+        if indexed_fallback is not None:
+            for item in attempts:
+                if item.get("fallbackIndex") is not None:
+                    item["message"] = (
+                        item.get("message")
+                        or "基础定位器存在多匹配，已启用录制索引兜底"
+                    )
+            logger.warning(
+                f"步骤定位在 {elapsed_ms}ms 内未收敛唯一元素，使用索引兜底: {indexed_fallback_hint}"
+            )
+            return indexed_fallback, attempts
+
+        if any(_as_int(item.get("rawCount"), 0) > 1 for item in attempts):
             raise RuntimeError(
                 f"未在 {elapsed_ms}ms 内唯一定位到步骤元素(存在多元素歧义): {json.dumps(attempts, ensure_ascii=False)}"
             )
@@ -4099,7 +4206,12 @@ class WebTestService:
 
     @classmethod
     def _build_locator(
-        cls, page: Any, locator_type: str, locator_value: dict[str, Any]
+        cls,
+        page: Any,
+        locator_type: str,
+        locator_value: dict[str, Any],
+        *,
+        apply_index: bool = True,
     ) -> Any:
         """根据定位器类型构建 Playwright Locator，并应用可选 nth/index 精准索引。"""
         locator: Any
@@ -4144,6 +4256,8 @@ class WebTestService:
                 locator = page.locator(f"xpath={selector}")
             else:
                 locator = page.locator(selector)
+        if not apply_index:
+            return locator
         locator_index = cls._resolve_locator_index(locator_value)
         if locator_index is not None:
             return locator.nth(locator_index)
