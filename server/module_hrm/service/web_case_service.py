@@ -69,6 +69,8 @@ class WebCaseService:
     """Web 测试模块服务层。"""
 
     ELEMENT_PROMOTION_THRESHOLD = 3
+    LOCATOR_LEARNING_META_KEY = "__qtrLearning"
+    LOCATOR_LEARNING_DISABLE_THRESHOLD = 3
     RUNTIME_PROFILE_CONFIG_KEY_PREFIX = "hrm.web.runtime.profile."
     BROWSER_SESSION_CONFIG_KEY_PREFIX = "hrm.web.browser.session."
     RUNTIME_VARIABLE_KEYS = (
@@ -1764,11 +1766,304 @@ class WebCaseService:
         return success, status, result, message
 
     @classmethod
+    def _extract_locator_learning_from_attempts(
+        cls,
+        attempts: list[Any],
+    ) -> tuple[int | None, list[int]]:
+        """
+        从单步定位尝试结果提取学习信息。
+
+        :param attempts: Agent 回传的 attempts 列表。
+        :return:
+            - selected_locator_id: 本步最终命中的定位器快照ID（无则 None）；
+            - failed_locator_ids: 本步尝试且失败的定位器快照ID（按出现顺序去重）；
+        """
+        selected_locator_id: int | None = None
+        failed_locator_ids: list[int] = []
+        seen_failed: set[int] = set()
+
+        for raw_item in attempts:
+            item = raw_item if isinstance(raw_item, dict) else {}
+            locator_snapshot_id = cls._to_optional_int(
+                item.get("locatorSnapshotId")
+                if item.get("locatorSnapshotId") is not None
+                else item.get("locator_snapshot_id")
+            )
+            if locator_snapshot_id is None:
+                continue
+
+            is_selected = bool(item.get("selected"))
+            tries = cls._to_optional_int(item.get("tries")) or 0
+            raw_count = cls._to_optional_int(
+                item.get("rawCount")
+                if item.get("rawCount") is not None
+                else item.get("raw_count")
+            )
+            error_text = str(item.get("error") or "").strip()
+            failed_this_round = tries > 0 and (bool(error_text) or raw_count != 1)
+
+            if is_selected and selected_locator_id is None:
+                selected_locator_id = locator_snapshot_id
+                continue
+
+            if failed_this_round and locator_snapshot_id not in seen_failed:
+                failed_locator_ids.append(locator_snapshot_id)
+                seen_failed.add(locator_snapshot_id)
+
+        return selected_locator_id, failed_locator_ids
+
+    @classmethod
+    def _normalize_locator_learning_meta_payload(
+        cls,
+        raw_meta: Any,
+    ) -> dict[str, Any]:
+        """
+        规范化定位器学习元信息。
+
+        :param raw_meta: 原始学习元信息对象。
+        :return: 标准化后的学习元信息字典。
+        """
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
+        return {
+            "failCount": max(cls._to_optional_int(meta.get("failCount")) or 0, 0),
+            "successCount": max(cls._to_optional_int(meta.get("successCount")) or 0, 0),
+            "preferred": bool(meta.get("preferred")),
+            "disabled": bool(meta.get("disabled")),
+            "autoDisabled": bool(meta.get("autoDisabled")),
+            "updatedAt": str(meta.get("updatedAt") or "").strip() or None,
+        }
+
+    @classmethod
+    def _split_locator_learning_payload(
+        cls,
+        locator_value_payload: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """
+        拆分定位器业务参数与学习元信息。
+
+        :param locator_value_payload: 定位器原始 JSON 对象。
+        :return: (业务参数, 学习元信息)。
+        """
+        value = locator_value_payload if isinstance(locator_value_payload, dict) else {}
+        business_value = dict(value)
+        raw_meta = business_value.pop(cls.LOCATOR_LEARNING_META_KEY, None)
+        if raw_meta is None:
+            raw_meta = business_value.pop("__qtr_learning", None)
+        learning_meta = cls._normalize_locator_learning_meta_payload(raw_meta)
+        return business_value, learning_meta
+
+    @classmethod
+    def _merge_locator_learning_payload(
+        cls,
+        business_value: dict[str, Any],
+        learning_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        将学习元信息写回定位器参数。
+
+        :param business_value: 业务定位参数。
+        :param learning_meta: 学习元信息。
+        :return: 合并后的定位器参数。
+        """
+        payload = dict(business_value or {})
+        normalized_meta = cls._normalize_locator_learning_meta_payload(learning_meta)
+        payload[cls.LOCATOR_LEARNING_META_KEY] = normalized_meta
+        return payload
+
+    @classmethod
+    def _strip_locator_learning_from_value(
+        cls,
+        locator_value_payload: Any,
+    ) -> dict[str, Any]:
+        """
+        去除定位器参数中的学习元信息。
+
+        :param locator_value_payload: 定位器原始 JSON 对象。
+        :return: 不含学习字段的业务定位参数。
+        """
+        business_value, _learning_meta = cls._split_locator_learning_payload(locator_value_payload)
+        return business_value
+
+    @classmethod
+    def _apply_locator_learning_to_case(
+        cls,
+        query_db: Session,
+        detail: WebCaseDetailModel,
+        response_result: dict[str, Any],
+        user_name: str | None,
+    ) -> int:
+        """
+        将执行阶段定位器学习结果落库（优先级重排 + 可选停用）。
+
+        :param query_db: 数据库会话。
+        :param detail: 当前执行用例详情（含步骤/目标快照/定位器）。
+        :param response_result: Agent 回传执行结果，需包含 steps[].attempts。
+        :param user_name: 更新人。
+        :return: 实际更新的定位器数量。
+        """
+        if detail is None or not isinstance(response_result, dict):
+            return 0
+        step_results = response_result.get("steps")
+        if not isinstance(step_results, list) or not step_results:
+            return 0
+
+        step_target_map: dict[str, int] = {}
+        target_ids: list[int] = []
+        for step in detail.steps:
+            if step is None or step.target_snapshot is None:
+                continue
+            step_id_text = str(step.step_id or "").strip()
+            target_snapshot_id = cls._to_optional_int(
+                step.target_snapshot.target_snapshot_id
+            )
+            if not step_id_text or target_snapshot_id is None:
+                continue
+            step_target_map[step_id_text] = target_snapshot_id
+            target_ids.append(target_snapshot_id)
+
+        if not target_ids:
+            return 0
+
+        locator_rows = WebCaseDao.list_locators_by_target_ids(query_db, sorted(set(target_ids)))
+        locators_by_target: dict[int, list[HrmWebCaseLocatorSnapshot]] = {}
+        for row in locator_rows:
+            locators_by_target.setdefault(int(row.target_snapshot_id), []).append(row)
+
+        now = datetime.now()
+        normalized_user = str(user_name or "").strip()
+        update_count = 0
+
+        for raw_step_result in step_results:
+            step_result = raw_step_result if isinstance(raw_step_result, dict) else {}
+            step_status = str(step_result.get("status") or "").strip().lower()
+            if step_status not in {"passed", "success", "ok", "1", "true"}:
+                continue
+
+            step_id_text = str(
+                step_result.get("stepId")
+                if step_result.get("stepId") is not None
+                else step_result.get("step_id")
+                or ""
+            ).strip()
+            if not step_id_text:
+                continue
+            target_snapshot_id = step_target_map.get(step_id_text)
+            if target_snapshot_id is None:
+                continue
+
+            rows = locators_by_target.get(target_snapshot_id) or []
+            if not rows:
+                continue
+            row_map = {int(item.locator_snapshot_id): item for item in rows}
+            ordered_ids = [
+                int(item.locator_snapshot_id)
+                for item in sorted(rows, key=lambda x: (int(x.priority or 0), x.create_time or now))
+            ]
+
+            attempts = step_result.get("attempts")
+            if not isinstance(attempts, list) or not attempts:
+                continue
+            selected_locator_id, failed_locator_ids = (
+                cls._extract_locator_learning_from_attempts(attempts)
+            )
+
+            if (
+                selected_locator_id is None
+                and not failed_locator_ids
+            ):
+                continue
+
+            failed_set: set[int] = set()
+            if selected_locator_id is not None and selected_locator_id in row_map:
+                failed_set = {
+                    locator_id
+                    for locator_id in failed_locator_ids
+                    if locator_id in row_map and locator_id != selected_locator_id
+                }
+                middle_ids = [
+                    locator_id
+                    for locator_id in ordered_ids
+                    if locator_id not in failed_set and locator_id != selected_locator_id
+                ]
+                tail_ids = [
+                    locator_id
+                    for locator_id in ordered_ids
+                    if locator_id in failed_set and locator_id != selected_locator_id
+                ]
+                new_order = [selected_locator_id] + middle_ids + tail_ids
+            else:
+                new_order = list(ordered_ids)
+
+            for new_priority, locator_id in enumerate(new_order):
+                row = row_map.get(locator_id)
+                if row is None:
+                    continue
+                update_data: dict[str, Any] = {}
+                raw_locator_value = cls._loads(row.locator_value_json, {})
+                if not isinstance(raw_locator_value, dict):
+                    raw_locator_value = {}
+                business_value, learning_meta = cls._split_locator_learning_payload(
+                    raw_locator_value
+                )
+
+                if int(row.priority or 0) != new_priority:
+                    update_data["priority"] = new_priority
+
+                fail_count = int(learning_meta.get("failCount") or 0)
+                success_count = int(learning_meta.get("successCount") or 0)
+                auto_disabled = bool(learning_meta.get("autoDisabled"))
+
+                if selected_locator_id is not None and locator_id == selected_locator_id:
+                    success_count += 1
+                    fail_count = max(fail_count - 1, 0)
+                    learning_meta["preferred"] = True
+                    learning_meta["disabled"] = False
+                    learning_meta["autoDisabled"] = False
+                    if row.enabled is False and auto_disabled:
+                        update_data["enabled"] = True
+                else:
+                    if locator_id in failed_set:
+                        fail_count += 1
+                    learning_meta["preferred"] = False
+                    should_disable = (
+                        success_count <= 0
+                        and fail_count >= cls.LOCATOR_LEARNING_DISABLE_THRESHOLD
+                    )
+                    if should_disable:
+                        learning_meta["disabled"] = True
+                        learning_meta["autoDisabled"] = True
+                        if bool(row.enabled):
+                            update_data["enabled"] = False
+                    else:
+                        learning_meta["disabled"] = bool(learning_meta.get("disabled"))
+                        learning_meta["autoDisabled"] = bool(learning_meta.get("autoDisabled"))
+
+                learning_meta["failCount"] = fail_count
+                learning_meta["successCount"] = success_count
+                learning_meta["updatedAt"] = now.isoformat()
+                merged_locator_value = cls._merge_locator_learning_payload(
+                    business_value,
+                    learning_meta,
+                )
+                if merged_locator_value != raw_locator_value:
+                    update_data["locator_value_json"] = cls._dumps(merged_locator_value)
+
+                if not update_data:
+                    continue
+                update_data["update_time"] = now
+                if normalized_user:
+                    update_data["update_by"] = normalized_user
+                WebCaseDao.update_locator_snapshot(query_db, locator_id, update_data)
+                update_count += 1
+
+        return update_count
+
+    @classmethod
     def _build_fingerprint(cls, target_snapshot: WebTargetSnapshotModel) -> str:
         locator_items = [
             {
                 "type": locator.locator_type,
-                "value": locator.locator_value,
+                "value": cls._strip_locator_learning_from_value(locator.locator_value),
                 "priority": locator.priority,
             }
             for locator in target_snapshot.locators
@@ -3137,6 +3432,12 @@ class WebCaseService:
             },
         )
         if success:
+            cls._apply_locator_learning_to_case(
+                query_db,
+                detail,
+                response_result,
+                user_name=user_name,
+            )
             cls._record_element_candidates(query_db, detail, response_result, manager, dept_id, user_name)
         query_db.commit()
 
@@ -3225,6 +3526,12 @@ class WebCaseService:
         if success:
             detail = cls.web_case_detail_services(query_db, run_record.web_case_id)
             if detail is not None:
+                cls._apply_locator_learning_to_case(
+                    query_db,
+                    detail,
+                    response_result,
+                    user_name=run_record.update_by,
+                )
                 cls._record_element_candidates(query_db, detail, response_result, run_record.manager, run_record.dept_id, run_record.update_by)
         query_db.commit()
 
@@ -3753,6 +4060,15 @@ class WebCaseService:
             started_at = run_record.started_at or now
             update_data["duration_ms"] = max(0, int((now - started_at).total_seconds() * 1000))
             WebCaseDao.update_run_record(query_db, run_id_int, update_data)
+            if run_success and run_record.web_case_id:
+                detail = cls.web_case_detail_services(query_db, int(run_record.web_case_id))
+                if detail is not None:
+                    cls._apply_locator_learning_to_case(
+                        query_db,
+                        detail,
+                        result_payload,
+                        user_name=run_record.update_by or run_record.create_by,
+                    )
             query_db.commit()
             runtime_debug_fallback = (
                 result_payload.get("runtimeDebug")
