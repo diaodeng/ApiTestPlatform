@@ -96,6 +96,37 @@ class WebCaseDao:
         )
 
     @classmethod
+    def list_locators_by_ids(cls, db: Session, locator_ids: list[int]) -> list[HrmWebCaseLocatorSnapshot]:
+        """
+        根据定位器快照ID列表查询定位器记录。
+
+        :param db: 数据库会话。
+        :param locator_ids: 定位器快照ID列表。
+        :return: 定位器快照对象列表。
+        """
+        if not locator_ids:
+            return []
+        return (
+            db.query(HrmWebCaseLocatorSnapshot)
+            .filter(HrmWebCaseLocatorSnapshot.locator_snapshot_id.in_(locator_ids))
+            .all()
+        )
+
+    @classmethod
+    def update_locator_snapshot(cls, db: Session, locator_snapshot_id: int, update_data: dict) -> None:
+        """
+        更新单条定位器快照记录。
+
+        :param db: 数据库会话。
+        :param locator_snapshot_id: 定位器快照ID。
+        :param update_data: 待更新字段字典。
+        :return: 无。
+        """
+        db.query(HrmWebCaseLocatorSnapshot).filter(
+            HrmWebCaseLocatorSnapshot.locator_snapshot_id == locator_snapshot_id
+        ).update(update_data)
+
+    @classmethod
     def delete_steps_by_case_id(cls, db: Session, web_case_id: int) -> None:
         steps = cls.list_steps(db, web_case_id)
         step_ids = [step.step_id for step in steps]

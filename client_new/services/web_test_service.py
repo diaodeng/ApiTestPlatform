@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -2274,6 +2275,8 @@ class WebTestService:
     _retained_runs: dict[str, RetainedRunSession] = {}
     _prepared_runs: dict[int, PreparedRunSession] = {}
     _active_runs: dict[int, ActiveRunSession] = {}
+    _locator_learning_hints: dict[str, dict[str, Any]] = {}
+    _locator_disable_threshold = 3
     _lock = asyncio.Lock()
 
     @classmethod
@@ -4002,6 +4005,174 @@ class WebTestService:
                 "errorType": exc.__class__.__name__,
             }
 
+    @staticmethod
+    def _build_locator_signature(locator_type: str, locator_value: dict[str, Any]) -> str:
+        """
+        构建定位器签名。
+
+        :param locator_type: 定位器类型，如 css/text/role。
+        :param locator_value: 定位器参数。
+        :return: 可稳定比较的签名字符串。
+        """
+        normalized_type = str(locator_type or "").strip().lower()
+        normalized_value = WebTestService._strip_locator_learning_meta(locator_value)
+        try:
+            payload = json.dumps(normalized_value or {}, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            payload = json.dumps(_as_dict(normalized_value), sort_keys=True, ensure_ascii=False)
+        return f"{normalized_type}:{payload}"
+
+    @staticmethod
+    def _strip_locator_learning_meta(locator_value: Any) -> dict[str, Any]:
+        """
+        移除定位器参数中的学习元信息，保证签名与哈希稳定。
+
+        :param locator_value: 原始定位器参数。
+        :return: 去除学习字段后的定位器参数副本。
+        """
+        value = _as_dict(locator_value)
+        if not value:
+            return {}
+        sanitized = dict(value)
+        sanitized.pop("__qtrLearning", None)
+        sanitized.pop("__qtr_learning", None)
+        return sanitized
+
+    @staticmethod
+    def _extract_persisted_locator_learning_meta(locator_value: Any) -> dict[str, Any]:
+        """
+        提取定位器参数中的持久化学习元信息。
+
+        :param locator_value: 原始定位器参数。
+        :return: 标准化后的学习元信息，包含 failCount/successCount/preferred/disabled。
+        """
+        value = _as_dict(locator_value)
+        raw_meta = value.get("__qtrLearning")
+        if raw_meta is None:
+            raw_meta = value.get("__qtr_learning")
+        meta = _as_dict(raw_meta)
+        return {
+            "failCount": max(_as_int(meta.get("failCount"), 0), 0),
+            "successCount": max(_as_int(meta.get("successCount"), 0), 0),
+            "preferred": _as_bool(meta.get("preferred"), False),
+            "disabled": _as_bool(meta.get("disabled"), False),
+        }
+
+    @classmethod
+    def _build_locator_learning_key(
+        cls,
+        step: dict[str, Any],
+        target_snapshot: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> str:
+        """
+        生成定位器学习键。
+
+        :param step: 当前步骤对象。
+        :param target_snapshot: 当前步骤快照对象。
+        :param candidates: 归一化后的候选定位器列表。
+        :return: 用于跨执行复用学习结果的键。
+        """
+        step_id = str(step.get("stepId") or step.get("step_id") or "").strip()
+        if step_id:
+            return f"step:{step_id}"
+
+        fingerprint = str(
+            target_snapshot.get("fingerprint")
+            or target_snapshot.get("targetFingerprint")
+            or ""
+        ).strip()
+        if fingerprint:
+            return f"fp:{fingerprint}"
+
+        action_type = str(step.get("actionType") or step.get("action_type") or "").strip().lower()
+        stable_payload = [
+            {
+                "type": item.get("locatorType"),
+                "value": cls._strip_locator_learning_meta(item.get("locatorValue")),
+            }
+            for item in candidates
+        ]
+        raw = json.dumps(
+            {"actionType": action_type, "locators": stable_payload},
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return f"anon:{hashlib.sha1(raw.encode('utf-8')).hexdigest()}"
+
+    @classmethod
+    def _resolve_locator_learning_hint(cls, learning_key: str) -> dict[str, Any]:
+        """
+        获取定位器学习提示（不存在则初始化）。
+
+        :param learning_key: 步骤学习键。
+        :return: 学习提示结构，包含 preferred/failCounts/successCounts/disabled。
+        """
+        if not learning_key:
+            return {"preferred": "", "failCounts": {}, "successCounts": {}, "disabled": []}
+        hint = cls._locator_learning_hints.get(learning_key)
+        if not isinstance(hint, dict):
+            hint = {"preferred": "", "failCounts": {}, "successCounts": {}, "disabled": []}
+            cls._locator_learning_hints[learning_key] = hint
+        hint.setdefault("preferred", "")
+        hint.setdefault("failCounts", {})
+        hint.setdefault("successCounts", {})
+        hint.setdefault("disabled", [])
+        if not isinstance(hint["failCounts"], dict):
+            hint["failCounts"] = {}
+        if not isinstance(hint["successCounts"], dict):
+            hint["successCounts"] = {}
+        if not isinstance(hint["disabled"], list):
+            hint["disabled"] = []
+        return hint
+
+    @classmethod
+    def _record_locator_learning_result(
+        cls,
+        learning_key: str,
+        attempts: list[dict[str, Any]],
+        success_signature: str,
+    ) -> None:
+        """
+        记录定位器学习结果：成功定位器前置，反复失败定位器停用。
+
+        :param learning_key: 步骤学习键。
+        :param attempts: 本次定位尝试记录。
+        :param success_signature: 本次成功命中的定位器签名。
+        """
+        success_signature = str(success_signature or "").strip()
+        if not learning_key or not success_signature:
+            return
+
+        hint = cls._resolve_locator_learning_hint(learning_key)
+        fail_counts = _as_dict(hint.get("failCounts"))
+        success_counts = _as_dict(hint.get("successCounts"))
+        disabled_set = {str(item or "") for item in _as_list(hint.get("disabled")) if str(item or "").strip()}
+
+        success_counts[success_signature] = _as_int(success_counts.get(success_signature), 0) + 1
+        fail_counts[success_signature] = max(_as_int(fail_counts.get(success_signature), 0) - 1, 0)
+        disabled_set.discard(success_signature)
+
+        for attempt in attempts:
+            signature = str(attempt.get("signature") or "").strip()
+            if not signature or signature == success_signature:
+                continue
+            if _as_int(attempt.get("tries"), 0) <= 0:
+                continue
+            raw_count = _as_int(attempt.get("rawCount"), -1)
+            failed_this_round = bool(attempt.get("error")) or raw_count != 1
+            if not failed_this_round:
+                continue
+            fail_counts[signature] = _as_int(fail_counts.get(signature), 0) + 1
+            success_count = _as_int(success_counts.get(signature), 0)
+            if success_count <= 0 and fail_counts[signature] >= cls._locator_disable_threshold:
+                disabled_set.add(signature)
+
+        hint["preferred"] = success_signature
+        hint["failCounts"] = fail_counts
+        hint["successCounts"] = success_counts
+        hint["disabled"] = sorted(disabled_set)
+
     @classmethod
     async def _resolve_locator(
         cls, page: Any, step: dict[str, Any], timeout_ms: int
@@ -4045,10 +4216,21 @@ class WebTestService:
                 locator_value = {"selector": str(locator_value_source)}
             else:
                 locator_value = {}
+            persisted_learning_meta = cls._extract_persisted_locator_learning_meta(
+                locator_value
+            )
             normalized_candidates.append(
                 {
+                    "locatorSnapshotId": _as_int(
+                        locator_def.get("locatorSnapshotId")
+                        if locator_def.get("locatorSnapshotId") is not None
+                        else locator_def.get("locator_snapshot_id"),
+                        0,
+                    ) or None,
                     "locatorType": locator_type,
                     "locatorValue": locator_value,
+                    "signature": cls._build_locator_signature(locator_type, locator_value),
+                    "persistedLearning": persisted_learning_meta,
                     "priority": _as_int(locator_def.get("priority"), index),
                     "index": index,
                     "uniqueness": str(locator_def.get("uniqueness") or "")
@@ -4066,8 +4248,47 @@ class WebTestService:
         if not normalized_candidates:
             raise RuntimeError("当前步骤没有可用(启用)定位器")
 
-        normalized_candidates.sort(
+        learning_key = cls._build_locator_learning_key(step, target_snapshot, normalized_candidates)
+        learning_hint = cls._resolve_locator_learning_hint(learning_key)
+        preferred_signature = str(learning_hint.get("preferred") or "").strip()
+        fail_counts = _as_dict(learning_hint.get("failCounts"))
+        disabled_signatures = {
+            str(item or "").strip()
+            for item in _as_list(learning_hint.get("disabled"))
+            if str(item or "").strip()
+        }
+
+        for item in normalized_candidates:
+            signature = str(item.get("signature") or "").strip()
+            persisted_learning = _as_dict(item.get("persistedLearning"))
+            memory_preferred = bool(signature and signature == preferred_signature)
+            persisted_preferred = _as_bool(
+                persisted_learning.get("preferred"), False
+            )
+            item["hintPreferRank"] = 0 if memory_preferred else (1 if persisted_preferred else 2)
+            item["hintPreferred"] = bool(item["hintPreferRank"] < 2)
+            item["hintFailCount"] = max(
+                _as_int(fail_counts.get(signature), 0),
+                _as_int(persisted_learning.get("failCount"), 0),
+            )
+            item["hintDisabled"] = bool(
+                signature
+                and (
+                    signature in disabled_signatures
+                    or _as_bool(persisted_learning.get("disabled"), False)
+                )
+                and signature != preferred_signature
+                and item["hintPreferRank"] > 0
+            )
+
+        active_candidates = [
+            item for item in normalized_candidates if not bool(item.get("hintDisabled"))
+        ]
+        candidates_for_run = active_candidates or normalized_candidates
+        candidates_for_run.sort(
             key=lambda item: (
+                _as_int(item.get("hintPreferRank"), 2),
+                _as_int(item.get("hintFailCount"), 0),
                 _as_int(item.get("priority"), 999),
                 _LOCATOR_TYPE_WEIGHT.get(str(item.get("locatorType") or ""), 99),
                 _as_int(item.get("index"), 0),
@@ -4076,21 +4297,28 @@ class WebTestService:
 
         attempts: list[dict[str, Any]] = [
             {
+                "locatorSnapshotId": item.get("locatorSnapshotId"),
                 "locatorType": item.get("locatorType"),
                 "locatorValue": item.get("locatorValue"),
+                "signature": item.get("signature"),
                 "priority": item.get("priority"),
                 "uniqueness": item.get("uniqueness"),
                 "targetIndex": item.get("targetIndex"),
                 "matchCount": item.get("matchCount"),
+                "learningPreferred": bool(item.get("hintPreferred")),
+                "learningFailCount": _as_int(item.get("hintFailCount"), 0),
+                "learningDisabled": bool(item.get("hintDisabled")),
+                "persistedLearning": item.get("persistedLearning"),
                 "tries": 0,
             }
-            for item in normalized_candidates
+            for item in candidates_for_run
         ]
 
         started_at = time.perf_counter()
         deadline = started_at + (max(timeout_ms, 500) / 1000.0)
         indexed_fallback: Any | None = None
         indexed_fallback_hint = ""
+        indexed_fallback_signature = ""
         while time.perf_counter() < deadline:
             for attempt in attempts:
                 locator_type = str(attempt.get("locatorType") or "")
@@ -4111,6 +4339,11 @@ class WebTestService:
                     raw_count = await locator.count()
                     attempt["rawCount"] = raw_count
                     if raw_count == 1:
+                        attempt["selected"] = True
+                        attempt["selectedBy"] = "unique"
+                        cls._record_locator_learning_result(
+                            learning_key, attempts, str(attempt.get("signature") or "")
+                        )
                         return locator.first, attempts
 
                     if raw_count > 1:
@@ -4124,6 +4357,11 @@ class WebTestService:
                                 )
                                 attempt["message"] = (
                                     f"匹配到多个元素({raw_count})，已收敛到唯一可见元素"
+                                )
+                                attempt["selected"] = True
+                                attempt["selectedBy"] = "visible_unique"
+                                cls._record_locator_learning_result(
+                                    learning_key, attempts, str(attempt.get("signature") or "")
                                 )
                                 return visible_locator.first, attempts
                         except Exception as visible_exc:
@@ -4141,6 +4379,11 @@ class WebTestService:
                                     attempt["message"] = (
                                         f"匹配到多个元素({raw_count})，已通过录制文本收敛"
                                     )
+                                    attempt["selected"] = True
+                                    attempt["selectedBy"] = "text_unique"
+                                    cls._record_locator_learning_result(
+                                        learning_key, attempts, str(attempt.get("signature") or "")
+                                    )
                                     return text_locator.first, attempts
 
                                 visible_text_locator = text_locator.locator(":visible")
@@ -4152,6 +4395,11 @@ class WebTestService:
                                     )
                                     attempt["message"] = (
                                         f"匹配到多个元素({raw_count})，已通过可见文本收敛"
+                                    )
+                                    attempt["selected"] = True
+                                    attempt["selectedBy"] = "visible_text_unique"
+                                    cls._record_locator_learning_result(
+                                        learning_key, attempts, str(attempt.get("signature") or "")
                                     )
                                     return visible_text_locator.first, attempts
                             except Exception as text_exc:
@@ -4173,6 +4421,9 @@ class WebTestService:
                                     indexed_fallback_hint = (
                                         f"{locator_type}#nth={locator_index}"
                                     )
+                                    indexed_fallback_signature = str(
+                                        attempt.get("signature") or ""
+                                    )
                             except Exception as index_exc:
                                 attempt["indexError"] = str(index_exc)
                         else:
@@ -4191,8 +4442,15 @@ class WebTestService:
                         item.get("message")
                         or "基础定位器存在多匹配，已启用录制索引兜底"
                     )
+                    if not item.get("selected"):
+                        item["selected"] = True
+                        item["selectedBy"] = "index_fallback"
+                        break
             logger.warning(
                 f"步骤定位在 {elapsed_ms}ms 内未收敛唯一元素，使用索引兜底: {indexed_fallback_hint}"
+            )
+            cls._record_locator_learning_result(
+                learning_key, attempts, indexed_fallback_signature
             )
             return indexed_fallback, attempts
 
