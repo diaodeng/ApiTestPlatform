@@ -71,6 +71,9 @@ class WebCaseService:
     ELEMENT_PROMOTION_THRESHOLD = 3
     LOCATOR_LEARNING_META_KEY = "__qtrLearning"
     LOCATOR_LEARNING_DISABLE_THRESHOLD = 3
+    LOCATOR_LEARNING_DISABLE_THRESHOLD_CONFIG_KEY = "hrm.web.locator.learning.disable_threshold"
+    LOCATOR_LEARNING_DISABLE_THRESHOLD_MIN = 1
+    LOCATOR_LEARNING_DISABLE_THRESHOLD_MAX = 20
     RUNTIME_PROFILE_CONFIG_KEY_PREFIX = "hrm.web.runtime.profile."
     BROWSER_SESSION_CONFIG_KEY_PREFIX = "hrm.web.browser.session."
     RUNTIME_VARIABLE_KEYS = (
@@ -140,6 +143,54 @@ class WebCaseService:
             return int(value)
         except Exception:
             return None
+
+    @classmethod
+    def _resolve_locator_learning_disable_threshold(cls, query_db: Session) -> int:
+        """
+        解析定位器自动停用阈值（系统参数）。
+
+        :param query_db: 数据库会话。
+        :return: 有效阈值，范围 [LOCATOR_LEARNING_DISABLE_THRESHOLD_MIN, LOCATOR_LEARNING_DISABLE_THRESHOLD_MAX]。
+        """
+        fallback = int(cls.LOCATOR_LEARNING_DISABLE_THRESHOLD)
+        threshold = fallback
+        config_row = (
+            query_db.query(SysConfig)
+            .filter(
+                SysConfig.config_key == cls.LOCATOR_LEARNING_DISABLE_THRESHOLD_CONFIG_KEY
+            )
+            .first()
+        )
+        if config_row is None:
+            return threshold
+
+        raw_value = config_row.config_value
+        parsed_candidate: Any = raw_value
+        if isinstance(raw_value, str):
+            raw_text = raw_value.strip()
+            if not raw_text:
+                return threshold
+            try:
+                parsed_candidate = json.loads(raw_text)
+            except Exception:
+                parsed_candidate = raw_text
+
+        if isinstance(parsed_candidate, dict):
+            parsed_candidate = (
+                parsed_candidate.get("value")
+                or parsed_candidate.get("threshold")
+                or parsed_candidate.get("disableThreshold")
+                or parsed_candidate.get("disable_threshold")
+            )
+
+        parsed_threshold = cls._to_optional_int(parsed_candidate)
+        if parsed_threshold is not None:
+            threshold = parsed_threshold
+
+        return max(
+            cls.LOCATOR_LEARNING_DISABLE_THRESHOLD_MIN,
+            min(cls.LOCATOR_LEARNING_DISABLE_THRESHOLD_MAX, int(threshold)),
+        )
 
     @staticmethod
     def _to_bool(value: Any, *, default: bool = True) -> bool:
@@ -1769,7 +1820,7 @@ class WebCaseService:
     def _extract_locator_learning_from_attempts(
         cls,
         attempts: list[Any],
-    ) -> tuple[int | None, list[int]]:
+    ) -> tuple[int | None, list[int], str | None, list[str]]:
         """
         从单步定位尝试结果提取学习信息。
 
@@ -1777,10 +1828,15 @@ class WebCaseService:
         :return:
             - selected_locator_id: 本步最终命中的定位器快照ID（无则 None）；
             - failed_locator_ids: 本步尝试且失败的定位器快照ID（按出现顺序去重）；
+            - selected_signature: 本步最终命中的定位器签名（无则 None）；
+            - failed_signatures: 本步尝试且失败的定位器签名（按出现顺序去重）；
         """
         selected_locator_id: int | None = None
+        selected_signature = ""
         failed_locator_ids: list[int] = []
-        seen_failed: set[int] = set()
+        failed_signatures: list[str] = []
+        seen_failed_locator_ids: set[int] = set()
+        seen_failed_signatures: set[str] = set()
 
         for raw_item in attempts:
             item = raw_item if isinstance(raw_item, dict) else {}
@@ -1789,8 +1845,7 @@ class WebCaseService:
                 if item.get("locatorSnapshotId") is not None
                 else item.get("locator_snapshot_id")
             )
-            if locator_snapshot_id is None:
-                continue
+            signature = str(item.get("signature") or "").strip()
 
             is_selected = bool(item.get("selected"))
             tries = cls._to_optional_int(item.get("tries")) or 0
@@ -1802,15 +1857,51 @@ class WebCaseService:
             error_text = str(item.get("error") or "").strip()
             failed_this_round = tries > 0 and (bool(error_text) or raw_count != 1)
 
-            if is_selected and selected_locator_id is None:
-                selected_locator_id = locator_snapshot_id
+            if is_selected:
+                if selected_locator_id is None and locator_snapshot_id is not None:
+                    selected_locator_id = locator_snapshot_id
+                if not selected_signature and signature:
+                    selected_signature = signature
                 continue
 
-            if failed_this_round and locator_snapshot_id not in seen_failed:
-                failed_locator_ids.append(locator_snapshot_id)
-                seen_failed.add(locator_snapshot_id)
+            if failed_this_round:
+                if (
+                    locator_snapshot_id is not None
+                    and locator_snapshot_id not in seen_failed_locator_ids
+                ):
+                    failed_locator_ids.append(locator_snapshot_id)
+                    seen_failed_locator_ids.add(locator_snapshot_id)
+                if signature and signature not in seen_failed_signatures:
+                    failed_signatures.append(signature)
+                    seen_failed_signatures.add(signature)
 
-        return selected_locator_id, failed_locator_ids
+        return (
+            selected_locator_id,
+            failed_locator_ids,
+            selected_signature or None,
+            failed_signatures,
+        )
+
+    @classmethod
+    def _build_locator_signature(
+        cls,
+        locator_type: Any,
+        locator_value_payload: Any,
+    ) -> str:
+        """
+        构建定位器签名，保持与 Agent 侧签名算法一致。
+
+        :param locator_type: 定位器类型（如 css/xpath/role）。
+        :param locator_value_payload: 定位器参数。
+        :return: 签名字符串（locator_type + 规范化后的 locator_value）。
+        """
+        normalized_type = str(locator_type or "").strip().lower()
+        business_value = cls._strip_locator_learning_from_value(locator_value_payload)
+        try:
+            payload_text = json.dumps(business_value, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            payload_text = json.dumps({}, sort_keys=True, ensure_ascii=False)
+        return f"{normalized_type}:{payload_text}"
 
     @classmethod
     def _normalize_locator_learning_meta_payload(
@@ -1907,18 +1998,23 @@ class WebCaseService:
         if not isinstance(step_results, list) or not step_results:
             return 0
 
-        step_target_map: dict[str, int] = {}
+        step_target_map_by_id: dict[str, int] = {}
+        step_target_map_by_index: dict[int, int] = {}
         target_ids: list[int] = []
         for step in detail.steps:
             if step is None or step.target_snapshot is None:
                 continue
-            step_id_text = str(step.step_id or "").strip()
             target_snapshot_id = cls._to_optional_int(
                 step.target_snapshot.target_snapshot_id
             )
-            if not step_id_text or target_snapshot_id is None:
+            if target_snapshot_id is None:
                 continue
-            step_target_map[step_id_text] = target_snapshot_id
+            step_id_text = str(step.step_id or "").strip()
+            if step_id_text:
+                step_target_map_by_id[step_id_text] = target_snapshot_id
+            step_index = cls._to_optional_int(step.step_index)
+            if step_index is not None and step_index not in step_target_map_by_index:
+                step_target_map_by_index[step_index] = target_snapshot_id
             target_ids.append(target_snapshot_id)
 
         if not target_ids:
@@ -1930,6 +2026,7 @@ class WebCaseService:
             locators_by_target.setdefault(int(row.target_snapshot_id), []).append(row)
 
         now = datetime.now()
+        disable_threshold = cls._resolve_locator_learning_disable_threshold(query_db)
         normalized_user = str(user_name or "").strip()
         update_count = 0
 
@@ -1939,15 +2036,43 @@ class WebCaseService:
             if step_status not in {"passed", "success", "ok", "1", "true"}:
                 continue
 
+            attempts = step_result.get("attempts")
+            if not isinstance(attempts, list) or not attempts:
+                continue
+            (
+                selected_locator_id,
+                failed_locator_ids,
+                selected_signature,
+                failed_signatures,
+            ) = cls._extract_locator_learning_from_attempts(attempts)
+
+            if (
+                selected_locator_id is None
+                and not failed_locator_ids
+                and not selected_signature
+                and not failed_signatures
+            ):
+                continue
+
             step_id_text = str(
                 step_result.get("stepId")
                 if step_result.get("stepId") is not None
                 else step_result.get("step_id")
                 or ""
             ).strip()
-            if not step_id_text:
-                continue
-            target_snapshot_id = step_target_map.get(step_id_text)
+            target_snapshot_id = (
+                step_target_map_by_id.get(step_id_text)
+                if step_id_text
+                else None
+            )
+            if target_snapshot_id is None:
+                step_index = cls._to_optional_int(
+                    step_result.get("stepIndex")
+                    if step_result.get("stepIndex") is not None
+                    else step_result.get("step_index")
+                )
+                if step_index is not None:
+                    target_snapshot_id = step_target_map_by_index.get(step_index)
             if target_snapshot_id is None:
                 continue
 
@@ -1959,38 +2084,68 @@ class WebCaseService:
                 int(item.locator_snapshot_id)
                 for item in sorted(rows, key=lambda x: (int(x.priority or 0), x.create_time or now))
             ]
+            ordered_rank = {
+                locator_id: rank for rank, locator_id in enumerate(ordered_ids)
+            }
+            signature_to_locator_ids: dict[str, list[int]] = {}
+            for row in rows:
+                locator_signature = cls._build_locator_signature(
+                    row.locator_type,
+                    cls._loads(row.locator_value_json, {}),
+                )
+                locator_snapshot_id = int(row.locator_snapshot_id)
+                signature_to_locator_ids.setdefault(locator_signature, []).append(
+                    locator_snapshot_id
+                )
+            for candidate_ids in signature_to_locator_ids.values():
+                candidate_ids.sort(key=lambda item: ordered_rank.get(item, 10**9))
 
-            attempts = step_result.get("attempts")
-            if not isinstance(attempts, list) or not attempts:
-                continue
-            selected_locator_id, failed_locator_ids = (
-                cls._extract_locator_learning_from_attempts(attempts)
+            selected_locator_candidate = (
+                selected_locator_id if selected_locator_id in row_map else None
             )
+            if selected_locator_candidate is None and selected_signature:
+                for locator_id in signature_to_locator_ids.get(selected_signature, []):
+                    if locator_id in row_map:
+                        selected_locator_candidate = locator_id
+                        break
 
-            if (
-                selected_locator_id is None
-                and not failed_locator_ids
-            ):
+            failed_set: set[int] = {
+                locator_id
+                for locator_id in failed_locator_ids
+                if locator_id in row_map and locator_id != selected_locator_candidate
+            }
+            for failed_signature in failed_signatures:
+                for locator_id in signature_to_locator_ids.get(failed_signature, []):
+                    if (
+                        locator_id in row_map
+                        and locator_id != selected_locator_candidate
+                    ):
+                        failed_set.add(locator_id)
+
+            if selected_locator_candidate is None and not failed_set:
                 continue
-
-            failed_set: set[int] = set()
-            if selected_locator_id is not None and selected_locator_id in row_map:
-                failed_set = {
-                    locator_id
-                    for locator_id in failed_locator_ids
-                    if locator_id in row_map and locator_id != selected_locator_id
-                }
+            if selected_locator_candidate is not None:
                 middle_ids = [
                     locator_id
                     for locator_id in ordered_ids
-                    if locator_id not in failed_set and locator_id != selected_locator_id
+                    if locator_id not in failed_set
+                    and locator_id != selected_locator_candidate
                 ]
                 tail_ids = [
                     locator_id
                     for locator_id in ordered_ids
-                    if locator_id in failed_set and locator_id != selected_locator_id
+                    if locator_id in failed_set
+                    and locator_id != selected_locator_candidate
                 ]
-                new_order = [selected_locator_id] + middle_ids + tail_ids
+                new_order = [selected_locator_candidate] + middle_ids + tail_ids
+            elif failed_set:
+                middle_ids = [
+                    locator_id for locator_id in ordered_ids if locator_id not in failed_set
+                ]
+                tail_ids = [
+                    locator_id for locator_id in ordered_ids if locator_id in failed_set
+                ]
+                new_order = middle_ids + tail_ids
             else:
                 new_order = list(ordered_ids)
 
@@ -2013,7 +2168,10 @@ class WebCaseService:
                 success_count = int(learning_meta.get("successCount") or 0)
                 auto_disabled = bool(learning_meta.get("autoDisabled"))
 
-                if selected_locator_id is not None and locator_id == selected_locator_id:
+                if (
+                    selected_locator_candidate is not None
+                    and locator_id == selected_locator_candidate
+                ):
                     success_count += 1
                     fail_count = max(fail_count - 1, 0)
                     learning_meta["preferred"] = True
@@ -2027,7 +2185,7 @@ class WebCaseService:
                     learning_meta["preferred"] = False
                     should_disable = (
                         success_count <= 0
-                        and fail_count >= cls.LOCATOR_LEARNING_DISABLE_THRESHOLD
+                        and fail_count >= disable_threshold
                     )
                     if should_disable:
                         learning_meta["disabled"] = True
@@ -3137,14 +3295,85 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
+        state_source_type = cls._normalize_state_source_type(request_model.state_source_type)
+        browser_session_id = (
+            str(request_model.browser_session_id or "").strip()
+            if state_source_type == "session"
+            else ""
+        )
+        runtime_profile_id = (
+            str(request_model.runtime_profile_id or "").strip()
+            if state_source_type == "cookie"
+            else ""
+        )
+        try:
+            profile_runtime_overrides = cls._resolve_runtime_profile_runtime_overrides(
+                query_db,
+                runtime_profile_id,
+            )
+            browser_session_runtime_overrides = cls._resolve_browser_session_runtime_overrides(
+                query_db,
+                browser_session_id,
+            )
+        except ValueError as exc:
+            return CrudResponseModel(is_success=False, message=str(exc))
+        merged_runtime_overrides = cls._merge_runtime_overrides(
+            profile_runtime_overrides,
+            browser_session_runtime_overrides,
+        )
+        merged_runtime_overrides = cls._merge_runtime_overrides(
+            merged_runtime_overrides,
+            request_model.runtime_overrides,
+        )
+
         runtime_options = request_model.model_dump(
             mode="json",
             by_alias=True,
-            exclude={"recording_id", "agent_id", "agent_code"},
+            exclude={
+                "recording_id",
+                "agent_id",
+                "agent_code",
+                "state_source_type",
+                "persist_context_enabled",
+                "persist_context_auto_sync_session",
+                "persist_context_key",
+                "browser_session_id",
+                "runtime_profile_id",
+                "runtime_overrides",
+            },
         )
+        persist_context_enabled = bool(
+            state_source_type in {"session", "cookie"}
+            and request_model.persist_context_enabled
+        )
+        persist_context_auto_sync_session = bool(
+            persist_context_enabled and request_model.persist_context_auto_sync_session
+        )
+        persist_context_key = str(
+            request_model.persist_context_key
+            or browser_session_runtime_overrides.get("persistContextKey")
+            or ""
+        ).strip()
+        runtime_options["stateSourceType"] = state_source_type
+        runtime_options["persistContextEnabled"] = persist_context_enabled
+        runtime_options["persistContextAutoSyncSession"] = persist_context_auto_sync_session
+        runtime_options["browserSessionId"] = browser_session_id
+        runtime_options["runtimeProfileId"] = runtime_profile_id
+        if persist_context_key:
+            runtime_options["persistContextKey"] = persist_context_key
+        if persist_context_enabled:
+            persist_context_hosts = cls._resolve_persist_context_hosts(
+                merged_runtime_overrides,
+                persist_context_key,
+            )
+            if persist_context_hosts:
+                runtime_options["persistContextHosts"] = persist_context_hosts
+        if merged_runtime_overrides:
+            runtime_options["runtimeOverrides"] = merged_runtime_overrides
+
         start_url = (
-            request_model.runtime_overrides.get("startUrl")
-            or request_model.runtime_overrides.get("start_url")
+            merged_runtime_overrides.get("startUrl")
+            or merged_runtime_overrides.get("start_url")
             or recording_detail.start_url
         )
         case_data = {
@@ -3431,13 +3660,13 @@ class WebCaseService:
                 "update_time": datetime.now(),
             },
         )
+        cls._apply_locator_learning_to_case(
+            query_db,
+            detail,
+            response_result,
+            user_name=user_name,
+        )
         if success:
-            cls._apply_locator_learning_to_case(
-                query_db,
-                detail,
-                response_result,
-                user_name=user_name,
-            )
             cls._record_element_candidates(query_db, detail, response_result, manager, dept_id, user_name)
         query_db.commit()
 
@@ -3523,15 +3752,15 @@ class WebCaseService:
                 "update_time": datetime.now(),
             },
         )
-        if success:
-            detail = cls.web_case_detail_services(query_db, run_record.web_case_id)
-            if detail is not None:
-                cls._apply_locator_learning_to_case(
-                    query_db,
-                    detail,
-                    response_result,
-                    user_name=run_record.update_by,
-                )
+        detail = cls.web_case_detail_services(query_db, run_record.web_case_id)
+        if detail is not None:
+            cls._apply_locator_learning_to_case(
+                query_db,
+                detail,
+                response_result,
+                user_name=run_record.update_by,
+            )
+            if success:
                 cls._record_element_candidates(query_db, detail, response_result, run_record.manager, run_record.dept_id, run_record.update_by)
         query_db.commit()
 

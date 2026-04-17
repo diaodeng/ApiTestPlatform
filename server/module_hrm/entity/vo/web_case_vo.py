@@ -443,6 +443,12 @@ class WebRecordingReplayRequestModel(WebJsonModel):
     browser_name: str | None = None
     headless: bool | None = None
     close_browser_on_finish: bool | None = None
+    state_source_type: str | None = None
+    persist_context_enabled: bool = False
+    persist_context_auto_sync_session: bool = True
+    persist_context_key: str | None = None
+    browser_session_id: str | None = None
+    runtime_profile_id: str | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     save_screenshot_on_failure: bool = True
     continue_on_failure: bool = False

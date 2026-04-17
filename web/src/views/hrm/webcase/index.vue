@@ -2065,6 +2065,32 @@
                                         />
                                     </el-form-item>
                                 </el-col>
+                                <el-col :span="6">
+                                    <el-form-item
+                                        label="Nth(0基)"
+                                        label-width="70px"
+                                    >
+                                        <el-input-number
+                                            :model-value="
+                                                resolveLocatorIndex(
+                                                    locator.locatorValue,
+                                                )
+                                            "
+                                            :min="0"
+                                            :step="1"
+                                            :value-on-clear="null"
+                                            controls-position="right"
+                                            style="width: 100%"
+                                            @update:model-value="
+                                                (value) =>
+                                                    updateLocatorNth(
+                                                        locator,
+                                                        value,
+                                                    )
+                                            "
+                                        />
+                                    </el-form-item>
+                                </el-col>
                             </el-row>
                         </div>
                     </div>
@@ -2455,6 +2481,36 @@
                                                                     'xpath'
                                                                         ? '//*[@id=&quot;login&quot;]'
                                                                         : '.login-button'
+                                                                "
+                                                            />
+                                                        </el-form-item>
+                                                    </el-col>
+                                                    <el-col :span="6">
+                                                        <el-form-item
+                                                            label="Nth(0基)"
+                                                            label-width="70px"
+                                                        >
+                                                            <el-input-number
+                                                                :model-value="
+                                                                    resolveLocatorIndex(
+                                                                        locator.locatorValue,
+                                                                    )
+                                                                "
+                                                                :min="0"
+                                                                :step="1"
+                                                                :value-on-clear="
+                                                                    null
+                                                                "
+                                                                controls-position="right"
+                                                                style="
+                                                                    width: 100%;
+                                                                "
+                                                                @update:model-value="
+                                                                    (value) =>
+                                                                        updateLocatorNth(
+                                                                            locator,
+                                                                            value,
+                                                                        )
                                                                 "
                                                             />
                                                         </el-form-item>
@@ -2977,6 +3033,14 @@
                                 inline-prompt
                                 active-text="开启"
                                 inactive-text="关闭"
+                            />
+                        </el-form-item>
+                        <el-form-item label="多匹配直接按Nth">
+                            <el-switch
+                                v-model="runForm.immediateLocatorIndexMode"
+                                inline-prompt
+                                active-text="开启"
+                                inactive-text="学习"
                             />
                         </el-form-item>
                         <el-form-item>
@@ -4107,6 +4171,113 @@
                 <el-form-item label="结束后关闭浏览器">
                     <el-switch v-model="replayForm.closeBrowserOnFinish" />
                 </el-form-item>
+                <el-form-item label="多匹配直接按Nth">
+                    <el-switch
+                        v-model="replayForm.immediateLocatorIndexMode"
+                        inline-prompt
+                        active-text="开启"
+                        inactive-text="学习"
+                    />
+                </el-form-item>
+                <el-form-item label="状态来源">
+                    <el-radio-group v-model="replayForm.stateSourceType">
+                        <el-radio-button value="none">不使用</el-radio-button>
+                        <el-radio-button
+                            value="session"
+                            v-hasPermi="['hrm:webCase:persistContext']"
+                            >浏览器Session</el-radio-button
+                        >
+                        <el-radio-button value="cookie"
+                            >Cookie配置</el-radio-button
+                        >
+                    </el-radio-group>
+                </el-form-item>
+                <el-form-item
+                    v-if="replayForm.stateSourceType === 'session'"
+                    label="浏览器Session"
+                    v-hasPermi="['hrm:webCase:persistContext']"
+                >
+                    <el-row :gutter="10" style="width: 100%">
+                        <el-col :span="18">
+                            <el-select
+                                v-model="replayForm.browserSessionId"
+                                clearable
+                                filterable
+                                style="width: 100%"
+                                placeholder="可选：选择浏览器Session"
+                            >
+                                <el-option
+                                    v-for="item in availableBrowserSessionsForReplay"
+                                    :key="item.sessionId"
+                                    :label="formatBrowserSessionLabel(item)"
+                                    :value="item.sessionId"
+                                />
+                            </el-select>
+                        </el-col>
+                        <el-col :span="6">
+                            <el-button
+                                style="width: 100%"
+                                @click="openBrowserSessionDialog"
+                                >管理Session</el-button
+                            >
+                        </el-col>
+                    </el-row>
+                </el-form-item>
+                <el-form-item
+                    v-if="replayForm.stateSourceType === 'cookie'"
+                    label="Cookie配置"
+                >
+                    <el-row :gutter="10" style="width: 100%">
+                        <el-col :span="18">
+                            <el-select
+                                v-model="replayForm.runtimeProfileId"
+                                clearable
+                                filterable
+                                style="width: 100%"
+                                placeholder="可选：选择Cookie配置"
+                            >
+                                <el-option
+                                    v-for="item in availableRuntimeProfilesForReplay"
+                                    :key="item.profileId"
+                                    :label="formatRuntimeProfileLabel(item)"
+                                    :value="item.profileId"
+                                />
+                            </el-select>
+                        </el-col>
+                        <el-col :span="6">
+                            <el-button
+                                style="width: 100%"
+                                @click="openRuntimeProfileDialog"
+                                >管理Cookie</el-button
+                            >
+                        </el-col>
+                    </el-row>
+                </el-form-item>
+                <el-row v-if="replayForm.stateSourceType !== 'none'">
+                    <el-col :span="12">
+                        <el-form-item
+                            label="保留浏览器状态"
+                            v-hasPermi="['hrm:webCase:persistContext']"
+                        >
+                            <el-switch
+                                v-model="replayForm.persistContextEnabled"
+                            />
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                        <el-form-item
+                            label="自动同步状态"
+                            v-hasPermi="['hrm:webCase:persistContext']"
+                        >
+                            <el-switch
+                                v-model="
+                                    replayForm.persistContextAutoSyncSession
+                                "
+                                :disabled="!replayForm.persistContextEnabled"
+                            />
+                        </el-form-item>
+                    </el-col>
+                </el-row>
             </el-form>
             <template #footer>
                 <el-button @click="showReplayDialog = false">取消</el-button>
@@ -5833,6 +6004,7 @@ const runForm = ref({
     browserName: "chromium",
     headless: true,
     closeBrowserOnFinish: true,
+    immediateLocatorIndexMode: false,
     stateSourceType: "none",
     browserSessionId: undefined,
     runtimeProfileId: undefined,
@@ -5888,6 +6060,12 @@ const replayForm = ref({
     browserName: "chromium",
     headless: false,
     closeBrowserOnFinish: true,
+    immediateLocatorIndexMode: false,
+    stateSourceType: "none",
+    browserSessionId: undefined,
+    runtimeProfileId: undefined,
+    persistContextEnabled: false,
+    persistContextAutoSyncSession: true,
 });
 
 const projectNameMap = computed(() =>
@@ -6003,6 +6181,38 @@ const availableRuntimeProfilesForRecording = computed(() =>
     ),
 );
 
+const replayLinkedCase = computed(() => {
+    const replayRecording = selectedRecording.value;
+    const replayCaseId = normalizeIdValue(replayRecording?.webCaseId);
+    if (!replayCaseId) return null;
+    return (
+        mergeCaseOptions(
+            allCaseOptions.value,
+            caseSelectOptions.value,
+            pageDataList.value,
+            runRecordList.value,
+            recordingList.value,
+            runDetail.value ? [runDetail.value] : [],
+            recordingDetail.value ? [recordingDetail.value] : [],
+        ).find((item) => isSameId(item.webCaseId, replayCaseId)) || null
+    );
+});
+const replayScopeProjectId = computed(() => replayLinkedCase.value?.projectId);
+const replayScopeModuleId = computed(() => replayLinkedCase.value?.moduleId);
+
+const availableRuntimeProfilesForReplay = computed(() =>
+    runtimeProfiles.value.filter(
+        (item) =>
+            item.enabled !== false &&
+            profileSupportsWeb(item) &&
+            isRuntimeProfileScopeMatch(
+                item,
+                replayScopeProjectId.value,
+                replayScopeModuleId.value,
+            ),
+    ),
+);
+
 const availableBrowserSessionsForRun = computed(() =>
     browserSessions.value.filter(
         (item) =>
@@ -6026,6 +6236,19 @@ const availableBrowserSessionsForRecording = computed(() =>
                 recordingScopeModuleId.value,
             ) &&
             isBrowserSessionBrowserMatch(item, recordingForm.value.browserName),
+    ),
+);
+
+const availableBrowserSessionsForReplay = computed(() =>
+    browserSessions.value.filter(
+        (item) =>
+            item.enabled !== false &&
+            isRuntimeProfileScopeMatch(
+                item,
+                replayScopeProjectId.value,
+                replayScopeModuleId.value,
+            ) &&
+            isBrowserSessionBrowserMatch(item, replayForm.value.browserName),
     ),
 );
 
@@ -6305,6 +6528,38 @@ function normalizeStateSourceType(value) {
     const normalized = `${value || ""}`.trim().toLowerCase();
     if (normalized === "session" || normalized === "cookie") return normalized;
     return "none";
+}
+
+/**
+ * 标准化定位器索引策略，支持 delayed/auto/always。
+ * @param {any} value 原始配置值（字符串或布尔）
+ * @returns {"delayed" | "auto" | "always"}
+ */
+function normalizeLocatorIndexMode(value) {
+    if (value === true) return "always";
+    if (value === false) return "auto";
+    const normalized = `${value || ""}`.trim().toLowerCase();
+    if (
+        ["always", "immediate", "force", "on", "enabled", "true", "1"].includes(
+            normalized,
+        )
+    ) {
+        return "always";
+    }
+    if (
+        [
+            "delayed",
+            "legacy",
+            "wait",
+            "off",
+            "disabled",
+            "false",
+            "0",
+        ].includes(normalized)
+    ) {
+        return "delayed";
+    }
+    return "auto";
 }
 
 function resolveStateSourceTypeByIds(browserSessionId, runtimeProfileId) {
@@ -7675,6 +7930,33 @@ function handleLocatorTypeChange(locator) {
     );
 }
 
+/**
+ * 更新定位器 nth 索引（0基），并统一清理 index/targetIndex 等别名字段。
+ * @param {any} locator 定位器对象
+ * @param {any} rawValue 输入值
+ * @returns {void}
+ */
+function updateLocatorNth(locator, rawValue) {
+    if (!locator) return;
+    locator.locatorValue = normalizeLocatorValue(
+        locator.locatorType,
+        locator.locatorValue,
+    );
+    delete locator.locatorValue.index;
+    delete locator.locatorValue.targetIndex;
+    delete locator.locatorValue.target_index;
+    if (rawValue === undefined || rawValue === null || rawValue === "") {
+        delete locator.locatorValue.nth;
+        return;
+    }
+    const parsed = Number(rawValue);
+    if (Number.isInteger(parsed) && parsed >= 0) {
+        locator.locatorValue.nth = parsed;
+        return;
+    }
+    delete locator.locatorValue.nth;
+}
+
 function isLocatorFilled(locator) {
     if (!locator || locator.enabled === false) return false;
     if (locator.locatorType === "role") {
@@ -8219,6 +8501,15 @@ function clearInvalidRuntimeProfileBindings() {
             recordingForm.value.stateSourceType = "none";
         }
     }
+    if (
+        replayForm.value.runtimeProfileId &&
+        !runtimeIds.has(normalizeIdValue(replayForm.value.runtimeProfileId))
+    ) {
+        replayForm.value.runtimeProfileId = undefined;
+        if (replayForm.value.stateSourceType === "cookie") {
+            replayForm.value.stateSourceType = "none";
+        }
+    }
     const sessionIds = new Set(
         browserSessions.value
             .map((item) => normalizeIdValue(item.sessionId))
@@ -8240,6 +8531,15 @@ function clearInvalidRuntimeProfileBindings() {
         recordingForm.value.browserSessionId = undefined;
         if (recordingForm.value.stateSourceType === "session") {
             recordingForm.value.stateSourceType = "none";
+        }
+    }
+    if (
+        replayForm.value.browserSessionId &&
+        !sessionIds.has(normalizeIdValue(replayForm.value.browserSessionId))
+    ) {
+        replayForm.value.browserSessionId = undefined;
+        if (replayForm.value.stateSourceType === "session") {
+            replayForm.value.stateSourceType = "none";
         }
     }
     if (
@@ -9000,11 +9300,20 @@ function initRunFormByCase(row) {
             runtimeSettings.persist_context_sync_to_session,
         true,
     );
+    const locatorIndexMode = normalizeLocatorIndexMode(
+        runtimeSettings.locatorIndexMode ??
+            runtimeSettings.locator_index_mode ??
+            runtimeSettings.locatorIndexStrategy ??
+            runtimeSettings.locator_index_strategy ??
+            runtimeSettings.locatorImmediateIndex ??
+            runtimeSettings.locator_immediate_index,
+    );
     runForm.value = {
         agentId: undefined,
         browserName: row?.browserName || "chromium",
         headless: row?.headless ?? true,
         closeBrowserOnFinish,
+        immediateLocatorIndexMode: locatorIndexMode === "always",
         stateSourceType,
         browserSessionId,
         runtimeProfileId,
@@ -9133,6 +9442,9 @@ async function submitRun() {
     }
 
     const runtimeOverrides = {};
+    runtimeOverrides.locatorIndexMode = runForm.value.immediateLocatorIndexMode
+        ? "always"
+        : "auto";
     if (
         runForm.value.stepTimeoutMs !== undefined &&
         runForm.value.stepTimeoutMs !== null &&
@@ -9788,6 +10100,66 @@ function openReplayDialog(recordingSource) {
             ElMessage.warning("当前录制记录中没有可回放的步骤");
             return;
         }
+        const recordingOptions = isPlainObject(detail.options)
+            ? cloneData(detail.options)
+            : {};
+        const runtimeSettings = isPlainObject(
+            recordingOptions.runtimeOptions || recordingOptions.runtime_options,
+        )
+            ? cloneData(
+                  recordingOptions.runtimeOptions ||
+                      recordingOptions.runtime_options,
+              )
+            : {};
+        const browserSessionId = normalizeIdValue(
+            runtimeSettings.browserSessionId ??
+                runtimeSettings.browser_session_id ??
+                runtimeSettings.persistContextSessionId ??
+                runtimeSettings.persist_context_session_id ??
+                runtimeSettings.sessionProfileId ??
+                runtimeSettings.session_profile_id,
+        );
+        const runtimeProfileId = normalizeIdValue(
+            runtimeSettings.runtimeProfileId ??
+                runtimeSettings.runtime_profile_id ??
+                runtimeSettings.cookieProfileId ??
+                runtimeSettings.cookie_profile_id,
+        );
+        const preferredStateSourceType = normalizeStateSourceType(
+            runtimeSettings.stateSourceType ?? runtimeSettings.state_source_type,
+        );
+        const inferredStateSourceType = resolveStateSourceTypeByIds(
+            browserSessionId,
+            runtimeProfileId,
+        );
+        const stateSourceType =
+            preferredStateSourceType === "none"
+                ? inferredStateSourceType
+                : preferredStateSourceType;
+        const persistContextEnabled = parseBooleanFlag(
+            runtimeSettings.persistContextEnabled ??
+                runtimeSettings.persist_context_enabled ??
+                runtimeSettings.preserveBrowserContext ??
+                runtimeSettings.preserve_browser_context ??
+                runtimeSettings.keepBrowserCache ??
+                runtimeSettings.keep_browser_cache,
+            false,
+        );
+        const persistContextAutoSyncSession = parseBooleanFlag(
+            runtimeSettings.persistContextAutoSyncSession ??
+                runtimeSettings.persist_context_auto_sync_session ??
+                runtimeSettings.persistContextSyncToSession ??
+                runtimeSettings.persist_context_sync_to_session,
+            true,
+        );
+        const locatorIndexMode = normalizeLocatorIndexMode(
+            runtimeSettings.locatorIndexMode ??
+                runtimeSettings.locator_index_mode ??
+                runtimeSettings.locatorIndexStrategy ??
+                runtimeSettings.locator_index_strategy ??
+                runtimeSettings.locatorImmediateIndex ??
+                runtimeSettings.locator_immediate_index,
+        );
         selectedRecording.value = detail;
         replayForm.value = {
             recordingId: detail.recordingId,
@@ -9795,6 +10167,13 @@ function openReplayDialog(recordingSource) {
             browserName: detail.browserName || "chromium",
             headless: detail.headless ?? false,
             closeBrowserOnFinish: true,
+            immediateLocatorIndexMode: locatorIndexMode === "always",
+            stateSourceType,
+            browserSessionId,
+            runtimeProfileId,
+            persistContextEnabled:
+                stateSourceType !== "none" && Boolean(persistContextEnabled),
+            persistContextAutoSyncSession,
         };
         showReplayDialog.value = true;
     });
@@ -9810,6 +10189,31 @@ function submitReplay() {
         return;
     }
 
+    const stateSourceType = normalizeStateSourceType(
+        replayForm.value.stateSourceType,
+    );
+    const selectedBrowserSessionId =
+        stateSourceType === "session"
+            ? normalizeIdValue(replayForm.value.browserSessionId)
+            : undefined;
+    const selectedRuntimeProfileId =
+        stateSourceType === "cookie"
+            ? normalizeIdValue(replayForm.value.runtimeProfileId)
+            : undefined;
+    const persistContextEnabled = Boolean(
+        stateSourceType !== "none" && replayForm.value.persistContextEnabled,
+    );
+    const persistContextAutoSyncSession = Boolean(
+        stateSourceType !== "none" &&
+            persistContextEnabled &&
+            replayForm.value.persistContextAutoSyncSession,
+    );
+    const runtimeOverrides = {
+        locatorIndexMode: replayForm.value.immediateLocatorIndexMode
+            ? "always"
+            : "auto",
+    };
+
     loading.value.replay = true;
     replayWebRecording({
         recordingId: replayForm.value.recordingId,
@@ -9817,6 +10221,12 @@ function submitReplay() {
         browserName: replayForm.value.browserName,
         headless: replayForm.value.headless,
         closeBrowserOnFinish: replayForm.value.closeBrowserOnFinish,
+        stateSourceType,
+        browserSessionId: selectedBrowserSessionId,
+        runtimeProfileId: selectedRuntimeProfileId,
+        persistContextEnabled,
+        persistContextAutoSyncSession,
+        runtimeOverrides,
     })
         .then((response) => {
             replayResult.value = response.data || null;
@@ -9987,6 +10397,27 @@ watch(
     },
 );
 
+watch(
+    () => replayForm.value.stateSourceType,
+    (stateType) => {
+        const normalized = normalizeStateSourceType(stateType);
+        if (normalized !== stateType) {
+            replayForm.value.stateSourceType = normalized;
+            return;
+        }
+        if (normalized !== "session") {
+            replayForm.value.browserSessionId = undefined;
+        }
+        if (normalized !== "cookie") {
+            replayForm.value.runtimeProfileId = undefined;
+        }
+        if (normalized === "none") {
+            replayForm.value.persistContextEnabled = false;
+            replayForm.value.persistContextAutoSyncSession = false;
+        }
+    },
+);
+
 watch(availableBrowserSessionsForRun, (sessions) => {
     if (runForm.value.stateSourceType !== "session") return;
     const selectedSessionId = normalizeIdValue(runForm.value.browserSessionId);
@@ -10007,6 +10438,15 @@ watch(availableBrowserSessionsForRecording, (sessions) => {
     }
 });
 
+watch(availableBrowserSessionsForReplay, (sessions) => {
+    if (replayForm.value.stateSourceType !== "session") return;
+    const selectedSessionId = normalizeIdValue(replayForm.value.browserSessionId);
+    if (!selectedSessionId) return;
+    if (!sessions.some((item) => isSameId(item.sessionId, selectedSessionId))) {
+        replayForm.value.browserSessionId = undefined;
+    }
+});
+
 watch(availableRuntimeProfilesForRun, (profiles) => {
     if (runForm.value.stateSourceType !== "cookie") return;
     const selectedProfileId = normalizeIdValue(runForm.value.runtimeProfileId);
@@ -10024,6 +10464,15 @@ watch(availableRuntimeProfilesForRecording, (profiles) => {
     if (!selectedProfileId) return;
     if (!profiles.some((item) => isSameId(item.profileId, selectedProfileId))) {
         recordingForm.value.runtimeProfileId = undefined;
+    }
+});
+
+watch(availableRuntimeProfilesForReplay, (profiles) => {
+    if (replayForm.value.stateSourceType !== "cookie") return;
+    const selectedProfileId = normalizeIdValue(replayForm.value.runtimeProfileId);
+    if (!selectedProfileId) return;
+    if (!profiles.some((item) => isSameId(item.profileId, selectedProfileId))) {
+        replayForm.value.runtimeProfileId = undefined;
     }
 });
 
