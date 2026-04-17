@@ -3956,7 +3956,12 @@ class WebTestService:
                 )
             locator = None
             if _action_requires_locator(action_type):
-                locator, attempts = await cls._resolve_locator(page, step, timeout_ms)
+                locator, attempts = await cls._resolve_locator(
+                    page,
+                    step,
+                    timeout_ms,
+                    runtime_options=runtime_options,
+                )
             await asyncio.wait_for(
                 cls._execute_action(
                     page,
@@ -3973,6 +3978,7 @@ class WebTestService:
                 assertions,
                 timeout_ms=timeout_ms,
                 step_deadline=step_deadline,
+                runtime_options=runtime_options,
             )
             return {
                 "stepId": step_id,
@@ -4175,7 +4181,12 @@ class WebTestService:
 
     @classmethod
     async def _resolve_locator(
-        cls, page: Any, step: dict[str, Any], timeout_ms: int
+        cls,
+        page: Any,
+        step: dict[str, Any],
+        timeout_ms: int,
+        *,
+        runtime_options: dict[str, Any] | None = None,
     ) -> tuple[Any, list[dict[str, Any]]]:
         """解析步骤定位器，优先真实唯一命中，其次可见唯一，最后才使用显式索引兜底。"""
         target_snapshot = _as_dict(
@@ -4319,6 +4330,7 @@ class WebTestService:
         indexed_fallback: Any | None = None
         indexed_fallback_hint = ""
         indexed_fallback_signature = ""
+        index_mode = cls._resolve_locator_index_mode(runtime_options)
         while time.perf_counter() < deadline:
             for attempt in attempts:
                 locator_type = str(attempt.get("locatorType") or "")
@@ -4412,6 +4424,26 @@ class WebTestService:
                                 await indexed_candidate.wait_for(
                                     state="attached", timeout=probe_timeout
                                 )
+                                allow_immediate_index = bool(
+                                    index_mode == "always"
+                                    or (
+                                        index_mode == "auto"
+                                        and bool(attempt.get("learningPreferred"))
+                                    )
+                                )
+                                if allow_immediate_index:
+                                    attempt["fallbackIndex"] = locator_index
+                                    attempt["message"] = (
+                                        f"匹配到多个元素({raw_count})，按索引策略直接命中 nth={locator_index}"
+                                    )
+                                    attempt["selected"] = True
+                                    attempt["selectedBy"] = "index_immediate"
+                                    cls._record_locator_learning_result(
+                                        learning_key,
+                                        attempts,
+                                        str(attempt.get("signature") or ""),
+                                    )
+                                    return indexed_candidate, attempts
                                 attempt["fallbackIndex"] = locator_index
                                 attempt["message"] = (
                                     f"匹配到多个元素({raw_count})，记录了索引兜底 nth={locator_index}"
@@ -4534,6 +4566,57 @@ class WebTestService:
             if index >= 0:
                 return index
         return None
+
+    @staticmethod
+    def _resolve_locator_index_mode(runtime_options: dict[str, Any] | None) -> str:
+        """
+        解析索引定位策略模式。
+
+        :param runtime_options: 运行时配置（支持顶层与 runtimeOverrides）。
+        :return:
+            - always: 多匹配且有 nth/index 时直接按索引命中；
+            - auto: 仅学习为 preferred 的定位器在多匹配时直接按索引命中；
+            - delayed: 始终先等待收敛唯一，超时后才索引兜底。
+        """
+        source = _as_dict(runtime_options)
+        overrides = _as_dict(
+            source.get("runtimeOverrides") or source.get("runtime_overrides")
+        )
+        candidates = [
+            source.get("locatorIndexMode"),
+            source.get("locator_index_mode"),
+            source.get("locatorIndexStrategy"),
+            source.get("locator_index_strategy"),
+            source.get("locatorImmediateIndex"),
+            source.get("locator_immediate_index"),
+            overrides.get("locatorIndexMode"),
+            overrides.get("locator_index_mode"),
+            overrides.get("locatorIndexStrategy"),
+            overrides.get("locator_index_strategy"),
+            overrides.get("locatorImmediateIndex"),
+            overrides.get("locator_immediate_index"),
+        ]
+        for candidate in candidates:
+            if isinstance(candidate, bool):
+                return "always" if candidate else "auto"
+            normalized = str(candidate or "").strip().lower()
+            if not normalized:
+                continue
+            if normalized in {"always", "immediate", "force", "on", "enabled"}:
+                return "always"
+            if normalized in {
+                "delayed",
+                "legacy",
+                "wait",
+                "off",
+                "disabled",
+                "false",
+                "0",
+            }:
+                return "delayed"
+            if normalized in {"auto", "learned", "preferred", "default", "true", "1"}:
+                return "auto"
+        return "auto"
 
     @classmethod
     async def _execute_action(
@@ -4706,6 +4789,8 @@ class WebTestService:
         step_locator: Any,
         assertion: dict[str, Any],
         timeout_ms: int,
+        *,
+        runtime_options: dict[str, Any] | None = None,
     ) -> Any:
         target_snapshot = _as_dict(
             assertion.get("targetSnapshot") or assertion.get("target_snapshot")
@@ -4715,6 +4800,7 @@ class WebTestService:
                 page,
                 {"targetSnapshot": target_snapshot},
                 timeout_ms=max(timeout_ms, 500),
+                runtime_options=runtime_options,
             )
             return resolved_locator
         return step_locator
@@ -4729,11 +4815,16 @@ class WebTestService:
         assert_type: str,
         expected: Any,
         timeout_ms: int,
+        runtime_options: dict[str, Any] | None = None,
     ) -> None:
         current_locator = step_locator
         if assert_type in {"text_contains", "text_equals", "visible"}:
             current_locator = await cls._resolve_assertion_locator(
-                page, step_locator, assertion, timeout_ms
+                page,
+                step_locator,
+                assertion,
+                timeout_ms,
+                runtime_options=runtime_options,
             )
             if current_locator is None:
                 raise AssertionError(f"{assert_type} 断言需要有效定位器")
@@ -4821,6 +4912,7 @@ class WebTestService:
         *,
         timeout_ms: int,
         step_deadline: float | None = None,
+        runtime_options: dict[str, Any] | None = None,
     ) -> None:
         supported_types = {
             "text_contains",
@@ -4876,6 +4968,7 @@ class WebTestService:
                         assert_type=assert_type,
                         expected=expected,
                         timeout_ms=probe_timeout,
+                        runtime_options=runtime_options,
                     )
                     last_error = None
                     passed = True
