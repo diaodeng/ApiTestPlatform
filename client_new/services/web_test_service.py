@@ -1751,10 +1751,31 @@ def _interpolate_string(value: str, variables: dict[str, Any]) -> str:
     def _replace(match: re.Match[str]) -> str:
         key = match.group(1) or match.group(2) or ""
         if key in variables:
-            return str(variables.get(key) or "")
+            matched = variables.get(key)
+            return "" if matched is None else str(matched)
         return match.group(0)
 
     return _VAR_PATTERN.sub(_replace, str(value))
+
+
+def _interpolate_runtime_value(value: Any, variables: dict[str, Any]) -> Any:
+    """
+    递归插值运行时参数，支持 dict/list/string 结构，其它类型保持不变。
+
+    :param value: 待插值的数据对象。
+    :param variables: 运行时变量字典，支持 `${var}` 与 `{{var}}` 两种语法。
+    :return: 插值后的新对象。
+    """
+    if isinstance(value, str):
+        return _interpolate_string(value, variables)
+    if isinstance(value, list):
+        return [_interpolate_runtime_value(item, variables) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _interpolate_runtime_value(item, variables)
+            for key, item in value.items()
+        }
+    return value
 
 
 def _resolve_runtime_variables(runtime_options: dict[str, Any]) -> dict[str, Any]:
@@ -2860,9 +2881,11 @@ class WebTestService:
             close_browser_on_finish = True
         else:
             close_browser_on_finish = bool(close_browser_on_finish)
+        runtime_variables = _resolve_runtime_variables(effective_runtime)
         start_url = str(
             effective_runtime.get("startUrl") or case_data.get("startUrl") or ""
         )
+        start_url = _interpolate_string(start_url, runtime_variables)
         steps = case_data.get("steps") or []
         if not isinstance(steps, list):
             steps = []
@@ -2894,13 +2917,14 @@ class WebTestService:
                 default_scope=f"run-{run_id}",
             )
             prepared.page = await prepared.context.new_page()
-            prepared.cookie_variables = _resolve_runtime_variables(effective_runtime)
+            prepared.cookie_variables = runtime_variables
             prepared.cookie_rules = _normalize_cookie_rules(effective_runtime)
             prepared.runtime_debug = {
                 "stateSourceType": _resolve_state_source_type(effective_runtime),
                 "runtimeProfileId": _resolve_runtime_profile_id(effective_runtime),
                 "cookieRuleCount": len(prepared.cookie_rules),
                 "cookieVariableKeys": sorted(prepared.cookie_variables.keys()),
+                "runtimeVariableKeys": sorted(prepared.cookie_variables.keys()),
             }
             _attach_runtime_persist_debug(
                 prepared.runtime_debug,
@@ -3517,9 +3541,11 @@ class WebTestService:
             close_browser_on_finish = True
         else:
             close_browser_on_finish = bool(close_browser_on_finish)
+        runtime_variables = _resolve_runtime_variables(effective_runtime)
         start_url = str(
             effective_runtime.get("startUrl") or case_data.get("startUrl") or ""
         )
+        start_url = _interpolate_string(start_url, runtime_variables)
         reuse_retained_session_id = _resolve_reuse_retained_session_id(
             effective_runtime
         )
@@ -3596,7 +3622,7 @@ class WebTestService:
                 async with cls._lock:
                     cls._active_runs[run_id] = active_session
 
-            cookie_variables = _resolve_runtime_variables(effective_runtime)
+            cookie_variables = runtime_variables
             cookie_rules = _normalize_cookie_rules(effective_runtime)
             runtime_debug = {
                 **runtime_debug,
@@ -3604,6 +3630,7 @@ class WebTestService:
                 "runtimeProfileId": _resolve_runtime_profile_id(effective_runtime),
                 "cookieRuleCount": len(cookie_rules),
                 "cookieVariableKeys": sorted(cookie_variables.keys()),
+                "runtimeVariableKeys": sorted(cookie_variables.keys()),
             }
             _attach_runtime_persist_debug(
                 runtime_debug,
@@ -3930,8 +3957,16 @@ class WebTestService:
         step_name = (
             step.get("stepName") or step.get("step_name") or action_type or "step"
         )
-        params = _as_dict(step.get("params"))
-        assertions = step.get("assertions") or []
+        params = _interpolate_runtime_value(
+            _as_dict(step.get("params")), cookie_variables
+        )
+        if not isinstance(params, dict):
+            params = _as_dict(step.get("params"))
+        assertions = _interpolate_runtime_value(
+            _as_list(step.get("assertions")), cookie_variables
+        )
+        if not isinstance(assertions, list):
+            assertions = _as_list(step.get("assertions"))
         timeout_ms = _step_timeout_ms(step, runtime_options, case_data)
         started_at = time.perf_counter()
         step_deadline = started_at + (max(timeout_ms, 500) / 1000.0)
