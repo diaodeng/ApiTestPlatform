@@ -64,7 +64,7 @@
                             >新增</el-button
                         >
                     </el-col>
-                    <el-col :span="2">
+                    <el-col :span="1.5">
                         <el-button
                             type="success"
                             plain
@@ -95,7 +95,7 @@
                             >刷新</el-button
                         >
                     </el-col>
-                    <el-col :span="2">
+                    <el-col :span="1.5">
                         <el-button
                             type="info"
                             plain
@@ -179,7 +179,7 @@
                             )
                         }}</template>
                     </el-table-column>
-                    <el-table-column label="操作" width="370" fixed="right">
+                    <el-table-column label="操作" width="280" fixed="right">
                         <template #default="scope">
                             <el-button
                                 link
@@ -197,14 +197,14 @@
                                 v-hasPermi="['hrm:webCase:run']"
                                 >执行</el-button
                             >
-                            <el-button
-                                link
-                                type="warning"
-                                icon="VideoPlay"
-                                @click="openRecordingDialog(scope.row)"
-                                v-hasPermi="['hrm:webCase:record']"
-                                >录制</el-button
-                            >
+<!--                            <el-button-->
+<!--                                link-->
+<!--                                type="warning"-->
+<!--                                icon="VideoPlay"-->
+<!--                                @click="openRecordingDialog(scope.row)"-->
+<!--                                v-hasPermi="['hrm:webCase:record']"-->
+<!--                                >录制</el-button-->
+<!--                            >-->
                             <el-button
                                 link
                                 type="info"
@@ -387,7 +387,7 @@
                             getRunRowFailureReason(scope.row)
                         }}</template>
                     </el-table-column>
-                    <el-table-column label="操作" width="320" fixed="right">
+                    <el-table-column label="操作" width="180" fixed="right">
                         <template #default="scope">
                             <el-button
                                 link
@@ -524,10 +524,7 @@
                             >刷新</el-button
                         >
                     </el-col>
-                </el-row>
-
-                <el-row :gutter="10" class="mb8">
-                    <el-col :span="2">
+                    <el-col :span="1.5">
                         <el-button
                             type="danger"
                             plain
@@ -620,7 +617,7 @@
                             scope.row.errorMessage || "-"
                         }}</template>
                     </el-table-column>
-                    <el-table-column label="操作" width="620" fixed="right">
+                    <el-table-column label="操作" width="330" fixed="right">
                         <template #default="scope">
                             <el-button
                                 link
@@ -687,6 +684,7 @@
                                 >保存新用例</el-button
                             >
                             <el-button
+                                v-if="false"
                                 link
                                 type="info"
                                 icon="DocumentAdd"
@@ -703,6 +701,7 @@
                                 >追加</el-button
                             >
                             <el-button
+                                v-if="false"
                                 link
                                 type="danger"
                                 icon="EditPen"
@@ -739,7 +738,7 @@
         <el-dialog
             v-model="showCaseDialog"
             :title="caseDialogTitle"
-            width="1360px"
+            width="90%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -857,7 +856,7 @@
                         :row-class-name="getStepRowClassName"
                         @row-click="handleStepRowClick"
                     >
-                        <el-table-column label="序号" width="140" fixed="left">
+                        <el-table-column label="序号" width="100" fixed="left">
                             <template #default="scope">
                                 <div class="step-order-cell">
                                     <span>#{{ scope.$index + 1 }}</span>
@@ -915,7 +914,9 @@
                                         />
                                     </el-select>
                                     <span v-else class="step-cell-text">
-                                        {{ getActionLabel(scope.row.actionType) }}
+                                        {{
+                                            getActionLabel(scope.row.actionType)
+                                        }}
                                     </span>
                                 </div>
                             </template>
@@ -976,7 +977,10 @@
                                                 getPrimaryLocator(scope.row)
                                             "
                                         >
-                                            <div class="step-inline-target" @click.stop>
+                                            <div
+                                                class="step-inline-target"
+                                                @click.stop
+                                            >
                                                 <el-select
                                                     :model-value="
                                                         getPrimaryLocator(
@@ -1054,8 +1058,8 @@
                                                     :model-value="
                                                         getPrimaryLocator(
                                                             scope.row,
-                                                        )?.locatorValue
-                                                            ?.text || ''
+                                                        )?.locatorValue?.text ||
+                                                        ''
                                                     "
                                                     placeholder="定位文本"
                                                     @update:model-value="
@@ -1119,8 +1123,8 @@
                                                     :model-value="
                                                         getPrimaryLocator(
                                                             scope.row,
-                                                        )?.locatorValue
-                                                            ?.name || ''
+                                                        )?.locatorValue?.name ||
+                                                        ''
                                                     "
                                                     placeholder="元素 name"
                                                     @update:model-value="
@@ -1157,7 +1161,9 @@
                                                 />
                                             </div>
                                         </template>
-                                        <span v-else class="step-cell-placeholder"
+                                        <span
+                                            v-else
+                                            class="step-cell-placeholder"
                                             >当前动作无需定位器</span
                                         >
                                     </template>
@@ -1187,7 +1193,9 @@
                                         "
                                     >
                                         <template
-                                            v-if="scope.row.actionType === 'goto'"
+                                            v-if="
+                                                scope.row.actionType === 'goto'
+                                            "
                                         >
                                             <el-input
                                                 v-model="scope.row.params.url"
@@ -1210,7 +1218,8 @@
                                                 <el-col :span="12">
                                                     <el-input-number
                                                         v-model="
-                                                            scope.row.params.width
+                                                            scope.row.params
+                                                                .width
                                                         "
                                                         :min="1"
                                                         :step="100"
@@ -1222,7 +1231,8 @@
                                                 <el-col :span="12">
                                                     <el-input-number
                                                         v-model="
-                                                            scope.row.params.height
+                                                            scope.row.params
+                                                                .height
                                                         "
                                                         :min="1"
                                                         :step="100"
@@ -1280,7 +1290,9 @@
                                             "
                                         >
                                             <el-select
-                                                v-model="scope.row.params.values"
+                                                v-model="
+                                                    scope.row.params.values
+                                                "
                                                 multiple
                                                 filterable
                                                 allow-create
@@ -1331,9 +1343,7 @@
                                             "
                                         >
                                             <el-input
-                                                v-model="
-                                                    scope.row.params.title
-                                                "
+                                                v-model="scope.row.params.title"
                                                 @click.stop
                                                 @blur="finishStepCellEditing"
                                                 placeholder="请输入页面标题关键字"
@@ -1371,7 +1381,9 @@
                                                 placeholder="请输入元素文本期望值"
                                             />
                                         </template>
-                                        <span v-else class="step-cell-placeholder"
+                                        <span
+                                            v-else
+                                            class="step-cell-placeholder"
                                             >当前动作无额外参数</span
                                         >
                                     </template>
@@ -1381,7 +1393,7 @@
                                 </div>
                             </template>
                         </el-table-column>
-                        <el-table-column label="操作" width="190" fixed="right">
+                        <el-table-column label="操作" width="230" fixed="right">
                             <template #default="scope">
                                 <div class="step-op-buttons">
                                     <el-button
@@ -1467,7 +1479,7 @@
         <el-dialog
             v-model="showStepDetailDialog"
             :title="stepDetailTitle"
-            width="1160px"
+            width="90%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -2844,7 +2856,7 @@
         <el-dialog
             v-model="showRunDialog"
             title="执行 Web 用例"
-            width="760px"
+            width="80%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -3095,7 +3107,7 @@
         <el-dialog
             v-model="showRunDetailDialog"
             :title="runDetailTitle"
-            width="1180px"
+            width="90%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -3244,7 +3256,7 @@
         <el-dialog
             v-model="showRecordingDialog"
             :title="recordingDialogTitle"
-            width="1240px"
+            width="90%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -3762,7 +3774,7 @@
         <el-dialog
             v-model="showRecordingDetailDialog"
             :title="recordingDetailTitle"
-            width="1240px"
+            width="90%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -3989,7 +4001,7 @@
         <el-dialog
             v-model="showRecordingActionDialog"
             :title="recordingActionDialogTitle"
-            width="760px"
+            width="80%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -4128,7 +4140,7 @@
         <el-dialog
             v-model="showReplayDialog"
             title="录制回放"
-            width="560px"
+            width="80%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -4293,7 +4305,7 @@
         <el-dialog
             v-model="showReplayResultDialog"
             :title="replayResultTitle"
-            width="1180px"
+            width="80%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -4366,7 +4378,7 @@
         <el-dialog
             v-model="showRuntimeProfileDialog"
             title="Cookie配置管理"
-            width="1180px"
+            width="90%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -4735,7 +4747,7 @@
         <el-dialog
             v-model="showBrowserSessionDialog"
             title="浏览器Session管理"
-            width="1240px"
+            width="90%"
             destroy-on-close
             append-to-body
             :close-on-click-modal="false"
@@ -6008,13 +6020,13 @@ const runForm = ref({
     stateSourceType: "none",
     browserSessionId: undefined,
     runtimeProfileId: undefined,
-    persistContextEnabled: false,
+    persistContextEnabled: true,
     persistContextAutoSyncSession: true,
     manualLoginEnabled: false,
     manualLoginRequireConfirm: false,
     manualLoginWaitSec: 120,
     stepTimeoutMs: undefined,
-    stepThinkTimeMs: undefined,
+    stepThinkTimeMs: 200,
 });
 const recordingForm = ref({
     webCaseId: undefined,
@@ -6026,7 +6038,7 @@ const recordingForm = ref({
     stateSourceType: "none",
     browserSessionId: undefined,
     runtimeProfileId: undefined,
-    persistContextEnabled: false,
+    persistContextEnabled: true,
     persistContextAutoSyncSession: true,
     manualLoginEnabled: false,
     manualLoginRequireConfirm: false,
@@ -6064,7 +6076,7 @@ const replayForm = ref({
     stateSourceType: "none",
     browserSessionId: undefined,
     runtimeProfileId: undefined,
-    persistContextEnabled: false,
+    persistContextEnabled: true,
     persistContextAutoSyncSession: true,
 });
 
@@ -6547,15 +6559,9 @@ function normalizeLocatorIndexMode(value) {
         return "always";
     }
     if (
-        [
-            "delayed",
-            "legacy",
-            "wait",
-            "off",
-            "disabled",
-            "false",
-            "0",
-        ].includes(normalized)
+        ["delayed", "legacy", "wait", "off", "disabled", "false", "0"].includes(
+            normalized,
+        )
     ) {
         return "delayed";
     }
@@ -8111,7 +8117,10 @@ function buildStepParamsForSubmit(step) {
     }
     if (step.actionType === "set_window_size") {
         return withThinkTime({
-            width: Math.max(Math.round(Number(step.params?.width ?? 1920) || 1920), 1),
+            width: Math.max(
+                Math.round(Number(step.params?.width ?? 1920) || 1920),
+                1,
+            ),
             height: Math.max(
                 Math.round(Number(step.params?.height ?? 1080) || 1080),
                 1,
@@ -9494,8 +9503,8 @@ async function submitRun() {
     );
     const persistContextAutoSyncSession = Boolean(
         stateSourceType !== "none" &&
-            persistContextEnabled &&
-            runForm.value.persistContextAutoSyncSession,
+        persistContextEnabled &&
+        runForm.value.persistContextAutoSyncSession,
     );
 
     loading.value.run = true;
@@ -9804,13 +9813,12 @@ async function startRecording() {
             ? normalizeIdValue(recordingForm.value.runtimeProfileId)
             : undefined;
     const persistContextEnabled = Boolean(
-        stateSourceType !== "none" &&
-            recordingForm.value.persistContextEnabled,
+        stateSourceType !== "none" && recordingForm.value.persistContextEnabled,
     );
     const persistContextAutoSyncSession = Boolean(
         stateSourceType !== "none" &&
-            persistContextEnabled &&
-            recordingForm.value.persistContextAutoSyncSession,
+        persistContextEnabled &&
+        recordingForm.value.persistContextAutoSyncSession,
     );
     const windowMaximize = Boolean(recordingForm.value.windowMaximize);
     const hasWindowWidthInput =
@@ -9821,13 +9829,17 @@ async function startRecording() {
         recordingForm.value.windowHeight !== undefined &&
         recordingForm.value.windowHeight !== null &&
         recordingForm.value.windowHeight !== "";
-    let windowWidth = normalizeOptionalPositiveInt(recordingForm.value.windowWidth);
+    let windowWidth = normalizeOptionalPositiveInt(
+        recordingForm.value.windowWidth,
+    );
     let windowHeight = normalizeOptionalPositiveInt(
         recordingForm.value.windowHeight,
     );
     if (!windowMaximize && (hasWindowWidthInput || hasWindowHeightInput)) {
         if (!windowWidth || !windowHeight) {
-            ElMessage.error("录制窗口宽高必须同时为正整数，或清空后使用默认尺寸");
+            ElMessage.error(
+                "录制窗口宽高必须同时为正整数，或清空后使用默认尺寸",
+            );
             return;
         }
     }
@@ -10126,7 +10138,8 @@ function openReplayDialog(recordingSource) {
                 runtimeSettings.cookie_profile_id,
         );
         const preferredStateSourceType = normalizeStateSourceType(
-            runtimeSettings.stateSourceType ?? runtimeSettings.state_source_type,
+            runtimeSettings.stateSourceType ??
+                runtimeSettings.state_source_type,
         );
         const inferredStateSourceType = resolveStateSourceTypeByIds(
             browserSessionId,
@@ -10205,8 +10218,8 @@ function submitReplay() {
     );
     const persistContextAutoSyncSession = Boolean(
         stateSourceType !== "none" &&
-            persistContextEnabled &&
-            replayForm.value.persistContextAutoSyncSession,
+        persistContextEnabled &&
+        replayForm.value.persistContextAutoSyncSession,
     );
     const runtimeOverrides = {
         locatorIndexMode: replayForm.value.immediateLocatorIndexMode
@@ -10372,6 +10385,9 @@ watch(
         if (normalized === "none") {
             runForm.value.persistContextEnabled = false;
             runForm.value.persistContextAutoSyncSession = false;
+        }else {
+            runForm.value.persistContextEnabled = true;
+            runForm.value.persistContextAutoSyncSession = true;
         }
     },
 );
@@ -10393,6 +10409,9 @@ watch(
         if (normalized === "none") {
             recordingForm.value.persistContextEnabled = false;
             recordingForm.value.persistContextAutoSyncSession = false;
+        }else {
+            recordingForm.value.persistContextEnabled = true;
+            recordingForm.value.persistContextAutoSyncSession = true;
         }
     },
 );
@@ -10414,6 +10433,9 @@ watch(
         if (normalized === "none") {
             replayForm.value.persistContextEnabled = false;
             replayForm.value.persistContextAutoSyncSession = false;
+        }else {
+          replayForm.value.persistContextEnabled = true;
+          replayForm.value.persistContextAutoSyncSession = true;
         }
     },
 );
@@ -10440,7 +10462,9 @@ watch(availableBrowserSessionsForRecording, (sessions) => {
 
 watch(availableBrowserSessionsForReplay, (sessions) => {
     if (replayForm.value.stateSourceType !== "session") return;
-    const selectedSessionId = normalizeIdValue(replayForm.value.browserSessionId);
+    const selectedSessionId = normalizeIdValue(
+        replayForm.value.browserSessionId,
+    );
     if (!selectedSessionId) return;
     if (!sessions.some((item) => isSameId(item.sessionId, selectedSessionId))) {
         replayForm.value.browserSessionId = undefined;
@@ -10469,7 +10493,9 @@ watch(availableRuntimeProfilesForRecording, (profiles) => {
 
 watch(availableRuntimeProfilesForReplay, (profiles) => {
     if (replayForm.value.stateSourceType !== "cookie") return;
-    const selectedProfileId = normalizeIdValue(replayForm.value.runtimeProfileId);
+    const selectedProfileId = normalizeIdValue(
+        replayForm.value.runtimeProfileId,
+    );
     if (!selectedProfileId) return;
     if (!profiles.some((item) => isSameId(item.profileId, selectedProfileId))) {
         replayForm.value.runtimeProfileId = undefined;
