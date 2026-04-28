@@ -50,8 +50,11 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "5.0.4",
     "@vue/compiler-sfc": "^3.4.27",
+    "eslint": "^10.2.1",
+    "eslint-plugin-vue": "^10.8.0",
     "json-editor-vue3": "^1.1.1",
     "less": "^4.2.0",
+    "prettier": "^3.8.3",
     "sass": "1.77.1",
     "unplugin-auto-import": "0.17.6",
     "unplugin-vue-setup-extend-plus": "1.0.1",
