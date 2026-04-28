@@ -39,6 +39,11 @@ from module_hrm.enums.enums import (
 )
 from module_hrm.exceptions import TestFailError
 from module_hrm.service.runner.case_data_handler import ConfigHandle
+from module_hrm.service.runner.run_error_service import (
+    append_error_event,
+    build_assertion_error_event,
+    build_exception_error_event,
+)
 from module_hrm.utils import case_run_utils, comparators
 from module_hrm.utils.case_run_utils import exec_js
 from module_hrm.utils.CaseRunLogHandle import CustomStackLevelLogger, RunLogCaptureHandler, TestLog
@@ -138,12 +143,13 @@ class CaseRunner:
                                         self.logger,
                                         self.handler,
                                         self.case_data,
-                                        self.run_info.global_vars,
-                                        self.case_data.config.variables,
-                                        None,
-                                        is_before=is_before,
-                                        data_type=DataType.case.value
-                                        )
+                                         self.run_info.global_vars,
+                                         self.case_data.config.variables,
+                                         None,
+                                         result_obj=self.case_data.config.result,
+                                         is_before=is_before,
+                                         data_type=DataType.case.value
+                                         )
 
     def __sys_case_hook(self, hook_name: str):
         """
@@ -160,6 +166,17 @@ class CaseRunner:
                 self.logger.error(f"{hook_name}处理失败：{e}")
                 self.logger.exception(e)
                 self.case_data.config.result.status = CaseRunStatus.failed.value
+                self.case_data.config.result.success = False
+                append_error_event(
+                    self.case_data.config.result,
+                    build_exception_error_event(
+                        error_source='case_hook',
+                        error_name=type(e).__name__,
+                        error_message=str(e),
+                        error_stack=traceback.format_exc(),
+                        error_subtype=hook_name,
+                    ),
+                )
                 raise TestFailError(f"{hook_name}处理失败") from e
 
     def __custom_case_hook(self, hooks_info: HooksModel, hook_name: str = "case_setup", is_before=True):
@@ -177,6 +194,17 @@ class CaseRunner:
             self.logger.error(f"{hook_name} error：{setupre}")
             self.logger.exception(setupre)
             self.case_data.config.result.status = CaseRunStatus.failed.value
+            self.case_data.config.result.success = False
+            append_error_event(
+                self.case_data.config.result,
+                build_exception_error_event(
+                    error_source='case_hook',
+                    error_name=type(setupre).__name__,
+                    error_message=str(setupre),
+                    error_stack=traceback.format_exc(),
+                    error_subtype=hook_name,
+                ),
+            )
 
     def __before_case(self):
         # 处理before_test, 执行开始测试之前的回调
@@ -281,6 +309,24 @@ class CaseRunner:
 
                     log_content += traceback.format_exc()
                     step_data.result.logs.error += log_content
+                current_error_events = getattr(step_data.result, 'error_events', []) or []
+                has_same_error = any(
+                    str(item.error_message if hasattr(item, 'error_message') else item.get('error_message', '')) == str(e)
+                    for item in current_error_events
+                )
+                if not has_same_error and not isinstance(e, AssertionError):
+                    append_error_event(
+                        step_data.result,
+                        build_exception_error_event(
+                            error_source='step_execute',
+                            error_name=type(e).__name__,
+                            error_message=str(e),
+                            step_id=step_data.step_id,
+                            step_name=step_data.name,
+                            error_stack=traceback.format_exc(),
+                            error_subtype='step_execute_exception',
+                        ),
+                    )
 
             finally:
                 new_steps.append(step_data)
@@ -393,12 +439,13 @@ class RequestRunner:
                                         self.logger,
                                         self.case_runner.handler,
                                         self.step_data,
-                                        self.case_runner.run_info.global_vars,
-                                        self.case_runner.case_data.config.variables,
-                                        self.step_data.result.logs,
-                                        is_before=is_before,
-                                        data_type="step"
-                                        )
+                                         self.case_runner.run_info.global_vars,
+                                         self.case_runner.case_data.config.variables,
+                                         self.step_data.result.logs,
+                                         result_obj=self.step_data.result,
+                                         is_before=is_before,
+                                         data_type="step"
+                                         )
 
     def sys_step_hook(self, hook_name: str, log_store: StepLogs, is_after_step: bool = False):
         """
@@ -415,6 +462,18 @@ class RequestRunner:
                     log_store.after_response += self.case_runner.handler.get_log()
                 else:
                     log_store.before_request += self.case_runner.handler.get_log()
+                append_error_event(
+                    self.step_data.result,
+                    build_exception_error_event(
+                        error_source='sys_step_hook',
+                        error_name=type(e).__name__,
+                        error_message=str(e),
+                        step_id=self.step_data.step_id,
+                        step_name=self.step_data.name,
+                        error_stack=traceback.format_exc(),
+                        error_subtype=hook_name,
+                    ),
+                )
                 raise TestFailError(f"{hook_name}函数执行失败: {e}") from e
 
     def custom_step_hook(self,
@@ -446,6 +505,19 @@ class RequestRunner:
 
             self.logger.error(f"回调{hook_name}执行失败: {setupre}")
             log_store.error += self.case_runner.handler.get_log()
+            if not isinstance(setupre, AssertionError):
+                append_error_event(
+                    self.step_data.result,
+                    build_exception_error_event(
+                        error_source='custom_step_hook',
+                        error_name=type(setupre).__name__,
+                        error_message=str(setupre),
+                        step_id=self.step_data.step_id,
+                        step_name=self.step_data.name,
+                        error_stack=traceback.format_exc(),
+                        error_subtype=hook_name,
+                    ),
+                )
 
             if is_after_step:
                 log_store.after_response += self.case_runner.handler.get_log()
@@ -789,6 +861,17 @@ class RequestRunner:
                 if not func:
                     self.logger.error(f'断言方法【{assert_key}】未找到方法')
                     self.set_step_failed()
+                    append_error_event(
+                        self.step_data.result,
+                        build_exception_error_event(
+                            error_source='validator',
+                            error_name='AssertionMethodNotFound',
+                            error_message=f'断言方法【{assert_key}】未找到方法',
+                            step_id=self.step_data.step_id,
+                            step_name=self.step_data.name,
+                            error_subtype='missing_assert_method',
+                        ),
+                    )
                     return self
                     # raise AttributeError(f'未找到方法：{vali["assert"]}')
                 check_value = ""
@@ -819,6 +902,22 @@ class RequestRunner:
 
                     if not isinstance(e, AssertionError):
                         self.logger.exception(e)
+                    append_error_event(
+                        self.step_data.result,
+                        build_assertion_error_event(
+                            error_source='validator',
+                            error_subtype=assert_key,
+                            assert_name=assert_key,
+                            check_key=check_key,
+                            expected_value=expect,
+                            actual_value=check_value,
+                            error_message=str(e),
+                            error_name=type(e).__name__,
+                            step_id=self.step_data.step_id,
+                            step_name=self.step_data.name,
+                            error_stack='' if isinstance(e, AssertionError) else traceback.format_exc(),
+                        ),
+                    )
 
                     continue
             self.logger.info(f"{self.step_data.name} 校验完成")
@@ -830,6 +929,18 @@ class RequestRunner:
             self.set_step_failed()
             self.logger.error(f'断言失败：error:{json.dumps({"args": str(e)}, indent=4, ensure_ascii=False)}')
             logger.exception(e)
+            append_error_event(
+                self.step_data.result,
+                build_exception_error_event(
+                    error_source='validator',
+                    error_name=type(e).__name__,
+                    error_message=str(e),
+                    step_id=self.step_data.step_id,
+                    step_name=self.step_data.name,
+                    error_stack=traceback.format_exc(),
+                    error_subtype='validator_exception',
+                ),
+            )
 
             error_info = self.case_runner.handler.get_log()
             self.step_data.result.logs.after_response += error_info

@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
+from module_hrm.entity.do.run_error_do import HrmRunError
 from module_hrm.entity.vo.run_detail_vo import HrmRunDetailModel, HrmRunListModel, RunDetailQueryModel
 from module_hrm.enums.enums import CaseRunStatus, RunTypeEnum
 from module_hrm.utils.util import format_duration
@@ -39,6 +40,7 @@ class RunDetailDao:
     @classmethod
     def delete(cls, db: Session, detail_ids: list):
         if detail_ids:
+            db.query(HrmRunError).filter(HrmRunError.detail_id.in_(detail_ids)).delete(synchronize_session=False)
             db.query(HrmRunDetail).filter(HrmRunDetail.detail_id.in_(detail_ids)).delete()
             db.commit()
 
@@ -59,14 +61,13 @@ class RunDetailDao:
     @classmethod
     async def create_bulk(cls, db: Session, details: list[HrmRunDetailModel]):
         """
-        批量创建报告
+        批量创建报告，由调用方统一控制提交时机，便于和错误事件同事务写入。
         """
 
         detail_dicts = [detail.model_dump(exclude_unset=True) for detail in details]
         # run_details = [HrmRunDetail(**detail_dict) for detail_dict in detail_dicts]
         stmt = insert(HrmRunDetail).values(detail_dicts)
         await run_in_threadpool(db.execute, stmt)
-        await run_in_threadpool(db.commit)
 
     @classmethod
     def _filter_handle(cls, query: Query[type[HrmRunDetail]], query_info: RunDetailQueryModel,

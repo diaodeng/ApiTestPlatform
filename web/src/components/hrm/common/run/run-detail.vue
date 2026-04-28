@@ -39,8 +39,11 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item>
+      <el-form-item v-if="false">
         <el-checkbox v-model="onlySelf">仅自己的数据</el-checkbox>
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" @click="openErrorSummaryDialog">错误统计</el-button>
       </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
@@ -125,6 +128,9 @@
                     :data-type="HrmDataTypeEnum.run_detail"
                     :title="'执行详情【'+caseDetailData.caseId + '>>' + caseDetailData.caseName +'】'"
     ></CaseEditDialog>
+    <ErrorSummaryDialog v-model:open-error-summary-dialog="showErrorSummaryDialog" :report-id="reportId" :run-id="runId">
+
+    </ErrorSummaryDialog>
   </div>
 </template>
 
@@ -139,6 +145,7 @@ import CaseEditDialog from "@/components/hrm/case/case-edit-dialog.vue"
 import {HrmDataTypeEnum, runDetailViewTypeEnum} from "@/components/hrm/enum.js";
 import DictTag from "@/components/DictTag/index.vue";
 import {initCaseFormData} from "@/components/hrm/data-template.js";
+import ErrorSummaryDialog from "@/components/hrm/common/run/run-error-report.vue";
 // import JsonEditorVue from "json-editor-vue3";
 
 
@@ -158,7 +165,8 @@ const projectOptions = ref([]);
 const open = ref(false);
 const loading = ref({
   page:false,
-  runDetail: false
+  runDetail: false,
+  errorRecords: false
 });
 const showSearch = ref(true);
 const ids = ref([]);
@@ -168,6 +176,7 @@ const total = ref(0);
 const onlySelf = ref(true);
 
 const showCaseEdit = ref(false);
+const showErrorSummaryDialog = ref(false);
 const caseDetailData = ref(JSON.parse(JSON.stringify(initCaseFormData)));
 
 
@@ -209,6 +218,10 @@ function getProjectSelect() {
   listProject({isPage: false}).then(response => {
     projectOptions.value = response.data;
   });
+}
+
+function openErrorSummaryDialog() {
+  showErrorSummaryDialog.value = true;
 }
 
 /** 搜索按钮操作 */
