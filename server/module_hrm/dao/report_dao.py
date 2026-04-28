@@ -5,6 +5,7 @@ from starlette.concurrency import run_in_threadpool
 
 from module_hrm.entity.do.report_do import HrmReport
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
+from module_hrm.entity.do.run_error_do import HrmRunError
 from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportListModel, ReportQueryModel
 from module_hrm.enums.enums import CaseRunStatus
 from module_admin.entity.vo.common_vo import DataScopeExpr
@@ -60,6 +61,7 @@ class ReportDao:
 
                 id_list = [i[0] for i in ids]
 
+                db.query(HrmRunError).filter(HrmRunError.detail_id.in_(id_list)).delete(synchronize_session=False)
                 db.query(HrmRunDetail).filter(HrmRunDetail.detail_id.in_(id_list)).delete(synchronize_session=False)
 
                 db.commit()  # 每批提交一次
