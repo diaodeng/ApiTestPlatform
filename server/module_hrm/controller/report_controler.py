@@ -12,10 +12,12 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.report_dao import ReportDao
+from module_hrm.dao.run_error_dao import RunErrorDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.report_do import HrmReport
 from module_hrm.entity.vo.report_vo import ReportDelModel, ReportQueryModel
 from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel
+from module_hrm.entity.vo.run_error_vo import RunErrorQueryModel
 from module_hrm.service.case_service import CurrentUserModel
 from module_hrm.service.report_service import ReportService
 from utils.page_util import PageResponseModel
@@ -49,6 +51,44 @@ async def report_detail(request: Request,
     query_obj = RunDetailQueryModel(**{"report_id": report_id})
 
     result = await RunDetailDao.list(query_db, query_obj)
+    return ResponseUtil.success(model_content=result)
+
+
+@reportController.get(
+    "/{report_id}/errorSummary",
+    dependencies=[Depends(CheckUserInterfaceAuth(['hrm:report:detail']))],
+)
+async def report_error_summary(
+    request: Request,
+    report_id: int,
+    only_self: bool = False,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    summary = await RunErrorDao.get_summary_by_report(
+        query_db,
+        report_id,
+        manager=current_user.user.user_id,
+        only_self=only_self,
+    )
+    return ResponseUtil.success(model_content=summary)
+
+
+@reportController.get(
+    "/{report_id}/errorRecords",
+    response_model=PageResponseModel,
+    dependencies=[Depends(CheckUserInterfaceAuth(['hrm:report:detail']))],
+)
+async def report_error_records(
+    request: Request,
+    report_id: int,
+    query_info: RunErrorQueryModel = Depends(RunErrorQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    query_info.report_id = report_id
+    # query_info.manager = current_user.user.user_id
+    result = await RunErrorDao.list(query_db, query_info)
     return ResponseUtil.success(model_content=result)
 
 

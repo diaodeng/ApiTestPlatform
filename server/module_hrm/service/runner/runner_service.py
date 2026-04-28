@@ -18,6 +18,7 @@ from module_hrm.dao.case_dao import CaseDao
 from module_hrm.dao.env_dao import EnvDao
 from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
+from module_hrm.dao.run_error_dao import RunErrorDao
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.do.suite_do import QtrSuite, QtrSuiteDetail
 from module_hrm.entity.vo.case_vo import CaseRunModel, ProjectDebugtalkInfoModel
@@ -35,6 +36,8 @@ from module_hrm.enums.enums import (
 from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkService
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler
 from module_hrm.service.runner.case_runner import TestRunner
+from module_hrm.service.runner.run_error_service import build_run_error_records, mark_case_run_failed
+from utils.snowflake import snowIdWorker
 from utils.log_util import logger
 from utils.message_util import TestResultPushHandler
 
@@ -43,7 +46,7 @@ if "WSL" in str(platform.platform()):
     multiprocessing.set_start_method("spawn")
 
 
-def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel | None:
+def build_run_detail_info(case_data, run_info) -> tuple[HrmRunDetailModel | None, list]:
     if case_data.case_id and isinstance(case_data.case_id, int):  # 没有ID的请求信息不记录
         # 保存前清空不必要的信息，减少数据存储
         case_data.config.variables = []
@@ -54,6 +57,7 @@ def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel | None:
             step.variables = []
 
         run_detail_obj = HrmRunDetailModel()
+        run_detail_obj.detail_id = snowIdWorker.get_id()
         run_detail_obj.manager = run_info.runner
         run_detail_obj.run_id = case_data.case_id
         run_detail_obj.report_id = run_info.report_id
@@ -67,14 +71,17 @@ def build_run_detail_info(case_data, run_info) -> HrmRunDetailModel | None:
         run_detail_obj.run_duration = case_data.config.result.duration
         run_detail_obj.run_detail = case_data.model_dump_json(by_alias=True)
         run_detail_obj.status = case_data.config.result.status
-        return run_detail_obj
-    return None
+        return run_detail_obj, build_run_error_records(case_data, run_info, run_detail_obj.detail_id, run_detail_obj.run_name)
+    return None, []
 
 
 async def save_run_detail(query_db, case_data, run_info):
-    run_detail_obj = build_run_detail_info(case_data, run_info)
+    run_detail_obj, run_error_objs = build_run_detail_info(case_data, run_info)
     if run_detail_obj:
         run_detail = RunDetailDao.create(query_db, run_detail_obj)
+        if run_error_objs:
+            await RunErrorDao.create_bulk(query_db, run_error_objs)
+            await run_in_threadpool(query_db.commit)
         return run_detail
 
 
@@ -235,6 +242,7 @@ async def _run_result_write_worker(
     result_queue: asyncio.Queue, worker_count, run_info, stats: dict, lock: asyncio.Lock
 ):
     buffer = []
+    error_buffer = []
     batch_size = 100
 
     finished_workers = 0
@@ -264,19 +272,25 @@ async def _run_result_write_worker(
             stats["failed"] += failed
             stats["total"] += 1
 
-        run_detail_obj = build_run_detail_info(data, run_info)
+        run_detail_obj, run_error_objs = build_run_detail_info(data, run_info)
         if run_detail_obj:
             buffer.append(run_detail_obj)
+            error_buffer.extend(run_error_objs)
 
         if len(buffer) >= batch_size:
             with SessionLocal() as db:
                 await RunDetailDao.create_bulk(db, buffer)
+                await RunErrorDao.create_bulk(db, error_buffer)
+                await run_in_threadpool(db.commit)
                 await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
             buffer = []
+            error_buffer = []
 
     if buffer:
         with SessionLocal() as db:
             await RunDetailDao.create_bulk(db, buffer)
+            await RunErrorDao.create_bulk(db, error_buffer)
+            await run_in_threadpool(db.commit)
             await ReportDao.update(db, run_info.report_id, stats["success"], stats["total"], CaseRunStatus.running)
 
 
@@ -297,9 +311,11 @@ async def _run_worker(
             res_list = await run_by_single(case_data, run_info, semaphore, debugtalk_info=debugtalk_info)
         except Exception as e:
             logger.warning(f"用例执行异常：{case_data}, 异常信息：{e}")
-            continue
+            mark_case_run_failed(case_data, e)
+            res_list = [case_data]
 
         if not res_list:
+            queue.task_done()
             continue
         for res_data in res_list:
             await result_queue.put(res_data)

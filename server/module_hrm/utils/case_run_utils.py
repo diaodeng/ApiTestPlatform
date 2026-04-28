@@ -10,8 +10,9 @@ import quickjs
 from jsonpath import jsonpath
 
 from module_hrm.entity.vo import case_vo_detail_for_run as caseVoForRun
-from module_hrm.entity.vo.case_vo_detail_for_handle import CustomHooksParams, HooksModel, StepLogs, TStep
+from module_hrm.entity.vo.case_vo_detail_for_handle import CustomHooksParams, HooksModel, Result, StepLogs, TStep
 from module_hrm.enums.enums import CodeTypeEnum, DataType
+from module_hrm.service.runner.run_error_service import build_assertion_error_event, build_exception_error_event
 from module_hrm.utils.CaseRunLogHandle import CustomStackLevelLogger
 from module_hrm.utils.common import dict2list, key_value_dict, update_or_extend_list
 from module_hrm.utils.sandbox_globals import SANDBOX_GLOBALS
@@ -206,12 +207,35 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomS
     执行自定义python脚本
     """
 
-    def assertC(condition, successMsg, errorMsg):
+    def assertC(
+        condition,
+        successMsg=None,
+        errorMsg=None,
+        expected=None,
+        actual=None,
+        field=None,
+        subtype='custom_script_assert',
+        message=None,
+    ):
         if condition:
             apt.logs.info.append(f"断言成功: {str(successMsg or '')} >> {condition}")
         else:
-            apt.logs.error.append(f"断言失败: {str(errorMsg or '')} >> {condition}")
+            final_message = str(message or errorMsg or successMsg or '')
+            apt.logs.error.append(f"断言失败: {final_message} >> {condition}")
             apt.failed = True
+            apt.error_events.append(
+                build_assertion_error_event(
+                    error_source='custom_python',
+                    error_subtype=subtype,
+                    assert_name='assertC',
+                    check_key=str(field or ''),
+                    expected_value=expected,
+                    actual_value=actual if actual is not None else condition,
+                    error_message=final_message,
+                    step_id=apt.data.step_id,
+                    step_name=apt.data.name,
+                )
+            )
 
     sandbox_globals = {
         "apt": apt,
@@ -267,6 +291,7 @@ def exec_hook_script(
     global_vars,
     case_vars,
     logs: StepLogs,
+    result_obj: Result | None = None,
     is_before=True,
     data_type=DataType.case.value,
 ):
@@ -277,6 +302,7 @@ def exec_hook_script(
     step_data_obj: CustomHooksParams = None
     script_source = hooks_info.code_info.code_content
     exception_str = ""
+    hook_exception = None
     try:
         if script_source:
             script_type = hooks_info.code_info.code_type
@@ -312,13 +338,14 @@ def exec_hook_script(
     except Exception as e:
         logger.exception(e)
         exception_str = "".join(traceback.format_exception(e))
+        hook_exception = e
         # raise TestFailError(f"{script_name}执行异常：{e}, 脚本: {script_source}") from e
     finally:
         if not script_source:
             return
         if isinstance(step_data_obj, dict):
             step_data_obj = CustomHooksParams(**step_data_obj)
-        if step_data_obj.logs:  # 处理回调中的日志
+        if step_data_obj and step_data_obj.logs:  # 处理回调中的日志
             for log in step_data_obj.logs.info:
                 logger.info(f"{script_name}日志： {log}")
 
@@ -339,9 +366,35 @@ def exec_hook_script(
                     logs.after_response += error_log
                 logs.error += error_log
 
-        if exception_str:
-            logs.error += f"{script_name}执行异常：{exception_str}"
-        if step_data_obj.failed:
+        if exception_str:  # 这里是脚本执行异常
+            if logs:
+                logs.error += f"{script_name}执行异常：{exception_str}"
+            if result_obj:
+                if isinstance(hook_exception, AssertionError):
+                    result_obj.error_events.append(
+                        build_assertion_error_event(
+                            error_source='hook_script',
+                            error_subtype='hook_script_assert',
+                            assert_name='AssertionError',
+                            error_message=str(hook_exception),
+                            error_stack=exception_str,
+                        )
+                    )
+                else:
+                    result_obj.error_events.append(
+                        build_exception_error_event(
+                            error_source='hook_script',
+                            error_name=type(hook_exception).__name__ if hook_exception else 'HookScriptError',
+                            error_message=str(hook_exception or script_name),
+                            error_stack=exception_str,
+                            error_subtype='hook_script_exception',
+                        )
+                    )
+        if step_data_obj and step_data_obj.failed:
+            if result_obj:
+                if step_data_obj.error_events:
+                    result_obj.error_events.extend(step_data_obj.error_events)
+
             raise AssertionError(f"{script_name}断言失败")
 
 

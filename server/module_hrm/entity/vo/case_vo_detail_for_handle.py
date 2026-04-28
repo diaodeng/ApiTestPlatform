@@ -18,6 +18,7 @@ from module_hrm.enums.enums import (
     ScopeEnum,
     TstepTypeEnum,
 )
+from module_hrm.entity.vo.run_error_vo import RunErrorEventModel
 from module_hrm.utils.common import dict2list
 
 Name = str
@@ -80,6 +81,7 @@ class Result(BaseModel):
     duration: float = 0
     response: ResponseData | str = ResponseData()  # text是用gzip压缩过的数据需要解压
     logs: StepLogs | str = StepLogs()  # text是用gzip压缩过的数据需要解压
+    error_events: List[RunErrorEventModel] = Field(default_factory=list)
 
 
 class MethodEnum(str, Enum):
@@ -418,3 +420,4 @@ class CustomHooksParams(BaseModel):
     case_variables: dict = Field(default_factory=lambda: {})
     logs: CustomHooksLogs = CustomHooksLogs()
     failed: bool = False
+    error_events: List[RunErrorEventModel] = Field(default_factory=list)
