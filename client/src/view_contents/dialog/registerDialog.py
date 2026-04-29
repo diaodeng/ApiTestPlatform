@@ -1,3 +1,7 @@
+import asyncio
+import flet as ft
+from pyparsing import actions
+
 from common.appState import userInfo
 from utils.common import write_json
 
@@ -61,3 +65,33 @@ class RegisterDialog(object):
         self.page.update()
         # self.page.add(self.ft.Text(f"注册陈功！用户名：{self.username.value}, 昵称：{self.nickname.value}"))
 
+
+class FeatureDialog(object):
+    def __init__(self, page, tile, content, actions: list[tuple[str, str|int|bool]], **kwargs):
+        self.page = page
+        self.tile = tile
+        self.content = content
+        self.actions = actions
+
+    async def show(self, *args, **kwargs):
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+
+        def action_handle(e, value):
+            dlg.open = False
+            self.page.update()
+            future.set_result(value)
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(self.tile),
+            modal=True,
+            content=ft.Text(self.content),
+            actions=[
+                ft.TextButton(name, on_click=lambda e: action_handle(e, value)) for name, value in self.actions
+            ]
+        )
+
+        self.page.open(dlg)
+        self.page.update()
+
+        return await future  # 等待点击
