@@ -1,24 +1,19 @@
-# modules/pressure/service/locust_service.py
-from module_pressure.engines.locust.master import locust_master
+from module_pressure.service.locust_process import LocustProcessController
 
 
 class LocustControlService:
+    """兼容旧代码的 Locust 控制服务入口。"""
 
-    def ensure_master(self):
-        locust_master.start_master()
+    def __init__(self):
+        self.controller = LocustProcessController()
 
-    def start(self, users: int, spawn_rate: int):
-        self.ensure_master()
-        locust_master.start_test(users, spawn_rate)
+    def status(self, port: int) -> dict:
+        """读取指定 Locust Web 端口的实时状态。"""
+        return self.controller.stats(port=port)
 
-    def stop(self):
-        locust_master.stop_test()
-
-    def force_stop(self):
-        locust_master.force_stop()
-
-    def status(self) -> dict:
-        return locust_master.status()
+    def stop(self, port: int) -> None:
+        """停止指定 Locust Web 端口对应的压测。"""
+        self.controller.stop_test(port=port)
 
 
 locust_service = LocustControlService()

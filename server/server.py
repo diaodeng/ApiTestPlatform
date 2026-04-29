@@ -12,13 +12,13 @@ from config.get_redis import RedisUtil
 from config.get_scheduler import sys_scheduler_util as SysSchedulerUtil
 from exceptions.handle import handle_exception
 from middlewares.handle import handle_middleware
+from module_admin.controller.api_key_controller import apiKeyController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.common_controller import commonController
 from module_admin.controller.config_controller import configController
 from module_admin.controller.dept_controller import deptController
 from module_admin.controller.dict_controller import dictController
-from module_admin.controller.api_key_controller import apiKeyController
 from module_admin.controller.job_controller import jobController
 from module_admin.controller.log_controller import logController
 from module_admin.controller.login_controller import loginController
@@ -54,6 +54,7 @@ from module_hrm.controller.test_controller import mockController
 from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
+from module_pressure.api.run_api import pressureController
 from module_qtr.controller.agent_controller import agentController, startup_handler
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
@@ -151,6 +152,7 @@ controller_list = [
     {'router': webCaseController, 'tags': ['HRM-Web测试管理']},
     {'router': desktopCaseAssetController, 'tags': ['HRM-桌面测试资源']},
     {'router': desktopCaseController, 'tags': ['HRM-桌面测试管理']},
+    {'router': pressureController, 'tags': ['性能测试']},
     # {'router': celeryController, 'tags': ['celery']},
 ]
 
