@@ -411,322 +411,6 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomS
             step_name = getattr(data, "case_name", "")
         return step_id, step_name
 
-    def _resolve_message(msg_factory, fallback_message: str = "") -> str:
-        if msg_factory is None:
-            return fallback_message
-        try:
-            return stringify_error_value(msg_factory())
-        except Exception as msg_error:
-            return f"{fallback_message} [message evaluate failed: {msg_error}]".strip()
-
-    def _append_structured_assert_event(
-        *,
-        error_subtype: str,
-        assert_name: str,
-        check_key: str,
-        expected_value=None,
-        actual_value=None,
-        error_message: str = "",
-    ):
-        step_id, step_name = _get_hook_context()
-        apt.error_events.append(
-            build_assertion_error_event(
-                error_source='custom_python',
-                error_subtype=error_subtype,
-                assert_name=assert_name,
-                check_key=check_key,
-                expected_value=expected_value,
-                actual_value=actual_value,
-                error_message=error_message,
-                step_id=step_id,
-                step_name=step_name,
-            )
-        )
-
-    def _raise_structured_assertion(
-        *,
-        error_subtype: str,
-        assert_name: str,
-        check_key: str,
-        expected_value=None,
-        actual_value=None,
-        error_message: str = "",
-    ):
-        apt.logs.error.append(f"断言失败: {error_message}")
-        apt.failed = True
-        _append_structured_assert_event(
-            error_subtype=error_subtype,
-            assert_name=assert_name,
-            check_key=check_key,
-            expected_value=expected_value,
-            actual_value=actual_value,
-            error_message=error_message,
-        )
-        raise AssertionError(error_message)
-
-    def _eval_compare_operator(operator_name: str, left_value, right_value) -> bool:
-        if operator_name == "Eq":
-            return left_value == right_value
-        if operator_name == "NotEq":
-            return left_value != right_value
-        if operator_name == "Gt":
-            return left_value > right_value
-        if operator_name == "Lt":
-            return left_value < right_value
-        if operator_name == "GtE":
-            return left_value >= right_value
-        if operator_name == "LtE":
-            return left_value <= right_value
-        if operator_name == "In":
-            return left_value in right_value
-        if operator_name == "NotIn":
-            return left_value not in right_value
-        if operator_name == "Is":
-            return left_value is right_value
-        if operator_name == "IsNot":
-            return left_value is not right_value
-        raise AssertionError(f"当前断言运算符不支持：{operator_name}")
-
-    def _build_assert_result(
-        passed: bool,
-        *,
-        source: str,
-        error_subtype: str,
-        check_key: str,
-        expected_value=None,
-        actual_value=None,
-        fallback_message: str = "",
-    ):
-        """
-        组装统一的断言分析结果，供 bool/not 递归分析与最终抛错复用。
-        """
-        return {
-            "passed": passed,
-            "source": source,
-            "error_subtype": error_subtype,
-            "check_key": check_key,
-            "expected_value": expected_value,
-            "actual_value": actual_value,
-            "fallback_message": fallback_message,
-        }
-
-    def _analyze_condition_value(condition_value, assert_source: str):
-        """
-        分析普通 truthy/falsey 条件断言。
-        """
-        return _build_assert_result(
-            bool(condition_value),
-            source=assert_source,
-            error_subtype='python_assert',
-            check_key=assert_source,
-            expected_value=True,
-            actual_value=condition_value,
-            fallback_message=f"assert {assert_source}",
-        )
-
-    def _analyze_compare_values(
-        left_value,
-        comparator_values,
-        operator_names,
-        left_source: str,
-        comparator_sources,
-        assert_source: str = "",
-    ):
-        """
-        分析 compare 表达式，保持链式比较的逐段失败定位。
-        """
-        current_left = left_value
-        current_left_source = left_source
-        failed_operator = ""
-        failed_right_value = None
-        failed_right_source = ""
-
-        for index, (operator_name, right_value) in enumerate(zip(operator_names, comparator_values)):
-            if _eval_compare_operator(operator_name, current_left, right_value):
-                current_left = right_value
-                current_left_source = comparator_sources[index]
-                continue
-            failed_operator = operator_name
-            failed_right_value = right_value
-            failed_right_source = comparator_sources[index]
-            break
-
-        if not failed_operator:
-            return _build_assert_result(
-                True,
-                source=assert_source or left_source,
-                error_subtype='python_assert',
-                check_key=assert_source or left_source,
-                expected_value=True,
-                actual_value=True,
-                fallback_message=f"assert {assert_source or left_source}",
-            )
-
-        subtype, operator_label = COMPARE_OPERATOR_LABELS.get(
-            getattr(ast, failed_operator, object),
-            ("python_compare", failed_operator),
-        )
-
-        if failed_operator in {"In", "NotIn"}:
-            check_key = failed_right_source
-            actual_value = failed_right_value
-            expected_value = current_left
-        else:
-            check_key = current_left_source
-            actual_value = current_left
-            expected_value = failed_right_value
-
-        return _build_assert_result(
-            False,
-            source=assert_source or left_source,
-            error_subtype=subtype,
-            check_key=check_key,
-            expected_value=expected_value,
-            actual_value=actual_value,
-            fallback_message=f"{check_key} {operator_label} {failed_right_source}",
-        )
-
-    def _analyze_assert_spec(spec):
-        """
-        递归分析 AST 断言规格，按 Python 短路语义返回最具体的失败子项。
-        """
-        kind = spec.get("kind")
-        source = spec.get("source", "")
-
-        if kind == "condition":
-            return _analyze_condition_value(spec["value_factory"](), source)
-
-        if kind == "compare":
-            return _analyze_compare_values(
-                spec["left_factory"](),
-                (factory() for factory in spec["comparator_factories"]),
-                spec["operator_names"],
-                spec["left_source"],
-                spec["comparator_sources"],
-                source,
-            )
-
-        if kind == "boolop":
-            op_name = spec.get("op_name")
-            last_failure = None
-            for child_spec in spec.get("children", []):
-                child_result = _analyze_assert_spec(child_spec)
-                if op_name == "And" and not child_result["passed"]:
-                    return child_result
-                if op_name == "Or" and child_result["passed"]:
-                    return _build_assert_result(
-                        True,
-                        source=source,
-                        error_subtype='python_assert',
-                        check_key=source,
-                        expected_value=True,
-                        actual_value=True,
-                        fallback_message=f"assert {source}",
-                    )
-                last_failure = child_result
-
-            if op_name == "And":
-                return _build_assert_result(
-                    True,
-                    source=source,
-                    error_subtype='python_assert',
-                    check_key=source,
-                    expected_value=True,
-                    actual_value=True,
-                    fallback_message=f"assert {source}",
-                )
-
-            if op_name == "Or" and last_failure is not None:
-                return last_failure
-
-            raise AssertionError(f"当前布尔断言运算符不支持：{op_name}")
-
-        if kind == "unary_not":
-            operand_result = _analyze_assert_spec(spec["operand"])
-            if not operand_result["passed"]:
-                return _build_assert_result(
-                    True,
-                    source=source,
-                    error_subtype='python_assert',
-                    check_key=source,
-                    expected_value=True,
-                    actual_value=True,
-                    fallback_message=f"assert {source}",
-                )
-            return _build_assert_result(
-                False,
-                source=source,
-                error_subtype='python_not_assert',
-                check_key=operand_result.get("check_key") or spec["operand"].get("source", source),
-                expected_value=False,
-                actual_value=operand_result.get("actual_value"),
-                fallback_message=f"not {spec['operand'].get('source', source)}",
-            )
-
-        raise AssertionError(f"当前断言表达式不支持：{kind}")
-
-    def _raise_from_assert_result(result, msg_factory=None, assert_source: str = ""):
-        """
-        把分析结果转换成统一日志与结构化错误事件。
-        """
-        if result["passed"]:
-            apt.logs.info.append(f"断言成功: {assert_source or result['source']}")
-            return
-        fallback_message = result.get("fallback_message") or f"assert {assert_source or result['source']}"
-        final_message = _resolve_message(msg_factory, fallback_message)
-        _raise_structured_assertion(
-            error_subtype=result["error_subtype"],
-            assert_name='assert',
-            check_key=result["check_key"],
-            expected_value=result.get("expected_value"),
-            actual_value=result.get("actual_value"),
-            error_message=final_message,
-        )
-
-    def __ast_assert_expression__(spec, msg_factory=None, assert_source: str = ""):
-        """
-        统一处理用户 assert 表达式，支持 compare、and/or、not 递归拆解。
-        """
-        _raise_from_assert_result(_analyze_assert_spec(spec), msg_factory, assert_source)
-
-    def __ast_assert_condition__(condition_value, assert_source: str, msg_factory=None):
-        _raise_from_assert_result(
-            _analyze_condition_value(condition_value, assert_source),
-            msg_factory,
-            assert_source,
-        )
-
-    def __ast_assert_compare__(
-        left_value,
-        comparator_values,
-        operator_names,
-        left_source: str,
-        comparator_sources,
-        msg_factory=None,
-        assert_source: str = "",
-    ):
-        _raise_from_assert_result(
-            _analyze_compare_values(
-                left_value,
-                comparator_values,
-                operator_names,
-                left_source,
-                comparator_sources,
-                assert_source,
-            ),
-            msg_factory,
-            assert_source,
-        )
-
-    def __ast_raise_assertion__(msg_factory=None, assert_source: str = "AssertionError"):
-        final_message = _resolve_message(msg_factory, assert_source)
-        _raise_structured_assertion(
-            error_subtype='python_assertion_error',
-            assert_name='AssertionError',
-            check_key=assert_source,
-            error_message=final_message,
-        )
-
     def assertC(
         condition,
         successMsg=None,
@@ -761,10 +445,10 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomS
         "apt": apt,
         "logger": logger,
         "assertC": assertC,
-        "__ast_assert_expression__": __ast_assert_expression__,
-        "__ast_assert_condition__": __ast_assert_condition__,
-        "__ast_assert_compare__": __ast_assert_compare__,
-        "__ast_raise_assertion__": __ast_raise_assertion__,
+        # "__ast_assert_expression__": __ast_assert_expression__,
+        # "__ast_assert_condition__": __ast_assert_condition__,
+        # "__ast_assert_compare__": __ast_assert_compare__,
+        # "__ast_raise_assertion__": __ast_raise_assertion__,
     }
 
     sandbox_globals.update(SANDBOX_GLOBALS)
@@ -773,8 +457,8 @@ def exec_python(python_code_source: str, apt: CustomHooksParams, logger: CustomS
         # global_namespace = globals()
         # local_namespace = locals()
         python_code_source = textwrap.dedent(python_code_source)
-        code_tree = _transform_python_assert_source(python_code_source)
-        code_obj = compile(code_tree, "<custom-hook>", "exec")
+        # code_tree = _transform_python_assert_source(python_code_source)
+        code_obj = compile(python_code_source, "<custom-python-hook>", "exec")
         exec(code_obj, sandbox_globals, None)
     except Exception:
         apt.failed = True
@@ -921,6 +605,340 @@ def exec_hook_script(
                     result_obj.error_events.extend(step_data_obj.error_events)
 
             raise AssertionError(f"{script_name}断言失败")
+
+
+class AssertASTHandle:
+    def __init__(self, hook_script, apt):
+        self.apt = apt
+
+    @classmethod
+    def _resolve_message(cls, msg_factory, fallback_message: str = "") -> str:
+        if msg_factory is None:
+            return fallback_message
+        try:
+            return stringify_error_value(msg_factory())
+        except Exception as msg_error:
+            return f"{fallback_message} [message evaluate failed: {msg_error}]".strip()
+
+    def _append_structured_assert_event(
+        self,
+        *,
+        error_subtype: str,
+        assert_name: str,
+        check_key: str,
+        expected_value=None,
+        actual_value=None,
+        error_message: str = "",
+    ):
+        step_id, step_name = self._get_hook_context()
+        self.apt.error_events.append(
+            build_assertion_error_event(
+                error_source='custom_python',
+                error_subtype=error_subtype,
+                assert_name=assert_name,
+                check_key=check_key,
+                expected_value=expected_value,
+                actual_value=actual_value,
+                error_message=error_message,
+                step_id=step_id,
+                step_name=step_name,
+            )
+        )
+
+    def _raise_structured_assertion(
+        self,
+        *,
+        error_subtype: str,
+        assert_name: str,
+        check_key: str,
+        expected_value=None,
+        actual_value=None,
+        error_message: str = "",
+    ):
+        self.apt.logs.error.append(f"断言失败: {error_message}")
+        self.apt.failed = True
+        self._append_structured_assert_event(
+            error_subtype=error_subtype,
+            assert_name=assert_name,
+            check_key=check_key,
+            expected_value=expected_value,
+            actual_value=actual_value,
+            error_message=error_message,
+        )
+        raise AssertionError(error_message)
+
+    @classmethod
+    def _eval_compare_operator(cls, operator_name: str, left_value, right_value) -> bool:
+        if operator_name == "Eq":
+            return left_value == right_value
+        if operator_name == "NotEq":
+            return left_value != right_value
+        if operator_name == "Gt":
+            return left_value > right_value
+        if operator_name == "Lt":
+            return left_value < right_value
+        if operator_name == "GtE":
+            return left_value >= right_value
+        if operator_name == "LtE":
+            return left_value <= right_value
+        if operator_name == "In":
+            return left_value in right_value
+        if operator_name == "NotIn":
+            return left_value not in right_value
+        if operator_name == "Is":
+            return left_value is right_value
+        if operator_name == "IsNot":
+            return left_value is not right_value
+        raise AssertionError(f"当前断言运算符不支持：{operator_name}")
+
+    @classmethod
+    def _build_assert_result(
+        cls,
+        passed: bool,
+        *,
+        source: str,
+        error_subtype: str,
+        check_key: str,
+        expected_value=None,
+        actual_value=None,
+        fallback_message: str = "",
+    ):
+        """
+        组装统一的断言分析结果，供 bool/not 递归分析与最终抛错复用。
+        """
+        return {
+            "passed": passed,
+            "source": source,
+            "error_subtype": error_subtype,
+            "check_key": check_key,
+            "expected_value": expected_value,
+            "actual_value": actual_value,
+            "fallback_message": fallback_message,
+        }
+
+    @classmethod
+    def _analyze_condition_value(cls, condition_value, assert_source: str):
+        """
+        分析普通 truthy/falsey 条件断言。
+        """
+        return cls._build_assert_result(
+            bool(condition_value),
+            source=assert_source,
+            error_subtype='python_assert',
+            check_key=assert_source,
+            expected_value=True,
+            actual_value=condition_value,
+            fallback_message=f"assert {assert_source}",
+        )
+
+    @classmethod
+    def _analyze_compare_values(
+        cls,
+        left_value,
+        comparator_values,
+        operator_names,
+        left_source: str,
+        comparator_sources,
+        assert_source: str = "",
+    ):
+        """
+        分析 compare 表达式，保持链式比较的逐段失败定位。
+        """
+        current_left = left_value
+        current_left_source = left_source
+        failed_operator = ""
+        failed_right_value = None
+        failed_right_source = ""
+
+        for index, (operator_name, right_value) in enumerate(zip(operator_names, comparator_values)):
+            if cls._eval_compare_operator(operator_name, current_left, right_value):
+                current_left = right_value
+                current_left_source = comparator_sources[index]
+                continue
+            failed_operator = operator_name
+            failed_right_value = right_value
+            failed_right_source = comparator_sources[index]
+            break
+
+        if not failed_operator:
+            return cls._build_assert_result(
+                True,
+                source=assert_source or left_source,
+                error_subtype='python_assert',
+                check_key=assert_source or left_source,
+                expected_value=True,
+                actual_value=True,
+                fallback_message=f"assert {assert_source or left_source}",
+            )
+
+        subtype, operator_label = COMPARE_OPERATOR_LABELS.get(
+            getattr(ast, failed_operator, object),
+            ("python_compare", failed_operator),
+        )
+
+        if failed_operator in {"In", "NotIn"}:
+            check_key = failed_right_source
+            actual_value = failed_right_value
+            expected_value = current_left
+        else:
+            check_key = current_left_source
+            actual_value = current_left
+            expected_value = failed_right_value
+
+        return cls._build_assert_result(
+            False,
+            source=assert_source or left_source,
+            error_subtype=subtype,
+            check_key=check_key,
+            expected_value=expected_value,
+            actual_value=actual_value,
+            fallback_message=f"{check_key} {operator_label} {failed_right_source}",
+        )
+
+    @classmethod
+    def _analyze_assert_spec(cls, spec):
+        """
+        递归分析 AST 断言规格，按 Python 短路语义返回最具体的失败子项。
+        """
+        kind = spec.get("kind")
+        source = spec.get("source", "")
+
+        if kind == "condition":
+            return cls._analyze_condition_value(spec["value_factory"](), source)
+
+        if kind == "compare":
+            return cls._analyze_compare_values(
+                spec["left_factory"](),
+                (factory() for factory in spec["comparator_factories"]),
+                spec["operator_names"],
+                spec["left_source"],
+                spec["comparator_sources"],
+                source,
+            )
+
+        if kind == "boolop":
+            op_name = spec.get("op_name")
+            last_failure = None
+            for child_spec in spec.get("children", []):
+                child_result = cls._analyze_assert_spec(child_spec)
+                if op_name == "And" and not child_result["passed"]:
+                    return child_result
+                if op_name == "Or" and child_result["passed"]:
+                    return cls._build_assert_result(
+                        True,
+                        source=source,
+                        error_subtype='python_assert',
+                        check_key=source,
+                        expected_value=True,
+                        actual_value=True,
+                        fallback_message=f"assert {source}",
+                    )
+                last_failure = child_result
+
+            if op_name == "And":
+                return cls._build_assert_result(
+                    True,
+                    source=source,
+                    error_subtype='python_assert',
+                    check_key=source,
+                    expected_value=True,
+                    actual_value=True,
+                    fallback_message=f"assert {source}",
+                )
+
+            if op_name == "Or" and last_failure is not None:
+                return last_failure
+
+            raise AssertionError(f"当前布尔断言运算符不支持：{op_name}")
+
+        if kind == "unary_not":
+            operand_result = cls._analyze_assert_spec(spec["operand"])
+            if not operand_result["passed"]:
+                return cls._build_assert_result(
+                    True,
+                    source=source,
+                    error_subtype='python_assert',
+                    check_key=source,
+                    expected_value=True,
+                    actual_value=True,
+                    fallback_message=f"assert {source}",
+                )
+            return cls._build_assert_result(
+                False,
+                source=source,
+                error_subtype='python_not_assert',
+                check_key=operand_result.get("check_key") or spec["operand"].get("source", source),
+                expected_value=False,
+                actual_value=operand_result.get("actual_value"),
+                fallback_message=f"not {spec['operand'].get('source', source)}",
+            )
+
+        raise AssertionError(f"当前断言表达式不支持：{kind}")
+
+    def _raise_from_assert_result(self, result, msg_factory=None, assert_source: str = ""):
+        """
+        把分析结果转换成统一日志与结构化错误事件。
+        """
+        if result["passed"]:
+            self.apt.logs.info.append(f"断言成功: {assert_source or result['source']}")
+            return
+        fallback_message = result.get("fallback_message") or f"assert {assert_source or result['source']}"
+        final_message = self._resolve_message(msg_factory, fallback_message)
+        self._raise_structured_assertion(
+            error_subtype=result["error_subtype"],
+            assert_name='assert',
+            check_key=result["check_key"],
+            expected_value=result.get("expected_value"),
+            actual_value=result.get("actual_value"),
+            error_message=final_message,
+        )
+
+    @classmethod
+    def __ast_assert_expression__(cls, spec, msg_factory=None, assert_source: str = ""):
+        """
+        统一处理用户 assert 表达式，支持 compare、and/or、not 递归拆解。
+        """
+        cls._raise_from_assert_result(cls._analyze_assert_spec(spec), msg_factory, assert_source)
+
+    @classmethod
+    def __ast_assert_condition__(cls, condition_value, assert_source: str, msg_factory=None):
+        cls._raise_from_assert_result(
+            cls._analyze_condition_value(condition_value, assert_source),
+            msg_factory,
+            assert_source,
+        )
+
+    def __ast_assert_compare__(
+        self,
+        left_value,
+        comparator_values,
+        operator_names,
+        left_source: str,
+        comparator_sources,
+        msg_factory=None,
+        assert_source: str = "",
+    ):
+        self._raise_from_assert_result(
+            self._analyze_compare_values(
+                left_value,
+                comparator_values,
+                operator_names,
+                left_source,
+                comparator_sources,
+                assert_source,
+            ),
+            msg_factory,
+            assert_source,
+        )
+
+    def __ast_raise_assertion__(self, msg_factory=None, assert_source: str = "AssertionError"):
+        final_message = self._resolve_message(msg_factory, assert_source)
+        self._raise_structured_assertion(
+            error_subtype='python_assertion_error',
+            assert_name='AssertionError',
+            check_key=assert_source,
+            error_message=final_message,
+        )
 
 
 if __name__ == '__main__':
