@@ -3,6 +3,7 @@ import json
 import traceback
 from collections import defaultdict
 from enum import Enum
+from typing import Awaitable, Callable
 
 import httpx
 import websockets
@@ -10,6 +11,7 @@ from httpx import HTTPError
 from loguru import logger
 from websockets.exceptions import InvalidStatus
 
+from server.web_test_service import WebTestService
 from utils.common import compress_dict_to_str, decompress_str_to_dict
 
 # websocket发送数据分片大小
@@ -25,7 +27,12 @@ class RequestByInput:
         pass
 
     @classmethod
-    async def forward_by_rules(cls, message_data_dict: dict, http_client: httpx.AsyncClient) -> (dict, bool):
+    async def forward_by_rules(
+        cls,
+        message_data_dict: dict,
+        http_client: httpx.AsyncClient,
+        event_sender: Callable[[dict], Awaitable[None]] | None = None,
+    ) -> (dict, bool):
         """根据入参转发请求"""
         logger.info(f"请求数据：{json.dumps(message_data_dict, ensure_ascii=True)}")
         client_status = True
@@ -61,6 +68,15 @@ class RequestByInput:
                 logger.error(e.args)
                 res_data['Error'] = "".join(traceback.format_exception(e))
                 # client_status = False
+            res_data['request_id'] = request_id
+            res_data['request_type'] = request_type
+            return res_data, client_status
+        elif request_type == RequestTypeEnum.webui.value:
+            try:
+                res_data = await WebTestService.handle_request(message_data_dict, event_sender)
+            except Exception as e:
+                logger.exception(e)
+                res_data['Error'] = "".join(traceback.format_exception(e))
             res_data['request_id'] = request_id
             res_data['request_type'] = request_type
             return res_data, client_status
@@ -154,9 +170,8 @@ class RequestByInput:
 
 class WebSocketClient:
     def __init__(self, uri, before_request_call = None, after_request_call = None):
-        # self.uri = uri
-        self.uri = "ws://localhost:9099/qtr/agent/ws/1111111"
-        self.agent_code = self.uri.split('/')[-1]
+        self.uri = ""
+        self.agent_code = ""
         # self.on_message = on_message
         # 客户端websocket是否已启动
         self.retry_num = 0
@@ -171,11 +186,17 @@ class WebSocketClient:
 
         self.before_request_call = before_request_call
         self.after_request_call = after_request_call
+        self._set_uri(uri)
+
+    def _set_uri(self, uri):
+        self.uri = uri or ""
+        self.agent_code = self.uri.rstrip("/").split("/")[-1] if self.uri else ""
 
     async def connect(self, uri=None, retry_num=None, retry=None, interval_time=None,is_retry=False):
         if not is_retry:
             self.retry_num = 0
-        self.uri = uri or self.uri
+        if uri is not None:
+            self._set_uri(uri)
         self.max_retry_num = retry_num if retry_num is not None else self.max_retry_num
         self.retry = retry if retry is not None else self.retry
         self.interval_time = interval_time if interval_time is not None else self.interval_time
@@ -231,7 +252,7 @@ class WebSocketClient:
         request_data = decompress_str_to_dict(request_all_chunk.pop(request_id))
         if self.before_request_call:
             self.before_request_call(request_data)
-        response, _ = await RequestByInput.forward_by_rules(request_data, http_client)
+        response, _ = await RequestByInput.forward_by_rules(request_data, http_client, self.send_message)
         if self.after_request_call:
             self.after_request_call(response)
         response = compress_dict_to_str(response)
@@ -258,7 +279,7 @@ class WebSocketClient:
         重新建立连接
         :param interval_time: 时间间隔,默认5秒
         """
-        if self.retry and self.max_retry_num > self.retry_num:
+        if self.running and self.retry and self.max_retry_num > self.retry_num:
             self.retry_num += 1
             self.update_status(False)
             await asyncio.sleep(self.interval_time)
@@ -274,8 +295,10 @@ class WebSocketClient:
 
     async def send_close(self):
         """主动断开连接"""
+        self.running = False
         try:
-            await self.websocket.close(code=1000, reason="关闭连接")
+            if self.websocket is not None:
+                await self.websocket.close(code=1000, reason="关闭连接")
         except websockets.exceptions.ConnectionClosedOK:
             logger.info('连接已断开')
 

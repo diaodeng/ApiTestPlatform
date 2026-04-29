@@ -1,33 +1,53 @@
-from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import APIRouter, Depends
+from fastapi.requests import Request
+from sqlalchemy.orm import Session
+
 from config.get_db import get_db
+from module_admin.annotation.log_annotation import log_decorator
+from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
+from module_admin.entity.vo.log_vo import (
+    DeleteLoginLogModel,
+    DeleteOperLogModel,
+    LoginLogPageQueryModel,
+    OperLogPageQueryModel,
+    QueryLoggerModel,
+    SetLoggerLevelModel,
+    UnlockUser,
+)
+from module_admin.service.log_service import LoggerService, LoginLogService, OperationLogService
 from module_admin.service.login_service import LoginService
-from module_admin.service.log_service import *
-from utils.response_util import *
+from utils.common_util import bytes2file_response
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
-from utils.common_util import bytes2file_response
-from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.annotation.log_annotation import log_decorator
+from utils.response_util import ResponseUtil
+
+logController = APIRouter(prefix="/monitor", dependencies=[Depends(LoginService.get_current_user)])
 
 
-logController = APIRouter(prefix='/monitor', dependencies=[Depends(LoginService.get_current_user)])
-
-
-@logController.get("/operlog/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('monitor:operlog:list'))])
-async def get_system_operation_log_list(request: Request, operation_log_page_query: OperLogPageQueryModel = Depends(OperLogPageQueryModel.as_query), query_db: Session = Depends(get_db)):
+@logController.get(
+    "/operlog/list",
+    response_model=PageResponseModel,
+    dependencies=[Depends(CheckUserInterfaceAuth("monitor:operlog:list"))],
+)
+async def get_system_operation_log_list(
+    request: Request,
+    operation_log_page_query: OperLogPageQueryModel = Depends(OperLogPageQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
     try:
         # 获取分页数据
-        operation_log_page_query_result = OperationLogService.get_operation_log_list_services(query_db, operation_log_page_query, is_page=True)
-        logger.info('获取成功')
+        operation_log_page_query_result = OperationLogService.get_operation_log_list_services(
+            query_db, operation_log_page_query, is_page=True
+        )
+        logger.info("获取成功")
         return ResponseUtil.success(model_content=operation_log_page_query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.delete("/operlog/clean", dependencies=[Depends(CheckUserInterfaceAuth('monitor:operlog:remove'))])
-@log_decorator(title='操作日志管理', business_type=9)
+@logController.delete("/operlog/clean", dependencies=[Depends(CheckUserInterfaceAuth("monitor:operlog:remove"))])
+@log_decorator(title="操作日志管理", business_type=9)
 async def clear_system_operation_log(request: Request, query_db: Session = Depends(get_db)):
     try:
         clear_operation_log_result = OperationLogService.clear_operation_log_services(query_db)
@@ -42,8 +62,8 @@ async def clear_system_operation_log(request: Request, query_db: Session = Depen
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.delete("/operlog/{oper_ids}", dependencies=[Depends(CheckUserInterfaceAuth('monitor:operlog:remove'))])
-@log_decorator(title='操作日志管理', business_type=3)
+@logController.delete("/operlog/{oper_ids}", dependencies=[Depends(CheckUserInterfaceAuth("monitor:operlog:remove"))])
+@log_decorator(title="操作日志管理", business_type=3)
 async def delete_system_operation_log(request: Request, oper_ids: str, query_db: Session = Depends(get_db)):
     try:
         delete_operation_log = DeleteOperLogModel(operIds=oper_ids)
@@ -59,34 +79,52 @@ async def delete_system_operation_log(request: Request, oper_ids: str, query_db:
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.post("/operlog/export", dependencies=[Depends(CheckUserInterfaceAuth('monitor:operlog:export'))])
-@log_decorator(title='操作日志管理', business_type=5)
-async def export_system_operation_log_list(request: Request, operation_log_page_query: OperLogPageQueryModel = Depends(OperLogPageQueryModel.as_form), query_db: Session = Depends(get_db)):
+@logController.post("/operlog/export", dependencies=[Depends(CheckUserInterfaceAuth("monitor:operlog:export"))])
+@log_decorator(title="操作日志管理", business_type=5)
+async def export_system_operation_log_list(
+    request: Request,
+    operation_log_page_query: OperLogPageQueryModel = Depends(OperLogPageQueryModel.as_form),
+    query_db: Session = Depends(get_db),
+):
     try:
         # 获取全量数据
-        operation_log_query_result = OperationLogService.get_operation_log_list_services(query_db, operation_log_page_query, is_page=False)
-        operation_log_export_result = await OperationLogService.export_operation_log_list_services(request, operation_log_query_result)
-        logger.info('导出成功')
+        operation_log_query_result = OperationLogService.get_operation_log_list_services(
+            query_db, operation_log_page_query, is_page=False
+        )
+        operation_log_export_result = await OperationLogService.export_operation_log_list_services(
+            request, operation_log_query_result
+        )
+        logger.info("导出成功")
         return ResponseUtil.streaming(data=bytes2file_response(operation_log_export_result))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.get("/logininfor/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('monitor:logininfor:list'))])
-async def get_system_login_log_list(request: Request, login_log_page_query: LoginLogPageQueryModel = Depends(LoginLogPageQueryModel.as_query), query_db: Session = Depends(get_db)):
+@logController.get(
+    "/logininfor/list",
+    response_model=PageResponseModel,
+    dependencies=[Depends(CheckUserInterfaceAuth("monitor:logininfor:list"))],
+)
+async def get_system_login_log_list(
+    request: Request,
+    login_log_page_query: LoginLogPageQueryModel = Depends(LoginLogPageQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
     try:
         # 获取分页数据
-        login_log_page_query_result = LoginLogService.get_login_log_list_services(query_db, login_log_page_query, is_page=True)
-        logger.info('获取成功')
+        login_log_page_query_result = LoginLogService.get_login_log_list_services(
+            query_db, login_log_page_query, is_page=True
+        )
+        logger.info("获取成功")
         return ResponseUtil.success(model_content=login_log_page_query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.delete("/logininfor/clean", dependencies=[Depends(CheckUserInterfaceAuth('monitor:logininfor:remove'))])
-@log_decorator(title='登录日志管理', business_type=9)
+@logController.delete("/logininfor/clean", dependencies=[Depends(CheckUserInterfaceAuth("monitor:logininfor:remove"))])
+@log_decorator(title="登录日志管理", business_type=9)
 async def clear_system_login_log(request: Request, query_db: Session = Depends(get_db)):
     try:
         clear_login_log_result = LoginLogService.clear_login_log_services(query_db)
@@ -101,8 +139,10 @@ async def clear_system_login_log(request: Request, query_db: Session = Depends(g
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.delete("/logininfor/{info_ids}", dependencies=[Depends(CheckUserInterfaceAuth('monitor:logininfor:remove'))])
-@log_decorator(title='登录日志管理', business_type=3)
+@logController.delete(
+    "/logininfor/{info_ids}", dependencies=[Depends(CheckUserInterfaceAuth("monitor:logininfor:remove"))]
+)
+@log_decorator(title="登录日志管理", business_type=3)
 async def delete_system_login_log(request: Request, info_ids: str, query_db: Session = Depends(get_db)):
     try:
         delete_login_log = DeleteLoginLogModel(infoIds=info_ids)
@@ -118,8 +158,10 @@ async def delete_system_login_log(request: Request, info_ids: str, query_db: Ses
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.get("/logininfor/unlock/{user_name}", dependencies=[Depends(CheckUserInterfaceAuth('monitor:logininfor:unlock'))])
-@log_decorator(title='登录日志管理', business_type=0)
+@logController.get(
+    "/logininfor/unlock/{user_name}", dependencies=[Depends(CheckUserInterfaceAuth("monitor:logininfor:unlock"))]
+)
+@log_decorator(title="登录日志管理", business_type=0)
 async def clear_system_login_log(request: Request, user_name: str, query_db: Session = Depends(get_db)):
     try:
         unlock_user = UnlockUser(userName=user_name)
@@ -135,40 +177,56 @@ async def clear_system_login_log(request: Request, user_name: str, query_db: Ses
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.post("/logininfor/export", dependencies=[Depends(CheckUserInterfaceAuth('monitor:logininfor:export'))])
-@log_decorator(title='登录日志管理', business_type=5)
-async def export_system_login_log_list(request: Request, login_log_page_query: LoginLogPageQueryModel = Depends(LoginLogPageQueryModel.as_form), query_db: Session = Depends(get_db)):
+@logController.post("/logininfor/export", dependencies=[Depends(CheckUserInterfaceAuth("monitor:logininfor:export"))])
+@log_decorator(title="登录日志管理", business_type=5)
+async def export_system_login_log_list(
+    request: Request,
+    login_log_page_query: LoginLogPageQueryModel = Depends(LoginLogPageQueryModel.as_form),
+    query_db: Session = Depends(get_db),
+):
     try:
         # 获取全量数据
-        login_log_query_result = LoginLogService.get_login_log_list_services(query_db, login_log_page_query, is_page=False)
+        login_log_query_result = LoginLogService.get_login_log_list_services(
+            query_db, login_log_page_query, is_page=False
+        )
         login_log_export_result = LoginLogService.export_login_log_list_services(login_log_query_result)
-        logger.info('导出成功')
+        logger.info("导出成功")
         return ResponseUtil.streaming(data=bytes2file_response(login_log_export_result))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.get("/logger/list", response_model=PageResponseModel, dependencies=[Depends(CheckUserInterfaceAuth('monitor:logger:list'))])
-@log_decorator(title='查询logger', business_type=0)
-async def get_log_list(request: Request, log_page_query: QueryLoggerModel = Depends(QueryLoggerModel.as_query), query_db: Session = Depends(get_db)):
+@logController.get(
+    "/logger/list",
+    response_model=PageResponseModel,
+    dependencies=[Depends(CheckUserInterfaceAuth("monitor:logger:list"))],
+)
+@log_decorator(title="查询logger", business_type=0)
+async def get_log_list(
+    request: Request,
+    log_page_query: QueryLoggerModel = Depends(QueryLoggerModel.as_query),
+    query_db: Session = Depends(get_db),
+):
     try:
         # 获取分页数据
         log_page_query_result = LoggerService.get_all_logger_services(log_page_query)
-        logger.info('获取成功')
+        logger.info("获取成功")
         return ResponseUtil.success(dict_content=log_page_query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
 
-@logController.post("/logger/level", dependencies=[Depends(CheckUserInterfaceAuth('monitor:logger:level'))])
-@log_decorator(title='修改日志级别', business_type=1)
+@logController.post("/logger/level", dependencies=[Depends(CheckUserInterfaceAuth("monitor:logger:level"))])
+@log_decorator(title="修改日志级别", business_type=1)
 async def set_logger_level(request: Request, logger_level: SetLoggerLevelModel, query_db: Session = Depends(get_db)):
     try:
         LoggerService.set_logger_level_services(logger_level.logger_name, logger_level.level)
-        logger.info(f'设置日志级别成功，logger_name：{logger_level.logger_name}，level：{logger_level.level}')
-        return ResponseUtil.success(msg=f'设置日志级别成功，logger_name：{logger_level.logger_name}，level：{logger_level.level}')
+        logger.info(f"设置日志级别成功，logger_name：{logger_level.logger_name}，level：{logger_level.level}")
+        return ResponseUtil.success(
+            msg=f"设置日志级别成功，logger_name：{logger_level.logger_name}，level：{logger_level.level}"
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

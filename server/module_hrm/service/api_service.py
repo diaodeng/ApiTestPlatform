@@ -1,10 +1,7 @@
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
 
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
-
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.entity.do.api_do import ApiInfo
 from module_hrm.entity.vo.api_vo import ApiPageQueryModel
 from module_hrm.enums.enums import DataType
@@ -16,7 +13,9 @@ def api_dir_tree(request):
     """
     name = request.GET.get("name")
 
-    def node(api_obj, all_children_data: list = []):
+    def node(api_obj, all_children_data: list = None):
+        if all_children_data is None:
+            all_children_data = []
         children_data = []
         for index, child in enumerate(all_children_data):
             if child.get("parent_id", None) == api_obj.id:
@@ -34,7 +33,9 @@ def api_dir_tree(request):
             node_data["children"] = children_data or []
         return node_data
 
-    def data_handle(dirs_obj, nodes: list = []):
+    def data_handle(dirs_obj, nodes: list = None):
+        if nodes is None:
+            nodes = []
         all_dir = dirs_obj
         for child in all_dir:
             child_node = node(child)
@@ -52,7 +53,7 @@ def api_dir_tree(request):
     return all_tree_data
 
 
-def api_tree(db: Session, query_info: ApiPageQueryModel, data_scope_sql:str='true'):
+def api_tree(db: Session, query_info: ApiPageQueryModel, data_scope_sql:DataScopeExpr):
     """
     这个实现从根目录开始
     """
@@ -106,13 +107,13 @@ def api_tree(db: Session, query_info: ApiPageQueryModel, data_scope_sql:str='tru
                 data_handle(node_data, childrens, new_not_root_nodes_data)
 
     root_node = {"children": []}
-    root_nodes = db.query(ApiInfo).filter(ApiInfo.parent_id == None, eval(data_scope_sql))
+    root_nodes = db.query(ApiInfo).filter(ApiInfo.parent_id == None, data_scope_sql)
     if query_info.only_self:
         root_nodes = root_nodes.filter(ApiInfo.manager == query_info.manager)
     root_nodes = root_nodes.order_by(desc(ApiInfo.create_time)).all()
     root_nodes = [node_handle(root_node) for root_node in root_nodes]
 
-    not_root_nodes_obj = db.query(ApiInfo).filter(ApiInfo.parent_id != None, eval(data_scope_sql))
+    not_root_nodes_obj = db.query(ApiInfo).filter(ApiInfo.parent_id != None, data_scope_sql)
     if query_info.only_self:
         not_root_nodes_obj = not_root_nodes_obj.filter(ApiInfo.manager == query_info.manager)
     not_root_nodes_obj = not_root_nodes_obj.order_by(desc(ApiInfo.create_time)).all()
@@ -127,9 +128,11 @@ def api_tree_from_children(query_db: Session, user_id=None):
     这个实现从api反向向上
     """
 
-    def node(api_obj, all_children_data: list = []):
+    def node(api_obj, all_children_data: list = None):
+        if all_children_data is None:
+            all_children_data = []
         children_data = []
-        for index, child in enumerate(all_children_data):
+        for _index, child in enumerate(all_children_data):
             if child.get("parent_id", None) == api_obj.id:
                 children_data.append(child)
                 # all_children_data.pop(index)
@@ -148,7 +151,9 @@ def api_tree_from_children(query_db: Session, user_id=None):
             node_data["children"] = children_data or []
         return node_data
 
-    def data_handle(apis_obj, all_data: list, all_children_data: list = []):
+    def data_handle(apis_obj, all_data: list, all_children_data: list = None):
+        if all_children_data is None:
+            all_children_data = []
         all_interface = apis_obj.filter(parent_id__isnull=True).all()
         # all_data.extend([node(api, all_children_data) for api in all_interface])
         for api in all_interface:

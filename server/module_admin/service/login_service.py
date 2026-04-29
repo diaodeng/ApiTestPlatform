@@ -1,22 +1,25 @@
 import random
 import uuid
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
 from typing import Optional, Union
 
-from fastapi import Depends
-from fastapi import Request, Form
+from fastapi import Depends, Form, Header, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from config.env import AppConfig, JwtConfig, RedisInitKeyConfig
 from config.get_db import get_db
-from exceptions.exception import LoginException, AuthException
+from exceptions.exception import AuthException, LoginException
+from module_admin.service.api_key_service import ApiKeyService
+from module_admin.dao.dept_dao import DeptDao
 from module_admin.dao.login_dao import login_by_account
+from module_admin.dao.post_dao import PostDao
+from module_admin.dao.role_dao import RoleDao
 from module_admin.dao.user_dao import UserDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from module_admin.entity.vo.login_vo import UserLogin, UserRegister, SmsCode
-from module_admin.entity.vo.user_vo import TokenData, CurrentUserModel, UserInfoModel, AddUserModel, ResetUserModel
+from module_admin.entity.vo.login_vo import SmsCode, UserLogin, UserRegister
+from module_admin.entity.vo.user_vo import AddUserModel, CurrentUserModel, ResetUserModel, TokenData, UserInfoModel
 from module_admin.service.user_service import UserService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -24,6 +27,15 @@ from utils.message_util import message_service
 from utils.pwd_util import PwdUtil
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+
+def get_authorization_header(authorization: Optional[str] = Header(default=None, alias="Authorization")):
+    """
+    提取请求头中的Authorization信息
+    :param authorization: 请求头中的Authorization原始值
+    :return: Authorization原始值，不存在时返回None
+    """
+    return authorization
 
 
 class CustomOAuth2PasswordRequestForm(OAuth2PasswordRequestForm):
@@ -54,6 +66,148 @@ class LoginService:
     """
     登录模块服务层
     """
+    REGISTER_DEFAULT_DEPT_ID_KEY = "sys.account.registerDefaultDeptId"
+    REGISTER_DEFAULT_ROLE_IDS_KEY = "sys.account.registerDefaultRoleIds"
+    REGISTER_DEFAULT_POST_IDS_KEY = "sys.account.registerDefaultPostIds"
+
+    @classmethod
+    async def __get_sys_config_value(cls, request: Request, config_key: str) -> Optional[str]:
+        """
+        获取系统参数缓存值
+        :param request: Request对象
+        :param config_key: 参数键名
+        :return: 参数值字符串，不存在时返回None
+        """
+        config_value = await request.app.state.redis.get(
+            f"{RedisInitKeyConfig.SYS_CONFIG.get('key')}:{config_key}"
+        )
+        if config_value is None:
+            return None
+        if isinstance(config_value, bytes):
+            return config_value.decode("utf-8")
+        return str(config_value)
+
+    @classmethod
+    def __parse_positive_int(cls, raw_value: Optional[str], config_key: str) -> Optional[int]:
+        """
+        解析正整数参数值
+        :param raw_value: 参数原始值
+        :param config_key: 参数键名
+        :return: 正整数结果，解析失败返回None
+        """
+        if raw_value is None:
+            return None
+        value = raw_value.strip()
+        if not value:
+            return None
+        if not value.isdigit():
+            logger.warning(f"注册默认配置无效，{config_key} 不是正整数：{raw_value}")
+            return None
+        number = int(value)
+        if number <= 0:
+            logger.warning(f"注册默认配置无效，{config_key} 必须大于0：{raw_value}")
+            return None
+        return number
+
+    @classmethod
+    def __parse_positive_int_list(cls, raw_value: Optional[str], config_key: str) -> list[int]:
+        """
+        解析逗号分隔的正整数列表参数值
+        :param raw_value: 参数原始值
+        :param config_key: 参数键名
+        :return: 去重后的正整数列表
+        """
+        if raw_value is None:
+            return []
+        value = raw_value.replace("，", ",").strip()
+        if not value:
+            return []
+        parsed_ids = []
+        parsed_id_set = set()
+        for item in value.split(","):
+            current_item = item.strip()
+            if not current_item:
+                continue
+            if not current_item.isdigit() or int(current_item) <= 0:
+                logger.warning(f"注册默认配置无效，{config_key} 包含非法ID：{current_item}")
+                continue
+            current_id = int(current_item)
+            if current_id in parsed_id_set:
+                continue
+            parsed_ids.append(current_id)
+            parsed_id_set.add(current_id)
+
+        return parsed_ids
+
+    @classmethod
+    def __get_valid_default_dept_id(cls, query_db: Session, dept_id: Optional[int]) -> Optional[int]:
+        """
+        校验默认部门配置是否有效
+        :param query_db: orm对象
+        :param dept_id: 默认部门id
+        :return: 有效部门id，无效返回None
+        """
+        if not dept_id:
+            return None
+        if DeptDao.get_dept_by_id(query_db, dept_id):
+            return dept_id
+        logger.warning(f"注册默认配置无效，部门不存在或不可用：dept_id={dept_id}")
+        return None
+
+    @classmethod
+    def __filter_valid_default_role_ids(cls, query_db: Session, role_ids: list[int]) -> list[int]:
+        """
+        过滤有效的默认角色id列表
+        :param query_db: orm对象
+        :param role_ids: 默认角色id列表
+        :return: 有效角色id列表
+        """
+        valid_role_ids = []
+        for role_id in role_ids:
+            if RoleDao.get_role_by_id(query_db, role_id):
+                valid_role_ids.append(role_id)
+            else:
+                logger.warning(f"注册默认配置无效，角色不存在或不可用：role_id={role_id}")
+
+        return valid_role_ids
+
+    @classmethod
+    def __filter_valid_default_post_ids(cls, query_db: Session, post_ids: list[int]) -> list[int]:
+        """
+        过滤有效的默认岗位id列表
+        :param query_db: orm对象
+        :param post_ids: 默认岗位id列表
+        :return: 有效岗位id列表
+        """
+        valid_post_ids = []
+        for post_id in post_ids:
+            if PostDao.get_post_by_id(query_db, post_id):
+                valid_post_ids.append(post_id)
+            else:
+                logger.warning(f"注册默认配置无效，岗位不存在或不可用：post_id={post_id}")
+
+        return valid_post_ids
+
+    @classmethod
+    async def __get_register_default_assignments(cls, request: Request, query_db: Session) -> dict:
+        """
+        获取注册默认部门、角色、岗位配置
+        :param request: Request对象
+        :param query_db: orm对象
+        :return: 默认配置字典（dept_id、role_ids、post_ids）
+        """
+        default_dept_value = await cls.__get_sys_config_value(request, cls.REGISTER_DEFAULT_DEPT_ID_KEY)
+        default_role_ids_value = await cls.__get_sys_config_value(request, cls.REGISTER_DEFAULT_ROLE_IDS_KEY)
+        default_post_ids_value = await cls.__get_sys_config_value(request, cls.REGISTER_DEFAULT_POST_IDS_KEY)
+        parsed_dept_id = cls.__parse_positive_int(default_dept_value, cls.REGISTER_DEFAULT_DEPT_ID_KEY)
+        parsed_role_ids = cls.__parse_positive_int_list(default_role_ids_value, cls.REGISTER_DEFAULT_ROLE_IDS_KEY)
+        parsed_post_ids = cls.__parse_positive_int_list(default_post_ids_value, cls.REGISTER_DEFAULT_POST_IDS_KEY)
+
+        return {
+            "dept_id": cls.__get_valid_default_dept_id(query_db, parsed_dept_id),
+            "role_ids": cls.__filter_valid_default_role_ids(query_db, parsed_role_ids),
+            "post_ids": cls.__filter_valid_default_post_ids(query_db, parsed_post_ids),
+        }
 
     @classmethod
     async def authenticate_user(cls, request: Request, query_db: Session, login_user: UserLogin):
@@ -163,22 +317,79 @@ class LoginService:
         return encoded_jwt
 
     @classmethod
-    async def get_current_user(cls, request: Request = Request, token: str = Depends(oauth2_scheme),
-                               query_db: Session = Depends(get_db)):
+    def __get_request_ip(cls, request: Request) -> str | None:
         """
-        根据token获取当前用户信息
+        获取当前请求的客户端IP
         :param request: Request对象
-        :param token: 用户token
-        :param query_db: orm对象
-        :return: 当前用户信息对象
-        :raise: 令牌异常AuthException
+        :return: 客户端IP字符串，不存在时返回None
         """
-        # if token[:6] != 'Bearer':
-        #     logger.warning("用户token不合法")
-        #     raise AuthException(data="", message="用户token不合法")
+        forward_ip = request.headers.get("X-Forwarded-For")
+        if forward_ip:
+            return forward_ip.split(",")[0].strip()
+        if request.client:
+            return request.client.host
+        return None
+
+    @classmethod
+    def __resolve_user_permissions(cls, query_user: dict) -> list[str]:
+        """
+        根据数据库查询结果计算登录账号原始权限列表
+        :param query_user: 用户查询结果字典
+        :return: 当前登录账号原始权限列表
+        """
+        role_id_list = [item.role_id for item in query_user.get("user_role_info")]
+        if 1 in role_id_list:
+            return ["*:*:*"]
+        return [row.perms for row in query_user.get("user_menu_info") if row.perms]
+
+    @classmethod
+    def __build_current_user_model(
+        cls,
+        query_user: dict,
+        permissions: list[str],
+        auth_type: str = "user",
+        api_key_id: int | None = None,
+        api_key_name: str | None = None,
+    ) -> CurrentUserModel:
+        """
+        根据用户查询结果和权限信息构造当前用户模型
+        :param query_user: 用户查询结果字典
+        :param permissions: 当前请求最终生效的权限列表
+        :param auth_type: 当前鉴权类型，user表示账号登录，api_key表示API Key登录
+        :param api_key_id: 可选，当前API Key主键
+        :param api_key_name: 可选，当前API Key名称
+        :return: 当前用户模型对象
+        """
+        post_ids = ",".join([str(row.post_id) for row in query_user.get("user_post_info")])
+        role_ids = ",".join([str(row.role_id) for row in query_user.get("user_role_info")])
+        roles = [row.role_key for row in query_user.get("user_role_info")]
+
+        return CurrentUserModel(
+            permissions=permissions,
+            roles=roles,
+            user=UserInfoModel(
+                **CamelCaseUtil.transform_result(query_user.get("user_basic_info")),
+                postIds=post_ids,
+                roleIds=role_ids,
+                dept=CamelCaseUtil.transform_result(query_user.get("user_dept_info")),
+                role=CamelCaseUtil.transform_result(query_user.get("user_role_info")),
+            ),
+            authType=auth_type,
+            apiKeyId=api_key_id,
+            apiKeyName=api_key_name,
+        )
+
+    @classmethod
+    async def __get_current_user_by_jwt(cls, request: Request, token: str, query_db: Session) -> CurrentUserModel:
+        """
+        根据JWT令牌获取当前用户信息
+        :param request: Request对象
+        :param token: JWT令牌明文
+        :param query_db: orm对象
+        :return: 当前用户模型对象
+        :raise AuthException: 当JWT令牌不合法或已失效时抛出
+        """
         try:
-            if token.startswith('Bearer'):
-                token = token.split(' ')[1]
             payload = jwt.decode(token, JwtConfig.jwt_secret_key, algorithms=[JwtConfig.jwt_algorithm])
             user_id: str = payload.get("user_id")
             session_id: str = payload.get("session_id")
@@ -189,52 +400,126 @@ class LoginService:
         except JWTError:
             logger.warning("用户token已失效，请重新登录")
             raise AuthException(data="", message="用户token已失效，请重新登录")
+
         query_user = UserDao.get_user_by_id(query_db, user_id=token_data.user_id)
-        if query_user.get('user_basic_info') is None:
+        if query_user.get("user_basic_info") is None:
             logger.warning("用户token不合法")
             raise AuthException(data="", message="用户token不合法")
+
         if AppConfig.app_same_time_login:
-            redis_token = await request.app.state.redis.get(
-                f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}")
+            redis_token = await request.app.state.redis.get(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}")
         else:
-            # 此方法可实现同一账号同一时间只能登录一次
             redis_token = await request.app.state.redis.get(
-                f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{query_user.get('user_basic_info').user_id}")
-        if token == redis_token:
-            if AppConfig.app_same_time_login:
-                await request.app.state.redis.set(f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}",
-                                                  redis_token,
-                                                  ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes))
-            else:
-                await request.app.state.redis.set(
-                    f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{query_user.get('user_basic_info').user_id}",
-                    redis_token,
-                    ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes))
-
-            role_id_list = [item.role_id for item in query_user.get('user_role_info')]
-            if 1 in role_id_list:
-                permissions = ['*:*:*']
-            else:
-                permissions = [row.perms for row in query_user.get('user_menu_info')]
-            post_ids = ','.join([str(row.post_id) for row in query_user.get('user_post_info')])
-            role_ids = ','.join([str(row.role_id) for row in query_user.get('user_role_info')])
-            roles = [row.role_key for row in query_user.get('user_role_info')]
-
-            current_user = CurrentUserModel(
-                permissions=permissions,
-                roles=roles,
-                user=UserInfoModel(
-                    **CamelCaseUtil.transform_result(query_user.get('user_basic_info')),
-                    postIds=post_ids,
-                    roleIds=role_ids,
-                    dept=CamelCaseUtil.transform_result(query_user.get('user_dept_info')),
-                    role=CamelCaseUtil.transform_result(query_user.get('user_role_info'))
-                )
+                f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{query_user.get('user_basic_info').user_id}"
             )
-            return current_user
-        else:
+
+        if token != redis_token:
             logger.warning("用户token已失效，请重新登录")
             raise AuthException(data="", message="用户token已失效，请重新登录")
+
+        if AppConfig.app_same_time_login:
+            await request.app.state.redis.set(
+                f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{session_id}",
+                redis_token,
+                ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes),
+            )
+        else:
+            await request.app.state.redis.set(
+                f"{RedisInitKeyConfig.ACCESS_TOKEN.get('key')}:{query_user.get('user_basic_info').user_id}",
+                redis_token,
+                ex=timedelta(minutes=JwtConfig.jwt_redis_expire_minutes),
+            )
+
+        return cls.__build_current_user_model(
+            query_user=query_user,
+            permissions=cls.__resolve_user_permissions(query_user),
+            auth_type="user",
+        )
+
+    @classmethod
+    async def __get_current_user_by_api_key(cls, request: Request, api_key: str, query_db: Session) -> CurrentUserModel:
+        """
+        根据API Key获取当前用户信息
+        :param request: Request对象
+        :param api_key: API Key明文
+        :param query_db: orm对象
+        :return: 当前用户模型对象
+        :raise AuthException: 当API Key不合法、已过期或所属用户失效时抛出
+        """
+        api_key_info = ApiKeyService.authenticate_api_key_services(
+            query_db=query_db,
+            api_key=api_key,
+            request_ip=cls.__get_request_ip(request),
+        )
+        query_user = UserDao.get_user_by_id(query_db, user_id=api_key_info.user_id)
+        if query_user.get("user_basic_info") is None:
+            logger.warning("API Key所属用户不存在或已停用")
+            raise AuthException(data="", message="API Key所属用户不存在或已停用")
+
+        user_permissions = cls.__resolve_user_permissions(query_user)
+        api_key_permissions = ApiKeyService.parse_permission_codes(api_key_info.permission_codes)
+        effective_permissions = ApiKeyService.get_effective_permission_codes(user_permissions, api_key_permissions)
+
+        return cls.__build_current_user_model(
+            query_user=query_user,
+            permissions=effective_permissions,
+            auth_type="api_key",
+            api_key_id=api_key_info.api_key_id,
+            api_key_name=api_key_info.key_name,
+        )
+
+    @classmethod
+    def __resolve_auth_credential(cls, request: Request, token: str | None) -> tuple[str, str]:
+        """
+        解析当前请求使用的鉴权方式及凭证值
+        :param request: Request对象
+        :param token: Authorization请求头原始值
+        :return: (鉴权类型, 凭证值) 元组，鉴权类型取值为jwt或api_key
+        :raise AuthException: 当请求头中未携带任何可用凭证时抛出
+        """
+        raw_authorization = (token or "").strip()
+        if not raw_authorization:
+            x_api_key = (request.headers.get("X-API-Key") or "").strip()
+            if x_api_key:
+                return "api_key", x_api_key
+            logger.warning("未提供认证信息")
+            raise AuthException(data="", message="未提供认证信息")
+
+        scheme, separator, credential = raw_authorization.partition(" ")
+        if separator:
+            normalized_scheme = scheme.lower()
+            normalized_credential = credential.strip()
+            if not normalized_credential:
+                logger.warning("认证信息不合法")
+                raise AuthException(data="", message="认证信息不合法")
+            if normalized_scheme == "bearer":
+                return "jwt", normalized_credential
+            if normalized_scheme in {"apikey", "api-key"}:
+                return "api_key", normalized_credential
+
+        if raw_authorization.count(".") == 2:
+            return "jwt", raw_authorization
+        return "api_key", raw_authorization
+
+    @classmethod
+    async def get_current_user(
+        cls,
+        request: Request,
+        token: Optional[str] = Depends(get_authorization_header),
+        query_db: Session = Depends(get_db),
+    ):
+        """
+        根据token获取当前用户信息
+        :param request: Request对象
+        :param token: 用户token
+        :param query_db: orm对象
+        :return: 当前用户信息对象
+        :raise: 令牌异常AuthException
+        """
+        auth_type, credential = cls.__resolve_auth_credential(request, token)
+        if auth_type == "jwt":
+            return await cls.__get_current_user_by_jwt(request, credential, query_db)
+        return await cls.__get_current_user_by_api_key(request, credential, query_db)
 
     @classmethod
     async def get_current_user_routers(cls, user_id: int, query_db: Session):
@@ -325,17 +610,21 @@ class LoginService:
                     elif user_register.code != str(captcha_value):
                         logger.warning("验证码错误")
                         return CrudResponseModel(is_success=False, message='验证码错误')
+                default_assignments = await cls.__get_register_default_assignments(request, query_db)
                 add_user = AddUserModel(
                     userName=user_register.username,
                     nickName=user_register.username,
-                    password=PwdUtil.get_password_hash(user_register.password)
+                    password=PwdUtil.get_password_hash(user_register.password),
+                    deptId=default_assignments.get('dept_id'),
+                    roleIds=default_assignments.get('role_ids'),
+                    postIds=default_assignments.get('post_ids')
                 )
                 result = UserService.add_user_services(query_db, add_user)
                 return result
             else:
-                result = dict(is_success=False, message='注册程序已关闭，禁止注册')
+                result = {"is_success": False, "message": '注册程序已关闭，禁止注册'}
         else:
-            result = dict(is_success=False, message='两次输入的密码不一致')
+            result = {"is_success": False, "message": '两次输入的密码不一致'}
 
         return CrudResponseModel(**result)
 
@@ -351,7 +640,7 @@ class LoginService:
         redis_sms_result = await request.app.state.redis.get(
             f"{RedisInitKeyConfig.SMS_CODE.get('key')}:{user.session_id}")
         if redis_sms_result:
-            return SmsCode(**dict(is_success=False, sms_code='', session_id='', message='短信验证码仍在有效期内'))
+            return SmsCode(**{"is_success": False, "sms_code": '', "session_id": '', "message": '短信验证码仍在有效期内'})
         is_user = UserDao.get_user_by_name(query_db, user.user_name)
         if is_user:
             sms_code = str(random.randint(100000, 999999))
@@ -361,9 +650,9 @@ class LoginService:
             # 此处模拟调用短信服务
             message_service(sms_code)
 
-            return SmsCode(**dict(is_success=True, sms_code=sms_code, session_id=session_id, message='获取成功'))
+            return SmsCode(**{"is_success": True, "sms_code": sms_code, "session_id": session_id, "message": '获取成功'})
 
-        return SmsCode(**dict(is_success=False, sms_code='', session_id='', message='用户不存在'))
+        return SmsCode(**{"is_success": False, "sms_code": '', "session_id": '', "message": '用户不存在'})
 
     @classmethod
     async def forget_user_services(cls, request: Request, query_db: Session, forget_user: ResetUserModel):
@@ -382,10 +671,10 @@ class LoginService:
             edit_result = UserService.reset_user_services(query_db, forget_user)
             result = edit_result.dict()
         elif not redis_sms_result:
-            result = dict(is_success=False, message='短信验证码已过期')
+            result = {"is_success": False, "message": '短信验证码已过期'}
         else:
             await request.app.state.redis.delete(f"{RedisInitKeyConfig.SMS_CODE.get('key')}:{forget_user.session_id}")
-            result = dict(is_success=False, message='短信验证码不正确')
+            result = {"is_success": False, "message": '短信验证码不正确'}
 
         return CrudResponseModel(**result)
 

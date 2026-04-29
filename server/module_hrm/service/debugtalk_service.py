@@ -1,5 +1,4 @@
 import importlib.util
-import importlib.util
 import sys
 from datetime import datetime
 
@@ -7,15 +6,16 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.dao.debugtalk_dao import DebugTalkDao
 from module_hrm.entity.do.case_do import HrmCase
 from module_hrm.entity.do.debugtalk_do import HrmDebugTalk
 from module_hrm.entity.vo.case_vo import CaseRunModel, ProjectDebugtalkInfoModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.entity.vo.debugtalk_vo import DebugTalkQueryModel, DeleteDebugTalkModel, DebugTalkModel
+from module_hrm.entity.vo.debugtalk_vo import DebugTalkModel, DebugTalkQueryModel, DeleteDebugTalkModel
 from module_hrm.exceptions import DebugtalkError
 from module_hrm.utils import debugtalk_common
-from module_hrm.utils.util import get_func_map, get_func_doc_map
+from module_hrm.utils.util import get_func_doc_map, get_func_map
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -28,7 +28,10 @@ class DebugTalkService:
     """
 
     @classmethod
-    def get_debugtalk_list_services(cls, query_db: Session, page_object: DebugTalkQueryModel, data_scope_sql: str):
+    def get_debugtalk_list_services(cls,
+                                    query_db: Session,
+                                    page_object: DebugTalkQueryModel,
+                                    data_scope_sql: DataScopeExpr):
         """
         获取debugtalk列表信息service
         :param query_db: orm对象
@@ -63,7 +66,7 @@ class DebugTalkService:
             page_object.debugtalk_id = snowIdWorker.get_id()
             DebugTalkDao.add_debugtalk_dao(query_db, page_object)
             query_db.commit()
-            result = dict(is_success=True, message='新增成功')
+            result = {'is_success': True, 'message': '新增成功'}
         except Exception as e:
             query_db.rollback()
             raise e
@@ -84,12 +87,12 @@ class DebugTalkService:
             try:
                 DebugTalkDao.edit_debugtalk_dao(query_db, edit_debugtalk)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='DebugTalk不存在')
+            result = {'is_success': False, 'message': 'DebugTalk不存在'}
 
         return CrudResponseModel(**result)
 
@@ -105,16 +108,16 @@ class DebugTalkService:
             project_id_list = page_object.project_ids.split(',')
             try:
                 for project_id in project_id_list:
-                    DebugTalkDao.delete_debugtalk_dao(query_db, DebugTalkModel(projectId=project_id,
-                                                                               updateTime=page_object.update_time,
-                                                                               updateBy=page_object.update_by))
+                    DebugTalkDao.delete_debugtalk_dao(query_db, DebugTalkModel(project_id=project_id,
+                                                                               update_time=page_object.update_time,
+                                                                               update_by=page_object.update_by))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入DebugTalkid为空')
+            result = {'is_success': False, 'message': '传入DebugTalkid为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -122,7 +125,7 @@ class DebugTalkService:
         """
         获取DebugTalk详细信息service
         :param query_db: orm对象
-        :param debugtalk_id: DebugTalkid / project_id
+        :param id: int
         :return: DebugTalkid对应的信息
         """
         debugtalk = DebugTalkDao.get_debugtalk_detail_by_id(query_db, id=id)
@@ -147,7 +150,9 @@ class DebugTalkService:
 
         common_debugtalk = await cls.commondebugtalk_source(query_db=query_db)
 
-        project_debugtalk = await cls.project_debugtalk_source(query_db=query_db, project_id=project_id, case_id=case_id)
+        project_debugtalk = await cls.project_debugtalk_source(query_db=query_db,
+                                                               project_id=project_id,
+                                                               case_id=case_id)
 
         return common_debugtalk, project_debugtalk
 
@@ -176,8 +181,11 @@ class DebugTalkService:
         return project_debugtalk
 
     @classmethod
-    async def project_debugtalk_map(cls, query_db: Session, project_id: int = None, case_id: int = None,
-                              run_info: CaseRunModel = None) -> ProjectDebugtalkInfoModel:
+    async def project_debugtalk_map(cls,
+                                    query_db: Session,
+                                    project_id: int = None,
+                                    case_id: int = None,
+                                    run_info: CaseRunModel = None) -> ProjectDebugtalkInfoModel:
         project_debugtalk_set = run_info.project_debugtalk_set.get(project_id, None)
         if project_debugtalk_set:
             return project_debugtalk_set
@@ -185,21 +193,28 @@ class DebugTalkService:
             try:
                 common_debugtalk_source = await cls.commondebugtalk_source(query_db)
                 project_debugtalk_source = await cls.project_debugtalk_source(query_db, project_id, case_id)
-                debugtalk_obj = DebugTalkHandler(project_debugtalk_source, common_debugtalk_source,
-                                                 project_id or case_id)
+                debugtalk_obj = DebugTalkHandler(project_debugtalk_source,
+                                                 common_debugtalk_source,
+                                                 project_id or case_id,
+                                                 run_info=run_info
+                                                 )
                 pdm = ProjectDebugtalkInfoModel()
-                pdm.func_map = debugtalk_obj.func_map(run_info.runner)
+                pdm.func_map = debugtalk_obj.func_map()
                 pdm.module_instance = debugtalk_obj.mudule_instances
                 pdm.module_names = debugtalk_obj.module_names
                 run_info.project_debugtalk_set[project_id] = pdm
                 return pdm
             except Exception as e:
                 logger.error(f"debugtalk加载异常:{e}")
-                raise DebugtalkError(f"debugtalk加载异常:{e}")
+                raise DebugtalkError(f"debugtalk加载异常:{e}") from e
 
 
 class DebugTalkHandler:
-    def __init__(self, debugtalk_source: str, common_debugtalk_source: str = None, project_id: int = ""):
+    def __init__(self,
+                 debugtalk_source: str,
+                 common_debugtalk_source: str = None,
+                 project_id: int = "",
+                 run_info: CaseRunModel = None):
         """
         :param debugtalk_source:
         :param common_debugtalk_source:
@@ -209,12 +224,17 @@ class DebugTalkHandler:
         self.project_id: int = project_id
         self.module_names = []
         self.mudule_instances = []
+        self.run_info: CaseRunModel = run_info
 
     def source(self):
         return self.debugtalks_data
 
-    def _import_debugtalk(self, debugtalk_source, user=None):
-        module_name = f'Debugtalk_{user or ""}_{self.project_id}_{int(datetime.now().timestamp() * 100000)}'
+    def _import_debugtalk(self, debugtalk_source):
+        user = self.run_info.runner if self.run_info else ""
+        if self.run_info:
+            module_name = f'Debugtalk_{user}_{self.project_id}_{self.run_info.run_id}'
+        else:
+            module_name = f'Debugtalk_{user}_{self.project_id}_{int(datetime.now().timestamp() * 100000)}'
         self.module_names.append(module_name)
         logger.info(f"开始载入模块 {module_name}")
         # 创建模块规范对象
@@ -228,19 +248,19 @@ class DebugTalkHandler:
         if debugtalk_source is None:
             debugtalk_source = ""
         exec(debugtalk_source, module.__dict__)
-        setattr(module, "logger", logger)
+        setattr(module, "logger", logger)  # noqa: B010
 
         # 将模块对象添加到 sys.modules 中，以便后续导入
         sys.modules[module_name] = module
         return module
 
-    def func_map(self, user=None) -> dict:
+    def func_map(self) -> dict:
         default_debugtalk = get_func_map(debugtalk_common)
 
-        module = self._import_debugtalk(self.common_debugtalk_source, user)
+        module = self._import_debugtalk(self.common_debugtalk_source)
         common_debugtalk = get_func_map(module)
 
-        project_debugtalk_module = self._import_debugtalk(self.debugtalks_data, user)
+        project_debugtalk_module = self._import_debugtalk(self.debugtalks_data)
         project_debugtalk = get_func_map(project_debugtalk_module)
 
         default_debugtalk.update(common_debugtalk)
@@ -248,16 +268,16 @@ class DebugTalkHandler:
 
         return default_debugtalk
 
-    def func_doc_map(self, user=None, filter=None) -> dict:
+    def func_doc_map(self, filter=None) -> dict:
         default_debugtalk = get_func_doc_map(debugtalk_common, filter)
 
         if self.common_debugtalk_source:
-            module = self._import_debugtalk(self.common_debugtalk_source, user)
+            module = self._import_debugtalk(self.common_debugtalk_source)
             common_debugtalk = get_func_doc_map(module, filter)
             default_debugtalk.update(common_debugtalk)
 
         if self.debugtalks_data:
-            project_debugtalk_module = self._import_debugtalk(self.debugtalks_data, user)
+            project_debugtalk_module = self._import_debugtalk(self.debugtalks_data)
             project_debugtalk = get_func_doc_map(project_debugtalk_module, filter)
             default_debugtalk.update(project_debugtalk)
 
@@ -272,3 +292,13 @@ class DebugTalkHandler:
         if module_name in sys.modules:
             del sys.modules[module_name]
             logger.info(f"成功卸载模块 {module_name}")
+
+    @classmethod
+    def del_run_module(cls, module_info: list[ProjectDebugtalkInfoModel]):
+        """
+        写在单次执行过程中动态加载的所有模块
+        """
+        for pdi in module_info:
+            for mn in pdi.module_names:
+                DebugTalkHandler.del_module(mn)
+

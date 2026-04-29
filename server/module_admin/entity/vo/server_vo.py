@@ -1,6 +1,7 @@
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
-from typing import Optional, List
 
 
 class CpuInfo(BaseModel):
@@ -63,4 +64,4 @@ class ServerMonitorModel(BaseModel):
     py: Optional[PyInfo]
     mem: Optional[MemoryInfo]
     sys: Optional[SysInfo]
-    sys_files: Optional[List[SysFiles]]
+    sys_files: Optional[list[SysFiles]]

@@ -1,8 +1,7 @@
 import inspect
-import sys
 
 
-class Tmp(object):
+class Tmp:
     def __init__(self):
         pass
 

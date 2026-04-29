@@ -1,15 +1,14 @@
 import datetime
 
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
 from starlette.concurrency import run_in_threadpool
 
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
-
 from module_hrm.entity.do.report_do import HrmReport
-from module_hrm.entity.vo.report_vo import ReportQueryModel, ReportListModel, ReportCreatModel
+from module_hrm.entity.do.run_detail_do import HrmRunDetail
+from module_hrm.entity.do.run_error_do import HrmRunError
+from module_hrm.entity.vo.report_vo import ReportCreatModel, ReportListModel, ReportQueryModel
 from module_hrm.enums.enums import CaseRunStatus
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from utils.page_util import PageUtil
 
 
@@ -47,10 +46,40 @@ class ReportDao:
         await run_in_threadpool(db.commit)
 
     @classmethod
+    def _delete_sync(cls, db: Session, report_ids: list, batch_size: int = 5000):
+        try:
+            while True:
+                ids = (
+                    db.query(HrmRunDetail.detail_id)
+                    .filter(HrmRunDetail.report_id.in_(report_ids))
+                    .limit(batch_size)
+                    .all()
+                )
+
+                if not ids:
+                    break
+
+                id_list = [i[0] for i in ids]
+
+                db.query(HrmRunError).filter(HrmRunError.detail_id.in_(id_list)).delete(synchronize_session=False)
+                db.query(HrmRunDetail).filter(HrmRunDetail.detail_id.in_(id_list)).delete(synchronize_session=False)
+
+                db.commit()  # 每批提交一次
+
+            # 删除主表（一般量小）
+            db.query(HrmReport).filter(HrmReport.report_id.in_(report_ids)).delete(synchronize_session=False)
+
+            db.commit()
+
+        except:
+            db.rollback()
+            raise
+
+    @classmethod
     async def delete(cls, db: Session, report_ids: list):
-        if report_ids:
-            await run_in_threadpool(db.query(HrmReport).filter(HrmReport.report_id.in_(report_ids)).delete)
-            await run_in_threadpool(db.commit)
+        if not report_ids:
+            return
+        await run_in_threadpool(cls._delete_sync, db, report_ids)
 
     @classmethod
     async def create(cls, db: Session, report_obj: ReportCreatModel) -> HrmReport:
@@ -68,8 +97,10 @@ class ReportDao:
 
 
     @classmethod
-    async def get_list(cls, db: Session, query_object: ReportQueryModel, data_scope_sql:str):
-        query = db.query(HrmReport).filter(eval(data_scope_sql))
+    async def get_list(cls, db: Session, query_object: ReportQueryModel, data_scope_sql:DataScopeExpr):
+        query = db.query(HrmReport).filter(data_scope_sql)
+        if query_object.report_id:
+            query = query.filter(HrmReport.report_id == query_object.report_id)
         if query_object.only_self:
             query = query.filter(HrmReport.manager == query_object.manager)
 
@@ -81,11 +112,11 @@ class ReportDao:
 
         query = query.order_by(HrmReport.create_time.desc())
 
-        result = await run_in_threadpool(PageUtil.paginate, query, query_object.page_num, query_object.page_size, query_object.is_page)
+        result = await run_in_threadpool(PageUtil.paginate,
+                                         query,
+                                         query_object.page_num,
+                                         query_object.page_size,
+                                         query_object.is_page)
 
-        rows = []
-        for row in result.rows:
-            rows.append(ReportListModel.model_validate(row))
-
-        result.rows = rows
+        result.rows = [ReportListModel.model_validate(row) for row in result.rows]
         return result

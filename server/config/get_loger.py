@@ -1,5 +1,6 @@
-from module_hrm.utils.CaseRunLogHandle import TestLog
 from fastapi import Request
+
+from module_hrm.utils.CaseRunLogHandle import TestLog
 
 
 def get_case_log(request: Request):

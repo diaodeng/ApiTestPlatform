@@ -1,10 +1,8 @@
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
 
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.entity.do.agent_do import QtrAgent
-from module_hrm.entity.vo.agent_vo import *
+from module_hrm.entity.vo.agent_vo import AgentModel, AgentQueryModel
 from utils.page_util import PageUtil
 
 
@@ -21,10 +19,7 @@ class AgentDao:
         :param agent_id: AgentId
         :return: 在用Agent信息对象
         """
-        agent_info = db.query(QtrAgent) \
-            .filter(QtrAgent.agent_id == agent_id,
-                    QtrAgent.del_flag == 1) \
-            .first()
+        agent_info = db.query(QtrAgent).filter(QtrAgent.agent_id == agent_id, QtrAgent.del_flag == 1).first()
 
         return agent_info
 
@@ -36,10 +31,7 @@ class AgentDao:
         :param agent_id: AgentId
         :return: 在用Agent信息对象
         """
-        agent_info = db.query(QtrAgent) \
-            .filter(QtrAgent.agent_id == agent_id,
-                    QtrAgent.del_flag == 1) \
-            .first()
+        agent_info = db.query(QtrAgent).filter(QtrAgent.agent_id == agent_id, QtrAgent.del_flag == 1).first()
 
         return agent_info
 
@@ -51,10 +43,7 @@ class AgentDao:
         :param agent_code: AgentCode
         :return: 在用Agent信息对象
         """
-        agent_info = db.query(QtrAgent) \
-            .filter(QtrAgent.agent_code == agent_code,
-                    QtrAgent.del_flag == 1) \
-            .first()
+        agent_info = db.query(QtrAgent).filter(QtrAgent.agent_code == agent_code, QtrAgent.del_flag == 1).first()
 
         return agent_info
 
@@ -66,35 +55,31 @@ class AgentDao:
         :param agent_code: AgentCode
         :return: 在用Agent信息对象
         """
-        agent_info = db.query(QtrAgent) \
-            .filter(QtrAgent.agent_code == agent_code,
-                    QtrAgent.del_flag == 1) \
-            .first()
+        agent_info = db.query(QtrAgent).filter(QtrAgent.agent_code == agent_code, QtrAgent.del_flag == 1).first()
 
         return agent_info
 
     @classmethod
-    def get_agent_list(cls, db: Session, page_object: AgentQueryModel, data_scope_sql: str):
+    def get_agent_list(cls, db: Session, page_object: AgentQueryModel, data_scope_sql: DataScopeExpr | None):
         """
         用于获取Agent列表的工具方法
         :param db: orm对象
         :return: Agent的信息对象
         """
-        agent_list = db.query(QtrAgent).filter(QtrAgent.del_flag == 1,
-                                               QtrAgent.agent_code == page_object.agent_code if page_object.agent_code else True,
-                                               QtrAgent.agent_name == page_object.agent_name if page_object.agent_name else True,
-                                               QtrAgent.status == page_object.status if page_object.status else True
-                                               )
-        if data_scope_sql:
-            agent_list = agent_list.filter(eval(data_scope_sql))
+        agent_list = db.query(QtrAgent).filter(
+            QtrAgent.del_flag == 1,
+            QtrAgent.agent_code == page_object.agent_code if page_object.agent_code else True,
+            QtrAgent.agent_name == page_object.agent_name if page_object.agent_name else True,
+            QtrAgent.status == page_object.status if page_object.status else True,
+        )
+        if data_scope_sql is not None:
+            agent_list = agent_list.filter(data_scope_sql)
 
         agent_list = agent_list.order_by(QtrAgent.agent_id)
 
-        agent_list = PageUtil.paginate(agent_list, page_object.page_num, page_object.page_size,
-                                           page_object.is_page)
+        agent_list = PageUtil.paginate(agent_list, page_object.page_num, page_object.page_size, page_object.is_page)
 
         return agent_list
-
 
     @classmethod
     def add_agent_dao(cls, db: Session, agent: AgentModel):
@@ -118,9 +103,7 @@ class AgentDao:
         :param agent: 需要更新的Agent字典
         :return: 编辑校验结果
         """
-        db.query(QtrAgent) \
-            .filter(QtrAgent.agent_id == agent.get('agent_id')) \
-            .update(agent)
+        db.query(QtrAgent).filter(QtrAgent.agent_id == agent.get("agent_id")).update(agent)
 
     @classmethod
     def edit_agent_dao_controller(cls, db, agent: dict):
@@ -130,9 +113,7 @@ class AgentDao:
         :param agent: 需要更新的Agent字典
         :return: 编辑校验结果
         """
-        db.query(QtrAgent) \
-            .filter(QtrAgent.agent_id == agent.get('agent_id')) \
-            .update(agent)
+        db.query(QtrAgent).filter(QtrAgent.agent_id == agent.get("agent_id")).update(agent)
 
     @classmethod
     def delete_agent_dao(cls, db: Session, agent: AgentModel):
@@ -142,7 +123,6 @@ class AgentDao:
         :param agent: Agent对象
         :return:
         """
-        db.query(QtrAgent) \
-            .filter(QtrAgent.agent_id == agent.agent_id) \
-            .update({QtrAgent.del_flag: '2', QtrAgent.update_by: agent.update_by,
-                     QtrAgent.update_time: agent.update_time})
+        db.query(QtrAgent).filter(QtrAgent.agent_id == agent.agent_id).update(
+            {QtrAgent.del_flag: "2", QtrAgent.update_by: agent.update_by, QtrAgent.update_time: agent.update_time}
+        )

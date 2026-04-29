@@ -1,9 +1,20 @@
-from module_admin.entity.vo.user_vo import UserInfoModel, UserRolePageQueryModel
-from module_admin.entity.vo.common_vo import CrudResponseModel
+from sqlalchemy.orm import Session
+
+from module_admin.dao.role_dao import RoleDao
 from module_admin.dao.user_dao import UserDao
-from module_admin.dao.role_dao import *
+from module_admin.entity.vo.common_vo import CrudResponseModel
+from module_admin.entity.vo.role_vo import (
+    AddRoleModel,
+    DeleteRoleModel,
+    RoleDeptModel,
+    RoleDeptQueryModel,
+    RoleMenuModel,
+    RoleModel,
+    RolePageQueryModel,
+)
+from module_admin.entity.vo.user_vo import UserInfoModel, UserRolePageQueryModel
+from utils.common_util import CamelCaseUtil, export_list2excel
 from utils.page_util import PageResponseModel
-from utils.common_util import export_list2excel, CamelCaseUtil
 
 
 class RoleService:
@@ -63,9 +74,9 @@ class RoleService:
         role_name = RoleDao.get_role_by_info(query_db, RoleModel(roleName=page_object.role_name))
         role_key = RoleDao.get_role_by_info(query_db, RoleModel(roleKey=page_object.role_key))
         if role_name:
-            result = dict(is_success=False, message='角色名称已存在')
+            result = {'is_success': False, 'message': '角色名称已存在'}
         elif role_key:
-            result = dict(is_success=False, message='权限字符已存在')
+            result = {'is_success': False, 'message': '权限字符已存在'}
         else:
             try:
                 add_result = RoleDao.add_role_dao(query_db, add_role)
@@ -74,7 +85,7 @@ class RoleService:
                     for menu in page_object.menu_ids:
                         RoleDao.add_role_menu_dao(query_db, RoleMenuModel(roleId=role_id, menuId=menu))
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -99,12 +110,12 @@ class RoleService:
             if page_object.type != 'status' and role_info.role_name != page_object.role_name:
                 role_name = RoleDao.get_role_by_info(query_db, RoleModel(roleName=page_object.role_name))
                 if role_name:
-                    result = dict(is_success=False, message='角色名称已存在')
+                    result = {'is_success': False, 'message': '角色名称已存在'}
                     return CrudResponseModel(**result)
             elif page_object.type != 'status' and role_info.role_key != page_object.role_key:
                 role_key = RoleDao.get_role_by_info(query_db, RoleModel(roleKey=page_object.role_key))
                 if role_key:
-                    result = dict(is_success=False, message='权限字符已存在')
+                    result = {'is_success': False, 'message': '权限字符已存在'}
                     return CrudResponseModel(**result)
             try:
                 RoleDao.edit_role_dao(query_db, edit_role)
@@ -114,12 +125,12 @@ class RoleService:
                         for menu in page_object.menu_ids:
                             RoleDao.add_role_menu_dao(query_db, RoleMenuModel(roleId=page_object.role_id, menuId=menu))
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='角色不存在')
+            result = {'is_success': False, 'message': '角色不存在'}
 
         return CrudResponseModel(**result)
 
@@ -138,12 +149,12 @@ class RoleService:
             if role_info.role_name != page_object.role_name:
                 role_name = RoleDao.get_role_by_info(query_db, RoleModel(roleName=page_object.role_name))
                 if role_name:
-                    result = dict(is_success=False, message='角色名称已存在')
+                    result = {'is_success': False, 'message': '角色名称已存在'}
                     return CrudResponseModel(**result)
             elif role_info.role_key != page_object.role_key:
                 role_key = RoleDao.get_role_by_info(query_db, RoleModel(roleKey=page_object.role_key))
                 if role_key:
-                    result = dict(is_success=False, message='权限字符已存在')
+                    result = {'is_success': False, 'message': '权限字符已存在'}
                     return CrudResponseModel(**result)
             try:
                 RoleDao.edit_role_dao(query_db, edit_role)
@@ -152,12 +163,12 @@ class RoleService:
                     for dept in page_object.dept_ids:
                         RoleDao.add_role_dept_dao(query_db, RoleDeptModel(roleId=page_object.role_id, deptId=dept))
                 query_db.commit()
-                result = dict(is_success=True, message='分配成功')
+                result = {'is_success': True, 'message': '分配成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='角色不存在')
+            result = {'is_success': False, 'message': '角色不存在'}
 
         return CrudResponseModel(**result)
 
@@ -173,16 +184,18 @@ class RoleService:
             role_id_list = page_object.role_ids.split(',')
             try:
                 for role_id in role_id_list:
-                    role_id_dict = dict(roleId=role_id, updateBy=page_object.update_by, updateTime=page_object.update_time)
+                    role_id_dict = {'roleId': role_id,
+                                    'updateBy': page_object.update_by,
+                                    'updateTime': page_object.update_time}
                     RoleDao.delete_role_menu_dao(query_db, RoleMenuModel(**role_id_dict))
                     RoleDao.delete_role_dao(query_db, RoleModel(**role_id_dict))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入角色id为空')
+            result = {'is_success': False, 'message': '传入角色id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -199,7 +212,7 @@ class RoleService:
         return result
 
     @staticmethod
-    def export_role_list_services(role_list: List):
+    def export_role_list_services(role_list: list):
         """
         导出角色列表信息service
         :param role_list: 角色信息列表
@@ -232,7 +245,10 @@ class RoleService:
         return binary_data
 
     @classmethod
-    def get_role_user_allocated_list_services(cls, query_db: Session, page_object: UserRolePageQueryModel, is_page: bool = False):
+    def get_role_user_allocated_list_services(cls,
+                                              query_db: Session,
+                                              page_object: UserRolePageQueryModel,
+                                              is_page: bool = False):
         """
         根据角色id获取已分配用户列表
         :param query_db: orm对象
@@ -251,7 +267,10 @@ class RoleService:
         return allocated_list
 
     @classmethod
-    def get_role_user_unallocated_list_services(cls, query_db: Session, page_object: UserRolePageQueryModel, is_page: bool = False):
+    def get_role_user_unallocated_list_services(cls,
+                                                query_db: Session,
+                                                page_object: UserRolePageQueryModel,
+                                                is_page: bool = False):
         """
         根据角色id获取未分配用户列表
         :param query_db: orm对象

@@ -113,6 +113,10 @@
     position: static !important;
 }
 
+.pagination-container.hidden {
+  display: none;
+}
+
 /* tree border */
 .tree-border {
     margin-top: 5px;

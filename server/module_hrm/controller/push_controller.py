@@ -1,16 +1,16 @@
-from fastapi import APIRouter, Request
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from module_hrm.dao.push_dao import PushDao
-from module_hrm.entity.vo.push_vo import DeletePushModel, PushPageQueryModel, PushModel
+from module_hrm.entity.do.push_do import PushTarget
+from module_hrm.entity.vo.push_vo import DeletePushModel, PushModel, PushPageQueryModel
 from module_hrm.service.push_service import PushService
-from utils.common_util import CamelCaseUtil
 from utils.page_util import PageResponseModel
 from utils.response_util import ResponseUtil
 
@@ -24,7 +24,7 @@ async def push_list(request: Request,
                     query_info: PushPageQueryModel = Depends(PushPageQueryModel.as_query),
                     query_db: Session = Depends(get_db),
                     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                    data_scope_sql: str = Depends(GetDataScope('PushTarget', user_alias='manager'))
+                    data_scope_sql: DataScopeExpr = Depends(GetDataScope(PushTarget, user_alias='manager'))
 
                     ):
     query_info.manager = current_user.user.user_id
@@ -39,7 +39,7 @@ async def push_list(request: Request,
                     query_info: PushPageQueryModel = Depends(PushPageQueryModel.as_query),
                     query_db: Session = Depends(get_db),
                     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                    data_scope_sql: str = Depends(GetDataScope('PushTarget', user_alias='manager'))
+                    data_scope_sql: DataScopeExpr = Depends(GetDataScope(PushTarget, user_alias='manager'))
 
                     ):
     query_info.manager = current_user.user.user_id
@@ -53,7 +53,7 @@ async def push_list(request: Request,
 def push_detail(request: Request,
                 push_id: int,
                 query_db: Session = Depends(get_db),
-                # data_scope_sql: str = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
+                # data_scope_sql: DataScopeExpr = Depends(GetDataScope('HrmRunDetail', user_alias='manager')),
                 ):
     result = PushService.get_detail(query_db, push_id)
     return ResponseUtil.success(data=result)

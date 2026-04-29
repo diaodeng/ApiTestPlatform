@@ -1,6 +1,8 @@
+from typing import Any, Optional
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
-from typing import Optional, Any
+from sqlalchemy.sql.elements import ColumnElement
 
 
 class CrudResponseModel(BaseModel):
@@ -22,3 +24,8 @@ class UploadResponseModel(BaseModel):
     new_file_name: Optional[str] = None
     original_filename: Optional[str] = None
     url: Optional[str] = None
+
+
+
+
+DataScopeExpr = ColumnElement[bool] | bool

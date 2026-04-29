@@ -27,7 +27,7 @@ def type_change(type, value):
             else:
                 raise TypeError(f"类型【{type}】不支持【{value}】，只能是'True'、'true'或者'False'、'false'")
     except ValueError:
-        raise TypeError('{value}转换{type}失败'.format(value=value, type=type))
+        raise TypeError(f'{value}转换{type}失败')
 
     return value
 
@@ -54,7 +54,7 @@ def key_value_list(keyword, cover_list: list):
             val = value.pop('value')
             type = value.pop('type', "str")
 
-            tips = '{keyword}: {val}格式错误,不是{type}类型'.format(keyword=keyword, val=val, type=type)
+            tips = f'{keyword}: {val}格式错误,不是{type}类型'
             if key != '':
                 if keyword == 'validate':
                     value['check'] = key
@@ -78,7 +78,7 @@ def key_value_list(keyword, cover_list: list):
                             value['value'] = eval(val)
 
                         # return '{keyword}: {val}格式错误'.format(keyword=keyword, val=val)
-                    except Exception as e:
+                    except Exception:
                         value['value'] = val
                         # logging.error('{val}->eval 异常'.format(val=val))
                         # return '{keyword}: {val}格式错误'.format(keyword=keyword, val=val)

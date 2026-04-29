@@ -107,7 +107,4 @@ function dataChange() {
 </template>
 
 <style scoped lang="scss">
-:deep(.pagination-container){
-  position: relative !important;
-}
 </style>

@@ -1,29 +1,32 @@
 import asyncio
-import csv
-import io
 from datetime import datetime
 
-from fastapi import APIRouter, Request, UploadFile, BackgroundTasks, HTTPException, Form
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Form, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.data_scope import GetDataScope
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
-from module_admin.entity.vo.user_vo import CurrentUserModel, UserInfoModel
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from module_hrm.entity.do.case_do import HrmCase, HrmCaseParams
+from module_hrm.entity.vo.case_params_vo import (
+    CaseParamsColumnCreateModel,
+    CaseParamsColumnDeleteModel,
+    CaseParamsCreateModel,
+    CaseParamsDeleteModel,
+    CaseParamsQueryModel,
+    CaseParamsUpdateModel,
+)
 from module_hrm.entity.vo.case_vo import (
-    CasePageQueryModel,
     AddCaseModel,
     CaseModel,
+    CasePageQueryModel,
     DeleteCaseModel,
 )
-from module_hrm.entity.vo.case_params_vo import (
-    CaseParamsQueryModel,
-    CaseParamsDeleteModel,
-)
-from module_hrm.service.case_service import CaseService, CaseParamsService
+from module_hrm.service.case_service import CaseParamsService, CaseService
 from utils.common_util import bytes2file_response
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -44,7 +47,7 @@ async def get_hrm_case_list(
     page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_query),
     query_db: Session = Depends(get_db),
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-    data_scope_sql: str = Depends(GetDataScope("HrmCase", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCase, user_alias="manager")),
 ):
     try:
         # 获取分页数据
@@ -208,7 +211,7 @@ async def delete_hrm_case(
     "/{case_id}",
     response_model=CaseModel,
     dependencies=[
-        Depends(CheckUserInterfaceAuth(["hrm:case:detail", "hrm.case:edit"], False))
+        Depends(CheckUserInterfaceAuth(["hrm:case:detail", "hrm:case:edit"], False))
     ],
 )
 async def query_detail_hrm_case(
@@ -231,7 +234,7 @@ async def export_hrm_case_list(
     request: Request,
     page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCase", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCase, user_alias="manager")),
 ):
     try:
         # 获取全量数据
@@ -255,7 +258,7 @@ async def get_case_params_list(
     request: Request,
     page_query: CaseParamsQueryModel,
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
 ):
     try:
         # 获取全量数据
@@ -275,12 +278,31 @@ async def get_case_params_list(
 @log_decorator(title="新增用例参数", business_type=1)
 async def add_case_params(
     request: Request,
-    page_query: CasePageQueryModel = Depends(CasePageQueryModel.as_form),
+    create_data: CaseParamsCreateModel,
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
 ):
     try:
-        pass
+        CaseParamsService.add_case_params_row_services(query_db, create_data)
+        return ResponseUtil.success(msg="新增成功")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@caseController.post(
+    "/params/column",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:caseParams:add"))],
+)
+@log_decorator(title="新增用例参数列", business_type=1)
+async def add_case_params_column(
+    request: Request,
+    create_data: CaseParamsColumnCreateModel,
+    query_db: Session = Depends(get_db),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
+):
+    try:
+        CaseParamsService.add_case_params_column_services(query_db, create_data)
         return ResponseUtil.success(msg="新增成功")
     except Exception as e:
         logger.exception(e)
@@ -293,15 +315,12 @@ async def add_case_params(
 @log_decorator(title="编辑用例参数", business_type=2)
 async def edite_case_params(
     request: Request,
-    caseId: str|int,
-    rowsData: list[dict],
+    update_data: CaseParamsUpdateModel,
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
 ):
     try:
-        await CaseParamsService.update_case_params_services(
-            query_db, caseId, rowsData
-        )
+        await CaseParamsService.update_case_params_by_model_services(query_db, update_data)
         return ResponseUtil.success(msg="更新成功")
     except Exception as e:
         logger.exception(e)
@@ -317,11 +336,30 @@ async def delete_case_params(
     request: Request,
     delete_data: CaseParamsDeleteModel,
     query_db: Session = Depends(get_db),
-    data_scope_sql: str = Depends(GetDataScope("HrmCaseParams", user_alias="manager")),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
 ):
     try:
         # 获取全量数据
         await CaseParamsService.delete_case_params_services(query_db, delete_data)
+        return ResponseUtil.success(msg="删除成功")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@caseController.delete(
+    "/params/column",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:caseParams:delete"))],
+)
+@log_decorator(title="删除用例参数列", business_type=3)
+async def delete_case_params_column(
+    request: Request,
+    delete_data: CaseParamsColumnDeleteModel,
+    query_db: Session = Depends(get_db),
+    data_scope_sql: DataScopeExpr = Depends(GetDataScope(HrmCaseParams, user_alias="manager")),
+):
+    try:
+        CaseParamsService.delete_case_params_column_services(query_db, delete_data)
         return ResponseUtil.success(msg="删除成功")
     except Exception as e:
         logger.exception(e)

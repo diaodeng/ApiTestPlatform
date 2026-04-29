@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+
+  <!-- dashboard -->
+  <symbol id="icon-dashboard" viewBox="0 0 14 14">
+    <rect x="1.5" y="1.5" width="4" height="4" rx="0.5"/>
+    <rect x="8.5" y="1.5" width="4" height="4" rx="0.5"/>
+    <rect x="1.5" y="8.5" width="4" height="4" rx="0.5"/>
+    <rect x="8.5" y="8.5" width="4" height="4" rx="0.5"/>
+  </symbol>
+
+  <!-- user -->
+  <symbol id="icon-user" viewBox="0 0 14 14">
+    <circle cx="7" cy="4.2" r="2.2"/>
+    <path d="M2.5 12c0-2.2 2-3.8 4.5-3.8s4.5 1.6 4.5 3.8"/>
+  </symbol>
+
+  <!-- settings -->
+  <symbol id="icon-settings" viewBox="0 0 14 14">
+    <circle cx="7" cy="7" r="2"/>
+    <path d="M7 1.5v2M7 10.5v2M1.5 7h2M10.5 7h2"/>
+    <path d="M3 3l1.4 1.4M9.6 9.6L11 11M11 3l-1.4 1.4M3 11l1.4-1.4"/>
+  </symbol>
+
+  <!-- list -->
+  <symbol id="icon-list" viewBox="0 0 14 14">
+    <path d="M4 3.5h8M4 7h8M4 10.5h8"/>
+    <circle cx="2" cy="3.5" r="0.6"/>
+    <circle cx="2" cy="7" r="0.6"/>
+    <circle cx="2" cy="10.5" r="0.6"/>
+  </symbol>
+
+  <!-- log -->
+  <symbol id="icon-log" viewBox="0 0 14 14">
+    <rect x="2" y="1.5" width="10" height="11" rx="1"/>
+    <path d="M4.5 4.5h5M4.5 7h5M4.5 9.5h3"/>
+  </symbol>
+
+</svg>

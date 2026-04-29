@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime, UniqueConstraint
-from config.database import Base
 from datetime import datetime
+
+from sqlalchemy import Column, DateTime, Integer, String, UniqueConstraint
+
+from config.database import Base
 
 
 class SysDictType(Base):

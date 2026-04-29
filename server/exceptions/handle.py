@@ -1,10 +1,10 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException, RequestValidationError
+from loguru import logger
 from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY
 
 from exceptions.exception import AuthException, PermissionException
-from utils.response_util import ResponseUtil, JSONResponse, jsonable_encoder
-from loguru import logger
+from utils.response_util import JSONResponse, ResponseUtil, jsonable_encoder
 
 
 def handle_exception(app: FastAPI):

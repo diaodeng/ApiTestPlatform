@@ -1,5 +1,4 @@
 import request from '@/utils/request'
-import {ElMessage} from "element-plus";
 
 // 查询用例列表
 export function listCase(query) {
@@ -113,10 +112,46 @@ export function listCaseParams(query) {
   })
 }
 
+// 新增一行用例参数
+export function addCaseParamsRow(data) {
+  return request({
+    url: '/hrm/case/params',
+    method: 'post',
+    data: data
+  })
+}
+
+// 更新用例参数
+export function updateCaseParams(data) {
+  return request({
+    url: '/hrm/case/params',
+    method: 'put',
+    data: data
+  })
+}
+
+// 新增用例参数列
+export function addCaseParamsColumn(data) {
+  return request({
+    url: '/hrm/case/params/column',
+    method: 'post',
+    data: data
+  })
+}
+
 // 删除用例参数
 export function delCaseParams(data) {
   return request({
     url: '/hrm/case/params/delete',
+    method: 'delete',
+    data: data
+  })
+}
+
+// 删除用例参数列
+export function deleteCaseParamsColumn(data) {
+  return request({
+    url: '/hrm/case/params/column',
     method: 'delete',
     data: data
   })

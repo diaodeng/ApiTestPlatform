@@ -11,13 +11,16 @@ class SearchConfigModel(BaseModel):
     dir_pattern: str = "*"
     max_depth: str = "1"
 
+
 class ProxyDelayConfigModel(BaseModel):
     enabled: bool = False
     delay: float = 0.0
     delay_path: list[str] = []
 
+
 class MitmProxyConfigModel(BaseModel):
     """mitmproxy 配置"""
+
     port: int = 9080
     web_port: int = 9081
     web_open_browser: bool = False
@@ -54,6 +57,7 @@ class PaymentMockConfigModel(BaseModel):
 
 class StartConfigModel(BaseModel):
     """POS启动配置"""
+
     backup: bool = False  # 备份支付配置
     replace_mitm_cert: bool = False  # 替换mitm证书
     change_env: bool = False  # 切换POS本地环境
@@ -81,7 +85,7 @@ class PosChangeParamsModel(BaseModel):
     pos_mac: str = ""
     pos_no: str = ""  # POS编号
     pos_skin: str = ""  # POS皮肤
-    pos_type:str = ""  # POS类型:1POS,2SCO,4Combined
+    pos_type: str = ""  # POS类型:1POS,2SCO,4Combined
     switchMode: str = "1"  # 切换模式，1mac，2posno
     venderId: str = ""  # 厂商ID
 
@@ -96,18 +100,20 @@ class ResolutionModel(BaseModel):
 
 class PosResolutionModel(BaseModel):
     pos: ResolutionModel = ResolutionModel()
-    sco: ResolutionModel = ResolutionModel()
+    sco: ResolutionModel = ResolutionModel(width=1080, height=1920, c_x=1080)
     scan: ResolutionModel = ResolutionModel()
 
 
 class VendorConfigModel(BaseModel):
-    vendor_id: int|str = ""
-    account: str|int = ""
+    vendor_id: int | str = ""
+    account: str | int = ""
     resolution: PosResolutionModel = PosResolutionModel()
+    custum_headers: dict = {}
 
 
 class PosConfigModel(BaseModel):
     """POS配置"""
+
     pos_path: str = ""
     payment_driver_back_up_path: str = ""
     payment_mock_driver_path: str = ""
@@ -116,42 +122,38 @@ class PosConfigModel(BaseModel):
     pos_test_host: str = ""
     pos_uat_host: str = ""
     pos_pro_host: str = ""
-    env_files: list[str] = [
-            "database",
-            "log",
-            "pos_params",
-            "init_config.data",
-            "charge_db"
-        ]
-    cache_files: list[str] = ['pos_params', "init_config.data", "charge_db"]
+    env_files: list[str] = ["database", "log", "pos_params", "init_config.data", "charge_db"]
+    cache_files: list[str] = ["pos_params", "init_config.data", "charge_db"]
     env_group_vendor: dict[str, list] = {
-                "rta-uat": [7, 9, 11],
-                "rta-uat-gray03": [3, 50],
-                "rta-uat-gray06": [12, 58949, 58959, 58984, 58969, 58989, 58964],
-                "rta-uat-gray07": [],
-                "rta-uat-gray08": [5, 10, 58938],
-                "rta-test": [1],
-            }
+        "rta-uat": [7, 9, 11],
+        "rta-uat-gray03": [3, 50],
+        "rta-uat-gray06": [12, 58949, 58959, 58984, 58969, 58989, 58964],
+        "rta-uat-gray07": [],
+        "rta-uat-gray08": [5, 10, 58938],
+        "rta-test": [1],
+    }
+    # DF_MY_HB, DF_ID_HB(BR), DF_SG_7E,DF_SG_HNB(HNB),DF_SG_7E(SG),DF_HK_7E(7E)
+    # headers = {"version": pos_version, "Version": pos_version, "Clienttype": "DF_SG_7E"}
     vendor_config: list[VendorConfigModel] = [
-                VendorConfigModel(vendor_id=3),
-                VendorConfigModel(vendor_id=5),
-                VendorConfigModel(vendor_id=7),
-                VendorConfigModel(vendor_id=8),
-                VendorConfigModel(vendor_id=9),
-                VendorConfigModel(vendor_id=10),
-                VendorConfigModel(vendor_id=11),
-                VendorConfigModel(vendor_id=12),
-                VendorConfigModel(vendor_id=13),
-                VendorConfigModel(vendor_id=50),
-                VendorConfigModel(vendor_id=58949),
-                VendorConfigModel(vendor_id=58959),
-                VendorConfigModel(vendor_id=58984),
-                VendorConfigModel(vendor_id=58969),
-                VendorConfigModel(vendor_id=58989),
-                VendorConfigModel(vendor_id=58964),
-                VendorConfigModel(vendor_id=58938),
-                VendorConfigModel(vendor_id=1)
-            ]
+        VendorConfigModel(vendor_id=3),
+        VendorConfigModel(vendor_id=5),
+        VendorConfigModel(vendor_id=7),
+        VendorConfigModel(vendor_id=8),
+        VendorConfigModel(vendor_id=9),
+        VendorConfigModel(vendor_id=10),
+        VendorConfigModel(vendor_id=11),
+        VendorConfigModel(vendor_id=12),
+        VendorConfigModel(vendor_id=13),
+        VendorConfigModel(vendor_id=50),
+        VendorConfigModel(vendor_id=58949),
+        VendorConfigModel(vendor_id=58959),
+        VendorConfigModel(vendor_id=58984),
+        VendorConfigModel(vendor_id=58969),
+        VendorConfigModel(vendor_id=58989),
+        VendorConfigModel(vendor_id=58964, custum_headers={"Clienttype": "DF_SG_7E"}),
+        VendorConfigModel(vendor_id=58938),
+        VendorConfigModel(vendor_id=1),
+    ]
     pos_params: PosParamsModel = PosParamsModel()
     pos_start_params: PosParamsModel = PosParamsModel()
     running_pos_path: str = ""
@@ -163,6 +165,7 @@ class PosConfigModel(BaseModel):
 
 class SetupConfigModel(BaseModel):
     """启动配置"""
+
     setup_mitmproxy: bool = False
     setup_pos: bool = False
 

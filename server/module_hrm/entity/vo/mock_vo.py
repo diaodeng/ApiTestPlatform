@@ -1,16 +1,12 @@
-import json
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from module_admin.annotation.pydantic_annotation import as_query, as_form
-from module_hrm.entity.dto.mock_dto import MockModel, MockResponseModel, MockRequestModel
-from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
-from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
-from module_hrm.enums.enums import RunTypeEnum, DataType
-from utils.common_util import CamelCaseUtil
+from module_admin.annotation.pydantic_annotation import as_form, as_query
+from module_hrm.entity.dto.mock_dto import MockModel, MockRequestModel, MockResponseModel
+from module_hrm.entity.vo.common_vo import QueryModel
 
 
 @as_query

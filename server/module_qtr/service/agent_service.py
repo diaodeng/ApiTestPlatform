@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import datetime
 import json
 import re
@@ -8,22 +7,45 @@ from collections import defaultdict
 from typing import Any
 
 import httpx
-from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from websockets import WebSocketClientProtocol
 
-from module_hrm.enums.enums import TstepTypeEnum, AgentResponseEnum
-from module_hrm.utils.util import compress_dict_to_str, decompress_str_to_dict
+from module_hrm.enums.enums import AgentResponseEnum, TstepTypeEnum
+from module_hrm.utils.util import compress_dict_to_str
 from utils.log_util import logger
 
 # 存储agent的WebSocket连接和Future对象（用于HTTP请求等待WebSocket响应）
 agents: dict = {}
 response_futures = defaultdict(dict)
-CHUNK_SIZE = 1024 * 16
+CHUNK_SIZE = 5 * 1024
 
 
-async def send_message(agent_code: str, message: dict, request_id: str = None):
+def _sanitize_log_value(value, *, key: str | None = None):
+    normalized_key = str(key or "").lower()
+    if normalized_key in {"imagebase64", "image_base64"}:
+        return f"<base64 len={len(str(value or ''))}>"
+    if normalized_key == "data" and isinstance(value, str):
+        return f"<chunk len={len(value)}>"
+    if isinstance(value, dict):
+        return {k: _sanitize_log_value(v, key=k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_log_value(item) for item in value]
+    if isinstance(value, str) and len(value) > 240:
+        return f"<str len={len(value)}>"
+    return value
+
+
+def _summarize_message(message: dict | None) -> str:
+    return json.dumps(_sanitize_log_value(message or {}), ensure_ascii=False)
+
+
+async def send_message(
+    agent_code: str,
+    message: dict,
+    request_id: str = None,
+    timeout_seconds: int | float | None = None,
+):
     logger.info(f"agent_code: {agent_code}")
     request_type = message.get('requestType')
     logger.info(f"转发类型: {request_type}")
@@ -39,6 +61,7 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
 
         # 将Future对象存储在字典中，以便稍后设置其结果
         response_futures[request_id]["future"] = future
+        response_futures[request_id]["agent_code"] = agent_code
 
         # 发送消息到WebSocket，并包含request_id以便客户端能够识别是哪个请求的响应
         compress_data = compress_dict_to_str(message)
@@ -60,29 +83,50 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
 
         # 等待Future对象的结果（即WebSocket客户端的响应）
         try:
-            response_data = await asyncio.wait_for(future, timeout=120)
-            logger.info(f"response={response_data}")
+            request_timeout = 120.0
+            if timeout_seconds not in (None, ""):
+                try:
+                    request_timeout = max(float(timeout_seconds), 1.0)
+                except Exception:
+                    request_timeout = 120.0
+            response_data = await asyncio.wait_for(future, timeout=request_timeout)
+            logger.info(f"response={_summarize_message(response_data)}")
             response = {}
             if response_data.get("Error", None):
-                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, response_data, f"客户端中发生异常：{response_data.get('Error')}"))
+                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
+                                        response_data,
+                                        f"客户端中发生异常：{response_data.get('Error')}"))
 
             if response_data.get("request_type") == TstepTypeEnum.http.value:
                 response = AgentResponse(response_data)
             elif response_data.get("request_type") == TstepTypeEnum.websocket.value:
                 response = AgentResponseWebSocket(response_data)
                 # logger.info(f"ws响应数据：{response}")
+            elif response_data.get("request_type") in (TstepTypeEnum.webui.value, TstepTypeEnum.desktopui.value):
+                response = AgentResponseWebUI(**response_data)
             else:
-                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, response_data, f"响应数据类型【{response_data.get('request_type')}】不支持"))
+                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
+                                        response_data,
+                                        f"响应数据类型【{response_data.get('request_type')}】不支持"))
 
             response = handle_response((AgentResponseEnum.SUCCESS.value, response, "操作成功"))
             return response
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             logger.error(f'websocket请求超时{e}，request_id：{request_id}')
             if request_type == TstepTypeEnum.http.value:
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value, None, f'wobsocket请求超时{e}，request_id：{request_id}'))
+                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
+                                            None,
+                                            f'wobsocket请求超时{e}，request_id：{request_id}'))
                 return response
             elif request_type == TstepTypeEnum.websocket.value:
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value, None, f'wobsocket请求超时{e}，request_id：{request_id}'))
+                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
+                                            None,
+                                            f'wobsocket请求超时{e}，request_id：{request_id}'))
+                return response
+            elif request_type in (TstepTypeEnum.webui.value, TstepTypeEnum.desktopui.value):
+                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
+                                            None,
+                                            f'wobsocket请求超时{e}，request_id：{request_id}'))
                 return response
         except asyncio.CancelledError as e:
             logger.error(e)
@@ -95,10 +139,14 @@ async def send_message(agent_code: str, message: dict, request_id: str = None):
         finally:
             if future and not future.done():
                 future.cancel()
+            if response_futures.get(request_id, {}).get("future") is future:
+                response_futures.pop(request_id, None)
 
 
     else:
-        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value, None, f"【{agent_code}】Agent not connected，request_id：{request_id}"))
+        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                                    None,
+                                    f"【{agent_code}】Agent not connected，request_id：{request_id}"))
         return response
 
 
@@ -248,10 +296,23 @@ class AgentResponseWebSocket(WebSocketClientProtocol):
         return json.loads(self.message.get('response_headers'))
 
 
+class AgentResponseWebUI(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, arbitrary_types_allowed=True)
+
+    request_type: int | None = None
+    command: str | None = None
+    status: str | None = None
+    success: bool = True
+    message: str | None = None
+    recording_id: int | str | None = None
+    result: dict[str, Any] | None = None
+    data: dict[str, Any] | None = None
+
+
 class HandleResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, arbitrary_types_allowed=True)
     status_code: int = 200
-    response: AgentResponse | AgentResponseWebSocket | dict | None = None
+    response: AgentResponse | AgentResponseWebSocket | AgentResponseWebUI | dict | None = None
     message: str = None
 
 

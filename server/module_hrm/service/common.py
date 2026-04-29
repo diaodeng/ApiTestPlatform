@@ -1,6 +1,6 @@
-from sqlalchemy import select, func, case, literal
 import datetime
 
+from sqlalchemy import case, func, select
 from starlette.concurrency import run_in_threadpool
 
 from module_hrm.entity.do.case_do import HrmCase
@@ -8,7 +8,7 @@ from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
 from module_hrm.entity.do.suite_do import QtrSuite
-from module_hrm.enums.enums import DataType, CaseRunStatus, RunTypeEnum
+from module_hrm.enums.enums import CaseRunStatus, DataType, RunTypeEnum
 from module_hrm.service.case_service import Session
 
 
@@ -64,7 +64,7 @@ async def get_base_counts(query_db: Session):
 
 async def get_run_statistics(query_db: Session):
     """运行统计"""
-    from sqlalchemy import func, case
+    from sqlalchemy import func
 
     today = datetime.date.today()
     start_date = today + datetime.timedelta(days=-11)

@@ -1,12 +1,9 @@
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
 
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.entity.do.env_do import HrmEnv
-from module_hrm.entity.vo.env_vo import *
+from module_hrm.entity.vo.env_vo import EnvModel, EnvQueryModel
 from utils.page_util import PageUtil
-from utils.time_format_util import list_format_datetime
 
 
 class EnvDao:
@@ -75,7 +72,7 @@ class EnvDao:
         return env_info
 
     @classmethod
-    def get_env_list(cls, db: Session, page_object: EnvQueryModel, data_scope_sql: str, is_page=False):
+    def get_env_list(cls, db: Session, page_object: EnvQueryModel, data_scope_sql: DataScopeExpr, is_page=False):
         """
         根据查询参数获取环境列表信息
         :param db: orm对象
@@ -87,7 +84,7 @@ class EnvDao:
             .filter(HrmEnv.del_flag == 0,
                     HrmEnv.status == page_object.status if page_object.status else True,
                     HrmEnv.env_name.like(f'%{page_object.env_name}%') if page_object.env_name else True,
-                    eval(data_scope_sql))
+                    data_scope_sql)
         if page_object.only_self:
             env_result = env_result.filter(HrmEnv.manager == page_object.manager)
 

@@ -1,18 +1,18 @@
+import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Optional, List, Any, Dict
-import asyncio
+from typing import Any, Dict, List, Optional
 
 import httpx
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 
-from module_admin.annotation.pydantic_annotation import as_query, as_form
+from module_admin.annotation.pydantic_annotation import as_form, as_query
 from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from module_hrm.entity.vo.push_vo import FeishuRobotModel
-from module_hrm.enums.enums import RunTypeEnum, DataType, UrlContentEnum, PushReminderEnum, AllowPushEnum
+from module_hrm.enums.enums import AllowPushEnum, DataType, PushReminderEnum, RunTypeEnum, UrlContentEnum
 from utils.common_util import CamelCaseUtil
 
 
@@ -127,6 +127,7 @@ class CaseRunModel(BaseModel):
     run_model: Optional[int | None] = None  # 执行方式，1手动，2定时任务
     report_name: Optional[str] = None  # 测试报告名称
     report_id: Optional[int] = -1  # 测试报告名称
+    run_id: Optional[str|int] = None  # 标识每次运行的唯一id
     is_async: Optional[bool] = False  # 本次执行同步或异步
     log_level: Optional[int] = logging.INFO  # 日志级别
     repeat_num: int = 1  # 用例重复执行次数
@@ -134,7 +135,7 @@ class CaseRunModel(BaseModel):
     concurrent: int = 1  # 并发数(同时执行的用例数)
     run_by_sort: Optional[bool] = False
     case_data: Optional[CaseModel | dict | None] = None  # 用例数据
-    runner: Any = None
+    runner: Any = None  # 用户ID
     dept_id: Optional[int|str] = None
 
     forward_config: Optional[ForwardConfigModel] = ForwardConfigModel()

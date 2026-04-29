@@ -12,7 +12,6 @@ class ProjectModel(CommonDataModel):
     """
     项目表对应pydantic模型
     """
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
     project_id: Optional[int] = None
     project_name: Optional[str] = None
@@ -43,7 +42,7 @@ class DeleteProjectModel(BaseModel):
     """
     删除项目模型
     """
-    model_config = ConfigDict(alias_generator=to_camel)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     project_ids: str
     update_by: Optional[str] = None

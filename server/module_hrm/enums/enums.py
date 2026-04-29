@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class PushTypeEnum(Enum):
     feishu_bot = 1
     feishu_application = 2
@@ -84,6 +85,7 @@ class TstepTypeEnum(Enum):
     websocket = 2
     webui = 3
     folder = 4
+    desktopui = 5
 
 
 class RunTypeEnum(Enum):

@@ -1,5 +1,6 @@
 import enum
 
+
 class ModeEnum(enum.Enum):
     LINUX = "linux_host"
     WINDOWS = "windows"

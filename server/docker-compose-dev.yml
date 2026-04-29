@@ -1,0 +1,67 @@
+version: "3.9"
+
+networks:
+  qtr-net:
+    driver: bridge
+
+services:
+  redis:
+    image: redis:7.2
+    container_name: qtr-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: always
+    networks:
+      - qtr-net
+
+  mysql:
+    image: mysql:8.0
+    container_name: qtr-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpwd
+      MYSQL_DATABASE: apitest
+      MYSQL_USER: user
+      MYSQL_PASSWORD: pwd
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: always
+    networks:
+      - qtr-net
+
+  qtr-api:
+    image: qtr-api
+    build: .
+    container_name: qtr-api
+    ports:
+      - "9099:9099"
+    environment:
+      ENV: dev
+      TZ: Asia/Shanghai
+      DB_HOST: 'mysql'
+      DB_PORT: 3306
+      DB_USERNAME: 'user'
+      DB_PASSWORD: 'pwd'
+      DB_DATABASE: 'apitest'
+      REDIS_HOST: 'redis'
+      REDIS_PORT: 6379
+      REDIS_USERNAME: ''
+      REDIS_PASSWORD: ''
+      REDIS_DATABASE: 2
+    depends_on:
+      - redis
+      - mysql
+    volumes:
+      - ./.env.dev:/app/.env.dev
+    restart: always
+    networks:
+      - qtr-net
+
+volumes:
+  redis-data:
+  mysql-data:

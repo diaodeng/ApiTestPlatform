@@ -1,8 +1,11 @@
 from fastapi import Request
+from sqlalchemy.orm import Session
+
 from config.env import RedisInitKeyConfig
-from module_admin.dao.config_dao import *
+from module_admin.dao.config_dao import ConfigDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from utils.common_util import export_list2excel, CamelCaseUtil
+from module_admin.entity.vo.config_vo import ConfigModel, ConfigPageQueryModel, DeleteConfigModel
+from utils.common_util import CamelCaseUtil, export_list2excel
 from utils.redis_util import scan_keys
 
 
@@ -37,10 +40,11 @@ class ConfigService:
         # 删除匹配的键
         if keys:
             await redis.delete(*keys)
-        config_all = ConfigDao.get_config_list(query_db, ConfigPageQueryModel(**dict()), is_page=False)
+        config_all = ConfigDao.get_config_list(query_db, ConfigPageQueryModel(**{}), is_page=False)
         for config_obj in config_all:
             if config_obj.get('configType') == 'Y':
-                await redis.set(f"{RedisInitKeyConfig.SYS_CONFIG.get('key')}:{config_obj.get('configKey')}", config_obj.get('configValue'))
+                await redis.set(f"{RedisInitKeyConfig.SYS_CONFIG.get('key')}:{config_obj.get('configKey')}",
+                                config_obj.get('configValue'))
 
     @classmethod
     async def query_config_list_from_cache_services(cls, redis, config_key: str):
@@ -65,13 +69,13 @@ class ConfigService:
         """
         config = ConfigDao.get_config_detail_by_info(query_db, ConfigModel(configKey=page_object.config_key))
         if config:
-            result = dict(is_success=False, message='参数键名已存在')
+            result = {"is_success": False, "message": '参数键名已存在'}
         else:
             try:
                 ConfigDao.add_config_dao(query_db, page_object)
                 query_db.commit()
                 await cls.init_cache_sys_config_services(query_db, request.app.state.redis)
-                result = dict(is_success=True, message='新增成功')
+                result = {"is_success": True, "message": '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -93,18 +97,18 @@ class ConfigService:
             if config_info.config_key != page_object.config_key or config_info.config_value != page_object.config_value:
                 config = ConfigDao.get_config_detail_by_info(query_db, page_object)
                 if config:
-                    result = dict(is_success=False, message='参数配置已存在')
+                    result = {"is_success": False, "message": '参数配置已存在'}
                     return CrudResponseModel(**result)
             try:
                 ConfigDao.edit_config_dao(query_db, edit_config)
                 query_db.commit()
                 await cls.init_cache_sys_config_services(query_db, request.app.state.redis)
-                result = dict(is_success=True, message='更新成功')
+                result = {"is_success": True, "message": '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='参数配置不存在')
+            result = {"is_success": False, "message": '参数配置不存在'}
 
         return CrudResponseModel(**result)
 
@@ -124,12 +128,12 @@ class ConfigService:
                     ConfigDao.delete_config_dao(query_db, ConfigModel(configId=config_id))
                 query_db.commit()
                 await cls.init_cache_sys_config_services(query_db, request.app.state.redis)
-                result = dict(is_success=True, message='删除成功')
+                result = {"is_success": True, "message": '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入字典数据id为空')
+            result = {"is_success": False, "message": '传入字典数据id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -146,7 +150,7 @@ class ConfigService:
         return result
 
     @staticmethod
-    def export_config_list_services(config_list: List):
+    def export_config_list_services(config_list: list):
         """
         导出参数配置信息service
         :param config_list: 参数配置信息列表
@@ -173,7 +177,8 @@ class ConfigService:
                 item['configType'] = '是'
             else:
                 item['configType'] = '否'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in data]
+        new_data = [{mapping_dict.get(key): value for key, value in item.items()
+                     if mapping_dict.get(key)} for item in data]
         binary_data = export_list2excel(new_data)
 
         return binary_data
@@ -187,6 +192,6 @@ class ConfigService:
         :return: 刷新字典缓存校验结果
         """
         await cls.init_cache_sys_config_services(query_db, request.app.state.redis)
-        result = dict(is_success=True, message='刷新成功')
+        result = {"is_success": True, "message": '刷新成功'}
 
         return CrudResponseModel(**result)

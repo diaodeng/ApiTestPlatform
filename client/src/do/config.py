@@ -1,15 +1,24 @@
 # 直接数据操作
+import ast
 import base64
 import json
 import os
-from shutil import copytree, copyfile, rmtree
-import shutil
+from shutil import copyfile, copytree, move, rmtree
 from typing import Optional
 
 from loguru import logger
 
-from model.config import SearchConfigModel, MitmProxyConfigModel, PaymentMockConfigModel, StartConfigModel, \
-    SetupConfigModel, PosParamsModel, PosConfigModel, AgentConfigModel, VendorConfigModel, FtpConfigModel
+from model.config import (
+    AgentConfigModel,
+    FtpConfigModel,
+    MitmProxyConfigModel,
+    PosConfigModel,
+    PosParamsModel,
+    SearchConfigModel,
+    SetupConfigModel,
+    StartConfigModel,
+    VendorConfigModel,
+)
 from model.pos_network_model import PosInitRespModel
 from utils.file_handle import IniFileHandel
 
@@ -31,7 +40,7 @@ class SearchConfig:
         """
         if not os.path.exists(cls.config_file):
             return []
-        with open(cls.config_file, "r", encoding="utf-8") as f:
+        with open(cls.config_file, encoding="utf-8") as f:
             try:
                 return json.load(f).get("dir", [])
             except json.JSONDecodeError:
@@ -45,7 +54,7 @@ class SearchConfig:
         """
         old_config = {}
         if os.path.exists(cls.config_file):
-            with open(cls.config_file, "r", encoding="utf-8") as f:
+            with open(cls.config_file, encoding="utf-8") as f:
                 try:
                     old_config = json.load(f)
                 except json.JSONDecodeError:
@@ -88,7 +97,7 @@ class SearchConfig:
     def read_search_result(cls) -> list[str]:
         if not os.path.exists(cls.search_result_file):
             return []
-        with open(cls.search_result_file, "r", encoding="utf-8") as f:
+        with open(cls.search_result_file, encoding="utf-8") as f:
             try:
                 return json.load(f)
             except json.JSONDecodeError:
@@ -194,7 +203,7 @@ class PosConfig:
     pos_path: str = "storage/data/config_pos.json"
 
     def __init__(self):
-        pass
+        self.pos_config = self.read_pos_config()
 
     @classmethod
     def read_pos_params(cls, pos_path: str) -> PosParamsModel | None:
@@ -206,11 +215,18 @@ class PosConfig:
         params_file = os.path.join(pos_dir, "pos_params")
         if not os.path.exists(params_file):
             return None
-        with open(params_file) as f:
-            content = base64.b64decode(f.read().encode("utf-8")).decode("utf-8")
-            content = eval(content)
-            # content_str = json.dumps(content, indent=4, ensure_ascii=False)
-            return PosParamsModel.model_validate(content)
+        with open(params_file, encoding="utf-8") as f:
+            raw_content = f.read().strip()
+        try:
+            content = base64.b64decode(raw_content.encode("utf-8")).decode("utf-8").strip()
+            try:
+                parsed_content = json.loads(content)
+            except json.JSONDecodeError:
+                parsed_content = ast.literal_eval(content)
+            return PosParamsModel.model_validate(parsed_content)
+        except Exception as e:
+            logger.error(f"解析pos_params失败:{params_file}, error={e}")
+            return None
 
     @classmethod
     def read_pos_config(cls) -> PosConfigModel:
@@ -219,12 +235,12 @@ class PosConfig:
             with open(cls.pos_path, "w") as f:
                 f.write(data.model_dump_json())
         else:
-            with open(cls.pos_path, "r") as f:
+            with open(cls.pos_path) as f:
                 data = f.read()
                 try:
                     data = json.loads(data)
                     data = PosConfigModel.model_validate(data)
-                except Exception as e:
+                except Exception:
                     data = PosConfigModel()
         return data
 
@@ -312,8 +328,7 @@ class PosConfig:
                 logger.warning(f"{current_file}文件不存在")
                 return
 
-            os.rename(current_file, target_file)
-
+            move(current_file, target_file)
 
         def backup_pos_env_file(pos_path: str, file_name: str, old_env_key: str):
             db_file = os.path.join(pos_path, file_name)
@@ -324,7 +339,7 @@ class PosConfig:
         def restore_pos_env_file(pos_path: str, file_name: str, env_key: str):
             db_file = os.path.join(pos_path, file_name)
             # 恢复备份数据
-            db_env_file = os.path.join(pos_path,"pos_env_back", f"{env_key}", f"{file_name}")
+            db_env_file = os.path.join(pos_path, "pos_env_back", f"{env_key}", f"{file_name}")
             copy_any_file(db_env_file, db_file)
 
         # 切换
@@ -336,7 +351,7 @@ class PosConfig:
             logger.info(f"环境位置不备份：{old_env}")
         logger.info(f"当前备份状态：{pos_config_data.backup_status}")
         if pos_config_data.backup_status != 2:
-            logger.info(f"开始备份文件")
+            logger.info("开始备份文件")
             pos_config_data.backup_status = 1
             cls.save_pos_config(pos_config_data)
             for file in env_files:
@@ -345,9 +360,8 @@ class PosConfig:
             pos_config_data.backup_status = 2
             cls.save_pos_config(pos_config_data)
 
-
         if pos_config_data.backup_status == 2:
-            logger.info(f"开始恢复原备份文件")
+            logger.info("开始恢复原备份文件")
             for file in env_files:
                 restore_pos_env_file(pos_dir, file, target_env_key)
 
@@ -395,11 +409,12 @@ class PosConfig:
             account = account[0]
         if not account:
             account = ""
-        if "test" in env.lower():
+        if env.lower() in ("rta_test", "kh_test_s"):
             return "rta-test", account
-        for k, v in pos_config.env_group_vendor.items():
-            if vendor_id and int(vendor_id) in v:
-                return k, account
+        elif env.lower() in ("rta_uat", "kh_test"):
+            for k, v in pos_config.env_group_vendor.items():
+                if vendor_id and int(vendor_id) in v:
+                    return k, account
         return None, account
 
     @classmethod
@@ -441,11 +456,11 @@ class PosConfig:
         mitm_dir = MitmproxyConfig.read().mitmproxy_config_dir or os.path.join(os.path.expanduser("~"), ".mitmproxy")
         cert_file = mitm_dir + "/mitmproxy-ca-cert.pem"
         if not os.path.exists(cert_file):
-            logger.error(f"mitmproxy-ca-cert.pem 不存在")
+            logger.error("mitmproxy-ca-cert.pem 不存在")
             return False, "mitmproxy-ca-cert.pem 不存在"
-        with open(cert_file, "r", encoding="utf-8") as f:
+        with open(cert_file, encoding="utf-8") as f:
             cert_content = f.read()
-        with open(os.path.join(file_dir, "certifi/cacert.pem"), "r", encoding="utf-8") as f:
+        with open(os.path.join(file_dir, "certifi/cacert.pem"), encoding="utf-8") as f:
             old_content = f.read()
         if cert_content not in old_content:
             with open(os.path.join(file_dir, "certifi/cacert.pem"), "a+", encoding="utf-8") as f:
@@ -463,10 +478,10 @@ class PosConfig:
         if not os.path.exists(mock_dirver_dir):
             logger.error(f"支付mock驱动不存在:{mock_dirver_dir}，请设置支付mock驱动的目录")
             return
-        backup_dir = pos_config.payment_mock_driver_backup_dir
-        if not os.path.exists(backup_dir):
+        backup_dir = pos_config.payment_driver_back_up_path
+        if not backup_dir or not os.path.exists(backup_dir):
             pos_dir = os.path.dirname(pos_file)
-            backup_dir = os.path.join(pos_dir, 'drive_backup')
+            backup_dir = os.path.join(pos_dir, "drive_backup")
         if not os.path.exists(backup_dir):
             os.makedirs(backup_dir)
 
@@ -475,7 +490,7 @@ class PosConfig:
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(os.path.dirname(file_path), mock_dirver_dir)
                 backup_path = os.path.join(backup_dir, rel_path)
-                old_payment_driver_dir = os.path.join(pos_dir, 'drive', rel_path)
+                old_payment_driver_dir = os.path.join(pos_dir, "drive", rel_path)
                 if not os.path.exists(backup_path):
                     os.makedirs(backup_path)
                 # copytree(file_path, backup_path, dirs_exist_ok=True)
@@ -495,20 +510,20 @@ class PosConfig:
         恢复支付驱动
         """
         pos_dir = os.path.dirname(pos_file)
-        backup_dir = os.path.join(pos_dir, 'drive_backup')
+        backup_dir = os.path.join(pos_dir, "drive_backup")
         if not os.path.exists(backup_dir):
             logger.warning(f"备份目录不存在:{backup_dir}")
             return
-        copytree(backup_dir, os.path.join(pos_dir, 'drive'), dirs_exist_ok=True)
+        copytree(backup_dir, os.path.join(pos_dir, "drive"), dirs_exist_ok=True)
 
     @classmethod
     def cover_payment_driver(cls, pos_file):
         if not os.path.exists(pos_file):
             logger.warning(f"POS文件不存在:{pos_file}")
             return False, "POS文件不存在"
-        drive_file = os.path.join(os.path.dirname(pos_file), 'drive')
+        drive_file = os.path.join(os.path.dirname(pos_file), "drive")
 
-        mock_file = os.path.abspath('drive')
+        mock_file = os.path.abspath("drive")
         if not os.path.exists(mock_file):
             logger.warning(f"支付mock驱动不存在:{mock_file}")
             return False, "支付mock驱动不存在"
@@ -519,13 +534,7 @@ class PosConfig:
 
     @classmethod
     def clear_env(cls, pos_path: str):
-        env_files = [
-            "database",
-            "log",
-            "pos_params",
-            "init_config.data",
-            "charge_db"
-        ]
+        env_files = ["database", "log", "pos_params", "init_config.data", "charge_db"]
         if not os.path.exists(pos_path):
             logger.warning(f"POS文件不存在:{pos_path}")
             return
@@ -549,7 +558,7 @@ class PosToolConfig:
     @classmethod
     def read_local_pos_tool_config(cls) -> PosInitRespModel | None:
         if os.path.exists(cls.config_file):
-            with open(cls.config_file, "r", encoding="utf-8") as f:
+            with open(cls.config_file, encoding="utf-8") as f:
                 data = f.read()
                 if not data:
                     return None
@@ -572,7 +581,7 @@ class AgentConfig:
                 f.write(json.dumps(config.model_dump(), ensure_ascii=False))
             return config
 
-        with open(cls.config_path, "r", encoding="utf-8") as f:
+        with open(cls.config_path, encoding="utf-8") as f:
             data = f.read()
             if not data:
                 config = AgentConfigModel()
@@ -599,7 +608,7 @@ class FtpConfig:
                 f.write(json.dumps(config.model_dump(), ensure_ascii=False))
             return config
 
-        with open(cls.config_path, "r", encoding="utf-8") as f:
+        with open(cls.config_path, encoding="utf-8") as f:
             data = f.read()
             if not data:
                 config = FtpConfigModel()

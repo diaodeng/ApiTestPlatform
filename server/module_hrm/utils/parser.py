@@ -1,16 +1,16 @@
 import ast
 import builtins
 import re
-from typing import Any, Callable, Dict, List, Set, Text
+from collections.abc import Callable
+from typing import Any, Dict, List, Set
 from urllib.parse import urlparse
-
-from module_hrm.exceptions import VariableNotFound
-from utils.log_util import logger
 
 from module_hrm import exceptions
 from module_hrm.entity.vo.case_vo_detail_for_handle import FunctionsMapping, VariablesMapping
-from module_hrm.utils import util, comparators
-from module_hrm.utils.util import load_csv_file, get_func_map
+from module_hrm.exceptions import VariableNotFound
+from module_hrm.utils import comparators, util
+from module_hrm.utils.util import get_func_map, load_csv_file
+from utils.log_util import logger
 
 # use $$ to escape $ notation
 dolloar_regex_compile = re.compile(r"\$\$")
@@ -23,7 +23,7 @@ variable_regex_compile_2 = re.compile(r"\$([a-zA-Z_]\w*)")
 function_regex_compile = re.compile(r"\$\{([a-zA-Z_]\w*)\(([\$\w\.\-/\s=,]*)\)\}")
 
 
-def parse_string_value(str_value: Text) -> Any:
+def parse_string_value(str_value: str) -> Any:
     """parse string to number if possible
     e.g. "123" => 123
          "12.2" => 12.3
@@ -61,12 +61,12 @@ def build_url(base_url, step_url):
     return o_step_url.geturl()
 
 
-def regex_find_variables(raw_string: Text) -> List[Text]:
+def regex_find_variables(raw_string: str) -> List[str]:
     pass
 
 
 
-def regex_findall_variables(raw_string: Text) -> List[Text]:
+def regex_findall_variables(raw_string: str) -> List[str]:
     """extract all variable names from content, which is in format $variable
 
     Args:
@@ -128,7 +128,7 @@ def regex_findall_variables(raw_string: Text) -> List[Text]:
     return vars_list
 
 
-def regex_findall_functions(content: Text) -> List[Text]:
+def regex_findall_functions(content: str) -> List[str]:
     """extract all functions from string content, which are in format ${fun()}
 
     Args:
@@ -181,7 +181,7 @@ def extract_variables(content: Any) -> Set:
     return set()
 
 
-def parse_function_params(params: Text) -> Dict:
+def parse_function_params(params: str) -> Dict:
     """parse function params to args and kwargs.
 
     Args:
@@ -231,7 +231,7 @@ def parse_function_params(params: Text) -> Dict:
 
 
 def get_mapping_variable(
-        variable_name: Text, variables_mapping: VariablesMapping
+        variable_name: str, variables_mapping: VariablesMapping
 ) -> Any:
     """get variable from variables_mapping.
 
@@ -257,7 +257,7 @@ def get_mapping_variable(
 
 
 def get_mapping_function(
-        function_name: Text, functions_mapping: FunctionsMapping
+        function_name: str, functions_mapping: FunctionsMapping
 ) -> Callable:
     """get function from functions_mapping,
         if not found, then try to check if builtin function.
@@ -304,7 +304,7 @@ def get_mapping_function(
 
 
 def parse_string(
-        raw_string: Text,
+        raw_string: str,
         variables_mapping: VariablesMapping,
         functions_mapping: FunctionsMapping,
         not_found_exception = True,
@@ -592,7 +592,7 @@ def parse_parameters(
                 parameter_content_dict = dict(zip(parameter_name_list, parameter_item))
                 parameter_content_list.append(parameter_content_dict)
 
-        elif isinstance(parameter_content, Text):
+        elif isinstance(parameter_content, str):
             # (2) & (3)
             parsed_parameter_content: List = parse_data(
                 parameter_content, {}, functions_mapping
@@ -651,12 +651,12 @@ def parse_parameters(
     return util.gen_cartesian_product(*parsed_parameters_list)
 
 
-class Parser(object):
+class Parser:
     def __init__(self, functions_mapping: FunctionsMapping = None) -> None:
         self.functions_mapping = functions_mapping
 
     def parse_string(
-            self, raw_string: Text, variables_mapping: VariablesMapping
+            self, raw_string: str, variables_mapping: VariablesMapping
     ) -> Any:
         return parse_string(raw_string, variables_mapping, self.functions_mapping)
 
@@ -668,7 +668,7 @@ class Parser(object):
     ) -> Any:
         return parse_data(raw_data, variables_mapping, self.functions_mapping)
 
-    def get_mapping_function(self, func_name: Text) -> Callable:
+    def get_mapping_function(self, func_name: str) -> Callable:
         return get_mapping_function(func_name, self.functions_mapping)
 
 

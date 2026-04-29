@@ -1,10 +1,12 @@
-import psutil
-from utils.common_util import bytes2human
+import os
 import platform
 import socket
-import os
 import time
-from module_admin.entity.vo.server_vo import *
+
+import psutil
+
+from module_admin.entity.vo.server_vo import CpuInfo, MemoryInfo, PyInfo, ServerMonitorModel, SysFiles, SysInfo
+from utils.common_util import bytes2human
 
 
 class ServerService:
@@ -40,7 +42,11 @@ class ServerService:
         computer_name = platform.node()
         os_arch = platform.machine()
         user_dir = os.path.abspath(os.getcwd())
-        sys = SysInfo(computerIp=computer_ip, computerName=computer_name, osArch=os_arch, osName=os_name, userDir=user_dir)
+        sys = SysInfo(computerIp=computer_ip,
+                      computerName=computer_name,
+                      osArch=os_arch,
+                      osName=os_name,
+                      userDir=user_dir)
 
         # python解释器信息
         current_pid = os.getpid()

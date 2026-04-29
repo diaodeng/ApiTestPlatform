@@ -1,21 +1,25 @@
-from functools import wraps, lru_cache
-from fastapi import Request
-from fastapi.responses import JSONResponse, ORJSONResponse, UJSONResponse
 import inspect
-import os
 import json
+import os
 import time
 from datetime import datetime
-import requests
+from functools import wraps
+
+import httpx
+from fastapi import Request
+from fastapi.responses import JSONResponse, ORJSONResponse, UJSONResponse
 from user_agents import parse
-from typing import Optional
-from module_admin.service.login_service import LoginService
-from module_admin.service.log_service import OperationLogService, LoginLogService
-from module_admin.entity.vo.log_vo import OperLogModel, LogininforModel
+
 from config.env import AppConfig
+from module_admin.entity.vo.log_vo import LogininforModel, OperLogModel
+from module_admin.service.log_service import LoginLogService, OperationLogService
+from module_admin.service.login_service import LoginService
+
+IP_LOCATION_CACHE_TTL_SECONDS = 60 * 60
+_ip_location_cache: dict[str, tuple[float, str]] = {}
 
 
-def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'operation'):
+def log_decorator(title: str, business_type: int, log_type: str | None = "operation"):
     """
     日志装饰器
     :param log_type: 日志类型（login表示登录日志，为空表示为操作日志）
@@ -23,6 +27,7 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
     :param business_type: 业务类型（0其它 1新增 2修改 3删除 4授权 5导出 6导入 7强退 8生成代码 9清空数据）
     :return:
     """
+
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -32,16 +37,16 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
             # 获取项目根路径
             project_root = os.getcwd()
             # 处理文件路径，去除项目根路径部分
-            relative_path = os.path.relpath(file_path, start=project_root)[0:-2].replace('\\', '.')
+            relative_path = os.path.relpath(file_path, start=project_root)[0:-2].replace("\\", ".")
             # 获取当前被装饰函数所在路径
-            func_path = f'{relative_path}{func.__name__}()'
+            func_path = f"{relative_path}{func.__name__}()"
             # 获取上下文信息
-            request: Request = kwargs.get('request')
-            token = request.headers.get('Authorization')
-            query_db = kwargs.get('query_db')
+            request: Request = kwargs.get("request")
+            token = request.headers.get("Authorization")
+            query_db = kwargs.get("query_db")
             request_method = request.method
             operator_type = 0
-            user_agent = request.headers.get('User-Agent')
+            user_agent = request.headers.get("User-Agent")
             if "Windows" in user_agent or "Macintosh" in user_agent or "Linux" in user_agent:
                 operator_type = 1
             if "Mobile" in user_agent or "Android" in user_agent or "iPhone" in user_agent:
@@ -50,12 +55,18 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
             oper_url = request.url.path
             # 获取请求的ip及ip归属区域
             oper_ip = request.headers.get("X-Forwarded-For")
-            oper_location = '内网IP'
+            if oper_ip:
+                oper_ip = oper_ip.split(",")[0].strip()
+            elif request.client:
+                oper_ip = request.client.host
+            oper_location = "内网IP"
             if AppConfig.app_ip_location_query:
-                oper_location = get_ip_location(oper_ip)
+                oper_location = await get_ip_location(oper_ip)
             # 根据不同的请求类型使用不同的方法获取请求参数
             content_type = request.headers.get("Content-Type")
-            if content_type and ("multipart/form-data" in content_type or 'application/x-www-form-urlencoded' in content_type):
+            if content_type and (
+                "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type
+            ):
                 payload = await request.form()
                 oper_param = "\n".join([f"{key}: {value}" for key, value in payload.items()])
             else:
@@ -64,72 +75,80 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
                 path_params = request.path_params
                 oper_param = {}
                 if payload:
-                    oper_param.update(json.loads(str(payload, 'utf-8')))
+                    oper_param.update(json.loads(str(payload, "utf-8")))
                 if path_params:
                     oper_param.update(path_params)
                 oper_param = json.dumps(oper_param, ensure_ascii=False)
             # 日志表请求参数字段长度最大为2000，因此在此处判断长度
             if len(oper_param) > 2000:
-                oper_param = '请求参数过长'
+                oper_param = "请求参数过长"
 
             # 获取操作时间
             oper_time = datetime.now()
             # 此处在登录之前向原始函数传递一些登录信息，用于监测在线用户的相关信息
             login_log = {}
-            if log_type == 'login':
+            if log_type == "login":
                 user_agent_info = parse(user_agent)
-                browser = f'{user_agent_info.browser.family}'
-                system_os = f'{user_agent_info.os.family}'
+                browser = f"{user_agent_info.browser.family}"
+                system_os = f"{user_agent_info.os.family}"
                 if user_agent_info.browser.version != ():
-                    browser += f' {user_agent_info.browser.version[0]}'
+                    browser += f" {user_agent_info.browser.version[0]}"
                 if user_agent_info.os.version != ():
-                    system_os += f' {user_agent_info.os.version[0]}'
-                login_log = dict(
-                    ipaddr=oper_ip,
-                    loginLocation=oper_location,
-                    browser=browser,
-                    os=system_os,
-                    loginTime=oper_time.strftime('%Y-%m-%d %H:%M:%S')
-                )
-                kwargs['form_data'].login_info = login_log
+                    system_os += f" {user_agent_info.os.version[0]}"
+                login_log = {
+                    "ipaddr": oper_ip,
+                    "loginLocation": oper_location,
+                    "browser": browser,
+                    "os": system_os,
+                    "loginTime": oper_time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                kwargs["form_data"].login_info = login_log
             # 调用原始函数
             result = await func(*args, **kwargs)
             # 获取请求耗时
             cost_time = float(time.time() - start_time) * 100
             # 判断请求是否来自api文档
-            request_from_swagger = request.headers.get('referer').endswith('docs') if request.headers.get('referer') else False
-            request_from_redoc = request.headers.get('referer').endswith('redoc') if request.headers.get('referer') else False
+            request_from_swagger = (
+                request.headers.get("referer").endswith("docs") if request.headers.get("referer") else False
+            )
+            request_from_redoc = (
+                request.headers.get("referer").endswith("redoc") if request.headers.get("referer") else False
+            )
             # 根据响应结果的类型使用不同的方法获取响应结果参数
-            if isinstance(result, JSONResponse) or isinstance(result, ORJSONResponse) or isinstance(result, UJSONResponse):
-                result_dict = json.loads(str(result.body, 'utf-8'))
+            if (
+                isinstance(result, JSONResponse)
+                or isinstance(result, ORJSONResponse)
+                or isinstance(result, UJSONResponse)
+            ):
+                result_dict = json.loads(str(result.body, "utf-8"))
             else:
                 if request_from_swagger or request_from_redoc:
                     result_dict = {}
                 else:
                     if result.status_code == 200:
-                        result_dict = {'code': result.status_code, 'message': '获取成功'}
+                        result_dict = {"code": result.status_code, "message": "获取成功"}
                     else:
-                        result_dict = {'code': result.status_code, 'message': '获取失败'}
+                        result_dict = {"code": result.status_code, "message": "获取失败"}
             json_result = json.dumps(result_dict, ensure_ascii=False)
             # 根据响应结果获取响应状态及异常信息
             status = 1
-            error_msg = ''
-            if result_dict.get('code') == 200:
+            error_msg = ""
+            if result_dict.get("code") == 200:
                 status = 0
             else:
-                error_msg = result_dict.get('msg')
+                error_msg = result_dict.get("msg")
             # 根据日志类型向对应的日志表插入数据
-            if log_type == 'login':
+            if log_type == "login":
                 # 登录请求来自于api文档时不记录登录日志，其余情况则记录
                 if request_from_swagger or request_from_redoc:
                     pass
                 else:
-                    user = kwargs.get('form_data')
+                    user = kwargs.get("form_data")
                     user_name = user.username
-                    login_log['loginTime'] = oper_time
-                    login_log['userName'] = user_name
-                    login_log['status'] = str(status)
-                    login_log['msg'] = result_dict.get('msg')
+                    login_log["loginTime"] = oper_time
+                    login_log["userName"] = user_name
+                    login_log["status"] = str(status)
+                    login_log["msg"] = result_dict.get("msg")
 
                     LoginLogService.add_login_log_services(query_db, LogininforModel(**login_log))
             else:
@@ -152,7 +171,7 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
                     status=status,
                     errorMsg=error_msg,
                     operTime=oper_time,
-                    costTime=int(cost_time)
+                    costTime=int(cost_time),
                 )
                 OperationLogService.add_operation_log_services(query_db, operation_log)
 
@@ -163,24 +182,40 @@ def log_decorator(title: str, business_type: int, log_type: Optional[str] = 'ope
     return decorator
 
 
-@lru_cache()
-def get_ip_location(oper_ip: str):
+async def get_ip_location(oper_ip: str | None):
     """
     查询ip归属区域
     :param oper_ip: 需要查询的ip
     :return: ip归属区域
     """
-    oper_location = '内网IP'
+    normalized_ip = (oper_ip or "").strip()
+    if not normalized_ip:
+        return "未知"
+    if normalized_ip in {"127.0.0.1", "localhost", "::1"}:
+        return "内网IP"
+
+    current_timestamp = time.time()
+    cached_location = _ip_location_cache.get(normalized_ip)
+    if cached_location and cached_location[0] > current_timestamp:
+        return cached_location[1]
+
+    oper_location = "内网IP"
     try:
-        if oper_ip != '127.0.0.1' and oper_ip != 'localhost':
-            oper_location = '未知'
-            ip_result = requests.get(f'https://qifu-api.baidubce.com/ip/geo/v1/district?ip={oper_ip}')
-            if ip_result.status_code == 200:
-                prov = ip_result.json().get('data').get('prov')
-                city = ip_result.json().get('data').get('city')
-                if prov or city:
-                    oper_location = f'{prov}-{city}'
+        oper_location = "未知"
+        async with httpx.AsyncClient() as client:
+            ip_result = await client.get(f"https://qifu-api.baidubce.com/ip/geo/v1/district?ip={normalized_ip}")
+        if ip_result.status_code == 200:
+            data = ip_result.json().get("data") or {}
+            prov = data.get("prov")
+            city = data.get("city")
+            if prov or city:
+                oper_location = f"{prov}-{city}"
     except Exception as e:
-        oper_location = '未知'
+        oper_location = "未知"
         print(e)
+
+    _ip_location_cache[normalized_ip] = (
+        current_timestamp + IP_LOCATION_CACHE_TTL_SECONDS,
+        oper_location,
+    )
     return oper_location

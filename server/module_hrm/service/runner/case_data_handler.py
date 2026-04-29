@@ -1,6 +1,6 @@
 import copy
 import json
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy.orm import Session
 
@@ -13,17 +13,17 @@ from module_hrm.entity.vo.case_vo_detail_for_handle import TestCase as TestCaseF
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase, TStep
 from module_hrm.entity.vo.env_vo import EnvModel, EnvModelForApi
 from module_hrm.enums.enums import ParameterTypeEnum
-from module_hrm.service.case_service import CaseParamsService
-from module_hrm.utils.common import key_value_dict, dict2list, update_or_extend_list
-from module_hrm.utils.parser import parse_data
-from module_hrm.utils.util import decompress_text, compress_text
-from utils.log_util import logger
-from utils.common_util import CamelCaseUtil
 from module_hrm.service.agent_service import AgentService
+from module_hrm.service.case_service import CaseParamsService
 from module_hrm.service.forward_rules_service import ForwardRulesService
+from module_hrm.utils.common import dict2list, key_value_dict, update_or_extend_list
+from module_hrm.utils.parser import parse_data
+from module_hrm.utils.util import compress_text, decompress_text
+from utils.common_util import CamelCaseUtil
+from utils.log_util import logger
 
 
-class CaseInfoHandle():
+class CaseInfoHandle:
     """
     用例、配置、API数据处理
     """
@@ -76,7 +76,7 @@ class CaseInfoHandle():
         return OutToIn(self.query_db, self.case_obj)
 
 
-class OutToIn(object):
+class OutToIn:
     def __init__(self, query_db: Session, case_obj: CaseModelForApi):
         self.query_db = query_db
         self.case_data = case_obj
@@ -89,7 +89,7 @@ class OutToIn(object):
         return info_obj
 
 
-class InToOut(object):
+class InToOut:
     def __init__(self, query_db: Session, case_obj: CaseModelForApi):
         self.query_db = query_db
         self.case_obj = case_obj
@@ -101,7 +101,7 @@ class InToOut(object):
         return CaseInfoToRun(self.query_db, env_obj, self.case_obj)
 
 
-class CaseInfoToPage(object):
+class CaseInfoToPage:
     def __init__(self, data_obj: InToOut):
         self.case_obj = data_obj.case_obj
 
@@ -148,7 +148,7 @@ class CaseInfoToPage(object):
         return self.asApi()
 
 
-class CaseInfoToApi(object):
+class CaseInfoToApi:
     def __init__(self, out_to_in: OutToIn):
         self._out_to_in = out_to_in
         step_length = len(self._out_to_in.case_data.get("request", {}).get("steps", []))
@@ -161,7 +161,7 @@ class CaseInfoToApi(object):
         return self._api_data
 
 
-class CaseInfoToDb(object):
+class CaseInfoToDb:
     def __init__(self, out_to_in: OutToIn):
         self.case_obj: CaseModelForApi = out_to_in.case_data
 
@@ -176,7 +176,7 @@ class CaseInfoToDb(object):
         return self.asCase()
 
 
-class CaseInfoToRun(object):
+class CaseInfoToRun:
     def __init__(self, query_db: Session, env_obj: EnvModelForApi | EnvModel | str | int, case_obj: CaseModelForApi):
         self.query_db = query_db
         self.env_obj = self.__ensure_env_obj(env_obj)
@@ -315,7 +315,7 @@ class CaseInfoToRun(object):
         return self.run_data()
 
 
-class ParametersHandler(object):
+class ParametersHandler:
     """
     参数处理器，用于处理参数化的情况
     """
@@ -464,7 +464,7 @@ class ParametersHandler(object):
         # return all_data
 
 
-class ForwardRulesHandler(object):
+class ForwardRulesHandler:
     """
     转发规则处理
     """
@@ -525,7 +525,7 @@ class ConfigHandle:
         if step_obj.run_condition.is_run_info.enable and source_data:
             try:
                 can_run = eval(source_data)
-            except SyntaxError as se:
+            except SyntaxError:
                 can_run = False
                 logger.error(f"步骤执行条件语法错误: {source_data}")
                 # raise se
@@ -545,4 +545,4 @@ class ConfigHandle:
             loop_num = step_obj.run_condition.loop_run_info.condition_source or 1
 
         loop_var = step_obj.run_condition.loop_run_info.loop_var or None
-        return loop_var, [i for i in range(int(loop_num))]
+        return loop_var, list(range(int(loop_num)))

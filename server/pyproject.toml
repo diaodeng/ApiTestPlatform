@@ -1,0 +1,65 @@
+[project]
+name = "server"
+version = "1.0.4.2"
+description = "一款现代化的多功能测试管理平台"
+readme = "README.md"
+target-version = "py310"  # 目标版本，ruff语法检测使用
+requires-python = ">=3.10"  # 打包进入资源提示，最低版本要求  .python-version中是运行时版本切换（uv使用相关），这三个应该一致
+dependencies = [
+    "apscheduler==3.10.4",
+    "bcrypt==4.1.2",
+    "datetime==5.4",
+    "fastapi[all]==0.109.1",
+    "httpx[http2]==0.27.0",
+    "jinja2==3.1.6",
+    "jmespath==1.0.1",
+    "jsonpath==0.82.2",
+    "loguru==0.7.2",
+    "openpyxl==3.1.2",
+    "paramiko>=3.4.0",
+    "passlib[bcrypt]==1.7.4",
+    "psutil==5.9.7",
+    "pydantic==2.7.1",
+    "pymysql==1.1.0",
+    "python-jose[cryptography]==3.3.0",
+    "quickjs>=1.19.4",
+    "redis==5.0.1",
+    "redlock==1.2.0",
+    "requests==2.31.0",
+    "sqlalchemy==2.0.25",
+    "user-agents==2.2.0",
+    "uvicorn==0.29.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.0",
+    "pip==26.0.1"
+]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["README.md"]
+
+[tool.ruff.lint]
+select = ["C4", "E", "F", "B", "I", "PERF", "UP"]
+ignore = ["PERF203","UP007","UP006","UP045", "B008"]
+
+fixable = [
+    "E",    # 基础风格
+    "F",    # pyflakes
+    "I",    # import排序
+    "C4",   # 简化推导式
+    "UP",   # pyupgrade（已排除不安全规则）
+]
+
+unfixable = [
+    "B",      # bugbear（可能改语义）
+    "PERF",   # 性能优化类规则（可能改逻辑）
+]
+
+

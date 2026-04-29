@@ -1,9 +1,17 @@
 from sqlalchemy.orm import Session
+
 from module_hrm.dao.module_dao import ModuleDao
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.entity.vo.module_vo import ModulePageQueryModel, ModuleModel, AddModuleModel, DeleteModuleModel, \
-    ModuleProjectModel, ModuleQuery
-from utils.common_util import export_list2excel, CamelCaseUtil
+from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_hrm.entity.vo.module_vo import (
+    AddModuleModel,
+    DeleteModuleModel,
+    ModuleModel,
+    ModulePageQueryModel,
+    ModuleProjectModel,
+    ModuleQuery,
+)
+from utils.common_util import CamelCaseUtil, export_list2excel
 
 
 class ModuleService:
@@ -12,7 +20,7 @@ class ModuleService:
     """
 
     @classmethod
-    def get_module_list_services(cls, query_db: Session, query_object: ModulePageQueryModel, data_scope_sql:str, is_page: bool = False):
+    def get_module_list_services(cls, query_db: Session, query_object: ModulePageQueryModel, data_scope_sql:DataScopeExpr, is_page: bool = False):
         """
         获取模块列表信息service
         :param query_db: orm对象
@@ -25,7 +33,7 @@ class ModuleService:
         return list_result
 
     @classmethod
-    def get_module_list_services_all(cls, query_db: Session, page_object: ModuleModel, data_scope_sql:str):
+    def get_module_list_services_all(cls, query_db: Session, page_object: ModuleModel, data_scope_sql:DataScopeExpr):
         """
         获取项目信息service
         :param query_db: orm对象
@@ -38,7 +46,7 @@ class ModuleService:
         return CamelCaseUtil.transform_result(project_list_result)
 
     @classmethod
-    def get_module_list_services_show(cls, query_db: Session, page_object: ModuleModel, data_scope_sql:str):
+    def get_module_list_services_show(cls, query_db: Session, page_object: ModuleModel, data_scope_sql:DataScopeExpr):
         """
         获取项目信息service
         :param query_db: orm对象
@@ -62,7 +70,7 @@ class ModuleService:
         module = ModuleDao.get_module_detail_by_info(query_db, ModuleQuery(moduleName=page_object.module_name,
                                                                            projectId=page_object.project_id))
         if module:
-            result = dict(is_success=False, message='模块名称已存在')
+            result = {'is_success': False, 'message': '模块名称已存在'}
         else:
             try:
                 add_result = ModuleDao.add_module_dao(query_db, add_module)
@@ -71,7 +79,7 @@ class ModuleService:
                     ModuleDao.add_module_project_dao(query_db, ModuleProjectModel(moduleId=module_id,
                                                                                   projectId=page_object.project_id))
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -92,17 +100,17 @@ class ModuleService:
             if info.module_name != page_object.module_name:
                 module = ModuleDao.get_module_detail_by_info(query_db, ModuleModel(moduleName=page_object.module_name))
                 if module:
-                    result = dict(is_success=False, message='模块名称已存在')
+                    result = {'is_success': False, 'message': '模块名称已存在'}
                     return CrudResponseModel(**result)
             try:
                 ModuleDao.edit_module_dao(query_db, edit)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='模块不存在')
+            result = {'is_success': False, 'message': '模块不存在'}
 
         return CrudResponseModel(**result)
 
@@ -120,12 +128,12 @@ class ModuleService:
                 for module_id in id_list:
                     ModuleDao.delete_module_dao(query_db, ModuleModel(moduleId=module_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入模块id为空')
+            result = {'is_success': False, 'message': '传入模块id为空'}
         return CrudResponseModel(**result)
 
     @classmethod

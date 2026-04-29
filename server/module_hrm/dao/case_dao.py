@@ -1,23 +1,22 @@
 import uuid
 from collections import defaultdict
-from typing import Type, Generator, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
-from sqlalchemy import select, case, Sequence
+from sqlalchemy import Sequence, case, select, and_, or_
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_, func # 不能把删掉，数据权限sql依赖
+from sqlalchemy.sql import func
 from starlette.concurrency import run_in_threadpool
 
 from config.database import SessionLocal
-from module_admin.entity.do.dept_do import SysDept # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept # 不能把删掉，数据权限sql依赖
-
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.dao.suite_dao import SuiteDetailDao
 from module_hrm.entity.do.case_do import HrmCase, HrmCaseModuleProject, HrmCaseParams
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.dto.case_dto import CaseModelForApi
-from module_hrm.entity.vo.case_vo import *
+from module_hrm.entity.vo.case_vo import CaseModel, CaseModuleProjectModel, CasePageQueryModel, CaseQuery
 from module_hrm.utils.util import PermissionHandler
 from utils.page_util import PageUtil
 
@@ -46,29 +45,20 @@ class CaseDao:
         :param case_ids: 用例id
         :return: 在用用例信息对象
         """
-        ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)],
-                             else_=len(case_ids))
         batch_size = 1000
-        offset = 0
-        while True:
-            with SessionLocal() as db:
-                batch = await run_in_threadpool(
-                    db.query(HrmCase)
-                    .filter(HrmCase.case_id.in_(case_ids))
-                    .order_by(ordering_case)
-                    .offset(offset)
-                    .limit(batch_size)
-                    .all
-                )
-            if not batch:
-                break
-            for row in batch:
-                yield row  # 逐条 yield（或者改成 yield batch）
-            offset += batch_size
 
-        # ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)], else_=len(case_ids))
-        # info = db.execute(select(HrmCase).where(HrmCase.case_id.in_(case_ids)).order_by(ordering_case).offset(offset).limit(batch_size)).scalars().all()
-        # return info
+        id_order_map = {cid: idx for idx, cid in enumerate(case_ids)}
+
+        for i in range(0, len(case_ids), batch_size):
+            chunk_ids = case_ids[i : i + batch_size]
+
+            with SessionLocal() as db:
+                batch = await run_in_threadpool(db.query(HrmCase).filter(HrmCase.case_id.in_(chunk_ids)).all)
+
+            batch.sort(key=lambda x: id_order_map[x.case_id])
+
+            for row in batch:
+                yield row
 
     @classmethod
     def get_case_by_ids(cls, db: Session, case_ids: list[int]) -> Sequence[HrmCase]:
@@ -78,7 +68,9 @@ class CaseDao:
         :param case_ids: 用例id
         :return: 在用用例信息对象
         """
-        ordering_case = case(*[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)], else_=len(case_ids))
+        ordering_case = case(
+            *[(HrmCase.case_id == value, index) for index, value in enumerate(case_ids)], else_=len(case_ids)
+        )
         # info = db.query(HrmCase).filter(HrmCase.case_id.in_(case_ids)).order_by(ordering_case).all()
 
         info = db.execute(select(HrmCase).where(HrmCase.case_id.in_(case_ids)).order_by(ordering_case)).scalars().all()
@@ -110,7 +102,9 @@ class CaseDao:
         return info
 
     @classmethod
-    def get_case_list(cls, db: Session, query_object: CasePageQueryModel, is_page: bool = False, data_scope_sql:str='true'):
+    def get_case_list(
+        cls, db: Session, query_object: CasePageQueryModel, is_page: bool = False, data_scope_sql: DataScopeExpr = True
+    ):
         """
         根据查询参数获取用例列表信息
         :param db: orm对象
@@ -119,13 +113,12 @@ class CaseDao:
         :return: 用例列表信息对象
         """
         # 创建查询的基本部分
-        query = db.query(HrmCase,
-                         HrmProject.project_name,
-                         HrmModule.module_name
-                         ).outerjoin(HrmProject,
-                                     HrmCase.project_id == HrmProject.project_id).outerjoin(HrmModule,
-                                                                                            HrmCase.module_id == HrmModule.module_id)
-        query = query.filter(eval(data_scope_sql))
+        query = (
+            db.query(HrmCase, HrmProject.project_name, HrmModule.module_name)
+            .outerjoin(HrmProject, HrmCase.project_id == HrmProject.project_id)
+            .outerjoin(HrmModule, HrmCase.module_id == HrmModule.module_id)
+        )
+        query = query.filter(data_scope_sql)
         if query_object.suite_id:
             # 查询条件中增加需要排除部分caseId
             query_obj = {"suite_id": query_object.suite_id, "data_type": query_object.data_type}
@@ -150,7 +143,7 @@ class CaseDao:
 
         # 根据其他查询参数添加过滤条件
         if query_object.case_name:
-            query = query.filter(HrmCase.case_name.like(f'%{query_object.case_name}%'))
+            query = query.filter(HrmCase.case_name.like(f"%{query_object.case_name}%"))
         if query_object.status is not None:
             query = query.filter(HrmCase.status == query_object.status)
         if query_object.case_id is not None:
@@ -196,13 +189,9 @@ class CaseDao:
         PermissionHandler.check_is_self(user, db.query(HrmCase).filter(HrmCase.case_id == case.case_id).first())
 
         db.query(HrmCase).filter(HrmCase.case_id == case.case_id).update(case_data)
-        case_module_project = {
-            'module_id': case.module_id,
-            'project_id': case.project_id
-        }
+        case_module_project = {"module_id": case.module_id, "project_id": case.project_id}
         # 更新用例、模块、项目关系表
-        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).update(
-            case_module_project)
+        db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).update(case_module_project)
 
     @classmethod
     async def delete_case_dao(cls, db: Session, case: CaseModel, user: CurrentUserModel = None):
@@ -215,7 +204,9 @@ class CaseDao:
         PermissionHandler.check_is_self(user, db.query(HrmCase).filter(HrmCase.case_id == case.case_id).first())
         await run_in_threadpool(db.query(HrmCase).filter(HrmCase.case_id == case.case_id).delete)
         # 删除用例、模块、项目关系
-        await run_in_threadpool(db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).delete)
+        await run_in_threadpool(
+            db.query(HrmCaseModuleProject).filter(HrmCaseModuleProject.case_id == case.case_id).delete
+        )
 
     @classmethod
     def add_case_module_project_dao(cls, db: Session, case_project: CaseModuleProjectModel):
@@ -230,6 +221,28 @@ class CaseDao:
 
 
 class CaseParamsDao:
+    @staticmethod
+    def _normalize_cell_value(value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value)
+
+    @staticmethod
+    def _normalize_enabled(value: Any, default: bool = True) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "y", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "n", "off"}:
+                return False
+        return bool(value)
+
     @classmethod
     def get_case_params_by_id(cls, db: Session, case_id: int):
         """
@@ -241,6 +254,46 @@ class CaseParamsDao:
         case_params = db.query(HrmCaseParams).filter(HrmCaseParams.case_id == case_id).all()
         if not case_params:
             return {}
+
+    @classmethod
+    def get_table_columns_with_sort(cls, db: Session, use_case_id) -> list[tuple[str, int]]:
+        columns = (
+            db.query(
+                HrmCaseParams.col_name,
+                func.min(HrmCaseParams.col_sort).label("col_sort"),
+            )
+            .filter(HrmCaseParams.case_id == use_case_id)
+            .group_by(HrmCaseParams.col_name)
+            .order_by(func.min(HrmCaseParams.col_sort), HrmCaseParams.col_name)
+            .all()
+        )
+        return [(col_name, col_sort if col_sort is not None else 0) for col_name, col_sort in columns]
+
+    @classmethod
+    def get_table_columns(cls, db: Session, use_case_id) -> list[str]:
+        return [col_name for col_name, _col_sort in cls.get_table_columns_with_sort(db, use_case_id)]
+
+    @classmethod
+    def _build_row_id_query(
+        cls,
+        db: Session,
+        use_case_id,
+        enabled: int | bool | None = -1,
+        row_id: str | None = None,
+        search_column: str | None = None,
+        search_value: str | None = None,
+    ):
+        query = db.query(HrmCaseParams.row_id, HrmCaseParams.sort_key).filter(HrmCaseParams.case_id == use_case_id)
+
+        if enabled is not None and enabled != -1:
+            query = query.filter(HrmCaseParams.enabled == cls._normalize_enabled(enabled))
+        if row_id:
+            query = query.filter(HrmCaseParams.row_id == row_id)
+        if search_column and search_value not in (None, ""):
+            query = query.filter(HrmCaseParams.col_name == search_column)
+            query = query.filter(HrmCaseParams.col_value.like(f"%{search_value}%"))
+
+        return query
 
     @classmethod
     def insert_table(cls, db: Session, use_case_id, table_data: list[dict]):
@@ -262,7 +315,7 @@ class CaseParamsDao:
                         params_name=col_name,
                         col_value=str(col_value),
                         sort_key=sort_key,
-                        enabled=True
+                        enabled=True,
                     )
                 )
             sort_key += 100
@@ -278,6 +331,13 @@ class CaseParamsDao:
         :param before_row_id: 移动到谁之前
         :param after_row_id: 移动到谁之后
         """
+        column_defs = cls.get_table_columns_with_sort(db, use_case_id)
+        if not column_defs:
+            raise ValueError("当前没有可用列，请先导入数据")
+
+        row_data = dict(row_data or {})
+        enabled = cls._normalize_enabled(row_data.pop("__enable", True))
+
         # 1️⃣ 先查最大的 sort_key
         max_sort_key = db.query(func.max(HrmCaseParams.sort_key)).filter_by(case_id=use_case_id).scalar()
         if max_sort_key is None:
@@ -286,20 +346,23 @@ class CaseParamsDao:
         # 2️⃣ 插入数据
         row_id = str(uuid.uuid4())
         records = []
-        for col_name, col_value in row_data.items():
+        for col_name, col_sort in column_defs:
+            col_value = cls._normalize_cell_value(row_data.get(col_name, ""))
             records.append(
                 HrmCaseParams(
                     case_id=use_case_id,
                     row_id=row_id,
                     col_name=col_name,
                     params_name=col_name,
-                    col_value=str(col_value),
+                    col_value=col_value,
                     sort_key=max_sort_key,
-                    enabled=True
+                    enabled=enabled,
+                    col_sort=col_sort,
                 )
             )
         db.bulk_save_objects(records)
         db.commit()
+        return row_id
 
     @classmethod
     def insert_table_col(cls, db: Session, use_case_id, col_name, col_value=""):
@@ -310,20 +373,43 @@ class CaseParamsDao:
         :param col_value: 列值
         :param row_id: 行 ID
         """
-        # 1️⃣ 先查最大的 sort_key
-        row_info = db.query(HrmCaseParams.row_id, HrmCaseParams.sort_key).filter_by(case_id=use_case_id).distinct().all()
+        if not col_name:
+            raise ValueError("列名不能为空")
+        if col_name == "__enable":
+            raise ValueError("__enable 为内置字段，不能作为普通列名")
+        exists = (
+            db.query(HrmCaseParams.id)
+            .filter(HrmCaseParams.case_id == use_case_id, HrmCaseParams.col_name == col_name)
+            .first()
+        )
+        if exists:
+            raise ValueError("列名已存在")
+
+        row_info = (
+            db.query(HrmCaseParams.row_id, HrmCaseParams.sort_key, HrmCaseParams.enabled)
+            .filter_by(case_id=use_case_id)
+            .group_by(HrmCaseParams.row_id, HrmCaseParams.sort_key, HrmCaseParams.enabled)
+            .all()
+        )
+        if not row_info:
+            raise ValueError("当前没有可用数据行，请先导入数据")
+
+        max_col_sort = db.query(func.max(HrmCaseParams.col_sort)).filter_by(case_id=use_case_id).scalar()
+        next_col_sort = (max_col_sort if max_col_sort is not None else -1) + 1
 
         # 2️⃣ 插入数据
         records = []
-        for row_id, max_sort_key in row_info:
+        for row_id, max_sort_key, enabled in row_info:
             records.append(
                 HrmCaseParams(
                     case_id=use_case_id,
                     row_id=row_id,
                     col_name=col_name,
                     params_name=col_name,
-                    col_value=str(col_value),
-                    sort_key=max_sort_key
+                    col_value=cls._normalize_cell_value(col_value),
+                    sort_key=max_sort_key,
+                    enabled=enabled,
+                    col_sort=next_col_sort,
                 )
             )
 
@@ -337,12 +423,7 @@ class CaseParamsDao:
         :param use_case_id: 用例 ID
         :return: 表格数据
         """
-        rows = (
-            db.query(HrmCaseParams)
-            .filter_by(case_id=use_case_id)
-            .order_by(HrmCaseParams.sort_key)
-            .all()
-        )
+        rows = db.query(HrmCaseParams).filter_by(case_id=use_case_id).order_by(HrmCaseParams.sort_key).all()
         table = defaultdict(dict)
         sort_keys = {}
         for r in rows:
@@ -355,12 +436,7 @@ class CaseParamsDao:
 
     @classmethod
     def _reorder_all(cls, db: Session, use_case_id):
-        query = (
-            db.query(HrmCaseParams)
-            .filter_by(case_id=use_case_id)
-            .order_by(HrmCaseParams.sort_key)
-            .all()
-        )
+        query = db.query(HrmCaseParams).filter_by(case_id=use_case_id).order_by(HrmCaseParams.sort_key).all()
         new_key = 100
         for r in query:
             r.sort_key = new_key
@@ -407,20 +483,77 @@ class CaseParamsDao:
         :param use_case_id: 用例 ID
         :param rows_data: 行数据
         """
-        def _update_row_data():
 
+        def _update_row_data():
+            column_sort_map = dict(cls.get_table_columns_with_sort(db, use_case_id))
             for row in rows_data:
-                row_id = row.pop("_row_id")
-                for k, v in row.items():
+                row_data = dict(row)
+                row_id = row_data.pop("_row_id", None)
+                if not row_id:
+                    continue
+
+                enabled = row_data.pop("__enable", None)
+                if enabled is not None:
                     db.query(HrmCaseParams).filter(
                         HrmCaseParams.case_id == use_case_id,
                         HrmCaseParams.row_id == row_id,
-                        HrmCaseParams.params_name == k
-                    ).update({"col_value": v})
+                    ).update({"enabled": cls._normalize_enabled(enabled)}, synchronize_session=False)
+
+                row_records = (
+                    db.query(HrmCaseParams)
+                    .filter(
+                        HrmCaseParams.case_id == use_case_id,
+                        HrmCaseParams.row_id == row_id,
+                    )
+                    .all()
+                )
+                existing_map = {item.col_name: item for item in row_records}
+                if not row_records:
+                    continue
+
+                row_sort_key = row_records[0].sort_key
+                row_enabled = row_records[0].enabled if enabled is None else cls._normalize_enabled(enabled)
+
+                for k, v in row_data.items():
+                    if k.startswith("_"):
+                        continue
+                    normalized_value = cls._normalize_cell_value(v)
+                    if k in existing_map:
+                        existing_map[k].col_value = normalized_value
+                        continue
+
+                    col_sort = column_sort_map.get(k)
+                    if col_sort is None:
+                        col_sort = (max(column_sort_map.values()) if column_sort_map else -1) + 1
+                        column_sort_map[k] = col_sort
+                    db.add(
+                        HrmCaseParams(
+                            case_id=use_case_id,
+                            row_id=row_id,
+                            col_name=k,
+                            params_name=k,
+                            col_value=normalized_value,
+                            sort_key=row_sort_key,
+                            enabled=row_enabled,
+                            col_sort=col_sort,
+                        )
+                    )
+
+            db.commit()
+
         await run_in_threadpool(_update_row_data)
 
     @classmethod
-    async def load_table_page(cls, use_case_id, page=1, page_size=1000, enabled=-1) -> list[dict]:
+    async def load_table_page(
+        cls,
+        use_case_id,
+        page=1,
+        page_size=1000,
+        enabled=-1,
+        row_id: str | None = None,
+        search_column: str | None = None,
+        search_value: str | None = None,
+    ) -> list[dict]:
         """
         分页加载表格数据
         :param use_case_id: 用例 ID
@@ -431,13 +564,16 @@ class CaseParamsDao:
         """
         # 1️⃣ 先查 row_id（限制数量）
         with SessionLocal() as db:
-            # db.execute(f"SET ob_query_timeout=60000000") # 超时60s
-            query = db.query(HrmCaseParams).filter_by(case_id=use_case_id)
-            if enabled is not None and enabled != -1:
-                query = query.filter_by(enabled=enabled)
+            query = cls._build_row_id_query(
+                db,
+                use_case_id=use_case_id,
+                enabled=enabled,
+                row_id=row_id,
+                search_column=search_column,
+                search_value=search_value,
+            )
             subquery = (
-                query
-                .distinct()
+                query.distinct()
                 .with_entities(HrmCaseParams.row_id, HrmCaseParams.sort_key)
                 .order_by(HrmCaseParams.sort_key)
                 .offset((page - 1) * page_size)
@@ -456,11 +592,13 @@ class CaseParamsDao:
 
         # 3️⃣ 拼成二维表
         from collections import defaultdict
+
         table = defaultdict(dict)
         sort_keys = {}
         for r in rows:
             table[r.row_id]["_row_id"] = r.row_id
-            table[r.row_id][r.col_name] = r.col_value
+            table[r.row_id]["__enable"] = bool(r.enabled)
+            table[r.row_id][r.col_name] = "" if r.col_value is None else r.col_value
             sort_keys[r.row_id] = r.sort_key
 
         result = [table[row_id] for row_id, _ in sorted(sort_keys.items(), key=lambda x: x[1])]
@@ -468,48 +606,128 @@ class CaseParamsDao:
 
     @classmethod
     async def load_table_iter(cls, use_case_id) -> AsyncGenerator[dict, None]:
-        page = 1
+        split_data = {"last_sort_key": None, "last_id": None}
         while True:
-            datas = await cls.load_table_page(use_case_id, page=page, page_size=1000, enabled=True)
+            datas, split_data = await cls.load_table_page_cursor(use_case_id, page_size=1000, enabled=True, **split_data)
             if not datas:
                 break
             for data in datas:
                 data.pop("_row_id", None)
                 yield data
-            page += 1
 
     @classmethod
-    async def get_table_row_count(cls, db: Session, use_case_id):
+    async def load_table_page_cursor(
+        cls,
+        use_case_id: int,
+        page_size: int = 1000,
+        enabled: int | None = -1,
+        last_sort_key: int | None = None,
+        last_id: int | None = None,  # 用主键id做游标
+    ):
+        with SessionLocal() as db:
+            # 每行只保留最小id（稳定、唯一）
+            anchor_sub = (
+                db.query(
+                    HrmCaseParams.row_id.label("row_id"),
+                    HrmCaseParams.sort_key.label("sort_key"),
+                    func.min(HrmCaseParams.id).label("anchor_id"),
+                )
+                .filter(HrmCaseParams.case_id == use_case_id)
+                .filter(HrmCaseParams.enabled == enabled if enabled is not None and enabled != -1 else True)
+                .group_by(HrmCaseParams.row_id, HrmCaseParams.sort_key)
+                .subquery()
+            )
+
+            page_q = db.query(anchor_sub.c.row_id, anchor_sub.c.sort_key, anchor_sub.c.anchor_id)
+
+            if last_sort_key is not None and last_id is not None:
+                page_q = page_q.filter(
+                    or_(
+                        anchor_sub.c.sort_key > last_sort_key,
+                        and_(
+                            anchor_sub.c.sort_key == last_sort_key,
+                            anchor_sub.c.anchor_id > last_id,
+                        ),
+                    )
+                )
+
+            row_page = await run_in_threadpool(
+                page_q.order_by(anchor_sub.c.sort_key, anchor_sub.c.anchor_id).limit(page_size).all
+            )
+            if not row_page:
+                return [], None
+
+            page_row_ids = [r.row_id for r in row_page]
+            order_map = {rid: idx for idx, rid in enumerate(page_row_ids)}
+
+            rows = await run_in_threadpool(
+                db.query(HrmCaseParams)
+                .filter(HrmCaseParams.case_id == use_case_id)
+                .filter(HrmCaseParams.row_id.in_(page_row_ids))
+                .order_by(HrmCaseParams.sort_key, HrmCaseParams.row_id, HrmCaseParams.col_sort, HrmCaseParams.id)
+                .all
+            )
+
+        table = defaultdict(dict)
+        for r in rows:
+            table[r.row_id]["_row_id"] = r.row_id
+            table[r.row_id][r.col_name] = r.col_value
+
+        result = [table[rid] for rid in sorted(table.keys(), key=lambda x: order_map[x])]
+        last = row_page[-1]
+        next_cursor = {"last_sort_key": last.sort_key, "last_id": last.anchor_id}
+        return result, next_cursor
+
+    @classmethod
+    async def get_table_row_count(
+        cls,
+        db: Session,
+        use_case_id,
+        enabled: int | bool | None = -1,
+        row_id: str | None = None,
+        search_column: str | None = None,
+        search_value: str | None = None,
+    ):
         """
         获取表格行数
         :param use_case_id: 用例 ID
         :return: 行数
         """
-        return await run_in_threadpool(
-            db.query(HrmCaseParams.row_id).filter_by(case_id=use_case_id).distinct().count
-        )
+        def _count():
+            query = cls._build_row_id_query(
+                db,
+                use_case_id=use_case_id,
+                enabled=enabled,
+                row_id=row_id,
+                search_column=search_column,
+                search_value=search_value,
+            )
+            return query.with_entities(HrmCaseParams.row_id).distinct().count()
+
+        return await run_in_threadpool(_count)
 
     @classmethod
     async def delete_table(cls, db: Session, use_case_id):
         await cls.delete_table_row(db, use_case_id)
 
     @classmethod
-    async def delete_table_row(cls, db: Session, use_case_id, row_ids: list[str|int] = None):
+    async def delete_table_row(cls, db: Session, use_case_id, row_ids: list[str | int] = None):
         while True:
             query = db.query(HrmCaseParams.id).filter(HrmCaseParams.case_id == use_case_id)
             if row_ids:
-                query.filter(HrmCaseParams.row_id.in_(row_ids))
+                query = query.filter(HrmCaseParams.row_id.in_(row_ids))
             all_data = await run_in_threadpool(query.limit(1000).all)
             batch_ids = [r[0] for r in all_data]
             if not batch_ids:
                 break
-            delete_count = await run_in_threadpool(
-                db.query(HrmCaseParams).filter(HrmCaseParams.id.in_(batch_ids)).delete,
-                synchronize_session=False
+            await run_in_threadpool(
+                db.query(HrmCaseParams).filter(HrmCaseParams.id.in_(batch_ids)).delete, synchronize_session=False
             )
             await run_in_threadpool(db.commit)
 
     @classmethod
     def delete_table_col(cls, db: Session, use_case_id, col_name):
+        if col_name == "__enable":
+            raise ValueError("__enable 为内置字段，不能删除")
         db.query(HrmCaseParams).filter_by(case_id=use_case_id, col_name=col_name).delete()
         db.commit()

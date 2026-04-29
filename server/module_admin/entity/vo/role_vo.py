@@ -1,8 +1,10 @@
+from datetime import datetime
+from typing import Optional, Union
+
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from pydantic.alias_generators import to_camel
-from typing import Union, Optional, List
-from datetime import datetime
-from module_admin.annotation.pydantic_annotation import as_query, as_form
+
+from module_admin.annotation.pydantic_annotation import as_form, as_query
 
 
 class RoleModel(BaseModel):
@@ -93,8 +95,8 @@ class RoleMenuQueryModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    menus: List = []
-    checked_keys: List[int] = []
+    menus: list = []
+    checked_keys: list[int] = []
 
 
 class RoleDeptQueryModel(BaseModel):
@@ -103,16 +105,16 @@ class RoleDeptQueryModel(BaseModel):
     """
     model_config = ConfigDict(alias_generator=to_camel)
 
-    depts: List = []
-    checked_keys: List[int] = []
+    depts: list = []
+    checked_keys: list[int] = []
 
 
 class AddRoleModel(RoleModel):
     """
     新增角色模型
     """
-    dept_ids: List = []
-    menu_ids: List = []
+    dept_ids: list = []
+    menu_ids: list = []
     type: Optional[str] = None
 
 

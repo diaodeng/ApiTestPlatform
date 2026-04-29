@@ -1,20 +1,18 @@
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-from sqlalchemy.orm import Session, Query
 from sqlalchemy import insert
-from sqlalchemy.sql import or_, func  # 不能把删掉，数据权限sql依赖
+from sqlalchemy.orm import Query, Session
+from sqlalchemy.sql import func
 from starlette.concurrency import run_in_threadpool
 
-from module_admin.entity.do.dept_do import SysDept  # 不能把删掉，数据权限sql依赖
-from module_admin.entity.do.role_do import SysRoleDept  # 不能把删掉，数据权限sql依赖
-
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.entity.do.run_detail_do import HrmRunDetail
-from module_hrm.entity.vo.run_detail_vo import RunDetailQueryModel, HrmRunListModel, HrmRunDetailModel
+from module_hrm.entity.do.run_error_do import HrmRunError
+from module_hrm.entity.vo.run_detail_vo import HrmRunDetailModel, HrmRunListModel, RunDetailQueryModel
 from module_hrm.enums.enums import CaseRunStatus, RunTypeEnum
 from module_hrm.utils.util import format_duration
-from utils.common_util import CamelCaseUtil
-from utils.page_util import PageUtil, PageResponseModel
 from utils.log_util import logger
+from utils.page_util import PageResponseModel, PageUtil
 
 
 class RunDetailDao:
@@ -42,6 +40,7 @@ class RunDetailDao:
     @classmethod
     def delete(cls, db: Session, detail_ids: list):
         if detail_ids:
+            db.query(HrmRunError).filter(HrmRunError.detail_id.in_(detail_ids)).delete(synchronize_session=False)
             db.query(HrmRunDetail).filter(HrmRunDetail.detail_id.in_(detail_ids)).delete()
             db.commit()
 
@@ -62,18 +61,17 @@ class RunDetailDao:
     @classmethod
     async def create_bulk(cls, db: Session, details: list[HrmRunDetailModel]):
         """
-        批量创建报告
+        批量创建报告，由调用方统一控制提交时机，便于和错误事件同事务写入。
         """
 
         detail_dicts = [detail.model_dump(exclude_unset=True) for detail in details]
         # run_details = [HrmRunDetail(**detail_dict) for detail_dict in detail_dicts]
         stmt = insert(HrmRunDetail).values(detail_dicts)
         await run_in_threadpool(db.execute, stmt)
-        await run_in_threadpool(db.commit)
 
     @classmethod
     def _filter_handle(cls, query: Query[type[HrmRunDetail]], query_info: RunDetailQueryModel,
-                       data_scope_sql: str | None = None):
+                       data_scope_sql: DataScopeExpr | None = None):
         if query_info.report_id:
             query = query.filter(HrmRunDetail.report_id == query_info.report_id)
 
@@ -110,15 +108,15 @@ class RunDetailDao:
         if query_info.run_name:
             query = query.filter(HrmRunDetail.run_name.like("%" + query_info.run_name + "%"))
         if data_scope_sql:
-            query = query.filter(eval(data_scope_sql))
+            query = query.filter(data_scope_sql)
         return query
 
     @classmethod
     async def list(cls, db: Session, query_info: RunDetailQueryModel,
-                   data_scope_sql: str | None = None) -> PageResponseModel | list | None:
+                   data_scope_sql: DataScopeExpr | None = None) -> PageResponseModel | list | None:
         logger.info(f"开始查询执行历史：{query_info.model_dump()}")
         if not query_info.report_id and not query_info.run_id:
-            logger.error(f"查询执行历史参数异常")
+            logger.error("查询执行历史参数异常")
             return None
         query = db.query(HrmRunDetail)
         query = cls._filter_handle(query, query_info, data_scope_sql)
@@ -127,10 +125,8 @@ class RunDetailDao:
                                          query_info.is_page)
         if not query_info.is_page:
             return result
-        logger.info(f"执行历史查询结束")
-        rows = []
-        for row in result.rows:
-            rows.append(HrmRunListModel.model_validate(row))
+        logger.info("执行历史查询结束")
+        rows: list[HrmRunListModel] = [HrmRunListModel.model_validate(row) for row in result.rows]
 
         result.rows = rows
         logger.info(f"执行历史数据组装完成: {len(result.rows)}")
@@ -139,7 +135,7 @@ class RunDetailDao:
     @classmethod
     async def list_iter(cls, db: Session,
                         query_info: RunDetailQueryModel,
-                        data_scope_sql: str | None = None) -> AsyncGenerator[HrmRunDetail, None]:
+                        data_scope_sql: DataScopeExpr | None = None) -> AsyncGenerator[HrmRunDetail, None]:
         batch_size = 500
         offset = 0
         query = db.query(HrmRunDetail)
@@ -158,7 +154,7 @@ class RunDetailDao:
     @classmethod
     async def get_report_count_info(cls, db: Session,
                                     query_info: RunDetailQueryModel,
-                                    data_scope_sql: str | None = None) -> dict[str, int|str]:
+                                    data_scope_sql: DataScopeExpr | None = None) -> dict[str, int|str]:
         query = db.query(
             HrmRunDetail.status,
             func.count(HrmRunDetail.id).label('count'))

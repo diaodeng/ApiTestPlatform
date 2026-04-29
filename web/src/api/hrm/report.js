@@ -25,6 +25,22 @@ export function detail(detailId) {
   })
 }
 
+export function errorSummary(reportId, query) {
+  return request({
+    url: `/hrm/report/${reportId}/errorSummary`,
+    method: 'GET',
+    params: query
+  })
+}
+
+export function errorRecords(reportId, query) {
+  return request({
+    url: `/hrm/report/${reportId}/errorRecords`,
+    method: 'GET',
+    params: query
+  })
+}
+
 export function countInfo(days) {
   return request({
     url: `/hrm/common/countInfo`,

@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.dao.env_dao import EnvDao
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_hrm.entity.vo.env_vo import EnvModel, EnvQueryModel, DeleteEnvModel, EnvModelForApi
+from module_hrm.entity.vo.env_vo import DeleteEnvModel, EnvModel, EnvModelForApi, EnvQueryModel
 from utils.common_util import CamelCaseUtil
 
 
@@ -12,7 +13,7 @@ class EnvService:
     """
 
     @classmethod
-    def get_env_services(cls, query_db: Session, page_object: EnvModel, data_scope_sql: str):
+    def get_env_services(cls, query_db: Session, page_object: EnvQueryModel, data_scope_sql: DataScopeExpr):
         """
         获取环境信息service
         :param query_db: orm对象
@@ -25,12 +26,13 @@ class EnvService:
         return env_list_result
 
     @classmethod
-    def get_env_list_services(cls, query_db: Session, page_object: EnvQueryModel, data_scope_sql: str, is_page=False):
+    def get_env_list_services(cls, query_db: Session, page_object: EnvQueryModel, data_scope_sql: DataScopeExpr, is_page=False):
         """
         获取部门列表信息service
         :param query_db: orm对象
         :param page_object: 分页查询参数对象
         :param data_scope_sql: 数据权限对应的查询sql语句
+        :param is_page
         :return: 环境列表信息对象
         """
         env_list_result = EnvDao.get_env_list(query_db, page_object, data_scope_sql, is_page=is_page)
@@ -42,17 +44,17 @@ class EnvService:
         """
         新增环境信息service
         :param query_db: orm对象
-        :param page_object: 新增环境对象
+        :param env_object: 新增环境对象
         :return: 新增环境校验结果
         """
         env = EnvDao.get_env_detail_by_info(query_db, EnvModel(env_name=env_object.env_name))
         if env:
-            result = dict(is_success=False, message='环境名称已存在')
+            result = {'is_success': False, 'message': '环境名称已存在'}
         else:
             try:
                 EnvDao.add_env_dao(query_db, env_object)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -64,12 +66,12 @@ class EnvService:
         """
         新增环境信息service
         :param query_db: orm对象
-        :param page_object: 新增环境对象
+        :param env_object: 新增环境对象
         :return: 新增环境校验结果
         """
         env = EnvDao.get_env_detail_by_id(query_db, env_object.env_id)
         if not env:
-            result = dict(is_success=False, message='原环境信息不存在')
+            result = {'is_success': False, 'message': '原环境信息不存在'}
         else:
             try:
                 env_dict = CamelCaseUtil.transform_result(env)
@@ -84,7 +86,7 @@ class EnvService:
                 env_obj.manager = env_object.manager
                 EnvDao.add_env_dao(query_db, env_obj)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -105,17 +107,17 @@ class EnvService:
             if env_info.env_name != env_object.env_name:
                 env = EnvDao.get_env_detail_by_info(query_db, EnvModel(env_name=env_object.env_name))
                 if env and env.env_id != env_info.env_id:
-                    result = dict(is_success=False, message='环境名称不能重复')
+                    result = {'is_success': False, 'message': '环境名称不能重复'}
                     return CrudResponseModel(**result)
             try:
                 EnvDao.edit_env_dao(query_db, edit_env)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='环境不存在')
+            result = {'is_success': False, 'message': '环境不存在'}
 
         return CrudResponseModel(**result)
 
@@ -134,12 +136,12 @@ class EnvService:
                 for env_id in env_id_list:
                     EnvDao.delete_env_dao(query_db, EnvModel(envId=env_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入环境id为空')
+            result = {'is_success': False, 'message': '传入环境id为空'}
         return CrudResponseModel(**result)
 
     @classmethod

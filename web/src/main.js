@@ -1,3 +1,4 @@
+window.BASE_API = window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || "http://localhost:80";
 import { createApp } from 'vue'
 
 import Cookies from 'js-cookie'
@@ -7,6 +8,13 @@ import 'element-plus/dist/index.css'
 import locale from 'element-plus/es/locale/lang/zh-cn'
 
 import '@/assets/styles/index.scss' // global css
+
+// hightlight相关
+// import 'highlight.js/styles/github.css'
+// 或
+// import 'highlight.js/styles/atom-one-dark.css'
+// 或
+import 'highlight.js/styles/monokai.css'
 
 import App from './App'
 import store from './store'

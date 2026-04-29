@@ -1,8 +1,9 @@
-from typing import List
-from module_admin.entity.vo.post_vo import DeletePostModel
-from module_admin.dao.post_dao import *
+from sqlalchemy.orm import Session
+
+from module_admin.dao.post_dao import PostDao
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from utils.common_util import export_list2excel, CamelCaseUtil
+from module_admin.entity.vo.post_vo import DeletePostModel, PostModel, PostPageQueryModel
+from utils.common_util import CamelCaseUtil, export_list2excel
 
 
 class PostService:
@@ -32,12 +33,12 @@ class PostService:
         """
         post = PostDao.get_post_detail_by_info(query_db, PostModel(postName=page_object.post_name))
         if post:
-            result = dict(is_success=False, message='岗位名称已存在')
+            result = {'is_success': False, 'message': '岗位名称已存在'}
         else:
             try:
                 PostDao.add_post_dao(query_db, page_object)
                 query_db.commit()
-                result = dict(is_success=True, message='新增成功')
+                result = {'is_success': True, 'message': '新增成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -58,17 +59,17 @@ class PostService:
             if post_info.post_name != page_object.post_name:
                 post = PostDao.get_post_detail_by_info(query_db, PostModel(postName=page_object.post_name))
                 if post:
-                    result = dict(is_success=False, message='岗位名称已存在')
+                    result = {'is_success': False, 'message': '岗位名称已存在'}
                     return CrudResponseModel(**result)
             try:
                 PostDao.edit_post_dao(query_db, edit_post)
                 query_db.commit()
-                result = dict(is_success=True, message='更新成功')
+                result = {'is_success': True, 'message': '更新成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='岗位不存在')
+            result = {'is_success': False, 'message': '岗位不存在'}
 
         return CrudResponseModel(**result)
 
@@ -86,12 +87,12 @@ class PostService:
                 for post_id in post_id_list:
                     PostDao.delete_post_dao(query_db, PostModel(postId=post_id))
                 query_db.commit()
-                result = dict(is_success=True, message='删除成功')
+                result = {'is_success': True, 'message': '删除成功'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = dict(is_success=False, message='传入岗位id为空')
+            result = {'is_success': False, 'message': '传入岗位id为空'}
         return CrudResponseModel(**result)
 
     @classmethod
@@ -108,7 +109,7 @@ class PostService:
         return result
 
     @staticmethod
-    def export_post_list_services(post_list: List):
+    def export_post_list_services(post_list: list):
         """
         导出岗位信息service
         :param post_list: 岗位信息列表

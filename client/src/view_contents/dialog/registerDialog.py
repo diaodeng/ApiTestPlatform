@@ -80,14 +80,18 @@ class FeatureDialog(object):
         def action_handle(e, value):
             dlg.open = False
             self.page.update()
-            future.set_result(value)
+            if not future.done():
+                future.set_result(value)
 
         dlg = ft.AlertDialog(
             title=ft.Text(self.tile),
             modal=True,
             content=ft.Text(self.content),
             actions=[
-                ft.TextButton(name, on_click=lambda e: action_handle(e, value)) for name, value in self.actions
+                ft.TextButton(name,
+                              on_click=lambda e, v=value: action_handle(e, v)
+                              )
+                for name, value in self.actions
             ]
         )
 

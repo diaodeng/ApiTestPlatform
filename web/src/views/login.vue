@@ -154,7 +154,8 @@ function getCode() {
     captchaEnabled.value = res.captchaEnabled === undefined ? true : res.captchaEnabled;
     register.value = res.registerEnabled === undefined ? false : res.registerEnabled;
     if (captchaEnabled.value) {
-      codeUrl.value = "data:image/gif;base64," + res.img;
+      // codeUrl.value = "data:image/gif;base64," + res.img;
+      codeUrl.value = "data:image/svg+xml;base64," + res.img;
       loginForm.value.uuid = res.uuid;
     }
   });

@@ -1,10 +1,10 @@
 import json
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from pydantic import model_validator, field_serializer, ConfigDict, Field
+from pydantic import ConfigDict, Field, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 
-from module_admin.annotation.pydantic_annotation import as_query, as_form
+from module_admin.annotation.pydantic_annotation import as_form, as_query
 from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from utils.common_util import CamelCaseUtil
 

@@ -3,12 +3,12 @@
 """
 
 import datetime
-from typing import Any, Dict, List, Text, Union, Annotated
+from typing import Annotated, Any, Dict, List, Union
 
-from pydantic import BaseModel, model_validator, Field
+from pydantic import BaseModel, Field, model_validator
 
 from module_hrm.entity.vo import case_vo_detail_for_handle as caseVoHandle
-from module_hrm.enums.enums import TstepTypeEnum, CaseRunStatus
+from module_hrm.enums.enums import CaseRunStatus, TstepTypeEnum
 from module_hrm.utils.common import key_value_dict
 from utils.utils import get_platform
 
@@ -35,9 +35,9 @@ class TConfig(caseVoHandle.TConfig):
 class TRequest(caseVoHandle.TRequest):
     """requests.Request model"""
 
-    params: Dict[Text, Text | int | float | bool | None] = Field(default_factory=lambda: {})
+    params: Dict[str, str | int | float | bool | None] = Field(default_factory=lambda: {})
     headers: caseVoHandle.Headers = Field(default_factory=lambda: {})
-    data: Union[Text, Dict[Text, Any], None] = None
+    data: Union[str, Dict[str, Any], None] = None
     cookies: caseVoHandle.Cookies = Field(default_factory=lambda: {})
 
     @model_validator(mode="before")
@@ -57,9 +57,9 @@ class TWebsocket(caseVoHandle.TWebsocket):
     """TWebsocket"""
     # params: caseVoHandle.VariablesMapping = Field(default_factory=lambda: {})
     # headers: caseVoHandle.Headers = Field(default_factory=lambda: {})
-    params: Dict[Text, Text | int | float | bool | None] = Field(default_factory=lambda: {})
+    params: Dict[str, str | int | float | bool | None] = Field(default_factory=lambda: {})
     headers: caseVoHandle.Headers = Field(default_factory=lambda: {})
-    data: Union[Text, Dict[Text, Any], None] = None
+    data: Union[str, Dict[str, Any], None] = None
     cookies: caseVoHandle.Cookies = Field(default_factory=lambda: {})
     result: Union[Result, None] = Result()
     # cookies: caseVoHandle.Cookies = Field(default_factory=lambda: {})
@@ -89,8 +89,8 @@ class TestCase(caseVoHandle.TestCase):
 class TestCaseTime(BaseModel):
     start_time: float = 0
     end_time: float = 0
-    start_time_iso_format: Text = ""
-    end_time_iso_format: Text = ""
+    start_time_iso_format: str = ""
+    end_time_iso_format: str = ""
     duration: float = 0
 
 
@@ -106,9 +106,9 @@ class RequestStat(BaseModel):
 
 
 class AddressData(BaseModel):
-    client_ip: Text = "N/A"
+    client_ip: str = "N/A"
     client_port: int = 0
-    server_ip: Text = "N/A"
+    server_ip: str = "N/A"
     server_port: int = 0
 
 
@@ -132,24 +132,24 @@ class SessionData(BaseModel):
 class StepResult(BaseModel):
     """teststep data, each step maybe corresponding to one request or one testcase"""
 
-    name: Text = ""  # teststep name
+    name: str = ""  # teststep name
     step_type: int = TstepTypeEnum.http.value  # teststep type
-    step_id: Text | int = ""  # teststep id
+    step_id: str | int = ""  # teststep id
     success: bool = True
     duration: float = 0.0  # teststep duration
-    status: Text = CaseRunStatus.passed.value
+    status: str = CaseRunStatus.passed.value
     data: Union[SessionData, List["StepResult"]] = None
     elapsed: float = 0.0  # teststep elapsed time
     content_size: float = 0  # response content size
     export_vars: caseVoHandle.VariablesMapping = Field(default_factory=lambda: {})
-    log: Text = ""
-    attachment: Text = ""  # teststep attachment
+    log: str = ""
+    attachment: str = ""  # teststep attachment
 
 
 StepResult.model_rebuild()
 
 
-class IStep(object):
+class IStep:
     def name(self) -> str:
         raise NotImplementedError
 
@@ -165,20 +165,20 @@ class IStep(object):
 
 
 class TestCaseSummary(BaseModel):
-    name: Text
+    name: str
     success: bool = True
     status: int = CaseRunStatus.passed.value
-    case_id: Text | int | None = None
+    case_id: str | int | None = None
     time: TestCaseTime = TestCaseTime()
     in_out: TestCaseInOut = TestCaseInOut()
-    log: Dict[Text, Any] = Field(default_factory=lambda: {})
+    log: Dict[str, Any] = Field(default_factory=lambda: {})
     step_results: List[StepResult] = Field(default_factory=lambda: [])
 
 
 class PlatformInfo(BaseModel):
-    httprunner_version: Text
-    python_version: Text
-    platform: Text
+    httprunner_version: str
+    python_version: str
+    platform: str
 
 
 class Stat(BaseModel):

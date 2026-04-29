@@ -1,42 +1,31 @@
 version: "3.9"
 
 services:
-  api:
+  qtr-api:
+    image: qtr-api
     build: .
-    container_name: fastapi-api
+    container_name: qtr-api
     ports:
-      - "8000:8000"
+      - "9099:9099"
     environment:
       - ENV=dev
-      - REDIS_URL=redis://redis:6379/0
-      - DB_URL=mysql://user:pwd@db:3306/app
-    depends_on:
-      - redis
-      - db
+      - TZ=Asia/Shanghai
+#      - REDIS_URL=redis://redis:6380/4
+#      - DB_URL=mysql://user:pwd@mysql:59408/app
+#    depends_on:
+#      - redis
+#      - mysql
+    volumes:
+      - ./.env.dev:/app/.env.dev
     restart: always
 
-  worker:
-    build: .
-    container_name: celery-worker
-    command: celery -A worker.celery_app worker -l info --concurrency=4
-    environment:
-      - ENV=dev
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      - redis
-    restart: always
-
-  redis:
-    image: redis:7
-    container_name: redis
-    ports:
-      - "6379:6379"
-
-  db:
-    image: mysql:8
-    container_name: mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: app
-    ports:
-      - "3306:3306"
+#  worker:
+#    build: .
+#    container_name: qtr-celery-worker
+#    command: celery -A background.celery_app.celery_app worker -l info --concurrency=4
+#    environment:
+#      - ENV=dev
+#      - REDIS_URL=redis://redis:6380/4
+#    depends_on:
+#      - redis
+#    restart: always

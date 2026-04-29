@@ -1,12 +1,12 @@
 import json
-from typing import Optional, List, Any, Text, Dict
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
 from module_hrm.entity.vo.case_vo_detail_for_run import TestCase
-from module_hrm.entity.vo.common_vo import QueryModel, CommonDataModel
+from module_hrm.entity.vo.common_vo import CommonDataModel, QueryModel
 from module_hrm.enums.enums import CaseRunStatus
 from utils.common_util import CamelCaseUtil
 
@@ -16,7 +16,7 @@ class RunDetailDelModel(BaseModel):
     报告删除模型
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
-    detail_ids: Optional[List[Text | int]] = Field(default_factory=lambda: [])
+    detail_ids: Optional[List[str | int]] = Field(default_factory=lambda: [])
 
 
 class HrmRunListModel(CommonDataModel):
@@ -24,7 +24,7 @@ class HrmRunListModel(CommonDataModel):
     detail_id: Optional[int] = None
     run_id: Optional[int] = None
     report_id: Optional[int] = None
-    run_name: Optional[Text] = None
+    run_name: Optional[str] = None
     run_type: Optional[int] = None
     run_start_time: Any = None
     run_end_time: Any = None
@@ -45,14 +45,14 @@ class RunDetailQueryModel(QueryModel, HrmRunListModel):
     run_id: Any = None
     run_type: Any = None
     report_id: Any = None
-    run_name: Text | None = None
+    run_name: str | None = None
 
 
 class HrmRunDetailModel(HrmRunListModel):
     """
     报告模型
     """
-    run_detail: TestCase | Text | None = None
+    run_detail: TestCase | str | None = None
 
     @model_validator(mode="before")
     def convert_address(cls, values: Dict[str, Any]) -> Dict[str, Any]:
