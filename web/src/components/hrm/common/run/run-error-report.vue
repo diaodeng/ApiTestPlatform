@@ -70,6 +70,10 @@
     return type || '-';
   }
 
+  function openCaseDetail(row) {
+    alert("暂未实现");
+  }
+
   function openErrorDrawer(filter = {}) {
     errorDrawerOpen.value = true;
     errorRecordQuery.value.pageNum = 1;
@@ -132,6 +136,7 @@
       <template #header>
         <div class="error-summary-header">
           <span>失败原因统计</span>
+          <el-button type="default" @click="reportErrorSummary">刷新</el-button>
           <el-button link type="primary" @click="openErrorDrawer()">查看全部错误</el-button>
         </div>
       </template>
@@ -259,6 +264,11 @@
         <el-table-column label="时间" prop="createTime" width="170">
           <template #default="scope">
             <span>{{ parseTime(scope.row.createTime) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="scope">
+            <el-button link type="primary" @click="openCaseDetail(scope.row)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
