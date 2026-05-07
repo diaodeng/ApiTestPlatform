@@ -553,12 +553,12 @@ class RequestRunner:
 
     def before_teststep_handler(self):
         # 请求前的回调
-        self.sys_step_hook("before_test_step", self.step_data.result.logs.before_request)
+        self.sys_step_hook("before_test_step", self.step_data.result.logs)
 
     def after_teststep_handler(self):
         # 响应回调
         self.sys_step_hook("after_test_step",
-                           self.step_data.result.logs.after_response,
+                           self.step_data.result.logs,
                            is_after_step=True)
 
     def teststep_setup_handler(self):
