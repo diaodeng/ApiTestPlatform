@@ -1,11 +1,11 @@
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy import text
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from config.database import Base, DATABASE_BACKEND, SessionLocal, engine
+from config.database import DATABASE_BACKEND, Base, SessionLocal, engine
 from scripts.seed_sqlite_from_init_sql import auto_seed_current_sqlite_if_needed
 from utils.log_util import logger
 
@@ -63,6 +63,8 @@ async def init_create_table():
     logger.info("初始化数据库连接...")
     Base.metadata.create_all(bind=engine)
     _ensure_large_sys_config_value_column()
+    _ensure_pressure_scenario_columns()
+
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
 
@@ -102,3 +104,44 @@ def _ensure_large_sys_config_value_column():
             )
     except Exception as exc:
         logger.warning(f"检查或升级 sys_config.config_value 字段失败: {exc}")
+
+
+def _ensure_pressure_scenario_columns():
+    """兼容历史 pressure_scenario 表结构，补齐 module_id 字段。"""
+    try:
+        if DATABASE_BACKEND == "mysql":
+            with engine.begin() as connection:
+                result = connection.execute(
+                    text(
+                        """
+                        SELECT COLUMN_NAME
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'pressure_scenario'
+                        """
+                    )
+                )
+                columns = {row[0] for row in result}
+                if not columns:
+                    return
+                if "module_id" not in columns:
+                    connection.execute(
+                        text(
+                            """
+                            ALTER TABLE pressure_scenario
+                            ADD COLUMN module_id BIGINT NOT NULL DEFAULT 0 COMMENT '模块ID'
+                            """
+                        )
+                    )
+            return
+
+        if DATABASE_BACKEND == "sqlite":
+            with engine.begin() as connection:
+                rows = connection.execute(text("PRAGMA table_info(pressure_scenario)")).fetchall()
+                columns = {row[1] for row in rows}
+                if not columns:
+                    return
+                if "module_id" not in columns:
+                    connection.execute(text("ALTER TABLE pressure_scenario ADD COLUMN module_id INTEGER DEFAULT 0"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 pressure_scenario 字段失败: {exc}")

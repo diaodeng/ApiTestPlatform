@@ -269,7 +269,8 @@ POST /pressure/runs/{run_id}/start
 5. 自动或手动分配 Worker；
 6. 启动 Locust master 子进程；
 7. 调用 Locust `/swarm` 开始压测；
-8. 运行状态变为 `running`。
+8. 注册 Locust `test_stop` 自动回调；
+9. 运行状态变为 `running`。
 
 运行产物默认生成在：
 
@@ -338,6 +339,14 @@ GET /pressure/runs/{run_id}/status
 - Worker 分配结果；
 - 报告路径；
 - 错误信息。
+
+状态收敛说明：
+
+- Locust `test_stop` 事件会主动回调平台自动收尾（主路径，不依赖前端查询）；
+- 当运行记录为 `running` 时，接口也会检查 Locust 当前状态并做兜底收敛；
+- 若 Locust 已进入结束态（例如 `stopped`、`ready`），平台会自动执行收尾；
+- 收尾动作包括：采集 summary、停止 master、释放 Worker、更新为 `finished`；
+- 若 Locust API 临时不可达，会回退为 master 进程存活检测进行兜底收敛。
 
 ### 4.10 查询运行历史
 
@@ -518,6 +527,93 @@ GET /pressure/workers/{worker_id}/assignment
 ```
 
 Worker agent 可以根据 `command` 启动 locust worker。
+
+### 5.5 脚本分发方式
+
+创建运行时可以选择 `script_delivery_mode`：
+
+| 值 | 说明 | 适用场景 |
+| --- | --- | --- |
+| `shared_path` | Worker 直接读取 `script_path` 指向的共享目录文件 | 后端和 Worker 有共享盘、NFS、PVC |
+| `fetch` | Worker 通过 artifact 接口拉取 `locustfile.py`、`cases.csv`、`scenario.json` | Worker 无共享目录，脚本较大或希望按需下载 |
+| `inline` | assignment 响应中直接带脚本和数据内容 | 小脚本、小数据、本地调试或简化部署 |
+
+`fetch` 模式下 Worker 会使用这些接口拉取数据：
+
+```http
+GET /pressure/runs/{run_id}/artifacts/script
+GET /pressure/runs/{run_id}/artifacts/csv
+GET /pressure/runs/{run_id}/artifacts/scenario
+```
+
+Worker 准备好后需要上报：
+
+```http
+POST /pressure/workers/{worker_id}/ready
+```
+
+请求体：
+
+```json
+{
+  "run_id": 1,
+  "status": "ready",
+  "message": "locust worker started"
+}
+```
+
+后端启动 Master 后会等待所有分配到的 Worker 上报 `ready`，全部 ready 后才调用 Locust 开始压测。
+
+### 5.6 Worker Agent 启动
+
+项目提供了一个独立 Worker agent：
+
+```text
+server/module_pressure/worker_agent.py
+```
+
+该脚本不依赖项目包导入，可以复制到 Worker 机器单独运行。Worker 机器只需要安装：
+
+```bash
+pip install locust==2.40.2 requests psutil jmespath
+```
+
+使用 API Key 启动：
+
+```powershell
+$env:QTR_SERVER="http://10.0.0.10:8000"
+$env:QTR_API_KEY="qtr_ak_xxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxxx"
+$env:WORKER_ID="worker-01"
+$env:WORKER_HOST="10.0.0.11"
+$env:MAX_USERS="1000"
+$env:WORKER_WORK_DIR="C:\pressure-worker"
+python worker_agent.py
+```
+
+使用登录 Token 启动：
+
+```powershell
+$env:QTR_SERVER="http://10.0.0.10:8000"
+$env:QTR_TOKEN="<jwt_access_token>"
+$env:WORKER_ID="worker-01"
+$env:WORKER_HOST="10.0.0.11"
+python worker_agent.py
+```
+
+共享目录模式下如果后端返回的路径和 Worker 本地挂载路径不同，可以增加路径映射：
+
+```powershell
+$env:RUNS_REMOTE_PREFIX="C:\myself\api-test-platform\server\storage\pressure\runs"
+$env:RUNS_LOCAL_PREFIX="Z:\pressure\runs"
+```
+
+Worker API Key 至少需要权限：
+
+```text
+hrm:pressure:worker:register
+hrm:pressure:worker:heartbeat
+hrm:pressure:worker:assignment
+```
 
 ## 6. DSL 使用说明
 
@@ -941,6 +1037,8 @@ P95 RT = 1.3s
 
 `run_time` 是压测持续时间。
 
+当 `run_time` 到期后，Locust 会结束本次压测；平台会通过 Locust `test_stop` 回调把运行从 `running` 自动收敛到 `finished`，一般不需要再手动点击“停止”。
+
 常用值：
 
 | 值 | 说明 |
@@ -1145,6 +1243,12 @@ pending -> starting -> running -> stopping -> finished
                      -> failed
                      -> canceled
 ```
+
+补充说明：
+
+- `running -> finished` 可以由两种方式触发：
+  - 手动调用 `POST /pressure/runs/{run_id}/stop`；
+  - Locust 自然结束后，由平台自动收敛逻辑触发。
 
 Worker 状态：
 

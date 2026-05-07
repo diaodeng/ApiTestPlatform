@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from common.common_do import BaseModel
 from config.database import Base
 from module_pressure.enums import PressureRunStatus
+from utils.snowflake import snowIdWorker
 
 
 class PressureScenario(Base, BaseModel):
@@ -15,7 +16,9 @@ class PressureScenario(Base, BaseModel):
 
     __tablename__ = "pressure_scenario"
 
+    scenario_id: Mapped[int] = mapped_column(BigInteger, nullable=False,index=True, unique=True, default=snowIdWorker.get_id, comment="场景ID")
     project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="项目ID")
+    module_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="模块ID")
     name: Mapped[str] = mapped_column(String(128), nullable=False, comment="场景名称")
     engine: Mapped[str] = mapped_column(String(32), nullable=False, default="locust", comment="执行引擎")
     base_url: Mapped[str] = mapped_column(String(512), nullable=False, default="", comment="被测服务地址")
@@ -32,7 +35,7 @@ class PressureRun(Base, BaseModel):
     project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="项目ID")
     scenario_id: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey("pressure_scenario.id"),
+        ForeignKey("pressure_scenario.scenario_id"),
         nullable=True,
         comment="场景ID",
     )
@@ -42,8 +45,15 @@ class PressureRun(Base, BaseModel):
     run_time: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="执行时长，例如 5m")
     target_qps: Mapped[float | None] = mapped_column(Float, nullable=True, comment="目标QPS")
     worker_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="auto", comment="auto/manual")
+    script_delivery_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="shared_path",
+        comment="shared_path/fetch/inline",
+    )
     requested_worker_ids: Mapped[list | None] = mapped_column(JSON, nullable=True, comment="手动选择的Worker")
     allocated_worker_ids: Mapped[list | None] = mapped_column(JSON, nullable=True, comment="实际分配的Worker")
+    worker_ready_state: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="Worker准备状态")
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 class ScenarioCreateReq(BaseModel):
     """创建性能测试场景的请求模型。"""
 
-    project_id: int = 0
+    project_id: int
+    module_id: int
     name: str
     engine: Literal["locust", "k6", "jmeter"] = "locust"
     base_url: str = ""
@@ -21,6 +22,8 @@ class ScenarioCreateReq(BaseModel):
 class ScenarioUpdateReq(BaseModel):
     """更新性能测试场景的请求模型。"""
 
+    project_id: int | None = None
+    module_id: int | None = None
     name: str | None = None
     engine: Literal["locust", "k6", "jmeter"] | None = None
     base_url: str | None = None
@@ -38,6 +41,7 @@ class RunCreateReq(BaseModel):
     run_time: str | None = None
     target_qps: float | None = Field(default=None, gt=0)
     worker_mode: Literal["auto", "manual"] = "auto"
+    script_delivery_mode: Literal["shared_path", "fetch", "inline"] = "shared_path"
     worker_ids: list[str] = Field(default_factory=list)
 
 
@@ -66,6 +70,14 @@ class WorkerHeartbeatReq(BaseModel):
     fail_rate: float = 0
     latency_ms: float = 0
     status: str | None = None
+
+
+class WorkerReadyReq(BaseModel):
+    """Worker 拉取脚本并启动 locust worker 后的准备状态上报。"""
+
+    run_id: int
+    status: Literal["ready", "failed"]
+    message: str | None = None
 
 
 class RunCompareReq(BaseModel):

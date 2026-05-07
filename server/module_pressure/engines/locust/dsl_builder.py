@@ -47,35 +47,56 @@ def normalize_dsl(dsl: dict, base_url: str | None = None) -> dict:
 
 
 def build_locustfile_content(scenario: dict, csv_file_name: str = "cases.csv") -> str:
-    """生成可独立运行的 Locust 脚本内容，脚本内包含参数化和断言 DSL。"""
-    scenario_json = json.dumps(scenario, ensure_ascii=False, indent=2)
-    task_methods: list[str] = []
-
-    for task in scenario["tasks"]:
-        task_json = json.dumps(task, ensure_ascii=False)
-        task_methods.append(
-            f"""
-    @task({task["weight"]})
-    def {task["method_name"]}(self):
-        run_task(self, {task_json})
-"""
-        )
-
+    """生成通用 Locust 脚本，运行时动态读取 scenario.json 和 CSV 数据。"""
+    del scenario
     return f'''from __future__ import annotations
 
 import csv
 import json
+import os
 import re
+import random
 from itertools import cycle
 from pathlib import Path
 from string import Template
 
 import jmespath
-from locust import HttpUser, between, task
+import requests
+from locust import HttpUser, between, events, task
 
 
-SCENARIO = {scenario_json}
+SCENARIO_FILE = Path(__file__).parent / "scenario.json"
 CSV_FILE = Path(__file__).parent / "data" / "{csv_file_name}"
+
+
+def load_scenario():
+    """从运行目录加载场景 DSL，使脚本本身可以在不同运行间复用。"""
+    with SCENARIO_FILE.open(encoding="utf-8") as file:
+        return json.load(file)
+
+
+SCENARIO = load_scenario()
+CALLBACK_URLS = [item.strip() for item in os.getenv("QTR_PRESSURE_FINISH_CALLBACK_URLS", "").split(",") if item.strip()]
+
+
+def notify_platform_finish():
+    """压测结束时主动通知平台回收资源并更新运行状态。"""
+    if not CALLBACK_URLS:
+        return
+    for callback_url in CALLBACK_URLS:
+        try:
+            response = requests.post(callback_url, timeout=3)
+            if response.status_code < 400:
+                return
+        except Exception:
+            continue
+
+
+@events.test_stop.add_listener
+def on_test_stop(environment, **kwargs):
+    """Locust 生命周期回调：测试停止后触发平台自动收尾。"""
+    del environment, kwargs
+    notify_platform_finish()
 
 
 class CSVDataSource:
@@ -187,6 +208,18 @@ def assert_value(actual, assertion):
 
 
 DATA_SOURCE = CSVDataSource(CSV_FILE)
+TASK_POOL = [
+    task_def
+    for task_def in SCENARIO.get("tasks", [])
+    for _ in range(max(int(task_def.get("weight") or 1), 1))
+]
+
+
+def pick_task():
+    """按权重选择本次要执行的任务。"""
+    if not TASK_POOL:
+        raise RuntimeError("scenario has no tasks")
+    return random.choice(TASK_POOL)
 
 
 def run_task(user, task_def):
@@ -245,7 +278,10 @@ class PlatformUser(HttpUser):
         float(SCENARIO.get("wait_time", {{}}).get("min", 0.1)),
         float(SCENARIO.get("wait_time", {{}}).get("max", 0.5)),
     )
-{''.join(task_methods)}
+
+    @task
+    def run_dynamic_task(self):
+        run_task(self, pick_task())
 '''
 
 

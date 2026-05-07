@@ -33,11 +33,17 @@ class PressureScenarioRepo:
         """按主键查询场景，未找到时返回 None。"""
         return self.db.get(PressureScenario, scenario_id)
 
-    def list(self, project_id: int | None = None) -> list[PressureScenario]:
-        """查询场景列表，可按项目过滤。"""
+    def get_by_scenario_id(self, scenario_id: int) -> PressureScenario | None:
+        """按主键查询场景，未找到时返回 None。"""
+        return self.db.query(PressureScenario).filter(PressureScenario.scenario_id == scenario_id).first()
+
+    def list(self, project_id: int | None = None, module_id: int | None = None) -> list[PressureScenario]:
+        """查询场景列表，可按项目和模块过滤。"""
         stmt = select(PressureScenario).order_by(PressureScenario.id.desc())
         if project_id is not None:
             stmt = stmt.where(PressureScenario.project_id == project_id)
+        if module_id is not None:
+            stmt = stmt.where(PressureScenario.module_id == module_id)
         return list(self.db.execute(stmt).scalars().all())
 
     def update(self, scenario_id: int, **kwargs) -> PressureScenario | None:
@@ -133,7 +139,11 @@ class PressureWorkerRepo:
 
     def list(self, include_unhealthy: bool = False) -> list[PressureWorker]:
         """查询 Worker 列表，默认排除不健康节点。"""
-        stmt = select(PressureWorker).order_by(PressureWorker.last_heartbeat.desc().nullslast())
+        # 兼容 MySQL/SQLite: 避免生成 `NULLS LAST`，改用 `IS NULL + DESC` 实现空值后置。
+        stmt = select(PressureWorker).order_by(
+            PressureWorker.last_heartbeat.is_(None),
+            PressureWorker.last_heartbeat.desc(),
+        )
         if not include_unhealthy:
             stmt = stmt.where(PressureWorker.status != "unhealthy")
         return list(self.db.execute(stmt).scalars().all())

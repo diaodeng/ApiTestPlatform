@@ -282,6 +282,17 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         remark="桌面测试管理菜单",
     ),
     C(
+        "hrm.pressure",
+        "性能测试",
+        "hrm.root",
+        "pressure",
+        "hrm/pressure/index",
+        "hrm:pressure:list",
+        "dashboard",
+        11,
+        remark="性能测试菜单",
+    ),
+    C(
         "hrm.push",
         "推送配置管理",
         "hrm.root",
@@ -289,7 +300,7 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         "hrm/push/index",
         "hrm:push:list",
         "message",
-        11,
+        12,
         remark="推送配置管理菜单",
     ),
     C(
@@ -300,10 +311,10 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         "hrm/mock/index",
         "",
         "bug",
-        12,
+        13,
         remark="MOCK管理菜单",
     ),
-    M("hrm.tools", "工具", "tools", "tool", 13, parent_key="hrm.root", remark="工具"),
+    M("hrm.tools", "工具", "tools", "tool", 14, parent_key="hrm.root", remark="工具"),
     C(
         "hrm.json",
         "工具",
@@ -425,6 +436,17 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     F("hrm.desktop_case.run", "桌面用例执行", "hrm.desktop_case", "hrm:desktopCase:run", 5),
     F("hrm.desktop_case.record", "桌面用例录制", "hrm.desktop_case", "hrm:desktopCase:record", 6),
     F("hrm.desktop_case.history", "桌面用例历史", "hrm.desktop_case", "hrm:desktopCase:history", 7),
+    F("hrm.pressure.scenario_add", "压测场景新增", "hrm.pressure", "hrm:pressure:scenario:add", 1),
+    F("hrm.pressure.scenario_edit", "压测场景编辑", "hrm.pressure", "hrm:pressure:scenario:edit", 2),
+    F("hrm.pressure.scenario_detail", "压测场景详情", "hrm.pressure", "hrm:pressure:scenario:detail", 3),
+    F("hrm.pressure.run_add", "压测运行创建", "hrm.pressure", "hrm:pressure:run:add", 4),
+    F("hrm.pressure.run_start", "压测运行启动", "hrm.pressure", "hrm:pressure:run:start", 5),
+    F("hrm.pressure.run_stop", "压测运行停止", "hrm.pressure", "hrm:pressure:run:stop", 6),
+    F("hrm.pressure.run_detail", "压测运行详情", "hrm.pressure", "hrm:pressure:run:detail", 7),
+    F("hrm.pressure.run_compare", "压测历史对比", "hrm.pressure", "hrm:pressure:run:compare", 8),
+    F("hrm.pressure.worker_register", "压测Worker注册", "hrm.pressure", "hrm:pressure:worker:register", 9),
+    F("hrm.pressure.worker_heartbeat", "压测Worker心跳", "hrm.pressure", "hrm:pressure:worker:heartbeat", 10),
+    F("hrm.pressure.worker_assignment", "压测Worker任务", "hrm.pressure", "hrm:pressure:worker:assignment", 11),
 )
 
 

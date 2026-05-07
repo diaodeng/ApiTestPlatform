@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import errno
 import os
 import signal
 import socket
@@ -46,6 +47,7 @@ class LocustProcessController:
         master_web_port: int,
         master_bind_port: int,
         expect_workers: int = 0,
+        finish_callback_urls: str | None = None,
     ) -> subprocess.Popen:
         """启动任务级 Locust master 子进程，返回 Popen 对象。"""
         command = [
@@ -73,12 +75,16 @@ class LocustProcessController:
 
         log_file = Path(artifact_dir) / "locust-master.log"
         log_handle = log_file.open("a", encoding="utf-8")
+        env = os.environ.copy()
+        if finish_callback_urls:
+            env["QTR_PRESSURE_FINISH_CALLBACK_URLS"] = finish_callback_urls
         return subprocess.Popen(
             command,
             cwd=str(Path(script_path).parent),
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            env=env,
         )
 
     def start_standalone(
@@ -87,6 +93,7 @@ class LocustProcessController:
         script_path: str,
         artifact_dir: str,
         web_port: int,
+        finish_callback_urls: str | None = None,
     ) -> subprocess.Popen:
         """启动单机 Locust 子进程，便于没有 Worker 时本机执行和调试。"""
         command = [
@@ -106,12 +113,16 @@ class LocustProcessController:
         ]
         log_file = Path(artifact_dir) / "locust-master.log"
         log_handle = log_file.open("a", encoding="utf-8")
+        env = os.environ.copy()
+        if finish_callback_urls:
+            env["QTR_PRESSURE_FINISH_CALLBACK_URLS"] = finish_callback_urls
         return subprocess.Popen(
             command,
             cwd=str(Path(script_path).parent),
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            env=env,
         )
 
     def wait_web_ready(self, port: int, timeout_seconds: int = 30) -> None:
@@ -169,6 +180,27 @@ class LocustProcessController:
                 os.kill(pid, signal.SIGTERM)
             except Exception:
                 pass
+
+    def is_process_alive(self, pid: int | None) -> bool:
+        """判断指定进程是否仍存活。
+
+        方法作用:
+            在 Locust API 不可达时，提供基于 PID 的进程存活兜底判断。
+        参数作用:
+            pid: 进程 ID。
+        响应值:
+            True 表示进程存在；False 表示进程不存在或不可访问。
+        """
+        if not pid:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError as exc:
+            # EPERM 表示进程存在但当前进程无权限信号操作。
+            return getattr(exc, "errno", None) == errno.EPERM
+        except Exception:
+            return False
 
     def collect_summary(self, artifact_dir: str) -> dict:
         """从 Locust CSV 产物聚合报告摘要，供历史对比使用。"""

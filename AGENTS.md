@@ -8,12 +8,19 @@
 
 ## 工作原则
 - 默认使用中文，先结论后细节。
-- 仅做与当前需求相关的最小改动，不做顺手重构。
+- 仅做与当前需求相关的最小改动，不做顺手重构，除非有明显的性能或者bug。
 - 优先修复根因，避免用大范围兜底逻辑掩盖问题。
 - 未经明确授权，不执行高风险操作（如批量删除、强制重置）。
+- 新功能实现需要补全文档，用户使用说明。
+- 所有实现需要按项目合理拆解，不要所有逻辑放在一个文件中。
+- 说明文档放在web/public/docs中。
 
 ## 目录边界
 - 后端接口、任务调度、服务逻辑优先改 `server/`。
+- 后端接口测试server/module_hrm/controller/case_controler.py。
+- 后端web测试server/module_hrm/controller/web_case_controller.py。
+- 后端桌面测试server/module_hrm/controller/desktop_case_controller.py。
+- 后端性能测试server/module_pressure。
 - 前端页面与组件优先改 `web/src/`。
 - Flet 客户端逻辑优先改 `client/src/`。
 - PySide 客户端逻辑优先改 `client_new/`。
