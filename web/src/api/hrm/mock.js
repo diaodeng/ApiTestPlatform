@@ -148,3 +148,21 @@ export function editResponsePriority(data) {
     data: data
   })
 }
+
+// 复制mock规则响应
+export function copyResponseDetail(data) {
+  return request({
+    url: '/hrm/mockManager/copyResponse',
+    method: 'post',
+    data: data
+  })
+}
+
+// 删除mock规则响应
+export function delResponseDetail(data) {
+  return request({
+    url: '/hrm/mockManager/responseDelete',
+    method: 'delete',
+    data: data
+  })
+}
