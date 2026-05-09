@@ -421,6 +421,47 @@ class RequestRunner:
         self.case_runner.case_data.config.result.status = CaseRunStatus.failed.value
         self.case_runner.case_data.config.result.success = False
 
+    def _handle_step_hook_assertion(
+            self,
+            hook_name: str,
+            assertion_error: AssertionError,
+            log_store: StepLogs,
+            is_after_step: bool = False,
+    ):
+        """
+        处理步骤系统回调中的断言失败，记录结构化断言事件并标记步骤失败。
+
+        :param hook_name: 系统回调名称（如 before_test_step/after_test_step）。
+        :param assertion_error: 系统回调抛出的断言异常。
+        :param log_store: 当前步骤日志容器，用于写入请求前/响应后/错误日志。
+        :param is_after_step: 是否为响应后回调，True 时写入 after_response。
+        """
+        pre_error_log = self.case_runner.handler.get_log()
+        self.logger.error(f"{hook_name}断言失败：{assertion_error}")
+        post_error_log = self.case_runner.handler.get_log()
+
+        if is_after_step:
+            log_store.after_response += f"{pre_error_log} {post_error_log}"
+        else:
+            log_store.before_request += f"{pre_error_log} {post_error_log}"
+        log_store.error += post_error_log
+
+        self.set_step_failed()
+        append_error_event(
+            self.step_data.result,
+            build_assertion_error_event(
+                error_source='sys_step_hook',
+                error_subtype=hook_name,
+                assert_name='AssertionError',
+                check_key=hook_name,
+                error_message=str(assertion_error),
+                error_name=type(assertion_error).__name__,
+                step_id=self.step_data.step_id,
+                step_name=self.step_data.name,
+                error_stack='',
+            ),
+        )
+
     def parse_data_in_step(self, data: str | dict, not_found_exception=True):
         new_data = ConfigHandle.parse_data_for_run(data,
                                                    not_found_exception,
@@ -449,7 +490,11 @@ class RequestRunner:
 
     def sys_step_hook(self, hook_name: str, log_store: StepLogs, is_after_step: bool = False):
         """
-        测试步骤的系统回调
+        执行测试步骤系统回调。
+
+        :param hook_name: 系统回调函数名称（before_test_step/after_test_step）。
+        :param log_store: 步骤日志对象，记录回调前后及错误日志。
+        :param is_after_step: 是否在请求后执行回调，True 时日志写入 after_response。
         """
         before_teststep: Callable = self.debugtalk_func_map.get(hook_name, None)
         if before_teststep:
@@ -457,6 +502,9 @@ class RequestRunner:
                 before_teststep(self.step_data)
                 # self.parse_data_in_step(self.step_data)
                 self.logger.debug(f"系统{hook_name}回调之后的数据：{self.step_data.model_dump_json(by_alias=True)}")
+            except AssertionError as ae:
+                self._handle_step_hook_assertion(hook_name, ae, log_store, is_after_step)
+
             except Exception as e:
                 if is_after_step:
                     log_store.after_response += self.case_runner.handler.get_log()
