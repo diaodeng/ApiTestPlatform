@@ -2,7 +2,7 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
@@ -18,6 +18,7 @@ from module_hrm.entity.do.mock_do import MockRules
 from module_hrm.entity.vo.mock_vo import (
     AddMockResponseModel,
     AddMockRuleModel,
+    DeleteMockResponseModel,
     DeleteMockRuleModel,
     MockModel,
     MockPageQueryModel,
@@ -414,10 +415,29 @@ async def update_hrm_mock_rule_response_priority(request: Request,
 async def rule_response_list(request: Request,
                              query_rule_response: MockResponsePageQueryModel = Depends(
                                  MockResponsePageQueryModel.as_query),
+                             response_condition_keyword: str | None = Query(default=None,
+                                                                           alias="responseConditionKeyword",
+                                                                           description="按response_condition文本关键字过滤"),
                              query_db: Session = Depends(get_db),
                              current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    """
+    查询指定mock规则下的响应列表。
+
+    :param request: FastAPI请求对象
+    :param query_rule_response: 响应查询参数（rule_id/name/status等）
+    :param response_condition_keyword: 响应条件关键字，按qtr_rule_response.response_condition模糊过滤
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: mock规则响应列表
+    """
     try:
-        add_module_result = await MockResponseService.get_by_rule_id(query_db, query_rule_response.rule_id)
+        add_module_result = await MockResponseService.get_by_rule_id(
+            query_db,
+            rule_id=query_rule_response.rule_id,
+            name=query_rule_response.name,
+            response_condition_keyword=response_condition_keyword,
+            status=query_rule_response.status,
+        )
 
         return ResponseUtil.success(data=add_module_result, msg="success")
 
@@ -434,6 +454,15 @@ async def rule_response_detail(request: Request,
                                    MockResponsePageQueryModel.as_query),
                                query_db: Session = Depends(get_db),
                                current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    """
+    查询mock响应详情。
+
+    :param request: FastAPI请求对象
+    :param query_rule_response: 响应查询参数（rule_response_id）
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: mock规则响应详情
+    """
     try:
         add_module_result = await MockResponseService.get_response_detail_services(query_db,
                                                                                    query_rule_response.rule_response_id)
@@ -452,6 +481,15 @@ async def set_default_response(request: Request,
                                query_rule_response: AddMockResponseModel,
                                query_db: Session = Depends(get_db),
                                current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    """
+    设置mock规则默认响应。
+
+    :param request: FastAPI请求对象
+    :param query_rule_response: 默认响应参数（rule_id/rule_response_id/response_condition）
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 设置结果
+    """
     try:
         add_module_result = await MockResponseService.set_default_response(query_db, query_rule_response, current_user)
 
@@ -468,11 +506,83 @@ async def set_default_response(request: Request,
 async def get_response_by_condition(request: Request,
                                     query_rule_response: AddMockResponseModel,
                                     query_db: Session = Depends(get_db)):
+    """
+    根据当前条件匹配mock响应列表。
+
+    :param request: FastAPI请求对象
+    :param query_rule_response: 条件参数（rule_id/response_condition）
+    :param query_db: 数据库会话
+    :return: 匹配到的mock响应列表
+    """
     try:
         add_module_result = await MockResponseService.get_by_response_condition(query_db, query_rule_response)
 
         return ResponseUtil.success(data=add_module_result, msg="success")
 
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@mockController.post("/mockManager/copyResponse",
+                     dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:addResponse'))])
+@log_decorator(title='复制mock规则响应', business_type=1)
+async def copy_hrm_mock_rule_response(request: Request,
+                                      add_mock_rule: AddMockResponseModel,
+                                      query_db: Session = Depends(get_db),
+                                      current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    """
+    复制mock规则响应。
+
+    :param request: FastAPI请求对象
+    :param add_mock_rule: 复制参数（rule_response_id/name/rule_id）
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 复制结果
+    """
+    try:
+        if not add_mock_rule.name:
+            raise ValueError("复制后的mock响应名不能为空")
+        add_mock_rule.manager = current_user.user.user_id
+        add_mock_rule.create_by = current_user.user.user_name
+        add_mock_rule.update_by = current_user.user.user_name
+        add_mock_rule.dept_id = current_user.user.dept_id
+        add_module_result = await MockResponseService.copy_mock_response_services(query_db, add_mock_rule)
+        if add_module_result.is_success:
+            logger.info(add_module_result.message)
+            return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
+        logger.warning(add_module_result.message)
+        return ResponseUtil.failure(data=add_module_result.result, msg=add_module_result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@mockController.delete("/mockManager/responseDelete",
+                       dependencies=[Depends(CheckUserInterfaceAuth('hrm:mockManager:updateResponse'))])
+@log_decorator(title='删除mock规则响应', business_type=3)
+async def delete_hrm_mock_response(request: Request,
+                                   delete_rule_response: DeleteMockResponseModel,
+                                   query_db: Session = Depends(get_db),
+                                   current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    """
+    删除mock规则响应（支持批量）。
+
+    :param request: FastAPI请求对象
+    :param delete_rule_response: 删除参数（rule_response_ids）
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 删除结果
+    """
+    try:
+        delete_rule_response.update_by = current_user.user.user_name
+        add_module_result = MockResponseService.delete_mock_response_services(query_db, delete_rule_response,
+                                                                              current_user)
+        if add_module_result.is_success:
+            logger.info(add_module_result.message)
+            return ResponseUtil.success(data=add_module_result.result, msg=add_module_result.message)
+        logger.warning(add_module_result.message)
+        return ResponseUtil.failure(data=add_module_result.result, msg=add_module_result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
