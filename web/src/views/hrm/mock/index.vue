@@ -53,6 +53,9 @@
         <el-button link type="warning" icon="Edit" :loading="loading.edite" @click="handleUpdate(scope.row)"
                    v-hasPermi="['hrm:case:edit']" title="编辑">
         </el-button>
+        <el-button link type="primary" icon="Tickets" @click="showResponseListDialog(scope.row)"
+                   v-hasPermi="['hrm:mockManager:responseList']" title="响应列表">
+        </el-button>
         <el-button link type="warning" icon="CopyDocument" :loading="loading.copy" @click="showCopyDialog(scope.row)"
                    v-hasPermi="['hrm:case:copy']" title="复制">
         </el-button>
@@ -67,6 +70,11 @@
                           :rule-id="editingRuleId"
                           :is-add="isAdd"
     ></MockRuleDetailDialog>
+    <MockResponseListDialog
+      v-model:open-dialog="openResponseListDialog"
+      :rule-id="responseDialogRuleId"
+      :rule-name="responseDialogRuleName"
+    ></MockResponseListDialog>
 
     <!-- 复制mock规则对话框 -->
     <el-dialog :title="copyMockRuleInfo?.name" v-model="copyDialog" append-to-body destroy-on-close>
@@ -90,6 +98,7 @@
 import {getMockRule, copyMockRule, delMockRule, updateMockRule, updateMockRuleInfo} from "@/api/hrm/mock.js";
 import TagSelector from "@/components/hrm/common/tag-selector.vue";
 import MockRuleDetailDialog from "@/components/hrm/mock/rule_detail.vue"
+import MockResponseListDialog from "@/components/hrm/mock/response_list_dialog.vue";
 import { initMockRuleFormData } from "@/components/hrm/data-template.js";
 import { HrmDataTypeEnum } from "@/components/hrm/enum.js";
 import { ElMessage } from "element-plus";
@@ -138,6 +147,9 @@ const runIds = ref([]);
 const showHistoryDialog = ref(false);
 const currentCaseInfo = ref(null);
 const currentRunId = ref();
+const openResponseListDialog = ref(false);
+const responseDialogRuleId = ref(null);
+const responseDialogRuleName = ref("");
 
 const copyDialog = ref(false);
 const copyMockRuleInfo = ref(initMockRuleFormData);
@@ -246,6 +258,15 @@ function showHistory(row) {
   currentCaseInfo.value = row;
   currentRunId.value = ruleId;
   showHistoryDialog.value = true;
+}
+
+/*
+* 打开mock响应列表弹窗
+* */
+function showResponseListDialog(row) {
+  responseDialogRuleId.value = row.ruleId;
+  responseDialogRuleName.value = row.name;
+  openResponseListDialog.value = true;
 }
 
 /** 删除按钮操作 */
