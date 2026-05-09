@@ -336,15 +336,32 @@ class MockResponseService:
         return False
 
     @classmethod
-    async def get_by_rule_id(cls, query_db: Session, rule_id: int, name: str = None) -> list[MockResponseModel]:
+    async def get_by_rule_id(
+            cls,
+            query_db: Session,
+            rule_id: int,
+            name: str = None,
+            response_condition_keyword: str = None,
+            status: int | None = None,
+    ) -> list[MockResponseModel]:
         """
         获取mock规则响应信息service
+        :param query_db: orm对象
         :param rule_id: mock规则id
+        :param name: 响应名称关键字，支持模糊查询
+        :param response_condition_keyword: 响应条件关键字（基于response_condition文本模糊过滤）
+        :param status: 响应状态
         :return: mock规则响应信息对象
         """
         info = query_db.query(RuleResponse).filter(RuleResponse.rule_id == rule_id)
         if name:
             info = info.filter(RuleResponse.name.like(f'%{name}%'))
+        if status is not None:
+            info = info.filter(RuleResponse.status == status)
+        if response_condition_keyword:
+            keyword = response_condition_keyword.strip()
+            if keyword:
+                info = info.filter(RuleResponse.response_condition.like(f'%{keyword}%'))
         info = info.order_by(
             RuleResponse.priority, RuleResponse.create_time.desc(), RuleResponse.update_time.desc())
         info = await run_in_threadpool(info.all)
