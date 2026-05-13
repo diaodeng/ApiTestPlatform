@@ -739,7 +739,7 @@ class ResponseGenerator:
         # 渲染响应体
         body = await self._render_template()
         headers = {data.key: data.value for data in self.response.headers_template}
-        # headers["mockId"] = f"{self.response.rule_id}_{self.response.rule_response_id}"
+        headers["mockId"] = f"{self.response.rule_id}_{self.response.rule_response_id}"
         return {
             'status_code': self.response.status_code,
             'headers': headers,
