@@ -50,6 +50,7 @@ from module_hrm.entity.vo.web_case_vo import (
     WebRecordingContinueRequestModel,
     WebRecordingDetailModel,
     WebRecordingEventModel,
+    WebRecordingStepDeleteRequestModel,
     WebRecordingReplayRequestModel,
     WebRecordingSaveCaseRequestModel,
     WebRecordingSessionPageQueryModel,
@@ -1633,16 +1634,72 @@ class WebCaseService:
 
     @classmethod
     def _build_steps_from_recording_events(cls, events: list[HrmWebRecordingEvent]) -> list[WebStepModel]:
+        return [item["step"] for item in cls._build_recording_step_entries(events)]
+
+    @classmethod
+    def _build_recording_step_entries(cls, events: list[HrmWebRecordingEvent]) -> list[dict[str, Any]]:
+        """根据录制事件构建步骤及其来源事件映射。"""
         steps: list[WebStepModel] = []
+        step_entries: list[dict[str, Any]] = []
         for event in events:
             payload = cls._loads(event.payload_json, {})
             if cls._is_recording_assert_pick_event(payload):
                 if cls._attach_recording_assertion_to_previous_step(steps, payload):
+                    if step_entries:
+                        step_entries[-1]["event_ids"].append(int(event.event_id))
+                        step_entries[-1]["event_indexes"].append(int(event.event_index))
                     continue
             step = cls._normalize_recording_step(payload, len(steps) + 1)
             if step is not None:
                 steps.append(step)
-        return steps
+                step_entries.append(
+                    {
+                        "step": step,
+                        "event_ids": [int(event.event_id)],
+                        "event_indexes": [int(event.event_index)],
+                    },
+                )
+        return step_entries
+
+    @classmethod
+    def _locate_recording_step_entry(
+        cls,
+        step_entries: list[dict[str, Any]],
+        request_model: WebRecordingStepDeleteRequestModel,
+    ) -> dict[str, Any] | None:
+        """根据步骤标识定位当前录制中的步骤来源事件。"""
+        target_step_id = str(request_model.step_id or "").strip()
+        if target_step_id:
+            for item in step_entries:
+                if str(item["step"].step_id or "").strip() == target_step_id:
+                    return item
+
+        target_event_id = cls._to_optional_int(request_model.event_id)
+        if target_event_id is not None:
+            for item in step_entries:
+                if target_event_id in item["event_ids"]:
+                    return item
+
+        target_step_index = cls._to_optional_int(request_model.step_index)
+        if target_step_index is not None:
+            for item in step_entries:
+                if int(item["step"].step_index or 0) == target_step_index:
+                    return item
+
+        target_event_index = cls._to_optional_int(request_model.event_index)
+        if target_event_index is not None:
+            event = next(
+                (
+                    item
+                    for item in step_entries
+                    if item["event_indexes"] and int(item["event_indexes"][0]) == target_event_index
+                ),
+                None,
+            )
+            if event is not None:
+                return event
+
+        return None
 
     @classmethod
     def _clone_step_for_persist(cls, step: WebStepModel, step_index: int) -> WebStepModel:
@@ -2772,6 +2829,64 @@ class WebCaseService:
                 WebCaseDao.delete_recording_session(query_db, session_obj.recording_id)
             query_db.commit()
             return CrudResponseModel(is_success=True, message=f"删除成功，共 {len(sessions)} 条录制记录")
+        except Exception as exc:
+            query_db.rollback()
+            raise exc
+
+    @classmethod
+    def delete_recording_step_services(
+        cls,
+        query_db: Session,
+        request_model: WebRecordingStepDeleteRequestModel,
+        *,
+        user_name: str | None,
+    ) -> CrudResponseModel:
+        """删除录制中的单个步骤及其对应的录制事件。"""
+        session_obj = WebCaseDao.get_recording_session(query_db, request_model.recording_id)
+        if session_obj is None:
+            return CrudResponseModel(is_success=False, message="录制会话不存在")
+
+        events = WebCaseDao.list_recording_events(query_db, int(request_model.recording_id))
+        if not events:
+            return CrudResponseModel(is_success=False, message="当前录制会话没有可删除的步骤")
+
+        step_entries = cls._build_recording_step_entries(events)
+        target_entry = cls._locate_recording_step_entry(step_entries, request_model)
+        if target_entry is None:
+            return CrudResponseModel(is_success=False, message="录制步骤不存在")
+
+        delete_event_ids = [int(event_id) for event_id in target_entry.get("event_ids", []) if event_id]
+        if not delete_event_ids:
+            return CrudResponseModel(is_success=False, message="录制步骤不存在")
+
+        now = datetime.now()
+        try:
+            WebCaseDao.delete_recording_events_by_event_ids(query_db, delete_event_ids)
+            WebCaseDao.update_recording_session(
+                query_db,
+                int(session_obj.recording_id),
+                {
+                    "update_time": now,
+                    "update_by": user_name or session_obj.update_by,
+                },
+            )
+            query_db.commit()
+            deleted_step = target_entry["step"]
+            return CrudResponseModel(
+                is_success=True,
+                message="录制步骤已删除",
+                result={
+                    "recordingId": request_model.recording_id,
+                    "deletedStepId": deleted_step.step_id,
+                    "deletedStepIndex": deleted_step.step_index,
+                    "deletedEventIds": delete_event_ids,
+                    "deletedEventIndexes": [
+                        int(item)
+                        for item in target_entry.get("event_indexes", [])
+                        if item is not None
+                    ],
+                },
+            )
         except Exception as exc:
             query_db.rollback()
             raise exc

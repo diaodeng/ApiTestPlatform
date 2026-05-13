@@ -182,6 +182,24 @@ export function getWebRecording(recordingId) {
   })
 }
 
+/**
+ * 删除单条 Web 录制步骤，并同步删除其对应的录制事件。
+ * @param {Object} data 删除请求参数
+ * @param {number} data.recordingId 录制会话ID
+ * @param {string|number|undefined} data.stepId 步骤稳定ID
+ * @param {number|undefined} data.stepIndex 步骤序号
+ * @param {string|number|undefined} data.eventId 录制事件ID
+ * @param {number|undefined} data.eventIndex 录制事件序号
+ * @returns {Promise<any>} 请求结果
+ */
+export function deleteWebRecordingStep(data) {
+  return webCaseRequest({
+    url: '/hrm/web-case/recording/event/delete',
+    method: 'post',
+    data
+  })
+}
+
 export function startWebRecording(data) {
   return webCaseRequest({
     url: '/hrm/web-case/recording/start',
