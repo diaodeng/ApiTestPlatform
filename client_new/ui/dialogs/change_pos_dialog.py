@@ -194,9 +194,9 @@ class ChangePosDialog(QDialog):
             self.state.vendor_id = data.get("vendor_id") or None
             self.state.store_id = data.get("store_id") or None
             self.state.switch_mode = data.get("switch_mode") or "1"
-            self.state.pos_mac = data.get("pos_mac") or self.state.pos_mac
+            self.state.pos_mac = self.state.pos_mac or data.get("pos_mac")
             self.state.pos_no = data.get("pos_no") or ""
-            self.state.pos_ip = data.get("pos_ip") or self.state.pos_ip
+            self.state.pos_ip = self.state.pos_ip or data.get("pos_ip")
             self.state.pos_type = data.get("pos_type") or "1"
             self.state.pos_group = data.get("pos_group") or ""
         except Exception:
