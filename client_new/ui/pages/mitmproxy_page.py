@@ -486,3 +486,16 @@ class MitmWidget(QWidget):
             stage,
             dialog.get_payload(),
         )
+
+    def shutdown(self):
+        """
+        关闭 mitmproxy 页面相关后台资源。
+
+        :return:
+        """
+        if self.controller is None:
+            return
+        try:
+            self.controller.shutdown()
+        except Exception:
+            pass
