@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import QObject, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox
 
@@ -21,24 +21,30 @@ from utils.mitmproxy_cert import (
 )
 
 
-class _CertStatusThread(QThread):
-    done = Signal(bool, bool, str, str)
+class _CertStatusThread(threading.Thread):
+    """
+    后台检查 mitmproxy 证书状态，避免阻塞 UI 线程。
 
-    def __init__(self, config):
-        super().__init__()
+    :param config: mitmproxy 配置快照，用于定位证书路径并检查证书信任状态。
+    :param done_signal: 检查完成后回传结果的 Qt 信号。
+    """
+
+    def __init__(self, config, done_signal):
+        super().__init__(name="mitmproxy-cert-status", daemon=True)
         self._config = (
             config.model_copy(deep=True) if hasattr(config, "model_copy") else config
         )
+        self._done_signal = done_signal
 
     def run(self):
         try:
             trusted, can_install, cert_path, message = describe_windows_cert_status(
                 self._config
             )
-            self.done.emit(trusted, can_install, cert_path, message)
+            self._done_signal.emit(trusted, can_install, cert_path, message)
         except Exception as e:
             cert_path = str(resolve_mitmproxy_cert_path(self._config))
-            self.done.emit(
+            self._done_signal.emit(
                 False,
                 False,
                 cert_path,
@@ -66,6 +72,7 @@ class _PipeReaderThread(threading.Thread):
 
 class MitmController(QObject):
     data_signal = Signal(dict)
+    cert_status_ready = Signal(bool, bool, str, str)
     RESTART_SENSITIVE_FIELDS = {
         "port": "代理端口",
         "web_port": "Web端口",
@@ -80,7 +87,7 @@ class MitmController(QObject):
     }
 
     def __init__(self, widget):
-        super().__init__()
+        super().__init__(widget)
         self.widget = widget
         self.config = MitmproxyConfig.read()
 
@@ -101,7 +108,7 @@ class MitmController(QObject):
         self._helper_stderr_thread: _PipeReaderThread | None = None
         self._helper_finished_emitted = False
 
-        self.timer = QTimer()
+        self.timer = QTimer(self)
         self.timer.timeout.connect(self._sync_ui_state)
         self.timer.start(200)
 
@@ -115,6 +122,11 @@ class MitmController(QObject):
         self._force_stop_timer.timeout.connect(self._force_stop_helper_if_needed)
 
         self._bind()
+        self.cert_status_ready.connect(self._on_cert_status_done)
+        try:
+            self.widget.destroyed.connect(self.shutdown)
+        except Exception:
+            pass
         self.widget.apply_config(self.config, self.helper_state)
         self._sync_ui_state()
         self._refresh_cert_status_async()
@@ -233,22 +245,29 @@ class MitmController(QObject):
             logger.exception(f"安装 mitmproxy 证书失败: {e}")
             QMessageBox.warning(self.widget, "mitmproxy 证书", str(e))
 
-    def shutdown(self):
+    def shutdown(self, *_args):
+        """
+        停止 mitmproxy 运行时并清理后台线程。
+
+        :param _args: 兼容 Qt destroyed 信号的冗余参数。
+        :return:
+        """
+        if self._shutting_down:
+            return
+
         self._shutting_down = True
         if self._helper_io_timer.isActive():
             self._helper_io_timer.stop()
-        if self._cert_status_thread and self._cert_status_thread.isRunning():
-            try:
-                self._cert_status_thread.done.disconnect(self._on_cert_status_done)
-                self._cert_status_thread.finished.disconnect(
-                    self._on_cert_status_thread_finished
-                )
-            except Exception:
-                pass
-            self._cert_status_thread.wait(1500)
+        self._force_stop_timer.stop()
+        if self.timer.isActive():
+            self.timer.stop()
+        self._wait_for_cert_status_thread()
         self._cert_status_thread = None
         self._current_web_url = ""
-        self.widget.set_web_url("")
+        try:
+            self.widget.set_web_url("")
+        except Exception:
+            pass
         if not self.helper:
             return
 
@@ -331,7 +350,10 @@ class MitmController(QObject):
         self._helper_stderr_thread.start()
 
     def _dispose_helper(self):
+        stdout_thread = self._helper_stdout_thread
+        stderr_thread = self._helper_stderr_thread
         if not self.helper:
+            self._join_helper_io_threads(stdout_thread, stderr_thread)
             return
 
         for stream_name in ("stdin", "stdout", "stderr"):
@@ -349,10 +371,11 @@ class MitmController(QObject):
         self._stdout_buffer = ""
         self._stderr_buffer = ""
         self._helper_finished_emitted = False
-        self._helper_stdout_thread = None
-        self._helper_stderr_thread = None
+        self._join_helper_io_threads(stdout_thread, stderr_thread)
         self._helper_stdout_queue = queue.Queue()
         self._helper_stderr_queue = queue.Queue()
+        self._helper_stdout_thread = None
+        self._helper_stderr_thread = None
 
     def _is_helper_running(self) -> bool:
         return bool(self.helper and self.helper.poll() is None)
@@ -408,14 +431,15 @@ class MitmController(QObject):
             ),
         )
 
-        if self._cert_status_thread and self._cert_status_thread.isRunning():
+        if self._cert_status_thread and self._cert_status_thread.is_alive():
             self._cert_status_refresh_pending = True
             return
 
         self._cert_status_refresh_pending = False
-        self._cert_status_thread = _CertStatusThread(self.config)
-        self._cert_status_thread.done.connect(self._on_cert_status_done)
-        self._cert_status_thread.finished.connect(self._on_cert_status_thread_finished)
+        self._cert_status_thread = _CertStatusThread(
+            self.config,
+            self.cert_status_ready,
+        )
         self._cert_status_thread.start()
 
     def _on_cert_status_done(
@@ -427,6 +451,7 @@ class MitmController(QObject):
     ):
         if self._shutting_down:
             return
+        self._cert_status_thread = None
         self.widget.set_cert_status(
             message=message,
             trusted=trusted,
@@ -434,8 +459,6 @@ class MitmController(QObject):
             cert_path=cert_path,
         )
 
-    def _on_cert_status_thread_finished(self):
-        self._cert_status_thread = None
         if self._cert_status_refresh_pending and not self._shutting_down:
             self._cert_status_refresh_pending = False
             QTimer.singleShot(0, self._refresh_cert_status_async)
@@ -445,7 +468,7 @@ class MitmController(QObject):
             return
         if check_seq != self._cert_status_check_seq:
             return
-        if not self._cert_status_thread or not self._cert_status_thread.isRunning():
+        if not self._cert_status_thread or not self._cert_status_thread.is_alive():
             return
 
         can_install = Path(cert_path).exists()
@@ -730,3 +753,38 @@ class MitmController(QObject):
                 self.helper.wait(timeout=2.0)
         except Exception as e:
             logger.exception(f"强制结束 mitmproxy helper 失败: {e}")
+
+    def _wait_for_cert_status_thread(self, timeout: float = 25.0):
+        """
+        等待证书状态检查线程退出，避免在对象销毁时线程仍在运行。
+
+        :param timeout: 最长等待秒数，建议覆盖 certutil 的超时时间。
+        :return:
+        """
+        thread = self._cert_status_thread
+        if thread is None:
+            return
+        if thread.is_alive():
+            thread.join(timeout=timeout)
+        if thread.is_alive():
+            logger.warning("mitmproxy 证书状态检查线程未在超时时间内结束")
+
+    def _join_helper_io_threads(
+        self,
+        stdout_thread: _PipeReaderThread | None,
+        stderr_thread: _PipeReaderThread | None,
+        timeout: float = 2.0,
+    ):
+        """
+        等待 helper 的 stdout/stderr 读取线程退出。
+
+        :param stdout_thread: 标准输出读取线程。
+        :param stderr_thread: 标准错误读取线程。
+        :param timeout: 单个线程最多等待时间。
+        :return:
+        """
+        for thread in (stdout_thread, stderr_thread):
+            if thread and thread.is_alive():
+                thread.join(timeout=timeout)
+                if thread.is_alive():
+                    logger.warning(f"mitmproxy helper 读线程未及时退出: {thread.name}")
