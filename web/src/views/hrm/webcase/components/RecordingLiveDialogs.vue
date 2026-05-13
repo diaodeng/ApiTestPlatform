@@ -469,6 +469,13 @@
 
             <el-tabs v-model="recordingLiveTab">
                 <el-tab-pane label="步骤列表" name="steps">
+                    <el-alert
+                        title="删除仅会从当前录制视图隐藏该步骤，不会中断录制过程。"
+                        type="info"
+                        :closable="false"
+                        show-icon
+                        class="mb12"
+                    />
                     <el-table
                         :data="liveRecordingSteps"
                         border
@@ -503,6 +510,22 @@
                             <template #default="scope">{{
                                 summarizeStepParams(scope.row)
                             }}</template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="100" fixed="right">
+                            <template #default="scope">
+                                <el-button
+                                    link
+                                    type="danger"
+                                    :icon="Delete"
+                                    @click="
+                                        handleDeleteLiveRecordingStep(
+                                            scope.row,
+                                        )
+                                    "
+                                >
+                                    删除
+                                </el-button>
+                            </template>
                         </el-table-column>
                     </el-table>
                 </el-tab-pane>
@@ -782,6 +805,7 @@ const {
     recordingLiveStatusType,
     recordingLiveTab,
     liveRecordingSteps,
+    handleDeleteLiveRecordingStep,
     getActionLabel,
     describeStepTarget,
     summarizeStepParams,

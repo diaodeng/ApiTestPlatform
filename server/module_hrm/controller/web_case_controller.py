@@ -28,6 +28,7 @@ from module_hrm.entity.vo.web_case_vo import (
     WebRecordingCancelRequestModel,
     WebRecordingContinueRequestModel,
     WebRecordingReplayRequestModel,
+    WebRecordingStepDeleteRequestModel,
     WebRecordingSaveCaseRequestModel,
     WebRecordingSessionPageQueryModel,
     WebRecordingStartRequestModel,
@@ -629,6 +630,32 @@ async def get_recording_detail(
         if detail is None:
             return ResponseUtil.failure(msg="录制会话不存在")
         return ResponseUtil.success(data=detail.model_dump(by_alias=True))
+    except Exception as exc:
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post(
+    "/recording/event/delete",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:record"))],
+)
+@log_decorator(title="Web录制步骤删除", business_type=3)
+async def delete_recording_step(
+    request: Request,
+    delete_request: WebRecordingStepDeleteRequestModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """删除单条 Web 录制步骤，对应录制事件会同步从存储中移除。"""
+    try:
+        result = WebCaseService.delete_recording_step_services(
+            query_db,
+            delete_request,
+            user_name=current_user.user.user_name,
+        )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message, data=result.result)
     except Exception as exc:
         logger.exception(exc)
         return ResponseUtil.error(msg=str(exc))

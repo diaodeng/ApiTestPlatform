@@ -99,6 +99,7 @@ import {
     applyWebRecording,
     cancelWebRecording,
     cancelWebRun,
+    deleteWebRecordingStep,
     delWebBrowserSession,
     delWebRuntimeProfile,
     continueWebRecording,
@@ -560,6 +561,7 @@ const {
 
 const recordingManager = useRecordingManager({
     ElMessage,
+    ElMessageBox,
     loading,
     activeTab,
     runtimeProfiles,
@@ -616,6 +618,7 @@ const recordingManager = useRecordingManager({
     saveWebRecordingAsCase,
     applyWebRecording,
     replayWebRecording,
+    deleteWebRecordingStep,
 });
 
 const {
@@ -659,6 +662,7 @@ const {
     replayResultJsonText,
     recordingDetailText,
     liveRecordingSteps,
+    handleDeleteLiveRecordingStep,
     openRecordingDialog,
     stopRecordingPoll,
     startRecording,
@@ -812,6 +816,7 @@ const recordingLiveDialogsContext = {
     recordingLiveStatusType,
     recordingLiveTab,
     liveRecordingSteps,
+    handleDeleteLiveRecordingStep,
     getActionLabel,
     describeStepTarget,
     summarizeStepParams,
