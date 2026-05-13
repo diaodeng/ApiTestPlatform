@@ -198,6 +198,39 @@ class WebCaseDao:
         )
 
     @classmethod
+    def get_recording_event(cls, db: Session, event_id: int):
+        """根据事件ID获取录制事件。"""
+        return db.query(HrmWebRecordingEvent).filter(HrmWebRecordingEvent.event_id == event_id).first()
+
+    @classmethod
+    def get_recording_event_by_index(cls, db: Session, recording_id: int, event_index: int):
+        """根据录制ID和事件序号获取录制事件。"""
+        return (
+            db.query(HrmWebRecordingEvent)
+            .filter(
+                HrmWebRecordingEvent.recording_id == recording_id,
+                HrmWebRecordingEvent.event_index == event_index,
+            )
+            .first()
+        )
+
+    @classmethod
+    def delete_recording_event(cls, db: Session, event_id: int) -> None:
+        """删除单条录制事件。"""
+        db.query(HrmWebRecordingEvent).filter(HrmWebRecordingEvent.event_id == event_id).delete(
+            synchronize_session=False
+        )
+
+    @classmethod
+    def delete_recording_events_by_event_ids(cls, db: Session, event_ids: list[int]) -> None:
+        """批量删除指定ID的录制事件。"""
+        if not event_ids:
+            return
+        db.query(HrmWebRecordingEvent).filter(HrmWebRecordingEvent.event_id.in_(event_ids)).delete(
+            synchronize_session=False
+        )
+
+    @classmethod
     def delete_recording_events(cls, db: Session, recording_id: int) -> None:
         db.query(HrmWebRecordingEvent).filter(HrmWebRecordingEvent.recording_id == recording_id).delete(
             synchronize_session=False

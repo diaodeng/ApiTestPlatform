@@ -186,6 +186,16 @@ class WebRecordingEventModel(CommonDataModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class WebRecordingStepDeleteRequestModel(WebJsonModel):
+    """Web 录制步骤删除请求。"""
+
+    recording_id: int
+    step_id: int | str | None = None
+    step_index: int | None = None
+    event_id: int | str | None = None
+    event_index: int | None = None
+
+
 class WebRecordingDetailModel(WebRecordingSessionModel):
     events: list[WebRecordingEventModel] = Field(default_factory=list)
     steps: list[WebStepModel] = Field(default_factory=list)

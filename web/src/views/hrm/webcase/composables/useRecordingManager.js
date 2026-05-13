@@ -8,6 +8,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 export function useRecordingManager(options) {
     const {
         ElMessage,
+        ElMessageBox,
         loading,
         activeTab,
         runtimeProfiles,
@@ -60,6 +61,7 @@ export function useRecordingManager(options) {
         startWebRecording,
         stopWebRecording,
         getWebRecording,
+        deleteWebRecordingStep,
         saveWebRecordingAsCase,
         applyWebRecording,
         replayWebRecording,
@@ -69,6 +71,7 @@ export function useRecordingManager(options) {
     const selectedRecording = ref(null);
     const recordingEvents = ref([]);
     const liveRecordingSteps = ref([]);
+    const hiddenRecordingStepKeys = ref([]);
     const recordingDetail = ref(null);
     const replayResult = ref(null);
     const recordingDetailText = ref("");
@@ -250,6 +253,88 @@ export function useRecordingManager(options) {
         safeJsonStringify(recordingDetail.value || {}),
     );
 
+    /**
+     * 获取录制步骤的本地隐藏标识。
+     * @param {Record<string, any>} step 录制步骤
+     * @returns {string} 稳定的本地标识
+     */
+    function getRecordingStepKey(step) {
+        const stepId = normalizeIdValue(step?.stepId ?? step?.step_id);
+        if (stepId) {
+            return `id:${stepId}`;
+        }
+
+        const stepIndex = Number(step?.stepIndex ?? step?.step_index);
+        if (Number.isInteger(stepIndex) && stepIndex > 0) {
+            return `index:${stepIndex}`;
+        }
+
+        const actionType = String(
+            step?.actionType ?? step?.action_type ?? "",
+        ).trim();
+        const stepName = String(step?.stepName ?? step?.step_name ?? "").trim();
+        const targetText = String(describeStepTarget(step) || "").trim();
+        const paramsText = String(summarizeStepParams(step) || "").trim();
+        return `fallback:${actionType}|${stepName}|${targetText}|${paramsText}`;
+    }
+
+    /**
+     * 过滤当前已被本地删除的录制步骤。
+     * @param {Array<Record<string, any>>} steps 录制步骤列表
+     * @returns {Array<Record<string, any>>} 可见步骤列表
+     */
+    function filterVisibleRecordingSteps(steps) {
+        if (!Array.isArray(steps) || !steps.length) {
+            return [];
+        }
+        const hiddenKeys = new Set(hiddenRecordingStepKeys.value);
+        return steps.filter((step) => !hiddenKeys.has(getRecordingStepKey(step)));
+    }
+
+    /**
+     * 同步录制弹窗中的可见步骤和步骤 JSON。
+     * @param {Record<string, any>|null} detail 录制详情
+     * @returns {void}
+     */
+    function syncVisibleRecordingDetail(detail = recordingDetail.value) {
+        if (!detail) {
+            recordingDetail.value = null;
+            liveRecordingSteps.value = [];
+            recordingDetailText.value = "";
+            return;
+        }
+        const visibleSteps = filterVisibleRecordingSteps(detail.steps);
+        recordingDetail.value = {
+            ...detail,
+            steps: visibleSteps,
+        };
+        liveRecordingSteps.value = visibleSteps;
+        recordingDetailText.value = safeJsonStringify({
+            ...detail,
+            steps: visibleSteps,
+        });
+    }
+
+    /**
+     * 获取当前录制视图可用的详情数据。
+     * @param {Record<string, any>} detail 录制详情
+     * @returns {Record<string, any>} 过滤后的详情
+     */
+    function getVisibleRecordingDetail(detail) {
+        if (!detail) {
+            return detail;
+        }
+        const currentRecordingId = normalizeIdValue(recordingForm.value.recordingId);
+        const detailRecordingId = normalizeIdValue(detail.recordingId);
+        if (!currentRecordingId || currentRecordingId !== detailRecordingId) {
+            return detail;
+        }
+        return {
+            ...detail,
+            steps: filterVisibleRecordingSteps(detail.steps),
+        };
+    }
+
     const recordingLiveStatusMeta = computed(() =>
         getRecordingStatusMeta(
             recordingDetail.value?.status ||
@@ -355,6 +440,7 @@ export function useRecordingManager(options) {
         recordingLiveTab.value = "steps";
         recordingEvents.value = [];
         liveRecordingSteps.value = [];
+        hiddenRecordingStepKeys.value = [];
         recordingDetail.value = null;
         recordingDetailText.value = "";
         const runtimeSettings = isPlainObject(
@@ -515,8 +601,7 @@ export function useRecordingManager(options) {
     function updateLiveRecording(detail) {
         recordingDetail.value = detail;
         recordingEvents.value = detail.events || [];
-        liveRecordingSteps.value = detail.steps || [];
-        recordingDetailText.value = safeJsonStringify(detail);
+        syncVisibleRecordingDetail(detail);
         if (shouldStopRecordingPoll(detail)) {
             stopRecordingPoll();
             loadBrowserSessions().catch(() => {});
@@ -680,12 +765,13 @@ export function useRecordingManager(options) {
 
     /**
      * 刷新录制详情。
-     * @returns {void}
+     * @returns {Promise<Record<string, any>|null>} 最新录制详情
      */
     function refreshRecording() {
-        if (!recordingForm.value.recordingId) return;
-        fetchRecordingDetail(recordingForm.value.recordingId).then((detail) => {
+        if (!recordingForm.value.recordingId) return Promise.resolve(null);
+        return fetchRecordingDetail(recordingForm.value.recordingId).then((detail) => {
             updateLiveRecording(detail);
+            return detail;
         });
     }
 
@@ -710,14 +796,75 @@ export function useRecordingManager(options) {
             return Promise.resolve(null);
         }
         return fetchRecordingDetail(recordingId).then((detail) => {
-            recordingDetail.value = detail;
-            syncCaseOptions(detail);
-            selectedRecording.value = detail;
+            syncVisibleRecordingDetail(detail);
+            syncCaseOptions(recordingDetail.value);
+            selectedRecording.value = recordingDetail.value;
             if (shouldStopRecordingPoll(detail)) {
                 stopRecordingDetailPoll();
             }
-            return detail;
+            return recordingDetail.value;
         });
+    }
+
+    /**
+     * 删除当前录制视图中的某个步骤。
+     * @param {Record<string, any>} step 录制步骤
+     * @returns {Promise<void>}
+     */
+    async function handleDeleteLiveRecordingStep(step) {
+        if (!recordingForm.value.recordingId) {
+            ElMessage.warning("当前没有可删除的录制步骤");
+            return;
+        }
+        const stepName = step?.stepName || step?.step_name || "未命名步骤";
+        const stepKey = getRecordingStepKey(step);
+        if (!stepKey) {
+            ElMessage.warning("无法识别该步骤，暂时不能删除");
+            return;
+        }
+
+        try {
+            await ElMessageBox.confirm(
+                `确认从当前录制视图中删除步骤【${stepName}】吗？该操作只会隐藏列表中的这一步，不会中断录制。`,
+                "提示",
+                {
+                    confirmButtonText: "删除",
+                    cancelButtonText: "取消",
+                    type: "warning",
+                },
+            );
+        } catch {
+            return;
+        }
+
+        loading.value.recordingDetail = true;
+        try {
+            const response = await deleteWebRecordingStep({
+                recordingId: recordingForm.value.recordingId,
+                stepId: normalizeIdValue(step?.stepId ?? step?.step_id),
+                stepIndex: Number(step?.stepIndex ?? step?.step_index) || undefined,
+                eventId: normalizeIdValue(step?.eventId ?? step?.event_id),
+                eventIndex: Number(step?.eventIndex ?? step?.event_index) || undefined,
+            });
+            if (!hiddenRecordingStepKeys.value.includes(stepKey)) {
+                hiddenRecordingStepKeys.value = [
+                    ...hiddenRecordingStepKeys.value,
+                    stepKey,
+                ];
+            }
+            syncVisibleRecordingDetail();
+            await refreshRecording();
+            ElMessage.success(response.msg || "已删除录制步骤");
+        } catch (error) {
+            const msg =
+                error?.response?.data?.msg ||
+                error?.message ||
+                "删除录制步骤失败";
+            ElMessage.error(msg);
+        } finally {
+            loading.value.recordingDetail = false;
+        }
+
     }
 
     /**
@@ -752,9 +899,9 @@ export function useRecordingManager(options) {
         loading.value.recordingDetail = true;
         fetchRecordingDetail(recordingId)
             .then((detail) => {
-                recordingDetail.value = detail;
-                syncCaseOptions(detail);
-                selectedRecording.value = detail;
+                syncVisibleRecordingDetail(detail);
+                syncCaseOptions(recordingDetail.value);
+                selectedRecording.value = recordingDetail.value;
                 showRecordingDetailDialog.value = true;
                 startRecordingDetailPoll();
             })
@@ -798,13 +945,17 @@ export function useRecordingManager(options) {
      */
     function resolveRecordingSource(recordingSource) {
         if (typeof recordingSource === "number") {
-            return fetchRecordingDetail(recordingSource);
+            return fetchRecordingDetail(recordingSource).then((detail) =>
+                getVisibleRecordingDetail(detail),
+            );
         }
         if (recordingSource?.recordingId && Array.isArray(recordingSource.steps)) {
-            return Promise.resolve(recordingSource);
+            return Promise.resolve(getVisibleRecordingDetail(recordingSource));
         }
         if (recordingSource?.recordingId) {
-            return fetchRecordingDetail(recordingSource.recordingId);
+            return fetchRecordingDetail(recordingSource.recordingId).then((detail) =>
+                getVisibleRecordingDetail(detail),
+            );
         }
         return Promise.resolve(null);
     }
@@ -1204,6 +1355,7 @@ export function useRecordingManager(options) {
         replayResultJsonText,
         recordingDetailText,
         liveRecordingSteps,
+        handleDeleteLiveRecordingStep,
         openBrowserSessionDialog,
         openRuntimeProfileDialog,
         formatRuntimeProfileLabel,
