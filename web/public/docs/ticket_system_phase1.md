@@ -1,0 +1,62 @@
+# 工单系统一期框架设计
+
+## 目标范围
+
+本次实现工单系统第一、二阶段的基础框架，不接入日志系统、AI Agent 或自动排查工具。当前阶段重点是把后续 AI 分析需要的数据先结构化沉淀下来。
+
+已覆盖能力：
+
+- 工单主数据：标题、描述、所属商家、所属模块、对方优先级、内部优先级、来源、分类、当前处理人。
+- 生命周期追踪：状态历史、指派历史、评论、事件流、RCA。
+- 状态机：默认状态与默认流转关系，启动时初始化，前端可新增、编辑、删除状态节点和流转规则。
+- 知识库：文章新增、编辑、查询、软删除，支持关联工单和向量状态预留。
+- 统计：按时间范围统计总量、状态分布、分类分布、人员处理量、平均处理耗时。
+- AI 预留：工单 `extra_data`、`ai_analysis`，事件 `event_data`，通用 `embedding_record`。
+
+## 权限策略
+
+继续沿用现有诺一/RuoYi 风格权限体系，不重新实现用户、角色、登录和鉴权。
+
+原因：
+
+- 当前平台已有统一用户、角色、菜单、接口权限和登录态。
+- 工单后续需要关联测试平台的项目、用例、执行记录、环境、接口等上下文。
+- 重做权限会导致用户体系和组织权限割裂，后续统计与 AI 分析难以统一。
+
+新增权限前缀为 `ticket:*:*`，由 `server/modules/ticket/perms.py` 注册并在应用启动时同步菜单。
+
+## 数据表
+
+核心表：
+
+- `ticket`：工单主表，保存当前态、最终归档态、商家、模块、优先级、来源、标签、扩展上下文和 AI 分析预留字段。
+- `ticket_status_history`：状态历史，记录每个状态阶段开始、结束和停留秒数。
+- `ticket_assign_history`：指派历史，记录处理人变化和原因。
+- `ticket_comment`：沟通评论，区别于结构化排查记录。
+- `ticket_event`：事件流，记录排查、复现、日志分析、DB 检查、修复、上线、验证等结构化过程。
+- `ticket_rca`：RCA 记录，保存现象、影响范围、复现步骤、排查过程、根因、修复、验证、预防方案。
+- `workflow_status`：工作流状态配置。
+- `workflow_transition`：工作流状态流转配置。
+- `knowledge_article`：知识库文章。
+- `embedding_record`：通用向量记录预留，按对象类型、对象 ID、模型、版本存储，便于后续迁移 pgvector/Qdrant。
+- `ticket_statistics_daily`、`user_statistics_daily`：离线统计预留表。
+
+## 前端页面
+
+- `web/src/views/ticket/index.vue`：工单列表、新增编辑、用户选择器指派、状态流转、详情抽屉、时间线、评论、事件、RCA。
+- `web/src/views/ticket/knowledge/index.vue`：知识库文章 CRUD。
+- `web/src/views/ticket/workflow/index.vue`：工作流状态和流转规则查看、编辑。
+- `web/src/views/ticket/statistics/index.vue`：工单统计概览。
+
+## 后续扩展原则
+
+- AI 分类、相似工单、自动排查不要直接改工单核心流程，应优先写入 `ticket_event` 和 `ticket.ai_analysis`。
+- 排查过程不要只写评论，应使用 `ticket_event.event_type + event_data` 结构化记录。
+- Embedding 模型升级时，不覆盖老向量，按 `embedding_model + embedding_version + embedding_dimension` 新增版本。
+- 后续接入日志或操作审计时，应通过 `extra_data.trace_id`、`event_data.trace_ids`、`event_data.checked_services` 等字段建立关联。
+
+## 变更记录
+
+- 2026-05-14：新增工单模块一期后端框架、权限注册、默认工作流初始化、知识库、统计接口和前端页面。
+- 2026-05-14：新增工单指派用户选择器；新增工作流状态节点和流转规则编辑能力。
+- 2026-05-14：补充用户选择器初始处理人回显；完成工作流编辑接口与前端构建验证。
