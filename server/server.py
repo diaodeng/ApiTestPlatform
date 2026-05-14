@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from common.permission.sync import sync_registered_menus
+from config.database import SessionLocal
 from config.env import AppConfig
 from config.get_db import init_create_table
 from config.get_redis import RedisUtil
@@ -52,6 +53,9 @@ from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
+from modules.ticket.controller.ticket_controller import ticketController
+from modules.ticket.perms import register as register_ticket_permission_defs
+from modules.ticket.service.ticket_service import TicketService
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
 from utils.log_util import logger
@@ -67,7 +71,10 @@ async def lifespan(app: FastAPI):
         await init_create_table()
         register_admin_permission_defs()
         register_hrm_permission_defs()
+        register_ticket_permission_defs()
         sync_registered_menus(app)
+        with SessionLocal() as db:
+            TicketService.init_default_workflow(db)
         app.state.redis = await RedisUtil.create_redis_pool()
         await RedisUtil.init_sys_dict(app.state.redis)
         await RedisUtil.init_sys_config(app.state.redis)
@@ -144,6 +151,7 @@ controller_list = [
     {'router': webCaseController, 'tags': ['HRM-Web测试管理']},
     {'router': desktopCaseAssetController, 'tags': ['HRM-桌面测试资源']},
     {'router': desktopCaseController, 'tags': ['HRM-桌面测试管理']},
+    {'router': ticketController, 'tags': ['工单管理']},
 ]
 
 for controller in controller_list:
