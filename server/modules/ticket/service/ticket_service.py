@@ -66,6 +66,19 @@ def _dump_model(model, *, exclude_none: bool = True) -> dict[str, Any]:
     return model.model_dump(by_alias=False, exclude_none=exclude_none)
 
 
+def _camelize(value):
+    """
+    递归转换字典键为小驼峰，保证接口返回与前端字段约定一致。
+    :param value: 字典、列表或普通值
+    :return: 转换后的结果
+    """
+    if isinstance(value, dict):
+        return {CamelCaseUtil.snake_to_camel(key): _camelize(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_camelize(item) for item in value]
+    return value
+
+
 def _ticket_no() -> str:
     """
     生成工单编号。
@@ -853,4 +866,5 @@ class TicketService:
         :param end_time: 结束时间
         :return: 统计结果
         """
-        return TicketDao.get_ticket_statistics(query_db, _date_start(begin_time), _date_end(end_time))
+        statistics = TicketDao.get_ticket_statistics(query_db, _date_start(begin_time), _date_end(end_time))
+        return _camelize(statistics)

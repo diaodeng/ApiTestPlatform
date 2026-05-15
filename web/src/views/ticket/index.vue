@@ -10,6 +10,15 @@
           @keyup.enter="handleQuery"
         />
       </el-form-item>
+      <el-form-item label="自然语言">
+        <el-input
+          v-model="naturalKeyword"
+          placeholder="如：支付超时且根因是下游接口"
+          clearable
+          style="width: 260px"
+          @keyup.enter="handleNaturalSearch"
+        />
+      </el-form-item>
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="工单状态" clearable style="width: 160px">
           <el-option v-for="item in ticketStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -39,7 +48,7 @@
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
+        <el-button type="primary" icon="Search" @click="handleSearch">搜索</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
       </el-form-item>
     </el-form>
@@ -48,6 +57,16 @@
       <el-col :span="1.5">
         <el-button type="primary" plain icon="Plus" @click="handleAdd" v-hasPermi="['ticket:ticket:add']">
           新增
+        </el-button>
+      </el-col>
+      <el-col :span="1.5">
+        <el-button type="success" plain icon="Upload" @click="importOpen = true" v-hasPermi="['ticket:ticket:import']">
+          导入
+        </el-button>
+      </el-col>
+      <el-col :span="1.5">
+        <el-button type="warning" plain icon="Download" @click="downloadTemplate" v-hasPermi="['ticket:ticket:import']">
+          下载模板
         </el-button>
       </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
@@ -253,6 +272,50 @@
       </template>
     </el-dialog>
 
+    <el-dialog title="导入工单数据" v-model="importOpen" width="720px" append-to-body>
+      <el-alert
+        title="支持飞书多维表格导出的 xlsx。工单号重复时会跳过，并在导入结果中列出未导入的重复工单号。"
+        type="info"
+        show-icon
+        class="mb16"
+      />
+      <el-upload
+        ref="uploadRef"
+        drag
+        action="#"
+        accept=".xlsx"
+        :limit="1"
+        :auto-upload="false"
+        :http-request="handleImportRequest"
+      >
+        <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+        <div class="el-upload__text">将 Excel 拖到此处，或 <em>点击选择</em></div>
+      </el-upload>
+      <div v-if="importResult" class="import-result">
+        <el-descriptions :column="3" border>
+          <el-descriptions-item label="读取行数">{{ importResult.totalRows }}</el-descriptions-item>
+          <el-descriptions-item label="导入成功">{{ importResult.importedCount }}</el-descriptions-item>
+          <el-descriptions-item label="已向量化">{{ importResult.embeddingCount }}</el-descriptions-item>
+          <el-descriptions-item label="重复跳过">{{ importResult.duplicateCount }}</el-descriptions-item>
+          <el-descriptions-item label="失败行">{{ importResult.failedCount }}</el-descriptions-item>
+        </el-descriptions>
+        <div v-if="importResult.duplicateTicketNos?.length" class="mt12">
+          <div class="result-title">重复未导入工单号</div>
+          <el-tag v-for="item in importResult.duplicateTicketNos" :key="item" class="mr8 mb8" type="warning">
+            {{ item }}
+          </el-tag>
+        </div>
+        <el-table v-if="importResult.failedRows?.length" :data="importResult.failedRows" class="mt12">
+          <el-table-column label="行号" prop="row" width="90" />
+          <el-table-column label="失败原因" prop="reason" />
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button type="primary" :loading="importing" @click="submitImport">开始导入</el-button>
+        <el-button @click="importOpen = false">关 闭</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer v-model="detailOpen" :title="detailTitle" size="70%" append-to-body>
       <template v-if="detail.ticketId">
         <el-descriptions :column="3" border>
@@ -386,6 +449,7 @@
 </template>
 
 <script setup name="TicketIndex">
+import { saveAs } from 'file-saver'
 import {
   addTicket,
   addTicketComment,
@@ -393,10 +457,13 @@ import {
   assignTicket,
   changeTicketStatus,
   delTicket,
+  downloadTicketImportTemplate,
   getTicket,
   getTicketTimeline,
+  importTicketExcel,
   listTicket,
   saveTicketRca,
+  searchTicketNaturalLanguage,
   updateTicket
 } from '@/api/ticket/ticket'
 import {
@@ -419,6 +486,8 @@ const total = ref(0)
 const open = ref(false)
 const assignOpen = ref(false)
 const statusOpen = ref(false)
+const importOpen = ref(false)
+const importing = ref(false)
 const detailOpen = ref(false)
 const title = ref('')
 const currentTicketId = ref()
@@ -427,6 +496,8 @@ const detail = ref({})
 const timeline = ref({})
 const tagText = ref('')
 const eventDataText = ref('')
+const naturalKeyword = ref('')
+const importResult = ref(null)
 
 const data = reactive({
   queryParams: {
@@ -541,9 +612,57 @@ function handleQuery() {
   getList()
 }
 
+function handleSearch() {
+  if (naturalKeyword.value) {
+    handleNaturalSearch()
+    return
+  }
+  handleQuery()
+}
+
 function resetQuery() {
   proxy.resetForm('queryRef')
+  naturalKeyword.value = ''
   handleQuery()
+}
+
+function handleNaturalSearch() {
+  if (!naturalKeyword.value) {
+    handleQuery()
+    return
+  }
+  loading.value = true
+  searchTicketNaturalLanguage({ keyword: naturalKeyword.value, limit: queryParams.value.pageSize }).then(response => {
+    ticketList.value = response.data || []
+    total.value = ticketList.value.length
+  }).finally(() => {
+    loading.value = false
+  })
+}
+
+function downloadTemplate() {
+  downloadTicketImportTemplate().then(data => {
+    saveAs(new Blob([data]), '工单导入模板.xlsx')
+  })
+}
+
+function submitImport() {
+  importResult.value = null
+  proxy.$refs.uploadRef.submit()
+}
+
+function handleImportRequest(option) {
+  const formData = new FormData()
+  formData.append('file', option.file)
+  importing.value = true
+  importTicketExcel(formData).then(response => {
+    importResult.value = response.data
+    proxy.$modal.msgSuccess('导入完成')
+    proxy.$refs.uploadRef.clearFiles()
+    getList()
+  }).finally(() => {
+    importing.value = false
+  })
 }
 
 function handleAdd() {
@@ -733,6 +852,24 @@ getList()
 
 .ml12 {
   margin-left: 12px;
+}
+
+.mt12 {
+  margin-top: 12px;
+}
+
+.mr8 {
+  margin-right: 8px;
+}
+
+.import-result {
+  margin-top: 16px;
+}
+
+.result-title {
+  margin-bottom: 8px;
+  color: #606266;
+  font-weight: 600;
 }
 
 .record-head {
