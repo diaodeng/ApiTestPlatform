@@ -16,6 +16,11 @@ class ServerService:
 
     @staticmethod
     def get_server_monitor_info():
+        """
+        获取服务器监控信息。
+
+        :return: 包含 CPU、内存、系统、Python 进程和磁盘分区使用情况的监控数据模型。
+        """
         # CPU信息
         # 获取CPU总核心数
         cpu_num = psutil.cpu_count(logical=True)
@@ -83,7 +88,11 @@ class ServerService:
         io = psutil.disk_partitions()
         sys_files = []
         for i in io:
-            o = psutil.disk_usage(i.device)
+            try:
+                o = psutil.disk_usage(i.mountpoint)
+            except (FileNotFoundError, PermissionError, OSError):
+                continue
+
             disk_data = SysFiles(
                 dirName=i.device,
                 sysTypeName=i.fstype,
@@ -91,7 +100,7 @@ class ServerService:
                 total=bytes2human(o.total),
                 used=bytes2human(o.used),
                 free=bytes2human(o.free),
-                usage=f'{psutil.disk_usage(i.device).percent}%'
+                usage=f'{o.percent}%'
             )
             sys_files.append(disk_data)
 
