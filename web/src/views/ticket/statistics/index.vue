@@ -38,8 +38,8 @@
       </el-col>
       <el-col :span="6">
         <el-card shadow="never">
-          <div class="metric-label">问题分类数</div>
-          <div class="metric-value">{{ overview.categoryCounts?.length || 0 }}</div>
+          <div class="metric-label">涉及模块数</div>
+          <div class="metric-value">{{ overview.moduleCounts?.length || 0 }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -58,9 +58,9 @@
       </el-col>
       <el-col :span="8">
         <el-card shadow="never">
-          <template #header>分类分布</template>
-          <el-table v-loading="loading" :data="overview.categoryCounts || []">
-            <el-table-column label="分类" prop="category" />
+          <template #header>模块分布</template>
+          <el-table v-loading="loading" :data="overview.moduleCounts || []">
+            <el-table-column label="模块" prop="module" />
             <el-table-column label="数量" prop="count" width="100" align="center" />
           </el-table>
         </el-card>
@@ -75,12 +75,69 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <el-row :gutter="16" class="mt16">
+      <el-col :span="8">
+        <el-card shadow="never">
+          <template #header>问题分类</template>
+          <el-table v-loading="loading" :data="overview.categoryCounts || []">
+            <el-table-column label="分类" prop="category" />
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="never">
+          <template #header>原因分类</template>
+          <el-table v-loading="loading" :data="overview.rootCauseCounts || []">
+            <el-table-column label="原因" prop="rootCause" />
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="never">
+          <template #header>状态流转</template>
+          <el-table v-loading="loading" :data="overview.transitionCounts || []">
+            <el-table-column label="流转">
+              <template #default="scope">
+                {{ formatTransition(scope.row) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="次数" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="mt16">
+      <el-col :span="12">
+        <el-card shadow="never">
+          <template #header>来源分布</template>
+          <el-table v-loading="loading" :data="overview.sourceCounts || []">
+            <el-table-column label="来源">
+              <template #default="scope">{{ getOptionLabel(sourceOptions, scope.row.source) }}</template>
+            </el-table-column>
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+      <el-col :span="12">
+        <el-card shadow="never">
+          <template #header>内部优先级</template>
+          <el-table v-loading="loading" :data="overview.priorityCounts || []">
+            <el-table-column label="优先级" prop="priority" />
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
 <script setup name="TicketStatistics">
 import { getTicketStatistics } from '@/api/ticket/ticket'
-import { getOptionLabel, ticketStatusOptions } from '../constants'
+import { getOptionLabel, sourceOptions, ticketStatusOptions } from '../constants'
 
 const loading = ref(false)
 const dateRange = ref([])
@@ -119,12 +176,21 @@ function formatSeconds(seconds) {
   return `${hour}小时${minute}分${second}秒`
 }
 
+function formatTransition(row) {
+  const fromStatus = row.fromStatus === '创建' ? '创建' : getOptionLabel(ticketStatusOptions, row.fromStatus)
+  return `${fromStatus} -> ${getOptionLabel(ticketStatusOptions, row.toStatus)}`
+}
+
 getStatistics()
 </script>
 
 <style scoped>
 .mb16 {
   margin-bottom: 16px;
+}
+
+.mt16 {
+  margin-top: 16px;
 }
 
 .metric-label {
