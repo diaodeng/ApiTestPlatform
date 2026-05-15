@@ -115,9 +115,10 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     F("ticket.ticket.assign", "工单指派", "ticket.ticket", "ticket:ticket:assign", 5),
     F("ticket.ticket.status", "状态流转", "ticket.ticket", "ticket:ticket:status", 6),
     F("ticket.ticket.timeline", "工单时间线", "ticket.ticket", "ticket:ticket:timeline", 7),
-    F("ticket.comment.add", "评论新增", "ticket.ticket", "ticket:comment:add", 8),
-    F("ticket.event.add", "事件新增", "ticket.ticket", "ticket:event:add", 9),
-    F("ticket.rca.edit", "RCA保存", "ticket.ticket", "ticket:rca:edit", 10),
+    F("ticket.ticket.import", "工单导入", "ticket.ticket", "ticket:ticket:import", 8),
+    F("ticket.comment.add", "评论新增", "ticket.ticket", "ticket:comment:add", 9),
+    F("ticket.event.add", "事件新增", "ticket.ticket", "ticket:event:add", 10),
+    F("ticket.rca.edit", "RCA保存", "ticket.ticket", "ticket:rca:edit", 11),
     C(
         "ticket.knowledge",
         "知识库",

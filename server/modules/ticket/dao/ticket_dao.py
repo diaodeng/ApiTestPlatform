@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from module_admin.entity.do.user_do import SysUser
 from modules.ticket.entity.do.ticket_do import (
+    EmbeddingRecord,
     KnowledgeArticle,
     Ticket,
     TicketAssignHistory,
@@ -75,6 +76,23 @@ class TicketDao:
         return db.query(Ticket).filter(Ticket.ticket_no == ticket_no, Ticket.del_flag == "0").first()
 
     @classmethod
+    def get_existing_ticket_nos(cls, db: Session, ticket_nos: list[str]) -> set[str]:
+        """
+        批量查询已存在的工单编号。
+        :param db: 数据库会话
+        :param ticket_nos: 工单编号列表
+        :return: 已存在工单编号集合
+        """
+        if not ticket_nos:
+            return set()
+        rows = (
+            db.query(Ticket.ticket_no)
+            .filter(Ticket.ticket_no.in_(ticket_nos))
+            .all()
+        )
+        return {row[0] for row in rows}
+
+    @classmethod
     def get_ticket_list(cls, db: Session, query: TicketQueryModel):
         """
         根据查询条件分页获取工单列表。
@@ -129,6 +147,18 @@ class TicketDao:
         db.add(ticket)
         db.flush()
         return ticket
+
+    @classmethod
+    def get_tickets_by_ids(cls, db: Session, ticket_ids: list[int]) -> list[Ticket]:
+        """
+        根据工单ID列表查询未删除工单。
+        :param db: 数据库会话
+        :param ticket_ids: 工单ID列表
+        :return: 工单列表
+        """
+        if not ticket_ids:
+            return []
+        return db.query(Ticket).filter(Ticket.del_flag == "0", Ticket.ticket_id.in_(ticket_ids)).all()
 
     @classmethod
     def update_ticket(cls, db: Session, ticket_id: int, data: dict) -> None:
@@ -523,10 +553,51 @@ class TicketDao:
             .group_by(Ticket.category_name)
             .all()
         )
+        module_rows = (
+            db.query(Ticket.module_name, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.module_name)
+            .all()
+        )
+        source_rows = (
+            db.query(Ticket.source, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.source)
+            .all()
+        )
+        priority_rows = (
+            db.query(Ticket.internal_priority, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.internal_priority)
+            .all()
+        )
         assignee_rows = (
             db.query(Ticket.current_assignee_id, Ticket.current_assignee_name, func.count(Ticket.ticket_id))
             .filter(base_filter)
             .group_by(Ticket.current_assignee_id, Ticket.current_assignee_name)
+            .all()
+        )
+        root_cause_rows = (
+            db.query(TicketRca.root_cause_category, func.count(TicketRca.id))
+            .join(Ticket, Ticket.ticket_id == TicketRca.ticket_id)
+            .filter(base_filter)
+            .group_by(TicketRca.root_cause_category)
+            .all()
+        )
+        transition_filters = []
+        if begin_time:
+            transition_filters.append(TicketStatusHistory.create_time >= begin_time)
+        if end_time:
+            transition_filters.append(TicketStatusHistory.create_time <= end_time)
+        transition_rows = (
+            db.query(
+                TicketStatusHistory.from_status,
+                TicketStatusHistory.to_status,
+                func.count(TicketStatusHistory.id),
+            )
+            .join(Ticket, Ticket.ticket_id == TicketStatusHistory.ticket_id)
+            .filter(Ticket.del_flag == "0", *transition_filters)
+            .group_by(TicketStatusHistory.from_status, TicketStatusHistory.to_status)
             .all()
         )
         avg_process_seconds = (
@@ -541,10 +612,97 @@ class TicketDao:
             "avg_process_seconds": int(avg_process_seconds),
             "status_counts": [{"status": row[0], "count": row[1]} for row in status_rows],
             "category_counts": [{"category": row[0] or "未分类", "count": row[1]} for row in category_rows],
+            "module_counts": [{"module": row[0] or "未填写", "count": row[1]} for row in module_rows],
+            "source_counts": [{"source": row[0] or "未填写", "count": row[1]} for row in source_rows],
+            "priority_counts": [{"priority": row[0] or "未填写", "count": row[1]} for row in priority_rows],
+            "root_cause_counts": [{"root_cause": row[0] or "未填写", "count": row[1]} for row in root_cause_rows],
+            "transition_counts": [
+                {"from_status": row[0] or "创建", "to_status": row[1], "count": row[2]} for row in transition_rows
+            ],
             "assignee_counts": [
                 {"user_id": row[0], "user_name": row[1] or "未指派", "count": row[2]} for row in assignee_rows
             ],
         }
+
+    @classmethod
+    def upsert_embedding_record(cls, db: Session, record: EmbeddingRecord) -> EmbeddingRecord:
+        """
+        新增或更新对象向量记录。
+        :param db: 数据库会话
+        :param record: 向量记录对象
+        :return: 保存后的向量记录
+        """
+        existing = (
+            db.query(EmbeddingRecord)
+            .filter(
+                EmbeddingRecord.object_type == record.object_type,
+                EmbeddingRecord.object_id == record.object_id,
+                EmbeddingRecord.embedding_model == record.embedding_model,
+                EmbeddingRecord.embedding_version == record.embedding_version,
+            )
+            .first()
+        )
+        if existing:
+            existing.embedding_dimension = record.embedding_dimension
+            existing.embedding = record.embedding
+            existing.content_hash = record.content_hash
+            existing.create_time = datetime.now()
+            db.flush()
+            return existing
+        db.add(record)
+        db.flush()
+        return record
+
+    @classmethod
+    def list_ticket_embedding_records(
+        cls, db: Session, model: str = "local-hash", version: str = "v1"
+    ) -> list[EmbeddingRecord]:
+        """
+        查询工单向量记录。
+        :param db: 数据库会话
+        :param model: 向量模型标识
+        :param version: 向量版本
+        :return: 向量记录列表
+        """
+        return (
+            db.query(EmbeddingRecord)
+            .filter(
+                EmbeddingRecord.object_type == "ticket",
+                EmbeddingRecord.embedding_model == model,
+                EmbeddingRecord.embedding_version == version,
+            )
+            .all()
+        )
+
+    @classmethod
+    def search_tickets_by_keyword(cls, db: Session, keyword: str, limit: int = 20) -> list[Ticket]:
+        """
+        按自然语言关键字匹配工单文本字段。
+        :param db: 数据库会话
+        :param keyword: 搜索文本
+        :param limit: 返回数量
+        :return: 工单列表
+        """
+        if not keyword:
+            return []
+        return (
+            db.query(Ticket)
+            .filter(Ticket.del_flag == "0")
+            .filter(
+                or_(
+                    Ticket.ticket_no.like(f"%{keyword}%"),
+                    Ticket.title.like(f"%{keyword}%"),
+                    Ticket.description.like(f"%{keyword}%"),
+                    Ticket.module_name.like(f"%{keyword}%"),
+                    Ticket.category_name.like(f"%{keyword}%"),
+                    Ticket.root_cause.like(f"%{keyword}%"),
+                    Ticket.solution.like(f"%{keyword}%"),
+                )
+            )
+            .order_by(Ticket.update_time.desc(), Ticket.create_time.desc())
+            .limit(limit)
+            .all()
+        )
 
     @classmethod
     def get_user_options(cls, db: Session, keyword: str | None = None, limit: int = 20) -> list[SysUser]:

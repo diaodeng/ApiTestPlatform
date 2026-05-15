@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Request
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -22,6 +24,8 @@ from modules.ticket.entity.vo.ticket_vo import (
     WorkflowStatusModel,
     WorkflowTransitionModel,
 )
+from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ticket_import_service import TicketImportService
 from modules.ticket.service.ticket_service import TicketService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
@@ -45,6 +49,76 @@ async def get_ticket_list(
         if query.is_page:
             return ResponseUtil.success(model_content=query_result)
         return ResponseUtil.success(data=query_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get("/import/template", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:import"))])
+async def download_ticket_import_template(request: Request):
+    """
+    下载工单 Excel 导入模板接口。
+    :param request: 请求对象
+    :return: 工单导入模板 Excel 文件
+    """
+    try:
+        filename = "工单导入模板.xlsx"
+        return Response(
+            content=TicketImportService.build_import_template(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+                "download-filename": quote(filename),
+            },
+        )
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post("/import", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:import"))])
+@log_decorator(title="工单导入", business_type=1)
+async def import_ticket_excel(
+    request: Request,
+    file: UploadFile = File(...),
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    导入工单 Excel 接口。
+    :param request: 请求对象
+    :param file: 飞书多维表格导出的 Excel 文件或系统导入模板文件
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入导入审计信息
+    :return: 导入汇总，包含重复工单号和失败行
+    """
+    try:
+        if not file.filename.lower().endswith(".xlsx"):
+            return ResponseUtil.failure(msg="仅支持 xlsx 文件")
+        result = await TicketImportService.import_excel(query_db, await file.read(), current_user)
+        return ResponseUtil.success(data=result, msg="导入完成")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get("/search/natural-language", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
+async def search_ticket_natural_language(
+    request: Request,
+    keyword: str,
+    limit: int = 20,
+    query_db: Session = Depends(get_db),
+):
+    """
+    自然语言搜索工单接口。
+    :param request: 请求对象
+    :param keyword: 自然语言搜索文本
+    :param limit: 返回数量限制
+    :param query_db: 数据库会话
+    :return: 按相关性排序的工单列表
+    """
+    try:
+        return ResponseUtil.success(data=TicketEmbeddingService.search_tickets(query_db, keyword, limit))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
