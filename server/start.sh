@@ -6,7 +6,7 @@ export PATH="/usr/local/bin:/app/.venv/bin:$PATH"
 echo "开始安装系统依赖。。。"
 sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
     sed -i 's|security.debian.org/debian-security|mirrors.ustc.edu.cn/debian-security|g' /etc/apt/sources.list && \
-    apt-get update && apt-get install --no-install-recommends -y libcairo2 && \
+    apt-get update && apt-get install --no-install-recommends -y libcairo2 supervisor && \
     rm -rf /var/lib/apt/lists/*
 
 echo "系统依赖安装完成。。。"
@@ -21,6 +21,6 @@ echo "开始安装应用依赖。。。"
 cd /app && python -m uv sync --frozen
 echo "应用依赖安装完成。。。"
 
-# 启动fastapi应用
+# 启动 supervisor，由 supervisord.conf 托管 FastAPI、Celery 等进程
 echo "开始启动。。。"
-/app/.venv/bin/python app.py --env=prod
+exec supervisord -c /app/supervisord.conf
