@@ -65,6 +65,7 @@ class TicketEventType(str, Enum):
     VERIFIED = "VERIFIED"
     RESOLVED = "RESOLVED"
     CLOSED = "CLOSED"
+    NOTIFY_PENDING = "NOTIFY_PENDING"
     AI_ANALYZED = "AI_ANALYZED"
     AI_RECOMMENDED = "AI_RECOMMENDED"
 
@@ -79,3 +80,27 @@ class EmbeddingObjectType(str, Enum):
     COMMENT = "comment"
     EVENT = "event"
     LOG_SUMMARY = "log_summary"
+
+
+class TicketLogPullStatus(str, Enum):
+    """
+    工单日志拉取内部状态枚举，用于标识提单、轮询、下载、解析和异常阶段。
+    """
+
+    CREATED = "created"
+    SUBMITTING = "submitting"
+    POLLING = "polling"
+    DOWNLOADING = "downloading"
+    PROCESSING = "processing"
+    SUCCESS = "success"
+    FAILED = "failed"
+    EXCEPTION = "exception"
+
+
+class TicketLogDataType(int, Enum):
+    """
+    工单日志拉取数据类型枚举，区分日志包和数据库包。
+    """
+
+    LOG = 1
+    DB = 2

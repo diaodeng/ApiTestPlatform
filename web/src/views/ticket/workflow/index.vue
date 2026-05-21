@@ -87,6 +87,16 @@
                 </el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="默认处理人" min-width="160" show-overflow-tooltip>
+              <template #default="scope">{{ scope.row.targetAssigneeName || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="通知预留" width="100" align="center">
+              <template #default="scope">
+                <el-tag :type="scope.row.notifyEnabled ? 'success' : 'info'">
+                  {{ scope.row.notifyEnabled ? '开启' : '关闭' }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="135" fixed="right">
               <template #default="scope">
                 <el-button link type="primary" icon="Edit" @click="openTransitionDialog(scope.row)" v-hasPermi="['ticket:workflow:edit']">
@@ -145,9 +155,30 @@
         <el-form-item label="允许角色">
           <el-input v-model="allowedRolesText" placeholder="逗号分隔角色编码，留空表示不限制" />
         </el-form-item>
+        <el-form-item label="默认处理人">
+          <UserSelect
+            v-model="transitionForm.targetAssigneeId"
+            :initial-option="transitionAssigneeOption"
+            @change="handleTransitionAssigneeChange"
+          />
+        </el-form-item>
+        <el-form-item label="处理人名称">
+          <el-input v-model="transitionForm.targetAssigneeName" placeholder="选择后自动填充，也可手动调整" />
+        </el-form-item>
         <el-form-item label="流转要求">
           <el-checkbox v-model="transitionForm.needComment">需要说明</el-checkbox>
           <el-checkbox v-model="transitionForm.needResolution">需要解决方案</el-checkbox>
+        </el-form-item>
+        <el-form-item label="通知预留">
+          <el-switch v-model="transitionForm.notifyEnabled" />
+        </el-form-item>
+        <el-form-item label="通知备注">
+          <el-input
+            v-model="transitionForm.notifyRemark"
+            type="textarea"
+            :rows="2"
+            placeholder="暂不发送真实通知，这里预留后续通知渠道或模板说明"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -166,6 +197,7 @@ import {
   saveWorkflowStatus,
   saveWorkflowTransition
 } from '@/api/ticket/ticket'
+import UserSelect from '../components/UserSelect.vue'
 
 const { proxy } = getCurrentInstance()
 
@@ -175,6 +207,7 @@ const transitionOpen = ref(false)
 const statusTitle = ref('')
 const transitionTitle = ref('')
 const allowedRolesText = ref('')
+const transitionAssigneeOption = ref(null)
 
 const workflow = ref({
   statuses: [],
@@ -247,14 +280,31 @@ function openTransitionDialog(row) {
     fromStatus: '',
     toStatus: '',
     allowedRoles: [],
+    targetAssigneeId: undefined,
+    targetAssigneeName: '',
+    notifyEnabled: false,
+    notifyRemark: '',
     needComment: false,
     needResolution: false
   }
+  transitionAssigneeOption.value = transitionForm.value.targetAssigneeId
+    ? {
+        userId: transitionForm.value.targetAssigneeId,
+        userName: transitionForm.value.targetAssigneeName,
+        nickName: transitionForm.value.targetAssigneeName,
+        label: transitionForm.value.targetAssigneeName
+      }
+    : null
   allowedRolesText.value = Array.isArray(transitionForm.value.allowedRoles)
     ? transitionForm.value.allowedRoles.join(',')
     : ''
   transitionTitle.value = row ? '编辑流转规则' : '新增流转规则'
   transitionOpen.value = true
+}
+
+function handleTransitionAssigneeChange(user) {
+  transitionForm.value.targetAssigneeName = user?.nickName || user?.userName || ''
+  transitionAssigneeOption.value = user
 }
 
 function submitTransition() {
