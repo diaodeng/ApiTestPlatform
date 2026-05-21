@@ -1,4 +1,5 @@
 from datetime import date, datetime, time
+from typing import Any
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
@@ -48,6 +49,25 @@ def _date_end(value: date | datetime | str | None) -> datetime | None:
     if isinstance(value, date):
         return datetime.combine(value, time.max)
     return datetime.combine(date.fromisoformat(str(value)[:10]), time.max)
+
+
+def _json_safe_value(value: Any) -> Any:
+    """
+    将值递归转换为可 JSON 序列化内容。
+    :param value: 原始值
+    :return: 可被 JSON 序列化的值
+    """
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, set):
+        return [_json_safe_value(item) for item in value]
+    return value
 
 
 class TicketDao:
@@ -110,9 +130,7 @@ class TicketDao:
                 Ticket.title.like(f"%{query.title}%") if query.title else True,
                 Ticket.status == query.status if query.status else True,
                 Ticket.project_id == query.project_id if query.project_id else True,
-                Ticket.merchant_name.like(f"%{query.merchant_name}%") if query.merchant_name else True,
                 Ticket.module_id == query.module_id if query.module_id else True,
-                Ticket.module_name.like(f"%{query.module_name}%") if query.module_name else True,
                 Ticket.category_id == query.category_id if query.category_id else True,
                 Ticket.customer_priority == query.customer_priority if query.customer_priority else True,
                 Ticket.internal_priority == query.internal_priority if query.internal_priority else True,
@@ -245,6 +263,8 @@ class TicketDao:
         :param event: 事件对象
         :return: 事件对象
         """
+        if event.event_data is not None:
+            event.event_data = _json_safe_value(event.event_data)
         db.add(event)
         db.flush()
         return event
@@ -723,3 +743,19 @@ class TicketDao:
                 )
             )
         return query.order_by(SysUser.user_id.asc()).limit(limit).all()
+
+    @classmethod
+    def get_user_by_id(cls, db: Session, user_id: int | None) -> SysUser | None:
+        """
+        根据用户ID查询有效用户。
+        :param db: 数据库会话
+        :param user_id: 用户ID
+        :return: 用户对象
+        """
+        if not user_id:
+            return None
+        return (
+            db.query(SysUser)
+            .filter(SysUser.user_id == user_id, SysUser.del_flag == "0", SysUser.status == "0")
+            .first()
+        )

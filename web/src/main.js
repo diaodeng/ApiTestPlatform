@@ -51,6 +51,8 @@ import ImagePreview from "@/components/ImagePreview"
 import TreeSelect from '@/components/TreeSelect'
 // 字典标签组件
 import DictTag from '@/components/DictTag'
+// 通用提示按钮组件
+import PromptButton from '@/components/PromptButton'
 
 import i18n from "@/language/i18n.js";
 
@@ -75,6 +77,7 @@ app.component('ImageUpload', ImageUpload)
 app.component('ImagePreview', ImagePreview)
 app.component('RightToolbar', RightToolbar)
 app.component('Editor', Editor)
+app.component('PromptButton', PromptButton)
 
 app.use(router)
 app.use(store)
