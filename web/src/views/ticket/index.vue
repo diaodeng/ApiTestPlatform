@@ -24,23 +24,15 @@
           <el-option v-for="item in ticketStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="商家" prop="merchantName">
-        <el-input
-          v-model="queryParams.merchantName"
-          placeholder="所属商家"
-          clearable
-          style="width: 180px"
-          @keyup.enter="handleQuery"
-        />
+      <el-form-item label="项目" prop="projectId">
+        <el-select v-model="queryParams.projectId" placeholder="所属项目" clearable filterable style="width: 180px">
+          <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
+        </el-select>
       </el-form-item>
-      <el-form-item label="模块" prop="moduleName">
-        <el-input
-          v-model="queryParams.moduleName"
-          placeholder="所属模块"
-          clearable
-          style="width: 180px"
-          @keyup.enter="handleQuery"
-        />
+      <el-form-item label="模块" prop="moduleId">
+        <el-select v-model="queryParams.moduleId" placeholder="所属模块" clearable filterable style="width: 180px">
+          <el-option v-for="item in queryModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
+        </el-select>
       </el-form-item>
       <el-form-item label="内部优先级" prop="internalPriority">
         <el-select v-model="queryParams.internalPriority" placeholder="内部优先级" clearable style="width: 140px">
@@ -82,7 +74,20 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="商家" prop="merchantName" width="140" show-overflow-tooltip />
+      <el-table-column label="日志拉取" min-width="150" align="center">
+        <template #default="scope">
+          <el-tag
+            v-if="scope.row.latestLogPull?.status"
+            :type="getLogPullStatusTagType(scope.row.latestLogPull.status)"
+          >
+            {{ scope.row.latestLogPull.statusDesc || getOptionLabel(logPullStatusOptions, scope.row.latestLogPull.status) }}
+          </el-tag>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="项目" width="160" show-overflow-tooltip>
+        <template #default="scope">{{ scope.row.projectName || scope.row.merchantName || '-' }}</template>
+      </el-table-column>
       <el-table-column label="模块" prop="moduleName" width="140" show-overflow-tooltip />
       <el-table-column label="对方优先级" prop="customerPriority" width="110" align="center" />
       <el-table-column label="内部优先级" prop="internalPriority" width="110" align="center" />
@@ -149,13 +154,17 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="所属商家" prop="merchantName">
-              <el-input v-model="form.merchantName" placeholder="请输入所属商家" />
+            <el-form-item label="所属项目" prop="projectId">
+              <el-select v-model="form.projectId" placeholder="请选择项目" filterable clearable>
+                <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="所属模块" prop="moduleName">
-              <el-input v-model="form.moduleName" placeholder="请输入所属模块" />
+            <el-form-item label="所属模块" prop="moduleId">
+              <el-select v-model="form.moduleId" placeholder="请选择模块" filterable clearable>
+                <el-option v-for="item in formModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -326,8 +335,17 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="当前处理人">{{ detail.currentAssigneeName || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="所属商家">{{ detail.merchantName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="所属项目">{{ detail.projectName || detail.merchantName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="所属模块">{{ detail.moduleName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="日志拉取状态">
+            <el-tag
+              v-if="detail.latestLogPull?.status"
+              :type="getLogPullStatusTagType(detail.latestLogPull.status)"
+            >
+              {{ detail.latestLogPull.statusDesc || getOptionLabel(logPullStatusOptions, detail.latestLogPull.status) }}
+            </el-tag>
+            <span v-else>-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="来源">{{ getOptionLabel(sourceOptions, detail.source) }}</el-descriptions-item>
           <el-descriptions-item label="对方优先级">{{ detail.customerPriority || '-' }}</el-descriptions-item>
           <el-descriptions-item label="内部优先级">{{ detail.internalPriority || '-' }}</el-descriptions-item>
@@ -408,6 +426,196 @@
               <pre v-if="item.eventData" class="json-block">{{ formatJson(item.eventData) }}</pre>
             </el-card>
           </el-tab-pane>
+          <el-tab-pane label="日志拉取">
+            <div class="panel-header mb16">
+              <div class="panel-inline">
+                <span>拉取记录</span>
+                <el-tag v-if="logPullAutoRefreshing" size="small" type="warning">自动刷新中</el-tag>
+              </div>
+              <div class="panel-inline">
+                <PromptButton button-text="参数提示" title="参数配置入口" width="420">
+                  <div>
+                    日志拉取地址、Cookie、FTP/本地归档配置已统一移到系统参数配置。
+                    <br />
+                    <code>ticket.logPull.external</code> 管理外部地址与 Cookie。
+                    <br />
+                    <code>ticket.logPull.storage</code> 管理本地/FTP 与轮询参数。
+                  </div>
+                </PromptButton>
+                <el-button type="primary" @click="openLogPullSubmitDialog" v-hasPermi="['ticket:logpull:add']">拉取日志</el-button>
+                <el-button link type="primary" @click="loadLogPullList">刷新</el-button>
+              </div>
+            </div>
+            <el-table v-loading="logPullLoading" :data="logPullList" row-key="id" class="mb16">
+              <el-table-column label="创建时间" prop="createTime" width="170">
+                <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
+              </el-table-column>
+              <el-table-column label="数据类型" width="90" align="center">
+                <template #default="scope">
+                  {{ getOptionLabel(logPullDataTypeOptions, scope.row.commandDataType) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" min-width="170">
+                <template #default="scope">
+                  <el-tag :type="getLogPullStatusTagType(scope.row.status)">
+                    {{ scope.row.statusDesc || getOptionLabel(logPullStatusOptions, scope.row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="保存方式" width="90" align="center">
+                <template #default="scope">{{ getOptionLabel(logPullStorageModeOptions, scope.row.storageMode) }}</template>
+              </el-table-column>
+              <el-table-column label="归档地址" prop="storagePath" min-width="220" show-overflow-tooltip />
+              <el-table-column label="原始压缩包" min-width="180" show-overflow-tooltip>
+                <template #default="scope">
+                  <el-link v-if="scope.row.commandResultUrl" :href="scope.row.commandResultUrl" target="_blank" type="primary">
+                    查看地址
+                  </el-link>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="摘要/异常" prop="contentSummary" min-width="220" show-overflow-tooltip>
+                <template #default="scope">
+                  <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="120" fixed="right">
+                <template #default="scope">
+                  <el-button
+                    link
+                    type="primary"
+                    @click="viewLogPullContent(scope.row)"
+                    :disabled="!scope.row.hasContent"
+                  >
+                    查看日志
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <pagination
+              v-show="logPullTotal > 0"
+              :total="logPullTotal"
+              v-model:page="logPullQuery.pageNum"
+              v-model:limit="logPullQuery.pageSize"
+              @pagination="loadLogPullList"
+            />
+            <el-dialog
+              v-model="logPullSubmitOpen"
+              title="提交拉取任务"
+              width="760px"
+              append-to-body
+              destroy-on-close
+              :close-on-click-modal="false"
+              @closed="resetLogPullForm"
+            >
+              <el-form ref="logPullRef" :model="logPullForm" :rules="logPullRules" label-width="110px">
+                <el-form-item label="vendorId" prop="vendorId">
+                  <el-input-number v-model="logPullForm.vendorId" :min="1" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="storeId" prop="storeId">
+                  <el-input-number v-model="logPullForm.storeId" :min="1" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="posNo" prop="posNo">
+                  <el-input-number v-model="logPullForm.posNo" :min="1" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="数据类型" prop="commandDataType">
+                  <el-select v-model="logPullForm.commandDataType" placeholder="请选择">
+                    <el-option
+                      v-for="item in logPullDataTypeOptions"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="modifyTime">
+                  <el-date-picker
+                    v-model="logPullForm.modifyTime"
+                    type="date"
+                    value-format="YYYY-MM-DD"
+                    placeholder="按日期拉取"
+                    clearable
+                  />
+                </el-form-item>
+                <el-form-item label="path">
+                  <el-input v-model="logPullForm.path" placeholder="可选，按路径拉取" clearable />
+                </el-form-item>
+                <el-form-item label="时间方式">
+                  <el-radio-group v-model="logPullForm.timeRangeMode">
+                    <el-radio value="between">开始 + 结束</el-radio>
+                    <el-radio value="point">时间点 + 前后范围</el-radio>
+                  </el-radio-group>
+                </el-form-item>
+                <template v-if="logPullForm.timeRangeMode === 'between'">
+                  <el-form-item label="开始时间">
+                    <el-date-picker
+                      v-model="logPullForm.logBeginTime"
+                      type="datetime"
+                      value-format="YYYY-MM-DD HH:mm:ss"
+                      placeholder="必填，筛选日志开始时间"
+                      clearable
+                    />
+                  </el-form-item>
+                  <el-form-item label="结束时间">
+                    <el-date-picker
+                      v-model="logPullForm.logEndTime"
+                      type="datetime"
+                      value-format="YYYY-MM-DD HH:mm:ss"
+                      placeholder="必填，筛选日志结束时间"
+                      clearable
+                    />
+                  </el-form-item>
+                </template>
+                <template v-else>
+                  <el-form-item label="时间点">
+                    <el-date-picker
+                      v-model="logPullForm.logPointTime"
+                      type="datetime"
+                      value-format="YYYY-MM-DD HH:mm:ss"
+                      placeholder="必填，基准时间点"
+                      clearable
+                    />
+                  </el-form-item>
+                  <el-form-item label="前后范围">
+                    <div class="time-range-inline">
+                      <span>前</span>
+                      <el-input-number v-model="logPullForm.rangeBeforeMinutes" :min="0" controls-position="right" />
+                      <span>分钟，后</span>
+                      <el-input-number v-model="logPullForm.rangeAfterMinutes" :min="0" controls-position="right" />
+                      <span>分钟</span>
+                    </div>
+                  </el-form-item>
+                </template>
+                <el-form-item label="单文件上限">
+                  <el-input-number v-model="logPullForm.fileMaxSize" :min="1" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="压缩包上限">
+                  <el-input-number v-model="logPullForm.zipMaxSize" :min="1" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="保存方式">
+                  <el-select v-model="logPullForm.storageMode" placeholder="请选择">
+                    <el-option
+                      v-for="item in logPullStorageModeOptions"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                    />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+              <template #footer>
+                <el-button @click="logPullSubmitOpen = false">取消</el-button>
+                <el-button
+                  type="primary"
+                  :loading="logPullSubmitting"
+                  @click="submitLogPull"
+                  v-hasPermi="['ticket:logpull:add']"
+                >
+                  提交拉取
+                </el-button>
+              </template>
+            </el-dialog>
+          </el-tab-pane>
           <el-tab-pane label="RCA">
             <el-form ref="rcaRef" :model="rcaForm" label-width="100px">
               <el-form-item label="问题现象">
@@ -445,31 +653,113 @@
         </el-tabs>
       </template>
     </el-drawer>
+
+    <el-dialog
+      v-model="logPullContentOpen"
+      title="日志内容"
+      width="80%"
+      top="5vh"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="handleLogPullDialogClosed"
+    >
+      <div v-loading="logPullContentLoading">
+        <el-descriptions :column="3" border class="mb16">
+          <el-descriptions-item label="记录ID">{{ selectedLogPullRecord?.id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="查看模式">{{ formatLogViewSource(selectedLogPullContent?.viewSource) }}</el-descriptions-item>
+          <el-descriptions-item label="本次截取范围">
+            {{ formatLogViewRange(selectedLogPullContent?.viewBeginTime, selectedLogPullContent?.viewEndTime) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="命中条目">{{ selectedLogPullContent?.matchedEntryCount || 0 }}</el-descriptions-item>
+          <el-descriptions-item label="压缩包文件数">{{ selectedLogPullContent?.archiveEntryCount || 0 }}</el-descriptions-item>
+          <el-descriptions-item label="日志字符数">{{ selectedLogPullContent?.contentCharCount || 0 }}</el-descriptions-item>
+          <el-descriptions-item label="归档地址" :span="2">
+            {{ selectedLogPullContent?.storagePath || '-' }}
+          </el-descriptions-item>
+        </el-descriptions>
+        <div class="panel-header mb16 log-view-controls">
+          <el-radio-group v-model="logPullViewForm.viewMode">
+            <el-radio value="stored">入库内容</el-radio>
+            <el-radio value="archive">原始文档</el-radio>
+          </el-radio-group>
+          <el-date-picker
+            v-model="logPullViewForm.logBeginTime"
+            type="datetime"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            placeholder="开始时间"
+            clearable
+            :disabled="logPullViewForm.viewMode !== 'archive'"
+            class="log-view-time-picker"
+          />
+          <span>至</span>
+          <el-date-picker
+            v-model="logPullViewForm.logEndTime"
+            type="datetime"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            placeholder="结束时间"
+            clearable
+            :disabled="logPullViewForm.viewMode !== 'archive'"
+            class="log-view-time-picker"
+          />
+          <el-input v-model="logPullKeyword" placeholder="本地过滤关键字，按日志块筛选" clearable class="log-filter-input" />
+          <el-switch
+            v-model="logPullWrapEnabled"
+            inline-prompt
+            active-text="换行"
+            inactive-text="不换行"
+          />
+          <el-button type="primary" @click="refreshLogPullContent">
+            {{ logPullViewForm.viewMode === 'archive' ? '按当前范围查看' : '查看入库内容' }}
+          </el-button>
+          <el-button link type="primary" @click="resetLogPullViewRange">恢复记录范围</el-button>
+        </div>
+        <el-alert
+          v-if="selectedLogPullContent?.contentTruncated"
+          type="warning"
+          show-icon
+          title="当前日志文本已按配置截断入库，如需更多内容请调整字符上限后重新拉取。"
+          class="mb16"
+        />
+        <pre :class="['log-content-block', 'log-content-dialog', { 'log-content-wrap': logPullWrapEnabled }]">
+{{ logPullContentDisplayText }}</pre>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup name="TicketIndex">
 import { saveAs } from 'file-saver'
+import { decompressText } from '@/utils/tools'
 import {
   addTicket,
   addTicketComment,
   addTicketEvent,
+  addTicketLogPull,
   assignTicket,
   changeTicketStatus,
   delTicket,
   downloadTicketImportTemplate,
   getTicket,
+  getTicketLogPullContent,
   getTicketTimeline,
   importTicketExcel,
   listTicket,
+  listTicketLogPulls,
+  listTicketModuleOptions,
+  listTicketProjectOptions,
   saveTicketRca,
   searchTicketNaturalLanguage,
   updateTicket
 } from '@/api/ticket/ticket'
 import {
   eventTypeOptions,
+  getLogPullStatusTagType,
   getOptionLabel,
   getStatusTagType,
+  logPullDataTypeOptions,
+  logPullStatusOptions,
+  logPullStorageModeOptions,
   priorityOptions,
   severityOptions,
   sourceOptions,
@@ -483,6 +773,9 @@ const loading = ref(false)
 const showSearch = ref(true)
 const ticketList = ref([])
 const total = ref(0)
+const projectOptions = ref([])
+const formModuleOptions = ref([])
+const queryModuleOptions = ref([])
 const open = ref(false)
 const assignOpen = ref(false)
 const statusOpen = ref(false)
@@ -498,6 +791,47 @@ const tagText = ref('')
 const eventDataText = ref('')
 const naturalKeyword = ref('')
 const importResult = ref(null)
+const logPullLoading = ref(false)
+const logPullSubmitting = ref(false)
+const logPullSubmitOpen = ref(false)
+const logPullContentLoading = ref(false)
+const logPullContentOpen = ref(false)
+const logPullList = ref([])
+const logPullTotal = ref(0)
+const selectedLogPullRecord = ref(null)
+const selectedLogPullContent = ref(null)
+const logPullViewForm = ref({
+  viewMode: 'stored',
+  logBeginTime: undefined,
+  logEndTime: undefined
+})
+const logPullKeyword = ref('')
+const logPullWrapEnabled = ref(false)
+const logPullAutoRefreshing = ref(false)
+
+let logPullRefreshTimer = null
+
+const activeLogPullStatuses = ['created', 'submitting', 'polling', 'downloading', 'processing']
+
+function createDefaultLogPullForm() {
+  return {
+    vendorId: undefined,
+    storeId: undefined,
+    posNo: undefined,
+    commandDataType: 1,
+    modifyTime: undefined,
+    path: '',
+    timeRangeMode: 'between',
+    fileMaxSize: 500,
+    zipMaxSize: 500,
+    logBeginTime: undefined,
+    logEndTime: undefined,
+    logPointTime: undefined,
+    rangeBeforeMinutes: 30,
+    rangeAfterMinutes: 30,
+    storageMode: undefined
+  }
+}
 
 const data = reactive({
   queryParams: {
@@ -505,8 +839,8 @@ const data = reactive({
     pageSize: 10,
     keyword: undefined,
     status: undefined,
-    merchantName: undefined,
-    moduleName: undefined,
+    projectId: undefined,
+    moduleId: undefined,
     internalPriority: undefined
   },
   form: {},
@@ -521,8 +855,15 @@ const data = reactive({
     content: ''
   },
   rcaForm: {},
+  logPullForm: createDefaultLogPullForm(),
+  logPullQuery: {
+    pageNum: 1,
+    pageSize: 10,
+    status: undefined
+  },
   rules: {
     title: [{ required: true, message: '工单标题不能为空', trigger: 'blur' }],
+    projectId: [{ required: true, message: '所属项目不能为空', trigger: 'change' }],
     customerPriority: [{ required: true, message: '对方优先级不能为空', trigger: 'change' }],
     internalPriority: [{ required: true, message: '内部优先级不能为空', trigger: 'change' }]
   },
@@ -532,6 +873,11 @@ const data = reactive({
   },
   statusRules: {
     toStatus: [{ required: true, message: '目标状态不能为空', trigger: 'change' }]
+  },
+  logPullRules: {
+    vendorId: [{ required: true, message: 'vendorId不能为空', trigger: 'blur' }],
+    storeId: [{ required: true, message: 'storeId不能为空', trigger: 'blur' }],
+    posNo: [{ required: true, message: 'posNo不能为空', trigger: 'blur' }]
   }
 })
 
@@ -543,12 +889,61 @@ const {
   commentForm,
   eventForm,
   rcaForm,
+  logPullForm,
+  logPullQuery,
   rules,
   assignRules,
-  statusRules
+  statusRules,
+  logPullRules
 } = toRefs(data)
 
 const detailTitle = computed(() => `工单详情：${detail.value.title || ''}`)
+const filteredLogPullContent = computed(() => {
+  const text = selectedLogPullContent.value?.text || ''
+  const keyword = (logPullKeyword.value || '').trim().toLowerCase()
+  if (!keyword || !text) {
+    return text
+  }
+  return text
+    .split(/\n{2,}/)
+    .filter(block => block.toLowerCase().includes(keyword))
+    .join('\n\n')
+})
+const logPullContentDisplayText = computed(() => {
+  const rawText = selectedLogPullContent.value?.text || ''
+  if (!rawText) {
+    return logPullContentLoading.value ? '日志内容加载中...' : '暂无可展示日志内容'
+  }
+  if ((logPullKeyword.value || '').trim() && !filteredLogPullContent.value) {
+    return '当前关键字过滤后无匹配日志，请清空过滤关键字后重试'
+  }
+  return filteredLogPullContent.value
+})
+
+function decodeLogText(text) {
+  if (text === null || text === undefined || text === '') {
+    return ''
+  }
+  const rawText = String(text)
+  try {
+    return decompressText(rawText)
+  } catch (error) {
+    return rawText
+  }
+}
+
+function formatLogViewRange(beginTime, endTime) {
+  if (!beginTime && !endTime) {
+    return '-'
+  }
+  return `${beginTime || '-'} 至 ${endTime || '-'}`
+}
+function formatLogViewSource(source) {
+  const value = String(source || 'stored')
+  if (value === 'realtime') return '实时重截'
+  if (value === 'fallback') return '实时回退'
+  return '入库内容'
+}
 const timelineItems = computed(() => {
   const items = []
   ;(timeline.value.statusHistory || []).forEach(item => {
@@ -593,8 +988,8 @@ function reset() {
     ticketId: undefined,
     title: undefined,
     description: undefined,
-    merchantName: undefined,
-    moduleName: undefined,
+    projectId: undefined,
+    moduleId: undefined,
     customerPriority: 'P3',
     internalPriority: 'P3',
     severity: undefined,
@@ -667,6 +1062,7 @@ function handleImportRequest(option) {
 
 function handleAdd() {
   reset()
+  formModuleOptions.value = []
   open.value = true
   title.value = '新增工单'
 }
@@ -676,6 +1072,7 @@ function handleUpdate(row) {
   getTicket(row.ticketId).then(response => {
     form.value = response.data || {}
     tagText.value = Array.isArray(form.value.tags) ? form.value.tags.join(',') : ''
+    loadFormModuleOptions(form.value.projectId)
     open.value = true
     title.value = '编辑工单'
   })
@@ -761,10 +1158,87 @@ function submitStatus() {
   })
 }
 
+function resetLogPullForm() {
+  logPullForm.value = createDefaultLogPullForm()
+  if (proxy.$refs.logPullRef) {
+    proxy.resetForm('logPullRef')
+  }
+}
+
+function openLogPullSubmitDialog() {
+  logPullSubmitOpen.value = true
+  nextTick(() => {
+    resetLogPullForm()
+  })
+}
+
+function stopLogPullAutoRefresh() {
+  if (logPullRefreshTimer) {
+    window.clearTimeout(logPullRefreshTimer)
+    logPullRefreshTimer = null
+  }
+  logPullAutoRefreshing.value = false
+}
+
+function scheduleLogPullAutoRefresh() {
+  stopLogPullAutoRefresh()
+  const hasRunningTask = detailOpen.value && logPullList.value.some(item => activeLogPullStatuses.includes(item.status))
+  logPullAutoRefreshing.value = hasRunningTask
+  if (!hasRunningTask) {
+    return
+  }
+  logPullRefreshTimer = window.setTimeout(() => {
+    Promise.all([loadLogPullList(true), refreshDetail()]).finally(() => {
+      scheduleLogPullAutoRefresh()
+    })
+  }, 10000)
+}
+
+function loadLogPullList(silent = false) {
+  if (!currentTicketId.value) {
+    return Promise.resolve()
+  }
+  if (!silent) {
+    logPullLoading.value = true
+  }
+  return listTicketLogPulls(currentTicketId.value, logPullQuery.value).then(response => {
+    logPullList.value = response.rows || []
+    logPullTotal.value = response.total || 0
+    if (selectedLogPullRecord.value) {
+      selectedLogPullRecord.value = logPullList.value.find(item => item.id === selectedLogPullRecord.value.id) || selectedLogPullRecord.value
+    }
+    scheduleLogPullAutoRefresh()
+  }).finally(() => {
+    if (!silent) {
+      logPullLoading.value = false
+    }
+  })
+}
+
+function refreshDetail() {
+  if (!currentTicketId.value) {
+    return Promise.resolve()
+  }
+  return getTicket(currentTicketId.value).then(response => {
+    detail.value = response.data || {}
+  })
+}
+
 function openDetail(row) {
   currentTicketId.value = row.ticketId
   detailOpen.value = true
-  Promise.all([getTicket(row.ticketId), getTicketTimeline(row.ticketId)]).then(([detailResponse, timelineResponse]) => {
+  logPullContentOpen.value = false
+  logPullSubmitOpen.value = false
+  selectedLogPullRecord.value = null
+  selectedLogPullContent.value = null
+  logPullKeyword.value = ''
+  logPullQuery.value.pageNum = 1
+  resetLogPullForm()
+  Promise.all([
+    getTicket(row.ticketId),
+    getTicketTimeline(row.ticketId),
+    loadLogPullList()
+  ]).then(([detailResponse, timelineResponse]) => {
     detail.value = detailResponse.data || {}
     timeline.value = timelineResponse.data || {}
     rcaForm.value = timeline.value.rca || {}
@@ -812,9 +1286,157 @@ function submitRca() {
   saveTicketRca(currentTicketId.value, rcaForm.value).then(() => {
     proxy.$modal.msgSuccess('RCA保存成功')
     refreshTimeline()
-    getTicket(currentTicketId.value).then(response => {
-      detail.value = response.data || {}
+    refreshDetail()
+  })
+}
+
+function submitLogPull() {
+  proxy.$refs.logPullRef.validate(valid => {
+    if (!valid) return
+    if (!logPullForm.value.modifyTime && !logPullForm.value.path) {
+      proxy.$modal.msgWarning('modifyTime 和 path 至少需要填写一个')
+      return
+    }
+    if (logPullForm.value.timeRangeMode === 'between') {
+      if (!logPullForm.value.logBeginTime || !logPullForm.value.logEndTime) {
+        proxy.$modal.msgWarning('开始时间和结束时间必填')
+        return
+      }
+      const begin = new Date(logPullForm.value.logBeginTime)
+      const end = new Date(logPullForm.value.logEndTime)
+      if (begin > end) {
+        proxy.$modal.msgWarning('日志开始时间不能晚于结束时间')
+        return
+      }
+    } else {
+      if (!logPullForm.value.logPointTime) {
+        proxy.$modal.msgWarning('时间点必填')
+        return
+      }
+      const beforeMinutes = Number(logPullForm.value.rangeBeforeMinutes ?? 0)
+      const afterMinutes = Number(logPullForm.value.rangeAfterMinutes ?? 0)
+      if (beforeMinutes < 0 || afterMinutes < 0) {
+        proxy.$modal.msgWarning('时间点前后范围不能为负数')
+        return
+      }
+      if (!beforeMinutes && !afterMinutes) {
+        proxy.$modal.msgWarning('时间点前后范围至少填写一侧大于 0 的时长')
+        return
+      }
+    }
+    const payload = {
+      vendorId: logPullForm.value.vendorId,
+      storeId: logPullForm.value.storeId,
+      posNo: logPullForm.value.posNo,
+      commandDataType: logPullForm.value.commandDataType,
+      modifyTime: logPullForm.value.modifyTime,
+      path: logPullForm.value.path,
+      fileMaxSize: logPullForm.value.fileMaxSize,
+      zipMaxSize: logPullForm.value.zipMaxSize,
+      storageMode: logPullForm.value.storageMode
+    }
+    if (logPullForm.value.timeRangeMode === 'between') {
+      payload.logBeginTime = logPullForm.value.logBeginTime
+      payload.logEndTime = logPullForm.value.logEndTime
+    } else {
+      payload.logPointTime = logPullForm.value.logPointTime
+      payload.rangeBeforeMinutes = Number(logPullForm.value.rangeBeforeMinutes ?? 0)
+      payload.rangeAfterMinutes = Number(logPullForm.value.rangeAfterMinutes ?? 0)
+    }
+    logPullSubmitting.value = true
+    addTicketLogPull(currentTicketId.value, payload).then(() => {
+      proxy.$modal.msgSuccess('日志拉取任务已提交')
+      logPullSubmitOpen.value = false
+      resetLogPullForm()
+      Promise.all([loadLogPullList(true), refreshDetail(), getList()])
+    }).finally(() => {
+      logPullSubmitting.value = false
     })
+  })
+}
+
+function loadProjectOptions() {
+  return listTicketProjectOptions().then(response => {
+    projectOptions.value = response.data || []
+  })
+}
+
+function loadQueryModuleOptions(projectId) {
+  return listTicketModuleOptions(projectId ? { projectId } : {}).then(response => {
+    queryModuleOptions.value = response.data || []
+  })
+}
+
+function loadFormModuleOptions(projectId) {
+  if (!projectId) {
+    formModuleOptions.value = []
+    return Promise.resolve()
+  }
+  return listTicketModuleOptions(projectId ? { projectId } : {}).then(response => {
+    formModuleOptions.value = response.data || []
+  })
+}
+
+function viewLogPullContent(row) {
+  if (!row?.id) {
+    return
+  }
+  const previousRecordId = selectedLogPullRecord.value?.id
+  selectedLogPullRecord.value = row
+  logPullViewForm.value = {
+    viewMode: 'stored',
+    logBeginTime: row?.logBeginTime || undefined,
+    logEndTime: row?.logEndTime || undefined
+  }
+  logPullWrapEnabled.value = false
+  logPullContentOpen.value = true
+  if (previousRecordId !== row.id) {
+    logPullKeyword.value = ''
+  }
+  logPullContentLoading.value = true
+  selectedLogPullContent.value = null
+  getTicketLogPullContent(row.id, buildLogPullViewQuery()).then(response => {
+    const payload = response?.data || {}
+    selectedLogPullContent.value = {
+      ...payload,
+      text: decodeLogText(payload?.text || payload?.content || payload?.compressedContent || '')
+    }
+  }).finally(() => {
+    logPullContentLoading.value = false
+  })
+}
+
+function handleLogPullDialogClosed() {
+  logPullKeyword.value = ''
+  logPullWrapEnabled.value = false
+}
+
+function resetLogPullViewRange(row = selectedLogPullRecord.value) {
+  logPullViewForm.value.logBeginTime = row?.logBeginTime || undefined
+  logPullViewForm.value.logEndTime = row?.logEndTime || undefined
+}
+
+function buildLogPullViewQuery() {
+  return {
+    viewMode: logPullViewForm.value.viewMode,
+    logBeginTime: logPullViewForm.value.logBeginTime,
+    logEndTime: logPullViewForm.value.logEndTime
+  }
+}
+
+function refreshLogPullContent() {
+  if (!selectedLogPullRecord.value?.id) {
+    return
+  }
+  logPullContentLoading.value = true
+  getTicketLogPullContent(selectedLogPullRecord.value.id, buildLogPullViewQuery()).then(response => {
+    const payload = response?.data || {}
+    selectedLogPullContent.value = {
+      ...payload,
+      text: decodeLogText(payload?.text || payload?.content || payload?.compressedContent || '')
+    }
+  }).finally(() => {
+    logPullContentLoading.value = false
   })
 }
 
@@ -830,6 +1452,39 @@ function formatSeconds(seconds) {
   return `${hour}小时${minute}分${second}秒`
 }
 
+watch(detailOpen, value => {
+  if (!value) {
+    stopLogPullAutoRefresh()
+    logPullContentOpen.value = false
+    logPullSubmitOpen.value = false
+  }
+})
+
+watch(
+  () => queryParams.value.projectId,
+  value => {
+    queryParams.value.moduleId = undefined
+    loadQueryModuleOptions(value)
+  }
+)
+
+watch(
+  () => form.value.projectId,
+  value => {
+    form.value.moduleId = undefined
+    if (!open.value) {
+      return
+    }
+    loadFormModuleOptions(value)
+  }
+)
+
+onBeforeUnmount(() => {
+  stopLogPullAutoRefresh()
+})
+
+loadProjectOptions()
+loadQueryModuleOptions()
 getList()
 </script>
 
@@ -896,5 +1551,61 @@ getList()
   overflow: auto;
   background: #f6f8fa;
   border-radius: 4px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.log-view-controls {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.log-view-time-picker {
+  width: 220px;
+}
+
+.panel-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.time-range-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.log-filter-input {
+  max-width: 360px;
+}
+
+.log-content-block {
+  max-height: 420px;
+  padding: 12px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre;
+  word-break: normal;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.log-content-wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-content-dialog {
+  max-height: 60vh;
 }
 </style>

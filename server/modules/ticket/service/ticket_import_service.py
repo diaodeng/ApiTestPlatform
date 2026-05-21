@@ -7,6 +7,9 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.entity.do.project_do import HrmProject
+from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketRca, TicketStatusHistory
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
@@ -18,7 +21,7 @@ IMPORT_HEADERS = [
     "标题",
     "描述",
     "状态",
-    "所属商家",
+    "所属项目",
     "所属模块",
     "问题分类",
     "对方优先级",
@@ -47,7 +50,17 @@ HEADER_ALIASES = {
     "标题": ["标题", "问题标题", "工单标题", "title"],
     "描述": ["描述", "问题描述", "现象", "工单描述", "description"],
     "状态": ["状态", "工单状态", "status"],
-    "所属商家": ["所属商家", "商家", "客户", "merchant_name", "merchantName"],
+    "所属项目": [
+        "所属项目",
+        "项目",
+        "所属商家",
+        "商家",
+        "客户",
+        "project_name",
+        "projectName",
+        "merchant_name",
+        "merchantName",
+    ],
     "所属模块": ["所属模块", "模块", "系统模块", "module_name", "moduleName"],
     "问题分类": ["问题分类", "分类", "问题类型", "category_name", "categoryName"],
     "对方优先级": ["对方优先级", "客户优先级", "customer_priority", "customerPriority"],
@@ -143,7 +156,7 @@ class TicketImportService:
             "标题": "支付接口偶发超时",
             "描述": "客户反馈支付提交后页面长时间无响应",
             "状态": "已解决",
-            "所属商家": "示例商家",
+            "所属项目": "示例项目",
             "所属模块": "支付中心",
             "问题分类": "接口超时",
             "对方优先级": "P2",
@@ -205,6 +218,10 @@ class TicketImportService:
                 if not title:
                     failed_rows.append({"row": row_index, "reason": "标题不能为空"})
                     continue
+                relation_result = cls._resolve_import_relation_fields(query_db, row)
+                if relation_result["message"]:
+                    failed_rows.append({"row": row_index, "reason": relation_result["message"]})
+                    continue
 
                 create_time = cls._parse_datetime(row.get("创建时间")) or now
                 resolved_at = cls._parse_datetime(row.get("解决时间"))
@@ -216,8 +233,10 @@ class TicketImportService:
                         ticket_no=ticket_no,
                         title=title,
                         description=cls._cell_text(row.get("描述")),
-                        merchant_name=cls._cell_text(row.get("所属商家")),
-                        module_name=cls._cell_text(row.get("所属模块")),
+                        project_id=relation_result["project_id"],
+                        merchant_name=relation_result["project_name"],
+                        module_id=relation_result["module_id"],
+                        module_name=relation_result["module_name"],
                         category_name=cls._cell_text(row.get("问题分类")),
                         status=status,
                         customer_priority=cls._cell_text(row.get("对方优先级")) or "P3",
@@ -298,6 +317,74 @@ class TicketImportService:
                     header_map[standard] = normalized[alias.lower()]
                     break
         return header_map
+
+    @classmethod
+    def _resolve_import_relation_fields(cls, query_db: Session, row: dict[str, Any]) -> dict[str, Any]:
+        """
+        解析导入行中的测试项目和模块，并回填为工单关联字段。
+        :param query_db: 数据库会话
+        :param row: 导入行数据
+        :return: 解析结果，包含项目模块ID、名称和失败信息
+        """
+        project_name = cls._cell_text(row.get("所属项目"))
+        module_name = cls._cell_text(row.get("所属模块"))
+        if not project_name:
+            return {
+                "message": "所属项目不能为空",
+                "project_id": None,
+                "project_name": "",
+                "module_id": None,
+                "module_name": "",
+            }
+
+        project = (
+            query_db.query(HrmProject)
+            .filter(
+                HrmProject.project_name == project_name,
+                HrmProject.status == QtrDataStatusEnum.normal.value,
+                HrmProject.del_flag == "0",
+            )
+            .first()
+        )
+        if not project:
+            return {
+                "message": f"所属项目不存在或已停用：{project_name}",
+                "project_id": None,
+                "project_name": "",
+                "module_id": None,
+                "module_name": "",
+            }
+
+        module_id = None
+        resolved_module_name = ""
+        if module_name:
+            module = (
+                query_db.query(HrmModule)
+                .filter(
+                    HrmModule.module_name == module_name,
+                    HrmModule.status == QtrDataStatusEnum.normal.value,
+                    HrmModule.project_id == project.project_id,
+                )
+                .first()
+            )
+            if not module:
+                return {
+                    "message": f"所属模块不存在、已停用或不属于项目：{module_name}",
+                    "project_id": project.project_id,
+                    "project_name": project.project_name,
+                    "module_id": None,
+                    "module_name": "",
+                }
+            module_id = module.module_id
+            resolved_module_name = module.module_name
+
+        return {
+            "message": "",
+            "project_id": project.project_id,
+            "project_name": project.project_name,
+            "module_id": module_id,
+            "module_name": resolved_module_name,
+        }
 
     @classmethod
     def _read_row(cls, row: tuple[Any, ...], header_map: dict[str, int]) -> dict[str, Any]:

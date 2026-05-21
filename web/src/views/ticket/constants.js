@@ -49,10 +49,35 @@ export const eventTypeOptions = [
   { label: '验证记录', value: 'VERIFIED' }
 ]
 
+export const logPullStatusOptions = [
+  { label: '待执行', value: 'created', type: 'info' },
+  { label: '提交申请中', value: 'submitting', type: 'warning' },
+  { label: '轮询处理中', value: 'polling', type: 'warning' },
+  { label: '下载中', value: 'downloading', type: 'warning' },
+  { label: '解析中', value: 'processing', type: 'primary' },
+  { label: '成功', value: 'success', type: 'success' },
+  { label: '外部失败', value: 'failed', type: 'danger' },
+  { label: '程序异常', value: 'exception', type: 'danger' }
+]
+
+export const logPullDataTypeOptions = [
+  { label: '日志', value: 1 },
+  { label: 'DB', value: 2 }
+]
+
+export const logPullStorageModeOptions = [
+  { label: '本地', value: 'local' },
+  { label: 'FTP', value: 'ftp' }
+]
+
 export function getOptionLabel(options, value) {
   return options.find(item => item.value === value)?.label || value || '-'
 }
 
 export function getStatusTagType(value) {
   return ticketStatusOptions.find(item => item.value === value)?.type || 'info'
+}
+
+export function getLogPullStatusTagType(value) {
+  return logPullStatusOptions.find(item => item.value === value)?.type || 'info'
 }
