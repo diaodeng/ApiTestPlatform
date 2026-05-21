@@ -119,6 +119,9 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     F("ticket.comment.add", "评论新增", "ticket.ticket", "ticket:comment:add", 9),
     F("ticket.event.add", "事件新增", "ticket.ticket", "ticket:event:add", 10),
     F("ticket.rca.edit", "RCA保存", "ticket.ticket", "ticket:rca:edit", 11),
+    F("ticket.logpull.query", "日志拉取查询", "ticket.ticket", "ticket:logpull:query", 12),
+    F("ticket.logpull.add", "日志拉取新增", "ticket.ticket", "ticket:logpull:add", 13),
+    F("ticket.logpull.config", "日志拉取配置", "ticket.ticket", "ticket:logpull:config", 14),
     C(
         "ticket.knowledge",
         "知识库",

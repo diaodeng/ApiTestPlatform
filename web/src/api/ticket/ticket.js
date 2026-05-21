@@ -48,6 +48,23 @@ export function getTicket(ticketId) {
   })
 }
 
+// 查询日志拉取存储配置
+export function getTicketLogPullStorageConfig() {
+  return request({
+    url: '/ticket/log-pull/storage-config',
+    method: 'get'
+  })
+}
+
+// 保存日志拉取存储配置
+export function saveTicketLogPullStorageConfig(data) {
+  return request({
+    url: '/ticket/log-pull/storage-config',
+    method: 'put',
+    data
+  })
+}
+
 // 新增工单
 export function addTicket(data) {
   return request({
@@ -118,6 +135,33 @@ export function getTicketTimeline(ticketId) {
   })
 }
 
+// 查询工单日志拉取记录
+export function listTicketLogPulls(ticketId, query) {
+  return request({
+    url: `/ticket/${ticketId}/log-pulls`,
+    method: 'get',
+    params: query
+  })
+}
+
+// 新增工单日志拉取任务
+export function addTicketLogPull(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/log-pulls`,
+    method: 'post',
+    data
+  })
+}
+
+// 查询日志拉取文本内容
+export function getTicketLogPullContent(recordId, query) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}/content`,
+    method: 'get',
+    params: query
+  })
+}
+
 // 保存工单RCA
 export function saveTicketRca(ticketId, data) {
   return request({
@@ -173,6 +217,23 @@ export function delWorkflowTransition(transitionId) {
 export function listTicketUserOptions(query) {
   return request({
     url: '/ticket/users/options',
+    method: 'get',
+    params: query
+  })
+}
+
+// 查询工单项目选项
+export function listTicketProjectOptions() {
+  return request({
+    url: '/ticket/projects/options',
+    method: 'get'
+  })
+}
+
+// 查询工单模块选项
+export function listTicketModuleOptions(query) {
+  return request({
+    url: '/ticket/modules/options',
     method: 'get',
     params: query
   })

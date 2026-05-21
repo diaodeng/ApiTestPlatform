@@ -8,6 +8,12 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from modules.ticket.entity.vo.ticket_log_pull_vo import (
+    TicketLogPullContentQueryModel,
+    TicketLogPullCreateModel,
+    TicketLogPullQueryModel,
+    TicketLogPullStorageConfigModel,
+)
 from modules.ticket.entity.vo.ticket_vo import (
     KnowledgeArticleModel,
     KnowledgeArticleQueryModel,
@@ -26,6 +32,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_import_service import TicketImportService
+from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
@@ -124,6 +131,49 @@ async def search_ticket_natural_language(
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketController.get(
+    "/log-pull/storage-config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
+)
+async def get_ticket_log_pull_storage_config(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取工单日志拉取存储配置接口。
+    :param request: 请求对象
+    :param query_db: 数据库会话
+    :return: 日志压缩包本地/FTP 保存与轮询配置
+    """
+    try:
+        return ResponseUtil.success(data=TicketLogPullService.get_storage_config_services(query_db))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.put(
+    "/log-pull/storage-config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
+)
+async def save_ticket_log_pull_storage_config(
+    request: Request,
+    config_object: TicketLogPullStorageConfigModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    保存工单日志拉取存储配置接口。
+    :param request: 请求对象
+    :param config_object: 本地目录、FTP 连接、轮询和压缩入库配置
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入配置审计信息
+    :return: 保存结果；当前版本统一改为通过系统参数配置维护
+    """
+    try:
+        return ResponseUtil.failure(msg="请前往参数配置维护 ticket.logPull.external / ticket.logPull.storage")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketController.post("", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:add"))])
 @log_decorator(title="工单管理", business_type=1)
 async def add_ticket(
@@ -135,7 +185,7 @@ async def add_ticket(
     """
     新增工单接口。
     :param request: 请求对象
-    :param add_ticket_object: 工单标题、描述、所属商家、所属模块、优先级、来源和扩展上下文
+    :param add_ticket_object: 工单标题、描述、所属项目ID、所属模块ID、优先级、来源和扩展上下文
     :param query_db: 数据库会话
     :param current_user: 当前登录用户，用于写入提单人和审计信息
     :return: 新增结果
@@ -212,6 +262,88 @@ async def get_ticket_detail(request: Request, ticket_id: int, query_db: Session 
     try:
         result = TicketService.get_ticket_detail_services(query_db, ticket_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/log-pulls/{record_id}/content",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_pull_content(
+    request: Request,
+    record_id: int,
+    query: TicketLogPullContentQueryModel = Depends(TicketLogPullContentQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    获取日志拉取记录文本内容接口。
+    :param request: 请求对象
+    :param record_id: 日志拉取记录ID
+    :param query: 查看日志范围参数，支持开始/结束时间或时间点前后范围
+    :param query_db: 数据库会话
+    :return: 解压后的日志文本内容
+    """
+    try:
+        result = TicketLogPullService.get_log_pull_content_services(query_db, record_id, query)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="日志拉取记录不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/{ticket_id}/log-pulls",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_pull_list(
+    request: Request,
+    ticket_id: int,
+    query: TicketLogPullQueryModel = Depends(TicketLogPullQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    获取工单日志拉取记录列表接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param query: 分页和状态筛选参数
+    :param query_db: 数据库会话
+    :return: 日志拉取记录分页列表
+    """
+    try:
+        result = TicketLogPullService.list_log_pull_records_services(query_db, ticket_id, query)
+        if query.is_page:
+            return ResponseUtil.success(model_content=result)
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/{ticket_id}/log-pulls",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:add"))],
+)
+async def create_ticket_log_pull(
+    request: Request,
+    ticket_id: int,
+    create_object: TicketLogPullCreateModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    提交工单日志拉取申请接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param create_object: 日志拉取参数，包含 vendor/store/pos、命令内容和时间范围
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入申请人
+    :return: 创建结果
+    """
+    try:
+        result = TicketLogPullService.create_log_pull_services(query_db, ticket_id, create_object, current_user)
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -466,7 +598,10 @@ async def delete_workflow_transition(request: Request, transition_id: int, query
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.get("/users/options", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:assign"))])
+@ticketController.get(
+    "/users/options",
+    dependencies=[Depends(CheckUserInterfaceAuth(["ticket:ticket:assign", "ticket:workflow:edit"], False))],
+)
 async def get_ticket_user_options(
     request: Request,
     query: TicketUserOptionQueryModel = Depends(TicketUserOptionQueryModel.as_query),
@@ -481,6 +616,41 @@ async def get_ticket_user_options(
     """
     try:
         return ResponseUtil.success(data=TicketService.get_user_options_services(query_db, query.keyword, query.limit))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get("/projects/options", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
+async def get_ticket_project_options(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取工单可选测试项目列表接口。
+    :param request: 请求对象
+    :param query_db: 数据库会话
+    :return: 项目选项列表
+    """
+    try:
+        return ResponseUtil.success(data=TicketService.get_project_options_services(query_db))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get("/modules/options", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
+async def get_ticket_module_options(
+    request: Request,
+    project_id: int | None = None,
+    query_db: Session = Depends(get_db),
+):
+    """
+    获取工单可选测试模块列表接口。
+    :param request: 请求对象
+    :param project_id: 项目ID；传入后仅返回当前项目下的模块
+    :param query_db: 数据库会话
+    :return: 模块选项列表
+    """
+    try:
+        return ResponseUtil.success(data=TicketService.get_module_options_services(query_db, project_id))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

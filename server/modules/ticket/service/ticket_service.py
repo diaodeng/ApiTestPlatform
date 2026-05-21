@@ -4,7 +4,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.dao.ticket_dao import TicketDao, _date_end, _date_start
 from modules.ticket.entity.do.ticket_do import (
     KnowledgeArticle,
@@ -32,6 +35,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     WorkflowTransitionModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
+from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from utils.common_util import CamelCaseUtil
 from utils.snowflake import snowIdWorker
 
@@ -101,6 +105,97 @@ def _is_end_status(status: str) -> bool:
         TicketStatus.DESIGN_AS_EXPECTED.value,
         TicketStatus.USER_MISOPERATION.value,
         TicketStatus.DUPLICATED.value,
+    }
+
+
+def _normalize_role_codes(raw_roles: Any) -> list[str]:
+    """
+    归一化流转规则中的角色编码列表。
+    :param raw_roles: 原始角色数据
+    :return: 去重后的角色编码列表
+    """
+    if not isinstance(raw_roles, list):
+        return []
+    normalized: list[str] = []
+    for item in raw_roles:
+        role_code = str(item or "").strip()
+        if role_code and role_code not in normalized:
+            normalized.append(role_code)
+    return normalized
+
+
+def _parse_transition_extension(raw_value: Any) -> dict[str, Any]:
+    """
+    从 `allowed_roles` JSON 中解析工单流转扩展配置。
+    :param raw_value: 数据库中的 `allowed_roles`
+    :return: 统一结构的扩展配置
+    """
+    extension = {
+        "allowed_roles": [],
+        "target_assignee_id": None,
+        "target_assignee_name": "",
+        "notify_enabled": False,
+        "notify_remark": "",
+    }
+    if isinstance(raw_value, list):
+        extension["allowed_roles"] = _normalize_role_codes(raw_value)
+        return extension
+    if not isinstance(raw_value, dict):
+        return extension
+
+    roles = raw_value.get("roles")
+    if not isinstance(roles, list):
+        roles = raw_value.get("allowedRoles")
+    extension["allowed_roles"] = _normalize_role_codes(roles)
+
+    assignee_payload = raw_value.get("assignee") if isinstance(raw_value.get("assignee"), dict) else {}
+    extension["target_assignee_id"] = (
+        assignee_payload.get("userId")
+        or raw_value.get("targetAssigneeId")
+        or raw_value.get("target_assignee_id")
+    )
+    extension["target_assignee_name"] = str(
+        assignee_payload.get("userName")
+        or raw_value.get("targetAssigneeName")
+        or raw_value.get("target_assignee_name")
+        or ""
+    ).strip()
+
+    notification_payload = raw_value.get("notification") if isinstance(raw_value.get("notification"), dict) else {}
+    extension["notify_enabled"] = bool(
+        notification_payload.get("enabled")
+        if "enabled" in notification_payload
+        else raw_value.get("notifyEnabled")
+        or raw_value.get("notify_enabled")
+    )
+    extension["notify_remark"] = str(
+        notification_payload.get("remark")
+        or raw_value.get("notifyRemark")
+        or raw_value.get("notify_remark")
+        or ""
+    ).strip()
+    return extension
+
+
+def _build_transition_storage_payload(transition_object: WorkflowTransitionModel) -> dict[str, Any]:
+    """
+    构建写入 `allowed_roles` JSON 列的流转扩展配置。
+    :param transition_object: 流转规则入参
+    :return: 可直接入库的 JSON 字典
+    """
+    role_source = transition_object.allowed_roles
+    if isinstance(role_source, dict):
+        role_source = _parse_transition_extension(role_source).get("allowed_roles")
+    return {
+        "roles": _normalize_role_codes(role_source),
+        "assignee": {
+            "userId": transition_object.target_assignee_id,
+            "userName": (transition_object.target_assignee_name or "").strip(),
+        },
+        "notification": {
+            "enabled": bool(transition_object.notify_enabled),
+            "remark": (transition_object.notify_remark or "").strip(),
+        },
     }
 
 
@@ -174,6 +269,193 @@ class TicketService:
         query_db.commit()
 
     @classmethod
+    def _decorate_ticket_item(cls, item: dict[str, Any]) -> dict[str, Any]:
+        """
+        为工单返回结果补充项目名称兼容字段。
+        :param item: 工单字典
+        :return: 补充后的工单字典
+        """
+        project_name = str(item.get("projectName") or item.get("merchantName") or "").strip()
+        item["projectName"] = project_name
+        if "merchantName" not in item:
+            item["merchantName"] = project_name
+        return item
+
+    @classmethod
+    def _resolve_ticket_relation_fields(
+        cls, query_db: Session, data: dict[str, Any]
+    ) -> tuple[bool, str, dict[str, Any]]:
+        """
+        校验并回填工单关联的测试项目和模块名称。
+        :param query_db: 数据库会话
+        :param data: 工单字段字典
+        :return: 校验结果、提示信息和需回填的字段
+        """
+        project_id = data.get("project_id")
+        module_id = data.get("module_id")
+        if not project_id:
+            return False, "所属项目不能为空", {}
+
+        project = (
+            query_db.query(HrmProject)
+            .filter(
+                HrmProject.project_id == project_id,
+                HrmProject.status == QtrDataStatusEnum.normal.value,
+                HrmProject.del_flag == "0",
+            )
+            .first()
+        )
+        if not project:
+            return False, "所属项目不存在或已停用", {}
+
+        relation_fields = {
+            "project_id": project.project_id,
+            "merchant_name": project.project_name,
+            "module_id": None,
+            "module_name": "",
+        }
+
+        if module_id:
+            module = (
+                query_db.query(HrmModule)
+                .filter(
+                    HrmModule.module_id == module_id,
+                    HrmModule.status == QtrDataStatusEnum.normal.value,
+                    HrmModule.project_id == project.project_id,
+                )
+                .first()
+            )
+            if not module:
+                return False, "所属模块不存在、已停用或不属于当前项目", {}
+            relation_fields["module_id"] = module.module_id
+            relation_fields["module_name"] = module.module_name
+
+        return True, "", relation_fields
+
+    @classmethod
+    def _resolve_transition_assignee_name(
+        cls, query_db: Session, target_assignee_id: int | None, target_assignee_name: str | None
+    ) -> str:
+        """
+        补齐流转规则中的默认处理人名称。
+        :param query_db: 数据库会话
+        :param target_assignee_id: 处理人ID
+        :param target_assignee_name: 处理人名称
+        :return: 最终名称
+        """
+        if str(target_assignee_name or "").strip():
+            return str(target_assignee_name).strip()
+        user = TicketDao.get_user_by_id(query_db, target_assignee_id)
+        if not user:
+            return ""
+        return user.nick_name or user.user_name or ""
+
+    @classmethod
+    def _append_transition_assignment_and_notification(
+        cls,
+        query_db: Session,
+        *,
+        ticket: Ticket,
+        ticket_id: int,
+        transition: WorkflowTransition,
+        target_status: str,
+        current_user: CurrentUserModel,
+        now: datetime,
+        update_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        根据流转规则自动指派处理人，并写入通知占位事件。
+        :param query_db: 数据库会话
+        :param ticket: 当前工单对象
+        :param ticket_id: 工单ID
+        :param transition: 命中的流转规则
+        :param target_status: 目标状态编码
+        :param current_user: 当前登录用户
+        :param now: 当前时间
+        :param update_data: 工单待更新字段
+        :return: 流转扩展结果
+        """
+        transition_extension = _parse_transition_extension(transition.allowed_roles)
+        target_assignee_id = transition_extension.get("target_assignee_id")
+        target_assignee_name = cls._resolve_transition_assignee_name(
+            query_db,
+            target_assignee_id=target_assignee_id,
+            target_assignee_name=transition_extension.get("target_assignee_name"),
+        )
+        should_auto_assign = bool(target_assignee_id or target_assignee_name)
+        assignee_changed = should_auto_assign and (
+            int(target_assignee_id or 0) != int(ticket.current_assignee_id or 0)
+            or str(target_assignee_name or "").strip() != str(ticket.current_assignee_name or "").strip()
+        )
+
+        if assignee_changed:
+            assign_reason = f"状态流转到 {target_status} 后自动切换处理人"
+            TicketDao.add_assign_history(
+                query_db,
+                TicketAssignHistory(
+                    ticket_id=ticket_id,
+                    from_user_id=ticket.current_assignee_id,
+                    from_user_name=ticket.current_assignee_name,
+                    to_user_id=target_assignee_id,
+                    to_user_name=target_assignee_name,
+                    assigned_by=_user_id(current_user),
+                    assigned_by_name=_user_name(current_user),
+                    reason=assign_reason,
+                    assigned_at=now,
+                ),
+            )
+            update_data["current_assignee_id"] = target_assignee_id
+            update_data["current_assignee_name"] = target_assignee_name
+            if not ticket.first_response_at:
+                update_data["first_response_at"] = now
+            TicketDao.add_event(
+                query_db,
+                TicketEvent(
+                    ticket_id=ticket_id,
+                    event_type=TicketEventType.ASSIGNED.value,
+                    operator_id=_user_id(current_user),
+                    operator_name=_user_name(current_user),
+                    content=assign_reason,
+                    event_data={
+                        "from_user_id": ticket.current_assignee_id,
+                        "from_user_name": ticket.current_assignee_name,
+                        "to_user_id": target_assignee_id,
+                        "to_user_name": target_assignee_name,
+                        "trigger_status": target_status,
+                    },
+                    create_time=now,
+                ),
+            )
+
+        if transition_extension.get("notify_enabled") and (target_assignee_id or target_assignee_name):
+            TicketDao.add_event(
+                query_db,
+                TicketEvent(
+                    ticket_id=ticket_id,
+                    event_type=TicketEventType.NOTIFY_PENDING.value,
+                    operator_id=_user_id(current_user),
+                    operator_name=_user_name(current_user),
+                    content=f"状态流转通知待发送：{target_assignee_name or target_assignee_id}",
+                    event_data={
+                        "target_status": target_status,
+                        "target_user_id": target_assignee_id,
+                        "target_user_name": target_assignee_name,
+                        "notify_remark": transition_extension.get("notify_remark"),
+                        "notify_status": "pending_channel_implementation",
+                    },
+                    create_time=now,
+                ),
+            )
+
+        return {
+            "target_assignee_id": target_assignee_id,
+            "target_assignee_name": target_assignee_name,
+            "notify_enabled": bool(transition_extension.get("notify_enabled")),
+            "notify_remark": transition_extension.get("notify_remark") or "",
+            "allowed_roles": transition_extension.get("allowed_roles") or [],
+        }
+
+    @classmethod
     def create_ticket(
         cls, query_db: Session, ticket_object: TicketCreateModel, current_user: CurrentUserModel
     ) -> CrudResponseModel:
@@ -188,6 +470,11 @@ class TicketService:
             now = datetime.now()
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
+            data.pop("project_name", None)
+            is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
+            if not is_valid:
+                return CrudResponseModel(is_success=False, message=message)
+            data.update(relation_fields)
             data["ticket_no"] = data.get("ticket_no") or _ticket_no()
             data["status"] = data.get("status") or TicketStatus.PENDING.value
             data["reporter_id"] = data.get("reporter_id") or _user_id(current_user)
@@ -223,7 +510,9 @@ class TicketService:
                 ),
             )
             query_db.commit()
-            return CrudResponseModel(is_success=True, message="新增成功", result=CamelCaseUtil.transform_result(ticket))
+            result = CamelCaseUtil.transform_result(ticket)
+            cls._decorate_ticket_item(result)
+            return CrudResponseModel(is_success=True, message="新增成功", result=result)
         except Exception:
             query_db.rollback()
             raise
@@ -236,7 +525,23 @@ class TicketService:
         :param query: 查询参数
         :return: 分页结果或列表
         """
-        return TicketDao.get_ticket_list(query_db, query)
+        result = TicketDao.get_ticket_list(query_db, query)
+        if query.is_page:
+            rows = result.rows or []
+            ticket_ids = [item.get("ticketId") for item in rows if isinstance(item, dict) and item.get("ticketId")]
+            summary_map = TicketLogPullService.get_latest_summary_map(query_db, ticket_ids)
+            for item in rows:
+                if isinstance(item, dict):
+                    cls._decorate_ticket_item(item)
+                    item["latestLogPull"] = summary_map.get(item.get("ticketId"))
+            return result
+        ticket_ids = [item.get("ticketId") for item in result if isinstance(item, dict) and item.get("ticketId")]
+        summary_map = TicketLogPullService.get_latest_summary_map(query_db, ticket_ids)
+        for item in result:
+            if isinstance(item, dict):
+                cls._decorate_ticket_item(item)
+                item["latestLogPull"] = summary_map.get(item.get("ticketId"))
+        return result
 
     @classmethod
     def get_ticket_detail_services(cls, query_db: Session, ticket_id: int) -> dict | None:
@@ -247,7 +552,12 @@ class TicketService:
         :return: 工单详情
         """
         ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
-        return CamelCaseUtil.transform_result(ticket) if ticket else None
+        if not ticket:
+            return None
+        result = CamelCaseUtil.transform_result(ticket)
+        cls._decorate_ticket_item(result)
+        result["latestLogPull"] = TicketLogPullService.get_latest_summary(query_db, ticket_id)
+        return result
 
     @classmethod
     def update_ticket(
@@ -267,6 +577,11 @@ class TicketService:
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
             data.pop("ticket_no", None)
+            data.pop("project_name", None)
+            is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
+            if not is_valid:
+                return CrudResponseModel(is_success=False, message=message)
+            data.update(relation_fields)
             data["update_by"] = _user_name(current_user)
             data["update_time"] = datetime.now()
             TicketDao.update_ticket(query_db, ticket.ticket_id, data)
@@ -450,6 +765,16 @@ class TicketService:
                     update_data["closed_at"] = now
                 start_time = ticket.started_at or ticket.create_time
                 update_data["total_process_seconds"] = max(int((now - start_time).total_seconds()), 0)
+            transition_extension = cls._append_transition_assignment_and_notification(
+                query_db,
+                ticket=ticket,
+                ticket_id=ticket_id,
+                transition=transition,
+                target_status=status_object.to_status,
+                current_user=current_user,
+                now=now,
+                update_data=update_data,
+            )
             TicketDao.update_ticket(query_db, ticket_id, update_data)
             TicketDao.add_event(
                 query_db,
@@ -459,7 +784,14 @@ class TicketService:
                     operator_id=_user_id(current_user),
                     operator_name=_user_name(current_user),
                     content=status_object.comment,
-                    event_data={"from_status": ticket.status, "to_status": status_object.to_status},
+                    event_data={
+                        "from_status": ticket.status,
+                        "to_status": status_object.to_status,
+                        "target_assignee_id": transition_extension.get("target_assignee_id"),
+                        "target_assignee_name": transition_extension.get("target_assignee_name"),
+                        "notify_enabled": transition_extension.get("notify_enabled"),
+                        "notify_remark": transition_extension.get("notify_remark"),
+                    },
                     create_time=now,
                 ),
             )
@@ -615,9 +947,19 @@ class TicketService:
         :param query_db: 数据库会话
         :return: 工作流配置
         """
+        transition_rows = []
+        for transition in TicketDao.list_workflow_transition(query_db):
+            item = CamelCaseUtil.transform_result(transition)
+            extension = _parse_transition_extension(transition.allowed_roles)
+            item["allowedRoles"] = extension["allowed_roles"]
+            item["targetAssigneeId"] = extension["target_assignee_id"]
+            item["targetAssigneeName"] = extension["target_assignee_name"]
+            item["notifyEnabled"] = extension["notify_enabled"]
+            item["notifyRemark"] = extension["notify_remark"]
+            transition_rows.append(item)
         return {
             "statuses": CamelCaseUtil.transform_result(TicketDao.list_workflow_status(query_db)),
-            "transitions": CamelCaseUtil.transform_result(TicketDao.list_workflow_transition(query_db)),
+            "transitions": transition_rows,
         }
 
     @classmethod
@@ -692,8 +1034,14 @@ class TicketService:
             return CrudResponseModel(is_success=False, message="目标状态不存在")
 
         try:
-            data = _dump_model(transition_object)
-            transition_id = data.pop("id", None)
+            data = {
+                "from_status": transition_object.from_status,
+                "to_status": transition_object.to_status,
+                "allowed_roles": _build_transition_storage_payload(transition_object),
+                "need_comment": transition_object.need_comment,
+                "need_resolution": transition_object.need_resolution,
+            }
+            transition_id = transition_object.id
             same_transition = TicketDao.get_transition(
                 query_db, transition_object.from_status, transition_object.to_status
             )
@@ -754,6 +1102,53 @@ class TicketService:
                 "label": f"{user.nick_name or user.user_name}（{user.user_name}）",
             }
             for user in users
+        ]
+
+    @classmethod
+    def get_project_options_services(cls, query_db: Session) -> list[dict[str, Any]]:
+        """
+        获取工单可选测试项目列表。
+        :param query_db: 数据库会话
+        :return: 项目选项列表
+        """
+        projects = (
+            query_db.query(HrmProject)
+            .filter(
+                HrmProject.status == QtrDataStatusEnum.normal.value,
+                HrmProject.del_flag == "0",
+            )
+            .order_by(HrmProject.order_num.asc(), HrmProject.create_time.desc())
+            .all()
+        )
+        return [
+            {
+                "projectId": project.project_id,
+                "projectName": project.project_name,
+                "label": project.project_name,
+            }
+            for project in projects
+        ]
+
+    @classmethod
+    def get_module_options_services(cls, query_db: Session, project_id: int | None = None) -> list[dict[str, Any]]:
+        """
+        获取工单可选测试模块列表。
+        :param query_db: 数据库会话
+        :param project_id: 目标项目ID；为空时返回全部有效模块
+        :return: 模块选项列表
+        """
+        query = query_db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
+        if project_id:
+            query = query.filter(HrmModule.project_id == project_id)
+        modules = query.order_by(HrmModule.sort.asc(), HrmModule.create_time.desc()).all()
+        return [
+            {
+                "moduleId": module.module_id,
+                "moduleName": module.module_name,
+                "projectId": module.project_id,
+                "label": module.module_name,
+            }
+            for module in modules
         ]
 
     @classmethod

@@ -55,6 +55,7 @@ from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
 from modules.ticket.controller.ticket_controller import ticketController
 from modules.ticket.perms import register as register_ticket_permission_defs
+from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
@@ -75,6 +76,9 @@ async def lifespan(app: FastAPI):
         sync_registered_menus(app)
         with SessionLocal() as db:
             TicketService.init_default_workflow(db)
+            TicketLogPullService.ensure_param_config_rows(db)
+            db.commit()
+        TicketLogPullService.resume_pending_records()
         app.state.redis = await RedisUtil.create_redis_pool()
         await RedisUtil.init_sys_dict(app.state.redis)
         await RedisUtil.init_sys_config(app.state.redis)
