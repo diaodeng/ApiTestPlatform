@@ -14,6 +14,7 @@ from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
 from services.desktop_test_service import DesktopTestService
+from services.ticket_ai_analysis_service import TicketAiAnalysisService
 from services.web_test_service import WebTestService
 from utils.common import compress_dict_to_str, decompress_str_to_dict
 
@@ -136,6 +137,15 @@ class RequestByInput:
         elif request_type == RequestTypeEnum.desktopui.value:
             try:
                 res_data = await DesktopTestService.handle_request(message_data_dict, event_sender)
+            except Exception as e:
+                logger.exception(e)
+                res_data = {"Error": "".join(traceback.format_exception(e))}
+            res_data["request_id"] = request_id
+            res_data["request_type"] = request_type
+            return res_data, client_status
+        elif request_type == RequestTypeEnum.ai_analysis.value:
+            try:
+                res_data = await TicketAiAnalysisService.handle_request(message_data_dict, event_sender)
             except Exception as e:
                 logger.exception(e)
                 res_data = {"Error": "".join(traceback.format_exception(e))}
@@ -474,6 +484,7 @@ class RequestTypeEnum(Enum):
     webui = 3
     folder = 4
     desktopui = 5
+    ai_analysis = 6
 
 
 # 根据枚举值获取枚举名称

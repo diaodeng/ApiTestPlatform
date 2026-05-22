@@ -102,7 +102,11 @@ async def send_message(
             elif response_data.get("request_type") == TstepTypeEnum.websocket.value:
                 response = AgentResponseWebSocket(response_data)
                 # logger.info(f"ws响应数据：{response}")
-            elif response_data.get("request_type") in (TstepTypeEnum.webui.value, TstepTypeEnum.desktopui.value):
+            elif response_data.get("request_type") in (
+                TstepTypeEnum.webui.value,
+                TstepTypeEnum.desktopui.value,
+                TstepTypeEnum.ai_analysis.value,
+            ):
                 response = AgentResponseWebUI(**response_data)
             else:
                 return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
@@ -123,7 +127,11 @@ async def send_message(
                                             None,
                                             f'wobsocket请求超时{e}，request_id：{request_id}'))
                 return response
-            elif request_type in (TstepTypeEnum.webui.value, TstepTypeEnum.desktopui.value):
+            elif request_type in (
+                TstepTypeEnum.webui.value,
+                TstepTypeEnum.desktopui.value,
+                TstepTypeEnum.ai_analysis.value,
+            ):
                 response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
                                             None,
                                             f'wobsocket请求超时{e}，request_id：{request_id}'))
