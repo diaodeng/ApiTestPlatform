@@ -104,3 +104,15 @@ class TicketLogDataType(int, Enum):
 
     LOG = 1
     DB = 2
+
+
+class TicketAiAnalysisStatus(str, Enum):
+    """
+    工单 AI 分析任务状态枚举，用于记录任务创建、执行、成功和失败状态。
+    """
+
+    CREATED = "created"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    CANCELED = "canceled"

@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.entity.do.module_do import HrmModule, HrmModuleProject
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.enums.enums import QtrDataStatusEnum
@@ -35,6 +36,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     WorkflowTransitionModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
+from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from utils.common_util import CamelCaseUtil
 from utils.snowflake import snowIdWorker
@@ -89,6 +91,21 @@ def _ticket_no() -> str:
     :return: 工单编号
     """
     return f"TK{datetime.now().strftime('%Y%m%d')}{snowIdWorker.get_id()}"
+
+
+def _extract_ticket_version_key(extra_data: Any) -> str:
+    """
+    从工单扩展信息中提取版本号。
+    :param extra_data: 工单扩展字段
+    :return: 版本号
+    """
+    if not isinstance(extra_data, dict):
+        return ""
+    for key in ("versionKey", "version_key", "version", "deployVersion", "deploy_version", "appVersion"):
+        value = extra_data.get(key)
+        if str(value or "").strip():
+            return str(value).strip()
+    return ""
 
 
 def _is_end_status(status: str) -> bool:
@@ -279,6 +296,8 @@ class TicketService:
         item["projectName"] = project_name
         if "merchantName" not in item:
             item["merchantName"] = project_name
+        extra_data = item.get("extraData")
+        item["versionKey"] = item.get("versionKey") or _extract_ticket_version_key(extra_data)
         return item
 
     @classmethod
@@ -471,11 +490,20 @@ class TicketService:
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
             data.pop("project_name", None)
+            version_key = str(data.pop("version_key", "") or "").strip()
+            extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
+            if version_key:
+                extra_data["version_key"] = version_key
+            data["extra_data"] = extra_data or None
             is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
             if not is_valid:
                 return CrudResponseModel(is_success=False, message=message)
+            if not str(data.get("ticket_no") or "").strip():
+                return CrudResponseModel(is_success=False, message="工单号不能为空")
+            if TicketDao.get_ticket_by_no(query_db, str(data["ticket_no"]).strip()):
+                return CrudResponseModel(is_success=False, message="工单号已存在")
             data.update(relation_fields)
-            data["ticket_no"] = data.get("ticket_no") or _ticket_no()
+            data["ticket_no"] = str(data.get("ticket_no") or "").strip()
             data["status"] = data.get("status") or TicketStatus.PENDING.value
             data["reporter_id"] = data.get("reporter_id") or _user_id(current_user)
             data["reporter_name"] = data.get("reporter_name") or _user_name(current_user)
@@ -530,17 +558,21 @@ class TicketService:
             rows = result.rows or []
             ticket_ids = [item.get("ticketId") for item in rows if isinstance(item, dict) and item.get("ticketId")]
             summary_map = TicketLogPullService.get_latest_summary_map(query_db, ticket_ids)
+            ai_summary_map = TicketAiAnalysisService.get_latest_summary_map(query_db, ticket_ids)
             for item in rows:
                 if isinstance(item, dict):
                     cls._decorate_ticket_item(item)
                     item["latestLogPull"] = summary_map.get(item.get("ticketId"))
+                    item["latestAiAnalysis"] = ai_summary_map.get(item.get("ticketId"))
             return result
         ticket_ids = [item.get("ticketId") for item in result if isinstance(item, dict) and item.get("ticketId")]
         summary_map = TicketLogPullService.get_latest_summary_map(query_db, ticket_ids)
+        ai_summary_map = TicketAiAnalysisService.get_latest_summary_map(query_db, ticket_ids)
         for item in result:
             if isinstance(item, dict):
                 cls._decorate_ticket_item(item)
                 item["latestLogPull"] = summary_map.get(item.get("ticketId"))
+                item["latestAiAnalysis"] = ai_summary_map.get(item.get("ticketId"))
         return result
 
     @classmethod
@@ -557,6 +589,7 @@ class TicketService:
         result = CamelCaseUtil.transform_result(ticket)
         cls._decorate_ticket_item(result)
         result["latestLogPull"] = TicketLogPullService.get_latest_summary(query_db, ticket_id)
+        result["latestAiAnalysis"] = TicketAiAnalysisService.get_latest_summary(query_db, ticket_id)
         return result
 
     @classmethod
@@ -576,14 +609,29 @@ class TicketService:
         try:
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
-            data.pop("ticket_no", None)
             data.pop("project_name", None)
+            version_key = str(data.pop("version_key", "") or "").strip()
+            extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+            form_extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
+            extra_data.update(form_extra_data)
+            if version_key:
+                extra_data["version_key"] = version_key
+            elif "version_key" in extra_data:
+                extra_data.pop("version_key", None)
+            data["extra_data"] = extra_data or None
             is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
             if not is_valid:
                 return CrudResponseModel(is_success=False, message=message)
+            ticket_no = str(data.get("ticket_no") or ticket.ticket_no or "").strip()
+            if not ticket_no:
+                return CrudResponseModel(is_success=False, message="工单号不能为空")
+            existing = TicketDao.get_ticket_by_no(query_db, ticket_no)
+            if existing and existing.ticket_id != ticket.ticket_id:
+                return CrudResponseModel(is_success=False, message="工单号已存在")
             data.update(relation_fields)
             data["update_by"] = _user_name(current_user)
             data["update_time"] = datetime.now()
+            data["ticket_no"] = ticket_no
             TicketDao.update_ticket(query_db, ticket.ticket_id, data)
             TicketDao.add_event(
                 query_db,
@@ -1134,13 +1182,22 @@ class TicketService:
         """
         获取工单可选测试模块列表。
         :param query_db: 数据库会话
-        :param project_id: 目标项目ID；为空时返回全部有效模块
+        :param project_id: 目标项目ID；为空时返回空列表
         :return: 模块选项列表
         """
+        if not project_id:
+            return []
+        module_ids = query_db.query(HrmModuleProject.module_id).filter(HrmModuleProject.project_id == project_id)
         query = query_db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
-        if project_id:
-            query = query.filter(HrmModule.project_id == project_id)
+        query = query.filter(or_(HrmModule.project_id == project_id, HrmModule.module_id.in_(module_ids)))
         modules = query.order_by(HrmModule.sort.asc(), HrmModule.create_time.desc()).all()
+        seen_module_ids: set[int] = set()
+        unique_modules = []
+        for module in modules:
+            if module.module_id in seen_module_ids:
+                continue
+            seen_module_ids.add(module.module_id)
+            unique_modules.append(module)
         return [
             {
                 "moduleId": module.module_id,
@@ -1148,7 +1205,7 @@ class TicketService:
                 "projectId": module.project_id,
                 "label": module.module_name,
             }
-            for module in modules
+            for module in unique_modules
         ]
 
     @classmethod
