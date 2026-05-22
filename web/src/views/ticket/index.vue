@@ -479,16 +479,45 @@
                   <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="120" fixed="right">
+              <el-table-column label="操作" width="280" fixed="right">
                 <template #default="scope">
-                  <el-button
-                    link
-                    type="primary"
-                    @click="viewLogPullContent(scope.row)"
-                    :disabled="!scope.row.hasContent"
-                  >
-                    查看日志
-                  </el-button>
+                  <el-button-group>
+                    <el-button
+                      link
+                      type="primary"
+                      @click="viewLogPullContent(scope.row)"
+                      :disabled="!scope.row.hasContent || logPullActionLoading"
+                    >
+                      查看日志
+                    </el-button>
+                    <el-button
+                      link
+                      type="warning"
+                      @click="retryLogPull(scope.row)"
+                      :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
+                      v-hasPermi="['ticket:logpull:add']"
+                    >
+                      重新拉取
+                    </el-button>
+                    <el-button
+                      link
+                      type="success"
+                      @click="redownloadLogPull(scope.row)"
+                      :disabled="logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
+                      v-hasPermi="['ticket:logpull:add']"
+                    >
+                      重新下载
+                    </el-button>
+                    <el-button
+                      link
+                      type="danger"
+                      @click="reextractLogPull(scope.row)"
+                      :disabled="logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
+                      v-hasPermi="['ticket:logpull:add']"
+                    >
+                      重新截取
+                    </el-button>
+                  </el-button-group>
                 </template>
               </el-table-column>
             </el-table>
@@ -712,6 +741,25 @@
           <el-button type="primary" @click="refreshLogPullContent">
             {{ logPullViewForm.viewMode === 'archive' ? '按当前范围查看' : '查看入库内容' }}
           </el-button>
+          <el-button type="warning" @click="retryLogPull(selectedLogPullRecord)" :disabled="logPullActionLoading" v-hasPermi="['ticket:logpull:add']">
+            重新拉取
+          </el-button>
+          <el-button
+            type="success"
+            @click="redownloadLogPull(selectedLogPullRecord)"
+            :disabled="logPullActionLoading || (!selectedLogPullRecord?.commandResultUrl && !selectedLogPullRecord?.storagePath)"
+            v-hasPermi="['ticket:logpull:add']"
+          >
+            重新下载
+          </el-button>
+          <el-button
+            type="danger"
+            @click="reextractLogPull(selectedLogPullRecord)"
+            :disabled="logPullActionLoading || logPullViewForm.viewMode !== 'archive'"
+            v-hasPermi="['ticket:logpull:add']"
+          >
+            重新截取
+          </el-button>
           <el-button link type="primary" @click="resetLogPullViewRange">恢复记录范围</el-button>
         </div>
         <el-alert
@@ -748,6 +796,9 @@ import {
   listTicketLogPulls,
   listTicketModuleOptions,
   listTicketProjectOptions,
+  reextractTicketLogPull,
+  redownloadTicketLogPull,
+  retryTicketLogPull,
   saveTicketRca,
   searchTicketNaturalLanguage,
   updateTicket
@@ -793,6 +844,7 @@ const naturalKeyword = ref('')
 const importResult = ref(null)
 const logPullLoading = ref(false)
 const logPullSubmitting = ref(false)
+const logPullActionLoading = ref(false)
 const logPullSubmitOpen = ref(false)
 const logPullContentLoading = ref(false)
 const logPullContentOpen = ref(false)
@@ -1353,6 +1405,84 @@ function submitLogPull() {
       logPullSubmitting.value = false
     })
   })
+}
+
+function runLogPullAction(actionPromise, successMessage, refreshContent = false) {
+  logPullActionLoading.value = true
+  return actionPromise
+    .then(() => {
+      proxy.$modal.msgSuccess(successMessage)
+      return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
+    })
+    .then(() => {
+      if (refreshContent && selectedLogPullRecord.value?.id) {
+        return refreshLogPullContent()
+      }
+      return undefined
+    })
+    .finally(() => {
+      logPullActionLoading.value = false
+    })
+}
+
+function retryLogPull(row) {
+  if (!row?.id) {
+    return
+  }
+  if (activeLogPullStatuses.includes(row.status)) {
+    proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能重新拉取')
+    return
+  }
+  runLogPullAction(retryTicketLogPull(row.id), '已重新提交拉取任务')
+}
+
+function redownloadLogPull(row) {
+  if (!row?.id) {
+    return
+  }
+  if (!row.commandResultUrl && !row.storagePath) {
+    proxy.$modal.msgWarning('当前记录缺少可用于重新下载的归档地址')
+    return
+  }
+  runLogPullAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载', true)
+}
+
+function reextractLogPull(row = selectedLogPullRecord.value) {
+  if (!row?.id) {
+    return
+  }
+  const useCurrentView = detailOpen.value && selectedLogPullRecord.value?.id === row.id
+  const query = useCurrentView
+    ? buildLogPullViewQuery()
+    : {
+        viewMode: 'archive',
+        logBeginTime: row.logBeginTime,
+        logEndTime: row.logEndTime
+      }
+  if (useCurrentView && logPullViewForm.value.viewMode !== 'archive') {
+    proxy.$modal.msgWarning('请先切换到原始文档并指定查询时间范围')
+    return
+  }
+  if (!query.logBeginTime || !query.logEndTime) {
+    proxy.$modal.msgWarning('重新截取时开始时间和结束时间必填')
+    return
+  }
+  logPullActionLoading.value = true
+  reextractTicketLogPull(row.id, query)
+    .then(() => {
+      proxy.$modal.msgSuccess('日志已按当前时间范围重新截取')
+      return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
+    })
+    .then(() => {
+      logPullViewForm.value.viewMode = 'stored'
+      if (selectedLogPullRecord.value?.id === row.id) {
+        return refreshLogPullContent()
+      }
+      return undefined
+    })
+    .finally(() => {
+      logPullActionLoading.value = false
+    })
 }
 
 function loadProjectOptions() {

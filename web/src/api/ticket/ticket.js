@@ -153,6 +153,31 @@ export function addTicketLogPull(ticketId, data) {
   })
 }
 
+// 重新拉取日志任务
+export function retryTicketLogPull(recordId) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}/retry`,
+    method: 'post'
+  })
+}
+
+// 重新下载日志压缩包
+export function redownloadTicketLogPull(recordId) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}/redownload`,
+    method: 'post'
+  })
+}
+
+// 重新截取日志内容
+export function reextractTicketLogPull(recordId, query) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}/reextract`,
+    method: 'post',
+    params: query
+  })
+}
+
 // 查询日志拉取文本内容
 export function getTicketLogPullContent(recordId, query) {
   return request({

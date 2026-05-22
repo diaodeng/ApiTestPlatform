@@ -20,7 +20,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from sqlalchemy import false
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
@@ -292,6 +291,177 @@ class TicketLogPullService:
         except Exception:
             query_db.rollback()
             raise
+
+    @classmethod
+    def retry_log_pull_services(
+        cls, query_db: Session, record_id: int, current_user: CurrentUserModel
+    ) -> CrudResponseModel:
+        """
+        基于原记录重新提交日志拉取任务。
+        :param query_db: 数据库会话
+        :param record_id: 原日志拉取记录ID
+        :param current_user: 当前登录用户
+        :return: 重新提交结果
+        """
+        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        if not record:
+            return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
+        if record.status in cls.ACTIVE_STATUSES:
+            return CrudResponseModel(is_success=False, message="当前日志拉取任务仍在执行中，暂不能重新拉取")
+        payload = cls._build_retry_payload(record)
+        if not payload:
+            return CrudResponseModel(is_success=False, message="当前记录缺少可重新拉取的原始参数")
+        return cls.create_log_pull_services(query_db, record.ticket_id, payload, current_user)
+
+    @classmethod
+    def redownload_log_pull_services(
+        cls, query_db: Session, record_id: int, current_user: CurrentUserModel
+    ) -> CrudResponseModel:
+        """
+        重新下载日志压缩包并恢复到原存储位置。
+        :param query_db: 数据库会话
+        :param record_id: 日志拉取记录ID
+        :param current_user: 当前登录用户
+        :return: 重新下载结果
+        """
+        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        if not record:
+            return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
+        if record.status in cls.ACTIVE_STATUSES:
+            return CrudResponseModel(is_success=False, message="当前日志拉取任务仍在执行中，暂不能重新下载")
+        if not str(record.command_result_url or "").strip():
+            return CrudResponseModel(is_success=False, message="当前记录缺少原始压缩包地址，无法重新下载")
+
+        temp_file_path: Path | None = None
+        try:
+            temp_file_path, file_size = cls._download_archive(record, query_db)
+            storage_path = cls._restore_archive_storage(record, temp_file_path, query_db)
+            now = datetime.now()
+            TicketLogPullDao.update_record(
+                query_db,
+                record.id,
+                {
+                    "download_file_name": temp_file_path.name,
+                    "download_file_size": file_size,
+                    "storage_path": storage_path,
+                    "update_by": cls._user_name(current_user),
+                    "update_time": now,
+                },
+            )
+            cls._add_ticket_event(
+                query_db,
+                ticket_id=record.ticket_id,
+                operator_id=cls._user_id(current_user),
+                operator_name=cls._user_name(current_user),
+                content="重新下载日志压缩包",
+                event_data={
+                    "record_id": record.id,
+                    "storage_mode": record.storage_mode,
+                    "storage_path": storage_path,
+                    "download_file_name": temp_file_path.name,
+                    "download_file_size": file_size,
+                },
+            )
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message="日志压缩包已重新下载")
+        except Exception:
+            query_db.rollback()
+            raise
+        finally:
+            if temp_file_path and temp_file_path.exists():
+                try:
+                    temp_file_path.unlink()
+                except Exception:
+                    logger.warning("删除重新下载产生的临时文件失败: %s", temp_file_path)
+
+    @classmethod
+    def reextract_log_pull_services(
+        cls,
+        query_db: Session,
+        record_id: int,
+        query: TicketLogPullContentQueryModel,
+        current_user: CurrentUserModel,
+    ) -> CrudResponseModel:
+        """
+        按新的时间范围重新截取并更新日志入库内容。
+        :param query_db: 数据库会话
+        :param record_id: 日志拉取记录ID
+        :param query: 日志查看时间范围参数
+        :param current_user: 当前登录用户
+        :return: 重新截取结果
+        """
+        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        if not record:
+            return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
+        if record.status in cls.ACTIVE_STATUSES:
+            return CrudResponseModel(is_success=False, message="当前日志拉取任务仍在执行中，暂不能重新截取")
+
+        begin_time, end_time = cls._resolve_view_log_time_range(query)
+        if not begin_time or not end_time:
+            return CrudResponseModel(is_success=False, message="重新截取时日志时间范围必填")
+        if begin_time > end_time:
+            return CrudResponseModel(is_success=False, message="重新截取时开始时间不能晚于结束时间")
+
+        archive_path, should_cleanup = cls._resolve_archive_source_for_view(record, query_db)
+        if not archive_path:
+            return CrudResponseModel(is_success=False, message="当前记录没有可用的压缩包文件，无法重新截取")
+
+        try:
+            content_result = cls._extract_archive_content(
+                record,
+                archive_path,
+                query_db,
+                begin_time=begin_time,
+                end_time=end_time,
+            )
+            now = datetime.now()
+            TicketLogPullDao.update_record(
+                query_db,
+                record.id,
+                {
+                    "log_begin_time": begin_time,
+                    "log_end_time": end_time,
+                    "status": TicketLogPullStatus.SUCCESS.value,
+                    "status_desc": "日志已按当前时间范围重新截取",
+                    "is_error": False,
+                    "error_message": None,
+                    "exception_detail": None,
+                    "archive_entry_count": content_result["archive_entry_count"],
+                    "matched_entry_count": content_result["matched_entry_count"],
+                    "content_char_count": content_result["content_char_count"],
+                    "content_truncated": content_result["content_truncated"],
+                    "compressed_content": content_result["compressed_content"],
+                    "content_summary": content_result["content_summary"],
+                    "finished_at": now,
+                    "update_by": cls._user_name(current_user),
+                    "update_time": now,
+                },
+            )
+            cls._add_ticket_event(
+                query_db,
+                ticket_id=record.ticket_id,
+                operator_id=cls._user_id(current_user),
+                operator_name=cls._user_name(current_user),
+                content="重新截取日志内容",
+                event_data={
+                    "record_id": record.id,
+                    "view_begin_time": begin_time,
+                    "view_end_time": end_time,
+                    "matched_entry_count": content_result["matched_entry_count"],
+                    "archive_entry_count": content_result["archive_entry_count"],
+                },
+            )
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message="日志已按当前时间范围重新截取")
+        except Exception:
+            query_db.rollback()
+            raise
+        finally:
+            if should_cleanup and archive_path:
+                try:
+                    archive_path.unlink(missing_ok=True)
+                except Exception:
+                    logger.warning("删除重新截取产生的临时文件失败: %s", archive_path)
 
     @classmethod
     def create_log_pull_services(
@@ -901,6 +1071,30 @@ class TicketLogPullService:
         return str(target_path)
 
     @classmethod
+    def _restore_archive_storage(cls, record: TicketLogPullRecord, temp_file_path: Path, db: Session) -> str:
+        """
+        将重新下载的压缩包恢复到原归档位置。
+        :param record: 日志拉取记录
+        :param temp_file_path: 临时文件路径
+        :param db: 数据库会话
+        :return: 归档位置
+        """
+        storage_mode = str(
+            record.storage_mode or cls._get_storage_config_dict(db).get("mode") or "local"
+        ).strip().lower()
+        storage_path = str(record.storage_path or "").strip()
+        if storage_mode == "ftp" and storage_path:
+            config = cls._get_storage_config_dict(db)
+            cls._upload_file_to_ftp(config, storage_path, temp_file_path)
+            return storage_path
+        if storage_mode == "local" and storage_path:
+            target_path = Path(storage_path)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(temp_file_path, target_path)
+            return str(target_path)
+        return cls._store_archive(record, temp_file_path, db)
+
+    @classmethod
     def _extract_archive_content(
         cls,
         record: TicketLogPullRecord,
@@ -1274,6 +1468,22 @@ class TicketLogPullService:
             command_content["modifyTime"] = str(payload.modify_time)[:10]
         if str(payload.path or "").strip():
             command_content["path"] = str(payload.path).strip()
+        command_content["commandDataType"] = int(payload.command_data_type)
+        command_content["storageMode"] = str(payload.storage_mode or "").strip() or None
+        point_time = cls._parse_datetime(payload.log_point_time)
+        begin_time = cls._parse_datetime(payload.log_begin_time)
+        end_time = cls._parse_datetime(payload.log_end_time)
+        if point_time:
+            command_content["timeRangeMode"] = "point"
+            command_content["logPointTime"] = point_time.isoformat(sep=" ")
+            command_content["rangeBeforeMinutes"] = int(payload.range_before_minutes or 0)
+            command_content["rangeAfterMinutes"] = int(payload.range_after_minutes or 0)
+        elif begin_time or end_time:
+            command_content["timeRangeMode"] = "between"
+            if begin_time:
+                command_content["logBeginTime"] = begin_time.isoformat(sep=" ")
+            if end_time:
+                command_content["logEndTime"] = end_time.isoformat(sep=" ")
         return command_content
 
     @classmethod
@@ -1300,6 +1510,50 @@ class TicketLogPullService:
             point_time - timedelta(minutes=before_minutes),
             point_time + timedelta(minutes=after_minutes),
         )
+
+    @classmethod
+    def _build_retry_payload(cls, record: TicketLogPullRecord) -> TicketLogPullCreateModel | None:
+        """
+        从历史记录恢复重新拉取所需的提交参数。
+        :param record: 日志拉取记录
+        :return: 可重新提交的创建模型
+        """
+        command_content = record.command_content if isinstance(record.command_content, dict) else cls._json_loads(
+            record.command_content, {}
+        )
+        time_range_mode = str(command_content.get("timeRangeMode") or "").strip().lower()
+        payload_data: dict[str, Any] = {
+            "vendorId": record.vendor_id,
+            "storeId": record.store_id,
+            "posNo": record.pos_no,
+            "commandDataType": record.command_data_type,
+            "modifyTime": command_content.get("modifyTime"),
+            "path": command_content.get("path"),
+            "fileMaxSize": int(command_content.get("fileMaxSize") or 500),
+            "zipMaxSize": int(command_content.get("zipMaxSize") or 500),
+            "storageMode": record.storage_mode,
+        }
+        point_time_value = command_content.get("logPointTime")
+        if time_range_mode == "point" and point_time_value not in (None, ""):
+            payload_data.update(
+                {
+                    "logPointTime": point_time_value,
+                    "rangeBeforeMinutes": command_content.get("rangeBeforeMinutes"),
+                    "rangeAfterMinutes": command_content.get("rangeAfterMinutes"),
+                }
+            )
+        else:
+            payload_data.update(
+                {
+                    "logBeginTime": command_content.get("logBeginTime") or record.log_begin_time,
+                    "logEndTime": command_content.get("logEndTime") or record.log_end_time,
+                }
+            )
+        try:
+            return TicketLogPullCreateModel.model_validate(payload_data)
+        except Exception as exc:
+            logger.warning("恢复日志拉取参数失败: %s", exc)
+            return None
 
     @classmethod
     def _normalize_command_content(cls, content: Any) -> dict[str, str]:
