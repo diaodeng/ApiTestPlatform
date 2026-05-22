@@ -86,6 +86,7 @@ class TstepTypeEnum(Enum):
     webui = 3
     folder = 4
     desktopui = 5
+    ai_analysis = 6
 
 
 class RunTypeEnum(Enum):

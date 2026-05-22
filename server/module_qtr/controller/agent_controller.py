@@ -5,21 +5,24 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket
+from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
 from config.get_db import get_db
 from module_hrm.entity.vo.agent_vo import AgentModel
 from module_hrm.service.agent_service import AgentService
+from module_hrm.service.desktop_case_service import DesktopCaseService
+from module_hrm.service.web_case_service import WebCaseService
 from module_hrm.utils.util import decompress_str_to_dict
 from module_qtr.service.agent_bootstrap_service import AgentBootstrapService
 from module_qtr.service.agent_service import (
     agents,
-    send_message as agent_service_send_message,
     response_futures,
 )
-from module_hrm.service.desktop_case_service import DesktopCaseService
-from module_hrm.service.web_case_service import WebCaseService
+from module_qtr.service.agent_service import (
+    send_message as agent_service_send_message,
+)
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 from utils.snowflake import snowIdWorker
@@ -79,6 +82,10 @@ def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool
         "web_run_status",
         "web_run_finished",
         "web_run_error",
+        "ai_analysis_step",
+        "ai_analysis_status",
+        "ai_analysis_finished",
+        "ai_analysis_error",
         "desktop_record_event",
         "desktop_record_status",
         "desktop_record_finished",
@@ -94,6 +101,12 @@ def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool
             return True
         if message_type in ("web_run_step", "web_run_status", "web_run_finished", "web_run_error"):
             WebCaseService.handle_agent_run_event(event_db, agent_code, message_data)
+            return True
+        if message_type in ("ai_analysis_step", "ai_analysis_status", "ai_analysis_finished", "ai_analysis_error"):
+            logger.info(
+                f"AI分析Agent事件，agent={agent_code}, type={message_type}, "
+                f"data={_summarize_message(message_data)}"
+            )
             return True
         if message_type in (
             "desktop_record_event",
@@ -240,6 +253,13 @@ async def get_agent_config_by_key(config_key: str, query_db: Session = Depends(g
 
 @agentController.websocket("/ws/{agent_code}")
 async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session = Depends(get_db)):
+    """
+    处理 Agent WebSocket 长连接。
+    :param agent_code: Agent 编码，用于路由请求和回传结果
+    :param websocket: 当前 WebSocket 连接
+    :param db: 数据库会话
+    :return: 无
+    """
     # await websocket.accept()
     await manager.connect(agent_code, websocket)
     # agents[agent_code] = websocket
@@ -263,7 +283,11 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
 
     try:
         while True:
-            data = await manager.agents[agent_code].receive_text()
+            current_websocket = manager.agents.get(agent_code)
+            if current_websocket is None:
+                logger.info(f"agent {agent_code} 已从连接表移除，结束 WebSocket 循环")
+                break
+            data = await current_websocket.receive_text()
             agent_status[agent_code]["heart_status"] = True
             agent_status[agent_code]["heart_time"] = datetime.now()
             # 解析接收到的消息
@@ -335,6 +359,8 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                 # 如果不是分片消息，则直接处理（这里可以根据需要添加逻辑）
                 pass
 
+    except WebSocketDisconnect as e:
+        logger.info(f"Agent {agent_code} WebSocket 已断开: {e}")
     except Exception as e:
         logger.exception(e)
         logger.error(f"Error with {agent_code}: connection closed, {e}")

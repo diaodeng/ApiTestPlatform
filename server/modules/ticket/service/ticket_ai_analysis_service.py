@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -20,7 +21,9 @@ from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.do.project_do import HrmProject
-from module_hrm.enums.enums import QtrDataStatusEnum
+from module_hrm.enums.enums import QtrDataStatusEnum, TstepTypeEnum
+from module_qtr.service.agent_service import agents as connected_agents
+from module_qtr.service.agent_service import send_message as agent_send_message
 from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
@@ -51,11 +54,13 @@ class TicketAiAnalysisService:
     CONFIG_WORKER_SANDBOX = "ticket.ai.worker.sandbox"
     CONFIG_WORKER_TIMEOUT = "ticket.ai.worker.timeoutSec"
     CONFIG_WORKSPACE_ROOT = "ticket.ai.workspace.root"
+    CONFIG_AGENT_CODE = "ticket.ai.agent.code"
     DEFAULT_WORKER_COMMAND = "codex exec"
     DEFAULT_WORKER_MODEL = ""
     DEFAULT_WORKER_SANDBOX = "workspace-write"
     DEFAULT_WORKER_TIMEOUT = 3600
     DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[4] / "logs" / "ticket_ai_analysis"
+    DEFAULT_AGENT_CODE = ""
     ACTIVE_STATUSES = {
         TicketAiAnalysisStatus.CREATED.value,
         TicketAiAnalysisStatus.RUNNING.value,
@@ -349,6 +354,12 @@ class TicketAiAnalysisService:
                 str(cls.DEFAULT_WORKSPACE_ROOT),
                 "AI分析任务工作区根目录",
             ),
+            (
+                cls.CONFIG_AGENT_CODE,
+                "工单AI分析Agent编码",
+                cls.DEFAULT_AGENT_CODE,
+                "AI分析任务优先投递的Agent编码，留空则自动选择在线Agent",
+            ),
         ]
         now = datetime.now()
         for config_key, config_name, config_value, remark in defaults:
@@ -459,6 +470,88 @@ class TicketAiAnalysisService:
         return TicketLogPullDao.get_record_by_id(db, int(latest_summary["id"]))
 
     @classmethod
+    def _resolve_agent_code(cls, db: Session, requested_agent_code: str | None = None) -> str:
+        """
+        解析 AI 分析任务使用的 Agent 编码。
+        :param db: 数据库会话
+        :param requested_agent_code: 请求指定的 Agent 编码
+        :return: Agent 编码
+        """
+        if str(requested_agent_code or "").strip():
+            return str(requested_agent_code).strip()
+        configured_agent_code = cls._get_config_text(db, cls.CONFIG_AGENT_CODE, cls.DEFAULT_AGENT_CODE)
+        if configured_agent_code:
+            return configured_agent_code
+        if connected_agents:
+            return next(iter(connected_agents.keys()))
+        return ""
+
+    @staticmethod
+    def _build_agent_request_payload(
+        *,
+        task_id: int,
+        ticket: Ticket,
+        mapping: TicketAiRepoMapping,
+        context_payload: dict[str, Any],
+        ticket_payload: dict[str, Any],
+        timeline_payload: Any,
+        prompt_template: str,
+        schema_payload: dict[str, Any],
+        result_path: str,
+        timeout_sec: int,
+    ) -> dict[str, Any]:
+        """
+        构建发送给 Agent 的 AI 分析请求体。
+        :param task_id: 任务ID
+        :param ticket: 工单对象
+        :param mapping: 仓库映射对象
+        :param context_payload: 上下文快照
+        :param ticket_payload: 工单快照
+        :param timeline_payload: 工单时间线快照
+        :param prompt_template: 提示词模板
+        :param schema_payload: JSON Schema
+        :param result_path: 结果文件路径
+        :return: 请求体
+        """
+        return {
+            "requestType": TstepTypeEnum.ai_analysis.value,
+            "command": "run_ticket_ai_analysis",
+            "taskId": task_id,
+            "ticketId": ticket.ticket_id,
+            "projectId": ticket.project_id,
+            "ticketNo": ticket.ticket_no,
+            "mapping": TicketAiAnalysisService._json_safe_value(CamelCaseUtil.transform_result(mapping)),
+            "context": TicketAiAnalysisService._json_safe_value(context_payload),
+            "ticket": TicketAiAnalysisService._json_safe_value(ticket_payload),
+            "timeline": TicketAiAnalysisService._json_safe_value(timeline_payload),
+            "promptTemplate": prompt_template,
+            "resultSchema": schema_payload,
+            "resultPath": result_path,
+            "timeoutSec": timeout_sec,
+        }
+
+    @staticmethod
+    def _extract_agent_response_result(response: Any) -> dict[str, Any]:
+        """
+        提取 Agent 响应中的 result 内容。
+        :param response: Agent 响应对象
+        :return: result 字典
+        """
+        if response is None:
+            return {}
+        if isinstance(response, dict):
+            result = response.get("result")
+            if isinstance(result, dict):
+                return result
+            if isinstance(response.get("analysis_result"), dict):
+                return response["analysis_result"]
+            return {}
+        result = getattr(response, "result", None)
+        if isinstance(result, dict):
+            return result
+        return {}
+
+    @classmethod
     def _decode_log_text(cls, text: str | None) -> str:
         """
         将日志内容解码为可读文本。
@@ -529,10 +622,10 @@ class TicketAiAnalysisService:
         }
 
     @classmethod
-    def _build_prompt(cls, context_path: str, mapping: TicketAiRepoMapping, ticket: Ticket) -> str:
+    def _build_prompt(cls, workspace_path: str, mapping: TicketAiRepoMapping, ticket: Ticket) -> str:
         """
         构建 Codex 分析提示词。
-        :param context_path: 上下文文件路径
+        :param workspace_path: 任务工作区路径
         :param mapping: 仓库映射
         :param ticket: 工单对象
         :return: 提示词文本
@@ -540,7 +633,7 @@ class TicketAiAnalysisService:
         return f"""你是工单自动分析 Worker，请基于当前工作区中的上下文进行根因分析。
 
 当前任务目录:
-{context_path}
+{workspace_path}
 
 仓库信息:
 - 项目: {mapping.project_name}
@@ -551,7 +644,7 @@ class TicketAiAnalysisService:
 
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
-2. 优先阅读 {context_path}/ticket.json、{context_path}/timeline.json、{context_path}/logs.txt。
+2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
 3. 如果仓库可用，请结合代码搜索、调用链、日志和历史事件分析根因。
 4. 输出严格 JSON，不要输出多余说明文本。
 5. 结果必须包含以下字段:
@@ -1021,6 +1114,8 @@ class TicketAiAnalysisService:
         log_record = cls._resolve_log_pull_record(db, ticket_id, request.log_pull_record_id)
         context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
         context_payload["forceRefresh"] = bool(request.force_refresh)
+        if request.agent_code:
+            context_payload["selectedAgentCode"] = request.agent_code
         workspace_root = cls._resolve_workspace_root(db)
         task_id = snowIdWorker.get_id()
         workspace_dir = workspace_root / f"ticket_{ticket.ticket_id}" / f"task_{task_id}"
@@ -1045,9 +1140,10 @@ class TicketAiAnalysisService:
         timeline_file.write_text(cls._dumps(timeline_payload), encoding="utf-8")
         logs_file.write_text(logs_text, encoding="utf-8")
 
-        prompt_text = cls._build_prompt(str(workspace_dir), mapping, ticket)
-        prompt_file.write_text(prompt_text, encoding="utf-8")
-        schema_file.write_text(cls._dumps(cls._build_result_schema(ticket, mapping)), encoding="utf-8")
+        prompt_template = cls._build_prompt("{workspace_path}", mapping, ticket)
+        schema_payload = cls._build_result_schema(ticket, mapping)
+        prompt_file.write_text(prompt_template, encoding="utf-8")
+        schema_file.write_text(cls._dumps(schema_payload), encoding="utf-8")
 
         now = datetime.now()
         task = TicketAiAnalysisTask(
@@ -1068,7 +1164,7 @@ class TicketAiAnalysisService:
             status=TicketAiAnalysisStatus.CREATED.value,
             status_desc="待执行",
             error_message=None,
-            prompt_text=prompt_text,
+            prompt_text=prompt_template,
             raw_output="",
             analysis_result=None,
             analysis_context=cls._json_safe_value(context_payload),
@@ -1098,6 +1194,7 @@ class TicketAiAnalysisService:
                         "version_key": mapping.version_key,
                         "repo_url": mapping.repo_url,
                         "branch_name": mapping.branch_name,
+                        "agent_code": request.agent_code or None,
                     },
                     create_time=now,
                 ),
@@ -1398,100 +1495,141 @@ class TicketAiAnalysisService:
         result_file = Path(task.result_path or workspace_dir / "result.json")
         prompt_file = Path(task.prompt_path or workspace_dir / "prompt.txt")
         if not prompt_file.exists():
-            prompt_file.write_text(cls._build_prompt(str(workspace_dir), mapping, ticket), encoding="utf-8")
+            prompt_file.write_text(cls._build_prompt("{workspace_path}", mapping, ticket), encoding="utf-8")
         if not schema_file.exists():
             schema_file.write_text(cls._dumps(cls._build_result_schema(ticket, mapping)), encoding="utf-8")
-
-        command, repo_path, timeout_sec, codex_home = cls._build_worker_command(
-            db, mapping, workspace_dir, schema_file, result_file
-        )
-        cls._log_task_step(task_id, "COMMAND", "构建 Worker 命令", repo_path=str(repo_path))
+        prompt_template = task.prompt_text or prompt_file.read_text(encoding="utf-8")
+        schema_payload = cls._build_result_schema(ticket, mapping)
+        timeout_sec = cls._get_config_int(db, cls.CONFIG_WORKER_TIMEOUT, cls.DEFAULT_WORKER_TIMEOUT)
+        requested_agent_code = str((task.analysis_context or {}).get("selectedAgentCode") or "").strip()
+        agent_code = cls._resolve_agent_code(db, requested_agent_code)
         cls._log_task_step(
             task_id,
-            "HOME",
-            "准备独立 CODEX_HOME",
-            codex_home=str(codex_home),
-            env_status=cls._describe_worker_env(codex_home),
-            env_detail=cls._describe_worker_env_detail(codex_home),
+            "AGENT",
+            "解析 AI 执行 Agent",
+            agent_code=agent_code or "<none>",
+            configured_agent_code=cls._get_config_text(db, cls.CONFIG_AGENT_CODE, cls.DEFAULT_AGENT_CODE) or "<auto>",
+            connected_agent_count=len(connected_agents),
         )
-        prompt_text = task.prompt_text or prompt_file.read_text(encoding="utf-8")
+        if not agent_code:
+            cls._log_task_step(task_id, "FAIL", "未找到可用的在线 Agent")
+            cls._mark_task_status(
+                db,
+                task_id,
+                status=TicketAiAnalysisStatus.FAILED.value,
+                status_desc="未找到Agent",
+                error_message="未找到可用的在线 Agent，请先启动本地 Agent 并连接到服务端",
+                finished_at=datetime.now(),
+                command_line="agent:<none>",
+            )
+            db.commit()
+            return
         started_at = datetime.now()
-        cls._log_task_step(task_id, "STATUS", "更新任务状态为执行中", started_at=started_at.isoformat())
+        cls._log_task_step(
+            task_id,
+            "STATUS",
+            "更新任务状态为执行中",
+            started_at=started_at.isoformat(),
+            agent_code=agent_code,
+            timeout_sec=timeout_sec,
+        )
         cls._mark_task_status(
             db,
             task_id,
             status=TicketAiAnalysisStatus.RUNNING.value,
             status_desc="分析中",
             started_at=started_at,
-            command_line=" ".join(command),
+            command_line=f"agent:{agent_code}",
         )
         db.commit()
 
+        ticket_payload = cls._json_safe_value(CamelCaseUtil.transform_result(ticket))
+        timeline_payload = cls._json_safe_value(
+            CamelCaseUtil.transform_result(TicketDao.get_timeline(db, ticket.ticket_id))
+        )
+        context_payload = cls._json_safe_value(task.analysis_context or {})
         raw_stdout = ""
         raw_stderr = ""
         result_text = ""
         try:
+            request_payload = cls._build_agent_request_payload(
+                task_id=task_id,
+                ticket=ticket,
+                mapping=mapping,
+                context_payload=context_payload,
+                ticket_payload=ticket_payload,
+                timeline_payload=timeline_payload,
+                prompt_template=prompt_template,
+                schema_payload=schema_payload,
+                result_path=str(result_file),
+                timeout_sec=timeout_sec,
+            )
             cls._log_task_step(
                 task_id,
                 "EXEC",
-                "开始执行 Worker",
-                command_line=" ".join(command),
+                "发送 AI 分析任务到 Agent",
+                agent_code=agent_code,
+                request_type=TstepTypeEnum.ai_analysis.value,
                 timeout_sec=timeout_sec,
-                cwd=str(repo_path),
             )
-            return_code, raw_stdout, raw_stderr = cls._execute_worker(
-                command=command,
-                prompt_text=prompt_text,
-                timeout_sec=timeout_sec,
-                cwd=repo_path,
-                codex_home=codex_home,
+            agent_response = asyncio.run(
+                agent_send_message(
+                    agent_code,
+                    request_payload,
+                    timeout_seconds=timeout_sec,
+                )
             )
+            response_object = getattr(agent_response, "response", None)
+            if isinstance(response_object, dict):
+                response_dump = response_object
+            elif response_object is not None and hasattr(response_object, "model_dump"):
+                response_dump = response_object.model_dump()
+            else:
+                response_dump = {}
+            raw_stdout = cls._dumps(cls._json_safe_value(response_dump))
+            raw_stderr = ""
             cls._persist_worker_streams(workspace_dir, raw_stdout, raw_stderr)
             cls._log_task_step(
                 task_id,
                 "EXEC",
-                "Worker 执行结束",
-                return_code=return_code,
-                stdout_len=len(raw_stdout or ""),
-                stderr_len=len(raw_stderr or ""),
-                stderr_tail=cls._summarize_worker_error(raw_stderr, None, ""),
-                stderr_excerpt=cls._summarize_worker_error(raw_stderr, raw_stdout, ""),
-                stderr_context=cls._extract_stderr_context(raw_stderr),
+                "Agent 返回结果",
+                status_code=getattr(agent_response, "status_code", None),
+                response_type=type(response_object).__name__ if response_object is not None else "None",
+                response_message=getattr(agent_response, "message", None),
             )
-            if result_file.exists():
-                result_text = result_file.read_text(encoding="utf-8")
-                cls._log_task_step(task_id, "PARSE", "读取结果文件", result_file=str(result_file))
-            elif raw_stdout.strip():
-                result_text = raw_stdout.strip().splitlines()[-1]
-                cls._log_task_step(task_id, "PARSE", "使用标准输出最后一行作为结果")
-            elif raw_stderr.strip():
-                result_text = raw_stderr.strip()
-                cls._log_task_step(task_id, "PARSE", "使用标准错误作为结果")
-            parsed_result: dict[str, Any] | None = None
-            if result_text.strip():
-                try:
-                    parsed_result = json.loads(result_text)
-                    cls._log_task_step(task_id, "PARSE", "结果 JSON 解析成功")
-                except Exception:
-                    try:
-                        parsed_result = json.loads(raw_stdout.strip().splitlines()[-1])
-                        cls._log_task_step(task_id, "PARSE", "使用标准输出最后一行 JSON 解析成功")
-                    except Exception:
-                        parsed_result = None
-            if not parsed_result:
-                cls._log_task_step(task_id, "FAIL", "Worker 未返回可解析的 JSON 结果")
+            if getattr(agent_response, "status_code", 500) != 200 or not bool(
+                getattr(response_object, "success", True)
+            ):
                 failure_message = (
-                    cls._extract_stderr_context(raw_stderr)
-                    or cls._extract_stderr_context(raw_stdout)
-                    or cls._summarize_worker_error(
-                        raw_stderr,
-                        raw_stdout,
-                        "AI Worker 未返回可解析的 JSON 结果",
-                    )
+                    getattr(response_object, "message", None)
+                    or getattr(agent_response, "message", None)
+                    or "Agent 返回失败"
                 )
-                raise ValueError(
-                    failure_message
+                cls._log_task_step(task_id, "FAIL", "Agent 执行失败", error=failure_message)
+                raise ValueError(failure_message)
+            response_payload = cls._extract_agent_response_result(response_object)
+            result_text = ""
+            if response_payload:
+                result_text = cls._dumps(response_payload)
+            parsed_result = (
+                response_payload.get("analysis_result")
+                or response_payload.get("analysisResult")
+                or response_payload.get("result")
+            )
+            if isinstance(parsed_result, str):
+                try:
+                    parsed_result = json.loads(parsed_result)
+                except Exception:
+                    parsed_result = None
+            if not isinstance(parsed_result, dict):
+                cls._log_task_step(task_id, "FAIL", "Agent 未返回可解析的分析结果")
+                failure_message = (
+                    response_payload.get("error_message")
+                    or response_payload.get("message")
+                    or getattr(agent_response, "message", None)
+                    or "AI Agent 未返回可解析的分析结果"
                 )
+                raise ValueError(failure_message)
             normalized = cls._normalize_analysis_result(result_payload=parsed_result, ticket=ticket, mapping=mapping)
             cls._log_task_step(task_id, "PERSIST", "写回工单与 RCA 结果")
             cls._persist_success_result(db, task, ticket, normalized, result_text or raw_stdout, None)
@@ -1504,25 +1642,10 @@ class TicketAiAnalysisService:
                 finished_at=finished_at,
                 analysis_result=normalized,
                 raw_output=result_text or raw_stdout,
-                command_line=" ".join(command),
+                command_line=f"agent:{agent_code}",
             )
             db.commit()
             cls._log_task_step(task_id, "DONE", "AI 分析任务完成")
-            return
-        except subprocess.TimeoutExpired as exc:
-            cls._log_task_step(task_id, "ERROR", "Worker 执行超时", error=str(exc))
-            logger.exception(f"AI分析任务[{task_id}] Worker执行超时")
-            failure_message = cls._summarize_worker_error(raw_stderr, raw_stdout, f"AI Worker 执行超时：{exc}")
-            cls._mark_task_status(
-                db,
-                task_id,
-                status=TicketAiAnalysisStatus.FAILED.value,
-                status_desc="执行超时",
-                error_message=failure_message,
-                finished_at=datetime.now(),
-                command_line=" ".join(command),
-            )
-            db.commit()
             return
         except Exception as exc:
             cls._log_task_step(task_id, "ERROR", "AI 分析任务执行失败", error=str(exc))
@@ -1535,7 +1658,7 @@ class TicketAiAnalysisService:
                 status_desc="分析失败",
                 error_message=failure_message,
                 finished_at=datetime.now(),
-                command_line=" ".join(command),
+                command_line=f"agent:{agent_code}",
             )
             db.commit()
             return
