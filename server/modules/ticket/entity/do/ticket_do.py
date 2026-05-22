@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
@@ -155,6 +155,82 @@ class TicketRca(Base):
     structured_data: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="RCA结构化扩展数据")
     created_by_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="创建人ID")
     created_by_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建人名称")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
+class TicketAiRepoMapping(Base):
+    """
+    工单 AI 分析仓库映射表，用于维护项目、版本与仓库分支的对应关系。
+    """
+
+    __tablename__ = "ticket_ai_repo_mapping"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version_key", name="uk_ticket_ai_repo_mapping_project_version"),
+        Index("idx_ticket_ai_repo_mapping_project_enabled", "project_id", "enabled"),
+    )
+
+    mapping_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="映射ID")
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="项目ID")
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称")
+    version_key: Mapped[str] = mapped_column(String(100), nullable=False, comment="版本标识")
+    repo_url: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="仓库地址")
+    branch_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="分支名称")
+    local_repo_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="Worker本地仓库路径")
+    workspace_root: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="Worker工作区根目录")
+    worker_command: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="Worker执行命令")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否默认映射")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, comment="是否启用")
+    remark: Mapped[str] = mapped_column(Text, nullable=True, comment="备注")
+    extra_data: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="扩展字段")
+    create_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建者")
+    update_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="更新者")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
+class TicketAiAnalysisTask(Base):
+    """
+    工单 AI 分析任务表，记录任务上下文、执行状态、结果和回写信息。
+    """
+
+    __tablename__ = "ticket_ai_analysis_task"
+
+    task_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="任务ID")
+    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="工单ID")
+    project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="项目ID")
+    mapping_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="仓库映射ID")
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称")
+    version_key: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="版本标识")
+    repo_url: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="仓库地址")
+    branch_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="分支名称")
+    local_repo_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="本地仓库路径")
+    workspace_root: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="工作区根目录")
+    workspace_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="任务工作区路径")
+    prompt_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="提示词文件路径")
+    result_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="结果文件路径")
+    command_line: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="执行命令")
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="created", comment="任务状态")
+    status_desc: Mapped[str] = mapped_column(String(200), nullable=False, default="待执行", comment="状态描述")
+    error_message: Mapped[str] = mapped_column(Text, nullable=True, comment="失败信息")
+    prompt_text: Mapped[str] = mapped_column(long_text_type(), nullable=False, default="", comment="提示词内容")
+    raw_output: Mapped[str] = mapped_column(long_text_type(), nullable=False, default="", comment="AI原始输出")
+    analysis_result: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="结构化分析结果")
+    analysis_context: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="任务上下文快照")
+    source_log_pull_record_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源日志记录ID")
+    source_log_view_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="stored", comment="日志来源模式"
+    )
+    submitted_by_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="提交人ID")
+    submitted_by_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="提交人名称")
+    create_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建者")
+    update_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="更新者")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="开始执行时间")
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="结束执行时间")
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
     update_time: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
