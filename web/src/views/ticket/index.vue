@@ -30,7 +30,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="模块" prop="moduleId">
-        <el-select v-model="queryParams.moduleId" placeholder="所属模块" clearable filterable style="width: 180px">
+        <el-select v-model="queryParams.moduleId" placeholder="所属模块" clearable filterable :disabled="!queryParams.projectId" style="width: 180px">
           <el-option v-for="item in queryModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
         </el-select>
       </el-form-item>
@@ -154,6 +154,11 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
+            <el-form-item label="工单号" prop="ticketNo">
+              <el-input v-model="form.ticketNo" placeholder="请输入外部系统工单号" maxlength="64" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
             <el-form-item label="所属项目" prop="projectId">
               <el-select v-model="form.projectId" placeholder="请选择项目" filterable clearable>
                 <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
@@ -162,9 +167,14 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="所属模块" prop="moduleId">
-              <el-select v-model="form.moduleId" placeholder="请选择模块" filterable clearable>
+              <el-select v-model="form.moduleId" placeholder="请选择模块" filterable clearable :disabled="!form.projectId">
                 <el-option v-for="item in formModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
               </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="版本号" prop="versionKey">
+              <el-input v-model="form.versionKey" placeholder="请输入版本号，供AI分析和追溯" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -337,6 +347,7 @@
           <el-descriptions-item label="当前处理人">{{ detail.currentAssigneeName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="所属项目">{{ detail.projectName || detail.merchantName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="所属模块">{{ detail.moduleName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="版本号">{{ detail.versionKey || detail.extraData?.versionKey || '-' }}</el-descriptions-item>
           <el-descriptions-item label="日志拉取状态">
             <el-tag
               v-if="detail.latestLogPull?.status"
@@ -679,9 +690,243 @@
               </el-form-item>
             </el-form>
           </el-tab-pane>
+          <el-tab-pane label="AI分析">
+            <div class="panel-header mb16">
+              <div class="panel-inline">
+                <span>AI分析任务</span>
+                <el-tag v-if="latestAiAnalysisTask?.status" :type="getAiStatusTagType(latestAiAnalysisTask.status)">
+                  {{ getAiStatusLabel(latestAiAnalysisTask.status) }}
+                </el-tag>
+              </div>
+              <div class="panel-inline">
+                <el-button type="primary" @click="openAiAnalysisDialog" v-hasPermi="['ticket:ai:analysis:run']">
+                  发起AI分析
+                </el-button>
+                <el-button @click="loadAiAnalysisTasks" :loading="aiTaskLoading" v-hasPermi="['ticket:ai:analysis:list']">
+                  刷新任务
+                </el-button>
+                <el-button type="warning" plain @click="openAiRepoMappingDialog()" v-hasPermi="['ticket:ai:mapping:add']">
+                  新增映射
+                </el-button>
+              </div>
+            </div>
+            <el-descriptions :column="3" border class="mb16">
+              <el-descriptions-item label="最新执行状态">
+                <el-tag v-if="latestAiAnalysisTask?.status" :type="getAiStatusTagType(latestAiAnalysisTask.status)">
+                  {{ getAiStatusLabel(latestAiAnalysisTask.status) }}
+                </el-tag>
+                <span v-else>-</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="最新提交时间">
+                {{ parseTime(latestAiAnalysisTask?.createTime) || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="最新完成时间">
+                {{ parseTime(latestAiAnalysisTask?.finishedAt || latestAiAnalysisTask?.updateTime) || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="版本标识">{{ latestAiAnalysisTask?.versionKey || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="仓库地址" :span="2">{{ latestAiAnalysisTask?.repoUrl || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="分支名称">{{ latestAiAnalysisTask?.branchName || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="置信度">{{ formatAiConfidence(aiAnalysisResult?.confidence) }}</el-descriptions-item>
+              <el-descriptions-item label="根因" :span="3">{{ aiAnalysisResult?.rootCause || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="分析摘要" :span="3">{{ aiAnalysisResult?.analysisSummary || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="修复建议" :span="3">{{ aiAnalysisResult?.fixSuggestion || '-' }}</el-descriptions-item>
+            </el-descriptions>
+            <el-alert
+              v-if="latestAiAnalysisTask?.errorMessage"
+              type="error"
+              show-icon
+              :title="latestAiAnalysisTask.errorMessage"
+              class="mb16"
+            />
+            <el-card shadow="never" class="mb16">
+              <template #header>
+                <div class="panel-header">
+                  <div class="panel-inline">
+                    <span>任务历史</span>
+                    <el-tag v-if="aiTaskTotal">{{ aiTaskTotal }} 条</el-tag>
+                  </div>
+                  <el-button link type="primary" @click="loadAiAnalysisTasks" :loading="aiTaskLoading">刷新</el-button>
+                </div>
+              </template>
+              <el-table v-loading="aiTaskLoading" :data="aiTaskList" row-key="taskId">
+                <el-table-column label="提交时间" prop="createTime" width="170">
+                  <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
+                </el-table-column>
+                <el-table-column label="状态" width="110" align="center">
+                  <template #default="scope">
+                    <el-tag :type="getAiStatusTagType(scope.row.status)">{{ getAiStatusLabel(scope.row.status) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="版本" prop="versionKey" width="120" show-overflow-tooltip />
+                <el-table-column label="仓库地址" prop="repoUrl" min-width="220" show-overflow-tooltip />
+                <el-table-column label="分支" prop="branchName" width="160" show-overflow-tooltip />
+                <el-table-column label="提交人" prop="submittedByName" width="120" show-overflow-tooltip />
+                <el-table-column label="完成时间" prop="finishedAt" width="170">
+                  <template #default="scope">{{ parseTime(scope.row.finishedAt) }}</template>
+                </el-table-column>
+              </el-table>
+              <pagination
+                v-show="aiTaskTotal > 0"
+                :total="aiTaskTotal"
+                v-model:page="aiTaskQuery.pageNum"
+                v-model:limit="aiTaskQuery.pageSize"
+                @pagination="loadAiAnalysisTasks"
+              />
+            </el-card>
+            <el-card shadow="never">
+              <template #header>
+                <div class="panel-header">
+                  <div class="panel-inline">
+                    <span>仓库映射</span>
+                    <el-tag v-if="aiRepoMappingTotal">{{ aiRepoMappingTotal }} 条</el-tag>
+                  </div>
+                  <el-button link type="primary" @click="loadAiRepoMappings" :loading="aiRepoMappingLoading">刷新</el-button>
+                </div>
+              </template>
+              <el-table v-loading="aiRepoMappingLoading" :data="aiRepoMappingList" row-key="mappingId">
+                <el-table-column label="版本" prop="versionKey" width="150" show-overflow-tooltip />
+                <el-table-column label="仓库地址" prop="repoUrl" min-width="220" show-overflow-tooltip />
+                <el-table-column label="分支" prop="branchName" width="160" show-overflow-tooltip />
+                <el-table-column label="默认" width="80" align="center">
+                  <template #default="scope">
+                    <el-tag v-if="scope.row.isDefault" type="success" size="small">默认</el-tag>
+                    <span v-else>-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="启用" width="80" align="center">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.enabled ? 'success' : 'info'" size="small">
+                      {{ scope.row.enabled ? '启用' : '停用' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="工作区" prop="workspaceRoot" min-width="180" show-overflow-tooltip />
+                <el-table-column label="操作" width="180" fixed="right">
+                  <template #default="scope">
+                    <el-button link type="primary" @click="openAiRepoMappingDialog(scope.row)" v-hasPermi="['ticket:ai:mapping:edit']">
+                      编辑
+                    </el-button>
+                    <el-button link type="danger" @click="deleteAiRepoMapping(scope.row)" v-hasPermi="['ticket:ai:mapping:remove']">
+                      删除
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+            <el-card shadow="never" class="mt16">
+              <template #header>AI结果原文</template>
+              <pre class="json-block">{{ aiAnalysisResult ? formatJson(aiAnalysisResult) : '暂无AI分析结果' }}</pre>
+            </el-card>
+          </el-tab-pane>
         </el-tabs>
       </template>
     </el-drawer>
+
+    <el-dialog
+      v-model="aiAnalysisOpen"
+      title="发起AI分析"
+      width="620px"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetAiAnalysisDialog"
+    >
+      <el-form ref="aiAnalysisRef" :model="aiAnalysisTaskForm" :rules="aiAnalysisRules" label-width="110px">
+        <el-form-item label="版本号" prop="versionKey">
+          <el-input
+            v-model="aiAnalysisTaskForm.versionKey"
+            placeholder="请输入版本号，系统将按工单所属项目 + 版本号自动匹配仓库映射"
+          />
+        </el-form-item>
+        <el-form-item label="强制刷新">
+          <el-switch v-model="aiAnalysisTaskForm.forceRefresh" />
+        </el-form-item>
+        <el-alert
+          title="分析任务会自动读取当前工单的日志和时间线，并通过 Codex Worker 写回结果。"
+          type="info"
+          show-icon
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="aiAnalysisOpen = false">取消</el-button>
+        <el-button type="primary" :loading="aiAnalysisSubmitting" @click="submitAiAnalysis" v-hasPermi="['ticket:ai:analysis:run']">
+          提交分析
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="aiRepoMappingOpen"
+      title="仓库映射"
+      width="760px"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetAiRepoMappingForm"
+    >
+      <el-form ref="aiRepoMappingRef" :model="aiRepoMappingForm" :rules="aiRepoMappingRules" label-width="110px">
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="项目" prop="projectId">
+              <el-select v-model="aiRepoMappingForm.projectId" placeholder="请选择项目" filterable style="width: 100%">
+                <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="版本标识" prop="versionKey">
+              <el-input v-model="aiRepoMappingForm.versionKey" placeholder="例如 release/2.1.3" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="仓库地址" prop="repoUrl">
+              <el-input v-model="aiRepoMappingForm.repoUrl" placeholder="git@gitlab.xxx/project.git" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="分支名称" prop="branchName">
+              <el-input v-model="aiRepoMappingForm.branchName" placeholder="release/2.1.3" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="本地仓库" prop="localRepoPath">
+              <el-input v-model="aiRepoMappingForm.localRepoPath" placeholder="Worker节点仓库缓存路径" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="工作区根目录">
+              <el-input v-model="aiRepoMappingForm.workspaceRoot" placeholder="留空则使用系统默认" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="Worker命令">
+              <el-input v-model="aiRepoMappingForm.workerCommand" placeholder="留空则使用系统默认 codex exec" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="默认映射">
+              <el-switch v-model="aiRepoMappingForm.isDefault" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="启用状态">
+              <el-switch v-model="aiRepoMappingForm.enabled" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="备注">
+              <el-input v-model="aiRepoMappingForm.remark" type="textarea" :rows="3" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <template #footer>
+        <el-button @click="aiRepoMappingOpen = false">取消</el-button>
+        <el-button type="primary" :loading="aiRepoMappingSubmitting" @click="submitAiRepoMapping">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-model="logPullContentOpen"
@@ -784,15 +1029,20 @@ import {
   addTicketComment,
   addTicketEvent,
   addTicketLogPull,
+  addTicketAiAnalysis,
+  addTicketAiRepoMapping,
   assignTicket,
   changeTicketStatus,
   delTicket,
+  delTicketAiRepoMapping,
   downloadTicketImportTemplate,
   getTicket,
   getTicketLogPullContent,
   getTicketTimeline,
   importTicketExcel,
   listTicket,
+  listTicketAiAnalysisTasks,
+  listTicketAiRepoMappings,
   listTicketLogPulls,
   listTicketModuleOptions,
   listTicketProjectOptions,
@@ -801,6 +1051,7 @@ import {
   retryTicketLogPull,
   saveTicketRca,
   searchTicketNaturalLanguage,
+  updateTicketAiRepoMapping,
   updateTicket
 } from '@/api/ticket/ticket'
 import {
@@ -850,6 +1101,40 @@ const logPullContentLoading = ref(false)
 const logPullContentOpen = ref(false)
 const logPullList = ref([])
 const logPullTotal = ref(0)
+const aiAnalysisLoading = ref(false)
+const aiAnalysisSubmitting = ref(false)
+const aiAnalysisOpen = ref(false)
+const aiRepoMappingOpen = ref(false)
+const aiRepoMappingLoading = ref(false)
+const aiRepoMappingSubmitting = ref(false)
+const aiTaskLoading = ref(false)
+const aiTaskList = ref([])
+const aiTaskTotal = ref(0)
+const aiRepoMappingList = ref([])
+const aiRepoMappingTotal = ref(0)
+const aiAnalysisTaskForm = ref({
+  versionKey: '',
+  forceRefresh: false
+})
+const aiRepoMappingForm = ref({
+  mappingId: undefined,
+  projectId: undefined,
+  projectName: '',
+  versionKey: '',
+  repoUrl: '',
+  branchName: '',
+  localRepoPath: '',
+  workspaceRoot: '',
+  workerCommand: '',
+  isDefault: false,
+  enabled: true,
+  remark: ''
+})
+const aiTaskQuery = ref({
+  pageNum: 1,
+  pageSize: 10,
+  status: undefined
+})
 const selectedLogPullRecord = ref(null)
 const selectedLogPullContent = ref(null)
 const logPullViewForm = ref({
@@ -915,6 +1200,7 @@ const data = reactive({
   },
   rules: {
     title: [{ required: true, message: '工单标题不能为空', trigger: 'blur' }],
+    ticketNo: [{ required: true, message: '工单号不能为空', trigger: 'blur' }],
     projectId: [{ required: true, message: '所属项目不能为空', trigger: 'change' }],
     customerPriority: [{ required: true, message: '对方优先级不能为空', trigger: 'change' }],
     internalPriority: [{ required: true, message: '内部优先级不能为空', trigger: 'change' }]
@@ -930,6 +1216,15 @@ const data = reactive({
     vendorId: [{ required: true, message: 'vendorId不能为空', trigger: 'blur' }],
     storeId: [{ required: true, message: 'storeId不能为空', trigger: 'blur' }],
     posNo: [{ required: true, message: 'posNo不能为空', trigger: 'blur' }]
+  },
+  aiAnalysisRules: {
+    versionKey: [{ required: true, message: '版本号不能为空', trigger: 'blur' }]
+  },
+  aiRepoMappingRules: {
+    projectId: [{ required: true, message: '请选择项目', trigger: 'change' }],
+    versionKey: [{ required: true, message: '版本标识不能为空', trigger: 'blur' }],
+    repoUrl: [{ required: true, message: '仓库地址不能为空', trigger: 'blur' }],
+    branchName: [{ required: true, message: '分支名称不能为空', trigger: 'blur' }]
   }
 })
 
@@ -946,7 +1241,9 @@ const {
   rules,
   assignRules,
   statusRules,
-  logPullRules
+  logPullRules,
+  aiAnalysisRules,
+  aiRepoMappingRules
 } = toRefs(data)
 
 const detailTitle = computed(() => `工单详情：${detail.value.title || ''}`)
@@ -996,6 +1293,15 @@ function formatLogViewSource(source) {
   if (value === 'fallback') return '实时回退'
   return '入库内容'
 }
+
+const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null)
+const aiAnalysisResult = computed(() => detail.value.aiAnalysis || latestAiAnalysisTask.value?.analysisResult || null)
+const currentAiMapping = computed(() => {
+  return aiRepoMappingList.value.find(
+    item => item.projectId === detail.value.projectId && item.versionKey === aiAnalysisTaskForm.value.versionKey
+  ) || null
+})
+
 const timelineItems = computed(() => {
   const items = []
   ;(timeline.value.statusHistory || []).forEach(item => {
@@ -1038,10 +1344,12 @@ function getList() {
 function reset() {
   form.value = {
     ticketId: undefined,
+    ticketNo: undefined,
     title: undefined,
     description: undefined,
     projectId: undefined,
     moduleId: undefined,
+    versionKey: undefined,
     customerPriority: 'P3',
     internalPriority: 'P3',
     severity: undefined,
@@ -1276,6 +1584,166 @@ function refreshDetail() {
   })
 }
 
+function createDefaultAiRepoMappingForm(projectId, projectName) {
+  return {
+    mappingId: undefined,
+    projectId,
+    projectName: projectName || '',
+    versionKey: '',
+    repoUrl: '',
+    branchName: '',
+    localRepoPath: '',
+    workspaceRoot: '',
+    workerCommand: '',
+    isDefault: false,
+    enabled: true,
+    remark: ''
+  }
+}
+
+function resetAiRepoMappingForm() {
+  aiRepoMappingForm.value = createDefaultAiRepoMappingForm(detail.value.projectId, detail.value.projectName || detail.value.merchantName || '')
+  if (proxy.$refs.aiRepoMappingRef) {
+    proxy.resetForm('aiRepoMappingRef')
+  }
+}
+
+function loadAiRepoMappings(silent = false) {
+  if (!detail.value.projectId) {
+    aiRepoMappingList.value = []
+    aiRepoMappingTotal.value = 0
+    return Promise.resolve()
+  }
+  if (!silent) {
+    aiRepoMappingLoading.value = true
+  }
+  const query = {
+    pageNum: 1,
+    pageSize: 50,
+    projectId: detail.value.projectId
+  }
+  return listTicketAiRepoMappings(query).then(response => {
+    aiRepoMappingList.value = response.rows || []
+    aiRepoMappingTotal.value = response.total || 0
+  }).finally(() => {
+    if (!silent) {
+      aiRepoMappingLoading.value = false
+    }
+  })
+}
+
+function loadAiAnalysisTasks(silent = false) {
+  if (!currentTicketId.value) {
+    return Promise.resolve()
+  }
+  if (!silent) {
+    aiTaskLoading.value = true
+  }
+  return listTicketAiAnalysisTasks(currentTicketId.value, aiTaskQuery.value).then(response => {
+    aiTaskList.value = response.rows || []
+    aiTaskTotal.value = response.total || 0
+  }).finally(() => {
+    if (!silent) {
+      aiTaskLoading.value = false
+    }
+  })
+}
+
+function resetAiAnalysisDialog() {
+  aiAnalysisTaskForm.value.versionKey = detail.value.versionKey || detail.value.extraData?.versionKey || ''
+  aiAnalysisTaskForm.value.forceRefresh = false
+}
+
+function openAiAnalysisDialog() {
+  if (!detail.value.projectId) {
+    proxy.$modal.msgWarning('当前工单缺少项目，无法发起AI分析')
+    return
+  }
+  if (!detail.value.versionKey && !detail.value.extraData?.versionKey) {
+    proxy.$modal.msgWarning('当前工单缺少版本号，请先完善版本号信息')
+  }
+  aiAnalysisTaskForm.value.versionKey = detail.value.versionKey || detail.value.extraData?.versionKey || aiAnalysisTaskForm.value.versionKey || ''
+  aiAnalysisOpen.value = true
+}
+
+function submitAiAnalysis() {
+  proxy.$refs.aiAnalysisRef.validate(valid => {
+    if (!valid) return
+    if (!aiAnalysisTaskForm.value.versionKey) {
+      proxy.$modal.msgWarning('请先完善版本号信息')
+      return
+    }
+    aiAnalysisSubmitting.value = true
+    addTicketAiAnalysis(currentTicketId.value, {
+      versionKey: aiAnalysisTaskForm.value.versionKey,
+      forceRefresh: aiAnalysisTaskForm.value.forceRefresh
+    }).then(() => {
+      proxy.$modal.msgSuccess('AI分析任务已提交')
+      aiAnalysisOpen.value = false
+      Promise.all([refreshDetail(), loadAiAnalysisTasks(true), getList()])
+    }).finally(() => {
+      aiAnalysisSubmitting.value = false
+    })
+  })
+}
+
+function openAiRepoMappingDialog(row) {
+  if (!detail.value.projectId) {
+    proxy.$modal.msgWarning('当前工单缺少项目，无法维护映射')
+    return
+  }
+  if (row) {
+    aiRepoMappingForm.value = {
+      mappingId: row.mappingId,
+      projectId: row.projectId,
+      projectName: row.projectName || detail.value.projectName || '',
+      versionKey: row.versionKey || '',
+      repoUrl: row.repoUrl || '',
+      branchName: row.branchName || '',
+      localRepoPath: row.localRepoPath || '',
+      workspaceRoot: row.workspaceRoot || '',
+      workerCommand: row.workerCommand || '',
+      isDefault: Boolean(row.isDefault),
+      enabled: row.enabled !== false,
+      remark: row.remark || ''
+    }
+  } else {
+    resetAiRepoMappingForm()
+  }
+  aiRepoMappingOpen.value = true
+}
+
+function submitAiRepoMapping() {
+  proxy.$refs.aiRepoMappingRef.validate(valid => {
+    if (!valid) return
+    aiRepoMappingSubmitting.value = true
+    const payload = { ...aiRepoMappingForm.value }
+    const request = payload.mappingId ? updateTicketAiRepoMapping(payload) : addTicketAiRepoMapping(payload)
+    request.then(() => {
+      proxy.$modal.msgSuccess(payload.mappingId ? '映射更新成功' : '映射新增成功')
+      aiRepoMappingOpen.value = false
+      loadAiRepoMappings(true)
+    }).finally(() => {
+      aiRepoMappingSubmitting.value = false
+    })
+  })
+}
+
+function deleteAiRepoMapping(row) {
+  if (!row?.mappingId) {
+    return
+  }
+  proxy.$modal.confirm(`是否确认删除版本映射 "${row.versionKey}"？`).then(() => {
+    aiRepoMappingLoading.value = true
+    return delTicketAiRepoMapping(row.mappingId)
+  }).then(() => {
+    proxy.$modal.msgSuccess('删除成功')
+    loadAiRepoMappings(true)
+  }).catch(() => {}).finally(() => {
+    aiRepoMappingLoading.value = false
+  })
+}
+
 function openDetail(row) {
   currentTicketId.value = row.ticketId
   detailOpen.value = true
@@ -1289,11 +1757,15 @@ function openDetail(row) {
   Promise.all([
     getTicket(row.ticketId),
     getTicketTimeline(row.ticketId),
-    loadLogPullList()
+    loadLogPullList(),
+    loadAiAnalysisTasks(true)
   ]).then(([detailResponse, timelineResponse]) => {
     detail.value = detailResponse.data || {}
     timeline.value = timelineResponse.data || {}
     rcaForm.value = timeline.value.rca || {}
+    aiAnalysisTaskForm.value.mappingId = detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId
+    loadAiRepoMappings(true)
+    loadAiAnalysisTasks(true)
   })
 }
 
@@ -1574,6 +2046,38 @@ function formatJson(value) {
   return JSON.stringify(value, null, 2)
 }
 
+function getAiStatusTagType(value) {
+  const status = String(value || '')
+  if (status === 'success') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'running') return 'warning'
+  if (status === 'created') return 'info'
+  return 'info'
+}
+
+function getAiStatusLabel(value) {
+  const status = String(value || '')
+  if (status === 'success') return '成功'
+  if (status === 'failed') return '失败'
+  if (status === 'running') return '执行中'
+  if (status === 'created') return '待执行'
+  return status || '-'
+}
+
+function formatAiConfidence(value) {
+  if (value === null || value === undefined || value === '') {
+    return '-'
+  }
+  const numeric = Number(value)
+  if (Number.isNaN(numeric)) {
+    return String(value)
+  }
+  if (numeric > 0 && numeric <= 1) {
+    return `${Math.round(numeric * 100)}%`
+  }
+  return numeric.toFixed ? numeric.toFixed(2) : String(numeric)
+}
+
 function formatSeconds(seconds) {
   if (!seconds) return '-'
   const hour = Math.floor(seconds / 3600)
@@ -1587,6 +2091,8 @@ watch(detailOpen, value => {
     stopLogPullAutoRefresh()
     logPullContentOpen.value = false
     logPullSubmitOpen.value = false
+    aiAnalysisOpen.value = false
+    aiRepoMappingOpen.value = false
   }
 })
 

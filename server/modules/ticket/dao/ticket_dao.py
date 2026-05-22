@@ -67,7 +67,19 @@ def _json_safe_value(value: Any) -> Any:
         return [_json_safe_value(item) for item in value]
     if isinstance(value, set):
         return [_json_safe_value(item) for item in value]
-    return value
+    if hasattr(value, "__table__"):
+        return {
+            column.name: _json_safe_value(getattr(value, column.name))
+            for column in value.__table__.columns
+        }
+    if hasattr(value, "model_dump"):
+        try:
+            return _json_safe_value(value.model_dump(by_alias=False, exclude_none=False))
+        except Exception:
+            return str(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 class TicketDao:

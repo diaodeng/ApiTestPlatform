@@ -176,6 +176,20 @@ export const dynamicRoutes = [
                 meta: {title: 'QTR调度日志', activeMenu: '/qtr/job'}
             }
         ]
+    },
+    {
+        path: '/ticket/aiRepoMapping',
+        component: Layout,
+        hidden: true,
+        permissions: ['ticket:ai:mapping:list'],
+        children: [
+            {
+                path: 'index',
+                component: () => import('@/views/ticket/ai-repo-mapping/index.vue'),
+                name: 'TicketAiRepoMapping',
+                meta: {title: 'AI仓库映射', activeMenu: '/ticket/aiRepoMapping'}
+            }
+        ]
     }
 ]
 

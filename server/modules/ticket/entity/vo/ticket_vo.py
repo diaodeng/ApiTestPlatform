@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
@@ -25,6 +25,7 @@ class TicketBaseModel(BaseModel):
     merchant_name: str | None = Field(default=None, description="所属项目名称（兼容历史字段 merchantName）")
     module_id: int | None = Field(default=None, description="所属模块ID")
     module_name: str | None = Field(default=None, description="所属模块名称")
+    version_key: str | None = Field(default=None, description="版本号")
     category_id: int | None = Field(default=None, description="问题分类ID")
     category_name: str | None = Field(default=None, description="问题分类名称")
     status: str | None = Field(default=TicketStatus.PENDING.value, description="当前状态")
@@ -58,6 +59,7 @@ class TicketCreateModel(TicketBaseModel):
     新增工单模型。
     """
 
+    ticket_no: str = Field(description="工单编号")
     title: str = Field(description="工单标题")
 
 
@@ -162,6 +164,134 @@ class TicketRcaModel(BaseModel):
     created_by_name: str | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None
+
+
+class TicketAiRepoMappingBaseModel(BaseModel):
+    """
+    工单 AI 仓库映射基础模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    mapping_id: int | None = None
+    project_id: int = Field(description="所属项目ID")
+    project_name: str = Field(default="", description="项目名称")
+    version_key: str = Field(description="版本标识")
+    repo_url: str = Field(default="", description="仓库地址")
+    branch_name: str = Field(default="", description="分支名称")
+    local_repo_path: str = Field(default="", description="本地仓库路径")
+    workspace_root: str = Field(default="", description="工作区根目录")
+    worker_command: str = Field(default="", description="Worker执行命令")
+    is_default: bool = Field(default=False, description="是否默认映射")
+    enabled: bool = Field(default=True, description="是否启用")
+    remark: str | None = Field(default=None, description="备注")
+    extra_data: dict[str, Any] | None = Field(default=None, description="扩展字段")
+    create_by: str | None = None
+    update_by: str | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+@as_query
+class TicketAiRepoMappingQueryModel(QueryModel):
+    """
+    工单 AI 仓库映射查询模型。
+    """
+
+    project_id: int | None = Field(default=None, description="所属项目ID")
+    version_key: str | None = Field(default=None, description="版本标识")
+    enabled: bool | None = Field(default=None, description="是否启用")
+    keyword: str | None = Field(default=None, description="项目名、版本或仓库关键字")
+
+
+class TicketAiRepoMappingCreateModel(TicketAiRepoMappingBaseModel):
+    """
+    工单 AI 仓库映射新增模型。
+    """
+
+    project_id: int = Field(description="所属项目ID")
+    version_key: str = Field(description="版本标识")
+
+
+class TicketAiRepoMappingUpdateModel(TicketAiRepoMappingBaseModel):
+    """
+    工单 AI 仓库映射编辑模型。
+    """
+
+    mapping_id: int = Field(description="映射ID")
+
+
+class TicketAiAnalysisRequestModel(BaseModel):
+    """
+    工单 AI 分析提交模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    mapping_id: int | None = Field(default=None, description="仓库映射ID，兼容手动指定")
+    version_key: str = Field(description="版本标识，用于匹配仓库映射")
+    log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
+    force_refresh: bool = Field(default=False, description="是否强制重新分析")
+
+    @model_validator(mode="after")
+    def validate_request(self):
+        """
+        校验 AI 分析提交参数。
+        :return: 当前模型
+        """
+        self.version_key = str(self.version_key or "").strip()
+        if not self.version_key:
+            raise ValueError("版本号不能为空")
+        return self
+
+
+class TicketAiAnalysisTaskModel(BaseModel):
+    """
+    工单 AI 分析任务模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    task_id: int | None = None
+    ticket_id: int | None = None
+    project_id: int | None = None
+    mapping_id: int | None = None
+    project_name: str | None = None
+    version_key: str | None = None
+    repo_url: str | None = None
+    branch_name: str | None = None
+    local_repo_path: str | None = None
+    workspace_root: str | None = None
+    workspace_path: str | None = None
+    prompt_path: str | None = None
+    result_path: str | None = None
+    command_line: str | None = None
+    status: str | None = None
+    status_desc: str | None = None
+    error_message: str | None = None
+    prompt_text: str | None = None
+    raw_output: str | None = None
+    analysis_result: dict[str, Any] | None = None
+    analysis_context: dict[str, Any] | None = None
+    source_log_pull_record_id: int | None = None
+    source_log_view_mode: str | None = None
+    submitted_by_id: int | None = None
+    submitted_by_name: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+@as_query
+class TicketAiAnalysisTaskQueryModel(QueryModel):
+    """
+    工单 AI 分析任务查询模型。
+    """
+
+    status: str | None = Field(default=None, description="任务状态")
+    ticket_id: int | None = Field(default=None, description="工单ID")
+    version_key: str | None = Field(default=None, description="版本标识")
 
 
 class KnowledgeArticleModel(BaseModel):
