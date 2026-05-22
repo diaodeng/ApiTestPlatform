@@ -1,6 +1,9 @@
 ## 更新历史
 
 ### latest
+1. 修复 `module_qtr.controller.agent_controller.websocket_endpoint` 读取 `manager.agents[agent_code]` 时因连接表被并发清理导致的 `KeyError`
+1. 修复客户端执行工单 AI 分析时，服务端将 WebSocket 正常断开误记为 `WebSocketDisconnect(1006)` 异常并打印堆栈的问题
+1. 修复服务端启动时报错：`TicketLogPullCreateModel` 从错误的 `ticket_vo` 模块导入，已改为从 `ticket_log_pull_vo` 正确导入
 1. Web录制页步骤列表支持录制中删除并同步后端事件存储，删除后不影响录制过程
 1. 修复服务器监控接口在 Linux 容器内读取磁盘分区时因设备路径不可访问导致失败的问题
 1. 自定义js脚本禁用变量替换

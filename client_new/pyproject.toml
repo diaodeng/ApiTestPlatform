@@ -22,6 +22,7 @@ dependencies = [
     "pytesseract>=0.3.13",
     "pywin32>=311",
     "websockets>=15.0.1",
+    "dotenv>=0.9.9",
 ]
 
 

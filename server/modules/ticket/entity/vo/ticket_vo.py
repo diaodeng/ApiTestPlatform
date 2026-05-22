@@ -26,6 +26,8 @@ class TicketBaseModel(BaseModel):
     module_id: int | None = Field(default=None, description="所属模块ID")
     module_name: str | None = Field(default=None, description="所属模块名称")
     version_key: str | None = Field(default=None, description="版本号")
+    need_log_pull: bool | None = Field(default=None, description="创建工单后是否自动拉取日志")
+    log_pull_config: dict[str, Any] | None = Field(default=None, description="创建工单时的日志拉取配置")
     category_id: int | None = Field(default=None, description="问题分类ID")
     category_name: str | None = Field(default=None, description="问题分类名称")
     status: str | None = Field(default=TicketStatus.PENDING.value, description="当前状态")
@@ -231,6 +233,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     mapping_id: int | None = Field(default=None, description="仓库映射ID，兼容手动指定")
     version_key: str = Field(description="版本标识，用于匹配仓库映射")
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
+    agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
 
     @model_validator(mode="after")
@@ -242,6 +245,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
         self.version_key = str(self.version_key or "").strip()
         if not self.version_key:
             raise ValueError("版本号不能为空")
+        self.agent_code = str(self.agent_code or "").strip() or None
         return self
 
 

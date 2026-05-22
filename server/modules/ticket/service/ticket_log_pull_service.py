@@ -529,6 +529,8 @@ class TicketLogPullService:
                     "storage_mode": storage_mode,
                     "log_begin_time": log_begin_time,
                     "log_end_time": log_end_time,
+                    "auto_ai_enabled": bool(payload.auto_ai_enabled),
+                    "ai_agent_code": str(payload.ai_agent_code or "").strip() or None,
                 },
             )
             query_db.commit()
@@ -828,6 +830,7 @@ class TicketLogPullService:
                     },
                 )
                 db.commit()
+                cls._trigger_auto_ai_analysis(db, record.id)
         except Exception as exc:
             error_message = str(exc) or exc.__class__.__name__
             cls._exception_record(
@@ -845,6 +848,61 @@ class TicketLogPullService:
                     logger.warning(f"删除临时日志压缩包失败: {temp_file_path}")
 
     @classmethod
+    def _trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> None:
+        """
+        根据日志拉取记录中的自动化配置触发 AI 分析。
+        :param db: 数据库会话
+        :param record_id: 日志拉取记录ID
+        :return: 无
+        """
+        record = TicketLogPullDao.get_record_by_id(db, record_id)
+        if not record or not isinstance(record.command_content, dict):
+            return
+        automation = record.command_content.get("_automation")
+        if not isinstance(automation, dict) or not automation.get("autoAiEnabled"):
+            return
+        agent_code = str(automation.get("aiAgentCode") or "").strip()
+        if not agent_code:
+            logger.warning("日志拉取记录[%s] 已配置自动AI但未填写Agent", record_id)
+            return
+        ticket = TicketDao.get_ticket_by_id(db, record.ticket_id)
+        if not ticket:
+            logger.warning("日志拉取记录[%s] 自动AI触发失败，工单不存在", record_id)
+            return
+        version_key = str(getattr(ticket, "version_key", "") or "").strip()
+        if not version_key and isinstance(ticket.extra_data, dict):
+            version_key = str(ticket.extra_data.get("version_key") or "").strip()
+        if not version_key:
+            logger.warning("日志拉取记录[%s] 自动AI触发失败，工单缺少版本号", record_id)
+            return
+        try:
+            from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel
+            from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+
+            request = TicketAiAnalysisRequestModel(
+                version_key=version_key,
+                log_pull_record_id=record.id,
+                agent_code=agent_code,
+            )
+            logger.info(
+                "日志拉取记录[%s] 触发自动AI分析 | ticket_id=%s, version_key=%s, agent_code=%s",
+                record_id,
+                record.ticket_id,
+                version_key,
+                agent_code,
+            )
+            result = TicketAiAnalysisService.create_analysis_task_services(db, record.ticket_id, request, None)
+            if not result.is_success:
+                logger.warning(
+                    "日志拉取记录[%s] 自动AI分析未成功提交 | ticket_id=%s, message=%s",
+                    record_id,
+                    record.ticket_id,
+                    result.message,
+                )
+        except Exception as exc:
+            logger.exception("日志拉取记录[%s] 触发自动AI分析失败: %s", record_id, exc)
+
+    @classmethod
     def _submit_external_request(cls, db: Session, record: TicketLogPullRecord) -> None:
         """
         向外部平台提交日志拉取申请。
@@ -853,6 +911,9 @@ class TicketLogPullService:
         :return: 无
         """
         external_config = cls._get_external_config_dict(db)
+        command_content = record.command_content if isinstance(record.command_content, dict) else cls._json_loads(
+            record.command_content, {}
+        )
         response = requests.post(
             external_config["insertUrl"],
             data={
@@ -861,7 +922,7 @@ class TicketLogPullService:
                 "posNo": record.pos_no,
                 "commandType": record.command_type,
                 "commandDataType": record.command_data_type,
-                "commandContent": cls._json_dumps(record.command_content or {}),
+                "commandContent": cls._json_dumps(cls._strip_internal_command_content(command_content)),
             },
             timeout=(10, 30),
             headers=cls._build_external_request_headers(external_config),
@@ -1484,7 +1545,23 @@ class TicketLogPullService:
                 command_content["logBeginTime"] = begin_time.isoformat(sep=" ")
             if end_time:
                 command_content["logEndTime"] = end_time.isoformat(sep=" ")
+        if payload.auto_ai_enabled:
+            command_content["_automation"] = {
+                "autoAiEnabled": True,
+                "aiAgentCode": str(payload.ai_agent_code or "").strip() or None,
+            }
         return command_content
+
+    @staticmethod
+    def _strip_internal_command_content(command_content: dict[str, Any] | None) -> dict[str, Any]:
+        """
+        移除 commandContent 中仅供系统内部使用的扩展字段。
+        :param command_content: 原始 commandContent
+        :return: 发送给外部接口的 commandContent
+        """
+        content = dict(command_content or {})
+        content.pop("_automation", None)
+        return content
 
     @classmethod
     def _resolve_log_time_range(
@@ -1549,6 +1626,10 @@ class TicketLogPullService:
                     "logEndTime": command_content.get("logEndTime") or record.log_end_time,
                 }
             )
+        automation = command_content.get("_automation") if isinstance(command_content.get("_automation"), dict) else {}
+        if automation:
+            payload_data["autoAiEnabled"] = automation.get("autoAiEnabled")
+            payload_data["aiAgentCode"] = automation.get("aiAgentCode")
         try:
             return TicketLogPullCreateModel.model_validate(payload_data)
         except Exception as exc:

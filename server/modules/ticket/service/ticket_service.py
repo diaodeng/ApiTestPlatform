@@ -35,10 +35,12 @@ from modules.ticket.entity.vo.ticket_vo import (
     WorkflowStatusModel,
     WorkflowTransitionModel,
 )
+from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from utils.common_util import CamelCaseUtil
+from utils.log_util import logger
 from utils.snowflake import snowIdWorker
 
 
@@ -106,6 +108,19 @@ def _extract_ticket_version_key(extra_data: Any) -> str:
         if str(value or "").strip():
             return str(value).strip()
     return ""
+
+
+def _extract_ticket_automation_config(data: dict[str, Any]) -> tuple[bool, dict[str, Any] | None]:
+    """
+    提取工单创建或编辑时携带的日志自动化配置。
+    :param data: 工单字段字典
+    :return: 是否启用日志拉取、日志拉取配置
+    """
+    need_log_pull = bool(data.pop("need_log_pull", False))
+    log_pull_config = data.pop("log_pull_config", None)
+    if isinstance(log_pull_config, dict):
+        return need_log_pull, log_pull_config
+    return need_log_pull, None
 
 
 def _is_end_status(status: str) -> bool:
@@ -490,10 +505,16 @@ class TicketService:
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
             data.pop("project_name", None)
+            need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()
             extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
             if version_key:
                 extra_data["version_key"] = version_key
+            if log_pull_config:
+                extra_data["ticket_automation"] = {
+                    "need_log_pull": need_log_pull or bool(log_pull_config),
+                    "log_pull_config": log_pull_config,
+                }
             data["extra_data"] = extra_data or None
             is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
             if not is_valid:
@@ -502,6 +523,10 @@ class TicketService:
                 return CrudResponseModel(is_success=False, message="工单号不能为空")
             if TicketDao.get_ticket_by_no(query_db, str(data["ticket_no"]).strip()):
                 return CrudResponseModel(is_success=False, message="工单号已存在")
+            if need_log_pull or log_pull_config:
+                if not log_pull_config:
+                    return CrudResponseModel(is_success=False, message="启用日志拉取时需要填写日志拉取信息")
+                TicketLogPullCreateModel.model_validate(log_pull_config)
             data.update(relation_fields)
             data["ticket_no"] = str(data.get("ticket_no") or "").strip()
             data["status"] = data.get("status") or TicketStatus.PENDING.value
@@ -533,11 +558,29 @@ class TicketService:
                     operator_id=_user_id(current_user),
                     operator_name=_user_name(current_user),
                     content="工单创建",
-                    event_data={"ticket_no": ticket.ticket_no, "status": ticket.status},
+                    event_data={
+                        "ticket_no": ticket.ticket_no,
+                        "status": ticket.status,
+                        "need_log_pull": bool(need_log_pull or log_pull_config),
+                    },
                     create_time=now,
                 ),
             )
             query_db.commit()
+            if need_log_pull or log_pull_config:
+                try:
+                    log_pull_result = TicketLogPullService.create_log_pull_services(
+                        query_db,
+                        ticket.ticket_id,
+                        TicketLogPullCreateModel.model_validate(log_pull_config),
+                        current_user,
+                    )
+                    if not log_pull_result.is_success:
+                        logger.warning(
+                            "工单[%s]创建后自动提交日志拉取失败: %s", ticket.ticket_id, log_pull_result.message
+                        )
+                except Exception as exc:
+                    logger.exception("工单[%s]创建后自动提交日志拉取异常: %s", ticket.ticket_id, exc)
             result = CamelCaseUtil.transform_result(ticket)
             cls._decorate_ticket_item(result)
             return CrudResponseModel(is_success=True, message="新增成功", result=result)
@@ -610,6 +653,7 @@ class TicketService:
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
             data.pop("project_name", None)
+            need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             form_extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
@@ -618,6 +662,13 @@ class TicketService:
                 extra_data["version_key"] = version_key
             elif "version_key" in extra_data:
                 extra_data.pop("version_key", None)
+            if log_pull_config:
+                extra_data["ticket_automation"] = {
+                    "need_log_pull": need_log_pull or bool(log_pull_config),
+                    "log_pull_config": log_pull_config,
+                }
+            elif "ticket_automation" in extra_data and not need_log_pull:
+                extra_data.pop("ticket_automation", None)
             data["extra_data"] = extra_data or None
             is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
             if not is_valid:
