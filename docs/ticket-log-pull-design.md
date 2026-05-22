@@ -1,0 +1,91 @@
+# 工单日志拉取设计
+
+## 目标
+- 在工单详情页直接提交日志/DB 拉取申请，替代人工访问外部平台手动拉取。
+- 全流程记录状态、异常信息、原始压缩包地址、归档地址和解析后的日志文本。
+- 支持本地目录或 FTP 目录归档，并可在页面查看解析后的日志内容。
+- 外部地址、Cookie、归档与轮询参数统一收口到系统参数配置管理，不再在工单详情页内联维护。
+
+## 落点
+- 后端模块：`server/modules/ticket`
+- 前端页面：`web/src/views/ticket/index.vue`
+- 全局启动恢复：`server/server.py`
+
+## 数据结构
+- `ticket_log_pull_record`
+  - 记录工单ID、vendor/store/pos、commandContent、日志时间范围。
+  - 记录外部命令ID、外部状态、压缩包地址、归档地址。
+  - 记录内部状态、错误信息、异常堆栈、日志摘要、压缩入库文本。
+
+## 状态流转
+- `created`：任务已创建，等待后台执行。
+- `submitting`：正在调用外部提交接口。
+- `polling`：外部申请成功，正在轮询列表接口。
+- `downloading`：外部已生成压缩包，正在下载归档。
+- `processing`：正在解析 ZIP 内日志并压缩入库。
+- `success`：流程成功结束。
+- `failed`：外部平台返回失败或轮询超时。
+- `exception`：程序自身执行异常。
+
+## 后台处理流程
+1. 页面提交 `vendorId/storeId/posNo/commandDataType/modifyTime/path` 等参数。
+2. 后端写入 `ticket_log_pull_record`，并启动线程池后台任务。
+3. 后台调用外部 `insert` 接口提交拉取申请。
+4. 后台轮询外部 `page` 接口，按 vendor/store/pos/dataType/commandContent 匹配本次申请。
+5. 外部状态成功后下载 ZIP，归档到本地或 FTP。
+6. 若数据类型是日志，仅遍历 ZIP 中命名符合 `*_pos.log*` 的文件，按时间戳规则提取指定时间段日志。
+7. 将筛选结果 `gzip + base64` 压缩入库，供页面查看。
+8. 写入工单事件，保留时间线痕迹。
+9. 页面查看日志时可按当前记录的时间范围或调整后的时间范围，基于归档 ZIP 实时重新截取，不影响已入库的原始解析结果。
+
+## 日志解析规则
+- 日志时间范围必填，支持两种提交方式：
+  - 直接范围：`logBeginTime + logEndTime`
+  - 时间点范围：`logPointTime + rangeBeforeMinutes + rangeAfterMinutes`
+- 日志行首按 `YYYY-MM-DD HH:mm:ss,SSS` 识别时间戳。
+- 非时间戳行视为上一条有时间戳日志的堆栈/补充内容。
+- 仅将命中时间范围的日志块写入结果，并原样保存日志文本，不再附加文件名前缀。
+- 仅解析文件名包含 `_pos.log` 的日志文件，其他文件直接跳过。
+- 日志按时间范围完整入库，不再静默截断；如果命中内容超过 `maxContentChars`，任务直接失败并提示缩小时间范围。
+
+## 配置项
+- 配置键：
+  - `ticket.logPull.external`
+  - `ticket.logPull.storage`
+- `ticket.logPull.external` 支持项：
+  - `insertUrl`
+  - `pageUrl`
+  - `headers.cookie`
+  - `headers.origin`
+- `ticket.logPull.storage` 支持项：
+  - `mode`：`local` 或 `ftp`
+  - `localDirectory`
+  - `ftp.host/port/username/password/baseDir/passive/timeoutSec/encoding`
+  - `pollIntervalSec`
+  - `pollTimeoutSec`
+  - `downloadTimeoutSec`
+  - `maxContentChars`：入库上限，超出则失败并提示
+- 启动时会自动补齐上述两个参数键，便于直接在“参数配置管理”中维护。
+
+## 页面交互
+- 工单主列表新增“日志拉取”状态列，展示最近一次任务状态。
+- 工单详情新增“日志拉取”标签页：
+  - 提交拉取任务改为弹窗，进入标签页后默认只展示拉取记录列表。
+  - 顶部提供“拉取日志”按钮打开提交弹窗。
+  - 日志时间范围改为必填，并支持“开始/结束时间”或“时间点前后时长”二选一输入。
+  - 参数配置入口改为通用提示按钮，点击后展示参数说明与系统参数键。
+  - 下方查看记录列表和异常信息。
+  - 日志文本改为点击记录后弹窗查看，默认展示入库内容；切换到“原始文档”后才会按弹窗里的时间范围实时重截 ZIP。
+  - 后端只传压缩结果，前端通过 `decompressText` 解压后展示。
+  - 弹窗内展示“本次截取范围”，并允许在原始文档模式下调整后重新查看。
+- 日志内容默认不换行，支持通过开关切换换行显示。
+- 任务运行中自动轮询刷新列表状态。
+- 日志拉取记录提供三个动作入口：
+  - `重新拉取`：按原提交参数新建一条拉取任务。
+  - `重新下载`：从原始压缩包地址重新下载归档文件，并恢复到原存储位置。
+  - `重新截取`：按当前查看时间范围重新切片并更新当前记录的入库日志。
+
+## 当前限制
+- 解析文本仅对 `commandDataType=1` 的日志包生效；DB 包当前只归档，不做文本展开。
+- 后台任务当前使用进程内线程池，适合当前单实例运行方式；如果后续部署为多实例，建议迁移到统一任务队列。
+- “自动把日志和工单描述送模型分析”本次未接入，只保留了时间线与日志内容沉淀，后续可在此基础上追加模型调用链路。
