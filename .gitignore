@@ -23,6 +23,7 @@ _internal
 case_data
 server/caches
 server/case_data
+logs
 
 
 web/vite.config.js.timestamp*.mjs

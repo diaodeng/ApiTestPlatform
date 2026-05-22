@@ -349,6 +349,86 @@ async def create_ticket_log_pull(
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketController.post(
+    "/log-pulls/{record_id}/retry",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:add"))],
+)
+async def retry_ticket_log_pull(
+    request: Request,
+    record_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    基于原参数重新提交日志拉取任务接口。
+    :param request: 请求对象
+    :param record_id: 原日志拉取记录ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入审计信息
+    :return: 重新提交结果
+    """
+    try:
+        result = TicketLogPullService.retry_log_pull_services(query_db, record_id, current_user)
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/log-pulls/{record_id}/redownload",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:add"))],
+)
+async def redownload_ticket_log_pull(
+    request: Request,
+    record_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    重新下载日志压缩包接口。
+    :param request: 请求对象
+    :param record_id: 日志拉取记录ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入审计信息
+    :return: 重新下载结果
+    """
+    try:
+        result = TicketLogPullService.redownload_log_pull_services(query_db, record_id, current_user)
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/log-pulls/{record_id}/reextract",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:add"))],
+)
+async def reextract_ticket_log_pull(
+    request: Request,
+    record_id: int,
+    query: TicketLogPullContentQueryModel = Depends(TicketLogPullContentQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    按新的时间范围重新截取日志内容接口。
+    :param request: 请求对象
+    :param record_id: 日志拉取记录ID
+    :param query: 查看日志时使用的时间范围参数
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入审计信息
+    :return: 重新截取结果
+    """
+    try:
+        result = TicketLogPullService.reextract_log_pull_services(query_db, record_id, query, current_user)
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketController.post("/{ticket_id}/assign", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:assign"))])
 @log_decorator(title="工单指派", business_type=2)
 async def assign_ticket(
