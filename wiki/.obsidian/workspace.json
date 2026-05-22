@@ -1,0 +1,215 @@
+{
+  "main": {
+    "id": "4e8a10a3267637a4",
+    "type": "split",
+    "children": [
+      {
+        "id": "69f1513084a798c6",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "4c7ec8a52d7767e3",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "concepts/module-landscape.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "module-landscape"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "82ece58f019ed8e5",
+    "type": "split",
+    "children": [
+      {
+        "id": "2b24c6f22ef3a4c4",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "75cde8028118ab60",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "2c19ce13d5491d62",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "1753c2662d197d29",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "bb9bafc1931a593e",
+    "type": "split",
+    "children": [
+      {
+        "id": "c5fd5806099aedff",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "12fa5231b1a32a02",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "concepts/module-landscape.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "module-landscape 的反向链接列表"
+            }
+          },
+          {
+            "id": "d98cbd0c6f20ec52",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "concepts/module-landscape.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "module-landscape 的出链列表"
+            }
+          },
+          {
+            "id": "315be9186a303988",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "cb0e149043e365cf",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "1809207f1f22a905",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "concepts/module-landscape.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "module-landscape 的大纲"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false
+    }
+  },
+  "active": "4c7ec8a52d7767e3",
+  "lastOpenFiles": [
+    "entities/services/ticket-domain.md",
+    "flows/ticket-workflow-routing.md",
+    "entities/data-models/ticket-core-models.md",
+    "index.md",
+    "concepts/module-landscape.md",
+    "entities/components/web-shell.md",
+    "log.md",
+    "entities/services/hrm-domain.md",
+    "entities/components/new-client-runtime.md",
+    "entities/enums/ticket-enums.md",
+    "entities/enums/hrm-enums.md",
+    "entities/data-models/task-core-models.md",
+    "entities/data-models/hrm-core-models.md",
+    "entities/data-models/admin-core-models.md",
+    "entities/services/new-client-services.md",
+    "entities/components/new-client-shell.md",
+    "entities/services/legacy-client-features.md",
+    "entities/components/legacy-client-runtime.md",
+    "entities/components/legacy-client-shell.md",
+    "entities/services/web-feature-domains.md",
+    "entities/services/task-scheduler-domain.md",
+    "entities/services/qtr-domain.md",
+    "entities/services/admin-domain.md",
+    "entities/components/server-infrastructure.md",
+    "entities/components/new-client-bootstrap.md",
+    "entities/components/legacy-client-bootstrap.md"
+  ]
+}
