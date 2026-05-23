@@ -885,7 +885,7 @@ async def get_ticket_project_options(request: Request, query_db: Session = Depen
 @ticketController.get("/modules/options", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
 async def get_ticket_module_options(
     request: Request,
-    project_id: int | None = None,
+    projectId: int | None = None,
     query_db: Session = Depends(get_db),
 ):
     """
@@ -896,7 +896,7 @@ async def get_ticket_module_options(
     :return: 模块选项列表
     """
     try:
-        return ResponseUtil.success(data=TicketService.get_module_options_services(query_db, project_id))
+        return ResponseUtil.success(data=TicketService.get_module_options_services(query_db, projectId))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
