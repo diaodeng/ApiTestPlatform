@@ -1,9 +1,12 @@
 import argparse
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class AppSettings(BaseSettings):
@@ -219,12 +222,13 @@ class GetConfig:
             os.environ['APP_ENV'] = 'dev'
         # 读取运行环境
         run_env = (os.environ.get('APP_ENV', '') or 'dev').strip()
-        env_file = f'.env.{run_env}'
-        # 加载配置
-
-        if os.path.exists(env_file):
+        env_file = BASE_DIR / f'.env.{run_env}'
+        base_env_file = BASE_DIR / '.env.base'
+        # 按项目根目录绝对路径加载配置，避免 Celery 从其他工作目录启动时回退到默认值。
+        if env_file.exists():
             load_dotenv(env_file)
-        load_dotenv(".env.base")
+        if base_env_file.exists():
+            load_dotenv(base_env_file)
 
 
 # 实例化获取配置类
