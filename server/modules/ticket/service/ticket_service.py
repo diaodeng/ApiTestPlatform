@@ -1238,9 +1238,8 @@ class TicketService:
         """
         if not project_id:
             return []
-        module_ids = query_db.query(HrmModuleProject.module_id).filter(HrmModuleProject.project_id == project_id)
         query = query_db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
-        query = query.filter(or_(HrmModule.project_id == project_id, HrmModule.module_id.in_(module_ids)))
+        query = query.filter(HrmModule.project_id == project_id)
         modules = query.order_by(HrmModule.sort.asc(), HrmModule.create_time.desc()).all()
         seen_module_ids: set[int] = set()
         unique_modules = []
