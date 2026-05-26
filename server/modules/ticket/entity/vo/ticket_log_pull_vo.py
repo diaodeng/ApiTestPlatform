@@ -80,29 +80,28 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
         """
         if not self.modify_time and not str(self.path or "").strip():
             raise ValueError("modifyTime 和 path 至少需要填写一个")
-        has_direct_range = bool(self.log_begin_time or self.log_end_time)
-        has_point_range = bool(
-            self.log_point_time
-            or self.range_before_minutes is not None
-            or self.range_after_minutes is not None
+        fields_set = getattr(self, "model_fields_set", set()) or set()
+        has_direct_range = any(field in fields_set for field in ("log_begin_time", "log_end_time"))
+        has_point_range = any(
+            field in fields_set
+            for field in ("log_point_time", "range_before_minutes", "range_after_minutes")
         )
         if has_direct_range and has_point_range:
             raise ValueError("日志时间范围请二选一：开始/结束时间 或 时间点前后范围")
         if has_direct_range:
             if not self.log_begin_time or not self.log_end_time:
                 raise ValueError("开始时间和结束时间需要同时填写")
-            return self
-        if not self.log_point_time:
-            raise ValueError("日志时间范围必填，请填写开始/结束时间或时间点前后范围")
-
-        before_minutes = int(self.range_before_minutes or 0)
-        after_minutes = int(self.range_after_minutes or 0)
-        if before_minutes < 0 or after_minutes < 0:
-            raise ValueError("时间点前后范围不能为负数")
-        if self.range_before_minutes is None and self.range_after_minutes is None:
-            raise ValueError("请选择时间点前后时长范围")
-        if before_minutes == 0 and after_minutes == 0:
-            raise ValueError("时间点前后时长至少需要填写一侧大于 0")
+        elif has_point_range:
+            if not self.log_point_time:
+                raise ValueError("时间点前后范围模式下时间点必填")
+            before_minutes = int(self.range_before_minutes or 0)
+            after_minutes = int(self.range_after_minutes or 0)
+            if before_minutes < 0 or after_minutes < 0:
+                raise ValueError("时间点前后范围不能为负数")
+            if self.range_before_minutes is None and self.range_after_minutes is None:
+                raise ValueError("请选择时间点前后时长范围")
+            if before_minutes == 0 and after_minutes == 0:
+                raise ValueError("时间点前后时长至少需要填写一侧大于 0")
         self.auto_ai_enabled = bool(self.auto_ai_enabled)
         self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
         if self.auto_ai_enabled and not self.ai_agent_code:
