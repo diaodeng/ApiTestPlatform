@@ -486,9 +486,10 @@ class TicketLogPullService:
         now = datetime.now()
         command_content = cls._build_command_content(payload)
         log_begin_time, log_end_time = cls._resolve_log_time_range(payload)
-        if not log_begin_time or not log_end_time:
-            return CrudResponseModel(is_success=False, message="日志时间范围必填")
-        if log_begin_time > log_end_time:
+        has_explicit_range = cls._has_explicit_log_time_range(payload)
+        if has_explicit_range and (not log_begin_time or not log_end_time):
+            return CrudResponseModel(is_success=False, message="日志时间范围填写不完整")
+        if log_begin_time and log_end_time and log_begin_time > log_end_time:
             return CrudResponseModel(is_success=False, message="日志开始时间不能晚于结束时间")
 
         try:
@@ -502,8 +503,8 @@ class TicketLogPullService:
                     command_type=1,
                     command_data_type=payload.command_data_type,
                     command_content=command_content,
-                    log_begin_time=log_begin_time,
-                    log_end_time=log_end_time,
+                    log_begin_time=log_begin_time if has_explicit_range else None,
+                    log_end_time=log_end_time if has_explicit_range else None,
                     storage_mode=storage_mode,
                     status=TicketLogPullStatus.CREATED.value,
                     status_desc="已创建，等待后台执行",
@@ -718,6 +719,7 @@ class TicketLogPullService:
         temp_file_path: Path | None = None
         direct_download_ready = False
         try:
+            has_log_time_range = bool(record.log_begin_time or record.log_end_time)
             if record.status == TicketLogPullStatus.CREATED.value:
                 rows = cls._fetch_external_rows(db, record)
                 matched_row = cls._match_external_row(record, rows)
@@ -817,63 +819,89 @@ class TicketLogPullService:
                     return
                 temp_file_path, file_size = cls._download_archive(record, db)
                 storage_path = cls._store_archive(record, temp_file_path, db)
-                cls._update_status(
-                    db,
-                    record_id,
-                    status=TicketLogPullStatus.PROCESSING.value,
-                    status_desc="正在解析日志内容并压缩入库",
-                    is_error=False,
-                    update_by="system",
-                    download_file_name=temp_file_path.name,
-                    download_file_size=file_size,
-                    storage_path=storage_path,
-                )
-                record = TicketLogPullDao.get_record_by_id(db, record_id)
-                if record is None:
-                    return
-                try:
-                    content_result = cls._extract_archive_content(record, temp_file_path, db)
-                except TicketLogContentTooLargeError as exc:
-                    cls._fail_record(
+                update_kwargs: dict[str, Any] = {
+                    "download_file_name": temp_file_path.name,
+                    "download_file_size": file_size,
+                    "storage_path": storage_path,
+                }
+                if has_log_time_range:
+                    cls._update_status(
                         db,
                         record_id,
-                        status=TicketLogPullStatus.FAILED.value,
-                        status_desc="日志内容超出入库上限",
-                        error_message=str(exc),
+                        status=TicketLogPullStatus.PROCESSING.value,
+                        status_desc="正在解析日志内容并压缩入库",
+                        is_error=False,
+                        update_by="system",
+                        **update_kwargs,
                     )
-                    return
-                success_desc = "日志拉取完成"
-                if record.command_data_type == TicketLogDataType.DB.value:
-                    success_desc = "DB 拉取完成"
-                elif content_result["matched_entry_count"] == 0:
-                    success_desc = "日志拉取完成，未匹配到时间范围内日志"
-                cls._update_status(
-                    db,
-                    record_id,
-                    status=TicketLogPullStatus.SUCCESS.value,
-                    status_desc=success_desc,
-                    is_error=False,
-                    update_by="system",
-                    archive_entry_count=content_result["archive_entry_count"],
-                    matched_entry_count=content_result["matched_entry_count"],
-                    content_char_count=content_result["content_char_count"],
-                    content_truncated=content_result["content_truncated"],
-                    compressed_content=content_result["compressed_content"],
-                    content_summary=content_result["content_summary"],
-                    finished_at=datetime.now(),
-                )
+                    record = TicketLogPullDao.get_record_by_id(db, record_id)
+                    if record is None:
+                        return
+                    try:
+                        content_result = cls._extract_archive_content(record, temp_file_path, db)
+                    except TicketLogContentTooLargeError as exc:
+                        cls._fail_record(
+                            db,
+                            record_id,
+                            status=TicketLogPullStatus.FAILED.value,
+                            status_desc="日志内容超出入库上限",
+                            error_message=str(exc),
+                        )
+                        return
+                    success_desc = "日志拉取完成"
+                    if record.command_data_type == TicketLogDataType.DB.value:
+                        success_desc = "DB 拉取完成"
+                    elif content_result["matched_entry_count"] == 0:
+                        success_desc = "日志拉取完成，未匹配到时间范围内日志"
+                    cls._update_status(
+                        db,
+                        record_id,
+                        status=TicketLogPullStatus.SUCCESS.value,
+                        status_desc=success_desc,
+                        is_error=False,
+                        update_by="system",
+                        archive_entry_count=content_result["archive_entry_count"],
+                        matched_entry_count=content_result["matched_entry_count"],
+                        content_char_count=content_result["content_char_count"],
+                        content_truncated=content_result["content_truncated"],
+                        compressed_content=content_result["compressed_content"],
+                        content_summary=content_result["content_summary"],
+                        finished_at=datetime.now(),
+                        **update_kwargs,
+                    )
+                else:
+                    archive_entry_count = cls._count_archive_entries(temp_file_path)
+                    cls._update_status(
+                        db,
+                        record_id,
+                        status=TicketLogPullStatus.SUCCESS.value,
+                        status_desc="日志已下载，未截取内容",
+                        is_error=False,
+                        update_by="system",
+                        archive_entry_count=archive_entry_count,
+                        matched_entry_count=0,
+                        content_char_count=0,
+                        content_truncated=False,
+                        compressed_content=None,
+                        content_summary="日志已下载完成，未截取入库，AI 分析将使用整包压缩文件。",
+                        finished_at=datetime.now(),
+                        **update_kwargs,
+                    )
                 cls._add_ticket_event(
                     db,
                     ticket_id=record.ticket_id,
                     operator_id=None,
                     operator_name="system",
-                    content=success_desc,
+                    content="日志拉取完成" if has_log_time_range else "日志已下载，未截取内容",
                     event_data={
                         "record_id": record.id,
                         "storage_mode": record.storage_mode,
                         "storage_path": storage_path,
-                        "matched_entry_count": content_result["matched_entry_count"],
-                        "archive_entry_count": content_result["archive_entry_count"],
+                        "matched_entry_count": content_result["matched_entry_count"] if has_log_time_range else 0,
+                        "archive_entry_count": (
+                            content_result["archive_entry_count"] if has_log_time_range else archive_entry_count
+                        ),
+                        "whole_archive": not has_log_time_range,
                     },
                 )
                 db.commit()
@@ -1588,6 +1616,21 @@ class TicketLogPullService:
         if content_truncated:
             summary += "，已按配置截断"
         return summary
+
+    @staticmethod
+    def _has_explicit_log_time_range(payload: TicketLogPullCreateModel) -> bool:
+        """
+        判断提交参数是否包含明确的日志截取时间范围。
+        :param payload: 日志拉取参数
+        :return: 是否配置了时间范围
+        """
+        fields_set = getattr(payload, "model_fields_set", set()) or set()
+        has_direct_range = any(field in fields_set for field in ("log_begin_time", "log_end_time"))
+        has_point_range = any(
+            field in fields_set
+            for field in ("log_point_time", "range_before_minutes", "range_after_minutes")
+        )
+        return has_direct_range or has_point_range
 
     @classmethod
     def _compress_text(cls, text: str) -> str | None:

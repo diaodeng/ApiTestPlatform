@@ -5,12 +5,14 @@ import os
 import re
 import shutil
 import subprocess
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from dotenv import dotenv_values
 from loguru import logger
+import httpx
 
 from utils.common import get_client_root_dir
 
@@ -140,6 +142,43 @@ class TicketAiAnalysisService:
             logger.warning(f"写入 Worker 流文件失败: {exc}")
 
     @staticmethod
+    def _download_archive(url: str, target_path: Path) -> Path | None:
+        """
+        下载日志压缩包到本地工作区。
+        :param url: 压缩包下载地址
+        :param target_path: 本地保存路径
+        :return: 保存后的路径，失败返回 None
+        """
+        if not url.strip():
+            return None
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with httpx.stream("GET", url, timeout=httpx.Timeout(300.0, connect=10.0)) as response:
+            response.raise_for_status()
+            with target_path.open("wb") as file_obj:
+                for chunk in response.iter_bytes():
+                    if chunk:
+                        file_obj.write(chunk)
+        return target_path
+
+    @staticmethod
+    def _extract_archive(archive_path: Path, extract_dir: Path) -> list[str]:
+        """
+        解压日志压缩包到工作区目录。
+        :param archive_path: 压缩包路径
+        :param extract_dir: 解压目录
+        :return: 解压后的文件相对路径列表
+        """
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        extracted_files: list[str] = []
+        with zipfile.ZipFile(archive_path, "r") as zip_ref:
+            for member in zip_ref.namelist():
+                if member.endswith("/"):
+                    continue
+                zip_ref.extract(member, extract_dir)
+                extracted_files.append(member)
+        return extracted_files
+
+    @staticmethod
     def _extract_stderr_context(stderr_text: str | None, keywords: tuple[str, ...] = ("invalid_request_error", "stream disconnected", "error sending request")) -> str:
         """
         从 stderr 中提取更长上下文。
@@ -225,7 +264,7 @@ class TicketAiAnalysisService:
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
-3. 如果仓库可用，请结合代码搜索、调用链、日志和历史事件分析根因。
+3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或 {workspace_path}/logs.txt 只有说明而没有正文，请先阅读 {workspace_path}/source_logs/ 目录中的解压日志文件，再结合代码搜索、调用链、日志和历史事件分析根因。
 4. 输出严格 JSON，不要输出多余说明文本。
 5. 结果必须包含以下字段:
    - ticket_id
@@ -290,13 +329,66 @@ class TicketAiAnalysisService:
             timeline_file = workspace_dir / "timeline.json"
             context_file = workspace_dir / "context.json"
             logs_file = workspace_dir / "logs.txt"
+            source_logs_dir = workspace_dir / "source_logs"
+            source_logs_zip = workspace_dir / "source_logs.zip"
+            source_logs_manifest = workspace_dir / "source_logs_manifest.json"
 
             await cls._emit_event(event_sender, "ai_analysis_status", task_id, "准备本地工作区", workspace_path=str(workspace_dir))
             ticket_file.write_text(cls._dumps(ticket), encoding="utf-8")
             timeline_file.write_text(cls._dumps(timeline_payload), encoding="utf-8")
             context_file.write_text(cls._dumps(context_payload), encoding="utf-8")
-            logs_text = str((context_payload.get("sourceLogPull") or {}).get("text") or "")
-            logs_file.write_text(logs_text, encoding="utf-8")
+            source_log_pull = context_payload.get("sourceLogPull") or {}
+            logs_text = str(source_log_pull.get("text") or "")
+            command_result_url = str(source_log_pull.get("commandResultUrl") or "").strip()
+            storage_path = str(source_log_pull.get("storagePath") or "").strip()
+            whole_archive_mode = bool(source_log_pull.get("wholeArchiveMode"))
+            extracted_files: list[str] = []
+            if logs_text:
+                logs_file.write_text(logs_text, encoding="utf-8")
+                archive_url = ""
+            else:
+                archive_url = command_result_url or storage_path
+                if whole_archive_mode:
+                    logs_file.write_text(
+                        "\n".join(
+                            [
+                                "日志内容未入库，已改为整包分析模式。",
+                                f"压缩包地址: {archive_url or '<none>'}",
+                                f"压缩包本地路径: {source_logs_zip}",
+                                f"解压目录: {source_logs_dir}",
+                            ]
+                        ),
+                        encoding="utf-8",
+                    )
+                else:
+                    logs_file.write_text(
+                        "日志内容未入库，当前任务为时间范围模式或未配置整包分析。",
+                        encoding="utf-8",
+                    )
+                if whole_archive_mode and archive_url and str(archive_url).lower().startswith(("http://", "https://")):
+                    await cls._emit_event(
+                        event_sender,
+                        "ai_analysis_status",
+                        task_id,
+                        "下载并解压整包日志",
+                        archive_url=archive_url,
+                        archive_path=str(source_logs_zip),
+                        extract_dir=str(source_logs_dir),
+                    )
+                    downloaded = cls._download_archive(str(archive_url), source_logs_zip)
+                    if downloaded:
+                        extracted_files = cls._extract_archive(downloaded, source_logs_dir)
+                    source_logs_manifest.write_text(
+                        cls._dumps(
+                            {
+                                "archiveUrl": archive_url or "",
+                                "archivePath": str(source_logs_zip),
+                                "extractDir": str(source_logs_dir),
+                                "extractedFiles": extracted_files,
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
             schema_file.write_text(cls._dumps(schema_payload), encoding="utf-8")
 
             resolved_prompt = prompt_template.replace("{workspace_path}", str(workspace_dir))

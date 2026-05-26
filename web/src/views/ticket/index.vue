@@ -1686,8 +1686,18 @@ function validateTicketAutomationConfig() {
     return false
   }
   if (config.timeRangeMode === 'between') {
+    const hasAnyDirectValue = Boolean(config.logBeginTime || config.logEndTime)
+    if (!hasAnyDirectValue) {
+      return true
+    }
     if (!config.logBeginTime || !config.logEndTime) {
-      proxy.$modal.msgWarning('启用日志拉取时，开始时间和结束时间不能为空')
+      proxy.$modal.msgWarning('启用日志拉取时，开始时间和结束时间需要同时填写')
+      return false
+    }
+    const begin = new Date(config.logBeginTime)
+    const end = new Date(config.logEndTime)
+    if (begin > end) {
+      proxy.$modal.msgWarning('启用日志拉取时，开始时间不能晚于结束时间')
       return false
     }
   } else if (config.timeRangeMode === 'point') {
@@ -1715,11 +1725,37 @@ function submitForm() {
     if (!validateTicketAutomationConfig()) {
       return
     }
+    const logPullConfig = form.value.needLogPull ? { ...form.value.logPullConfig } : undefined
+    if (logPullConfig) {
+      if (logPullConfig.timeRangeMode === 'between') {
+        if (logPullConfig.logBeginTime || logPullConfig.logEndTime) {
+          delete logPullConfig.logPointTime
+          delete logPullConfig.rangeBeforeMinutes
+          delete logPullConfig.rangeAfterMinutes
+        } else {
+          delete logPullConfig.logBeginTime
+          delete logPullConfig.logEndTime
+          delete logPullConfig.logPointTime
+          delete logPullConfig.rangeBeforeMinutes
+          delete logPullConfig.rangeAfterMinutes
+        }
+      } else if (logPullConfig.timeRangeMode === 'point') {
+        delete logPullConfig.logBeginTime
+        delete logPullConfig.logEndTime
+      } else {
+        delete logPullConfig.logBeginTime
+        delete logPullConfig.logEndTime
+        delete logPullConfig.logPointTime
+        delete logPullConfig.rangeBeforeMinutes
+        delete logPullConfig.rangeAfterMinutes
+      }
+      delete logPullConfig.timeRangeMode
+    }
     const payload = {
       ...form.value,
       tags: tagText.value ? tagText.value.split(',').map(item => item.trim()).filter(Boolean) : undefined,
       needLogPull: Boolean(form.value.needLogPull),
-      logPullConfig: form.value.needLogPull ? { ...form.value.logPullConfig } : undefined
+      logPullConfig
     }
     if (payload.logPullConfig && !payload.logPullConfig.autoAiEnabled) {
       payload.logPullConfig.aiAgentCode = ''
@@ -2130,17 +2166,20 @@ function submitLogPull() {
       return
     }
     if (logPullForm.value.timeRangeMode === 'between') {
-      if (!logPullForm.value.logBeginTime || !logPullForm.value.logEndTime) {
-        proxy.$modal.msgWarning('开始时间和结束时间必填')
-        return
+      const hasAnyDirectValue = Boolean(logPullForm.value.logBeginTime || logPullForm.value.logEndTime)
+      if (hasAnyDirectValue) {
+        if (!logPullForm.value.logBeginTime || !logPullForm.value.logEndTime) {
+          proxy.$modal.msgWarning('开始时间和结束时间需要同时填写')
+          return
+        }
+        const begin = new Date(logPullForm.value.logBeginTime)
+        const end = new Date(logPullForm.value.logEndTime)
+        if (begin > end) {
+          proxy.$modal.msgWarning('日志开始时间不能晚于结束时间')
+          return
+        }
       }
-      const begin = new Date(logPullForm.value.logBeginTime)
-      const end = new Date(logPullForm.value.logEndTime)
-      if (begin > end) {
-        proxy.$modal.msgWarning('日志开始时间不能晚于结束时间')
-        return
-      }
-    } else {
+    } else if (logPullForm.value.timeRangeMode === 'point') {
       if (!logPullForm.value.logPointTime) {
         proxy.$modal.msgWarning('时间点必填')
         return
