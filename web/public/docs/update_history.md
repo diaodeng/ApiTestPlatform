@@ -1,6 +1,9 @@
 ## 更新历史
 
 ### latest
+1. 收紧日志拉取命中规则，改为只比较 `modifyTime/path` 且要求本地与远端可用参数个数一致
+1. 修复日志跨文件截取拼接顺序问题，按归档文件尾号逆序拼接，避免更接近当前时间的文件排到前面
+1. 优化工单日志拉取流程，新增“先查外部列表，已可下载则直接拉取；未命中再提交申请并轮询”的处理路径
 1. 修复工单创建后自动拉日志在启用“日志后自动 AI”时，外部平台轮询命中会被 `commandContent` 内部 `_automation` 字段干扰，导致状态长期停留在“已提交申请，轮询外部平台处理中”的问题
 1. 修复 `module_qtr.controller.agent_controller.websocket_endpoint` 读取 `manager.agents[agent_code]` 时因连接表被并发清理导致的 `KeyError`
 1. 修复客户端执行工单 AI 分析时，服务端将 WebSocket 正常断开误记为 `WebSocketDisconnect(1006)` 异常并打印堆栈的问题
