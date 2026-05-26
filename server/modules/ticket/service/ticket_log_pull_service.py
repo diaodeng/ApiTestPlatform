@@ -1040,6 +1040,8 @@ class TicketLogPullService:
         :param rows: 外部接口返回列表
         :return: 匹配到的记录
         """
+        # 外部平台不会回传内部自动化字段，匹配时需要忽略 `_automation`。
+        record_command_content = cls._strip_internal_command_content(record.command_content)
         for row in rows:
             if record.external_command_id and int(row.get("id") or 0) == int(record.external_command_id):
                 return row
@@ -1056,7 +1058,7 @@ class TicketLogPullService:
             command_content = cls._json_loads(row.get("commandContent"), {})
             if (
                 cls._normalize_command_content(command_content)
-                != cls._normalize_command_content(record.command_content)
+                != cls._normalize_command_content(record_command_content)
             ):
                 continue
             source_created_at = cls._parse_external_datetime(row)
