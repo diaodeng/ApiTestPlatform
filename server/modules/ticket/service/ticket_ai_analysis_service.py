@@ -601,6 +601,9 @@ class TicketAiAnalysisService:
                         "viewBeginTime": log_content_model.view_begin_time,
                         "viewEndTime": log_content_model.view_end_time,
                         "viewSource": log_content_model.view_source,
+                        "wholeArchiveMode": not bool(
+                            log_content_model.view_begin_time or log_content_model.view_end_time
+                        ),
                         "contentSummary": log_content_model.content_summary,
                         "matchedEntryCount": log_content_model.matched_entry_count,
                         "archiveEntryCount": log_content_model.archive_entry_count,
@@ -645,7 +648,9 @@ class TicketAiAnalysisService:
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
-3. 如果仓库可用，请结合代码搜索、调用链、日志和历史事件分析根因。
+3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或
+   {workspace_path}/logs.txt 只是整包分析说明，请优先阅读 {workspace_path}/source_logs/ 目录中的解压日志文件，
+   再结合代码搜索、调用链、日志和历史事件分析根因。
 4. 输出严格 JSON，不要输出多余说明文本。
 5. 结果必须包含以下字段:
    - ticket_id
