@@ -716,23 +716,69 @@ class TicketLogPullService:
             return
 
         temp_file_path: Path | None = None
+        direct_download_ready = False
         try:
             if record.status == TicketLogPullStatus.CREATED.value:
-                cls._update_status(
-                    db,
-                    record_id,
-                    status=TicketLogPullStatus.SUBMITTING.value,
-                    status_desc="正在提交外部日志拉取申请",
-                    is_error=False,
-                    update_by="system",
-                )
-                record = TicketLogPullDao.get_record_by_id(db, record_id)
-                if record is None:
-                    return
-                cls._submit_external_request(db, record)
-                record = TicketLogPullDao.get_record_by_id(db, record_id)
-                if record is None:
-                    return
+                rows = cls._fetch_external_rows(db, record)
+                matched_row = cls._match_external_row(record, rows)
+                if matched_row:
+                    external_status = int(matched_row.get("commandStatus") or 0)
+                    command_result_url = cls._extract_command_result_url(matched_row.get("commandResult"))
+                    if external_status == 2:
+                        cls._fail_record(
+                            db,
+                            record_id,
+                            status=TicketLogPullStatus.FAILED.value,
+                            status_desc="外部平台日志拉取失败",
+                            error_message=str(matched_row.get("errorMsg") or "外部平台返回失败"),
+                        )
+                        cls._add_ticket_event(
+                            db,
+                            ticket_id=record.ticket_id,
+                            operator_id=None,
+                            operator_name="system",
+                            content="外部平台日志拉取失败",
+                            event_data={"record_id": record.id, "error_message": matched_row.get("errorMsg")},
+                        )
+                        db.commit()
+                        return
+                    if external_status == 1 and command_result_url:
+                        now = datetime.now()
+                        cls._update_status(
+                            db,
+                            record_id,
+                            status=TicketLogPullStatus.DOWNLOADING.value,
+                            status_desc="已匹配到外部平台结果，正在下载日志压缩包",
+                            is_error=False,
+                            update_by="system",
+                            last_polled_at=now,
+                            external_command_id=matched_row.get("id"),
+                            external_serial_number=matched_row.get("serialNumber"),
+                            external_command_status=external_status,
+                            external_command_status_desc=matched_row.get("commandStatusDesc"),
+                            command_result_url=command_result_url,
+                            source_created_at=cls._parse_external_datetime(matched_row),
+                        )
+                        record = TicketLogPullDao.get_record_by_id(db, record_id)
+                        if record is None:
+                            return
+                        direct_download_ready = True
+                if record.status == TicketLogPullStatus.CREATED.value:
+                    cls._update_status(
+                        db,
+                        record_id,
+                        status=TicketLogPullStatus.SUBMITTING.value,
+                        status_desc="正在提交外部日志拉取申请",
+                        is_error=False,
+                        update_by="system",
+                    )
+                    record = TicketLogPullDao.get_record_by_id(db, record_id)
+                    if record is None:
+                        return
+                    cls._submit_external_request(db, record)
+                    record = TicketLogPullDao.get_record_by_id(db, record_id)
+                    if record is None:
+                        return
 
             if record.status in {
                 TicketLogPullStatus.SUBMITTING.value,
@@ -740,31 +786,32 @@ class TicketLogPullService:
                 TicketLogPullStatus.DOWNLOADING.value,
                 TicketLogPullStatus.PROCESSING.value,
             }:
-                command_row = cls._poll_external_result(db, record)
-                record = TicketLogPullDao.get_record_by_id(db, record_id)
-                if record is None:
-                    return
-                if not command_row:
-                    return
+                if not direct_download_ready:
+                    command_row = cls._poll_external_result(db, record)
+                    record = TicketLogPullDao.get_record_by_id(db, record_id)
+                    if record is None:
+                        return
+                    if not command_row:
+                        return
+                    if not record.command_result_url:
+                        cls._fail_record(
+                            db,
+                            record_id,
+                            status=TicketLogPullStatus.FAILED.value,
+                            status_desc="外部平台未返回压缩包地址",
+                            error_message="外部平台返回成功状态但缺少 commandResult.url",
+                        )
+                        return
 
-                if not record.command_result_url:
-                    cls._fail_record(
+                if record.status != TicketLogPullStatus.DOWNLOADING.value:
+                    cls._update_status(
                         db,
                         record_id,
-                        status=TicketLogPullStatus.FAILED.value,
-                        status_desc="外部平台未返回压缩包地址",
-                        error_message="外部平台返回成功状态但缺少 commandResult.url",
+                        status=TicketLogPullStatus.DOWNLOADING.value,
+                        status_desc="正在下载日志压缩包",
+                        is_error=False,
+                        update_by="system",
                     )
-                    return
-
-                cls._update_status(
-                    db,
-                    record_id,
-                    status=TicketLogPullStatus.DOWNLOADING.value,
-                    status_desc="正在下载日志压缩包",
-                    is_error=False,
-                    update_by="system",
-                )
                 record = TicketLogPullDao.get_record_by_id(db, record_id)
                 if record is None:
                     return
@@ -949,30 +996,10 @@ class TicketLogPullService:
         :return: 匹配到的外部命令数据
         """
         storage_config = cls._get_storage_config_dict(db)
-        external_config = cls._get_external_config_dict(db)
         deadline = datetime.now() + timedelta(seconds=int(storage_config.get("pollTimeoutSec") or 1800))
         interval_seconds = int(storage_config.get("pollIntervalSec") or 20)
         while datetime.now() < deadline:
-            response = requests.get(
-                external_config["pageUrl"],
-                params={
-                    "currentPage": 1,
-                    "pageSize": 20,
-                    "venderId": record.vendor_id,
-                    "storeId": record.store_id,
-                    "posNo": record.pos_no,
-                    "commandType": "",
-                    "commandStatus": "",
-                    "_": int(datetime.now().timestamp() * 1000),
-                },
-                timeout=(10, 30),
-                headers=cls._build_external_request_headers(external_config),
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if int(payload.get("code") or 0) != 200:
-                raise RuntimeError(f"轮询日志拉取结果失败: {payload.get('msg') or payload}")
-            rows = payload.get("data") or []
+            rows = cls._fetch_external_rows(db, record)
             matched_row = cls._match_external_row(record, rows)
             now = datetime.now()
             TicketLogPullDao.update_record(
@@ -1033,6 +1060,37 @@ class TicketLogPullService:
         return None
 
     @classmethod
+    def _fetch_external_rows(cls, db: Session, record: TicketLogPullRecord) -> list[dict[str, Any]]:
+        """
+        查询外部平台日志拉取列表。
+        :param db: 数据库会话
+        :param record: 日志拉取记录
+        :return: 外部平台列表数据
+        """
+        external_config = cls._get_external_config_dict(db)
+        response = requests.get(
+            external_config["pageUrl"],
+            params={
+                "currentPage": 1,
+                "pageSize": 20,
+                "venderId": record.vendor_id,
+                "storeId": record.store_id,
+                "posNo": record.pos_no,
+                "commandType": "",
+                "commandStatus": "",
+                "_": int(datetime.now().timestamp() * 1000),
+            },
+            timeout=(10, 30),
+            headers=cls._build_external_request_headers(external_config),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if int(payload.get("code") or 0) != 200:
+            raise RuntimeError(f"查询日志拉取列表失败: {payload.get('msg') or payload}")
+        rows = payload.get("data") or []
+        return rows if isinstance(rows, list) else []
+
+    @classmethod
     def _match_external_row(cls, record: TicketLogPullRecord, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         """
         从外部平台列表结果中匹配当前日志拉取记录。
@@ -1056,10 +1114,7 @@ class TicketLogPullService:
             if int(row.get("commandDataType") or 0) != int(record.command_data_type):
                 continue
             command_content = cls._json_loads(row.get("commandContent"), {})
-            if (
-                cls._normalize_command_content(command_content)
-                != cls._normalize_command_content(record_command_content)
-            ):
+            if not cls._match_command_content_for_download(record_command_content, command_content):
                 continue
             source_created_at = cls._parse_external_datetime(row)
             if source_created_at and source_created_at < record.create_time - timedelta(minutes=5):
@@ -1207,7 +1262,7 @@ class TicketLogPullService:
                     "compressed_content": None,
                     "content_summary": f"压缩包共 {archive_entry_count} 个文件，未发现 *_pos.log* 日志文件。",
                 }
-            for entry_name in sorted(target_entry_names):
+            for entry_name in cls._sort_archive_entry_names(target_entry_names):
                 matched_entry_count, current_char_count = cls._extract_entry_logs(
                     archive=archive,
                     entry_name=entry_name,
@@ -1234,6 +1289,47 @@ class TicketLogPullService:
                 content_truncated=False,
             ),
         }
+
+    @classmethod
+    def _sort_archive_entry_names(cls, entry_names: list[str]) -> list[str]:
+        """
+        按压缩包日志文件尾号排序，尾号越小越接近当前时间，因此需要按尾号逆序拼接。
+        :param entry_names: 压缩包中的日志文件名列表
+        :return: 排序后的文件名列表
+        """
+        def _entry_sort_key(entry_name: str) -> tuple[int, int, str]:
+            file_name = PurePosixPath(entry_name).name
+            match = re.search(r"(\d+)(?=\D*$)", file_name)
+            suffix_index = int(match.group(1)) if match else -1
+            return (1 if match else 0, suffix_index, file_name.lower())
+
+        return sorted(entry_names, key=_entry_sort_key, reverse=True)
+
+    @classmethod
+    def _match_command_content_for_download(
+        cls, local_command_content: dict[str, Any] | None, remote_command_content: dict[str, Any] | None
+    ) -> bool:
+        """
+        比较本地与远端 commandContent 中用于下载命中的参数。
+        :param local_command_content: 本地记录中的命令内容
+        :param remote_command_content: 外部平台返回的命令内容
+        :return: 是否匹配
+        """
+        local_content = cls._strip_internal_command_content(local_command_content)
+        remote_content = cls._strip_internal_command_content(remote_command_content)
+        local_fields = {
+            key: str(local_content.get(key)).strip()
+            for key in ("modifyTime", "path")
+            if str(local_content.get(key) or "").strip()
+        }
+        remote_fields = {
+            key: str(remote_content.get(key)).strip()
+            for key in ("modifyTime", "path")
+            if str(remote_content.get(key) or "").strip()
+        }
+        if len(local_fields) != len(remote_fields):
+            return False
+        return local_fields == remote_fields
 
     @classmethod
     def _extract_entry_logs(
