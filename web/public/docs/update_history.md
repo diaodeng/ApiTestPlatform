@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 修复工单创建后自动拉日志在启用“日志后自动 AI”时，外部平台轮询命中会被 `commandContent` 内部 `_automation` 字段干扰，导致状态长期停留在“已提交申请，轮询外部平台处理中”的问题
 1. 修复 `module_qtr.controller.agent_controller.websocket_endpoint` 读取 `manager.agents[agent_code]` 时因连接表被并发清理导致的 `KeyError`
 1. 修复客户端执行工单 AI 分析时，服务端将 WebSocket 正常断开误记为 `WebSocketDisconnect(1006)` 异常并打印堆栈的问题
 1. 修复服务端启动时报错：`TicketLogPullCreateModel` 从错误的 `ticket_vo` 模块导入，已改为从 `ticket_log_pull_vo` 正确导入

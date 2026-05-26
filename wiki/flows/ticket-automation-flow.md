@@ -62,7 +62,7 @@ sequenceDiagram
 | 1 | 新增工单时，前端可勾选是否需要拉取日志，并在同一表单里填写日志拉取参数。 |
 | 2 | 若勾选“日志后自动 AI”，前端同时要求选择 Agent，后端将 Agent 编码写入日志拉取记录的内部自动化配置。 |
 | 3 | `TicketService.create_ticket` 在保存工单后可同步创建日志拉取任务，并把自动化配置写入工单 `extra_data.ticket_automation` 便于追溯。 |
-| 4 | `TicketLogPullService._process_record` 在日志拉取成功后读取记录中的 `_automation` 配置。 |
+| 4 | `TicketLogPullService._process_record` 在日志拉取成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
 | 5 | 若自动化配置开启 AI 且存在 Agent 编码，服务端构造 `TicketAiAnalysisRequestModel` 并触发分析任务。 |
 | 6 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent。 |
 | 7 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库。 |
