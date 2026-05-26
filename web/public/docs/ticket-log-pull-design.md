@@ -31,7 +31,7 @@
 1. 页面提交 `vendorId/storeId/posNo/commandDataType/modifyTime/path` 等参数。
 2. 后端写入 `ticket_log_pull_record`，并启动线程池后台任务。
 3. 后台调用外部 `insert` 接口提交拉取申请。
-4. 后台轮询外部 `page` 接口，按 vendor/store/pos/dataType/commandContent 匹配本次申请。
+4. 后台轮询外部 `page` 接口，按 vendor/store/pos/dataType/commandContent 匹配本次申请，匹配时会忽略内部自动化字段 `_automation`，避免自动 AI 配置干扰命中。
 5. 外部状态成功后下载 ZIP，归档到本地或 FTP。
 6. 若数据类型是日志，仅遍历 ZIP 中命名符合 `*_pos.log*` 的文件，按时间戳规则提取指定时间段日志。
 7. 将筛选结果 `gzip + base64` 压缩入库，供页面查看。
