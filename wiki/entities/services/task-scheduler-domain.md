@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-05-20
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-27
 related_files:
   - server/module_task/task_register.py
   - server/module_task/celery_tasks.py
@@ -39,8 +39,11 @@ graph TD
 ## 主要职责
 
 - 将调度配置转换为可执行任务。
-- 维护任务、任务日志与执行状态。
+- 维护任务、任务日志与执行状态；运行中任务通过 Redis 心跳记录“活跃”状态。
 - 支持 QTR、测试和促销等调度入口。
+- `lock_ttl_seconds` 表示互斥锁的固定 TTL，不会自动续租；如果任务执行时间超过该值，锁会先过期，后续触发源可能再次派发同一任务。
+- 执行日志在任务真正开始时先写入一条 `running` 记录，带上 `celery_task_id` 和触发来源；任务结束后再回写同一条日志的最终状态、耗时和异常信息。
+- 手动终止运行中任务时，服务层会写入停止标记并触发 Celery revoke，任务执行入口会优先检查停止请求并清理运行态。
 
 ## 参见
 

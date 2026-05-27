@@ -8,6 +8,24 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-05-27] INGEST-CODE | 修复 Celery 任务长执行锁过期与失联状态恢复
+- 触发：用户反馈 Celery Worker 异常后任务状态会一直停留在 running，且无法再次手动执行；另有 2 小时任务在 `lock_ttl_seconds=3600` 下执行到 1 小时后又被自动重复派发
+- 架构层：任务调度域 / Redis 锁 / 运行态心跳 / 手动终止
+- 创建的页面：无
+- 更新的页面：`entities/services/task-scheduler-domain.md`、`entities/data-models/task-core-models.md`、`docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_task/celery_tasks.py` / `server/module_task/celery_job_service.py` -> 任务调度域知识页
+- 总共涉及页面：3
+
+## [2026-05-27] INGEST-CODE | 调整 Celery 执行日志为启动写入、结束回填
+- 触发：用户怀疑存在其他触发途径，希望能在任务执行中直接看到是谁触发、何时进入 running；现有执行日志只在任务完成后写入，导致运行中缺少数据库记录
+- 架构层：任务调度域 / 执行日志生命周期
+- 创建的页面：无
+- 更新的页面：`entities/services/task-scheduler-domain.md`、`entities/data-models/task-core-models.md`、`docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_task/celery_tasks.py` / `server/module_task/celery_job_service.py` -> 任务调度域知识页
+- 总共涉及页面：3
+
 ## [2026-05-26] INGEST-CODE | 修复工单 AI 分析 WebSocket loop 归属错误
 - 触发：用户先反馈工单 AI 分析失败后重试时任务长期停留在“进行中”，修复后又暴露出发起分析时报 `got Future attached to a different loop`
 - 架构层：工单域 / Agent 编排 / 异步事件循环

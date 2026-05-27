@@ -1,6 +1,10 @@
 import asyncio
 import inspect
+import json
+import multiprocessing
+import threading
 from datetime import datetime
+from queue import Empty
 from urllib.parse import quote
 
 from redis import Redis
@@ -18,6 +22,12 @@ from module_task.celery_contract import (
 from module_task.celery_job_models import CeleryPeriodicTask, CeleryTaskExecutionLog
 from module_task.task_register import JOB_REGISTRY
 from utils.log_util import logger
+
+TASK_LOCK_PREFIX = "celery:task:lock"
+TASK_STATE_PREFIX = "celery:task:state"
+TASK_STOP_PREFIX = "celery:task:stop"
+TASK_HEARTBEAT_SECONDS = 30
+TASK_STATE_TTL_SECONDS = 90
 
 
 def _build_redis_url(database: int) -> str:
@@ -46,6 +56,212 @@ def _build_lock_client() -> Redis:
     :return: Redis 客户端实例。
     """
     return Redis.from_url(_build_redis_url(RedisConfig.redis_celery_database), decode_responses=True)
+
+
+def _build_task_lock_key(task_id: int) -> str:
+    """
+    构建任务互斥锁键。
+
+    :param task_id: 任务ID。
+    :return: Redis 锁键。
+    """
+    return f"{TASK_LOCK_PREFIX}:{task_id}"
+
+
+def _build_task_state_key(task_id: int) -> str:
+    """
+    构建任务运行态心跳键。
+
+    :param task_id: 任务ID。
+    :return: Redis 状态键。
+    """
+    return f"{TASK_STATE_PREFIX}:{task_id}"
+
+
+def _build_task_stop_key(task_id: int) -> str:
+    """
+    构建任务停止请求键。
+
+    :param task_id: 任务ID。
+    :return: Redis 停止键。
+    """
+    return f"{TASK_STOP_PREFIX}:{task_id}"
+
+
+def _serialize_task_state(
+    *,
+    task_id: int,
+    celery_task_id: str,
+    status: str,
+    payload: dict,
+    started_at: datetime,
+) -> str:
+    """
+    序列化任务运行态快照。
+
+    :param task_id: 任务ID。
+    :param celery_task_id: Celery 任务ID。
+    :param status: 当前状态。
+    :param payload: 原始执行载荷。
+    :param started_at: 开始时间。
+    :return: JSON 字符串。
+    """
+    return json.dumps(
+        {
+            "task_id": task_id,
+            "celery_task_id": celery_task_id,
+            "status": status,
+            "task_name": payload.get("task_name") or "",
+            "task_key": payload.get("task_key") or "",
+            "queue_name": payload.get("queue_name") or "celery",
+            "trigger_type": payload.get("trigger_type") or "scheduler",
+            "started_at": started_at.isoformat(),
+            "heartbeat_at": datetime.now().isoformat(),
+        },
+        ensure_ascii=False,
+    )
+
+
+def _refresh_task_runtime_state(
+    *,
+    lock_client: Redis,
+    task_id: int,
+    celery_task_id: str,
+    payload: dict,
+    started_at: datetime,
+    stop_event: threading.Event,
+):
+    """
+    维护运行态心跳，用于状态可见性与失联恢复。
+
+    :param lock_client: Redis 客户端。
+    :param task_id: 任务ID。
+    :param celery_task_id: Celery 任务ID。
+    :param payload: 执行载荷。
+    :param started_at: 开始时间。
+    :param stop_event: 停止事件。
+    :return: 无返回值。
+    """
+    state_key = _build_task_state_key(task_id)
+    heartbeat_seconds = max(10, min(TASK_HEARTBEAT_SECONDS, max(int(payload.get("lock_ttl_seconds") or 30) // 3, 10)))
+    state_ttl_seconds = max(TASK_STATE_TTL_SECONDS, heartbeat_seconds * 3)
+
+    while not stop_event.wait(heartbeat_seconds):
+        try:
+            lock_client.set(
+                state_key,
+                _serialize_task_state(
+                    task_id=task_id,
+                    celery_task_id=celery_task_id,
+                    status="running",
+                    payload=payload,
+                    started_at=started_at,
+                ),
+                ex=state_ttl_seconds,
+            )
+        except Exception as exc:
+            logger.warning(f"刷新任务心跳失败[{task_id}]：{exc}")
+
+
+def _put_child_result(result_queue, result: dict):
+    """
+    安全写入子进程执行结果。
+
+    :param result_queue: 结果队列。
+    :param result: 结果字典。
+    :return: 无返回值。
+    """
+    try:
+        result_queue.put(result, timeout=1)
+    except Exception as exc:
+        logger.warning(f"写入任务子进程结果失败：{exc}")
+
+
+def _run_registered_job_child(payload: dict, result_queue):
+    """
+    在子进程中执行注册任务函数。
+
+    :param payload: 任务执行载荷。
+    :param result_queue: 父进程结果队列。
+    :return: 无返回值。
+    """
+    task_id = int(payload.get("task_id") or 0)
+    celery_task_id = str(payload.get("celery_task_id") or "")
+    lock_client = _build_lock_client()
+    stop_event = threading.Event()
+    heartbeat_thread = None
+    started_at = datetime.now()
+
+    try:
+        state_key = _build_task_state_key(task_id)
+        lock_client.set(
+            state_key,
+            _serialize_task_state(
+                task_id=task_id,
+                celery_task_id=celery_task_id,
+                status="running",
+                payload=payload,
+                started_at=started_at,
+            ),
+            ex=max(TASK_STATE_TTL_SECONDS, 90),
+        )
+        heartbeat_thread = threading.Thread(
+            target=_refresh_task_runtime_state,
+            kwargs={
+                "lock_client": lock_client,
+                "task_id": task_id,
+                "celery_task_id": celery_task_id,
+                "payload": payload,
+                "started_at": started_at,
+                "stop_event": stop_event,
+            },
+            daemon=True,
+        )
+        heartbeat_thread.start()
+
+        args = parse_payload_args(payload.get("args_json"))
+        kwargs = parse_payload_kwargs(payload.get("kwargs_json"))
+        _execute_job_function(task_key=str(payload.get("task_key") or ""), args=args, kwargs=kwargs)
+
+        finished_at = datetime.now()
+        _put_child_result(
+            result_queue,
+            {
+                "status": "success",
+                "message": "任务执行成功",
+                "exception_info": "",
+                "started_at": started_at.isoformat(),
+                "finished_at": finished_at.isoformat(),
+            },
+        )
+    except BaseException as exc:
+        finished_at = datetime.now()
+        status = "revoked" if str(exc.__class__.__name__) in {"TaskRevokedError", "SoftTimeLimitExceeded"} else "failed"
+        message = "任务已手动终止" if status == "revoked" else "任务执行失败"
+        _put_child_result(
+            result_queue,
+            {
+                "status": status,
+                "message": message,
+                "exception_info": str(exc),
+                "started_at": started_at.isoformat(),
+                "finished_at": finished_at.isoformat(),
+            },
+        )
+    finally:
+        stop_event.set()
+        try:
+            if heartbeat_thread:
+                heartbeat_thread.join(timeout=1)
+        except Exception:
+            pass
+        try:
+            state_key = _build_task_state_key(task_id)
+            lock_key = _build_task_lock_key(task_id)
+            stop_key = _build_task_stop_key(task_id)
+            lock_client.delete(state_key, lock_key, stop_key)
+        except Exception as exc:
+            logger.warning(f"清理任务运行态失败[{task_id}]：{exc}")
 
 
 def _execute_job_function(task_key: str, args: list, kwargs: dict):
@@ -119,7 +335,96 @@ def _update_task_status(
         session.close()
 
 
-def _write_execution_log(
+def _build_execution_log_fields(
+    payload: dict,
+    *,
+    celery_task_id: str,
+    status: str,
+    message: str,
+    exception_info: str,
+    started_at: datetime,
+    finished_at: datetime | None = None,
+) -> dict:
+    """
+    构建任务执行日志字段。
+
+    :param payload: Celery 执行载荷。
+    :param celery_task_id: Celery Task UUID。
+    :param status: 执行状态。
+    :param message: 执行消息。
+    :param exception_info: 异常信息。
+    :param started_at: 开始时间。
+    :param finished_at: 结束时间，运行中任务可为空。
+    :return: 日志字段字典。
+    """
+    fields = {
+        "task_id": int(payload.get("task_id") or 0),
+        "owner_type": str(payload.get("owner_type") or "sys"),
+        "task_name": str(payload.get("task_name") or ""),
+        "task_key": str(payload.get("task_key") or ""),
+        "queue_name": str(payload.get("queue_name") or "celery"),
+        "trigger_type": str(payload.get("trigger_type") or "scheduler"),
+        "celery_task_id": celery_task_id,
+        "schedule_desc": str(payload.get("schedule_desc") or ""),
+        "status": status,
+        "message": message,
+        "exception_info": exception_info or "",
+        "args_json": str(payload.get("args_json") or "[]"),
+        "kwargs_json": str(payload.get("kwargs_json") or "{}"),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_ms": int((finished_at - started_at).total_seconds() * 1000) if finished_at else None,
+    }
+    return fields
+
+
+def _create_execution_log(
+    payload: dict,
+    *,
+    celery_task_id: str,
+    status: str,
+    message: str,
+    exception_info: str,
+    started_at: datetime,
+    finished_at: datetime | None = None,
+):
+    """
+    新建任务执行日志。
+
+    :param payload: Celery 执行载荷。
+    :param celery_task_id: Celery Task UUID。
+    :param status: 执行状态。
+    :param message: 执行消息。
+    :param exception_info: 异常信息。
+    :param started_at: 开始时间。
+    :param finished_at: 结束时间，运行中任务可为空。
+    :return: 无返回值。
+    """
+    session = SessionLocal()
+    try:
+        session.add(
+            CeleryTaskExecutionLog(
+                **_build_execution_log_fields(
+                    payload,
+                    celery_task_id=celery_task_id,
+                    status=status,
+                    message=message,
+                    exception_info=exception_info,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                ),
+                create_time=started_at,
+            )
+        )
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        logger.exception(f"写入任务日志失败[{payload.get('task_id')}]：{exc}")
+    finally:
+        session.close()
+
+
+def _update_execution_log(
     payload: dict,
     *,
     celery_task_id: str,
@@ -130,7 +435,7 @@ def _write_execution_log(
     finished_at: datetime,
 ):
     """
-    写入任务执行日志。
+    更新任务执行日志。
 
     :param payload: Celery 执行载荷。
     :param celery_task_id: Celery Task UUID。
@@ -143,32 +448,35 @@ def _write_execution_log(
     """
     session = SessionLocal()
     try:
-        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-        session.add(
-            CeleryTaskExecutionLog(
-                task_id=int(payload.get("task_id") or 0),
-                owner_type=str(payload.get("owner_type") or "sys"),
-                task_name=str(payload.get("task_name") or ""),
-                task_key=str(payload.get("task_key") or ""),
-                queue_name=str(payload.get("queue_name") or "celery"),
-                trigger_type=str(payload.get("trigger_type") or "scheduler"),
-                celery_task_id=celery_task_id,
-                schedule_desc=str(payload.get("schedule_desc") or ""),
-                status=status,
-                message=message,
-                exception_info=exception_info or "",
-                args_json=str(payload.get("args_json") or "[]"),
-                kwargs_json=str(payload.get("kwargs_json") or "{}"),
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=duration_ms,
-                create_time=finished_at,
-            )
+        update_fields = _build_execution_log_fields(
+            payload,
+            celery_task_id=celery_task_id,
+            status=status,
+            message=message,
+            exception_info=exception_info,
+            started_at=started_at,
+            finished_at=finished_at,
         )
+        updated_count = (
+            session.query(CeleryTaskExecutionLog)
+            .filter(
+                CeleryTaskExecutionLog.task_id == int(payload.get("task_id") or 0),
+                CeleryTaskExecutionLog.owner_type == str(payload.get("owner_type") or "sys"),
+                CeleryTaskExecutionLog.celery_task_id == celery_task_id,
+            )
+            .update(update_fields)
+        )
+        if not updated_count:
+            session.add(
+                CeleryTaskExecutionLog(
+                    **update_fields,
+                    create_time=started_at,
+                )
+            )
         session.commit()
     except Exception as exc:
         session.rollback()
-        logger.exception(f"写入任务日志失败[{payload.get('task_id')}]：{exc}")
+        logger.exception(f"更新任务日志失败[{payload.get('task_id')}]：{exc}")
     finally:
         session.close()
 
@@ -183,22 +491,22 @@ def execute_registered_job(self, payload: dict):
     :return: 执行结果摘要。
     """
     task_id = int(payload.get("task_id") or 0)
-    task_key = str(payload.get("task_key") or "")
     allow_concurrent = bool(payload.get("allow_concurrent"))
     lock_ttl_seconds = int(payload.get("lock_ttl_seconds") or 3600)
-    lock_key = f"celery:task:lock:{task_id}"
+    lock_key = _build_task_lock_key(task_id)
+    state_key = _build_task_state_key(task_id)
+    stop_key = _build_task_stop_key(task_id)
     lock_client = None
     lock_acquired = False
     started_at = datetime.now()
-
-    _update_task_status(
-        task_id,
-        status="running",
-        message="任务开始执行",
-        set_last_run_at=True,
-    )
+    child_process = None
+    result_queue = None
+    runtime_client = None
 
     try:
+        payload = dict(payload)
+        payload["celery_task_id"] = self.request.id
+
         if not allow_concurrent:
             lock_client = _build_lock_client()
             lock_acquired = bool(lock_client.set(lock_key, "1", nx=True, ex=max(lock_ttl_seconds, 30)))
@@ -212,7 +520,7 @@ def execute_registered_job(self, payload: dict):
                     duration_ms=duration_ms,
                     add_run_count=1,
                 )
-                _write_execution_log(
+                _create_execution_log(
                     payload=payload,
                     celery_task_id=self.request.id,
                     status="skipped",
@@ -223,29 +531,96 @@ def execute_registered_job(self, payload: dict):
                 )
                 return {"status": "skipped"}
 
-        args = parse_payload_args(payload.get("args_json"))
-        kwargs = parse_payload_kwargs(payload.get("kwargs_json"))
-        _execute_job_function(task_key=task_key, args=args, kwargs=kwargs)
-
-        finished_at = datetime.now()
-        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
         _update_task_status(
             task_id,
-            status="success",
-            message="任务执行成功",
+            status="running",
+            message="任务开始执行",
+            set_last_run_at=True,
+        )
+        _create_execution_log(
+            payload=payload,
+            celery_task_id=self.request.id,
+            status="running",
+            message="任务开始执行",
+            exception_info="",
+            started_at=started_at,
+        )
+        runtime_client = lock_client or _build_lock_client()
+
+        result_queue = multiprocessing.get_context("spawn").Queue(maxsize=1)
+        child_process = multiprocessing.get_context("spawn").Process(
+            target=_run_registered_job_child,
+            args=(payload, result_queue),
+            daemon=True,
+        )
+        child_process.start()
+
+        result = None
+        while True:
+            if runtime_client and runtime_client.get(stop_key):
+                if child_process and child_process.is_alive():
+                    child_process.terminate()
+                    child_process.join(timeout=5)
+                result = {
+                    "status": "revoked",
+                    "message": "任务已手动终止",
+                    "exception_info": "收到停止请求",
+                    "started_at": started_at.isoformat(),
+                    "finished_at": datetime.now().isoformat(),
+                }
+                break
+
+            if child_process and not child_process.is_alive():
+                try:
+                    result = result_queue.get_nowait() if result_queue else None
+                except Empty:
+                    result = None
+                break
+
+            try:
+                result = result_queue.get(timeout=1) if result_queue else None
+                break
+            except Empty:
+                continue
+
+        if result is None:
+            result = {
+                "status": "failed",
+                "message": "任务执行失败",
+                "exception_info": "子进程未返回结果",
+                "started_at": started_at.isoformat(),
+                "finished_at": datetime.now().isoformat(),
+            }
+
+        finished_at = datetime.fromisoformat(result["finished_at"])
+        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+        final_status = str(result.get("status") or "failed")
+        final_message = str(result.get("message") or "")
+        final_exception = str(result.get("exception_info") or "")
+
+        _update_task_status(
+            task_id,
+            status=final_status,
+            message=final_message,
             duration_ms=duration_ms,
             add_run_count=1,
         )
-        _write_execution_log(
+        _update_execution_log(
             payload=payload,
             celery_task_id=self.request.id,
-            status="success",
-            message="任务执行成功",
-            exception_info="",
+            status=final_status,
+            message=final_message,
+            exception_info=final_exception,
             started_at=started_at,
             finished_at=finished_at,
         )
-        return {"status": "success"}
+        if final_status == "success":
+            return {"status": "success"}
+        if final_status == "revoked":
+            return {"status": "revoked"}
+        if final_status == "skipped":
+            return {"status": "skipped"}
+        return {"status": final_status}
     except Exception as exc:
         finished_at = datetime.now()
         duration_ms = int((finished_at - started_at).total_seconds() * 1000)
@@ -257,7 +632,7 @@ def execute_registered_job(self, payload: dict):
             duration_ms=duration_ms,
             add_run_count=1,
         )
-        _write_execution_log(
+        _update_execution_log(
             payload=payload,
             celery_task_id=self.request.id,
             status="failed",
@@ -269,7 +644,15 @@ def execute_registered_job(self, payload: dict):
         raise
     finally:
         try:
+            if child_process and child_process.is_alive():
+                child_process.terminate()
+                child_process.join(timeout=5)
+        except Exception as exc:
+            logger.warning(f"结束任务子进程失败[{task_id}]：{exc}")
+        try:
             if lock_client and lock_acquired:
                 lock_client.delete(lock_key)
+            if runtime_client:
+                runtime_client.delete(state_key, stop_key)
         except Exception as exc:
             logger.warning(f"释放任务锁失败[{task_id}]：{exc}")
