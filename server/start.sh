@@ -2,6 +2,8 @@
 # 这个是给一个奇怪的环境使用的，不能修改dockerfile，构建安装的依赖运行时没有，搜易之类需要手动再次安装
 set -e
 export PATH="/usr/local/bin:/app/.venv/bin:$PATH"
+# 统一 supervisor 子进程的运行环境，避免 Celery 退回默认 dev 配置。
+export APP_ENV="${APP_ENV:-prod}"
 
 echo "开始安装系统依赖。。。"
 sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
@@ -23,4 +25,5 @@ echo "应用依赖安装完成。。。"
 
 # 启动 supervisor，由 supervisord.conf 托管 FastAPI、Celery 等进程
 echo "开始启动。。。"
+echo "当前运行环境：${APP_ENV}"
 exec supervisord -c /app/supervisord.conf
