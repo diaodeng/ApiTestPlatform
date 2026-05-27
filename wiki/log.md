@@ -8,6 +8,24 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-05-26] INGEST-CODE | 修复工单 AI 分析 WebSocket loop 归属错误
+- 触发：用户先反馈工单 AI 分析失败后重试时任务长期停留在“进行中”，修复后又暴露出发起分析时报 `got Future attached to a different loop`
+- 架构层：工单域 / Agent 编排 / 异步事件循环
+- 创建的页面：`docs/2026-05-26-ticket-ai-analysis-future-threadsafe-result.md`
+- 更新的页面：`entities/services/ticket-domain.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_qtr/service/agent_service.py` / `server/module_qtr/controller/agent_controller.py` -> 工单域知识页
+- 总共涉及页面：2
+
+## [2026-05-26] INGEST-CODE | 修复 AI 分析期间 Agent 事件循环被阻塞导致断连
+- 触发：用户反馈启动 AI 分析时 Agent 经常断开，怀疑是大文件占用连接过久，要求在不改数据流前提下定位根因并采用稳定方案处理
+- 架构层：工单域 / Agent 编排 / 新版客户端
+- 创建的页面：无
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-automation-flow.md`、`docs/ticket_system_phase1.md`、`docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`client_new/services/ticket_ai_analysis_service.py` / `client_new/server/agent_server.py` / `server/module_qtr/controller/agent_controller.py` / `server/module_qtr/service/agent_service.py` / `server/modules/ticket/service/ticket_ai_analysis_service.py` -> 工单域知识页
+- 总共涉及页面：4
+
 ## [2026-05-20] INIT-CODE | 初始化 Wiki 基础结构
 - 触发：用户执行 `$llm-wiki init`
 - 架构层：知识库初始化
