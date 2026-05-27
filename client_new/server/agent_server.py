@@ -56,6 +56,17 @@ def _get_websocket_response_headers(websocket) -> dict:
     return {}
 
 
+def _get_websocket_close_info(websocket) -> tuple[Any, Any]:
+    """
+    提取 WebSocket 关闭状态与原因。
+    :param websocket: WebSocket 对象
+    :return: (close_code, close_reason)
+    """
+    if websocket is None:
+        return None, None
+    return getattr(websocket, "close_code", None), getattr(websocket, "close_reason", None)
+
+
 def clamp_message_size(value: Any) -> int:
     try:
         size = int(value)
@@ -306,6 +317,10 @@ class WebSocketClient:
         except ConnectionRefusedError as e:
             logger.error(e)
             self._notify_status("error", f"连接被拒绝：{e}")
+            close_code, close_reason = _get_websocket_close_info(self.websocket)
+            logger.warning(
+                f"Agent 连接被拒绝后关闭信息：code={close_code}, reason={close_reason}, uri={self.uri}"
+            )
             logger.info(
                 f"连接异常断开，需要重试：{self.retry and self.max_retry_num > self.retry_num}，"
                 f"{self.interval_time}秒后重新尝试连接, {self.uri}"
@@ -313,14 +328,24 @@ class WebSocketClient:
             await self.reconnect()
         except websockets.exceptions.ConnectionClosedError as e:
             logger.error(e)
+            close_code, close_reason = _get_websocket_close_info(self.websocket)
             self._notify_status("error", f"服务端异常断开：{e}")
+            logger.warning(
+                f"Agent WebSocket 异常断开：exception_code={getattr(e, 'code', None)}, "
+                f"exception_reason={getattr(e, 'reason', None)}, close_code={close_code}, "
+                f"close_reason={close_reason}, uri={self.uri}"
+            )
             logger.info(
                 f"服务端异常断开，需要重试：{self.retry and self.max_retry_num > self.retry_num},"
                 f"{self.interval_time}秒后重新尝试连接, {self.uri}"
             )
             await self.reconnect()
         except websockets.exceptions.ConnectionClosedOK as e:
-            logger.info(f"连接关闭：{e}")
+            close_code, close_reason = _get_websocket_close_info(self.websocket)
+            logger.info(
+                f"连接关闭：{e}，close_code={getattr(e, 'code', None)}, close_reason={getattr(e, 'reason', None)}, "
+                f"active_close_code={close_code}, active_close_reason={close_reason}, uri={self.uri}"
+            )
             await self.reconnect()
         except asyncio.CancelledError:
             logger.info("Agent 客户端协程已取消")
@@ -330,8 +355,17 @@ class WebSocketClient:
             logger.error(f"未知异常，连接中断：{e}")
             logger.exception(e)
             self._notify_status("error", f"未知异常，连接中断：{e}")
+            close_code, close_reason = _get_websocket_close_info(self.websocket)
+            logger.warning(
+                f"Agent WebSocket 未知异常后关闭信息：close_code={close_code}, close_reason={close_reason}, uri={self.uri}"
+            )
             await self.reconnect()
         finally:
+            close_code, close_reason = _get_websocket_close_info(self.websocket)
+            logger.info(
+                f"Agent WebSocket 退出：uri={self.uri}, close_code={close_code}, close_reason={close_reason}, "
+                f"manual_stop={self.manual_stop}, running={self.running}, status={self.status}"
+            )
             self.status = False
             self.websocket = None
             if self.manual_stop or not self.running:
