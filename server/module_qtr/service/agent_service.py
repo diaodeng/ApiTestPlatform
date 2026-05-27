@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import re
+import time
 import uuid
 from collections import defaultdict
 from typing import Any
@@ -17,6 +18,7 @@ from utils.log_util import logger
 
 # 存储agent的WebSocket连接和Future对象（用于HTTP请求等待WebSocket响应）
 agents: dict = {}
+agent_loops: dict[str, asyncio.AbstractEventLoop] = {}
 response_futures = defaultdict(dict)
 CHUNK_SIZE = 5 * 1024
 
@@ -46,27 +48,65 @@ async def send_message(
     request_id: str = None,
     timeout_seconds: int | float | None = None,
 ):
+    request_message = dict(message or {})
     logger.info(f"agent_code: {agent_code}")
-    request_type = message.get('requestType')
+    request_type = request_message.get('requestType')
     logger.info(f"转发类型: {request_type}")
     # 如果没有提供request_id，则生成一个唯一的标识符
     if not request_id:
         request_id = str(uuid.uuid4())
-    message["request_id"] = request_id
+    request_message["request_id"] = request_id
 
+    if agent_code not in agents:
+        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                                    None,
+                                    f"【{agent_code}】Agent not connected，request_id：{request_id}"))
+        return response
+
+    agent_loop = agent_loops.get(agent_code)
+    if not agent_loop or agent_loop.is_closed():
+        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                                    None,
+                                    f"【{agent_code}】Agent loop not available，request_id：{request_id}"))
+        return response
+
+    current_loop = asyncio.get_running_loop()
+    if agent_loop is current_loop:
+        return await _send_message_on_agent_loop(agent_code, request_message, request_id, timeout_seconds)
+    concurrent_future = asyncio.run_coroutine_threadsafe(
+        _send_message_on_agent_loop(agent_code, request_message, request_id, timeout_seconds),
+        agent_loop,
+    )
+    return await asyncio.wrap_future(concurrent_future)
+
+
+async def _send_message_on_agent_loop(
+    agent_code: str,
+    message: dict,
+    request_id: str,
+    timeout_seconds: int | float | None = None,
+):
+    request_type = message.get('requestType')
     if agent_code in agents:
         # 创建一个Future对象来代表异步操作的结果
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future = loop.create_future()
+        request_started_at = time.monotonic()
 
         # 将Future对象存储在字典中，以便稍后设置其结果
         response_futures[request_id]["future"] = future
+        response_futures[request_id]["loop"] = loop
         response_futures[request_id]["agent_code"] = agent_code
 
         # 发送消息到WebSocket，并包含request_id以便客户端能够识别是哪个请求的响应
         compress_data = compress_dict_to_str(message)
         request_chunks = [compress_data[i:i+CHUNK_SIZE] for i in range(0, len(compress_data), CHUNK_SIZE)]
         total = len(request_chunks) or 1
+        logger.info(
+            f"发送 AI 分析请求到 Agent | agent_code={agent_code}, request_id={request_id}, "
+            f"request_type={request_type}, payload_size={len(compress_data)}, chunk_count={total}, "
+            f"timeout_seconds={timeout_seconds}"
+        )
         for idx, chunk in enumerate(request_chunks):
             message_data = {
                 "type": "request_chunk",
@@ -90,7 +130,12 @@ async def send_message(
                 except Exception:
                     request_timeout = 120.0
             response_data = await asyncio.wait_for(future, timeout=request_timeout)
+            elapsed_sec = round(time.monotonic() - request_started_at, 3)
             logger.info(f"response={_summarize_message(response_data)}")
+            logger.info(
+                f"Agent 请求完成 | agent_code={agent_code}, request_id={request_id}, "
+                f"request_type={request_type}, elapsed_sec={elapsed_sec}, timeout_sec={request_timeout}"
+            )
             response = {}
             if response_data.get("Error", None):
                 return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
@@ -116,7 +161,12 @@ async def send_message(
             response = handle_response((AgentResponseEnum.SUCCESS.value, response, "操作成功"))
             return response
         except TimeoutError as e:
-            logger.error(f'websocket请求超时{e}，request_id：{request_id}')
+            elapsed_sec = round(time.monotonic() - request_started_at, 3)
+            logger.error(
+                f'websocket请求超时{e}，request_id：{request_id}, agent_code={agent_code}, '
+                f'request_type={request_type}, elapsed_sec={elapsed_sec}, timeout_sec={request_timeout}, '
+                f'payload_size={len(compress_data)}, chunk_count={total}'
+            )
             if request_type == TstepTypeEnum.http.value:
                 response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
                                             None,
@@ -141,7 +191,11 @@ async def send_message(
             response = handle_response((AgentResponseEnum.TASK_CANCELLED.value, None, str(e.args)))
             return response
         except Exception as e:
-            logger.error(e)
+            elapsed_sec = round(time.monotonic() - request_started_at, 3)
+            logger.error(
+                f"Agent 请求异常，request_id={request_id}, agent_code={agent_code}, request_type={request_type}, "
+                f"elapsed_sec={elapsed_sec}, payload_size={len(compress_data)}, chunk_count={total}, error={e}"
+            )
             response = handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, str(e.args)))
             return response
         finally:
@@ -149,13 +203,10 @@ async def send_message(
                 future.cancel()
             if response_futures.get(request_id, {}).get("future") is future:
                 response_futures.pop(request_id, None)
-
-
-    else:
-        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
-                                    None,
-                                    f"【{agent_code}】Agent not connected，request_id：{request_id}"))
-        return response
+    response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                                None,
+                                f"【{agent_code}】Agent not connected，request_id：{request_id}"))
+    return response
 
 
 class Request:

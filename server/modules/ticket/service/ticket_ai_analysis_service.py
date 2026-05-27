@@ -1213,6 +1213,81 @@ class TicketAiAnalysisService:
             raise
 
     @classmethod
+    def retry_analysis_task_services(
+        cls,
+        db: Session,
+        ticket_id: int,
+        task_id: int,
+        current_user: CurrentUserModel,
+    ) -> CrudResponseModel:
+        """
+        重新提交指定任务ID的 AI 分析任务。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param task_id: 任务ID
+        :param current_user: 当前登录用户
+        :return: 重试结果
+        """
+        task = TicketAiDao.get_task_by_id(db, task_id)
+        if not task or task.ticket_id != ticket_id:
+            return CrudResponseModel(is_success=False, message="AI分析任务不存在")
+        if task.status == TicketAiAnalysisStatus.SUCCESS.value and task.analysis_result:
+            return CrudResponseModel(
+                is_success=True,
+                message="AI分析任务已完成，直接返回历史结果",
+                result=CamelCaseUtil.transform_result(task),
+            )
+        with cls._executor_lock:
+            if task_id in cls._active_task_ids:
+                return CrudResponseModel(is_success=False, message="当前AI分析任务正在执行中，请稍后重试")
+        now = datetime.now()
+        update_data: dict[str, Any] = {
+            "update_by": cls._user_name(current_user),
+            "update_time": now,
+        }
+        if task.status in (TicketAiAnalysisStatus.FAILED.value, TicketAiAnalysisStatus.CANCELED.value):
+            update_data.update(
+                {
+                    "status": TicketAiAnalysisStatus.CREATED.value,
+                    "status_desc": "待重试",
+                    "error_message": None,
+                    "started_at": None,
+                    "finished_at": None,
+                }
+            )
+        try:
+            if update_data:
+                TicketAiDao.update_task(db, task_id, update_data)
+            TicketDao.add_event(
+                db,
+                TicketEvent(
+                    ticket_id=ticket_id,
+                    event_type=TicketEventType.ANALYSIS.value,
+                    operator_id=cls._user_id(current_user),
+                    operator_name=cls._user_name(current_user),
+                    content="重试AI分析任务",
+                    event_data={
+                        "task_id": task.task_id,
+                        "origin_status": task.status,
+                        "version_key": task.version_key,
+                        "repo_url": task.repo_url,
+                        "branch_name": task.branch_name,
+                    },
+                    create_time=now,
+                ),
+            )
+            db.commit()
+            cls.queue_task(task_id)
+            return CrudResponseModel(
+                is_success=True,
+                message="AI分析任务已重新提交",
+                result=CamelCaseUtil.transform_result(TicketAiDao.get_task_by_id(db, task_id) or task),
+            )
+        except Exception:
+            db.rollback()
+            raise
+
+    @classmethod
     def _mark_repo_default_if_needed(
         cls, db: Session, mapping: TicketAiRepoMapping, exclude_mapping_id: int | None = None
     ) -> None:
@@ -1594,6 +1669,14 @@ class TicketAiAnalysisService:
             raw_stdout = cls._dumps(cls._json_safe_value(response_dump))
             raw_stderr = ""
             cls._persist_worker_streams(workspace_dir, raw_stdout, raw_stderr)
+            response_result_preview = None
+            if hasattr(response_object, "result"):
+                try:
+                    response_result_preview = getattr(response_object, "result", None)
+                    if isinstance(response_result_preview, dict):
+                        response_result_preview = list(response_result_preview.keys())
+                except Exception:
+                    response_result_preview = "<error>"
             cls._log_task_step(
                 task_id,
                 "EXEC",
@@ -1601,6 +1684,7 @@ class TicketAiAnalysisService:
                 status_code=getattr(agent_response, "status_code", None),
                 response_type=type(response_object).__name__ if response_object is not None else "None",
                 response_message=getattr(agent_response, "message", None),
+                response_result_preview=response_result_preview,
             )
             if getattr(agent_response, "status_code", 500) != 200 or not bool(
                 getattr(response_object, "success", True)

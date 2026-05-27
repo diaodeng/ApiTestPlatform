@@ -65,7 +65,7 @@ sequenceDiagram
 | 4 | `TicketLogPullService._process_record` 在日志拉取成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
 | 5 | 若自动化配置开启 AI 且存在 Agent 编码，服务端构造 `TicketAiAnalysisRequestModel` 并触发分析任务。 |
 | 6 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent。 |
-| 7 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库。 |
+| 7 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环；服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。 |
 | 8 | 工单详情页中的时间线、日志拉取和 AI 分析改为按需加载，避免打开详情时一次性拉取大量数据。 |
 
 ## 错误处理

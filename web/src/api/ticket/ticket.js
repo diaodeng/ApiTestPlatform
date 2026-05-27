@@ -231,6 +231,14 @@ export function addTicketAiAnalysis(ticketId, data) {
   })
 }
 
+// 重试工单AI分析任务
+export function retryTicketAiAnalysis(ticketId, taskId) {
+  return request({
+    url: `/ticket/${ticketId}/ai-analysis/tasks/${taskId}/retry`,
+    method: 'post'
+  })
+}
+
 // 查询日志拉取文本内容
 export function getTicketLogPullContent(recordId, query) {
   return request({

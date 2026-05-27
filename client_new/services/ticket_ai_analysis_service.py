@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import shutil
 import subprocess
 import zipfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -140,6 +142,146 @@ class TicketAiAnalysisService:
             (workspace_dir / "worker.stderr.txt").write_text(stderr_text or "", encoding="utf-8")
         except Exception as exc:
             logger.warning(f"写入 Worker 流文件失败: {exc}")
+
+    @staticmethod
+    async def _run_worker_process(
+        command: list[str],
+        resolved_prompt: str,
+        repo_path: Path,
+        env_values: dict[str, str],
+        timeout_sec: int,
+    ) -> subprocess.CompletedProcess:
+        """
+        在后台线程中执行 Worker 进程，避免阻塞 Agent 事件循环。
+        :param command: Worker 命令
+        :param resolved_prompt: 发送给 Worker 的提示词
+        :param repo_path: 仓库路径
+        :param env_values: 执行环境变量
+        :param timeout_sec: 超时时间
+        :return: 进程执行结果
+        """
+        return await asyncio.to_thread(
+            subprocess.run,
+            command,
+            input=resolved_prompt,
+            text=True,
+            capture_output=True,
+            cwd=str(repo_path),
+            env=env_values,
+            timeout=max(timeout_sec, 60),
+        )
+
+    @staticmethod
+    def _read_json_file(path: Path) -> dict[str, Any] | None:
+        """
+        读取 JSON 文件并转换为字典。
+        :param path: JSON 文件路径
+        :return: 解析后的字典，失败返回 None
+        """
+        try:
+            if not path.exists():
+                return None
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _is_valid_cached_result(payload: dict[str, Any] | None) -> bool:
+        """
+        判断本地结果是否可作为缓存直接返回。
+        :param payload: 结果内容
+        :return: 是否可直接复用
+        """
+        if not isinstance(payload, dict):
+            return False
+        return any(
+            key in payload
+            for key in (
+                "analysis_result",
+                "analysisResult",
+                "root_cause",
+                "rootCause",
+                "analysis_summary",
+                "analysisSummary",
+            )
+        )
+
+    @classmethod
+    def _load_cached_result(cls, result_file: Path) -> dict[str, Any] | None:
+        """
+        读取已完成的分析结果缓存。
+        :param result_file: 结果文件路径
+        :return: 缓存结果，失败返回 None
+        """
+        payload = cls._read_json_file(result_file)
+        if not cls._is_valid_cached_result(payload):
+            return None
+        return payload
+
+    @staticmethod
+    def _acquire_task_lock(lock_file: Path, payload: dict[str, Any]) -> bool:
+        """
+        尝试获取任务运行锁。
+        :param lock_file: 锁文件路径
+        :param payload: 锁文件内容
+        :return: 是否获取成功
+        """
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with lock_file.open("x", encoding="utf-8") as file_obj:
+                file_obj.write(json.dumps(payload, ensure_ascii=False, indent=2))
+            return True
+        except FileExistsError:
+            return False
+        except Exception as exc:
+            logger.warning(f"创建 AI 分析任务锁失败: {exc}")
+            return False
+
+    @staticmethod
+    def _release_task_lock(lock_file: Path) -> None:
+        """
+        释放任务运行锁。
+        :param lock_file: 锁文件路径
+        :return: 无
+        """
+        try:
+            if lock_file.exists():
+                lock_file.unlink()
+        except Exception as exc:
+            logger.warning(f"释放 AI 分析任务锁失败: {exc}")
+
+    @staticmethod
+    def _parse_iso_datetime(value: Any) -> datetime | None:
+        """
+        解析 ISO 格式时间字符串。
+        :param value: 时间值
+        :return: 解析后的时间对象
+        """
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value))
+        except Exception:
+            return None
+
+    @classmethod
+    def _is_stale_lock(cls, lock_payload: dict[str, Any] | None, timeout_sec: int) -> bool:
+        """
+        判断锁文件是否已经过期。
+        :param lock_payload: 锁文件内容
+        :param timeout_sec: 当前任务超时时间
+        :return: 是否过期
+        """
+        if not isinstance(lock_payload, dict):
+            return True
+        started_at = cls._parse_iso_datetime(lock_payload.get("startedAt") or lock_payload.get("started_at"))
+        if not started_at:
+            return True
+        stale_after = max(int(timeout_sec or cls.DEFAULT_TIMEOUT_SEC), 60) * 2
+        return (datetime.now() - started_at).total_seconds() > stale_after
 
     @staticmethod
     def _download_archive(url: str, target_path: Path) -> Path | None:
@@ -310,6 +452,10 @@ class TicketAiAnalysisService:
         timeline_payload = req_data.get("timeline") or {}
         prompt_template = str(req_data.get("promptTemplate") or req_data.get("prompt_template") or "").strip()
         schema_payload = req_data.get("resultSchema") or {}
+        try:
+            timeout_sec = int(req_data.get("timeoutSec") or req_data.get("timeout_sec") or cls.DEFAULT_TIMEOUT_SEC)
+        except Exception:
+            timeout_sec = cls.DEFAULT_TIMEOUT_SEC
         if not task_id or not ticket_id:
             return {
                 "request_type": req_data.get("requestType"),
@@ -332,195 +478,267 @@ class TicketAiAnalysisService:
             source_logs_dir = workspace_dir / "source_logs"
             source_logs_zip = workspace_dir / "source_logs.zip"
             source_logs_manifest = workspace_dir / "source_logs_manifest.json"
+            task_lock_file = workspace_dir / "analysis.lock"
+            request_snapshot_file = workspace_dir / "request.snapshot.json"
 
             await cls._emit_event(event_sender, "ai_analysis_status", task_id, "准备本地工作区", workspace_path=str(workspace_dir))
-            ticket_file.write_text(cls._dumps(ticket), encoding="utf-8")
-            timeline_file.write_text(cls._dumps(timeline_payload), encoding="utf-8")
-            context_file.write_text(cls._dumps(context_payload), encoding="utf-8")
-            source_log_pull = context_payload.get("sourceLogPull") or {}
-            logs_text = str(source_log_pull.get("text") or "")
-            command_result_url = str(source_log_pull.get("commandResultUrl") or "").strip()
-            storage_path = str(source_log_pull.get("storagePath") or "").strip()
-            whole_archive_mode = bool(source_log_pull.get("wholeArchiveMode"))
-            extracted_files: list[str] = []
-            if logs_text:
-                logs_file.write_text(logs_text, encoding="utf-8")
-                archive_url = ""
-            else:
-                archive_url = command_result_url or storage_path
-                if whole_archive_mode:
-                    logs_file.write_text(
-                        "\n".join(
-                            [
-                                "日志内容未入库，已改为整包分析模式。",
-                                f"压缩包地址: {archive_url or '<none>'}",
-                                f"压缩包本地路径: {source_logs_zip}",
-                                f"解压目录: {source_logs_dir}",
-                            ]
-                        ),
-                        encoding="utf-8",
-                    )
-                else:
-                    logs_file.write_text(
-                        "日志内容未入库，当前任务为时间范围模式或未配置整包分析。",
-                        encoding="utf-8",
-                    )
-                if whole_archive_mode and archive_url and str(archive_url).lower().startswith(("http://", "https://")):
-                    await cls._emit_event(
-                        event_sender,
-                        "ai_analysis_status",
-                        task_id,
-                        "下载并解压整包日志",
-                        archive_url=archive_url,
-                        archive_path=str(source_logs_zip),
-                        extract_dir=str(source_logs_dir),
-                    )
-                    downloaded = cls._download_archive(str(archive_url), source_logs_zip)
-                    if downloaded:
-                        extracted_files = cls._extract_archive(downloaded, source_logs_dir)
-                    source_logs_manifest.write_text(
-                        cls._dumps(
-                            {
-                                "archiveUrl": archive_url or "",
-                                "archivePath": str(source_logs_zip),
-                                "extractDir": str(source_logs_dir),
-                                "extractedFiles": extracted_files,
-                            }
-                        ),
-                        encoding="utf-8",
-                    )
-            schema_file.write_text(cls._dumps(schema_payload), encoding="utf-8")
-
-            resolved_prompt = prompt_template.replace("{workspace_path}", str(workspace_dir))
-            if not resolved_prompt:
-                resolved_prompt = cls._build_prompt(str(workspace_dir), mapping, ticket)
-            prompt_file.write_text(resolved_prompt, encoding="utf-8")
-
-            repo_path_text = str(mapping.get("localRepoPath") or mapping.get("local_repo_path") or "").strip()
-            repo_path = Path(repo_path_text).expanduser()
-            if not repo_path.is_absolute():
-                repo_path = repo_path.resolve()
-            if not repo_path.exists():
-                raise FileNotFoundError(f"本地仓库路径不存在: {repo_path}")
-
             try:
-                timeout_sec = int(req_data.get("timeoutSec") or req_data.get("timeout_sec") or cls.DEFAULT_TIMEOUT_SEC)
-            except Exception:
-                timeout_sec = cls.DEFAULT_TIMEOUT_SEC
-            command = cls._resolve_worker_command_parts(
-                [
-                    *cls.DEFAULT_WORKER_COMMAND.split(),
-                    "-s",
-                    cls.DEFAULT_WORKER_SANDBOX,
-                    "-C",
-                    str(repo_path),
-                    "--skip-git-repo-check",
-                    "--output-schema",
-                    str(schema_file),
-                    "--output-last-message",
-                    str(result_file),
-                ]
-            )
-            codex_home = cls._prepare_codex_home(workspace_dir)
-            env_values = cls._load_codex_env(codex_home)
-            env_values["CODEX_HOME"] = str(codex_home)
-
-            await cls._emit_event(
-                event_sender,
-                "ai_analysis_step",
-                task_id,
-                "开始执行 Worker",
-                command_line=" ".join(command),
-                repo_path=str(repo_path),
-                codex_home=str(codex_home),
-            )
-            process = subprocess.run(
-                command,
-                input=resolved_prompt,
-                text=True,
-                capture_output=True,
-                cwd=str(repo_path),
-                env=env_values,
-                timeout=max(timeout_sec, 60),
-            )
-            raw_stdout = process.stdout or ""
-            raw_stderr = process.stderr or ""
-            cls._persist_worker_streams(workspace_dir, raw_stdout, raw_stderr)
-            await cls._emit_event(
-                event_sender,
-                "ai_analysis_step",
-                task_id,
-                "Worker 执行结束",
-                return_code=process.returncode,
-                stdout_len=len(raw_stdout),
-                stderr_len=len(raw_stderr),
-                stderr_context=cls._extract_stderr_context(raw_stderr),
-            )
-
-            result_text = ""
-            if result_file.exists():
-                result_text = result_file.read_text(encoding="utf-8")
-            elif raw_stdout.strip():
-                result_text = raw_stdout.strip().splitlines()[-1]
-            elif raw_stderr.strip():
-                result_text = raw_stderr.strip()
-
-            parsed_result: dict[str, Any] | None = None
-            if result_text.strip():
-                try:
-                    parsed_result = json.loads(result_text)
-                except Exception:
-                    try:
-                        parsed_result = json.loads(raw_stdout.strip().splitlines()[-1])
-                    except Exception:
-                        parsed_result = None
-            if not parsed_result:
-                failure_message = (
-                    cls._extract_stderr_context(raw_stderr)
-                    or cls._extract_stderr_context(raw_stdout)
-                    or cls._summarize_worker_error(raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果")
+                request_snapshot_file.write_text(
+                    cls._dumps(
+                        {
+                            "taskId": task_id,
+                            "ticketId": ticket_id,
+                            "requestType": req_data.get("requestType"),
+                            "command": req_data.get("command"),
+                            "payloadSize": len(cls._dumps(req_data, indent=None)),
+                            "createdAt": datetime.now().isoformat(),
+                        }
+                    ),
+                    encoding="utf-8",
                 )
-                await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message)
+            except Exception as exc:
+                logger.warning(f"写入 AI 分析请求快照失败: {exc}")
+            cached_result = cls._load_cached_result(result_file)
+            if cached_result:
+                await cls._emit_event(
+                    event_sender,
+                    "ai_analysis_finished",
+                    task_id,
+                    "命中本地缓存结果，直接返回",
+                    workspace_path=str(workspace_dir),
+                )
+                result_text = cls._dumps(cached_result)
+                return {
+                    "request_type": req_data.get("requestType"),
+                    "command": req_data.get("command"),
+                    "success": True,
+                    "status": "success",
+                    "message": "AI 分析已完成，直接返回缓存结果",
+                    "result": {
+                        "analysis_result": cached_result,
+                        "raw_output": result_text,
+                        "workspace_path": str(workspace_dir),
+                        "result_path": str(result_file),
+                        "command_line": "cached:result.json",
+                        "stdout_path": str(workspace_dir / "worker.stdout.txt"),
+                        "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                    },
+                }
+            lock_payload = cls._read_json_file(task_lock_file)
+            if task_lock_file.exists() and not cls._is_stale_lock(lock_payload, timeout_sec):
+                failure_message = "当前任务正在分析中，请稍后重试"
+                await cls._emit_event(event_sender, "ai_analysis_status", task_id, failure_message)
                 return {
                     "request_type": req_data.get("requestType"),
                     "command": req_data.get("command"),
                     "success": False,
-                    "status": "failed",
+                    "status": "running",
                     "message": failure_message,
                     "error_message": failure_message,
+                }
+            cls._release_task_lock(task_lock_file)
+            if not cls._acquire_task_lock(
+                task_lock_file,
+                {
+                    "taskId": task_id,
+                    "ticketId": ticket_id,
+                    "status": "running",
+                    "startedAt": datetime.now().isoformat(),
+                    "requestType": req_data.get("requestType"),
+                    "command": req_data.get("command"),
+                },
+            ):
+                failure_message = "当前任务正在分析中，请稍后重试"
+                await cls._emit_event(event_sender, "ai_analysis_status", task_id, failure_message)
+                return {
+                    "request_type": req_data.get("requestType"),
+                    "command": req_data.get("command"),
+                    "success": False,
+                    "status": "running",
+                    "message": failure_message,
+                    "error_message": failure_message,
+                }
+            try:
+                ticket_file.write_text(cls._dumps(ticket), encoding="utf-8")
+                timeline_file.write_text(cls._dumps(timeline_payload), encoding="utf-8")
+                context_file.write_text(cls._dumps(context_payload), encoding="utf-8")
+                source_log_pull = context_payload.get("sourceLogPull") or {}
+                logs_text = str(source_log_pull.get("text") or "")
+                command_result_url = str(source_log_pull.get("commandResultUrl") or "").strip()
+                storage_path = str(source_log_pull.get("storagePath") or "").strip()
+                whole_archive_mode = bool(source_log_pull.get("wholeArchiveMode"))
+                extracted_files: list[str] = []
+                if logs_text:
+                    logs_file.write_text(logs_text, encoding="utf-8")
+                    archive_url = ""
+                else:
+                    archive_url = command_result_url or storage_path
+                    if whole_archive_mode:
+                        logs_file.write_text(
+                            "\n".join(
+                                [
+                                    "日志内容未入库，已改为整包分析模式。",
+                                    f"压缩包地址: {archive_url or '<none>'}",
+                                    f"压缩包本地路径: {source_logs_zip}",
+                                    f"解压目录: {source_logs_dir}",
+                                ]
+                            ),
+                            encoding="utf-8",
+                        )
+                    else:
+                        logs_file.write_text(
+                            "日志内容未入库，当前任务为时间范围模式或未配置整包分析。",
+                            encoding="utf-8",
+                        )
+                    if whole_archive_mode and archive_url and str(archive_url).lower().startswith(("http://", "https://")):
+                        await cls._emit_event(
+                            event_sender,
+                            "ai_analysis_status",
+                            task_id,
+                            "下载并解压整包日志",
+                            archive_url=archive_url,
+                            archive_path=str(source_logs_zip),
+                            extract_dir=str(source_logs_dir),
+                        )
+                        downloaded = cls._download_archive(str(archive_url), source_logs_zip)
+                        if downloaded:
+                            extracted_files = cls._extract_archive(downloaded, source_logs_dir)
+                        source_logs_manifest.write_text(
+                            cls._dumps(
+                                {
+                                    "archiveUrl": archive_url or "",
+                                    "archivePath": str(source_logs_zip),
+                                    "extractDir": str(source_logs_dir),
+                                    "extractedFiles": extracted_files,
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                schema_file.write_text(cls._dumps(schema_payload), encoding="utf-8")
+
+                resolved_prompt = prompt_template.replace("{workspace_path}", str(workspace_dir))
+                if not resolved_prompt:
+                    resolved_prompt = cls._build_prompt(str(workspace_dir), mapping, ticket)
+                prompt_file.write_text(resolved_prompt, encoding="utf-8")
+
+                repo_path_text = str(mapping.get("localRepoPath") or mapping.get("local_repo_path") or "").strip()
+                repo_path = Path(repo_path_text).expanduser()
+                if not repo_path.is_absolute():
+                    repo_path = repo_path.resolve()
+                if not repo_path.exists():
+                    raise FileNotFoundError(f"本地仓库路径不存在: {repo_path}")
+
+                command = cls._resolve_worker_command_parts(
+                    [
+                        *cls.DEFAULT_WORKER_COMMAND.split(),
+                        "-s",
+                        cls.DEFAULT_WORKER_SANDBOX,
+                        "-C",
+                        str(repo_path),
+                        "--skip-git-repo-check",
+                        "--output-schema",
+                        str(schema_file),
+                        "--output-last-message",
+                        str(result_file),
+                    ]
+                )
+                codex_home = cls._prepare_codex_home(workspace_dir)
+                env_values = cls._load_codex_env(codex_home)
+                env_values["CODEX_HOME"] = str(codex_home)
+
+                await cls._emit_event(
+                    event_sender,
+                    "ai_analysis_step",
+                    task_id,
+                    "开始执行 Worker",
+                    command_line=" ".join(command),
+                    repo_path=str(repo_path),
+                    codex_home=str(codex_home),
+                )
+                worker_started_at = time.monotonic()
+                process = await cls._run_worker_process(command, resolved_prompt, repo_path, env_values, timeout_sec)
+                worker_elapsed = round(time.monotonic() - worker_started_at, 3)
+                raw_stdout = process.stdout or ""
+                raw_stderr = process.stderr or ""
+                cls._persist_worker_streams(workspace_dir, raw_stdout, raw_stderr)
+                await cls._emit_event(
+                    event_sender,
+                    "ai_analysis_step",
+                    task_id,
+                    "Worker 执行结束",
+                    return_code=process.returncode,
+                    elapsed_sec=worker_elapsed,
+                    stdout_len=len(raw_stdout),
+                    stderr_len=len(raw_stderr),
+                    stderr_context=cls._extract_stderr_context(raw_stderr),
+                )
+
+                result_text = ""
+                if result_file.exists():
+                    result_text = result_file.read_text(encoding="utf-8")
+                elif raw_stdout.strip():
+                    result_text = raw_stdout.strip().splitlines()[-1]
+                elif raw_stderr.strip():
+                    result_text = raw_stderr.strip()
+
+                parsed_result: dict[str, Any] | None = None
+                if result_text.strip():
+                    try:
+                        parsed_result = json.loads(result_text)
+                    except Exception:
+                        try:
+                            parsed_result = json.loads(raw_stdout.strip().splitlines()[-1])
+                        except Exception:
+                            parsed_result = None
+                if not parsed_result:
+                    failure_message = (
+                        cls._extract_stderr_context(raw_stderr)
+                        or cls._extract_stderr_context(raw_stdout)
+                        or cls._summarize_worker_error(raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果")
+                    )
+                    await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message)
+                    return {
+                        "request_type": req_data.get("requestType"),
+                        "command": req_data.get("command"),
+                        "success": False,
+                        "status": "failed",
+                        "message": failure_message,
+                        "error_message": failure_message,
+                        "result": {
+                            "workspace_path": str(workspace_dir),
+                            "result_path": str(result_file),
+                            "command_line": " ".join(command),
+                            "stdout": raw_stdout,
+                            "stderr": raw_stderr,
+                        },
+                    }
+
+                normalized_result = parsed_result
+                await cls._emit_event(
+                    event_sender,
+                    "ai_analysis_finished",
+                    task_id,
+                    "Worker 已完成分析",
+                    workspace_path=str(workspace_dir),
+                )
+                return {
+                    "request_type": req_data.get("requestType"),
+                    "command": req_data.get("command"),
+                    "success": True,
+                    "status": "success",
+                    "message": "AI 分析完成",
                     "result": {
+                        "analysis_result": normalized_result,
+                        "raw_output": result_text or raw_stdout,
                         "workspace_path": str(workspace_dir),
                         "result_path": str(result_file),
                         "command_line": " ".join(command),
-                        "stdout": raw_stdout,
-                        "stderr": raw_stderr,
+                        "stdout_path": str(workspace_dir / "worker.stdout.txt"),
+                        "stderr_path": str(workspace_dir / "worker.stderr.txt"),
                     },
                 }
-
-            normalized_result = parsed_result
-            await cls._emit_event(
-                event_sender,
-                "ai_analysis_finished",
-                task_id,
-                "Worker 已完成分析",
-                workspace_path=str(workspace_dir),
-            )
-            return {
-                "request_type": req_data.get("requestType"),
-                "command": req_data.get("command"),
-                "success": True,
-                "status": "success",
-                "message": "AI 分析完成",
-                "result": {
-                    "analysis_result": normalized_result,
-                    "raw_output": result_text or raw_stdout,
-                    "workspace_path": str(workspace_dir),
-                    "result_path": str(result_file),
-                    "command_line": " ".join(command),
-                    "stdout_path": str(workspace_dir / "worker.stdout.txt"),
-                    "stderr_path": str(workspace_dir / "worker.stderr.txt"),
-                },
-            }
+            finally:
+                cls._release_task_lock(task_lock_file)
         except subprocess.TimeoutExpired as exc:
             failure_message = f"AI Worker 执行超时：{exc}"
             await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message)
