@@ -1,6 +1,10 @@
 ## 更新历史
 
 ### latest
+1. 调整 Celery 执行日志生命周期：任务开始时先写入 `running` 记录并保存 `celery_task_id`/触发来源，任务结束后再回写最终状态、耗时和异常信息，方便排查运行中是谁触发的任务
+1. 调整 Celery 定时任务锁机制说明：`lock_ttl_seconds` 恢复为固定 TTL，不再自动续租；运行态心跳只用于状态可见性与失联恢复
+1. 增加运行中任务的手动终止能力：服务层会写入停止标记并调用 Celery revoke，任务执行入口会在启动/运行期间检查停止请求并清理运行态
+1. 增加失联运行态恢复：当数据库状态为 running 但 Redis 运行态心跳已消失时，会自动恢复为失败状态，避免任务一直卡在 running 且无法再次手动执行
 1. 修复发起工单 AI 分析时 `got Future attached to a different loop` 的问题：服务端发送 Agent 请求改为统一切回 Agent WebSocket 所属事件循环执行，避免后台线程中的临时 loop 直接操作主线程 WebSocket
 1. 修复 AI 分析完成后服务端误判 Agent 离线、任务 future 无法回收的问题：Agent Worker 改为后台线程执行，服务端心跳会在同 Agent 存在未完成请求时跳过离线判定，并补充完整响应回写日志
 1. 修复 Agent 在 AI 分析执行期间被阻塞断连的问题：将 Codex Worker 同步执行改为后台线程执行，并补充请求分片、任务耗时和 WebSocket 关闭原因日志

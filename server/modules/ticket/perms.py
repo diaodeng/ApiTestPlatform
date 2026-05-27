@@ -127,7 +127,7 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         "AI仓库映射",
         "ticket.root",
         "aiRepoMapping",
-        "ticket/ai-repo-mapping/index",
+        "ticket/aiRepoMapping/index",
         "ticket:ai:mapping:list",
         "link",
         5,

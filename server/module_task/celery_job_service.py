@@ -2,10 +2,13 @@ import ast
 import json
 import os
 from datetime import datetime, time
+from urllib.parse import quote
 
+from redis import Redis
 from sqlalchemy.orm import Session
 
 from config.celery_app import celery_app
+from config.env import RedisConfig
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_task.celery_contract import (
     CELERY_EXECUTE_JOB_TASK,
@@ -26,7 +29,70 @@ from module_task.celery_job_vo import (
 )
 from module_task.celery_schedule_parser import normalize_cron_expression, parse_cron_to_schedule
 from utils.common_util import CamelCaseUtil, export_list2excel
+from utils.log_util import logger
 from utils.page_util import PageResponseModel
+
+TASK_STATE_PREFIX = "celery:task:state"
+TASK_STOP_PREFIX = "celery:task:stop"
+TASK_LOCK_PREFIX = "celery:task:lock"
+
+
+def _build_redis_url(database: int) -> str:
+    """
+    构建 Redis 连接地址。
+
+    :param database: Redis 数据库编号。
+    :return: Redis URL。
+    """
+    username = (RedisConfig.redis_username or "").strip()
+    password = (RedisConfig.redis_password or "").strip()
+    auth = ""
+    if username and password:
+        auth = f"{quote(username)}:{quote(password)}@"
+    elif password:
+        auth = f":{quote(password)}@"
+    elif username:
+        auth = f"{quote(username)}@"
+    return f"redis://{auth}{RedisConfig.redis_host}:{RedisConfig.redis_port}/{database}"
+
+
+def _build_runtime_client() -> Redis:
+    """
+    创建任务运行态 Redis 客户端。
+
+    :return: Redis 客户端实例。
+    """
+    return Redis.from_url(_build_redis_url(RedisConfig.redis_celery_database), decode_responses=True)
+
+
+def _task_state_key(task_id: int) -> str:
+    """
+    构建任务运行态键。
+
+    :param task_id: 任务ID。
+    :return: Redis 键。
+    """
+    return f"{TASK_STATE_PREFIX}:{task_id}"
+
+
+def _task_lock_key(task_id: int) -> str:
+    """
+    构建任务锁键。
+
+    :param task_id: 任务ID。
+    :return: Redis 锁键。
+    """
+    return f"{TASK_LOCK_PREFIX}:{task_id}"
+
+
+def _task_stop_key(task_id: int) -> str:
+    """
+    构建任务停止请求键。
+
+    :param task_id: 任务ID。
+    :return: Redis 停止键。
+    """
+    return f"{TASK_STOP_PREFIX}:{task_id}"
 
 
 class CeleryJobService:
@@ -206,6 +272,136 @@ class CeleryJobService:
         return item
 
     @classmethod
+    def _load_runtime_state(cls, task_id: int) -> dict | None:
+        """
+        读取任务运行态心跳信息。
+
+        :param task_id: 任务ID。
+        :return: 运行态字典，缺失时返回 None。
+        """
+        client = _build_runtime_client()
+        try:
+            raw_value = client.get(_task_state_key(task_id))
+            if not raw_value:
+                return None
+            parsed = json.loads(raw_value)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+
+    @classmethod
+    def _recover_stale_running_tasks(
+        cls,
+        query_db: Session,
+        owner_type: str,
+        data_scope_sql=True,
+        task_id: int | None = None,
+    ) -> int:
+        """
+        自动恢复已经失联的 running 任务状态。
+
+        :param query_db: 数据库会话。
+        :param owner_type: 任务归属类型。
+        :param data_scope_sql: 数据权限表达式。
+        :param task_id: 可选任务ID，仅恢复指定任务。
+        :return: 恢复数量。
+        """
+        owner_type = cls._validate_owner_type(owner_type)
+        query = query_db.query(CeleryPeriodicTask).filter(
+            CeleryPeriodicTask.owner_type == owner_type,
+            CeleryPeriodicTask.last_status == "running",
+            data_scope_sql,
+        )
+        if task_id is not None:
+            query = query.filter(CeleryPeriodicTask.task_id == task_id)
+
+        rows = query.all()
+        if not rows:
+            return 0
+
+        runtime_client = _build_runtime_client()
+        recovered_count = 0
+        now = datetime.now()
+        for task in rows:
+            runtime_state = cls._load_runtime_state(task.task_id)
+            if runtime_state and str(runtime_state.get("status") or "").lower() == "running":
+                continue
+            if task.last_run_at and (now - task.last_run_at).total_seconds() < 90:
+                continue
+
+            try:
+                runtime_client.delete(
+                    _task_state_key(task.task_id),
+                    _task_lock_key(task.task_id),
+                    _task_stop_key(task.task_id),
+                )
+            except Exception:
+                pass
+
+            duration_ms = None
+            if task.last_run_at:
+                duration_ms = int((now - task.last_run_at).total_seconds() * 1000)
+            query_db.query(CeleryPeriodicTask).filter(CeleryPeriodicTask.task_id == task.task_id).update(
+                {
+                    "last_status": "failed",
+                    "last_message": "任务已失联并自动恢复为失败状态",
+                    "last_duration_ms": duration_ms,
+                    "update_time": now,
+                }
+            )
+            cls._recover_stale_running_task_log(
+                query_db=query_db,
+                owner_type=owner_type,
+                task_id=task.task_id,
+                started_at=task.last_run_at,
+                finished_at=now,
+            )
+            recovered_count += 1
+
+        if recovered_count:
+            query_db.commit()
+        return recovered_count
+
+    @classmethod
+    def _recover_stale_running_task_log(
+        cls,
+        query_db: Session,
+        owner_type: str,
+        task_id: int,
+        started_at: datetime | None,
+        finished_at: datetime,
+    ) -> None:
+        """
+        回写失联 running 任务对应的执行日志。
+
+        :param query_db: 数据库会话。
+        :param owner_type: 任务归属类型。
+        :param task_id: 任务ID。
+        :param started_at: 日志开始时间。
+        :param finished_at: 恢复完成时间。
+        :return: 无返回值。
+        """
+        log_row = (
+            query_db.query(CeleryTaskExecutionLog)
+            .filter(
+                CeleryTaskExecutionLog.owner_type == owner_type,
+                CeleryTaskExecutionLog.task_id == task_id,
+                CeleryTaskExecutionLog.status == "running",
+            )
+            .order_by(CeleryTaskExecutionLog.log_id.desc())
+            .first()
+        )
+        if not log_row:
+            return
+
+        log_started_at = started_at or log_row.started_at or finished_at
+        log_row.status = "failed"
+        log_row.message = "任务已失联并自动恢复为失败状态"
+        log_row.exception_info = "运行态心跳失联"
+        log_row.finished_at = finished_at
+        log_row.duration_ms = int((finished_at - log_started_at).total_seconds() * 1000) if log_started_at else None
+
+    @classmethod
     def _build_task_page(
         cls,
         query,
@@ -362,6 +558,7 @@ class CeleryJobService:
         :return: 分页模型或列表。
         """
         owner_type = cls._validate_owner_type(owner_type)
+        cls._recover_stale_running_tasks(query_db=query_db, owner_type=owner_type, data_scope_sql=data_scope_sql)
         query = query_db.query(CeleryPeriodicTask).filter(
             CeleryPeriodicTask.owner_type == owner_type,
             data_scope_sql,
@@ -552,6 +749,7 @@ class CeleryJobService:
         :return: CRUD 响应。
         """
         owner_type = cls._validate_owner_type(owner_type)
+        cls._recover_stale_running_tasks(query_db=query_db, owner_type=owner_type, task_id=page_object.task_id)
         task = (
             query_db.query(CeleryPeriodicTask)
             .filter(
@@ -562,6 +760,14 @@ class CeleryJobService:
         )
         if not task:
             return CrudResponseModel(is_success=False, message="任务不存在")
+
+        runtime_state = cls._load_runtime_state(task.task_id)
+        if (
+            task.last_status == "running"
+            and runtime_state
+            and str(runtime_state.get("status") or "").lower() == "running"
+        ):
+            return CrudResponseModel(is_success=False, message="任务正在执行中，请先终止后再手动执行")
 
         payload = build_task_payload(task_row=task, trigger_type="manual")
         celery_app.send_task(
@@ -766,20 +972,41 @@ class CeleryJobService:
 
         task_id = int(target.get("taskId") or 0)
         if task_id:
-            try:
-                query_db.query(CeleryPeriodicTask).filter(
-                    CeleryPeriodicTask.owner_type == owner_type,
-                    CeleryPeriodicTask.task_id == task_id,
-                ).update(
-                    {
-                        "last_status": "revoked",
-                        "last_message": "任务已手动终止" if terminate else "任务已手动取消",
-                        "update_time": datetime.now(),
-                    }
-                )
-                query_db.commit()
-            except Exception:
-                query_db.rollback()
+            runtime_state = str(target.get("runtimeState") or "").strip().lower()
+            runtime_client = _build_runtime_client()
+            if terminate:
+                try:
+                    runtime_client.set(
+                        _task_stop_key(task_id),
+                        json.dumps(
+                            {
+                                "task_id": task_id,
+                                "celery_task_id": celery_task_id,
+                                "terminate": True,
+                                "requested_at": datetime.now().isoformat(),
+                            },
+                            ensure_ascii=False,
+                        ),
+                        ex=600,
+                    )
+                except Exception as exc:
+                    logger.warning(f"写入任务停止请求失败[{task_id}]：{exc}")
+            should_update_status = terminate or runtime_state in {"reserved", "scheduled"}
+            if should_update_status:
+                try:
+                    query_db.query(CeleryPeriodicTask).filter(
+                        CeleryPeriodicTask.owner_type == owner_type,
+                        CeleryPeriodicTask.task_id == task_id,
+                    ).update(
+                        {
+                            "last_status": "revoked",
+                            "last_message": "任务已手动终止" if terminate else "任务已手动取消",
+                            "update_time": datetime.now(),
+                        }
+                    )
+                    query_db.commit()
+                except Exception:
+                    query_db.rollback()
 
         action_text = "终止" if terminate else "取消"
         if terminate and os.name == "nt":
