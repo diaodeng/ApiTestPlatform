@@ -956,6 +956,21 @@
                 <el-table-column label="完成时间" prop="finishedAt" width="170">
                   <template #default="scope">{{ parseTime(scope.row.finishedAt) }}</template>
                 </el-table-column>
+                <el-table-column label="操作" width="110" align="center" fixed="right">
+                  <template #default="scope">
+                    <el-button
+                      v-if="canRetryAiTask(scope.row)"
+                      link
+                      type="primary"
+                      :loading="aiAnalysisRetryLoading"
+                      @click="retryAiAnalysisTask(scope.row)"
+                      v-hasPermi="['ticket:ai:analysis:run']"
+                    >
+                      重试
+                    </el-button>
+                    <span v-else>-</span>
+                  </template>
+                </el-table-column>
               </el-table>
               <pagination
                 v-show="aiTaskTotal > 0"
@@ -1252,6 +1267,7 @@ import {
   reextractTicketLogPull,
   redownloadTicketLogPull,
   retryTicketLogPull,
+  retryTicketAiAnalysis,
   saveTicketRca,
   searchTicketNaturalLanguage,
   updateTicketAiRepoMapping,
@@ -1308,6 +1324,7 @@ const logPullList = ref([])
 const logPullTotal = ref(0)
 const aiAnalysisLoading = ref(false)
 const aiAnalysisSubmitting = ref(false)
+const aiAnalysisRetryLoading = ref(false)
 const aiAnalysisOpen = ref(false)
 const aiRepoMappingOpen = ref(false)
 const aiRepoMappingLoading = ref(false)
@@ -1964,6 +1981,10 @@ function loadAiAnalysisTasks(silent = false) {
   })
 }
 
+function canRetryAiTask(row) {
+  return Boolean(row?.taskId) && ['failed', 'canceled'].includes(String(row.status || '').toLowerCase())
+}
+
 function resetAiAnalysisDialog() {
   aiAnalysisTaskForm.value.versionKey = detail.value.versionKey || detail.value.extraData?.versionKey || ''
   aiAnalysisTaskForm.value.agentCode = detail.value.extraData?.ticketAutomation?.logPullConfig?.aiAgentCode
@@ -2003,6 +2024,21 @@ function submitAiAnalysis() {
     }).finally(() => {
       aiAnalysisSubmitting.value = false
     })
+  })
+}
+
+function retryAiAnalysisTask(row) {
+  if (!row?.taskId) {
+    return
+  }
+  proxy.$modal.confirm(`是否确认重试 AI 分析任务 #${row.taskId}？`).then(() => {
+    aiAnalysisRetryLoading.value = true
+    return retryTicketAiAnalysis(currentTicketId.value, row.taskId)
+  }).then(() => {
+    proxy.$modal.msgSuccess('AI分析任务已重新提交')
+    return Promise.all([loadAiAnalysisTasks(true), refreshDetail(), getList()])
+  }).catch(() => {}).finally(() => {
+    aiAnalysisRetryLoading.value = false
   })
 }
 

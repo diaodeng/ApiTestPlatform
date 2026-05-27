@@ -565,6 +565,35 @@ async def get_ticket_ai_analysis_tasks(
 
 
 @ticketController.post(
+    "/{ticket_id}/ai-analysis/tasks/{task_id}/retry",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:run"))],
+)
+@log_decorator(title="工单AI分析重试", business_type=1)
+async def retry_ticket_ai_analysis_task(
+    request: Request,
+    ticket_id: int,
+    task_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    重新提交指定 AI 分析任务接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param task_id: AI 分析任务ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 重试结果
+    """
+    try:
+        result = TicketAiAnalysisService.retry_analysis_task_services(query_db, ticket_id, task_id, current_user)
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
     "/{ticket_id}/ai-analysis",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:run"))],
 )

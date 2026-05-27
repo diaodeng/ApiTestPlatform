@@ -71,12 +71,17 @@ graph TD
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
 - AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本号匹配映射，未命中时拒绝提交。
+- AI 分析任务列表新增“重试”入口，基于原任务 ID 重新提交；Agent 会先检查工作区 `result.json`，存在可用历史结果时直接返回，任务仍在运行则返回“正在分析中”的提示。
+- Agent 侧执行 AI Worker 时改为后台线程执行，避免同步 `subprocess.run` 阻塞 WebSocket 事件循环；同时服务端会记录分片大小、请求耗时，客户端会记录关闭码与关闭原因，便于判断是超时还是执行阻塞。
+- 服务端发送 AI 分析请求与回写 Future 时都必须遵守 Agent WebSocket 的事件循环归属：发送阶段需要切回 Agent 所属 loop，回写阶段需要按 Future 所属事件循环使用 `call_soon_threadsafe()`，否则会出现任务卡在“进行中”或 `got Future attached to a different loop`。
+- 服务端心跳在同一 Agent 存在未完成请求时会跳过离线判定，并在完整响应分片到达时明确回写 Future，避免 AI 分析已完成但任务状态仍停留在“进行中”。
 - 工单模块选项会同时读取 HRM 模块的项目字段和项目-模块关联表，保证不同维护方式下都能正确返回模块下拉列表。
 - AI 分析任务的执行过程会在系统日志里按阶段输出，失败时输出异常堆栈；数据库只保留最后失败原因，避免把调试细节落到业务表。
 - Windows 开发环境会优先解析 `codex` 的绝对路径再执行，避免 Agent 进程找不到 Worker 可执行文件。
 - AI 分析 Worker 会为每个任务准备独立 `CODEX_HOME` 并复制当前 Codex 配置，避免 Windows 下复用用户目录临时状态导致的初始化失败。
 - AI 分析 Worker 的认证环境优先从 Codex 配置目录 `.env` 读取，再回退进程环境变量，避免开发机密钥只配置在 Codex 目录时失效。
 - AI 分析 Agent 会在任务工作区落盘 `worker.stdout.txt` 和 `worker.stderr.txt`，并在系统日志中记录环境快照，便于对比手工终端与后端线程的运行差异。
+- AI 分析 Agent 通过工作区内 `analysis.lock` 规避同任务重复并发执行；锁文件存在且未过期时会直接返回运行中提示，锁文件异常或过期会自动放行重试。
 - AI 分析 Worker 的输出 schema 必须满足 Codex `response_format` 约束，根对象需要显式设置 `additionalProperties: false`，否则会返回 `invalid_request_error`。
 - Agent 执行过程会通过 `ai_analysis_step` / `ai_analysis_status` / `ai_analysis_error` / `ai_analysis_finished` 事件把阶段日志回传服务端，服务端只记录系统日志，不把调试细节落到业务表。
 - 工作流流转规则会把允许角色、默认处理人和通知预留统一压到 `workflow_transition.allowed_roles` JSON 中，避免引入额外表结构迁移。

@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket
-from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
+from starlette.websockets import WebSocketDisconnect
 
 from config.database import SessionLocal
 from config.get_db import get_db
@@ -18,6 +18,7 @@ from module_hrm.utils.util import decompress_str_to_dict
 from module_qtr.service.agent_bootstrap_service import AgentBootstrapService
 from module_qtr.service.agent_service import (
     agents,
+    agent_loops,
     response_futures,
 )
 from module_qtr.service.agent_service import (
@@ -135,6 +136,59 @@ def change_agent_status(current_db, agent):
         logger.error(f"改变agent状态失败:{e}")
 
 
+def _count_pending_requests(agent_code: str) -> int:
+    """
+    统计指定 Agent 当前未完成的请求数。
+    :param agent_code: Agent 编码
+    :return: 未完成请求数
+    """
+    return sum(1 for request_state in response_futures.values() if request_state.get("agent_code") == agent_code)
+
+
+def _resolve_future_loop(request_state: dict[str, Any] | None):
+    """
+    获取 Future 所属事件循环。
+    :param request_state: 请求状态缓存
+    :return: Future 对应的事件循环
+    """
+    if not request_state:
+        return None
+    return request_state.get("loop")
+
+
+def _complete_future_threadsafe(request_state: dict[str, Any], response_data: dict[str, Any]) -> None:
+    """
+    线程安全地回写 Future 结果。
+    :param request_state: 请求状态缓存
+    :param response_data: 完整响应数据
+    :return: 无
+    """
+    response_future = request_state.get("future")
+    if not response_future or response_future.done():
+        return
+    future_loop = _resolve_future_loop(request_state)
+    if future_loop and not future_loop.is_closed():
+        future_loop.call_soon_threadsafe(response_future.set_result, response_data)
+        return
+    response_future.set_result(response_data)
+
+
+def _cancel_future_threadsafe(request_state: dict[str, Any]) -> None:
+    """
+    线程安全地取消 Future。
+    :param request_state: 请求状态缓存
+    :return: 无
+    """
+    response_future = request_state.get("future")
+    if not response_future or response_future.done():
+        return
+    future_loop = _resolve_future_loop(request_state)
+    if future_loop and not future_loop.is_closed():
+        future_loop.call_soon_threadsafe(response_future.cancel)
+        return
+    response_future.cancel()
+
+
 class ConnectionManager:
     def __init__(self):
         self.agents = agents
@@ -143,11 +197,13 @@ class ConnectionManager:
         await websocket.accept()
         self.agents[agent_code] = websocket
         agents[agent_code] = websocket
+        agent_loops[agent_code] = asyncio.get_running_loop()
         agent_status.setdefault(agent_code, {})
         logger.info(f"Client connected: {self.agents[agent_code].client_state}")
 
     async def disconnect(self, agent_code: str, close_code):
         websocket = self.agents.pop(agent_code, None)
+        agent_loops.pop(agent_code, None)
         if websocket is None:
             return
         try:
@@ -165,7 +221,19 @@ class ConnectionManager:
                 for k, v in agent_status.items():
                     if len(v) > 0:
                         # logger.info(agent_status)
-                        if datetime.now() - v.get("heart_time") > timedelta(seconds=(HEARTBEAT_INTERVAL + 5)):
+                        pending_request_count = _count_pending_requests(k)
+                        heart_time = v.get("heart_time")
+                        if not heart_time:
+                            continue
+                        if pending_request_count > 0:
+                            logger.info(
+                                "agent【%s】存在 %s 个未完成请求，跳过离线判定，heart_time=%s",
+                                k,
+                                pending_request_count,
+                                heart_time,
+                            )
+                            continue
+                        if datetime.now() - heart_time > timedelta(seconds=(HEARTBEAT_INTERVAL + 5)):
                             invalid_agent_key.append(k)
                 current_db = SessionLocal()
                 try:
@@ -174,6 +242,7 @@ class ConnectionManager:
                         del agent_status[agent]
                         if self.agents.get(agent):
                             del self.agents[agent]
+                        agent_loops.pop(agent, None)
                         change_agent_status(current_db, agent)
 
                     for agent_code, _ in list(self.agents.items()):
@@ -190,6 +259,7 @@ class ConnectionManager:
                         else:
                             logger.info(f"客户端{agent_code}已断开连接，从内存中移除")
                             del self.agents[agent_code]
+                            agent_loops.pop(agent_code, None)
                 finally:
                     current_db.close()
             except Exception:
@@ -323,13 +393,20 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                     try:
                         complete_message = "".join(current_finished_request["chunks"])
                         response_data = decompress_str_to_dict(complete_message)
+                        response_keys = (
+                            list(response_data.keys()) if isinstance(response_data, dict) else type(response_data)
+                        )
 
                         # 检查是否有等待这个响应的Future对象
                         response_future = current_finished_request["future"]
-                        logger.debug(f"response_future状态： {response_future.done()}")
+                        logger.info(
+                            f"收到完整响应，准备回写 Future | agent={agent_code}, request_id={request_id}, "
+                            f"future_done={response_future.done() if response_future else None}, "
+                            f"response_keys={response_keys}"
+                        )
                         if response_future and not response_future.done():
-                            # 设置Future对象的结果
-                            response_future.set_result(response_data)
+                            # Future 由发送方线程创建，这里必须按所属事件循环线程安全回写。
+                            _complete_future_threadsafe(current_finished_request, response_data)
                         del complete_message
                         del response_data
                     finally:
@@ -369,9 +446,7 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
             for request_id, request_state in list(response_futures.items()):
                 if request_state.get("agent_code") != agent_code:
                     continue
-                future = request_state.get("future")
-                if future and not future.done():
-                    future.cancel()
+                _cancel_future_threadsafe(request_state)
                 response_futures.pop(request_id, None)
             for chunk_key in [key for key in event_chunks.keys() if str(key).startswith(f"{agent_code}:")]:
                 event_chunks.pop(chunk_key, None)
