@@ -625,6 +625,100 @@ class TicketAiAnalysisService:
         }
 
     @classmethod
+    def _build_task_context_snapshot(
+        cls,
+        context_payload: dict[str, Any],
+        request: TicketAiAnalysisRequestModel | None = None,
+    ) -> dict[str, Any]:
+        """
+        构建写入任务表的轻量上下文快照。
+        :param context_payload: 完整任务上下文
+        :param request: AI分析提交参数
+        :return: 轻量上下文快照
+        """
+        latest_log_pull = context_payload.get("latestLogPull") if isinstance(context_payload, dict) else {}
+        source_log_pull = context_payload.get("sourceLogPull") if isinstance(context_payload, dict) else {}
+        snapshot: dict[str, Any] = {
+            "ticketId": (context_payload.get("ticket") or {}).get("ticketId") if isinstance(context_payload, dict) else None,
+            "projectId": (context_payload.get("ticket") or {}).get("projectId") if isinstance(context_payload, dict) else None,
+            "versionKey": (context_payload.get("mapping") or {}).get("versionKey") if isinstance(context_payload, dict) else None,
+            "sourceLogPullRecordId": context_payload.get("sourceLogPullRecordId") if isinstance(context_payload, dict) else None,
+            "sourceLogViewMode": context_payload.get("sourceLogViewMode") if isinstance(context_payload, dict) else None,
+            "forceRefresh": bool(request.force_refresh) if request else bool(context_payload.get("forceRefresh")) if isinstance(context_payload, dict) else False,
+            "selectedAgentCode": str(request.agent_code or "").strip() if request and request.agent_code else str(context_payload.get("selectedAgentCode") or "").strip() if isinstance(context_payload, dict) else "",
+        }
+        if isinstance(latest_log_pull, dict) and latest_log_pull:
+            snapshot["latestLogPullSummary"] = {
+                "id": latest_log_pull.get("id"),
+                "status": latest_log_pull.get("status"),
+                "statusDesc": latest_log_pull.get("statusDesc"),
+                "contentSummary": latest_log_pull.get("contentSummary"),
+                "matchedEntryCount": latest_log_pull.get("matchedEntryCount"),
+                "archiveEntryCount": latest_log_pull.get("archiveEntryCount"),
+                "contentCharCount": latest_log_pull.get("contentCharCount"),
+                "contentTruncated": latest_log_pull.get("contentTruncated"),
+            }
+        if isinstance(source_log_pull, dict) and source_log_pull:
+            snapshot["sourceLogPullSummary"] = {
+                "recordId": source_log_pull.get("recordId"),
+                "viewBeginTime": source_log_pull.get("viewBeginTime"),
+                "viewEndTime": source_log_pull.get("viewEndTime"),
+                "viewSource": source_log_pull.get("viewSource"),
+                "wholeArchiveMode": source_log_pull.get("wholeArchiveMode"),
+                "contentSummary": source_log_pull.get("contentSummary"),
+                "matchedEntryCount": source_log_pull.get("matchedEntryCount"),
+                "archiveEntryCount": source_log_pull.get("archiveEntryCount"),
+                "storagePath": source_log_pull.get("storagePath"),
+                "commandResultUrl": source_log_pull.get("commandResultUrl"),
+                "hasText": bool(str(source_log_pull.get("text") or "").strip()),
+            }
+        return cls._json_safe_value(snapshot)
+
+    @staticmethod
+    def _read_json_file(path: Path) -> dict[str, Any] | None:
+        """
+        读取 JSON 文件为字典。
+        :param path: JSON 文件路径
+        :return: 解析后的字典，失败返回 None
+        """
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @classmethod
+    def _load_workspace_context_payload(
+        cls,
+        db: Session,
+        task: TicketAiAnalysisTask,
+        ticket: Ticket,
+        mapping: TicketAiRepoMapping,
+        workspace_dir: Path,
+    ) -> dict[str, Any]:
+        """
+        加载执行阶段完整上下文，优先读取工作区文件，失败时回退到数据库重建。
+        :param db: 数据库会话
+        :param task: AI分析任务
+        :param ticket: 工单对象
+        :param mapping: 仓库映射对象
+        :param workspace_dir: 任务工作区目录
+        :return: 完整上下文
+        """
+        context_payload = cls._read_json_file(workspace_dir / "context.json")
+        if not context_payload:
+            log_record = cls._resolve_log_pull_record(db, task.ticket_id, task.source_log_pull_record_id)
+            context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
+        compact_context = cls._json_safe_value(task.analysis_context or {})
+        if isinstance(compact_context, dict):
+            for key in ("selectedAgentCode", "forceRefresh", "sourceLogPullRecordId", "sourceLogViewMode"):
+                if key not in context_payload or context_payload.get(key) in (None, "", {}):
+                    context_payload[key] = compact_context.get(key)
+        return cls._json_safe_value(context_payload)
+
+    @classmethod
     def _build_prompt(cls, workspace_path: str, mapping: TicketAiRepoMapping, ticket: Ticket) -> str:
         """
         构建 Codex 分析提示词。
@@ -1124,31 +1218,10 @@ class TicketAiAnalysisService:
         workspace_root = cls._resolve_workspace_root(db)
         task_id = snowIdWorker.get_id()
         workspace_dir = workspace_root / f"ticket_{ticket.ticket_id}" / f"task_{task_id}"
-        workspace_dir.mkdir(parents=True, exist_ok=True)
-        prompt_file = workspace_dir / "prompt.txt"
-        schema_file = workspace_dir / "result.schema.json"
-        result_file = workspace_dir / "result.json"
-        context_file = workspace_dir / "context.json"
-        ticket_file = workspace_dir / "ticket.json"
-        timeline_file = workspace_dir / "timeline.json"
-        logs_file = workspace_dir / "logs.txt"
-
-        ticket_payload = cls._json_safe_value(CamelCaseUtil.transform_result(ticket))
-        timeline_payload = cls._json_safe_value(
-            CamelCaseUtil.transform_result(TicketDao.get_timeline(db, ticket.ticket_id))
-        )
-        log_payload = context_payload.get("sourceLogPull") or {}
-        logs_text = str(log_payload.get("text") or "")
-
-        context_file.write_text(cls._dumps(context_payload), encoding="utf-8")
-        ticket_file.write_text(cls._dumps(ticket_payload), encoding="utf-8")
-        timeline_file.write_text(cls._dumps(timeline_payload), encoding="utf-8")
-        logs_file.write_text(logs_text, encoding="utf-8")
+        task_context_payload = cls._build_task_context_snapshot(context_payload, request)
 
         prompt_template = cls._build_prompt("{workspace_path}", mapping, ticket)
         schema_payload = cls._build_result_schema(ticket, mapping)
-        prompt_file.write_text(prompt_template, encoding="utf-8")
-        schema_file.write_text(cls._dumps(schema_payload), encoding="utf-8")
 
         now = datetime.now()
         task = TicketAiAnalysisTask(
@@ -1163,8 +1236,8 @@ class TicketAiAnalysisService:
             local_repo_path=mapping.local_repo_path,
             workspace_root=str(workspace_root),
             workspace_path=str(workspace_dir),
-            prompt_path=str(prompt_file),
-            result_path=str(result_file),
+            prompt_path=str(workspace_dir / "prompt.txt"),
+            result_path=str(workspace_dir / "result.json"),
             command_line="",
             status=TicketAiAnalysisStatus.CREATED.value,
             status_desc="待执行",
@@ -1172,7 +1245,7 @@ class TicketAiAnalysisService:
             prompt_text=prompt_template,
             raw_output="",
             analysis_result=None,
-            analysis_context=cls._json_safe_value(context_payload),
+            analysis_context=task_context_payload,
             source_log_pull_record_id=context_payload.get("sourceLogPullRecordId"),
             source_log_view_mode=str(context_payload.get("sourceLogViewMode") or "stored"),
             submitted_by_id=cls._user_id(current_user),
@@ -1566,22 +1639,12 @@ class TicketAiAnalysisService:
                 / f"ticket_{ticket.ticket_id}"
                 / f"task_{task.task_id}"
             )
-        workspace_dir.mkdir(parents=True, exist_ok=True)
-        schema_file = (
-            Path(task.result_path).with_suffix(".schema.json")
-            if task.result_path
-            else workspace_dir / "result.schema.json"
-        )
-        result_file = Path(task.result_path or workspace_dir / "result.json")
-        prompt_file = Path(task.prompt_path or workspace_dir / "prompt.txt")
-        if not prompt_file.exists():
-            prompt_file.write_text(cls._build_prompt("{workspace_path}", mapping, ticket), encoding="utf-8")
-        if not schema_file.exists():
-            schema_file.write_text(cls._dumps(cls._build_result_schema(ticket, mapping)), encoding="utf-8")
-        prompt_template = task.prompt_text or prompt_file.read_text(encoding="utf-8")
+        result_file = str(task.result_path or workspace_dir / "result.json")
+        prompt_template = task.prompt_text or cls._build_prompt("{workspace_path}", mapping, ticket)
         schema_payload = cls._build_result_schema(ticket, mapping)
         timeout_sec = cls._get_config_int(db, cls.CONFIG_WORKER_TIMEOUT, cls.DEFAULT_WORKER_TIMEOUT)
-        requested_agent_code = str((task.analysis_context or {}).get("selectedAgentCode") or "").strip()
+        context_payload = cls._load_workspace_context_payload(db, task, ticket, mapping, workspace_dir)
+        requested_agent_code = str((context_payload or {}).get("selectedAgentCode") or "").strip()
         agent_code = cls._resolve_agent_code(db, requested_agent_code)
         cls._log_task_step(
             task_id,
@@ -1627,7 +1690,6 @@ class TicketAiAnalysisService:
         timeline_payload = cls._json_safe_value(
             CamelCaseUtil.transform_result(TicketDao.get_timeline(db, ticket.ticket_id))
         )
-        context_payload = cls._json_safe_value(task.analysis_context or {})
         raw_stdout = ""
         raw_stderr = ""
         result_text = ""
@@ -1641,7 +1703,7 @@ class TicketAiAnalysisService:
                 timeline_payload=timeline_payload,
                 prompt_template=prompt_template,
                 schema_payload=schema_payload,
-                result_path=str(result_file),
+                result_path=result_file,
                 timeout_sec=timeout_sec,
             )
             cls._log_task_step(
@@ -1668,7 +1730,6 @@ class TicketAiAnalysisService:
                 response_dump = {}
             raw_stdout = cls._dumps(cls._json_safe_value(response_dump))
             raw_stderr = ""
-            cls._persist_worker_streams(workspace_dir, raw_stdout, raw_stderr)
             response_result_preview = None
             if hasattr(response_object, "result"):
                 try:

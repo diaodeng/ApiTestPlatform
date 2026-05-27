@@ -49,7 +49,7 @@ erDiagram
 - `TicketLogPullRecord` 只保存每次拉取任务过程与结果，外部地址、Cookie、归档与轮询参数不进该表，而是进入系统参数表。
 - `TicketLogPullRecord.command_content` 会携带内部 `_automation` 扩展字段，用于记录日志拉取成功后是否自动触发 AI 以及目标 Agent 编码，外部提交前会自动剥离。
 - `TicketAiRepoMapping` 记录项目、版本、仓库地址、分支、本地仓库路径和工作区根目录的映射，用于 AI Worker 定位代码版本。
-- `TicketAiAnalysisTask.analysis_context` 会保留 `selectedAgentCode` 等任务上下文，`TicketAiAnalysisTask` 记录 AI 分析任务上下文、执行命令、状态、原始输出和结构化结果；`Ticket.ai_analysis` 则保存最新一次分析结论。
+- `TicketAiAnalysisTask.analysis_context` 仅保留 `selectedAgentCode`、`forceRefresh`、日志记录ID等轻量任务快照，完整工单/日志上下文落到工作区 `context.json`，避免任务表因超大日志包触发 MySQL `max_allowed_packet`；`Ticket.ai_analysis` 则保存最新一次分析结论。
 
 ## 参见
 
