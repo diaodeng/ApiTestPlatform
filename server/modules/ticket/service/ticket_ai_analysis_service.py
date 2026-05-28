@@ -27,7 +27,15 @@ from module_qtr.service.agent_service import send_message as agent_send_message
 from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
-from modules.ticket.entity.do.ticket_do import Ticket, TicketAiAnalysisTask, TicketAiRepoMapping, TicketEvent, TicketRca
+from modules.ticket.entity.do.ticket_do import (
+    Ticket,
+    TicketAiAnalysisTask,
+    TicketAiRepoMapping,
+    TicketEvent,
+    TicketMessage,
+    TicketRca,
+    TicketSnapshot,
+)
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullContentQueryModel
 from modules.ticket.entity.vo.ticket_vo import (
@@ -38,6 +46,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketAiRepoMappingUpdateModel,
 )
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType
+from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -61,6 +70,7 @@ class TicketAiAnalysisService:
     DEFAULT_WORKER_TIMEOUT = 3600
     DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[4] / "logs" / "ticket_ai_analysis"
     DEFAULT_AGENT_CODE = ""
+    DEFAULT_CONTEXT_LOG_MAX_CHARS = 800_000
     ACTIVE_STATUSES = {
         TicketAiAnalysisStatus.CREATED.value,
         TicketAiAnalysisStatus.RUNNING.value,
@@ -565,6 +575,27 @@ class TicketAiAnalysisService:
         except Exception:
             return str(text)
 
+    @staticmethod
+    def _truncate_middle(text: str | None, max_chars: int) -> str:
+        """
+        对长文本做中间截断，保留首尾关键上下文。
+        :param text: 原始文本
+        :param max_chars: 最大字符数
+        :return: 截断后的文本
+        """
+        raw_text = str(text or "")
+        if max_chars <= 0 or len(raw_text) <= max_chars:
+            return raw_text
+        head_size = max_chars // 2
+        tail_size = max_chars - head_size
+        return "\n".join(
+            [
+                raw_text[:head_size],
+                f"\n... 日志内容已截断，原始长度 {len(raw_text)} 字符，仅保留首尾 {max_chars} 字符 ...\n",
+                raw_text[-tail_size:],
+            ]
+        )
+
     @classmethod
     def _build_context_payload(
         cls,
@@ -584,6 +615,25 @@ class TicketAiAnalysisService:
         ticket_payload = CamelCaseUtil.transform_result(ticket)
         timeline_payload = TicketDao.get_timeline(db, ticket.ticket_id)
         latest_log_summary = TicketLogPullService.get_latest_summary(db, ticket.ticket_id)
+        messages_payload = CamelCaseUtil.transform_result(TicketDao.list_messages(db, ticket.ticket_id, 80))
+        snapshots_payload = CamelCaseUtil.transform_result(TicketDao.list_snapshots(db, ticket.ticket_id, 10))
+        search_text = " ".join(
+            str(item)
+            for item in [
+                ticket.title,
+                ticket.description,
+                ticket.root_cause,
+                ticket.solution,
+                ticket.module_name,
+                ticket.category_name,
+            ]
+            if item
+        )
+        similar_tickets = [
+            item
+            for item in TicketEmbeddingService.search_tickets(db, search_text, 6)
+            if item.get("ticketId") != ticket.ticket_id
+        ][:5]
         log_content_payload: dict[str, Any] | None = None
         source_log_view_mode = "stored"
         source_log_record_id: int | None = None
@@ -596,6 +646,7 @@ class TicketAiAnalysisService:
                     TicketLogPullContentQueryModel(view_mode="stored"),
                 )
                 if log_content_model:
+                    log_text = cls._decode_log_text(log_content_model.text)
                     log_content_payload = {
                         "recordId": log_content_model.record_id,
                         "viewBeginTime": log_content_model.view_begin_time,
@@ -609,7 +660,9 @@ class TicketAiAnalysisService:
                         "archiveEntryCount": log_content_model.archive_entry_count,
                         "storagePath": log_content_model.storage_path,
                         "commandResultUrl": log_content_model.command_result_url,
-                        "text": cls._decode_log_text(log_content_model.text),
+                        "text": cls._truncate_middle(log_text, cls.DEFAULT_CONTEXT_LOG_MAX_CHARS),
+                        "textTruncatedForAi": len(log_text) > cls.DEFAULT_CONTEXT_LOG_MAX_CHARS,
+                        "textOriginalCharCount": len(log_text),
                     }
                     source_log_view_mode = str(log_content_model.view_source or "stored")
             except Exception as exc:
@@ -617,6 +670,10 @@ class TicketAiAnalysisService:
         return {
             "ticket": ticket_payload,
             "timeline": cls._json_safe_value(CamelCaseUtil.transform_result(timeline_payload)),
+            "messages": cls._json_safe_value(messages_payload),
+            "snapshots": cls._json_safe_value(snapshots_payload),
+            "latestSnapshot": cls._json_safe_value(snapshots_payload[0]) if snapshots_payload else None,
+            "similarTickets": cls._json_safe_value(similar_tickets),
             "latestLogPull": cls._json_safe_value(latest_log_summary),
             "sourceLogPull": cls._json_safe_value(log_content_payload),
             "mapping": cls._json_safe_value(CamelCaseUtil.transform_result(mapping)),
@@ -638,14 +695,23 @@ class TicketAiAnalysisService:
         """
         latest_log_pull = context_payload.get("latestLogPull") if isinstance(context_payload, dict) else {}
         source_log_pull = context_payload.get("sourceLogPull") if isinstance(context_payload, dict) else {}
+        is_context = isinstance(context_payload, dict)
+        ticket_context = context_payload.get("ticket") or {} if is_context else {}
+        mapping_context = context_payload.get("mapping") or {} if is_context else {}
+        force_refresh = bool(request.force_refresh) if request else bool(context_payload.get("forceRefresh"))
+        selected_agent_code = (
+            str(request.agent_code or "").strip()
+            if request and request.agent_code
+            else str(context_payload.get("selectedAgentCode") or "").strip()
+        )
         snapshot: dict[str, Any] = {
-            "ticketId": (context_payload.get("ticket") or {}).get("ticketId") if isinstance(context_payload, dict) else None,
-            "projectId": (context_payload.get("ticket") or {}).get("projectId") if isinstance(context_payload, dict) else None,
-            "versionKey": (context_payload.get("mapping") or {}).get("versionKey") if isinstance(context_payload, dict) else None,
-            "sourceLogPullRecordId": context_payload.get("sourceLogPullRecordId") if isinstance(context_payload, dict) else None,
-            "sourceLogViewMode": context_payload.get("sourceLogViewMode") if isinstance(context_payload, dict) else None,
-            "forceRefresh": bool(request.force_refresh) if request else bool(context_payload.get("forceRefresh")) if isinstance(context_payload, dict) else False,
-            "selectedAgentCode": str(request.agent_code or "").strip() if request and request.agent_code else str(context_payload.get("selectedAgentCode") or "").strip() if isinstance(context_payload, dict) else "",
+            "ticketId": ticket_context.get("ticketId"),
+            "projectId": ticket_context.get("projectId"),
+            "versionKey": mapping_context.get("versionKey"),
+            "sourceLogPullRecordId": context_payload.get("sourceLogPullRecordId") if is_context else None,
+            "sourceLogViewMode": context_payload.get("sourceLogViewMode") if is_context else None,
+            "forceRefresh": force_refresh,
+            "selectedAgentCode": selected_agent_code,
         }
         if isinstance(latest_log_pull, dict) and latest_log_pull:
             snapshot["latestLogPullSummary"] = {
@@ -745,8 +811,13 @@ class TicketAiAnalysisService:
 3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或
    {workspace_path}/logs.txt 只是整包分析说明，请优先阅读 {workspace_path}/source_logs/ 目录中的解压日志文件，
    再结合代码搜索、调用链、日志和历史事件分析根因。
-4. 输出严格 JSON，不要输出多余说明文本。
-5. 结果必须包含以下字段:
+4. 工单不是一次性分析，请结合 messages、snapshots 和 similarTickets：
+   - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
+   - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
+   - similarTickets 是历史相似工单，若可复用经验，请写入 similar_cases、sop_suggestion、
+     owner_suggestion、monitoring_suggestion。
+5. 输出严格 JSON，不要输出多余说明文本。
+6. 结果必须包含以下核心字段，输出严格按 schema 返回：
    - ticket_id
    - project_id
    - version_key
@@ -761,7 +832,7 @@ class TicketAiAnalysisService:
    - evidence
    - risk_items
    - next_steps
-   - needs_human_review
+7. 如果你能从上下文中推断协同增强信息，可在分析内容里自然体现；服务端会负责把缺省增强字段补为空值。
 
 工单基础信息:
 - ticket_id: {ticket.ticket_id}
@@ -788,16 +859,15 @@ class TicketAiAnalysisService:
                 "version_key": {"type": ["string", "null"], "default": mapping.version_key},
                 "repo_url": {"type": ["string", "null"], "default": mapping.repo_url},
                 "branch_name": {"type": ["string", "null"], "default": mapping.branch_name},
-                "root_cause": {"type": "string"},
-                "analysis_summary": {"type": "string"},
-                "related_files": {"type": "array", "items": {"type": "string"}},
-                "related_functions": {"type": "array", "items": {"type": "string"}},
-                "fix_suggestion": {"type": "string"},
-                "confidence": {"type": "number"},
-                "evidence": {"type": "array", "items": {"type": "string"}},
-                "risk_items": {"type": "array", "items": {"type": "string"}},
-                "next_steps": {"type": "array", "items": {"type": "string"}},
-                "needs_human_review": {"type": "boolean"},
+                "root_cause": {"type": "string", "default": ""},
+                "analysis_summary": {"type": "string", "default": ""},
+                "related_files": {"type": "array", "items": {"type": "string"}, "default": []},
+                "related_functions": {"type": "array", "items": {"type": "string"}, "default": []},
+                "fix_suggestion": {"type": "string", "default": ""},
+                "confidence": {"type": "number", "default": 0},
+                "evidence": {"type": "array", "items": {"type": "string"}, "default": []},
+                "risk_items": {"type": "array", "items": {"type": "string"}, "default": []},
+                "next_steps": {"type": "array", "items": {"type": "string"}, "default": []},
             },
             "required": [
                 "ticket_id",
@@ -814,7 +884,6 @@ class TicketAiAnalysisService:
                 "evidence",
                 "risk_items",
                 "next_steps",
-                "needs_human_review",
             ],
         }
 
@@ -1038,6 +1107,13 @@ class TicketAiAnalysisService:
         normalized.setdefault("evidence", [])
         normalized.setdefault("risk_items", [])
         normalized.setdefault("next_steps", [])
+        normalized.setdefault("symptom", [])
+        normalized.setdefault("investigation_steps", [])
+        normalized.setdefault("prevention_actions", [])
+        normalized.setdefault("similar_cases", [])
+        normalized.setdefault("sop_suggestion", [])
+        normalized.setdefault("owner_suggestion", "")
+        normalized.setdefault("monitoring_suggestion", [])
         normalized.setdefault("needs_human_review", True)
         return cls._json_safe_value(normalized)
 
@@ -1062,16 +1138,26 @@ class TicketAiAnalysisService:
             db,
             TicketRca(
                 ticket_id=ticket.ticket_id,
-                symptom=ticket.description or result_payload.get("analysis_summary") or "",
+                symptom=(
+                    "\n".join(result_payload.get("symptom") or [])
+                    or ticket.description
+                    or result_payload.get("analysis_summary")
+                    or ""
+                ),
                 root_cause_category="AI分析",
                 root_cause_detail=str(result_payload.get("root_cause") or ""),
                 trigger_reason=str(result_payload.get("analysis_summary") or ""),
                 impact_scope="",
                 reproduce_steps="",
-                investigation_process=str(result_payload.get("analysis_summary") or ""),
+                investigation_process=(
+                    "\n".join(result_payload.get("investigation_steps") or [])
+                    or str(result_payload.get("analysis_summary") or "")
+                ),
                 fix_solution=str(result_payload.get("fix_suggestion") or ""),
                 verify_method="",
-                prevention_solution="\n".join(result_payload.get("next_steps") or []),
+                prevention_solution="\n".join(
+                    result_payload.get("prevention_actions") or result_payload.get("next_steps") or []
+                ),
                 structured_data=cls._json_safe_value(result_payload),
                 created_by_id=cls._user_id(current_user) if current_user else None,
                 created_by_name=cls._user_name(current_user) if current_user else "system",
@@ -1112,7 +1198,43 @@ class TicketAiAnalysisService:
                 "update_time": now,
             },
         )
+        ai_message = TicketDao.add_message(
+            db,
+            TicketMessage(
+                ticket_id=ticket.ticket_id,
+                role="ai",
+                message_type="analysis",
+                content=str(result_payload.get("analysis_summary") or result_payload.get("root_cause") or "AI分析完成"),
+                attachments=cls._json_safe_value(result_payload),
+                reference_type="ai_analysis",
+                reference_id=task.task_id,
+                created_by_id=cls._user_id(current_user) if current_user else None,
+                created_by_name=cls._user_name(current_user) if current_user else "system",
+                create_time=now,
+            ),
+        )
         cls._create_rca_from_result(db, ticket, result_payload, current_user)
+        TicketDao.add_snapshot(
+            db,
+            TicketSnapshot(
+                ticket_id=ticket.ticket_id,
+                version=TicketDao.get_next_snapshot_version(db, ticket.ticket_id),
+                summary=str(result_payload.get("analysis_summary") or ""),
+                root_cause=str(result_payload.get("root_cause") or ""),
+                solution=str(result_payload.get("fix_suggestion") or ""),
+                prevention="\n".join(
+                    result_payload.get("prevention_actions") or result_payload.get("next_steps") or []
+                ),
+                risk="\n".join(result_payload.get("risk_items") or []),
+                owner=str(result_payload.get("owner_suggestion") or ""),
+                source_type="ai_analysis",
+                source_id=task.task_id,
+                structured_data=cls._json_safe_value(result_payload),
+                created_by_id=cls._user_id(current_user) if current_user else None,
+                created_by_name=cls._user_name(current_user) if current_user else "system",
+                create_time=now,
+            ),
+        )
         TicketDao.add_event(
             db,
             TicketEvent(
@@ -1128,6 +1250,7 @@ class TicketAiAnalysisService:
                     "branch_name": task.branch_name,
                     "analysis_result": cls._json_safe_value(result_payload),
                     "raw_output": raw_output[:5000],
+                    "message_id": ai_message.id,
                 },
                 create_time=now,
             ),
@@ -1221,7 +1344,6 @@ class TicketAiAnalysisService:
         task_context_payload = cls._build_task_context_snapshot(context_payload, request)
 
         prompt_template = cls._build_prompt("{workspace_path}", mapping, ticket)
-        schema_payload = cls._build_result_schema(ticket, mapping)
 
         now = datetime.now()
         task = TicketAiAnalysisTask(

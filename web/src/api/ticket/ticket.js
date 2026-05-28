@@ -118,6 +118,40 @@ export function addTicketComment(ticketId, data) {
   })
 }
 
+// 查询工单协同消息
+export function getTicketMessages(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/messages`,
+    method: 'get'
+  })
+}
+
+// 新增工单协同消息
+export function addTicketMessage(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/messages`,
+    method: 'post',
+    data
+  })
+}
+
+// 新增工单 ACR 快照
+export function addTicketSnapshot(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/snapshots`,
+    method: 'post',
+    data
+  })
+}
+
+// 自动生成工单知识库案例
+export function extractTicketKnowledge(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/knowledge/extract`,
+    method: 'post'
+  })
+}
+
 // 新增工单事件
 export function addTicketEvent(ticketId, data) {
   return request({

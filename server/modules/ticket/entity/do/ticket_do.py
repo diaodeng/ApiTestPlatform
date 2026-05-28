@@ -116,6 +116,30 @@ class TicketComment(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
+class TicketMessage(Base):
+    """
+    工单消息流表，将评论、追问、AI回复和排查动作统一沉淀为可持续会话上下文。
+    """
+
+    __tablename__ = "ticket_message"
+    __table_args__ = (
+        Index("idx_ticket_message_ticket_time", "ticket_id", "create_time"),
+        Index("idx_ticket_message_ticket_role", "ticket_id", "role"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="消息ID")
+    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="工单ID")
+    role: Mapped[str] = mapped_column(String(30), nullable=False, default="user", comment="消息角色")
+    message_type: Mapped[str] = mapped_column(String(50), nullable=False, default="comment", comment="消息类型")
+    content: Mapped[str] = mapped_column(long_text_type(), nullable=False, comment="消息内容")
+    attachments: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="附件或引用信息")
+    reference_type: Mapped[str] = mapped_column(String(50), nullable=True, default="", comment="来源对象类型")
+    reference_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源对象ID")
+    created_by_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="创建人ID")
+    created_by_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建人名称")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+
+
 class TicketEvent(Base):
     """
     工单事件表，统一沉淀时间线、排查记录、修复记录和后续 AI 学习数据。
@@ -159,6 +183,34 @@ class TicketRca(Base):
     update_time: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
     )
+
+
+class TicketSnapshot(Base):
+    """
+    工单 ACR 快照表，记录每次 AI 或人工总结后的当前结论版本。
+    """
+
+    __tablename__ = "ticket_snapshot"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "version", name="uk_ticket_snapshot_ticket_version"),
+        Index("idx_ticket_snapshot_ticket_time", "ticket_id", "create_time"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="快照ID")
+    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="工单ID")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, comment="快照版本号")
+    summary: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="当前摘要")
+    root_cause: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="当前根因")
+    solution: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="当前解决方案")
+    prevention: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="预防建议")
+    risk: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="风险说明")
+    owner: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="建议负责人")
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False, default="manual", comment="快照来源")
+    source_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源对象ID")
+    structured_data: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="结构化快照数据")
+    created_by_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="创建人ID")
+    created_by_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建人名称")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
 class TicketAiRepoMapping(Base):

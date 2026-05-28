@@ -321,7 +321,16 @@ class TicketAiAnalysisService:
         return extracted_files
 
     @staticmethod
-    def _extract_stderr_context(stderr_text: str | None, keywords: tuple[str, ...] = ("invalid_request_error", "stream disconnected", "error sending request")) -> str:
+    def _extract_stderr_context(
+        stderr_text: str | None,
+        keywords: tuple[str, ...] = (
+            "openai_error",
+            "bad_response_status_code",
+            "invalid_request_error",
+            "stream disconnected",
+            "error sending request",
+        ),
+    ) -> str:
         """
         从 stderr 中提取更长上下文。
         :param stderr_text: 标准错误
@@ -408,7 +417,13 @@ class TicketAiAnalysisService:
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
 3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或 {workspace_path}/logs.txt 只有说明而没有正文，请先阅读 {workspace_path}/source_logs/ 目录中的解压日志文件，再结合代码搜索、调用链、日志和历史事件分析根因。
 4. 输出严格 JSON，不要输出多余说明文本。
-5. 结果必须包含以下字段:
+4. 工单不是一次性分析，请结合 context.json 中的 messages、snapshots 和 similarTickets：
+   - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
+   - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
+   - similarTickets 是历史相似工单，若可复用经验，请写入 similar_cases、sop_suggestion、
+     owner_suggestion、monitoring_suggestion。
+5. 输出严格 JSON，不要输出多余说明文本。
+6. 结果必须包含以下字段；如果某些扩展字段暂时无法确定，请用空字符串、空数组或 false 占位，不要省略：
    - ticket_id
    - project_id
    - version_key
@@ -423,6 +438,13 @@ class TicketAiAnalysisService:
    - evidence
    - risk_items
    - next_steps
+   - symptom
+   - investigation_steps
+   - prevention_actions
+   - similar_cases
+   - sop_suggestion
+   - owner_suggestion
+   - monitoring_suggestion
    - needs_human_review
 
 工单基础信息:
@@ -696,6 +718,8 @@ class TicketAiAnalysisService:
                         or cls._extract_stderr_context(raw_stdout)
                         or cls._summarize_worker_error(raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果")
                     )
+                    if "openai_error" in failure_message or "bad_response_status_code" in failure_message:
+                        failure_message = f"AI模型接口返回异常，请检查模型配置、请求上下文大小或上游服务状态：{failure_message}"
                     await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message)
                     return {
                         "request_type": req_data.get("requestType"),

@@ -26,8 +26,10 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketCommentCreateModel,
     TicketCreateModel,
     TicketEventCreateModel,
+    TicketMessageCreateModel,
     TicketQueryModel,
     TicketRcaModel,
+    TicketSnapshotModel,
     TicketStatisticsQueryModel,
     TicketStatusChangeModel,
     TicketUpdateModel,
@@ -743,6 +745,107 @@ async def get_ticket_timeline(request: Request, ticket_id: int, query_db: Sessio
         result = TicketService.get_timeline_services(query_db, ticket_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
     except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get("/{ticket_id}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))])
+async def get_ticket_messages(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
+    """
+    获取工单协同消息接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param query_db: 数据库会话
+    :return: 工单消息流、ACR快照和相似工单推荐
+    """
+    try:
+        result = TicketService.get_messages_services(query_db, ticket_id)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post("/{ticket_id}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:add"))])
+async def add_ticket_message(
+    request: Request,
+    ticket_id: int,
+    message_object: TicketMessageCreateModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    新增工单协同消息接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param message_object: 角色、消息类型、内容、附件和是否立即发起 AI 追问
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入消息创建人
+    :return: 消息保存结果及可选 AI 任务结果
+    """
+    try:
+        result = TicketService.add_message(query_db, ticket_id, message_object, current_user)
+        if result.is_success:
+            return ResponseUtil.success(data=result, msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post("/{ticket_id}/snapshots", dependencies=[Depends(CheckUserInterfaceAuth("ticket:snapshot:add"))])
+async def add_ticket_snapshot(
+    request: Request,
+    ticket_id: int,
+    snapshot_object: TicketSnapshotModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    新增工单 ACR 快照接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param snapshot_object: 摘要、根因、解决方案、预防、风险和负责人
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入快照创建人
+    :return: 快照保存结果
+    """
+    try:
+        result = TicketService.create_snapshot(query_db, ticket_id, snapshot_object, current_user)
+        if result.is_success:
+            return ResponseUtil.success(data=result, msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/{ticket_id}/knowledge/extract",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:knowledge:add"))],
+)
+async def extract_ticket_knowledge(
+    request: Request,
+    ticket_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    从工单自动生成知识库案例接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入知识库创建人
+    :return: 知识库案例生成结果
+    """
+    try:
+        result = TicketService.create_knowledge_from_ticket(query_db, ticket_id, current_user)
+        if result.is_success:
+            query_db.commit()
+            return ResponseUtil.success(data=result, msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        query_db.rollback()
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
