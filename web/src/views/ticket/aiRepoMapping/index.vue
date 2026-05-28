@@ -97,12 +97,12 @@
           </el-col>
           <el-col :span="24">
             <el-form-item label="本地仓库" prop="localRepoPath">
-              <el-input v-model="form.localRepoPath" placeholder="Worker 节点仓库缓存路径" />
+              <el-input v-model="form.localRepoPath" placeholder="留空则使用 Agent 本地配置" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="工作区根目录">
-              <el-input v-model="form.workspaceRoot" placeholder="留空则使用系统默认" />
+              <el-input v-model="form.workspaceRoot" placeholder="留空则使用 Agent 本地配置" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -168,8 +168,7 @@ const rules = {
   projectId: [{ required: true, message: '请选择项目', trigger: 'change' }],
   versionKey: [{ required: true, message: '版本号不能为空', trigger: 'blur' }],
   repoUrl: [{ required: true, message: '仓库地址不能为空', trigger: 'blur' }],
-  branchName: [{ required: true, message: '分支名称不能为空', trigger: 'blur' }],
-  localRepoPath: [{ required: true, message: '本地仓库路径不能为空', trigger: 'blur' }]
+  branchName: [{ required: true, message: '分支名称不能为空', trigger: 'blur' }]
 }
 
 const dialogTitle = computed(() => (isEdit.value ? '修改仓库映射' : '新增仓库映射'))

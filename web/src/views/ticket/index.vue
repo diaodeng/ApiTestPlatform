@@ -1278,12 +1278,12 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="本地仓库" prop="localRepoPath">
-              <el-input v-model="aiRepoMappingForm.localRepoPath" placeholder="Worker节点仓库缓存路径" />
+              <el-input v-model="aiRepoMappingForm.localRepoPath" placeholder="留空则使用 Agent 本地配置" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="工作区根目录">
-              <el-input v-model="aiRepoMappingForm.workspaceRoot" placeholder="留空则使用系统默认" />
+              <el-input v-model="aiRepoMappingForm.workspaceRoot" placeholder="留空则使用 Agent 本地配置" />
             </el-form-item>
           </el-col>
           <el-col :span="12">

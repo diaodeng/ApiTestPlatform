@@ -804,6 +804,7 @@ class TicketAiAnalysisService:
 - 仓库地址: {mapping.repo_url}
 - 分支: {mapping.branch_name}
 - 本地仓库路径: {mapping.local_repo_path}
+- 说明: 如果 Agent 本地配置中提供了本地仓库路径或工作区根目录，则以 Agent 本地配置为准；映射中的路径仅保留兼容和审计用途.
 
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
@@ -1539,9 +1540,6 @@ class TicketAiAnalysisService:
         )
         payload["worker_command"] = payload.get("worker_command") or cls._get_config_text(
             db, cls.CONFIG_WORKER_COMMAND, cls.DEFAULT_WORKER_COMMAND
-        )
-        payload["workspace_root"] = payload.get("workspace_root") or cls._get_config_text(
-            db, cls.CONFIG_WORKSPACE_ROOT, str(cls.DEFAULT_WORKSPACE_ROOT)
         )
         payload["create_by"] = payload.get("create_by") or cls._user_name(current_user)
         payload["update_by"] = cls._user_name(current_user)

@@ -206,6 +206,8 @@ class AgentConfigModel(BaseModel):
     config_sync_url: str = ""
     config_sync_initialized: bool = False
     config_sync_last_sync_at: str = ""
+    ticket_ai_workspace_root: str = ""
+    ticket_ai_local_repo_path: str = ""
     browser: AgentBrowserConfigModel = AgentBrowserConfigModel()
 
     @field_validator("max_send_size", mode="before")
