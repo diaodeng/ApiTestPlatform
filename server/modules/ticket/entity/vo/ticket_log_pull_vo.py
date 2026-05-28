@@ -55,6 +55,7 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     提交工单日志拉取申请模型。
     """
 
+    ticket_id: int | None = Field(default=None, description="关联工单ID，可为空表示独立管理记录")
     vendor_id: int = Field(description="外部接口 venderId")
     store_id: int = Field(description="外部接口 storeId")
     pos_no: int = Field(description="外部接口 posNo")
@@ -71,6 +72,23 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     storage_mode: str | None = Field(default=None, description="本次任务使用的存储模式，支持 local/ftp")
     auto_ai_enabled: bool = Field(default=False, description="日志拉取成功后是否自动发起AI分析")
     ai_agent_code: str | None = Field(default=None, description="自动AI分析使用的Agent编码")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_optional_ticket_id(cls, data):
+        """
+        兼容前端将关联工单ID传为空字符串的情况。
+        :param data: 原始请求数据
+        :return: 归一化后的请求数据
+        """
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        ticket_id = normalized.get("ticketId")
+        if ticket_id in ("", None):
+            normalized["ticketId"] = None
+        return normalized
 
     @model_validator(mode="after")
     def validate_command_content(self):
@@ -106,6 +124,8 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
         self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
         if self.auto_ai_enabled and not self.ai_agent_code:
             raise ValueError("日志拉取后自动AI分析时必须选择Agent")
+        if self.auto_ai_enabled and not self.ticket_id:
+            raise ValueError("未关联工单时不能启用自动AI分析")
         return self
 
 
@@ -115,6 +135,9 @@ class TicketLogPullQueryModel(QueryModel):
     工单日志拉取记录查询模型。
     """
 
+    ticket_id: int | None = Field(default=None, description="关联工单ID")
+    ticket_no: str | None = Field(default=None, description="工单编号")
+    keyword: str | None = Field(default=None, description="关键字")
     status: str | None = Field(default=None, description="内部处理状态")
 
 
@@ -217,6 +240,10 @@ class TicketLogPullListItemModel(TicketLogPullSummaryModel):
     """
 
     ticket_id: int | None = None
+    ticket_no: str | None = Field(default=None, description="工单编号")
+    ticket_title: str | None = Field(default=None, description="工单标题")
+    project_name: str | None = Field(default=None, description="项目名称")
+    module_name: str | None = Field(default=None, description="模块名称")
     vendor_id: int | None = None
     store_id: int | None = None
     pos_no: int | None = None

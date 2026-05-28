@@ -465,18 +465,19 @@ class TicketLogPullService:
 
     @classmethod
     def create_log_pull_services(
-        cls, query_db: Session, ticket_id: int, payload: TicketLogPullCreateModel, current_user: CurrentUserModel
+        cls, query_db: Session, ticket_id: int | None, payload: TicketLogPullCreateModel, current_user: CurrentUserModel
     ) -> CrudResponseModel:
         """
         创建日志拉取记录并触发后台执行。
         :param query_db: 数据库会话
-        :param ticket_id: 工单ID
+        :param ticket_id: 工单ID，允许为空表示独立管理记录
         :param payload: 日志拉取参数
         :param current_user: 当前登录用户
         :return: 创建结果
         """
-        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
-        if not ticket:
+        resolved_ticket_id = ticket_id if ticket_id is not None else payload.ticket_id
+        ticket = TicketDao.get_ticket_by_id(query_db, resolved_ticket_id) if resolved_ticket_id else None
+        if resolved_ticket_id and not ticket:
             return CrudResponseModel(is_success=False, message="工单不存在")
 
         storage_config = cls._get_storage_config_dict(query_db)
@@ -484,7 +485,7 @@ class TicketLogPullService:
         if storage_mode not in {"local", "ftp"}:
             storage_mode = "local"
         now = datetime.now()
-        command_content = cls._build_command_content(payload)
+        command_content = payload.model_dump(by_alias=True)
         log_begin_time, log_end_time = cls._resolve_log_time_range(payload)
         has_explicit_range = cls._has_explicit_log_time_range(payload)
         if has_explicit_range and (not log_begin_time or not log_end_time):
@@ -496,7 +497,7 @@ class TicketLogPullService:
             record = TicketLogPullDao.add_record(
                 query_db,
                 TicketLogPullRecord(
-                    ticket_id=ticket_id,
+                    ticket_id=resolved_ticket_id,
                     vendor_id=payload.vendor_id,
                     store_id=payload.store_id,
                     pos_no=payload.pos_no,
@@ -517,7 +518,7 @@ class TicketLogPullService:
             )
             cls._add_ticket_event(
                 query_db,
-                ticket_id=ticket_id,
+                ticket_id=resolved_ticket_id,
                 operator_id=cls._user_id(current_user),
                 operator_name=cls._user_name(current_user),
                 content="提交日志拉取申请",
@@ -546,19 +547,34 @@ class TicketLogPullService:
             raise
 
     @classmethod
-    def list_log_pull_records_services(cls, query_db: Session, ticket_id: int, query: TicketLogPullQueryModel):
+    def list_log_pull_records_services(cls, query_db: Session, query: TicketLogPullQueryModel):
         """
         查询工单日志拉取记录列表。
         :param query_db: 数据库会话
-        :param ticket_id: 工单ID
         :param query: 查询参数
         :return: 分页结果
         """
-        result = TicketLogPullDao.list_ticket_records(query_db, ticket_id, query)
+        result = TicketLogPullDao.list_ticket_records(query_db, query)
         if query.is_page:
             result.rows = [cls._to_record_list_item(row) for row in result.rows]
             return result
         return [cls._to_record_list_item(row) for row in result]
+
+    @classmethod
+    def list_log_pull_management_records_services(
+        cls, query_db: Session, query: TicketLogPullQueryModel
+    ):
+        """
+        查询日志拉取管理页记录。
+        :param query_db: 数据库会话
+        :param query: 查询参数
+        :return: 分页结果或列表
+        """
+        result = TicketLogPullDao.list_log_pull_records(query_db, query)
+        if query.is_page:
+            result.rows = cls._enrich_record_list_items(query_db, result.rows)
+            return result
+        return cls._enrich_record_list_items(query_db, result)
 
     @classmethod
     def get_log_pull_content_services(
@@ -907,6 +923,7 @@ class TicketLogPullService:
                 db.commit()
                 cls._trigger_auto_ai_analysis(db, record.id)
         except Exception as exc:
+            logger.exception(exc)
             error_message = str(exc) or exc.__class__.__name__
             cls._exception_record(
                 db,
@@ -933,10 +950,17 @@ class TicketLogPullService:
         record = TicketLogPullDao.get_record_by_id(db, record_id)
         if not record or not isinstance(record.command_content, dict):
             return
-        automation = record.command_content.get("_automation")
-        if not isinstance(automation, dict) or not automation.get("autoAiEnabled"):
+        if not record.ticket_id:
             return
-        agent_code = str(automation.get("aiAgentCode") or "").strip()
+        automation = record.command_content.get("_automation")
+        if isinstance(automation, dict):
+            auto_ai_enabled = bool(automation.get("autoAiEnabled"))
+            agent_code = str(automation.get("aiAgentCode") or "").strip()
+        else:
+            auto_ai_enabled = bool(record.command_content.get("autoAiEnabled"))
+            agent_code = str(record.command_content.get("aiAgentCode") or "").strip()
+        if not auto_ai_enabled:
+            return
         if not agent_code:
             logger.warning("日志拉取记录[%s] 已配置自动AI但未填写Agent", record_id)
             return
@@ -986,18 +1010,38 @@ class TicketLogPullService:
         :return: 无
         """
         external_config = cls._get_external_config_dict(db)
+        request_url = str(external_config.get("insertUrl") or "").strip()
+        page_url = str(external_config.get("pageUrl") or "").strip()
+        loggable_config = dict(external_config)
+        loggable_headers = dict(loggable_config.get("headers") or {})
+        if loggable_headers.get("cookie"):
+            loggable_headers["cookie"] = "***"
+        if loggable_headers.get("authorization"):
+            loggable_headers["authorization"] = "***"
+        loggable_config["headers"] = loggable_headers
+        logger.info(
+            "日志拉取外部提交配置: record_id=%s ticket_id=%s config=%s request_url=%s page_url=%s",
+            record.id,
+            record.ticket_id,
+            loggable_config,
+            request_url,
+            page_url,
+        )
+        if not request_url:
+            raise ValueError("日志拉取外部接口提交地址未配置，请检查 ticket.logPull.external.insertUrl")
         command_content = record.command_content if isinstance(record.command_content, dict) else cls._json_loads(
             record.command_content, {}
         )
+        command_content = cls._build_command_content(command_content)
         response = requests.post(
-            external_config["insertUrl"],
+            request_url,
             data={
                 "venderId": record.vendor_id,
                 "storeId": record.store_id,
                 "posNo": record.pos_no,
                 "commandType": record.command_type,
                 "commandDataType": record.command_data_type,
-                "commandContent": cls._json_dumps(cls._strip_internal_command_content(command_content)),
+                "commandContent": cls._json_dumps(command_content),
             },
             timeout=(10, 30),
             headers=cls._build_external_request_headers(external_config),
@@ -1656,41 +1700,38 @@ class TicketLogPullService:
         return gzip.decompress(base64.b64decode(encoded_text.encode("ascii"))).decode("utf-8")
 
     @classmethod
-    def _build_command_content(cls, payload: TicketLogPullCreateModel) -> dict[str, Any]:
+    def _build_command_content(cls, payload: TicketLogPullCreateModel | dict[str, Any]) -> dict[str, Any]:
         """
         根据页面输入构造外部接口 commandContent。
         :param payload: 页面请求参数
         :return: commandContent 字典
         """
+        source = payload if isinstance(payload, dict) else payload.model_dump(by_alias=True)
         command_content: dict[str, Any] = {
-            "fileMaxSize": str(payload.file_max_size),
-            "zipMaxSize": str(payload.zip_max_size),
+            "fileMaxSize": str(source.get("fileMaxSize") or source.get("file_max_size") or 500),
+            "zipMaxSize": str(source.get("zipMaxSize") or source.get("zip_max_size") or 500),
         }
-        if payload.modify_time:
-            command_content["modifyTime"] = str(payload.modify_time)[:10]
-        if str(payload.path or "").strip():
-            command_content["path"] = str(payload.path).strip()
-        command_content["commandDataType"] = int(payload.command_data_type)
-        command_content["storageMode"] = str(payload.storage_mode or "").strip() or None
-        point_time = cls._parse_datetime(payload.log_point_time)
-        begin_time = cls._parse_datetime(payload.log_begin_time)
-        end_time = cls._parse_datetime(payload.log_end_time)
+        modify_time = source.get("modifyTime") or source.get("modify_time")
+        if modify_time:
+            command_content["modifyTime"] = str(modify_time)[:10]
+        if str(source.get("path") or "").strip():
+            command_content["path"] = str(source.get("path")).strip()
+        command_content["commandDataType"] = int(source.get("commandDataType") or source.get("command_data_type") or 1)
+        command_content["storageMode"] = str(source.get("storageMode") or source.get("storage_mode") or "").strip() or None
+        point_time = cls._parse_datetime(source.get("logPointTime") or source.get("log_point_time"))
+        begin_time = cls._parse_datetime(source.get("logBeginTime") or source.get("log_begin_time"))
+        end_time = cls._parse_datetime(source.get("logEndTime") or source.get("log_end_time"))
         if point_time:
             command_content["timeRangeMode"] = "point"
             command_content["logPointTime"] = point_time.isoformat(sep=" ")
-            command_content["rangeBeforeMinutes"] = int(payload.range_before_minutes or 0)
-            command_content["rangeAfterMinutes"] = int(payload.range_after_minutes or 0)
+            command_content["rangeBeforeMinutes"] = int(source.get("rangeBeforeMinutes") or source.get("range_before_minutes") or 0)
+            command_content["rangeAfterMinutes"] = int(source.get("rangeAfterMinutes") or source.get("range_after_minutes") or 0)
         elif begin_time or end_time:
             command_content["timeRangeMode"] = "between"
             if begin_time:
                 command_content["logBeginTime"] = begin_time.isoformat(sep=" ")
             if end_time:
                 command_content["logEndTime"] = end_time.isoformat(sep=" ")
-        if payload.auto_ai_enabled:
-            command_content["_automation"] = {
-                "autoAiEnabled": True,
-                "aiAgentCode": str(payload.ai_agent_code or "").strip() or None,
-            }
         return command_content
 
     @staticmethod
@@ -1966,7 +2007,7 @@ class TicketLogPullService:
         cls,
         db: Session,
         *,
-        ticket_id: int,
+        ticket_id: int | None,
         operator_id: int | None,
         operator_name: str,
         content: str,
@@ -1982,6 +2023,8 @@ class TicketLogPullService:
         :param event_data: 结构化数据
         :return: 无
         """
+        if not ticket_id:
+            return
         TicketDao.add_event(
             db,
             TicketEvent(
@@ -2023,6 +2066,31 @@ class TicketLogPullService:
         payload.pop("compressedContent", None)
         payload.pop("exceptionDetail", None)
         return TicketLogPullListItemModel.model_validate(payload).model_dump(by_alias=True)
+
+    @classmethod
+    def _enrich_record_list_items(cls, db: Session, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        为日志拉取列表补充工单信息。
+        :param db: 数据库会话
+        :param rows: 日志拉取记录列表
+        :return: 补充后的列表
+        """
+        if not rows:
+            return []
+        ticket_ids = [item.get("ticketId") for item in rows if item.get("ticketId")]
+        ticket_map = {ticket.ticket_id: ticket for ticket in TicketDao.get_tickets_by_ids(db, ticket_ids)}
+        enriched_rows: list[dict[str, Any]] = []
+        for item in rows:
+            payload = dict(item or {})
+            ticket_id = payload.get("ticketId")
+            ticket = ticket_map.get(ticket_id)
+            if ticket:
+                payload["ticketNo"] = ticket.ticket_no
+                payload["ticketTitle"] = ticket.title
+                payload["projectName"] = ticket.merchant_name
+                payload["moduleName"] = ticket.module_name
+            enriched_rows.append(cls._to_record_list_item(payload))
+        return enriched_rows
 
     @classmethod
     def _build_ftp_storage_path(cls, config: dict[str, Any], relative_path: PurePosixPath) -> str:

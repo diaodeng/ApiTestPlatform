@@ -126,6 +126,17 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     F("ticket.logpull.add", "日志拉取新增", "ticket.ticket", "ticket:logpull:add", 16),
     F("ticket.logpull.config", "日志拉取配置", "ticket.ticket", "ticket:logpull:config", 17),
     C(
+        "ticket.logpull.record",
+        "日志拉取管理",
+        "ticket.root",
+        "logPullRecord",
+        "ticket/logPullRecord/index",
+        "ticket:logpull:query",
+        "list",
+        6,
+        remark="工单日志拉取记录管理菜单",
+    ),
+    C(
         "ticket.ai.repo-mapping",
         "AI仓库映射",
         "ticket.root",

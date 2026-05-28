@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -49,6 +49,31 @@ class QueryModel(BaseModel):
     id: Optional[Any] = None
     only_self: bool = False
     is_page: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_query_numbers(cls, data):
+        """
+        归一化查询参数中的分页与ID字段，兼容空字符串和字符串数字。
+        :param data: 原始查询参数
+        :return: 归一化后的查询参数
+        """
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        for key in ("pageNum", "page_size", "pageSize", "id"):
+            value = normalized.get(key)
+            if value in (None, ""):
+                continue
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    normalized[key] = None
+                    continue
+                if text.isdigit():
+                    normalized[key] = int(text)
+        return normalized
 
 
 class CommonDataModel(BaseModel):

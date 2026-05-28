@@ -63,6 +63,7 @@ async def init_create_table():
     logger.info("初始化数据库连接...")
     Base.metadata.create_all(bind=engine)
     _ensure_large_sys_config_value_column()
+    _ensure_ticket_log_pull_ticket_id_nullable()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
 
@@ -102,3 +103,38 @@ def _ensure_large_sys_config_value_column():
             )
     except Exception as exc:
         logger.warning(f"检查或升级 sys_config.config_value 字段失败: {exc}")
+
+
+def _ensure_ticket_log_pull_ticket_id_nullable():
+    if DATABASE_BACKEND != "mysql":
+        return
+
+    try:
+        with engine.begin() as connection:
+            result = connection.execute(
+                text(
+                    """
+                    SELECT IS_NULLABLE
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'ticket_log_pull_record'
+                      AND COLUMN_NAME = 'ticket_id'
+                    """
+                )
+            ).mappings().first()
+            is_nullable = str((result or {}).get("IS_NULLABLE") or "").upper()
+            if is_nullable == "YES":
+                return
+
+            logger.info("检测到 ticket_log_pull_record.ticket_id 仍为非空，升级为可空")
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE ticket_log_pull_record
+                    MODIFY COLUMN ticket_id BIGINT NULL COMMENT '工单ID'
+                    """
+                )
+            )
+    except Exception as exc:
+        logger.warning(f"检查或升级 ticket_log_pull_record.ticket_id 字段失败: {exc}")
+
