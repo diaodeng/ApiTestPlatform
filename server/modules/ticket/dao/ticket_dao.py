@@ -12,7 +12,9 @@ from modules.ticket.entity.do.ticket_do import (
     TicketAssignHistory,
     TicketComment,
     TicketEvent,
+    TicketMessage,
     TicketRca,
+    TicketSnapshot,
     TicketStatusHistory,
     WorkflowStatus,
     WorkflowTransition,
@@ -268,6 +270,106 @@ class TicketDao:
         return comment
 
     @classmethod
+    def add_message(cls, db: Session, message: TicketMessage) -> TicketMessage:
+        """
+        新增工单消息。
+        :param db: 数据库会话
+        :param message: 消息对象
+        :return: 保存后的消息对象
+        """
+        if message.attachments is not None:
+            message.attachments = _json_safe_value(message.attachments)
+        db.add(message)
+        db.flush()
+        return message
+
+    @classmethod
+    def list_messages(cls, db: Session, ticket_id: int, limit: int | None = None) -> list[TicketMessage]:
+        """
+        查询工单消息流。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param limit: 返回最近消息数量；为空时返回全部
+        :return: 消息列表
+        """
+        query = (
+            db.query(TicketMessage)
+            .filter(TicketMessage.ticket_id == ticket_id)
+            .order_by(TicketMessage.create_time.desc(), TicketMessage.id.desc())
+        )
+        if limit:
+            return list(reversed(query.limit(limit).all()))
+        return (
+            db.query(TicketMessage)
+            .filter(TicketMessage.ticket_id == ticket_id)
+            .order_by(TicketMessage.create_time.asc(), TicketMessage.id.asc())
+            .all()
+        )
+
+    @classmethod
+    def add_snapshot(cls, db: Session, snapshot: TicketSnapshot) -> TicketSnapshot:
+        """
+        新增工单 ACR 快照。
+        :param db: 数据库会话
+        :param snapshot: 快照对象
+        :return: 保存后的快照对象
+        """
+        if snapshot.structured_data is not None:
+            snapshot.structured_data = _json_safe_value(snapshot.structured_data)
+        db.add(snapshot)
+        db.flush()
+        return snapshot
+
+    @classmethod
+    def get_next_snapshot_version(cls, db: Session, ticket_id: int) -> int:
+        """
+        获取工单下一个快照版本号。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 下一个版本号
+        """
+        latest_version = (
+            db.query(func.max(TicketSnapshot.version))
+            .filter(TicketSnapshot.ticket_id == ticket_id)
+            .scalar()
+            or 0
+        )
+        return int(latest_version) + 1
+
+    @classmethod
+    def list_snapshots(cls, db: Session, ticket_id: int, limit: int | None = None) -> list[TicketSnapshot]:
+        """
+        查询工单快照列表。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param limit: 返回最近快照数量；为空时返回全部
+        :return: 快照列表
+        """
+        query = (
+            db.query(TicketSnapshot)
+            .filter(TicketSnapshot.ticket_id == ticket_id)
+            .order_by(TicketSnapshot.version.desc(), TicketSnapshot.create_time.desc())
+        )
+        if limit:
+            return query.limit(limit).all()
+        return query.all()
+
+    @classmethod
+    def get_latest_snapshot(cls, db: Session, ticket_id: int) -> TicketSnapshot | None:
+        """
+        查询工单最新 ACR 快照。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 最新快照
+        """
+        return (
+            db.query(TicketSnapshot)
+            .filter(TicketSnapshot.ticket_id == ticket_id)
+            .order_by(TicketSnapshot.version.desc(), TicketSnapshot.create_time.desc())
+            .first()
+        )
+
+    @classmethod
     def add_event(cls, db: Session, event: TicketEvent) -> TicketEvent:
         """
         新增工单事件。
@@ -305,6 +407,14 @@ class TicketDao:
             "events": db.query(TicketEvent)
             .filter(TicketEvent.ticket_id == ticket_id)
             .order_by(TicketEvent.create_time.asc())
+            .all(),
+            "messages": db.query(TicketMessage)
+            .filter(TicketMessage.ticket_id == ticket_id)
+            .order_by(TicketMessage.create_time.asc(), TicketMessage.id.asc())
+            .all(),
+            "snapshots": db.query(TicketSnapshot)
+            .filter(TicketSnapshot.ticket_id == ticket_id)
+            .order_by(TicketSnapshot.version.desc(), TicketSnapshot.create_time.desc())
             .all(),
             "rca": db.query(TicketRca).filter(TicketRca.ticket_id == ticket_id).first(),
         }

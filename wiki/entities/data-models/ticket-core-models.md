@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-05-20
 created: 2026-05-20
-updated: 2026-05-22
+updated: 2026-05-28
 related_files:
   - server/modules/ticket/entity/do/ticket_do.py
   - server/modules/ticket/entity/do/ticket_log_pull_do.py
@@ -23,8 +23,10 @@ erDiagram
   Ticket ||--o{ TicketStatusHistory : has
   Ticket ||--o{ TicketAssignHistory : has
   Ticket ||--o{ TicketComment : has
+  Ticket ||--o{ TicketMessage : converses
   Ticket ||--o{ TicketEvent : has
   Ticket ||--o{ TicketRca : has
+  Ticket ||--o{ TicketSnapshot : versions
   Ticket ||--o{ TicketAiAnalysisTask : analyzed_by
   Ticket ||--o{ EmbeddingRecord : indexed_by
 ```
@@ -33,6 +35,7 @@ erDiagram
 
 - `Ticket`、`TicketStatusHistory`、`TicketAssignHistory`
 - `TicketComment`、`TicketEvent`、`TicketRca`
+- `TicketMessage`、`TicketSnapshot`
 - `KnowledgeArticle`、`EmbeddingRecord`
 - `TicketAiRepoMapping`、`TicketAiAnalysisTask`
 - `WorkflowStatus`、`WorkflowTransition`
@@ -50,6 +53,8 @@ erDiagram
 - `TicketLogPullRecord.command_content` 会携带内部 `_automation` 扩展字段，用于记录日志拉取成功后是否自动触发 AI 以及目标 Agent 编码，外部提交前会自动剥离。
 - `TicketAiRepoMapping` 记录项目、版本、仓库地址、分支、本地仓库路径和工作区根目录的映射，用于 AI Worker 定位代码版本。
 - `TicketAiAnalysisTask.analysis_context` 仅保留 `selectedAgentCode`、`forceRefresh`、日志记录ID等轻量任务快照，完整工单/日志上下文落到工作区 `context.json`，避免任务表因超大日志包触发 MySQL `max_allowed_packet`；`Ticket.ai_analysis` 则保存最新一次分析结论。
+- `TicketMessage` 是持续协同和追问的上下文来源，字段包含 `role`、`message_type`、`content`、`attachments`、来源对象和创建人信息。
+- `TicketSnapshot` 是 ACR 当前快照版本，字段包含 `version`、`summary`、`root_cause`、`solution`、`prevention`、`risk`、`owner`、`source_type` 和结构化数据。
 
 ## 参见
 

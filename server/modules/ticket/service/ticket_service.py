@@ -1,11 +1,10 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
-from module_hrm.entity.do.module_do import HrmModule, HrmModuleProject
+from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.enums.enums import QtrDataStatusEnum
@@ -16,28 +15,34 @@ from modules.ticket.entity.do.ticket_do import (
     TicketAssignHistory,
     TicketComment,
     TicketEvent,
+    TicketMessage,
     TicketRca,
+    TicketSnapshot,
     TicketStatusHistory,
     WorkflowStatus,
     WorkflowTransition,
 )
+from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import (
     KnowledgeArticleModel,
     KnowledgeArticleQueryModel,
+    TicketAiAnalysisRequestModel,
     TicketAssignModel,
     TicketCommentCreateModel,
     TicketCreateModel,
     TicketEventCreateModel,
+    TicketMessageCreateModel,
     TicketQueryModel,
     TicketRcaModel,
+    TicketSnapshotModel,
     TicketStatusChangeModel,
     TicketUpdateModel,
     WorkflowStatusModel,
     WorkflowTransitionModel,
 )
-from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -231,6 +236,17 @@ def _build_transition_storage_payload(transition_object: WorkflowTransitionModel
     }
 
 
+def _join_text_lines(values: list[Any], *, empty: str = "") -> str:
+    """
+    将字符串列表拼接为换行文本。
+    :param values: 原始值列表
+    :param empty: 空列表返回值
+    :return: 换行文本
+    """
+    lines = [str(item).strip() for item in values if str(item or "").strip()]
+    return "\n".join(lines) if lines else empty
+
+
 class TicketService:
     """
     工单模块服务层，负责工单生命周期、状态机、事件和知识库业务逻辑。
@@ -383,6 +399,195 @@ class TicketService:
         if not user:
             return ""
         return user.nick_name or user.user_name or ""
+
+    @classmethod
+    def _add_message(
+        cls,
+        query_db: Session,
+        *,
+        ticket_id: int,
+        role: str,
+        message_type: str,
+        content: str,
+        current_user: CurrentUserModel | None = None,
+        attachments: Any = None,
+        reference_type: str = "",
+        reference_id: int | None = None,
+        created_by_name: str | None = None,
+        create_time: datetime | None = None,
+    ) -> TicketMessage:
+        """
+        写入工单消息流。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param role: 消息角色
+        :param message_type: 消息类型
+        :param content: 消息内容
+        :param current_user: 当前登录用户
+        :param attachments: 附件或引用信息
+        :param reference_type: 来源对象类型
+        :param reference_id: 来源对象ID
+        :param created_by_name: 自定义创建人名称
+        :param create_time: 创建时间
+        :return: 消息对象
+        """
+        return TicketDao.add_message(
+            query_db,
+            TicketMessage(
+                ticket_id=ticket_id,
+                role=str(role or "user").strip() or "user",
+                message_type=str(message_type or "comment").strip() or "comment",
+                content=content,
+                attachments=attachments,
+                reference_type=reference_type,
+                reference_id=reference_id,
+                created_by_id=_user_id(current_user) if current_user else None,
+                created_by_name=created_by_name if created_by_name is not None else _user_name(current_user),
+                create_time=create_time or datetime.now(),
+            ),
+        )
+
+    @classmethod
+    def _build_snapshot_payload_from_ticket(
+        cls,
+        ticket: Ticket,
+        *,
+        source_type: str = "manual",
+        source_id: int | None = None,
+        structured_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        基于工单当前态构建 ACR 快照数据。
+        :param ticket: 工单对象
+        :param source_type: 快照来源
+        :param source_id: 来源对象ID
+        :param structured_data: 结构化扩展数据
+        :return: 快照字段
+        """
+        ai_payload = ticket.ai_analysis if isinstance(ticket.ai_analysis, dict) else {}
+        next_steps = ai_payload.get("next_steps") or ai_payload.get("nextSteps") or []
+        risk_items = ai_payload.get("risk_items") or ai_payload.get("riskItems") or []
+        owner = (
+            ai_payload.get("owner")
+            or ai_payload.get("suggested_owner")
+            or ai_payload.get("suggestedOwner")
+            or ticket.current_assignee_name
+            or ""
+        )
+        summary = ai_payload.get("analysis_summary") or ai_payload.get("analysisSummary") or ticket.description or ""
+        root_cause = ticket.root_cause or str(ai_payload.get("root_cause") or ai_payload.get("rootCause") or "")
+        solution = ticket.solution or str(ai_payload.get("fix_suggestion") or ai_payload.get("fixSuggestion") or "")
+        return {
+            "summary": str(summary),
+            "root_cause": root_cause,
+            "solution": solution,
+            "prevention": _join_text_lines(next_steps) if isinstance(next_steps, list) else str(next_steps or ""),
+            "risk": _join_text_lines(risk_items) if isinstance(risk_items, list) else str(risk_items or ""),
+            "owner": str(owner or ""),
+            "source_type": source_type,
+            "source_id": source_id,
+            "structured_data": structured_data or ai_payload or None,
+        }
+
+    @classmethod
+    def create_snapshot(
+        cls,
+        query_db: Session,
+        ticket_id: int,
+        snapshot_object: TicketSnapshotModel | None = None,
+        current_user: CurrentUserModel | None = None,
+        *,
+        source_type: str = "manual",
+        source_id: int | None = None,
+        structured_data: dict[str, Any] | None = None,
+    ) -> CrudResponseModel:
+        """
+        创建工单 ACR 快照，并保持工单当前根因和方案为最新快照。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param snapshot_object: 快照参数；为空时从工单当前态生成
+        :param current_user: 当前登录用户
+        :param source_type: 快照来源
+        :param source_id: 来源对象ID
+        :param structured_data: 结构化快照数据
+        :return: 操作结果
+        """
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
+            return CrudResponseModel(is_success=False, message="工单不存在")
+        now = datetime.now()
+        data = cls._build_snapshot_payload_from_ticket(
+            ticket,
+            source_type=source_type,
+            source_id=source_id,
+            structured_data=structured_data,
+        )
+        if snapshot_object:
+            explicit = snapshot_object.model_dump(by_alias=False, exclude_none=True)
+            explicit.pop("id", None)
+            explicit.pop("ticket_id", None)
+            explicit.pop("version", None)
+            data.update(explicit)
+        snapshot = TicketDao.add_snapshot(
+            query_db,
+            TicketSnapshot(
+                ticket_id=ticket_id,
+                version=TicketDao.get_next_snapshot_version(query_db, ticket_id),
+                summary=data.get("summary"),
+                root_cause=data.get("root_cause"),
+                solution=data.get("solution"),
+                prevention=data.get("prevention"),
+                risk=data.get("risk"),
+                owner=data.get("owner") or "",
+                source_type=data.get("source_type") or source_type,
+                source_id=data.get("source_id") or source_id,
+                structured_data=data.get("structured_data"),
+                created_by_id=_user_id(current_user) if current_user else None,
+                created_by_name=_user_name(current_user) if current_user else "system",
+                create_time=now,
+            ),
+        )
+        update_data: dict[str, Any] = {
+            "update_by": _user_name(current_user) if current_user else "system",
+            "update_time": now,
+        }
+        if data.get("root_cause"):
+            update_data["root_cause"] = data.get("root_cause")
+        if data.get("solution"):
+            update_data["solution"] = data.get("solution")
+        TicketDao.update_ticket(query_db, ticket_id, update_data)
+        cls._add_message(
+            query_db,
+            ticket_id=ticket_id,
+            role="system",
+            message_type="snapshot",
+            content=f"ACR快照 V{snapshot.version} 已生成",
+            current_user=current_user,
+            reference_type="snapshot",
+            reference_id=snapshot.id,
+            create_time=now,
+        )
+        TicketDao.add_event(
+            query_db,
+            TicketEvent(
+                ticket_id=ticket_id,
+                event_type=TicketEventType.RCA.value,
+                operator_id=_user_id(current_user) if current_user else None,
+                operator_name=_user_name(current_user) if current_user else "system",
+                content=f"ACR快照 V{snapshot.version} 已生成",
+                event_data={
+                    "snapshot_id": snapshot.id,
+                    "version": snapshot.version,
+                    "source_type": snapshot.source_type,
+                },
+                create_time=now,
+            ),
+        )
+        return CrudResponseModel(
+            is_success=True,
+            message="快照生成成功",
+            result=CamelCaseUtil.transform_result(snapshot),
+        )
 
     @classmethod
     def _append_transition_assignment_and_notification(
@@ -566,6 +771,17 @@ class TicketService:
                     create_time=now,
                 ),
             )
+            cls._add_message(
+                query_db,
+                ticket_id=ticket.ticket_id,
+                role="user",
+                message_type="ticket_created",
+                content=f"{ticket.title}\n\n{ticket.description or ''}".strip(),
+                current_user=current_user,
+                reference_type="ticket",
+                reference_id=ticket.ticket_id,
+                create_time=now,
+            )
             query_db.commit()
             if need_log_pull or log_pull_config:
                 try:
@@ -633,6 +849,11 @@ class TicketService:
         cls._decorate_ticket_item(result)
         result["latestLogPull"] = TicketLogPullService.get_latest_summary(query_db, ticket_id)
         result["latestAiAnalysis"] = TicketAiAnalysisService.get_latest_summary(query_db, ticket_id)
+        message_bundle = cls.get_messages_services(query_db, ticket_id) or {}
+        result["messages"] = message_bundle.get("messages") or []
+        result["snapshots"] = message_bundle.get("snapshots") or []
+        result["latestSnapshot"] = message_bundle.get("latestSnapshot")
+        result["similarTickets"] = message_bundle.get("similarTickets") or []
         return result
 
     @classmethod
@@ -894,6 +1115,20 @@ class TicketService:
                     create_time=now,
                 ),
             )
+            if _is_end_status(status_object.to_status):
+                cls.create_snapshot(
+                    query_db,
+                    ticket_id,
+                    current_user=current_user,
+                    source_type="status",
+                    structured_data={
+                        "from_status": ticket.status,
+                        "to_status": status_object.to_status,
+                        "comment": status_object.comment,
+                    },
+                )
+            if status_object.to_status == TicketStatus.CLOSED.value:
+                cls.create_knowledge_from_ticket(query_db, ticket_id, current_user)
             query_db.commit()
             return CrudResponseModel(is_success=True, message="状态流转成功")
         except Exception:
@@ -924,6 +1159,18 @@ class TicketService:
                     content=comment_object.content,
                     is_internal=comment_object.is_internal,
                 ),
+            )
+            cls._add_message(
+                query_db,
+                ticket_id=ticket_id,
+                role="user",
+                message_type="comment",
+                content=comment_object.content,
+                current_user=current_user,
+                attachments={"is_internal": comment_object.is_internal},
+                reference_type="comment",
+                reference_id=comment.id,
+                create_time=comment.create_time,
             )
             TicketDao.add_event(
                 query_db,
@@ -972,6 +1219,19 @@ class TicketService:
                     event_data=event_object.event_data,
                 ),
             )
+            if event_object.content:
+                cls._add_message(
+                    query_db,
+                    ticket_id=ticket_id,
+                    role="developer",
+                    message_type=str(event_object.event_type or "action").lower(),
+                    content=event_object.content,
+                    current_user=current_user,
+                    attachments=event_object.event_data,
+                    reference_type="event",
+                    reference_id=event.id,
+                    create_time=event.create_time,
+                )
             query_db.commit()
             return CrudResponseModel(
                 is_success=True,
@@ -994,6 +1254,259 @@ class TicketService:
             return None
         timeline = TicketDao.get_timeline(query_db, ticket_id)
         return {key: CamelCaseUtil.transform_result(value) for key, value in timeline.items()}
+
+    @classmethod
+    def get_messages_services(cls, query_db: Session, ticket_id: int) -> dict | None:
+        """
+        获取工单协同消息、ACR快照和相似工单推荐。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 消息流、快照、最新快照和相似工单
+        """
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
+            return None
+        search_text = " ".join(
+            str(item)
+            for item in [
+                ticket.title,
+                ticket.description,
+                ticket.root_cause,
+                ticket.solution,
+                ticket.module_name,
+                ticket.category_name,
+            ]
+            if item
+        )
+        similar_tickets = [
+            item
+            for item in TicketEmbeddingService.search_tickets(query_db, search_text, 6)
+            if item.get("ticketId") != ticket_id
+        ]
+        snapshots = TicketDao.list_snapshots(query_db, ticket_id)
+        return {
+            "messages": CamelCaseUtil.transform_result(TicketDao.list_messages(query_db, ticket_id)),
+            "snapshots": CamelCaseUtil.transform_result(snapshots),
+            "latestSnapshot": CamelCaseUtil.transform_result(snapshots[0]) if snapshots else None,
+            "similarTickets": similar_tickets[:5],
+        }
+
+    @classmethod
+    def add_message(
+        cls,
+        query_db: Session,
+        ticket_id: int,
+        message_object: TicketMessageCreateModel,
+        current_user: CurrentUserModel,
+    ) -> CrudResponseModel:
+        """
+        新增工单协同消息；可选同步提交 AI 追问任务。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param message_object: 消息内容、角色、类型和 AI 追问参数
+        :param current_user: 当前登录用户
+        :return: 操作结果
+        """
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
+            return CrudResponseModel(is_success=False, message="工单不存在")
+        content = str(message_object.content or "").strip()
+        if not content:
+            return CrudResponseModel(is_success=False, message="消息内容不能为空")
+        try:
+            now = datetime.now()
+            message = cls._add_message(
+                query_db,
+                ticket_id=ticket_id,
+                role=message_object.role,
+                message_type=message_object.message_type,
+                content=content,
+                current_user=current_user,
+                attachments=message_object.attachments,
+                create_time=now,
+            )
+            TicketDao.add_event(
+                query_db,
+                TicketEvent(
+                    ticket_id=ticket_id,
+                    event_type=TicketEventType.COMMENTED.value,
+                    operator_id=_user_id(current_user),
+                    operator_name=_user_name(current_user),
+                    content=content,
+                    event_data={
+                        "message_id": message.id,
+                        "role": message.role,
+                        "message_type": message.message_type,
+                        "run_ai": message_object.run_ai,
+                    },
+                    create_time=now,
+                ),
+            )
+            query_db.commit()
+            ai_result = None
+            ai_message = ""
+            ai_success = False
+            if message_object.run_ai:
+                try:
+                    version_key = (
+                        str(message_object.version_key or "").strip()
+                        or _extract_ticket_version_key(ticket.extra_data)
+                        or ""
+                    )
+                    if not version_key:
+                        ai_message = "当前工单缺少版本号，未发起AI追问"
+                    else:
+                        ai_request = TicketAiAnalysisRequestModel(
+                            versionKey=version_key,
+                            agentCode=message_object.agent_code,
+                            forceRefresh=True,
+                        )
+                        ai_result = TicketAiAnalysisService.create_analysis_task_services(
+                            query_db,
+                            ticket_id,
+                            ai_request,
+                            current_user,
+                        )
+                        ai_success = bool(ai_result.is_success)
+                        ai_message = ai_result.message
+                except Exception as exc:
+                    ai_message = f"AI追问提交失败: {exc}"
+            return CrudResponseModel(
+                is_success=True,
+                message="消息提交成功",
+                result={
+                    "message": CamelCaseUtil.transform_result(message),
+                    "aiTask": (
+                        CamelCaseUtil.transform_result(ai_result.result)
+                        if ai_result and ai_result.is_success
+                        else None
+                    ),
+                    "aiMessage": ai_message,
+                    "aiSuccess": ai_success,
+                },
+            )
+        except Exception:
+            query_db.rollback()
+            raise
+
+    @classmethod
+    def create_knowledge_from_ticket(
+        cls, query_db: Session, ticket_id: int, current_user: CurrentUserModel | None = None
+    ) -> CrudResponseModel:
+        """
+        从已处理工单自动生成知识库案例文章并刷新工单向量。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param current_user: 当前登录用户
+        :return: 操作结果
+        """
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
+            return CrudResponseModel(is_success=False, message="工单不存在")
+        existing_articles = (
+            query_db.query(KnowledgeArticle)
+            .filter(KnowledgeArticle.del_flag == "0")
+            .order_by(KnowledgeArticle.update_time.desc(), KnowledgeArticle.create_time.desc())
+            .all()
+        )
+        for article in existing_articles:
+            related_ids = article.related_ticket_ids or []
+            if isinstance(related_ids, dict):
+                related_ids = related_ids.get("ids") or []
+            if ticket_id in related_ids:
+                return CrudResponseModel(
+                    is_success=True,
+                    message="知识库案例已存在",
+                    result=CamelCaseUtil.transform_result(article),
+                )
+        timeline = TicketDao.get_timeline(query_db, ticket_id)
+        rca = timeline.get("rca")
+        messages = timeline.get("messages") or []
+        events = timeline.get("events") or []
+        ai_payload = ticket.ai_analysis if isinstance(ticket.ai_analysis, dict) else {}
+        investigation_lines = [
+            f"- {item.create_time:%Y-%m-%d %H:%M:%S} {item.event_type}: {item.content or ''}"
+            for item in events[-20:]
+        ]
+        message_lines = [
+            f"- {item.create_time:%Y-%m-%d %H:%M:%S} [{item.role}/{item.message_type}] {item.content}"
+            for item in messages[-20:]
+        ]
+        symptom = getattr(rca, "symptom", None) or ticket.description or ai_payload.get("analysis_summary") or ""
+        root_cause = getattr(rca, "root_cause_detail", None) or ticket.root_cause or ai_payload.get("root_cause") or ""
+        solution = getattr(rca, "fix_solution", None) or ticket.solution or ai_payload.get("fix_suggestion") or ""
+        prevention = getattr(rca, "prevention_solution", None) or _join_text_lines(ai_payload.get("next_steps") or [])
+        content = "\n".join(
+            [
+                f"# {ticket.title}",
+                "",
+                "## 问题现象",
+                symptom or "-",
+                "",
+                "## 根因",
+                root_cause or "-",
+                "",
+                "## 解决方案",
+                solution or "-",
+                "",
+                "## 排查过程",
+                _join_text_lines(investigation_lines, empty="-"),
+                "",
+                "## 协同消息",
+                _join_text_lines(message_lines, empty="-"),
+                "",
+                "## 验证与预防",
+                getattr(rca, "verify_method", None) or "-",
+                "",
+                prevention or "-",
+            ]
+        )
+        tags = [
+            item
+            for item in {
+                ticket.merchant_name,
+                ticket.module_name,
+                ticket.category_name,
+                getattr(rca, "root_cause_category", None) if rca else None,
+                "工单案例",
+            }
+            if item
+        ]
+        article = TicketDao.add_knowledge(
+            query_db,
+            KnowledgeArticle(
+                title=f"{ticket.ticket_no} {ticket.title}",
+                content=content,
+                category=ticket.category_name or "工单案例",
+                tags=tags,
+                related_ticket_ids=[ticket_id],
+                embedding_status="pending",
+                created_by_id=_user_id(current_user) if current_user else None,
+                created_by_name=_user_name(current_user) if current_user else "system",
+                create_time=datetime.now(),
+                update_time=datetime.now(),
+            ),
+        )
+        TicketDao.add_event(
+            query_db,
+            TicketEvent(
+                ticket_id=ticket_id,
+                event_type=TicketEventType.AI_RECOMMENDED.value,
+                operator_id=_user_id(current_user) if current_user else None,
+                operator_name=_user_name(current_user) if current_user else "system",
+                content="工单关闭后自动生成知识库案例",
+                event_data={"article_id": article.article_id},
+            ),
+        )
+        try:
+            TicketEmbeddingService.vectorize_ticket(query_db, ticket)
+        except Exception as exc:
+            logger.warning("工单[%s]向量刷新失败: %s", ticket_id, exc)
+        return CrudResponseModel(
+            is_success=True,
+            message="知识库案例生成成功",
+            result=CamelCaseUtil.transform_result(article),
+        )
 
     @classmethod
     def upsert_rca(
@@ -1032,6 +1545,20 @@ class TicketService:
                     content="RCA记录更新",
                     event_data={"rca_id": rca.id, "root_cause_category": rca.root_cause_category},
                 ),
+            )
+            cls.create_snapshot(
+                query_db,
+                ticket_id,
+                TicketSnapshotModel(
+                    summary=rca.symptom,
+                    root_cause=rca.root_cause_detail,
+                    solution=rca.fix_solution,
+                    prevention=rca.prevention_solution,
+                    structured_data=rca.structured_data,
+                ),
+                current_user,
+                source_type="rca",
+                source_id=rca.id,
             )
             query_db.commit()
             return CrudResponseModel(is_success=True, message="RCA保存成功", result=CamelCaseUtil.transform_result(rca))

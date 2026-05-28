@@ -130,6 +130,45 @@ class TicketCommentCreateModel(BaseModel):
     is_internal: bool = Field(default=False, description="是否内部评论")
 
 
+class TicketMessageCreateModel(BaseModel):
+    """
+    新增工单消息模型，用于持续追问、AI回复和协同排查记录。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    role: str = Field(default="user", description="消息角色，如 user、ai、developer、tester、system")
+    message_type: str = Field(
+        default="question",
+        description="消息类型，如 question、analysis、log、conclusion、action",
+    )
+    content: str = Field(description="消息内容")
+    attachments: dict[str, Any] | list[dict[str, Any]] | None = Field(default=None, description="附件或引用信息")
+    run_ai: bool = Field(default=False, description="提交后是否立即发起 AI 追问分析")
+    version_key: str | None = Field(default=None, description="发起 AI 追问时使用的版本号")
+    agent_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Agent 编码")
+
+
+class TicketMessageModel(BaseModel):
+    """
+    工单消息返回模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    id: int | None = None
+    ticket_id: int | None = None
+    role: str | None = None
+    message_type: str | None = None
+    content: str | None = None
+    attachments: dict[str, Any] | list[dict[str, Any]] | None = None
+    reference_type: str | None = None
+    reference_id: int | None = None
+    created_by_id: int | None = None
+    created_by_name: str | None = None
+    create_time: datetime | None = None
+
+
 class TicketEventCreateModel(BaseModel):
     """
     新增工单事件模型，用于排查过程、复现步骤、日志分析、修复上线等结构化记录。
@@ -166,6 +205,30 @@ class TicketRcaModel(BaseModel):
     created_by_name: str | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None
+
+
+class TicketSnapshotModel(BaseModel):
+    """
+    工单 ACR 快照模型，用于保存和返回当前结论版本。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    id: int | None = None
+    ticket_id: int | None = None
+    version: int | None = None
+    summary: str | None = Field(default=None, description="当前摘要")
+    root_cause: str | None = Field(default=None, description="当前根因")
+    solution: str | None = Field(default=None, description="当前解决方案")
+    prevention: str | None = Field(default=None, description="预防建议")
+    risk: str | None = Field(default=None, description="风险说明")
+    owner: str | None = Field(default=None, description="建议负责人")
+    source_type: str | None = Field(default="manual", description="快照来源")
+    source_id: int | None = Field(default=None, description="来源对象ID")
+    structured_data: dict[str, Any] | None = Field(default=None, description="结构化快照数据")
+    created_by_id: int | None = None
+    created_by_name: str | None = None
+    create_time: datetime | None = None
 
 
 class TicketAiRepoMappingBaseModel(BaseModel):

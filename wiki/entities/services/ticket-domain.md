@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-05-21
 created: 2026-05-20
-updated: 2026-05-22
+updated: 2026-05-28
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
@@ -68,6 +68,11 @@ graph TD
 - 日志拉取列表和详情页支持 `重新拉取`、`重新下载`、`重新截取` 三类记录级动作：重拉基于原始参数新建任务，重下恢复原始压缩包到原位置，重截按当前查看时间范围更新当前记录的入库内容。
 - 重新拉取优先恢复原始时间模式参数；历史记录若缺少点位参数，允许回退到已保存的开始/结束范围继续提交。
 - 工单 AI 分析已接入 Codex CLI：新增仓库映射表 `ticket_ai_repo_mapping`、分析任务表 `ticket_ai_analysis_task`，分析结果写回 `ticket.ai_analysis` 并同步更新 RCA/事件。
+- 工单二阶段闭环新增消息流 `ticket_message` 和 ACR 快照 `ticket_snapshot`：评论、追问、AI 回复、开发/测试补充会进入消息流；AI 分析、RCA 保存、状态闭环或手工操作会生成快照版本。
+- AI 分析上下文现在包含工单消息、最近 ACR 快照和相似工单推荐，追问入口会先保存消息，再按工单版本和 Agent 配置提交新的 AI 分析任务。
+- AI 协同追问的输出契约需要满足 Codex structured output 约束，`evidence`、`risk_items`、`next_steps` 也必须出现在 `required` 中；`symptom`、`similar_cases`、`sop_suggestion`、`monitoring_suggestion` 等增强字段允许为空或缺省，由服务端归一化补默认值，避免模型未产出扩展字段时任务失败。
+- AI 分析下发给 Agent 的日志正文会做中间截断，默认最多保留首尾约 80 万字符，并记录 `textTruncatedForAi` 与原始字符数，避免追问请求因超大上下文触发 Codex/OpenAI `bad_response_status_code`。
+- 工单关闭时会尝试从工单、RCA、事件和消息流自动生成知识库案例，知识文章关联原工单并刷新工单向量，供下一次相似工单检索复用。
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
 - AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本号匹配映射，未命中时拒绝提交。
@@ -85,6 +90,7 @@ graph TD
 - AI 分析 Agent 会在任务工作区落盘 `worker.stdout.txt` 和 `worker.stderr.txt`，并在系统日志中记录环境快照，便于对比手工终端与后端线程的运行差异。
 - AI 分析 Agent 通过工作区内 `analysis.lock` 规避同任务重复并发执行；锁文件存在且未过期时会直接返回运行中提示，锁文件异常或过期会自动放行重试。
 - AI 分析 Worker 的输出 schema 必须满足 Codex `response_format` 约束，根对象需要显式设置 `additionalProperties: false`，否则会返回 `invalid_request_error`。
+- 输出 schema 不应把协同增强字段全部设为必填；核心字段用于写回 RCA 和 ACR，增强字段用于知识沉淀与经验复用，缺失时由服务端默认空数组、空字符串或人工复核标记。
 - Agent 执行过程会通过 `ai_analysis_step` / `ai_analysis_status` / `ai_analysis_error` / `ai_analysis_finished` 事件把阶段日志回传服务端，服务端只记录系统日志，不把调试细节落到业务表。
 - 工作流流转规则会把允许角色、默认处理人和通知预留统一压到 `workflow_transition.allowed_roles` JSON 中，避免引入额外表结构迁移。
 

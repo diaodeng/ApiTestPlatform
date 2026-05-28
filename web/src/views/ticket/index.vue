@@ -530,6 +530,7 @@
           <div class="panel-inline">
             <el-button-group>
               <el-button :type="detailActiveTab === 'timeline' ? 'primary' : 'default'" @click="switchDetailSection('timeline')">时间线</el-button>
+              <el-button :type="detailActiveTab === 'collab' ? 'primary' : 'default'" @click="switchDetailSection('collab')">协同</el-button>
               <el-button :type="detailActiveTab === 'comments' ? 'primary' : 'default'" @click="switchDetailSection('comments')">评论</el-button>
               <el-button :type="detailActiveTab === 'events' ? 'primary' : 'default'" @click="switchDetailSection('events')">排查事件</el-button>
               <el-button :type="detailActiveTab === 'logPull' ? 'primary' : 'default'" @click="switchDetailSection('logPull')">日志拉取</el-button>
@@ -540,6 +541,119 @@
         </div>
 
         <el-tabs v-model="detailActiveTab" class="detail-entry-tabs" @tab-click="handleDetailTabClick">
+          <el-tab-pane label="协同" name="collab" lazy>
+            <el-form :model="messageForm" label-width="90px" class="mb16">
+              <el-row :gutter="12">
+                <el-col :span="8">
+                  <el-form-item label="角色">
+                    <el-select v-model="messageForm.role">
+                      <el-option label="提问人" value="user" />
+                      <el-option label="AI" value="ai" />
+                      <el-option label="开发" value="developer" />
+                      <el-option label="测试" value="tester" />
+                      <el-option label="系统" value="system" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="类型">
+                    <el-select v-model="messageForm.messageType">
+                      <el-option label="追问" value="question" />
+                      <el-option label="分析" value="analysis" />
+                      <el-option label="日志" value="log" />
+                      <el-option label="结论" value="conclusion" />
+                      <el-option label="动作" value="action" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="发起AI">
+                    <el-switch v-model="messageForm.runAi" inline-prompt active-text="是" inactive-text="否" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="版本号">
+                    <el-input v-model="messageForm.versionKey" placeholder="追问分析时使用" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="Agent">
+                    <el-select v-model="messageForm.agentCode" placeholder="可选" filterable clearable>
+                      <el-option
+                        v-for="item in agentOptions"
+                        :key="item.agentCode"
+                        :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                        :value="item.agentCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="内容">
+                    <el-input v-model="messageForm.content" type="textarea" :rows="4" placeholder="补充追问、开发反馈、排查动作或AI结论" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="附件JSON">
+                    <el-input v-model="messageDataText" type="textarea" :rows="3" placeholder='可选，如 {"traceIds":["..."],"evidence":"..."}' />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item>
+                    <el-button type="primary" @click="submitMessage" v-hasPermi="['ticket:message:add']">提交消息</el-button>
+                    <el-button @click="resetMessageForm">重置</el-button>
+                    <el-button type="success" plain @click="saveSnapshotFromCurrentState" v-hasPermi="['ticket:snapshot:add']">
+                      生成快照
+                    </el-button>
+                    <el-button type="warning" plain @click="generateKnowledgeFromTicket" v-hasPermi="['ticket:knowledge:add']">
+                      生成知识库
+                    </el-button>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+
+            <el-row :gutter="16">
+              <el-col :span="14">
+                <el-card shadow="never" class="mb16">
+                  <template #header>消息流</template>
+                  <el-empty v-if="!messageItems.length" description="暂无消息" />
+                  <div v-for="item in messageItems" :key="item.id" class="mb12">
+                    <div class="record-head">
+                      <span>{{ item.roleLabel }}</span>
+                      <el-tag size="small">{{ item.typeLabel }}</el-tag>
+                      <span>{{ parseTime(item.createTime) }}</span>
+                    </div>
+                    <div>{{ item.content || '-' }}</div>
+                    <pre v-if="item.attachments" class="json-block">{{ formatJson(item.attachments) }}</pre>
+                  </div>
+                </el-card>
+              </el-col>
+              <el-col :span="10">
+                <el-card shadow="never" class="mb16">
+                  <template #header>最新快照</template>
+                  <el-descriptions :column="1" border>
+                    <el-descriptions-item label="版本">{{ latestSnapshot?.version || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="摘要">{{ latestSnapshot?.summary || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="根因">{{ latestSnapshot?.rootCause || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="方案">{{ latestSnapshot?.solution || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="负责人">{{ latestSnapshot?.owner || '-' }}</el-descriptions-item>
+                  </el-descriptions>
+                </el-card>
+                <el-card shadow="never">
+                  <template #header>相似工单</template>
+                  <el-empty v-if="!similarTickets.length" description="暂无相似工单" />
+                  <div v-for="item in similarTickets" :key="item.ticketId" class="similar-item">
+                    <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
+                    <div class="similar-meta">
+                      <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
+                      <span>{{ item.rootCause || '-' }}</span>
+                    </div>
+                  </div>
+                </el-card>
+              </el-col>
+            </el-row>
+          </el-tab-pane>
           <el-tab-pane label="时间线" name="timeline" lazy>
             <el-timeline>
               <el-timeline-item
@@ -1244,6 +1358,7 @@ import { decompressText } from '@/utils/tools'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import {
   addTicket,
+  addTicketMessage,
   addTicketComment,
   addTicketEvent,
   addTicketLogPull,
@@ -1254,8 +1369,10 @@ import {
   delTicket,
   delTicketAiRepoMapping,
   downloadTicketImportTemplate,
+  extractTicketKnowledge,
   getTicket,
   getTicketLogPullContent,
+  getTicketMessages,
   getTicketTimeline,
   importTicketExcel,
   listTicket,
@@ -1268,6 +1385,7 @@ import {
   redownloadTicketLogPull,
   retryTicketLogPull,
   retryTicketAiAnalysis,
+  addTicketSnapshot,
   saveTicketRca,
   searchTicketNaturalLanguage,
   updateTicketAiRepoMapping,
@@ -1310,8 +1428,12 @@ const currentTicketId = ref()
 const currentAssigneeOption = ref(null)
 const detail = ref({})
 const timeline = ref({})
+const ticketMessages = ref([])
+const ticketSnapshots = ref([])
+const similarTickets = ref([])
 const tagText = ref('')
 const eventDataText = ref('')
+const messageDataText = ref('')
 const naturalKeyword = ref('')
 const importResult = ref(null)
 const logPullLoading = ref(false)
@@ -1433,6 +1555,14 @@ const data = reactive({
     content: '',
     isInternal: false
   },
+  messageForm: {
+    role: 'user',
+    messageType: 'question',
+    content: '',
+    runAi: false,
+    versionKey: '',
+    agentCode: ''
+  },
   eventForm: {
     eventType: 'ANALYSIS',
     content: ''
@@ -1480,6 +1610,7 @@ const {
   assignForm,
   statusForm,
   commentForm,
+  messageForm,
   eventForm,
   rcaForm,
   logPullForm,
@@ -1493,6 +1624,7 @@ const {
 } = toRefs(data)
 
 const detailTitle = computed(() => `工单详情：${detail.value.title || ''}`)
+const latestSnapshotSummary = computed(() => latestSnapshot.value?.summary || detail.value.rootCause || detail.value.description || '')
 const filteredLogPullContent = computed(() => {
   const text = selectedLogPullContent.value?.text || ''
   const keyword = (logPullKeyword.value || '').trim().toLowerCase()
@@ -1548,6 +1680,12 @@ const currentAiMapping = computed(() => {
   ) || null
 })
 
+const latestSnapshot = computed(() => detail.value.latestSnapshot || ticketSnapshots.value[0] || null)
+const latestMessageSnapshot = computed(() => {
+  const items = ticketMessages.value || []
+  return items.length ? items[items.length - 1] : null
+})
+
 const timelineItems = computed(() => {
   const items = []
   ;(timeline.value.statusHistory || []).forEach(item => {
@@ -1575,6 +1713,14 @@ const timelineItems = computed(() => {
     })
   })
   return items.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0))
+})
+
+const messageItems = computed(() => {
+  return (ticketMessages.value || []).map(item => ({
+    ...item,
+    roleLabel: item.role || 'user',
+    typeLabel: item.messageType || 'question'
+  }))
 })
 
 function getList() {
@@ -1606,6 +1752,21 @@ function applyTicketAutomationConfig(ticketData) {
     autoAiEnabled: Boolean(logPullConfig.autoAiEnabled ?? logPullConfig.auto_ai_enabled ?? false),
     aiAgentCode: logPullConfig.aiAgentCode || logPullConfig.ai_agent_code || ''
   }
+}
+
+function loadTicketMessageBundle() {
+  if (!currentTicketId.value) {
+    return Promise.resolve()
+  }
+  return getTicketMessages(currentTicketId.value).then(response => {
+    const payload = response.data || {}
+    ticketMessages.value = payload.messages || []
+    ticketSnapshots.value = payload.snapshots || []
+    similarTickets.value = payload.similarTickets || []
+    if (payload.latestSnapshot) {
+      detail.value.latestSnapshot = payload.latestSnapshot
+    }
+  })
 }
 
 function handleQuery() {
@@ -1913,6 +2074,9 @@ function refreshDetail() {
   }
   return getTicket(currentTicketId.value).then(response => {
     detail.value = response.data || {}
+    ticketMessages.value = detail.value.messages || ticketMessages.value
+    ticketSnapshots.value = detail.value.snapshots || ticketSnapshots.value
+    similarTickets.value = detail.value.similarTickets || similarTickets.value
   })
 }
 
@@ -2013,14 +2177,14 @@ function submitAiAnalysis() {
       return
     }
     aiAnalysisSubmitting.value = true
-    addTicketAiAnalysis(currentTicketId.value, {
+  addTicketAiAnalysis(currentTicketId.value, {
       versionKey: aiAnalysisTaskForm.value.versionKey,
       agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
       forceRefresh: aiAnalysisTaskForm.value.forceRefresh
     }).then(() => {
       proxy.$modal.msgSuccess('AI分析任务已提交')
       aiAnalysisOpen.value = false
-      Promise.all([refreshDetail(), loadAiAnalysisTasks(true), getList()])
+      Promise.all([refreshDetail(), loadAiAnalysisTasks(true), refreshMessageBundle(), getList()])
     }).finally(() => {
       aiAnalysisSubmitting.value = false
     })
@@ -2036,7 +2200,7 @@ function retryAiAnalysisTask(row) {
     return retryTicketAiAnalysis(currentTicketId.value, row.taskId)
   }).then(() => {
     proxy.$modal.msgSuccess('AI分析任务已重新提交')
-    return Promise.all([loadAiAnalysisTasks(true), refreshDetail(), getList()])
+    return Promise.all([loadAiAnalysisTasks(true), refreshDetail(), refreshMessageBundle(), getList()])
   }).catch(() => {}).finally(() => {
     aiAnalysisRetryLoading.value = false
   })
@@ -2106,6 +2270,9 @@ function openDetail(row) {
   logPullContentOpen.value = false
   logPullSubmitOpen.value = false
   timeline.value = {}
+  ticketMessages.value = []
+  ticketSnapshots.value = []
+  similarTickets.value = []
   rcaForm.value = {}
   logPullList.value = []
   aiTaskList.value = []
@@ -2116,13 +2283,18 @@ function openDetail(row) {
   logPullKeyword.value = ''
   logPullQuery.value.pageNum = 1
   resetLogPullForm()
+  resetMessageForm()
   Promise.all([
     getTicket(row.ticketId),
-    getTicketTimeline(row.ticketId)
-  ]).then(([detailResponse, timelineResponse]) => {
+    getTicketTimeline(row.ticketId),
+    getTicketMessages(row.ticketId)
+  ]).then(([detailResponse, timelineResponse, messageResponse]) => {
     detail.value = detailResponse.data || {}
     timeline.value = timelineResponse.data || {}
     rcaForm.value = timeline.value.rca || {}
+    ticketMessages.value = messageResponse.data?.messages || []
+    ticketSnapshots.value = messageResponse.data?.snapshots || []
+    similarTickets.value = messageResponse.data?.similarTickets || []
     aiAnalysisTaskForm.value.mappingId = detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId
   })
 }
@@ -2146,6 +2318,10 @@ function handleDetailTabClick(tab) {
   }
   if (tabName === 'ai') {
     Promise.all([loadAiRepoMappings(true), loadAiAnalysisTasks()]).catch(() => {})
+    return
+  }
+  if (tabName === 'collab') {
+    loadTicketMessageBundle()
   }
 }
 
@@ -2156,6 +2332,10 @@ function refreshTimeline() {
   })
 }
 
+function refreshMessageBundle() {
+  return loadTicketMessageBundle()
+}
+
 function submitComment() {
   if (!commentForm.value.content) {
     proxy.$modal.msgWarning('请填写评论内容')
@@ -2164,7 +2344,80 @@ function submitComment() {
   addTicketComment(currentTicketId.value, commentForm.value).then(() => {
     proxy.$modal.msgSuccess('评论成功')
     commentForm.value = { content: '', isInternal: false }
-    refreshTimeline()
+    Promise.all([refreshTimeline(), refreshMessageBundle()])
+  })
+}
+
+function resetMessageForm() {
+  messageForm.value = {
+    role: 'user',
+    messageType: 'question',
+    content: '',
+    runAi: false,
+    versionKey: detail.value.versionKey || detail.value.extraData?.versionKey || '',
+    agentCode: detail.value.latestAiAnalysis?.agentCode || ''
+  }
+  messageDataText.value = ''
+}
+
+function parseMessageAttachments() {
+  if (!messageDataText.value) {
+    return undefined
+  }
+  try {
+    return JSON.parse(messageDataText.value)
+  } catch (error) {
+    proxy.$modal.msgError('消息附件必须是合法 JSON')
+    return null
+  }
+}
+
+function submitMessage() {
+  const content = String(messageForm.value.content || '').trim()
+  if (!content) {
+    proxy.$modal.msgWarning('请填写消息内容')
+    return
+  }
+  const attachments = parseMessageAttachments()
+  if (attachments === null) {
+    return
+  }
+  addTicketMessage(currentTicketId.value, {
+    ...messageForm.value,
+    content,
+    attachments
+  }).then(response => {
+    const payload = response.data || {}
+    proxy.$modal.msgSuccess(payload.message || '消息提交成功')
+    resetMessageForm()
+    Promise.all([refreshMessageBundle(), refreshDetail(), getList()])
+  })
+}
+
+function saveSnapshotFromCurrentState() {
+  return addTicketSnapshot(currentTicketId.value, {
+    summary: latestSnapshotSummary.value || detail.value.description || '',
+    rootCause: detail.value.rootCause || '',
+    solution: detail.value.solution || '',
+    prevention: latestSnapshot.value?.prevention || '',
+    risk: latestSnapshot.value?.risk || '',
+    owner: detail.value.currentAssigneeName || '',
+    sourceType: 'manual',
+    structuredData: {
+      ticketId: detail.value.ticketId,
+      rootCause: detail.value.rootCause,
+      solution: detail.value.solution
+    }
+  }).then(() => {
+    proxy.$modal.msgSuccess('快照已保存')
+    return Promise.all([refreshMessageBundle(), refreshDetail()])
+  })
+}
+
+function generateKnowledgeFromTicket() {
+  extractTicketKnowledge(currentTicketId.value).then(() => {
+    proxy.$modal.msgSuccess('知识库案例已生成')
+    Promise.all([refreshMessageBundle(), refreshDetail(), getList()])
   })
 }
 
@@ -2182,15 +2435,14 @@ function submitEvent() {
     proxy.$modal.msgSuccess('事件记录成功')
     eventForm.value = { eventType: 'ANALYSIS', content: '' }
     eventDataText.value = ''
-    refreshTimeline()
+    Promise.all([refreshTimeline(), refreshMessageBundle()])
   })
 }
 
 function submitRca() {
   saveTicketRca(currentTicketId.value, rcaForm.value).then(() => {
     proxy.$modal.msgSuccess('RCA保存成功')
-    refreshTimeline()
-    refreshDetail()
+    Promise.all([refreshTimeline(), refreshDetail(), refreshMessageBundle()])
   })
 }
 
@@ -2273,7 +2525,7 @@ function runLogPullAction(actionPromise, successMessage, refreshContent = false)
   return actionPromise
     .then(() => {
       proxy.$modal.msgSuccess(successMessage)
-      return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
+      return Promise.all([loadLogPullList(true), refreshDetail(), refreshMessageBundle(), getList()])
     })
     .then(() => {
       if (refreshContent && selectedLogPullRecord.value?.id) {
@@ -2332,7 +2584,7 @@ function reextractLogPull(row = selectedLogPullRecord.value) {
   reextractTicketLogPull(row.id, query)
     .then(() => {
       proxy.$modal.msgSuccess('日志已按当前时间范围重新截取')
-      return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
+      return Promise.all([loadLogPullList(true), refreshDetail(), refreshMessageBundle(), getList()])
     })
     .then(() => {
       logPullViewForm.value.viewMode = 'stored'
@@ -2587,6 +2839,27 @@ getList()
   overflow: auto;
   background: #f6f8fa;
   border-radius: 4px;
+}
+
+.similar-item {
+  padding: 10px 0;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.similar-item:last-child {
+  border-bottom: 0;
+}
+
+.similar-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.similar-meta {
+  display: flex;
+  gap: 10px;
+  color: #606266;
+  font-size: 12px;
 }
 
 .panel-header {

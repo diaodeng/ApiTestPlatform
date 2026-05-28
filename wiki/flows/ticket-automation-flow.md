@@ -16,7 +16,7 @@ entry_points:
     path: /ticket/{ticket_id}/ai-analysis
     trigger: 手工或日志拉取成功后触发AI分析任务
 created: 2026-05-22
-updated: 2026-05-22
+updated: 2026-05-28
 ---
 
 # 工单自动化链路流程
@@ -44,6 +44,8 @@ sequenceDiagram
   A->>A: 本地执行 Codex Worker
   A-->>C: 回传 AI 分析结果
   C->>S: 回写工单 AI 分析结果 / RCA / 事件
+  S->>S: 写入AI消息与ACR快照
+  S->>S: 关闭工单时自动生成知识库案例
   S-->>W: 返回工单创建与自动化结果
 ```
 
@@ -65,8 +67,10 @@ sequenceDiagram
 | 4 | `TicketLogPullService._process_record` 在日志拉取成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
 | 5 | 若自动化配置开启 AI 且存在 Agent 编码，服务端构造 `TicketAiAnalysisRequestModel` 并触发分析任务。 |
 | 6 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent。 |
-| 7 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环；服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。 |
+| 7 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环；服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
 | 8 | 工单详情页中的时间线、日志拉取和 AI 分析改为按需加载，避免打开详情时一次性拉取大量数据。 |
+| 9 | 协同追问会先写入 `ticket_message`，再复用 AI 分析任务入口读取消息流、快照和相似历史工单做增量分析；下发给 Agent 的日志正文会按首尾保留策略截断，避免超大上下文导致上游模型接口失败。 |
+| 10 | AI 分析成功后写回 `ticket.ai_analysis`、RCA、AI 消息和 `ticket_snapshot`；工单关闭时自动提炼 `knowledge_article` 供后续相似工单检索。 |
 
 ## 错误处理
 
@@ -76,6 +80,7 @@ sequenceDiagram
 | 自动 AI 但未选择 Agent | 前端与后端都拒绝提交，避免任务落到默认 Agent。 |
 | 日志拉取成功后自动 AI 提交失败 | 保留日志拉取成功结果，并在系统日志记录自动 AI 失败原因。 |
 | Agent 不在线 | AI 分析任务失败，服务端返回明确的 agent 不在线提示。 |
+| Codex/OpenAI 返回 `bad_response_status_code` | Agent 返回更明确的上游异常摘要；服务端通过日志截断和放宽增强字段必填约束降低重试失败概率。 |
 
 ## 参见
 

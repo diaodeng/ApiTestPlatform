@@ -17,6 +17,7 @@
 - 数据导入：支持下载 Excel 导入模板，导入飞书多维表格导出的 xlsx，重复工单号跳过并返回未导入清单。
 - 自然语言搜索：导入后写入 `embedding_record` 本地哈希向量，支持按自然语言检索工单；后续可替换为真实 Embedding 模型。
 - AI 分析：支持按工单项目版本映射到仓库/分支，提交 AI 分析任务后由本地 `client_new` agent 调用 Codex 并回写 `ticket.ai_analysis`、`ticket_rca` 和 `ticket_event`；服务端只负责编排与入库。
+- 二阶段闭环：新增 `ticket_message` 消息流承接追问和协同排查，新增 `ticket_snapshot` 保存 ACR 当前结论版本，AI 分析上下文会读取消息、快照和相似工单；工单关闭或手工触发可从处理过程自动生成知识库案例。
 - AI 预留：工单 `extra_data`、`ai_analysis`，事件 `event_data`，通用 `embedding_record`。
 - 日志拉取参数：外部地址、Cookie、本地/FTP 归档与轮询参数统一在“参数配置管理”通过 `ticket.logPull.external`、`ticket.logPull.storage` 维护。
 - 日志拉取约束：日志查看改为弹窗模式，默认展示入库内容；切换到原始文档后可显示“本次截取范围”并按当前记录实时重截；提交拉取任务改为弹窗；参数配置说明改为通用提示按钮；日志时间范围可空，填写时支持开始/结束时间或时间点前后分钟范围，空时只下载整包压缩文件供 AI 分析解压；日志解析仅处理 `*_pos.log*` 文件；日志内容默认不换行，支持开关切换换行显示；后端仅传压缩结果，前端使用 `decompressText` 解压展示；入库内容原样保存，超过上限时直接失败并提示缩小时间范围。
@@ -42,8 +43,10 @@
 - `ticket_status_history`：状态历史，记录每个状态阶段开始、结束和停留秒数。
 - `ticket_assign_history`：指派历史，记录处理人变化和原因。
 - `ticket_comment`：沟通评论，区别于结构化排查记录。
+- `ticket_message`：工单消息流，统一保存用户追问、AI 回复、开发/测试补充和系统消息，作为持续 AI 分析上下文。
 - `ticket_event`：事件流，记录排查、复现、日志分析、DB 检查、修复、上线、验证等结构化过程。
 - `ticket_rca`：RCA 记录，保存现象、影响范围、复现步骤、排查过程、根因、修复、验证、预防方案。
+- `ticket_snapshot`：ACR 快照表，每次 AI 分析、RCA 保存、状态闭环或手工生成时记录当前摘要、根因、方案、预防、风险和负责人。
 - `workflow_status`：工作流状态配置。
 - `workflow_transition`：工作流状态流转配置，扩展保存允许角色、默认处理人和通知预留信息。
 - `knowledge_article`：知识库文章。
@@ -53,6 +56,7 @@
 ## 前端页面
 
 - `web/src/views/ticket/index.vue`：工单列表、新增编辑、用户选择器指派、状态流转、详情抽屉、时间线、评论、事件、RCA。
+- 详情抽屉新增“协同”页签，支持提交消息、发起追问分析、查看 ACR 快照、相似工单和手工生成知识库案例。
 - `web/src/views/ticket/knowledge/index.vue`：知识库文章 CRUD。
 - `web/src/views/ticket/workflow/index.vue`：工作流状态和流转规则查看、编辑。
 - `web/src/views/ticket/statistics/index.vue`：工单统计概览。
@@ -76,6 +80,7 @@
 ## 后续扩展原则
 
 - AI 分类、相似工单、自动排查不要直接改工单核心流程，应优先写入 `ticket_event` 和 `ticket.ai_analysis`。
+- 持续追问优先写入 `ticket_message`，AI Worker 每次分析应读取消息流、最新 ACR 快照和相似历史工单，避免只基于最新描述做一次性推理。
 - 排查过程不要只写评论，应使用 `ticket_event.event_type + event_data` 结构化记录。
 - Embedding 模型升级时，不覆盖老向量，按 `embedding_model + embedding_version + embedding_dimension` 新增版本。
 - 后续接入日志或操作审计时，应通过 `extra_data.trace_id`、`event_data.trace_ids`、`event_data.checked_services` 等字段建立关联。
@@ -98,3 +103,4 @@
 - 2026-05-20：工单归属字段切换为测试项目/模块；日志拉取配置迁移到参数配置管理；工作流流转支持默认处理人与通知预留。
 - 2026-05-20：日志查看改为弹窗并支持原始文档实时重截；日志时间范围支持空提交并兼容时间点前后范围；日志解析仅处理 `*_pos.log*` 文件。
 - 2026-05-21：日志提交任务改为弹窗；参数配置说明改为通用提示按钮；日志拉取区域简化为记录列表优先。
+- 2026-05-28：新增工单二阶段闭环框架：消息流、ACR 快照、追问分析、相似工单推荐、关闭自动知识沉淀和 Web 协同页签。

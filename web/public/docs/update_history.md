@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 工单系统进入第二阶段：新增协同消息流、ACR 快照、相似工单推荐、追问后继续 AI 分析、关闭后自动生成知识库案例的整体框架。
 1. 继续优化工单 AI 分析日志链路：服务端容器不再把工作区文件当持久化存储，任务只保留轻量快照和路径字符串；日志内容按数据库压缩内容、本地归档、FTP 归档、外部下载地址逐级回退获取
 1. 修复生产环境发起工单 AI 分析时报 `Got a packet bigger than 'max_allowed_packet' bytes` 的问题：任务表 `analysis_context` 改为只保存轻量快照，完整工单/日志上下文继续写入工作区文件，执行阶段优先从工作区 `context.json` 读取
 1. 调整 Celery 执行日志生命周期：任务开始时先写入 `running` 记录并保存 `celery_task_id`/触发来源，任务结束后再回写最终状态、耗时和异常信息，方便排查运行中是谁触发的任务
@@ -42,6 +43,13 @@
 7. 测试定时任务配置优化
 8. 修复部分bug
 
+### 20260528
+1. 修复工单协同追问 AI 失败时 `ValueError` 暴露字段列表的问题：AI 结果 schema 保留核心字段必填，追问增强字段改为可省略并由后端归一化补默认值。
+2. AI 分析上下文中的日志正文增加中间截断，避免追问请求携带超大日志导致 Agent/Codex 上游返回 `openai_error/bad_response_status_code`。
+3. client_new Agent 的工单 AI 兜底提示词同步支持消息流、ACR 快照和相似工单，并优化 OpenAI 上游异常摘要。
+4. 修复 `similar_cases.items` 缺少 `additionalProperties: false` 导致 OpenAI `invalid_json_schema` 的问题。
+5. 由于 Codex/OpenAI 对复杂扩展 schema 仍存在 `bad_response_status_code`，AI 输出 schema 暂时回退为稳定核心字段，增强字段继续由服务端归一化补默认值。
+
 ### 20241204
 1. 自定义脚本中支持使用变量
 2. 回调脚本编辑器支持全屏
@@ -81,6 +89,9 @@
 1.更新文档  
 2.修复bug  
 3.优化代码  
+
+### 20260528
+1. 修复工单 AI 分析 Codex 输出 schema 的必填字段不完整问题，补齐 `evidence`、`risk_items`、`next_steps`，避免分析任务因 `invalid_json_schema` 在发起和重试阶段都失败。
 
 ### 20241104
 1.实现套件内按顺序执行  
