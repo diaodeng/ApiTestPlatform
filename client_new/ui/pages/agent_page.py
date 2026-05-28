@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -178,6 +179,14 @@ class AgentPage(QWidget):
         self.retry_interval_input.setSuffix(" s")
         self.retry_interval_input.setFixedWidth(100)
 
+        self.ai_workspace_root_input = QLineEdit()
+        self.ai_workspace_root_input.setPlaceholderText("AI 工作区根目录，留空则使用默认值")
+        self.ai_workspace_root_input.setMinimumWidth(260)
+
+        self.ai_local_repo_path_input = QLineEdit()
+        self.ai_local_repo_path_input.setPlaceholderText("AI 本地仓库路径，留空则回退到映射配置")
+        self.ai_local_repo_path_input.setMinimumWidth(260)
+
         config_layout = QHBoxLayout()
         config_layout.setContentsMargins(0, 0, 0, 0)
         config_layout.setSpacing(10)
@@ -196,6 +205,15 @@ class AgentPage(QWidget):
         config_layout.addWidget(QLabel("重试间隔"))
         config_layout.addWidget(self.retry_interval_input)
         config_layout.addStretch()
+
+        ai_config_layout = QHBoxLayout()
+        ai_config_layout.setContentsMargins(0, 0, 0, 0)
+        ai_config_layout.setSpacing(10)
+        ai_config_layout.addWidget(QLabel("AI工作区"))
+        ai_config_layout.addWidget(self.ai_workspace_root_input)
+        ai_config_layout.addWidget(QLabel("AI本地仓库"))
+        ai_config_layout.addWidget(self.ai_local_repo_path_input)
+        ai_config_layout.addStretch()
 
         self.mac_value_label = QLabel("-")
         self.mac_value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -232,6 +250,7 @@ class AgentPage(QWidget):
 
         main_layout.addLayout(action_layout)
         main_layout.addLayout(config_layout)
+        main_layout.addLayout(ai_config_layout)
         main_layout.addLayout(info_layout)
         main_layout.addWidget(self.log_splitter, 1)
 
@@ -250,6 +269,8 @@ class AgentPage(QWidget):
         self.retry_checkbox.toggled.connect(self._save_quick_settings)
         self.retry_times_input.valueChanged.connect(self._save_quick_settings)
         self.retry_interval_input.valueChanged.connect(self._save_quick_settings)
+        self.ai_workspace_root_input.editingFinished.connect(self._save_quick_settings)
+        self.ai_local_repo_path_input.editingFinished.connect(self._save_quick_settings)
 
     def _handle_start_clicked(self):
         if self.controller is None and not self._runtime_initialized:
@@ -354,6 +375,8 @@ class AgentPage(QWidget):
             "config_sync_url": self._config_sync_url,
             "config_sync_initialized": self._config_sync_initialized,
             "config_sync_last_sync_at": self._config_sync_last_sync_at,
+            "ticket_ai_workspace_root": self.ai_workspace_root_input.text().strip(),
+            "ticket_ai_local_repo_path": self.ai_local_repo_path_input.text().strip(),
             "browser": self._browser_config.model_dump(),
         }
 
@@ -385,6 +408,8 @@ class AgentPage(QWidget):
         self.retry_checkbox.setChecked(config.retry)
         self.retry_times_input.setValue(config.retry_times)
         self.retry_interval_input.setValue(float(config.retry_interval))
+        self.ai_workspace_root_input.setText(str(getattr(config, "ticket_ai_workspace_root", "") or ""))
+        self.ai_local_repo_path_input.setText(str(getattr(config, "ticket_ai_local_repo_path", "") or ""))
         self.mac_value_label.setText(local_mac or "-")
         self._quick_save_guard = False
 

@@ -16,6 +16,7 @@ from dotenv import dotenv_values
 from loguru import logger
 import httpx
 
+from server.config import AgentConfig
 from utils.common import get_client_root_dir
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
@@ -392,14 +393,26 @@ class TicketAiAnalysisService:
         await event_sender(payload)
 
     @staticmethod
-    def _build_prompt(workspace_path: str, mapping: dict[str, Any], ticket: dict[str, Any]) -> str:
+    def _build_prompt(
+        workspace_path: str,
+        mapping: dict[str, Any],
+        ticket: dict[str, Any],
+        *,
+        repo_path: str | None = None,
+        workspace_root: str | None = None,
+    ) -> str:
         """
         构建分析提示词。
         :param workspace_path: 本地工作区路径
         :param mapping: 仓库映射
         :param ticket: 工单信息
+        :param repo_path: 实际使用的本地仓库路径。
+        :param workspace_root: 实际使用的工作区根目录。
         :return: 提示词文本
         """
+        resolved_repo_path = repo_path or mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""
+        resolved_workspace_root = workspace_root or mapping.get("workspaceRoot") or mapping.get("workspace_root") or ""
+        fallback_workspace_root = str(Path(workspace_path).parent.parent)
         return f"""你是工单自动分析 Worker，请基于当前工作区中的上下文进行根因分析。
 
 当前任务目录:
@@ -410,7 +423,9 @@ class TicketAiAnalysisService:
 - 版本: {mapping.get("versionKey") or mapping.get("version_key") or ""}
 - 仓库地址: {mapping.get("repoUrl") or mapping.get("repo_url") or ""}
 - 分支: {mapping.get("branchName") or mapping.get("branch_name") or ""}
-- 本地仓库路径: {mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""}
+- 本地仓库路径: {resolved_repo_path}
+- 工作区根目录: {resolved_workspace_root or fallback_workspace_root}
+- 说明: 如果 Agent 本地配置中存在仓库路径或工作区根目录，则以 Agent 本地配置为准，映射中的值仅用于兼容和审计。
 
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
@@ -455,6 +470,53 @@ class TicketAiAnalysisService:
 """
 
     @classmethod
+    def _resolve_ai_repo_runtime_settings(
+        cls,
+        mapping: dict[str, Any],
+    ) -> tuple[Path, Path]:
+        """
+        解析 Agent 本地 AI 仓库运行目录。
+        :param mapping: 仓库映射数据。
+        :return: (工作区根目录, 本地仓库路径)
+        """
+        config = AgentConfig.read_config()
+        workspace_root_text = str(
+            getattr(config, "ticket_ai_workspace_root", "")
+            or mapping.get("workspaceRoot")
+            or mapping.get("workspace_root")
+            or ""
+        ).strip()
+        if workspace_root_text:
+            workspace_root = Path(workspace_root_text).expanduser()
+            if not workspace_root.is_absolute():
+                workspace_root = workspace_root.resolve()
+        else:
+            workspace_root = get_client_root_dir() / "storage" / "ticket_ai_analysis"
+
+        repo_path_text = str(
+            getattr(config, "ticket_ai_local_repo_path", "")
+            or mapping.get("localRepoPath")
+            or mapping.get("local_repo_path")
+            or ""
+        ).strip()
+        if not repo_path_text:
+            raise FileNotFoundError(
+                "本地仓库路径未配置，请在 Agent 本地配置中填写 ticket_ai_local_repo_path，"
+                "或在仓库映射中维护 localRepoPath"
+            )
+        repo_path = Path(repo_path_text).expanduser()
+        if not repo_path.is_absolute():
+            repo_path = repo_path.resolve()
+        if not repo_path.exists():
+            raise FileNotFoundError(
+                "本地仓库路径不存在，请在 Agent 本地配置中填写 ticket_ai_local_repo_path，"
+                "或在仓库映射中维护 localRepoPath"
+            )
+
+        workspace_root.mkdir(parents=True, exist_ok=True)
+        return workspace_root, repo_path
+
+    @classmethod
     async def handle_request(
         cls,
         req_data: dict[str, Any],
@@ -487,7 +549,7 @@ class TicketAiAnalysisService:
                 "message": "taskId 或 ticketId 不能为空",
             }
         try:
-            workspace_root = get_client_root_dir() / "storage" / "ticket_ai_analysis"
+            workspace_root, repo_path = cls._resolve_ai_repo_runtime_settings(mapping)
             workspace_dir = workspace_root / f"ticket_{ticket_id}" / f"task_{task_id}"
             workspace_dir.mkdir(parents=True, exist_ok=True)
             schema_file = workspace_dir / "result.schema.json"
@@ -503,7 +565,15 @@ class TicketAiAnalysisService:
             task_lock_file = workspace_dir / "analysis.lock"
             request_snapshot_file = workspace_dir / "request.snapshot.json"
 
-            await cls._emit_event(event_sender, "ai_analysis_status", task_id, "准备本地工作区", workspace_path=str(workspace_dir))
+            await cls._emit_event(
+                event_sender,
+                "ai_analysis_status",
+                task_id,
+                "准备本地工作区",
+                workspace_root=str(workspace_root),
+                workspace_path=str(workspace_dir),
+                repo_path=str(repo_path),
+            )
             try:
                 request_snapshot_file.write_text(
                     cls._dumps(
@@ -640,15 +710,14 @@ class TicketAiAnalysisService:
 
                 resolved_prompt = prompt_template.replace("{workspace_path}", str(workspace_dir))
                 if not resolved_prompt:
-                    resolved_prompt = cls._build_prompt(str(workspace_dir), mapping, ticket)
+                    resolved_prompt = cls._build_prompt(
+                        str(workspace_dir),
+                        mapping,
+                        ticket,
+                        repo_path=str(repo_path),
+                        workspace_root=str(workspace_root),
+                    )
                 prompt_file.write_text(resolved_prompt, encoding="utf-8")
-
-                repo_path_text = str(mapping.get("localRepoPath") or mapping.get("local_repo_path") or "").strip()
-                repo_path = Path(repo_path_text).expanduser()
-                if not repo_path.is_absolute():
-                    repo_path = repo_path.resolve()
-                if not repo_path.exists():
-                    raise FileNotFoundError(f"本地仓库路径不存在: {repo_path}")
 
                 command = cls._resolve_worker_command_parts(
                     [
@@ -675,6 +744,8 @@ class TicketAiAnalysisService:
                     "开始执行 Worker",
                     command_line=" ".join(command),
                     repo_path=str(repo_path),
+                    workspace_root=str(workspace_root),
+                    workspace_path=str(workspace_dir),
                     codex_home=str(codex_home),
                 )
                 worker_started_at = time.monotonic()
