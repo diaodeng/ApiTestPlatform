@@ -3,9 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime
 
+from dns.e164 import query
+from loguru import logger
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, defer
 
 from module_admin.entity.do.config_do import SysConfig
+from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullQueryModel
 from utils.page_util import PageUtil
@@ -55,11 +59,10 @@ class TicketLogPullDao:
         db.query(TicketLogPullRecord).filter(TicketLogPullRecord.id == record_id).update(data)
 
     @classmethod
-    def list_ticket_records(cls, db: Session, ticket_id: int, query: TicketLogPullQueryModel):
+    def list_ticket_records(cls, db: Session, query: TicketLogPullQueryModel):
         """
         分页查询指定工单的日志拉取记录。
         :param db: 数据库会话
-        :param ticket_id: 工单ID
         :param query: 查询参数
         :return: 分页结果
         """
@@ -70,9 +73,52 @@ class TicketLogPullDao:
                 defer(TicketLogPullRecord.exception_detail),
             )
             .filter(
-                TicketLogPullRecord.ticket_id == ticket_id,
+                TicketLogPullRecord.ticket_id == query.ticket_id,
                 TicketLogPullRecord.status == query.status if query.status else True,
             )
+            .order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc())
+        )
+        return PageUtil.paginate(record_query, query.page_num, query.page_size, query.is_page)
+
+    @classmethod
+    def list_log_pull_records(cls, db: Session, query: TicketLogPullQueryModel):
+        """
+        分页查询日志拉取管理记录。
+        :param db: 数据库会话
+        :param query: 查询参数
+        :return: 分页结果或列表
+        """
+        keyword = str(query.keyword or "").strip()
+        ticket_no = str(query.ticket_no or "").strip()
+        search_texts = [text for text in (keyword, ticket_no) if text]
+        search_filters = []
+        for text in search_texts:
+            search_filters.extend(
+                [
+                    TicketLogPullRecord.status_desc.like(f"%{text}%"),
+                    TicketLogPullRecord.error_message.like(f"%{text}%"),
+                    TicketLogPullRecord.content_summary.like(f"%{text}%"),
+                    TicketLogPullRecord.storage_path.like(f"%{text}%"),
+                    TicketLogPullRecord.command_result_url.like(f"%{text}%"),
+                    TicketLogPullRecord.external_serial_number.like(f"%{text}%"),
+                    Ticket.ticket_no.like(f"%{text}%"),
+                    Ticket.title.like(f"%{text}%"),
+                    Ticket.merchant_name.like(f"%{text}%"),
+                ]
+            )
+
+        record_query = (
+            db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
+            .outerjoin(Ticket, Ticket.ticket_id == TicketLogPullRecord.ticket_id)
+            .filter(
+                TicketLogPullRecord.ticket_id == query.ticket_id if query.ticket_id is not None else True,
+                TicketLogPullRecord.status == query.status if query.status else True,
+            )
+            .filter(or_(*search_filters) if search_filters else True)
             .order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc())
         )
         return PageUtil.paginate(record_query, query.page_num, query.page_size, query.is_page)
@@ -153,7 +199,9 @@ class TicketLogPullDao:
         :param config_key: 参数键名
         :return: 系统参数记录
         """
-        return db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+        config_row = db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+        logger.info(f"获取到的外部配置：{config_key}:{config_row.config_value if config_row else None}")
+        return config_row
 
     @classmethod
     def save_storage_config_row(

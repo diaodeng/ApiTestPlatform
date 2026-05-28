@@ -20,7 +20,7 @@ class TicketLogPullRecord(Base):
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment="记录ID"
     )
-    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="工单ID")
+    ticket_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="工单ID")
     vendor_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="商户vendorId")
     store_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="门店storeId")
     pos_no: Mapped[int] = mapped_column(Integer, nullable=False, comment="POS编号")

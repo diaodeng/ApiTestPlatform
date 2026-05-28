@@ -232,7 +232,7 @@ async def edit_ticket(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.delete("/{ticket_id}", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:remove"))])
+@ticketController.delete("/{ticket_id:int}", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:remove"))])
 @log_decorator(title="工单管理", business_type=3)
 async def delete_ticket(
     request: Request,
@@ -258,7 +258,7 @@ async def delete_ticket(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.get("/{ticket_id}", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))])
+@ticketController.get("/{ticket_id:int}", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))])
 async def get_ticket_detail(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
     """
     获取工单详情接口。
@@ -302,12 +302,11 @@ async def get_ticket_log_pull_content(
 
 
 @ticketController.get(
-    "/{ticket_id}/log-pulls",
+    "/log-pulls-by-ticket",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
 )
 async def get_ticket_log_pull_list(
     request: Request,
-    ticket_id: int,
     query: TicketLogPullQueryModel = Depends(TicketLogPullQueryModel.as_query),
     query_db: Session = Depends(get_db),
 ):
@@ -320,7 +319,33 @@ async def get_ticket_log_pull_list(
     :return: 日志拉取记录分页列表
     """
     try:
-        result = TicketLogPullService.list_log_pull_records_services(query_db, ticket_id, query)
+        result = TicketLogPullService.list_log_pull_records_services(query_db, query)
+        if query.is_page:
+            return ResponseUtil.success(model_content=result)
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/log-pulls",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_pull_manage_list(
+    request: Request,
+    query: TicketLogPullQueryModel = Depends(TicketLogPullQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    获取日志拉取管理列表接口。
+    :param request: 请求对象
+    :param query: 日志拉取查询条件，支持工单、状态和关键字筛选
+    :param query_db: 数据库会话
+    :return: 日志拉取分页列表
+    """
+    try:
+        result = TicketLogPullService.list_log_pull_management_records_services(query_db, query)
         if query.is_page:
             return ResponseUtil.success(model_content=result)
         return ResponseUtil.success(data=result)
@@ -330,7 +355,7 @@ async def get_ticket_log_pull_list(
 
 
 @ticketController.post(
-    "/{ticket_id}/log-pulls",
+    "/{ticket_id:int}/log-pulls",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:add"))],
 )
 async def create_ticket_log_pull(
@@ -539,7 +564,7 @@ async def delete_ticket_ai_repo_mapping(
 
 
 @ticketController.get(
-    "/{ticket_id}/ai-analysis/tasks",
+    "/{ticket_id:int}/ai-analysis/tasks",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:list"))],
 )
 async def get_ticket_ai_analysis_tasks(
@@ -567,7 +592,7 @@ async def get_ticket_ai_analysis_tasks(
 
 
 @ticketController.post(
-    "/{ticket_id}/ai-analysis/tasks/{task_id}/retry",
+    "/{ticket_id:int}/ai-analysis/tasks/{task_id}/retry",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:run"))],
 )
 @log_decorator(title="工单AI分析重试", business_type=1)
@@ -596,7 +621,7 @@ async def retry_ticket_ai_analysis_task(
 
 
 @ticketController.post(
-    "/{ticket_id}/ai-analysis",
+    "/{ticket_id:int}/ai-analysis",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:run"))],
 )
 @log_decorator(title="工单AI分析", business_type=1)
@@ -626,7 +651,7 @@ async def create_ticket_ai_analysis(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id}/assign", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:assign"))])
+@ticketController.post("/{ticket_id:int}/assign", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:assign"))])
 @log_decorator(title="工单指派", business_type=2)
 async def assign_ticket(
     request: Request,
@@ -654,7 +679,7 @@ async def assign_ticket(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id}/status", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:status"))])
+@ticketController.post("/{ticket_id:int}/status", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:status"))])
 @log_decorator(title="工单状态流转", business_type=2)
 async def change_ticket_status(
     request: Request,
@@ -682,7 +707,7 @@ async def change_ticket_status(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id}/comments", dependencies=[Depends(CheckUserInterfaceAuth("ticket:comment:add"))])
+@ticketController.post("/{ticket_id:int}/comments", dependencies=[Depends(CheckUserInterfaceAuth("ticket:comment:add"))])
 async def add_ticket_comment(
     request: Request,
     ticket_id: int,
@@ -707,7 +732,7 @@ async def add_ticket_comment(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id}/events", dependencies=[Depends(CheckUserInterfaceAuth("ticket:event:add"))])
+@ticketController.post("/{ticket_id:int}/events", dependencies=[Depends(CheckUserInterfaceAuth("ticket:event:add"))])
 async def add_ticket_event(
     request: Request,
     ticket_id: int,
@@ -732,7 +757,7 @@ async def add_ticket_event(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.get("/{ticket_id}/timeline", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:timeline"))])
+@ticketController.get("/{ticket_id:int}/timeline", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:timeline"))])
 async def get_ticket_timeline(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
     """
     获取工单时间线接口。
@@ -749,7 +774,7 @@ async def get_ticket_timeline(request: Request, ticket_id: int, query_db: Sessio
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.get("/{ticket_id}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))])
+@ticketController.get("/{ticket_id:int}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))])
 async def get_ticket_messages(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
     """
     获取工单协同消息接口。
@@ -766,7 +791,33 @@ async def get_ticket_messages(request: Request, ticket_id: int, query_db: Sessio
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:add"))])
+@ticketController.post(
+    "/log-pulls",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:add"))],
+)
+async def create_ticket_log_pull_manage(
+    request: Request,
+    create_object: TicketLogPullCreateModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    新增日志拉取管理记录接口。
+    :param request: 请求对象
+    :param create_object: 日志拉取参数，关联工单可选
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入申请人
+    :return: 创建结果
+    """
+    try:
+        result = TicketLogPullService.create_log_pull_services(query_db, create_object.ticket_id, create_object, current_user)
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post("/{ticket_id:int}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:add"))])
 async def add_ticket_message(
     request: Request,
     ticket_id: int,
@@ -793,7 +844,7 @@ async def add_ticket_message(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id}/snapshots", dependencies=[Depends(CheckUserInterfaceAuth("ticket:snapshot:add"))])
+@ticketController.post("/{ticket_id:int}/snapshots", dependencies=[Depends(CheckUserInterfaceAuth("ticket:snapshot:add"))])
 async def add_ticket_snapshot(
     request: Request,
     ticket_id: int,
@@ -821,7 +872,7 @@ async def add_ticket_snapshot(
 
 
 @ticketController.post(
-    "/{ticket_id}/knowledge/extract",
+    "/{ticket_id:int}/knowledge/extract",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:knowledge:add"))],
 )
 async def extract_ticket_knowledge(
@@ -850,7 +901,7 @@ async def extract_ticket_knowledge(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.put("/{ticket_id}/rca", dependencies=[Depends(CheckUserInterfaceAuth("ticket:rca:edit"))])
+@ticketController.put("/{ticket_id:int}/rca", dependencies=[Depends(CheckUserInterfaceAuth("ticket:rca:edit"))])
 async def upsert_ticket_rca(
     request: Request,
     ticket_id: int,
