@@ -1192,8 +1192,6 @@ class TicketAiAnalysisService:
             ticket.ticket_id,
             {
                 "ai_analysis": cls._json_safe_value(result_payload),
-                "root_cause": str(result_payload.get("root_cause") or ticket.root_cause or ""),
-                "solution": str(result_payload.get("fix_suggestion") or ticket.solution or ""),
                 "update_by": cls._user_name(current_user) if current_user else "system",
                 "update_time": now,
             },
