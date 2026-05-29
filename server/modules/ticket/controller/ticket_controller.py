@@ -636,7 +636,7 @@ async def create_ticket_ai_analysis(
     提交工单 AI 分析任务接口。
     :param request: 请求对象
     :param ticket_id: 工单ID
-    :param analysis_object: 仓库映射、版本和日志记录选择参数
+    :param analysis_object: 仓库映射、版本、日志记录、额外说明和 Agent 选择参数
     :param query_db: 数据库会话
     :param current_user: 当前登录用户
     :return: 创建结果

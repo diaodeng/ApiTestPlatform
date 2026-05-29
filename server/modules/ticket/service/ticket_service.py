@@ -44,6 +44,7 @@ from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.ticket_prompt_service import TicketPromptService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.snowflake import snowIdWorker
@@ -854,6 +855,7 @@ class TicketService:
         result["snapshots"] = message_bundle.get("snapshots") or []
         result["latestSnapshot"] = message_bundle.get("latestSnapshot")
         result["similarTickets"] = message_bundle.get("similarTickets") or []
+        result["aiPromptLayers"] = TicketPromptService.resolve_prompt_layers(query_db, ticket)
         return result
 
     @classmethod
