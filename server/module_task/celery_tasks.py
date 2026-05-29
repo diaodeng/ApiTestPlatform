@@ -3,8 +3,8 @@ import inspect
 import json
 import multiprocessing
 import threading
+import traceback
 from datetime import datetime
-from queue import Empty
 from urllib.parse import quote
 
 from redis import Redis
@@ -163,26 +163,26 @@ def _refresh_task_runtime_state(
             logger.warning(f"刷新任务心跳失败[{task_id}]：{exc}")
 
 
-def _put_child_result(result_queue, result: dict):
+def _send_child_result(result_conn, result: dict):
     """
     安全写入子进程执行结果。
 
-    :param result_queue: 结果队列。
+    :param result_conn: 子进程结果连接。
     :param result: 结果字典。
     :return: 无返回值。
     """
     try:
-        result_queue.put(result, timeout=1)
+        result_conn.send(result)
     except Exception as exc:
         logger.warning(f"写入任务子进程结果失败：{exc}")
 
 
-def _run_registered_job_child(payload: dict, result_queue):
+def _run_registered_job_child(payload: dict, result_conn):
     """
     在子进程中执行注册任务函数。
 
     :param payload: 任务执行载荷。
-    :param result_queue: 父进程结果队列。
+    :param result_conn: 父进程结果连接。
     :return: 无返回值。
     """
     task_id = int(payload.get("task_id") or 0)
@@ -224,8 +224,8 @@ def _run_registered_job_child(payload: dict, result_queue):
         _execute_job_function(task_key=str(payload.get("task_key") or ""), args=args, kwargs=kwargs)
 
         finished_at = datetime.now()
-        _put_child_result(
-            result_queue,
+        _send_child_result(
+            result_conn,
             {
                 "status": "success",
                 "message": "任务执行成功",
@@ -238,12 +238,12 @@ def _run_registered_job_child(payload: dict, result_queue):
         finished_at = datetime.now()
         status = "revoked" if str(exc.__class__.__name__) in {"TaskRevokedError", "SoftTimeLimitExceeded"} else "failed"
         message = "任务已手动终止" if status == "revoked" else "任务执行失败"
-        _put_child_result(
-            result_queue,
+        _send_child_result(
+            result_conn,
             {
                 "status": status,
                 "message": message,
-                "exception_info": str(exc),
+                "exception_info": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
                 "started_at": started_at.isoformat(),
                 "finished_at": finished_at.isoformat(),
             },
@@ -262,6 +262,10 @@ def _run_registered_job_child(payload: dict, result_queue):
             lock_client.delete(state_key, lock_key, stop_key)
         except Exception as exc:
             logger.warning(f"清理任务运行态失败[{task_id}]：{exc}")
+        try:
+            result_conn.close()
+        except Exception:
+            pass
 
 
 def _execute_job_function(task_key: str, args: list, kwargs: dict):
@@ -500,7 +504,8 @@ def execute_registered_job(self, payload: dict):
     lock_acquired = False
     started_at = datetime.now()
     child_process = None
-    result_queue = None
+    result_parent_conn = None
+    result_child_conn = None
     runtime_client = None
 
     try:
@@ -547,13 +552,18 @@ def execute_registered_job(self, payload: dict):
         )
         runtime_client = lock_client or _build_lock_client()
 
-        result_queue = multiprocessing.get_context("spawn").Queue(maxsize=1)
+        result_parent_conn, result_child_conn = multiprocessing.get_context("spawn").Pipe()
         child_process = multiprocessing.get_context("spawn").Process(
             target=_run_registered_job_child,
-            args=(payload, result_queue),
+            args=(payload, result_child_conn),
             daemon=True,
         )
         child_process.start()
+        try:
+            if result_child_conn:
+                result_child_conn.close()
+        except Exception:
+            pass
 
         result = None
         while True:
@@ -570,18 +580,20 @@ def execute_registered_job(self, payload: dict):
                 }
                 break
 
-            if child_process and not child_process.is_alive():
-                try:
-                    result = result_queue.get_nowait() if result_queue else None
-                except Empty:
-                    result = None
+            if result_parent_conn and result_parent_conn.poll(1):
+                result = result_parent_conn.recv()
                 break
 
-            try:
-                result = result_queue.get(timeout=1) if result_queue else None
+            if child_process and not child_process.is_alive():
+                exitcode = child_process.exitcode
+                result = {
+                    "status": "failed",
+                    "message": "任务执行失败",
+                    "exception_info": f"子进程未返回结果，exitcode={exitcode}",
+                    "started_at": started_at.isoformat(),
+                    "finished_at": datetime.now().isoformat(),
+                }
                 break
-            except Empty:
-                continue
 
         if result is None:
             result = {
@@ -597,6 +609,10 @@ def execute_registered_job(self, payload: dict):
         final_status = str(result.get("status") or "failed")
         final_message = str(result.get("message") or "")
         final_exception = str(result.get("exception_info") or "")
+        if final_status != "success":
+            logger.error(
+                f"任务执行结束[{task_id}]，状态={final_status}，消息={final_message}，异常={final_exception}"
+            )
 
         _update_task_status(
             task_id,
@@ -656,3 +672,13 @@ def execute_registered_job(self, payload: dict):
                 runtime_client.delete(state_key, stop_key)
         except Exception as exc:
             logger.warning(f"释放任务锁失败[{task_id}]：{exc}")
+        try:
+            if result_parent_conn:
+                result_parent_conn.close()
+        except Exception:
+            pass
+        try:
+            if result_child_conn:
+                result_child_conn.close()
+        except Exception:
+            pass

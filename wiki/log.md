@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-05-29] INGEST-CODE | 修复定时任务子进程结果回传竞态
+- 触发：用户反馈定时任务执行记录显示“子进程未返回结果”，但应用日志里没有异常堆栈
+- 架构层：任务调度域 / Celery Worker / 子进程 IPC
+- 创建的页面：无
+- 更新的页面：`entities/services/task-scheduler-domain.md`、`entities/data-models/task-core-models.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_task/celery_tasks.py` -> 任务调度域知识页
+- 总共涉及页面：2
+
 ## [2026-05-29] INGEST-CODE | 落地 AI 分析提示词分层设计
 - 触发：用户要求直接落地“AI 分析提示词分层设计方案”，希望项目/模块拥有默认提示词，且提交分析时允许额外说明
 - 架构层：工单域 / AI 提示词组装 / 前端提交弹窗
