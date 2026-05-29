@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import json
 import multiprocessing
+import os
 import threading
 import traceback
 from datetime import datetime
@@ -287,6 +288,85 @@ def _execute_job_function(task_key: str, args: list, kwargs: dict):
     return result
 
 
+def _execute_job_inline(payload: dict, started_at: datetime) -> dict:
+    """
+    在当前 Worker 线程内直接执行任务。
+
+    :param payload: 任务执行载荷。
+    :param started_at: 任务开始时间。
+    :return: 统一结果字典。
+    """
+    task_id = int(payload.get("task_id") or 0)
+    celery_task_id = str(payload.get("celery_task_id") or "")
+    lock_client = _build_lock_client()
+    stop_event = threading.Event()
+    heartbeat_thread = None
+
+    try:
+        state_key = _build_task_state_key(task_id)
+        lock_client.set(
+            state_key,
+            _serialize_task_state(
+                task_id=task_id,
+                celery_task_id=celery_task_id,
+                status="running",
+                payload=payload,
+                started_at=started_at,
+            ),
+            ex=max(TASK_STATE_TTL_SECONDS, 90),
+        )
+        heartbeat_thread = threading.Thread(
+            target=_refresh_task_runtime_state,
+            kwargs={
+                "lock_client": lock_client,
+                "task_id": task_id,
+                "celery_task_id": celery_task_id,
+                "payload": payload,
+                "started_at": started_at,
+                "stop_event": stop_event,
+            },
+            daemon=True,
+        )
+        heartbeat_thread.start()
+
+        args = parse_payload_args(payload.get("args_json"))
+        kwargs = parse_payload_kwargs(payload.get("kwargs_json"))
+        _execute_job_function(task_key=str(payload.get("task_key") or ""), args=args, kwargs=kwargs)
+        finished_at = datetime.now()
+        return {
+            "status": "success",
+            "message": "任务执行成功",
+            "exception_info": "",
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+        }
+    except BaseException as exc:
+        finished_at = datetime.now()
+        status = "revoked" if str(exc.__class__.__name__) in {"TaskRevokedError", "SoftTimeLimitExceeded"} else "failed"
+        message = "任务已手动终止" if status == "revoked" else "任务执行失败"
+        return {
+            "status": status,
+            "message": message,
+            "exception_info": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+        }
+    finally:
+        stop_event.set()
+        try:
+            if heartbeat_thread:
+                heartbeat_thread.join(timeout=1)
+        except Exception:
+            pass
+        try:
+            state_key = _build_task_state_key(task_id)
+            lock_key = _build_task_lock_key(task_id)
+            stop_key = _build_task_stop_key(task_id)
+            lock_client.delete(state_key, lock_key, stop_key)
+        except Exception as exc:
+            logger.warning(f"清理任务运行态失败[{task_id}]：{exc}")
+
+
 def _update_task_status(
     task_id: int,
     *,
@@ -552,48 +632,52 @@ def execute_registered_job(self, payload: dict):
         )
         runtime_client = lock_client or _build_lock_client()
 
-        result_parent_conn, result_child_conn = multiprocessing.get_context("spawn").Pipe()
-        child_process = multiprocessing.get_context("spawn").Process(
-            target=_run_registered_job_child,
-            args=(payload, result_child_conn),
-            daemon=True,
-        )
-        child_process.start()
-        try:
-            if result_child_conn:
-                result_child_conn.close()
-        except Exception:
-            pass
+        if os.name == "nt":
+            logger.info(f"Windows 环境跳过任务业务子进程，改为 Worker 线程内直接执行[{task_id}]")
+            result = _execute_job_inline(payload=payload, started_at=started_at)
+        else:
+            result_parent_conn, result_child_conn = multiprocessing.get_context("spawn").Pipe()
+            child_process = multiprocessing.get_context("spawn").Process(
+                target=_run_registered_job_child,
+                args=(payload, result_child_conn),
+                daemon=True,
+            )
+            child_process.start()
+            try:
+                if result_child_conn:
+                    result_child_conn.close()
+            except Exception:
+                pass
 
-        result = None
-        while True:
-            if runtime_client and runtime_client.get(stop_key):
-                if child_process and child_process.is_alive():
-                    child_process.terminate()
-                    child_process.join(timeout=5)
-                result = {
-                    "status": "revoked",
-                    "message": "任务已手动终止",
-                    "exception_info": "收到停止请求",
-                    "started_at": started_at.isoformat(),
-                    "finished_at": datetime.now().isoformat(),
-                }
-                break
+            result = None
+            while True:
+                if runtime_client and runtime_client.get(stop_key):
+                    if child_process and child_process.is_alive():
+                        child_process.terminate()
+                        child_process.join(timeout=5)
+                    result = {
+                        "status": "revoked",
+                        "message": "任务已手动终止",
+                        "exception_info": "收到停止请求",
+                        "started_at": started_at.isoformat(),
+                        "finished_at": datetime.now().isoformat(),
+                    }
+                    break
 
-            if result_parent_conn and result_parent_conn.poll(1):
-                result = result_parent_conn.recv()
-                break
+                if result_parent_conn and result_parent_conn.poll(1):
+                    result = result_parent_conn.recv()
+                    break
 
-            if child_process and not child_process.is_alive():
-                exitcode = child_process.exitcode
-                result = {
-                    "status": "failed",
-                    "message": "任务执行失败",
-                    "exception_info": f"子进程未返回结果，exitcode={exitcode}",
-                    "started_at": started_at.isoformat(),
-                    "finished_at": datetime.now().isoformat(),
-                }
-                break
+                if child_process and not child_process.is_alive():
+                    exitcode = child_process.exitcode
+                    result = {
+                        "status": "failed",
+                        "message": "任务执行失败",
+                        "exception_info": f"子进程未返回结果，exitcode={exitcode}",
+                        "started_at": started_at.isoformat(),
+                        "finished_at": datetime.now().isoformat(),
+                    }
+                    break
 
         if result is None:
             result = {

@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-05-29] INGEST-CODE | 修复 Windows 下 Celery 业务子进程导入失败
+- 触发：用户在 Windows 开发环境执行定时任务时，Worker 已收到任务，但二级 `spawn` 子进程启动阶段报 `ModuleNotFoundError: No module named 'module_task'`
+- 架构层：任务调度域 / Celery Worker / Windows 多进程导入路径
+- 创建的页面：无
+- 更新的页面：`entities/services/task-scheduler-domain.md`、`entities/data-models/task-core-models.md`、`docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_task/celery_tasks.py` -> 任务调度域知识页
+- 总共涉及页面：3
+
 ## [2026-05-29] INGEST-CODE | 修复定时任务子进程结果回传竞态
 - 触发：用户反馈定时任务执行记录显示“子进程未返回结果”，但应用日志里没有异常堆栈
 - 架构层：任务调度域 / Celery Worker / 子进程 IPC
