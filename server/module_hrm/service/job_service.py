@@ -23,7 +23,18 @@ class JobService:
 
     OWNER_TYPE = "qtr"
     QTR_QUEUE = "qtr"
+    QTR_PROCESS_QUEUE = "qtr_process"
     QTR_TASK_KEY = "module_task.scheduler_qtr.job_run_test"
+
+    @classmethod
+    def _resolve_queue_name(cls, execution_mode: str | None) -> str:
+        """
+        根据执行方式解析 QTR 任务投递队列。
+
+        :param execution_mode: 执行方式，支持 thread/process。
+        :return: Celery 队列名。
+        """
+        return cls.QTR_PROCESS_QUEUE if str(execution_mode or "thread").strip().lower() == "process" else cls.QTR_QUEUE
 
     @classmethod
     def get_job_list_services(
@@ -70,7 +81,7 @@ class JobService:
 
         page_object.owner_user_id = user_info.user.user_id
         page_object.owner_dept_id = user_info.user.dept_id
-        page_object.queue_name = cls.QTR_QUEUE
+        page_object.queue_name = cls._resolve_queue_name(page_object.execution_mode)
         page_object.task_key = cls.QTR_TASK_KEY
         page_object.task_args = "[]"
         return CeleryJobService.add_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
@@ -89,7 +100,7 @@ class JobService:
             page_object.owner_user_id = user_info.user.user_id
         if page_object.owner_dept_id is None:
             page_object.owner_dept_id = user_info.user.dept_id
-        page_object.queue_name = cls.QTR_QUEUE
+        page_object.queue_name = cls._resolve_queue_name(page_object.execution_mode)
         page_object.task_key = cls.QTR_TASK_KEY
         page_object.task_args = "[]"
         return CeleryJobService.edit_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)

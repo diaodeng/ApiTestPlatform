@@ -15,6 +15,11 @@
           <el-option v-for="item in scheduleTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
+      <el-form-item label="执行方式" prop="executionMode">
+        <el-select v-model="queryParams.executionMode" clearable placeholder="请选择" style="width: 160px">
+          <el-option v-for="item in executionModeOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="启用状态" prop="enabled">
         <el-select v-model="queryParams.enabled" clearable placeholder="请选择" style="width: 160px">
           <el-option label="启用" :value="true" />
@@ -78,6 +83,11 @@
       <el-table-column label="任务ID" width="90" align="center" prop="taskId" />
       <el-table-column label="任务名称" align="center" prop="taskName" :show-overflow-tooltip="true" />
       <el-table-column label="任务注册键" align="center" prop="taskKey" :show-overflow-tooltip="true" />
+      <el-table-column label="执行方式" align="center" width="100">
+        <template #default="scope">
+          {{ executionModeLabel(scope.row.executionMode) }}
+        </template>
+      </el-table-column>
       <el-table-column label="调度类型" align="center" width="110">
         <template #default="scope">
           {{ scheduleTypeLabel(scope.row.scheduleType) }}
@@ -147,6 +157,13 @@
             <el-form-item label="任务注册键" prop="taskKey">
               <el-select v-model="form.taskKey" filterable placeholder="请选择任务注册键">
                 <el-option v-for="item in taskKeyOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="执行方式" prop="executionMode">
+              <el-select v-model="form.executionMode" placeholder="请选择">
+                <el-option v-for="item in executionModeOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -242,6 +259,12 @@
         <el-table-column label="Celery任务ID" prop="celeryTaskId" min-width="260" :show-overflow-tooltip="true" />
         <el-table-column label="任务ID" prop="taskId" width="90" />
         <el-table-column label="任务名称" prop="taskName" min-width="160" :show-overflow-tooltip="true" />
+        <el-table-column label="执行方式" width="100">
+          <template #default="scope">
+            {{ executionModeLabel(scope.row.executionMode) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="队列" prop="queueName" min-width="120" :show-overflow-tooltip="true" />
         <el-table-column label="状态" prop="runtimeStateLabel" width="100" />
         <el-table-column label="Worker" prop="worker" min-width="170" :show-overflow-tooltip="true" />
         <el-table-column label="开始时间" prop="startedAt" min-width="150" />
@@ -268,6 +291,8 @@
         <el-descriptions-item label="任务ID">{{ form.taskId }}</el-descriptions-item>
         <el-descriptions-item label="任务名称">{{ form.taskName }}</el-descriptions-item>
         <el-descriptions-item label="任务注册键">{{ form.taskKey }}</el-descriptions-item>
+        <el-descriptions-item label="执行方式">{{ executionModeLabel(form.executionMode) }}</el-descriptions-item>
+        <el-descriptions-item label="队列">{{ form.queueName }}</el-descriptions-item>
         <el-descriptions-item label="调度类型">{{ scheduleTypeLabel(form.scheduleType) }}</el-descriptions-item>
         <el-descriptions-item label="调度表达式">{{ scheduleDisplay(form) }}</el-descriptions-item>
         <el-descriptions-item label="最近状态">{{ form.lastStatus || "未执行" }}</el-descriptions-item>
@@ -329,6 +354,10 @@ const scheduleTypeOptions = [
   { label: "间隔", value: "interval" },
   { label: "单次", value: "once" },
 ];
+const executionModeOptions = [
+  { label: "线程", value: "thread" },
+  { label: "进程", value: "process" },
+];
 const intervalPeriodOptions = [
   { label: "秒", value: "seconds" },
   { label: "分", value: "minutes" },
@@ -376,11 +405,13 @@ const data = reactive({
     pageSize: 10,
     taskName: undefined,
     scheduleType: undefined,
+    executionMode: undefined,
     enabled: undefined,
   },
   rules: {
     taskName: [{ required: true, message: "任务名称不能为空", trigger: "blur" }],
     taskKey: [{ required: true, message: "任务注册键不能为空", trigger: "change" }],
+    executionMode: [{ required: true, message: "执行方式不能为空", trigger: "change" }],
     scheduleType: [{ required: true, message: "调度类型不能为空", trigger: "change" }],
     cronExpression: [{ validator: validateSchedule, trigger: "blur" }],
     intervalEvery: [{ validator: validateSchedule, trigger: "change" }],
@@ -402,6 +433,7 @@ function defaultForm() {
     taskName: undefined,
     taskKey: defaultTaskKey(),
     queueName: "sys",
+    executionMode: "thread",
     scheduleType: "crontab",
     cronExpression: "0 0 * * *",
     intervalEvery: 1,
@@ -423,8 +455,14 @@ function normalizeFormData(data) {
     taskArgs: "[]",
     taskKwargs: data?.taskKwargs || "{}",
     queueName: "sys",
+    executionMode: data?.executionMode || "thread",
     taskKey: data?.taskKey || defaultTaskKey(),
   };
+}
+
+function executionModeLabel(value) {
+  const found = executionModeOptions.find((item) => item.value === value);
+  return found ? found.label : value || "-";
 }
 
 function scheduleTypeLabel(value) {
@@ -607,7 +645,7 @@ function submitForm() {
     if (!valid) return;
 
     const payload = { ...form.value };
-    payload.queueName = "sys";
+    payload.queueName = undefined;
     payload.taskArgs = "[]";
     if (payload.scheduleType !== "crontab") payload.cronExpression = undefined;
     if (payload.scheduleType !== "interval") {

@@ -19,6 +19,17 @@ class JobService:
 
     OWNER_TYPE = "sys"
     SYS_QUEUE = "sys"
+    SYS_PROCESS_QUEUE = "sys_process"
+
+    @classmethod
+    def _resolve_queue_name(cls, execution_mode: str | None) -> str:
+        """
+        根据执行方式解析系统任务投递队列。
+
+        :param execution_mode: 执行方式，支持 thread/process。
+        :return: Celery 队列名。
+        """
+        return cls.SYS_PROCESS_QUEUE if str(execution_mode or "thread").strip().lower() == "process" else cls.SYS_QUEUE
 
     @classmethod
     def get_job_list_services(cls, query_db: Session, query_object: JobPageQueryModel, is_page: bool = False):
@@ -47,7 +58,7 @@ class JobService:
         :param page_object: 新增模型。
         :return: CRUD 响应。
         """
-        page_object.queue_name = cls.SYS_QUEUE
+        page_object.queue_name = cls._resolve_queue_name(page_object.execution_mode)
         page_object.task_args = "[]"
         return CeleryJobService.add_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
 
@@ -60,7 +71,7 @@ class JobService:
         :param page_object: 编辑模型。
         :return: CRUD 响应。
         """
-        page_object.queue_name = cls.SYS_QUEUE
+        page_object.queue_name = cls._resolve_queue_name(page_object.execution_mode)
         page_object.task_args = "[]"
         return CeleryJobService.edit_job_services(query_db=query_db, owner_type=cls.OWNER_TYPE, page_object=page_object)
 

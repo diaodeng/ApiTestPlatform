@@ -8,6 +8,24 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-05-29] INGEST-CODE | 定时任务新增线程/进程执行方式并拆分 Worker
+- 触发：用户要求按任务配置选择线程或进程执行，并落地长期稳定方案，去掉业务层二级 spawn 子进程
+- 架构层：任务调度域 / Celery Worker / 任务执行模型
+- 创建的页面：无
+- 更新的页面：`entities/services/task-scheduler-domain.md`、`entities/data-models/task-core-models.md`、`docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_task/celery_job_models.py` / `server/module_task/celery_job_service.py` / `server/config/get_db.py` / `server/supervisord.conf` / `web/src/views/monitor/job/index.vue` / `web/src/views/qtr/job/index.vue` -> 任务调度域知识页
+- 总共涉及页面：3
+
+## [2026-05-29] INGEST-CODE | 临时统一 Celery 任务为线程内直执行
+- 触发：用户要求先排除 Linux 下业务子进程 `spawn` 与 IPC 干扰，确认任务逻辑在线程直执行模式下是否正常
+- 架构层：任务调度域 / Celery Worker / 任务执行模型
+- 创建的页面：无
+- 更新的页面：`entities/services/task-scheduler-domain.md`、`entities/data-models/task-core-models.md`、`docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_task/celery_tasks.py` -> 任务调度域知识页
+- 总共涉及页面：3
+
 ## [2026-05-29] INGEST-CODE | 修复 Windows 下 Celery 业务子进程导入失败
 - 触发：用户在 Windows 开发环境执行定时任务时，Worker 已收到任务，但二级 `spawn` 子进程启动阶段报 `ModuleNotFoundError: No module named 'module_task'`
 - 架构层：任务调度域 / Celery Worker / Windows 多进程导入路径

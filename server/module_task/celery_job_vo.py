@@ -47,6 +47,7 @@ class JobModel(BaseModel):
     task_name: Optional[str] = None
     task_key: Optional[str] = None
     queue_name: Optional[str] = "celery"
+    execution_mode: Optional[str] = "thread"
 
     schedule_type: Optional[str] = "crontab"
     cron_expression: Optional[str] = None
@@ -168,6 +169,7 @@ class JobQueryModel(BaseModel):
     task_name: Optional[str] = None
     task_key: Optional[str] = None
     schedule_type: Optional[str] = None
+    execution_mode: Optional[str] = None
     enabled: Optional[bool] = None
     last_status: Optional[str] = None
     begin_time: Optional[str] = None

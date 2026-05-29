@@ -102,6 +102,8 @@ class CeleryJobService:
 
     SCHEDULE_TYPES = {"crontab", "interval", "once"}
     INTERVAL_PERIODS = {"seconds", "minutes", "hours", "days"}
+    EXECUTION_MODES = {"thread", "process"}
+    EXECUTION_MODE_LABELS = {"thread": "线程", "process": "进程"}
 
     @classmethod
     def list_registered_task_keys(cls) -> list[str]:
@@ -256,6 +258,7 @@ class CeleryJobService:
         item = CamelCaseUtil.transform_result(row) if not isinstance(row, dict) else dict(row)
         item["taskArgs"] = item.pop("taskArgsJson", "[]") or "[]"
         item["taskKwargs"] = item.pop("taskKwargsJson", "{}") or "{}"
+        item["executionMode"] = item.get("executionMode") or "thread"
         return item
 
     @classmethod
@@ -480,6 +483,9 @@ class CeleryJobService:
         schedule_type = (model_data.get("schedule_type") or "crontab").strip().lower()
         if schedule_type not in cls.SCHEDULE_TYPES:
             raise ValueError("schedule_type 仅支持 crontab/interval/once")
+        execution_mode = str(model_data.get("execution_mode") or "thread").strip().lower()
+        if execution_mode not in cls.EXECUTION_MODES:
+            raise ValueError("execution_mode 仅支持 thread/process")
 
         payload = {
             "owner_type": owner_type,
@@ -488,6 +494,7 @@ class CeleryJobService:
             "task_name": task_name,
             "task_key": task_key,
             "queue_name": (model_data.get("queue_name") or owner_type).strip() or owner_type,
+            "execution_mode": execution_mode,
             "schedule_type": schedule_type,
             "task_args_json": normalize_args_json(model_data.get("task_args")),
             "task_kwargs_json": normalize_kwargs_json(model_data.get("task_kwargs")),
@@ -569,6 +576,8 @@ class CeleryJobService:
             query = query.filter(CeleryPeriodicTask.task_key.like(f"%{query_object.task_key}%"))
         if query_object.schedule_type:
             query = query.filter(CeleryPeriodicTask.schedule_type == query_object.schedule_type)
+        if query_object.execution_mode:
+            query = query.filter(CeleryPeriodicTask.execution_mode == query_object.execution_mode)
         if query_object.enabled is not None:
             query = query.filter(CeleryPeriodicTask.enabled == query_object.enabled)
         if query_object.last_status:
@@ -644,6 +653,7 @@ class CeleryJobService:
                 "task_name": model_data.get("task_name", task.task_name),
                 "task_key": model_data.get("task_key", task.task_key),
                 "queue_name": model_data.get("queue_name", task.queue_name),
+                "execution_mode": model_data.get("execution_mode", task.execution_mode),
                 "schedule_type": model_data.get("schedule_type", task.schedule_type),
                 "cron_expression": model_data.get("cron_expression", task.cron_expression),
                 "interval_every": model_data.get("interval_every", task.interval_every),
@@ -911,6 +921,11 @@ class CeleryJobService:
                     "taskName": payload.get("task_name") or "",
                     "taskKey": payload.get("task_key") or "",
                     "queueName": payload.get("queue_name") or "",
+                    "executionMode": payload.get("execution_mode") or "thread",
+                    "executionModeLabel": cls.EXECUTION_MODE_LABELS.get(
+                        str(payload.get("execution_mode") or "thread"),
+                        str(payload.get("execution_mode") or "thread"),
+                    ),
                     "triggerType": payload.get("trigger_type") or "",
                     "scheduleDesc": payload.get("schedule_desc") or "",
                     "runtimeState": state,
@@ -1129,6 +1144,7 @@ class CeleryJobService:
             "taskName": "任务名称",
             "taskKey": "任务注册键",
             "queueName": "队列",
+            "executionMode": "执行方式",
             "scheduleType": "调度类型",
             "cronExpression": "Cron表达式",
             "intervalEvery": "间隔步长",
@@ -1150,6 +1166,10 @@ class CeleryJobService:
             row = dict(item)
             row["enabled"] = "启用" if row.get("enabled") else "停用"
             row["allowConcurrent"] = "是" if row.get("allowConcurrent") else "否"
+            row["executionMode"] = cls.EXECUTION_MODE_LABELS.get(
+                str(row.get("executionMode") or "thread"),
+                str(row.get("executionMode") or "thread"),
+            )
             normalized.append({mapping_dict.get(k): v for k, v in row.items() if mapping_dict.get(k)})
         return export_list2excel(normalized)
 
