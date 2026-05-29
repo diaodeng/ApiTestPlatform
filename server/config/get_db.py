@@ -64,6 +64,7 @@ async def init_create_table():
     Base.metadata.create_all(bind=engine)
     _ensure_large_sys_config_value_column()
     _ensure_ticket_log_pull_ticket_id_nullable()
+    _ensure_celery_periodic_task_execution_mode_column()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
 
@@ -138,3 +139,53 @@ def _ensure_ticket_log_pull_ticket_id_nullable():
     except Exception as exc:
         logger.warning(f"检查或升级 ticket_log_pull_record.ticket_id 字段失败: {exc}")
 
+
+def _ensure_celery_periodic_task_execution_mode_column():
+    """
+    为 celery_periodic_task 补齐 execution_mode 字段，兼容旧库。
+
+    :return: 无返回值。
+    """
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                result = connection.execute(
+                    text(
+                        """
+                        SELECT COLUMN_NAME
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'celery_periodic_task'
+                          AND COLUMN_NAME = 'execution_mode'
+                        """
+                    )
+                ).mappings().first()
+                if result:
+                    return
+                logger.info("检测到 celery_periodic_task 缺少 execution_mode 列，自动补齐")
+                connection.execute(
+                    text(
+                        """
+                        ALTER TABLE celery_periodic_task
+                        ADD COLUMN execution_mode VARCHAR(16) NOT NULL DEFAULT 'thread' COMMENT '执行方式：thread/process'
+                        AFTER queue_name
+                        """
+                    )
+                )
+                return
+
+            if DATABASE_BACKEND == "sqlite":
+                rows = connection.execute(text("PRAGMA table_info(celery_periodic_task)")).mappings().all()
+                if any(str(row.get("name") or "") == "execution_mode" for row in rows):
+                    return
+                logger.info("检测到 sqlite celery_periodic_task 缺少 execution_mode 列，自动补齐")
+                connection.execute(
+                    text(
+                        """
+                        ALTER TABLE celery_periodic_task
+                        ADD COLUMN execution_mode VARCHAR(16) NOT NULL DEFAULT 'thread'
+                        """
+                    )
+                )
+    except Exception as exc:
+        logger.warning(f"检查或升级 celery_periodic_task.execution_mode 字段失败: {exc}")

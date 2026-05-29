@@ -36,6 +36,7 @@ class CeleryPeriodicTask(Base):
     task_name = Column(String(128), nullable=False, comment="任务显示名称")
     task_key = Column(String(255), nullable=False, comment="任务注册键")
     queue_name = Column(String(64), nullable=False, default="celery", comment="Celery 队列")
+    execution_mode = Column(String(16), nullable=False, default="thread", comment="执行方式：thread/process")
 
     schedule_type = Column(String(16), nullable=False, default="crontab", comment="调度类型")
     cron_expression = Column(String(128), nullable=True, comment="Cron 表达式")

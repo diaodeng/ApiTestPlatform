@@ -123,6 +123,7 @@ def build_task_payload(task_row: Any, trigger_type: str) -> dict:
         "task_name": task_row.task_name,
         "task_key": task_row.task_key,
         "queue_name": task_row.queue_name or "celery",
+        "execution_mode": str(getattr(task_row, "execution_mode", "thread") or "thread"),
         "args_json": normalize_args_json(task_row.task_args_json),
         "kwargs_json": normalize_kwargs_json(task_row.task_kwargs_json),
         "allow_concurrent": bool(task_row.allow_concurrent),
