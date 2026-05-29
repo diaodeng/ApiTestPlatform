@@ -31,7 +31,7 @@ erDiagram
 - `CeleryPeriodicTask.last_status` 记录最近一次最终状态；执行中的实时状态由 Redis 心跳键补充，而不是只靠数据库字段。
 - `CeleryPeriodicTask.lock_ttl_seconds` 用于并发互斥锁的固定 TTL；超时后锁自然失效。
 - `CeleryTaskExecutionLog` 以单次 `celery_task_id` 作为运行生命周期标识，任务开始时先落 `running` 记录，结束后回写 `success/failed/revoked/skipped`、耗时和异常详情。
-- 子进程异常或结果丢失时，执行日志会补充退出码/堆栈信息，避免只看到“子进程未返回结果”这类笼统失败原因。
+- 非 Windows 环境下若子进程异常或结果丢失，执行日志会补充退出码/堆栈信息，避免只看到“子进程未返回结果”这类笼统失败原因；Windows 开发环境默认改为 Worker 线程内直执行，不再经过业务子进程。
 
 ## 参见
 
