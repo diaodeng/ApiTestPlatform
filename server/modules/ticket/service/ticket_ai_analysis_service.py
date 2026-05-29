@@ -48,6 +48,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.ticket_prompt_service import TicketPromptService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.snowflake import snowIdWorker
@@ -704,6 +705,11 @@ class TicketAiAnalysisService:
             if request and request.agent_code
             else str(context_payload.get("selectedAgentCode") or "").strip()
         )
+        extra_instruction = (
+            str(request.extra_instruction or "").strip()
+            if request and request.extra_instruction
+            else str(context_payload.get("extraInstruction") or "").strip()
+        )
         snapshot: dict[str, Any] = {
             "ticketId": ticket_context.get("ticketId"),
             "projectId": ticket_context.get("projectId"),
@@ -712,7 +718,10 @@ class TicketAiAnalysisService:
             "sourceLogViewMode": context_payload.get("sourceLogViewMode") if is_context else None,
             "forceRefresh": force_refresh,
             "selectedAgentCode": selected_agent_code,
+            "extraInstruction": extra_instruction,
         }
+        if isinstance(context_payload.get("promptLayers"), dict):
+            snapshot["promptLayers"] = context_payload.get("promptLayers")
         if isinstance(latest_log_pull, dict) and latest_log_pull:
             snapshot["latestLogPullSummary"] = {
                 "id": latest_log_pull.get("id"),
@@ -779,20 +788,53 @@ class TicketAiAnalysisService:
             context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
         compact_context = cls._json_safe_value(task.analysis_context or {})
         if isinstance(compact_context, dict):
-            for key in ("selectedAgentCode", "forceRefresh", "sourceLogPullRecordId", "sourceLogViewMode"):
+            for key in (
+                "selectedAgentCode",
+                "forceRefresh",
+                "sourceLogPullRecordId",
+                "sourceLogViewMode",
+                "extraInstruction",
+                "promptLayers",
+            ):
                 if key not in context_payload or context_payload.get(key) in (None, "", {}):
                     context_payload[key] = compact_context.get(key)
         return cls._json_safe_value(context_payload)
 
     @classmethod
-    def _build_prompt(cls, workspace_path: str, mapping: TicketAiRepoMapping, ticket: Ticket) -> str:
+    def _build_prompt(
+        cls,
+        workspace_path: str,
+        mapping: TicketAiRepoMapping,
+        ticket: Ticket,
+        *,
+        prompt_layers: dict[str, Any] | None = None,
+        extra_instruction: str = "",
+    ) -> str:
         """
         构建 Codex 分析提示词。
         :param workspace_path: 任务工作区路径
         :param mapping: 仓库映射
         :param ticket: 工单对象
+        :param prompt_layers: 项目/模块默认提示词分层。
+        :param extra_instruction: 本次提交的额外说明。
         :return: 提示词文本
         """
+        prompt_layers = prompt_layers or {}
+        default_prompt_text = str(prompt_layers.get("defaultPromptText") or "").strip()
+        extra_instruction_text = str(extra_instruction or "").strip()
+        layered_prompt_text = TicketPromptService._join_text(
+            [
+                default_prompt_text,
+                TicketPromptService._build_prompt_block(
+                    "本次额外说明",
+                    [
+                        extra_instruction_text,
+                        "额外说明只用于补充本次分析重点，不覆盖系统约束和输出 schema。",
+                    ],
+                ),
+            ],
+            separator="\n\n",
+        )
         return f"""你是工单自动分析 Worker，请基于当前工作区中的上下文进行根因分析。
 
 当前任务目录:
@@ -805,6 +847,8 @@ class TicketAiAnalysisService:
 - 分支: {mapping.branch_name}
 - 本地仓库路径: {mapping.local_repo_path}
 - 说明: 如果 Agent 本地配置中提供了本地仓库路径或工作区根目录，则以 Agent 本地配置为准；映射中的路径仅保留兼容和审计用途.
+
+{layered_prompt_text}
 
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
@@ -1334,15 +1378,25 @@ class TicketAiAnalysisService:
             return CrudResponseModel(is_success=False, message="未找到可用的项目版本仓库映射，请先维护映射配置")
         log_record = cls._resolve_log_pull_record(db, ticket_id, request.log_pull_record_id)
         context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
+        prompt_layers = TicketPromptService.resolve_prompt_layers(db, ticket)
         context_payload["forceRefresh"] = bool(request.force_refresh)
         if request.agent_code:
             context_payload["selectedAgentCode"] = request.agent_code
+        if str(request.extra_instruction or "").strip():
+            context_payload["extraInstruction"] = str(request.extra_instruction).strip()
+        context_payload["promptLayers"] = prompt_layers
         workspace_root = cls._resolve_workspace_root(db)
         task_id = snowIdWorker.get_id()
         workspace_dir = workspace_root / f"ticket_{ticket.ticket_id}" / f"task_{task_id}"
         task_context_payload = cls._build_task_context_snapshot(context_payload, request)
 
-        prompt_template = cls._build_prompt("{workspace_path}", mapping, ticket)
+        prompt_template = cls._build_prompt(
+            "{workspace_path}",
+            mapping,
+            ticket,
+            prompt_layers=prompt_layers,
+            extra_instruction=request.extra_instruction or "",
+        )
 
         now = datetime.now()
         task = TicketAiAnalysisTask(

@@ -298,6 +298,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
+    extra_instruction: str | None = Field(default="", description="本次分析的额外说明")
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -309,6 +310,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
         if not self.version_key:
             raise ValueError("版本号不能为空")
         self.agent_code = str(self.agent_code or "").strip() or None
+        self.extra_instruction = str(self.extra_instruction or "").strip()
         return self
 
 

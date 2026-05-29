@@ -1121,9 +1121,19 @@
         <el-form-item label="强制刷新">
           <el-switch v-model="aiAnalysisTaskForm.forceRefresh" />
         </el-form-item>
+        <el-form-item label="额外说明">
+          <el-input
+            v-model="aiAnalysisTaskForm.extraInstruction"
+            type="textarea"
+            :rows="4"
+            maxlength="2000"
+            show-word-limit
+            placeholder="可填写本次分析的额外重点，例如优先排查的链路、已知异常现象、需要忽略的噪声等"
+          />
+        </el-form-item>
         <el-alert
-          title="分析任务会自动读取当前工单的日志和时间线，并通过 Codex Worker 写回独立分析结果；它用于发起新的分析任务，不等同于协同消息。"
-          description="协同区是围绕当前工单持续补充消息、追问和记录过程；AI 分析是单独创建任务并生成结果、RCA 和快照。"
+          :title="aiPromptHintTitle"
+          :description="aiPromptHintDesc"
           type="info"
           show-icon
         />
@@ -1519,7 +1529,8 @@ const aiRepoMappingTotal = ref(0)
 const aiAnalysisTaskForm = ref({
   versionKey: '',
   agentCode: '',
-  forceRefresh: false
+  forceRefresh: false,
+  extraInstruction: ''
 })
 const aiRepoMappingForm = ref({
   mappingId: undefined,
@@ -1739,6 +1750,26 @@ const latestSnapshot = computed(() => detail.value.latestSnapshot || ticketSnaps
 const latestMessageItems = computed(() => (ticketMessages.value || []).slice(-3))
 const latestSimilarTickets = computed(() => (similarTickets.value || []).slice(0, 3))
 const aiTaskDetailPayload = computed(() => selectedAiTask.value || {})
+const aiPromptLayers = computed(() => detail.value.aiPromptLayers || {})
+const aiPromptHintTitle = computed(() => {
+  const projectName = aiPromptLayers.value?.project?.projectName || detail.value.projectName || ''
+  const moduleName = aiPromptLayers.value?.module?.moduleName || detail.value.moduleName || ''
+  const parts = ['AI 分析会自动叠加默认提示词']
+  if (projectName) {
+    parts.push(`项目：${projectName}`)
+  }
+  if (moduleName) {
+    parts.push(`模块：${moduleName}`)
+  }
+  return parts.join('，')
+})
+const aiPromptHintDesc = computed(() => {
+  const hasDefaultPrompt = Boolean(aiPromptLayers.value?.hasDefaultPrompt)
+  if (!hasDefaultPrompt) {
+    return '当前工单未读取到项目/模块默认提示词，仍可填写额外说明来补充本次分析重点。'
+  }
+  return '项目和模块的默认提示词会自动参与本次分析，额外说明仅用于补充临时背景，不会覆盖系统约束和输出结构。'
+})
 
 const timelineItems = computed(() => {
   const items = []
@@ -2198,6 +2229,7 @@ function resetAiAnalysisDialog() {
     || detail.value.extraData?.ticket_automation?.log_pull_config?.aiAgentCode
     || ''
   aiAnalysisTaskForm.value.forceRefresh = false
+  aiAnalysisTaskForm.value.extraInstruction = ''
 }
 
 function openAiAnalysisDialog() {
@@ -2237,7 +2269,8 @@ function submitAiAnalysis() {
     addTicketAiAnalysis(currentTicketId.value, {
       versionKey: aiAnalysisTaskForm.value.versionKey,
       agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
-      forceRefresh: aiAnalysisTaskForm.value.forceRefresh
+      forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
+      extraInstruction: aiAnalysisTaskForm.value.extraInstruction || undefined
     }).then(() => {
       proxy.$modal.msgSuccess('AI分析任务已提交')
       aiAnalysisOpen.value = false
