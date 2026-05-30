@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import date, datetime
 
-from dns.e164 import query
 from loguru import logger
-from sqlalchemy import or_
+from sqlalchemy import Date, cast, or_
 from sqlalchemy.orm import Session, defer
 
 from module_admin.entity.do.config_do import SysConfig
@@ -90,6 +89,11 @@ class TicketLogPullDao:
         """
         keyword = str(query.keyword or "").strip()
         ticket_no = str(query.ticket_no or "").strip()
+        modify_time = query.modify_time
+        if isinstance(modify_time, str):
+            modify_time = modify_time.strip() or None
+            if modify_time:
+                modify_time = date.fromisoformat(modify_time)
         search_texts = [text for text in (keyword, ticket_no) if text]
         search_filters = []
         for text in search_texts:
@@ -117,6 +121,12 @@ class TicketLogPullDao:
             .filter(
                 TicketLogPullRecord.ticket_id == query.ticket_id if query.ticket_id is not None else True,
                 TicketLogPullRecord.status == query.status if query.status else True,
+                TicketLogPullRecord.vendor_id == query.vendor_id if query.vendor_id is not None else True,
+                TicketLogPullRecord.store_id == query.store_id if query.store_id is not None else True,
+                TicketLogPullRecord.pos_no == query.pos_no if query.pos_no is not None else True,
+                cast(TicketLogPullRecord.command_content["modifyTime"].as_string(), Date) == modify_time
+                if modify_time
+                else True,
             )
             .filter(or_(*search_filters) if search_filters else True)
             .order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc())

@@ -35,6 +35,25 @@
           @keyup.enter="handleQuery"
         />
       </el-form-item>
+      <el-form-item label="商家" prop="vendorId">
+        <el-input-number v-model="queryParams.vendorId" :min="1" controls-position="right" placeholder="vendorId" style="width: 150px" />
+      </el-form-item>
+      <el-form-item label="门店" prop="storeId">
+        <el-input-number v-model="queryParams.storeId" :min="1" controls-position="right" placeholder="storeId" style="width: 150px" />
+      </el-form-item>
+      <el-form-item label="POS" prop="posNo">
+        <el-input-number v-model="queryParams.posNo" :min="1" controls-position="right" placeholder="posNo" style="width: 150px" />
+      </el-form-item>
+      <el-form-item label="拉取日期" prop="modifyTime">
+        <el-date-picker
+          v-model="queryParams.modifyTime"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="选择拉取日期"
+          clearable
+          style="width: 170px"
+        />
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -474,7 +493,11 @@ const queryParams = ref({
   pageSize: 10,
   ticketId: undefined,
   status: '',
-  keyword: ''
+  keyword: '',
+  vendorId: undefined,
+  storeId: undefined,
+  posNo: undefined,
+  modifyTime: ''
 })
 
 const createForm = ref(createDefaultForm())
@@ -543,7 +566,11 @@ function resetQuery() {
     pageSize: 10,
     ticketId: undefined,
     status: '',
-    keyword: ''
+    keyword: '',
+    vendorId: undefined,
+    storeId: undefined,
+    posNo: undefined,
+    modifyTime: ''
   }
   handleQuery()
 }
