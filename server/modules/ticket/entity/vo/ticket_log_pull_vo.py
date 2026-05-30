@@ -139,6 +139,10 @@ class TicketLogPullQueryModel(QueryModel):
     ticket_no: str | None = Field(default=None, description="工单编号")
     keyword: str | None = Field(default=None, description="关键字")
     status: str | None = Field(default=None, description="内部处理状态")
+    vendor_id: int | None = Field(default=None, description="商家vendorId")
+    store_id: int | None = Field(default=None, description="门店storeId")
+    pos_no: int | None = Field(default=None, description="POS编号")
+    modify_time: date | str | None = Field(default=None, description="页面配置的拉取日期")
 
 
 class TicketLogPullContentModel(TicketLogPullBaseModel):
