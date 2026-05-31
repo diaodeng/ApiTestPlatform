@@ -196,6 +196,14 @@ export function listTicketLogPullRecords(query) {
   });
 }
 
+// 查询日志拉取商家/门店联动选项
+export function getTicketLogPullVendorStoreOptions() {
+  return request({
+    url: '/ticket/log-pull/vendor-store-options',
+    method: 'get',
+  });
+}
+
 // 新增工单日志拉取任务
 export function addTicketLogPull(ticketId, data) {
   return request({

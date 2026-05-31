@@ -50,6 +50,35 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
     max_content_chars: int = Field(default=500000, description="压缩入库允许的最大文本字符数，超出则失败")
 
 
+class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):
+    """
+    日志拉取门店选项模型。
+    """
+
+    store_id: int = Field(description="门店ID")
+    store_code: str | None = Field(default=None, description="门店编码")
+    store_name: str = Field(description="门店名称")
+
+
+class TicketLogPullVendorOptionModel(TicketLogPullBaseModel):
+    """
+    日志拉取商家选项模型。
+    """
+
+    vendor_id: int = Field(description="商家ID")
+    vendor_code: str | None = Field(default=None, description="商家编码")
+    vendor_name: str = Field(description="商家名称")
+    stores: list[TicketLogPullStoreOptionModel] = Field(default_factory=list, description="商家下门店列表")
+
+
+class TicketLogPullVendorStoreOptionsModel(TicketLogPullBaseModel):
+    """
+    日志拉取商家门店联动选项模型。
+    """
+
+    vendors: list[TicketLogPullVendorOptionModel] = Field(default_factory=list, description="商家列表")
+
+
 class TicketLogPullCreateModel(TicketLogPullBaseModel):
     """
     提交工单日志拉取申请模型。

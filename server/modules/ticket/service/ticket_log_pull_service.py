@@ -36,7 +36,10 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullListItemModel,
     TicketLogPullQueryModel,
     TicketLogPullStorageConfigModel,
+    TicketLogPullStoreOptionModel,
     TicketLogPullSummaryModel,
+    TicketLogPullVendorOptionModel,
+    TicketLogPullVendorStoreOptionsModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
 from utils.common_util import CamelCaseUtil
@@ -155,6 +158,7 @@ class TicketLogPullService:
                 "cookie": "",
                 "origin": "https://erp.rta-os.com",
             },
+            "vendors": [],
         }
 
     @classmethod
@@ -220,7 +224,86 @@ class TicketLogPullService:
             for key, value in normalized["headers"].items()
             if str(value or "").strip()
         }
+        normalized["vendors"] = cls._normalize_vendor_store_options(config.get("vendors"))
         return normalized
+
+    @classmethod
+    def _normalize_vendor_store_options(cls, raw_vendors: Any) -> list[dict[str, Any]]:
+        """
+        归一化日志拉取商家/门店联动配置。
+        :param raw_vendors: 原始商家配置列表
+        :return: 规范化后的商家列表
+        """
+        if not isinstance(raw_vendors, list):
+            return []
+
+        normalized_vendors: list[dict[str, Any]] = []
+        seen_vendor_ids: set[int] = set()
+        for vendor in raw_vendors:
+            if not isinstance(vendor, dict):
+                continue
+            try:
+                vendor_id = int(vendor.get("vendorId"))
+            except (TypeError, ValueError):
+                continue
+            if vendor_id <= 0 or vendor_id in seen_vendor_ids:
+                continue
+            seen_vendor_ids.add(vendor_id)
+            stores = vendor.get("stores") if isinstance(vendor.get("stores"), list) else []
+            normalized_stores: list[dict[str, Any]] = []
+            seen_store_ids: set[int] = set()
+            for store in stores:
+                if not isinstance(store, dict):
+                    continue
+                try:
+                    store_id = int(store.get("storeId"))
+                except (TypeError, ValueError):
+                    continue
+                if store_id <= 0 or store_id in seen_store_ids:
+                    continue
+                seen_store_ids.add(store_id)
+                normalized_stores.append(
+                    {
+                        "storeId": store_id,
+                        "storeCode": str(store.get("storeCode") or "").strip() or None,
+                        "storeName": str(store.get("storeName") or "").strip() or str(store_id),
+                    }
+                )
+            normalized_vendors.append(
+                {
+                    "vendorId": vendor_id,
+                    "vendorCode": str(vendor.get("vendorCode") or "").strip() or None,
+                    "vendorName": str(vendor.get("vendorName") or "").strip() or str(vendor_id),
+                    "stores": normalized_stores,
+                }
+            )
+        return normalized_vendors
+
+    @classmethod
+    def get_vendor_store_options_services(cls, query_db: Session) -> TicketLogPullVendorStoreOptionsModel:
+        """
+        获取日志拉取页面使用的商家/门店联动选项。
+        :param query_db: 数据库会话
+        :return: 商家/门店联动配置
+        """
+        external_config = cls._get_external_config_dict(query_db)
+        vendors = [
+            TicketLogPullVendorOptionModel(
+                vendor_id=int(item.get("vendorId")),
+                vendor_code=item.get("vendorCode"),
+                vendor_name=str(item.get("vendorName") or item.get("vendorId")),
+                stores=[
+                    TicketLogPullStoreOptionModel(
+                        store_id=int(store.get("storeId")),
+                        store_code=store.get("storeCode"),
+                        store_name=str(store.get("storeName") or store.get("storeId")),
+                    )
+                    for store in item.get("stores", [])
+                ],
+            )
+            for item in external_config.get("vendors", [])
+        ]
+        return TicketLogPullVendorStoreOptionsModel(vendors=vendors)
 
     @classmethod
     def ensure_param_config_rows(cls, query_db: Session) -> None:
@@ -1716,16 +1799,24 @@ class TicketLogPullService:
             command_content["modifyTime"] = str(modify_time)[:10]
         if str(source.get("path") or "").strip():
             command_content["path"] = str(source.get("path")).strip()
-        command_content["commandDataType"] = int(source.get("commandDataType") or source.get("command_data_type") or 1)
-        command_content["storageMode"] = str(source.get("storageMode") or source.get("storage_mode") or "").strip() or None
+        command_content["commandDataType"] = int(
+            source.get("commandDataType") or source.get("command_data_type") or 1
+        )
+        command_content["storageMode"] = (
+            str(source.get("storageMode") or source.get("storage_mode") or "").strip() or None
+        )
         point_time = cls._parse_datetime(source.get("logPointTime") or source.get("log_point_time"))
         begin_time = cls._parse_datetime(source.get("logBeginTime") or source.get("log_begin_time"))
         end_time = cls._parse_datetime(source.get("logEndTime") or source.get("log_end_time"))
         if point_time:
             command_content["timeRangeMode"] = "point"
             command_content["logPointTime"] = point_time.isoformat(sep=" ")
-            command_content["rangeBeforeMinutes"] = int(source.get("rangeBeforeMinutes") or source.get("range_before_minutes") or 0)
-            command_content["rangeAfterMinutes"] = int(source.get("rangeAfterMinutes") or source.get("range_after_minutes") or 0)
+            command_content["rangeBeforeMinutes"] = int(
+                source.get("rangeBeforeMinutes") or source.get("range_before_minutes") or 0
+            )
+            command_content["rangeAfterMinutes"] = int(
+                source.get("rangeAfterMinutes") or source.get("range_after_minutes") or 0
+            )
         elif begin_time or end_time:
             command_content["timeRangeMode"] = "between"
             if begin_time:

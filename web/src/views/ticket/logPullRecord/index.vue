@@ -36,10 +36,38 @@
         />
       </el-form-item>
       <el-form-item label="商家" prop="vendorId">
-        <el-input-number v-model="queryParams.vendorId" :min="1" controls-position="right" placeholder="vendorId" style="width: 150px" />
+        <el-select
+          v-model="queryParams.vendorId"
+          placeholder="选择商家"
+          clearable
+          filterable
+          style="width: 220px"
+          @change="handleQueryVendorChange"
+        >
+          <el-option
+            v-for="item in vendorOptions"
+            :key="item.vendorId"
+            :label="item.label"
+            :value="item.vendorId"
+          />
+        </el-select>
       </el-form-item>
       <el-form-item label="门店" prop="storeId">
-        <el-input-number v-model="queryParams.storeId" :min="1" controls-position="right" placeholder="storeId" style="width: 150px" />
+        <el-select
+          v-model="queryParams.storeId"
+          placeholder="先选择商家"
+          clearable
+          filterable
+          :disabled="!queryParams.vendorId"
+          style="width: 260px"
+        >
+          <el-option
+            v-for="item in queryStoreOptions"
+            :key="item.storeId"
+            :label="item.label"
+            :value="item.storeId"
+          />
+        </el-select>
       </el-form-item>
       <el-form-item label="POS" prop="posNo">
         <el-input-number v-model="queryParams.posNo" :min="1" controls-position="right" placeholder="posNo" style="width: 150px" />
@@ -197,13 +225,41 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="vendorId" prop="vendorId">
-              <el-input-number v-model="createForm.vendorId" :min="1" controls-position="right" style="width: 100%" />
+            <el-form-item label="商家" prop="vendorId">
+              <el-select
+                v-model="createForm.vendorId"
+                placeholder="选择商家"
+                clearable
+                filterable
+                style="width: 100%"
+                @change="handleCreateVendorChange"
+              >
+                <el-option
+                  v-for="item in vendorOptions"
+                  :key="item.vendorId"
+                  :label="item.label"
+                  :value="item.vendorId"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="storeId" prop="storeId">
-              <el-input-number v-model="createForm.storeId" :min="1" controls-position="right" style="width: 100%" />
+            <el-form-item label="门店" prop="storeId">
+              <el-select
+                v-model="createForm.storeId"
+                placeholder="先选择商家"
+                clearable
+                filterable
+                :disabled="!createForm.vendorId"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in createStoreOptions"
+                  :key="item.storeId"
+                  :label="item.label"
+                  :value="item.storeId"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -456,6 +512,7 @@
 import {
   createTicketLogPullRecord,
   getTicketLogPullContent,
+  getTicketLogPullVendorStoreOptions,
   listTicket,
   listTicketLogPullRecords,
   redownloadTicketLogPull,
@@ -479,6 +536,7 @@ const total = ref(0)
 const ticketLoading = ref(false)
 const ticketOptions = ref([])
 const agentOptions = ref([])
+const vendorOptions = ref([])
 const selectedRecord = ref(null)
 const contentDetail = ref(null)
 const contentText = ref('')
@@ -504,8 +562,8 @@ const createForm = ref(createDefaultForm())
 const viewForm = ref(createDefaultViewForm())
 
 const createRules = {
-  vendorId: [{ required: true, message: 'vendorId 不能为空', trigger: 'blur' }],
-  storeId: [{ required: true, message: 'storeId 不能为空', trigger: 'blur' }],
+  vendorId: [{ required: true, message: 'vendorId 不能为空', trigger: 'change' }],
+  storeId: [{ required: true, message: 'storeId 不能为空', trigger: 'change' }],
   posNo: [{ required: true, message: 'posNo 不能为空', trigger: 'blur' }]
 }
 
@@ -604,10 +662,88 @@ function loadAgentOptions() {
   })
 }
 
+function normalizeVendorOptions(rows = []) {
+  return rows.map(item => ({
+    vendorId: Number(item.vendorId),
+    vendorCode: String(item.vendorCode || '').trim(),
+    vendorName: String(item.vendorName || item.vendorId || '').trim(),
+    label: buildVendorOptionLabel(item),
+    stores: Array.isArray(item.stores)
+      ? item.stores.map(store => ({
+        storeId: Number(store.storeId),
+        storeCode: String(store.storeCode || '').trim(),
+        storeName: String(store.storeName || store.storeId || '').trim(),
+        label: buildStoreOptionLabel(store),
+      }))
+      : []
+  }))
+}
+
+function buildVendorOptionLabel(vendor) {
+  const name = String(vendor.vendorName || vendor.vendorId || '').trim()
+  const code = String(vendor.vendorCode || '').trim()
+  const id = String(vendor.vendorId || '').trim()
+  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+}
+
+function buildStoreOptionLabel(store) {
+  const name = String(store.storeName || store.storeId || '').trim()
+  const code = String(store.storeCode || '').trim()
+  const id = String(store.storeId || '').trim()
+  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+}
+
+function loadVendorOptions() {
+  return getTicketLogPullVendorStoreOptions().then(response => {
+    vendorOptions.value = normalizeVendorOptions(response.data?.vendors || [])
+  })
+}
+
+function getVendorStoreOptions(vendorId) {
+  const resolvedVendorId = Number(vendorId)
+  if (!resolvedVendorId) {
+    return []
+  }
+  const vendor = vendorOptions.value.find(item => item.vendorId === resolvedVendorId)
+  return vendor?.stores || []
+}
+
+const queryStoreOptions = computed(() => getVendorStoreOptions(queryParams.value.vendorId))
+const createStoreOptions = computed(() => getVendorStoreOptions(createForm.value.vendorId))
+
+function resetStoreSelection(target, vendorId) {
+  const storeId = Number(target.storeId)
+  if (!storeId) {
+    target.storeId = undefined
+    return
+  }
+  const storeExists = getVendorStoreOptions(vendorId).some(item => item.storeId === storeId)
+  if (!storeExists) {
+    target.storeId = undefined
+  }
+}
+
+function handleQueryVendorChange(vendorId) {
+  resetStoreSelection(queryParams.value, vendorId)
+}
+
+function handleCreateVendorChange(vendorId) {
+  resetStoreSelection(createForm.value, vendorId)
+}
+
 function openCreateDialog() {
   createForm.value = createDefaultForm()
   if (queryParams.value.ticketId) {
     createForm.value.ticketId = queryParams.value.ticketId
+  }
+  if (queryParams.value.vendorId) {
+    createForm.value.vendorId = queryParams.value.vendorId
+  }
+  if (queryParams.value.storeId) {
+    createForm.value.storeId = queryParams.value.storeId
+  }
+  if (queryParams.value.posNo) {
+    createForm.value.posNo = queryParams.value.posNo
   }
   createOpen.value = true
   loadTicketOptions()
@@ -822,6 +958,7 @@ function updateAutoRefresh() {
 onMounted(() => {
   loadTicketOptions()
   loadAgentOptions()
+  loadVendorOptions()
   getList()
 })
 
