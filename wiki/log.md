@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-05-31] INGEST-CODE | 日志拉取页面商家门店改为参数配置联动下拉
+- 触发：用户要求日志拉取页面的商家、门店改为可配置并沿用现有服务端参数配置，且商家与门店联动。
+- 架构层：工单域 / 日志拉取 / 系统参数配置 / Web 控制台
+- 创建的页面：无
+- 更新的页面：`entities/services/ticket-domain.md`、`web/public/docs/ticket-log-pull-design.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_log_pull_service.py` / `server/modules/ticket/controller/ticket_controller.py` / `server/modules/ticket/entity/vo/ticket_log_pull_vo.py` / `web/src/api/ticket/ticket.js` / `web/src/views/ticket/logPullRecord/index.vue` -> 工单域知识页
+- 总共涉及页面：4
+
 ## [2026-05-29] INGEST-CODE | 定时任务新增线程/进程执行方式并拆分 Worker
 - 触发：用户要求按任务配置选择线程或进程执行，并落地长期稳定方案，去掉业务层二级 spawn 子进程
 - 架构层：任务调度域 / Celery Worker / 任务执行模型

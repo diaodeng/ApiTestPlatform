@@ -157,6 +157,25 @@ async def get_ticket_log_pull_storage_config(request: Request, query_db: Session
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketController.get(
+    "/log-pull/vendor-store-options",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_pull_vendor_store_options(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取日志拉取页面商家/门店联动选项接口。
+    :param request: 请求对象
+    :param query_db: 数据库会话
+    :return: 脱敏后的商家与门店选项
+    """
+    try:
+        result = TicketLogPullService.get_vendor_store_options_services(query_db)
+        return ResponseUtil.success(data=result.model_dump(by_alias=True))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketController.put(
     "/log-pull/storage-config",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
