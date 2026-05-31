@@ -169,6 +169,55 @@ class TicketDao:
         return PageUtil.paginate(ticket_query, query.page_num, query.page_size, query.is_page)
 
     @classmethod
+    def get_tickets_for_sync(
+        cls,
+        db: Session,
+        *,
+        consumer: str,
+        limit: int = 50,
+        include_closed: bool = True,
+    ) -> list[Ticket]:
+        """
+        按消费者拉取未同步或存在新版本的工单。
+        :param db: 数据库会话
+        :param consumer: 消费者标识
+        :param limit: 最大返回条数
+        :param include_closed: 是否包含结束状态工单
+        :return: 待同步工单列表
+        """
+        safe_limit = min(max(int(limit or 50), 1), 200)
+        query = db.query(Ticket).filter(Ticket.del_flag == "0")
+        if not include_closed:
+            query = query.filter(
+                ~Ticket.status.in_(
+                    [
+                        "closed",
+                        "rejected",
+                        "non_problem",
+                        "design_as_expected",
+                        "user_misoperation",
+                        "duplicated",
+                    ]
+                )
+            )
+        rows = query.order_by(Ticket.update_time.asc(), Ticket.create_time.asc()).limit(safe_limit * 4).all()
+        result: list[Ticket] = []
+        consumer_key = str(consumer or "").strip()
+        for ticket in rows:
+            extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+            sync_meta = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
+            state = sync_meta.get("sync_state") if isinstance(sync_meta.get("sync_state"), dict) else {}
+            consumers = state.get("consumers") if isinstance(state.get("consumers"), dict) else {}
+            consumer_state = consumers.get(consumer_key) if isinstance(consumers.get(consumer_key), dict) else {}
+            current_revision = int(sync_meta.get("revision") or 0)
+            delivered_revision = int(consumer_state.get("delivered_revision") or 0)
+            if current_revision > 0 and delivered_revision < current_revision:
+                result.append(ticket)
+            if len(result) >= safe_limit:
+                break
+        return result
+
+    @classmethod
     def add_ticket(cls, db: Session, ticket: Ticket) -> Ticket:
         """
         新增工单。

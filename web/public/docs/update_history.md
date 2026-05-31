@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 新增工单外部同步与内网拉取链路：后端增加 `POST /ticket/sync/external`、`GET /ticket/sync/pending`，并提供可选 `POST /ticket/sync/ack`；同步状态统一写入 `ticket.extra_data.external_sync`，改用 `revision + consumer.delivered_revision` 跟踪每个消费方的拉取进度，同时记录自动识别、相似工单检索、自动日志拉取和自动 AI 分析的步骤状态，便于后续断点排查。
 1. 日志拉取页面的商家、门店改为复用服务端参数 `ticket.logPull.external.vendors` 的联动下拉；商家包含名称/编码/ID，门店包含名称/编码/ID，选择商家后才允许选择所属门店，门店下拉支持按编码、ID、名称搜索。
 1. 日志拉取管理页新增按商家、门店、POS、拉取日期筛选；其中拉取日期按页面配置的 `modifyTime` 查询，后端直接基于日志记录保存的 `command_content.modifyTime` 过滤。
 1. 定时任务管理新增“执行方式”选项，支持按任务选择线程或进程执行；服务端会自动路由到线程 Worker 或 prefork 进程 Worker，长任务可继续保留 Celery 原生终止能力。

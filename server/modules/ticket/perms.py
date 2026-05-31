@@ -97,6 +97,8 @@ def F(key: str, name: str, parent_key: str, perm: str, order: int, *, remark: st
 
 MENU_DEFS: tuple[MenuConfig, ...] = (
     M("ticket.root", "工单管理", "ticket", "message", 20, remark="工单管理目录"),
+    F("ticket.sync.external", "外部工单同步", "ticket.ticket", "ticket:sync:external", 24),
+    F("ticket.sync.pull", "内网工单拉取", "ticket.ticket", "ticket:sync:pull", 25),
     C(
         "ticket.ticket",
         "工单列表",
