@@ -116,6 +116,33 @@ def _extract_ticket_version_key(extra_data: Any) -> str:
     return ""
 
 
+def _extract_ticket_sync_summary(extra_data: Any) -> dict[str, Any] | None:
+    """
+    从扩展字段中提取同步摘要信息。
+    :param extra_data: 工单扩展字段
+    :return: 同步摘要
+    """
+    if not isinstance(extra_data, dict):
+        return None
+    sync_meta = extra_data.get("external_sync")
+    if not isinstance(sync_meta, dict):
+        return None
+    sync_state = sync_meta.get("sync_state") if isinstance(sync_meta.get("sync_state"), dict) else {}
+    automation = sync_state.get("automation") if isinstance(sync_state.get("automation"), dict) else {}
+    return {
+        "revision": int(sync_meta.get("revision") or 0),
+        "sourceSystem": sync_meta.get("sourceSystem") or (sync_meta.get("source") or {}).get("system"),
+        "sourceRecordId": sync_meta.get("sourceRecordId") or (sync_meta.get("source") or {}).get("recordId"),
+        "status": sync_state.get("status") or "pending",
+        "lastPulledAt": sync_state.get("last_pulled_at"),
+        "lastConsumer": sync_state.get("last_consumer"),
+        "lastBatchId": sync_state.get("last_batch_id"),
+        "automationStatus": automation.get("status"),
+        "automationStep": automation.get("current_step"),
+        "automationError": automation.get("last_error"),
+    }
+
+
 def _extract_ticket_automation_config(data: dict[str, Any]) -> tuple[bool, dict[str, Any] | None]:
     """
     提取工单创建或编辑时携带的日志自动化配置。
@@ -330,6 +357,7 @@ class TicketService:
             item["merchantName"] = project_name
         extra_data = item.get("extraData")
         item["versionKey"] = item.get("versionKey") or _extract_ticket_version_key(extra_data)
+        item["syncSummary"] = _extract_ticket_sync_summary(extra_data)
         return item
 
     @classmethod

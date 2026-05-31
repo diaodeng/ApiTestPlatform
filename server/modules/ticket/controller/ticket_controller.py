@@ -26,12 +26,15 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketCommentCreateModel,
     TicketCreateModel,
     TicketEventCreateModel,
+    TicketExternalSyncUpsertModel,
     TicketMessageCreateModel,
     TicketQueryModel,
     TicketRcaModel,
     TicketSnapshotModel,
     TicketStatisticsQueryModel,
     TicketStatusChangeModel,
+    TicketSyncAckRequestModel,
+    TicketSyncPullQueryModel,
     TicketUpdateModel,
     TicketUserOptionQueryModel,
     WorkflowStatusModel,
@@ -42,6 +45,7 @@ from modules.ticket.service.ticket_embedding_service import TicketEmbeddingServi
 from modules.ticket.service.ticket_import_service import TicketImportService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService
+from modules.ticket.service.ticket_sync_service import TicketSyncService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -220,6 +224,63 @@ async def add_ticket(
     try:
         result = TicketService.create_ticket(query_db, add_ticket_object, current_user)
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post("/sync/external", dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:external"))])
+async def sync_external_ticket(
+    request: Request,
+    sync_object: TicketExternalSyncUpsertModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    外部工单系统同步数据入库接口。
+    """
+    try:
+        result = TicketSyncService.sync_external_ticket(query_db, sync_object, current_user)
+        if result.is_success:
+            return ResponseUtil.success(data=result.result, msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get("/sync/pending", dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:pull"))])
+async def pull_pending_sync_tickets(
+    request: Request,
+    query: TicketSyncPullQueryModel = Depends(),
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    内网系统拉取未同步或更新后的工单数据。
+    """
+    try:
+        return ResponseUtil.success(data=TicketSyncService.pull_pending_tickets(query_db, query, current_user))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post("/sync/ack", dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:pull"))])
+async def ack_sync_tickets(
+    request: Request,
+    ack_object: TicketSyncAckRequestModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    内网系统回执本次拉取数据的交付状态。
+    """
+    try:
+        result = TicketSyncService.ack_sync_delivery(query_db, ack_object, current_user)
+        if result.is_success:
+            return ResponseUtil.success(data=result.result, msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

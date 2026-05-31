@@ -93,6 +93,9 @@ class TicketQueryModel(QueryModel):
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
 
 
+    sync_consumer: str | None = Field(default=None, description="同步消费者标识，用于筛选未同步数据")
+
+
 class TicketAssignModel(BaseModel):
     """
     工单指派模型。
@@ -361,6 +364,135 @@ class TicketAiAnalysisTaskQueryModel(QueryModel):
     status: str | None = Field(default=None, description="任务状态")
     ticket_id: int | None = Field(default=None, description="工单ID")
     version_key: str | None = Field(default=None, description="版本标识")
+
+
+class TicketSyncSourcePayloadModel(BaseModel):
+    """
+    外部工单同步来源信息模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    system: str = Field(description="外部系统标识")
+    record_id: str | None = Field(default=None, description="外部记录 ID")
+    record_url: str | None = Field(default=None, description="外部记录链接")
+    pushed_at: datetime | None = Field(default=None, description="外部推送时间")
+
+    @model_validator(mode="after")
+    def validate_source(self):
+        self.system = str(self.system or "").strip()
+        if not self.system:
+            raise ValueError("source.system 不能为空")
+        self.record_id = str(self.record_id or "").strip() or None
+        self.record_url = str(self.record_url or "").strip() or None
+        return self
+
+
+class TicketSyncAutomationModel(BaseModel):
+    """
+    工单同步后自动化配置模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    auto_identify: bool = Field(default=True, description="是否自动识别工单归属信息")
+    auto_log_pull: bool = Field(default=False, description="是否根据识别结果自动拉取日志")
+    auto_ai_analysis: bool = Field(default=False, description="是否自动发起 AI 分析")
+    ai_agent_code: str | None = Field(default=None, description="自动 AI 使用的 Agent 编码")
+    log_pull_config: dict[str, Any] | None = Field(default=None, description="默认日志拉取参数")
+    extra_instruction: str | None = Field(default=None, description="自动 AI 额外说明")
+
+    @model_validator(mode="after")
+    def validate_automation(self):
+        self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
+        self.extra_instruction = str(self.extra_instruction or "").strip() or None
+        if self.auto_ai_analysis and not self.ai_agent_code:
+            raise ValueError("启用自动 AI 时需要 aiAgentCode")
+        return self
+
+
+class TicketExternalSyncUpsertModel(TicketBaseModel):
+    """
+    外部工单同步入参模型。
+    """
+
+    source: TicketSyncSourcePayloadModel = Field(description="同步来源信息")
+    automation: TicketSyncAutomationModel | None = Field(default=None, description="同步后自动化配置")
+    sync_consumer: str | None = Field(default=None, description="同步消费者名称，用于预初始化交付状态")
+    raw_payload: dict[str, Any] | None = Field(default=None, description="外部工单原始载荷")
+    ticket_no: str = Field(description="工单编号")
+    title: str = Field(description="工单标题")
+
+    @model_validator(mode="after")
+    def validate_sync_upsert(self):
+        self.ticket_no = str(self.ticket_no or "").strip()
+        self.title = str(self.title or "").strip()
+        self.sync_consumer = str(self.sync_consumer or "").strip() or None
+        if not self.ticket_no:
+            raise ValueError("ticketNo 不能为空")
+        if not self.title:
+            raise ValueError("title 不能为空")
+        return self
+
+
+class TicketSyncPullQueryModel(BaseModel):
+    """
+    内网同步拉取查询模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    consumer: str = Field(description="内网消费者标识")
+    limit: int = Field(default=50, description="最大返回条数")
+    include_closed: bool = Field(default=True, description="是否包含结束状态工单")
+
+    @model_validator(mode="after")
+    def validate_pull_query(self):
+        self.consumer = str(self.consumer or "").strip()
+        if not self.consumer:
+            raise ValueError("consumer 不能为空")
+        self.limit = min(max(int(self.limit or 50), 1), 200)
+        return self
+
+
+class TicketSyncAckItemModel(BaseModel):
+    """
+    同步回执条目模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_id: int = Field(description="宸ュ崟ID")
+    sync_revision: int = Field(description="工单同步版本")
+    delivery_status: str = Field(default="delivered", description="交付状态")
+    message: str | None = Field(default=None, description="回执说明")
+    detail: dict[str, Any] | None = Field(default=None, description="额外回执明细")
+
+    @model_validator(mode="after")
+    def validate_ack_item(self):
+        self.delivery_status = str(self.delivery_status or "delivered").strip() or "delivered"
+        self.message = str(self.message or "").strip() or None
+        return self
+
+
+class TicketSyncAckRequestModel(BaseModel):
+    """
+    同步回执请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    consumer: str = Field(description="内网消费者标识")
+    items: list[TicketSyncAckItemModel] = Field(default_factory=list, description="回执条目")
+
+    @model_validator(mode="after")
+    def validate_ack_request(self):
+        self.consumer = str(self.consumer or "").strip()
+        if not self.consumer:
+            raise ValueError("consumer 不能为空")
+        if not self.items:
+            raise ValueError("items 不能为空")
+        return self
 
 
 class KnowledgeArticleModel(BaseModel):

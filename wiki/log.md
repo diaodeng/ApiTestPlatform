@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-05-31] INGEST-CODE | 工单外部同步与内网拉取链路落地
+- 触发：用户需要双环境部署下的工单同步能力，要求知道哪些数据已被某个内网系统拉取过，并在同步后自动识别归属信息、匹配类似工单、按条件串联日志拉取与 AI 分析，同时记录执行失败步骤。
+- 架构层：工单域 / 外部系统集成 / 自动化链路 / 系统参数配置
+- 创建的页面：`flows/ticket-external-sync-flow.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`index.md`、`log.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：2 对
+- 变更传播链：`server/modules/ticket/controller/ticket_controller.py` / `server/modules/ticket/service/ticket_sync_service.py` / `server/modules/ticket/dao/ticket_dao.py` / `server/modules/ticket/entity/vo/ticket_vo.py` / `server/modules/ticket/service/ticket_service.py` / `server/modules/ticket/perms.py` -> `wiki/flows/ticket-external-sync-flow.md` -> `wiki/entities/services/ticket-domain.md`
+- 总共涉及页面：6
+
 ## [2026-05-31] INGEST-CODE | 日志拉取页面商家门店改为参数配置联动下拉
 - 触发：用户要求日志拉取页面的商家、门店改为可配置并沿用现有服务端参数配置，且商家与门店联动。
 - 架构层：工单域 / 日志拉取 / 系统参数配置 / Web 控制台

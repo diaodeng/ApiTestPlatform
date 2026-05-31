@@ -6,12 +6,13 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-05-21
+freshness: 2026-05-31
 created: 2026-05-20
-updated: 2026-05-28
+updated: 2026-05-31
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
+  - server/modules/ticket/service/ticket_sync_service.py
   - server/modules/ticket/service/ticket_log_pull_service.py
   - server/modules/ticket/service/ticket_ai_analysis_service.py
   - server/modules/ticket/service/ticket_import_service.py
@@ -51,6 +52,11 @@ graph TD
 - 工单新增/编辑时项目和模块联动，模块必须属于当前项目；工单号作为外部系统唯一编号手动录入，不再自动生成。
 - 工单 `extra_data.version_key` 作为版本号来源，AI 分析按“项目 + 版本号”匹配仓库映射。
 - 工单 AI 仓库映射中的本地仓库路径和工作区根目录已下沉为 Agent 本地配置优先；服务端仍保留兼容字段用于历史审计和兜底。
+- 工单同步新增独立外部入口与内网拉取链路：`POST /ticket/sync/external` 负责入站创建/更新工单，`GET /ticket/sync/pending` 负责按 `consumer` 拉取未交付 revision，`POST /ticket/sync/ack` 用于可选回执处理结果。
+- 同步状态统一写入 `ticket.extra_data.external_sync`，不再依赖单一“是否已同步”布尔值，而是按 `revision + consumers.{consumer}.delivered_revision` 判断某个消费方是否已经拿到当前版本。
+- `/ticket/sync/pending` 只会返回真正带同步元数据的工单，避免把普通人工创建的工单误返回给内网同步系统。
+- 外部同步后的自动化链路支持规则化识别项目、模块、商家、门店、POS/SCO、版本号，识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。
+- 识别和自动化配置统一由系统参数 `ticket.sync.automation` 驱动，优先通过映射规则、正则和默认参数适配不同工单系统，避免把定制话术写死在服务代码里。
 - 工单项目/模块选项直接复用 HRM 公共项目管理，不单独维护工单项目库；后端按 HRM 的正常状态值 `QtrDataStatusEnum.normal = 2` 过滤有效项。
 - 若后续需要把“工单项目”和“测试项目”显式区分，优先增加结构化 `project_type`，不建议只靠自由标签做长期筛选。
 - 历史字段 `merchant_name` 仍保留，用于兼容旧数据和前端旧字段 `merchantName`，实际语义已经切换为项目名称。
@@ -109,6 +115,7 @@ graph TD
 - [工单核心数据模型](../data-models/ticket-core-models.md)
 - [工单枚举集](../enums/ticket-enums.md)
 - [工单流转路由流程](../../flows/ticket-workflow-routing.md)
+- [工单外部同步与内网拉取流程](../../flows/ticket-external-sync-flow.md)
 - [工单AI分析最终方案落地记录](../../../../docs/2026-05-22-ticket-ai-analysis-final-solution.md)
 - [工单表单与 AI 流程更新记录](../../../../docs/2026-05-22-ticket-form-and-ai-flow-update.md)
 - [工单自动化链路流程](../../flows/ticket-automation-flow.md)
@@ -118,3 +125,4 @@ graph TD
 - [项目总览](../../overview.md)
 - [模块全景图](../../concepts/module-landscape.md)
 - [工单流转路由流程](../../flows/ticket-workflow-routing.md)
+- [工单外部同步与内网拉取流程](../../flows/ticket-external-sync-flow.md)
