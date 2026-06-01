@@ -3,9 +3,11 @@ import inspect
 import json
 import threading
 import traceback
+import uuid
 from datetime import datetime
 from urllib.parse import quote
 
+from celery.signals import worker_ready
 from redis import Redis
 from sqlalchemy import update
 
@@ -19,6 +21,7 @@ from module_task.celery_contract import (
     parse_payload_kwargs,
 )
 from module_task.celery_job_models import CeleryPeriodicTask, CeleryTaskExecutionLog
+from module_task.celery_job_service import CeleryJobService
 from module_task.task_register import JOB_REGISTRY
 from utils.log_util import logger
 
@@ -27,6 +30,7 @@ TASK_STATE_PREFIX = "celery:task:state"
 TASK_STOP_PREFIX = "celery:task:stop"
 TASK_HEARTBEAT_SECONDS = 30
 TASK_STATE_TTL_SECONDS = 90
+WORKER_BOOT_ID = uuid.uuid4().hex
 
 
 def _build_redis_url(database: int) -> str:
@@ -87,6 +91,64 @@ def _build_task_stop_key(task_id: int) -> str:
     return f"{TASK_STOP_PREFIX}:{task_id}"
 
 
+def _parse_runtime_state_timestamp(raw_value: str | None) -> datetime | None:
+    """
+    解析运行态快照中的时间戳字段。
+
+    :param raw_value: ISO 格式时间字符串。
+    :return: 解析后的 datetime，失败时返回 None。
+    """
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw_value))
+    except Exception:
+        return None
+
+
+def _recover_stale_task_lock(lock_client: Redis, task_id: int) -> bool:
+    """
+    回收已经失联但仍残留的任务锁。
+
+    说明：
+    线程模式下任务重启后，业务线程会消失，但 Redis 锁可能仍然保留到 TTL 结束。
+    当运行态心跳已经缺失或失效时，这里主动清理锁、状态和停止标记，避免后续调度一直被并发限制拦截。
+
+    :param lock_client: Redis 客户端。
+    :param task_id: 任务ID。
+    :return: 是否成功识别并清理了失联锁。
+    """
+    state_key = _build_task_state_key(task_id)
+    lock_key = _build_task_lock_key(task_id)
+    stop_key = _build_task_stop_key(task_id)
+    try:
+        raw_state = lock_client.get(state_key)
+        if not raw_state:
+            lock_client.delete(lock_key, state_key, stop_key)
+            return True
+
+        state = json.loads(raw_state)
+        if not isinstance(state, dict):
+            lock_client.delete(lock_key, state_key, stop_key)
+            return True
+
+        if str(state.get("worker_boot_id") or "") != WORKER_BOOT_ID:
+            lock_client.delete(lock_key, state_key, stop_key)
+            return True
+
+        if str(state.get("status") or "").lower() != "running":
+            lock_client.delete(lock_key, state_key, stop_key)
+            return True
+
+        heartbeat_at = _parse_runtime_state_timestamp(state.get("heartbeat_at"))
+        if heartbeat_at and (datetime.now() - heartbeat_at).total_seconds() > TASK_STATE_TTL_SECONDS:
+            lock_client.delete(lock_key, state_key, stop_key)
+            return True
+    except Exception as exc:
+        logger.warning(f"回收任务失联锁失败[{task_id}]：{exc}")
+    return False
+
+
 def _serialize_task_state(
     *,
     task_id: int,
@@ -114,6 +176,7 @@ def _serialize_task_state(
             "task_key": payload.get("task_key") or "",
             "queue_name": payload.get("queue_name") or "celery",
             "trigger_type": payload.get("trigger_type") or "scheduler",
+            "worker_boot_id": WORKER_BOOT_ID,
             "started_at": started_at.isoformat(),
             "heartbeat_at": datetime.now().isoformat(),
         },
@@ -486,25 +549,34 @@ def execute_registered_job(self, payload: dict):
             lock_client = _build_lock_client()
             lock_acquired = bool(lock_client.set(lock_key, "1", nx=True, ex=max(lock_ttl_seconds, 30)))
             if not lock_acquired:
-                finished_at = datetime.now()
-                duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-                _update_task_status(
-                    task_id,
-                    status="skipped",
-                    message="任务并发冲突，已跳过",
-                    duration_ms=duration_ms,
-                    add_run_count=1,
-                )
-                _create_execution_log(
-                    payload=payload,
-                    celery_task_id=self.request.id,
-                    status="skipped",
-                    message="任务并发冲突，已跳过",
-                    exception_info="已有同任务实例在执行",
-                    started_at=started_at,
-                    finished_at=finished_at,
-                )
-                return {"status": "skipped"}
+                if _recover_stale_task_lock(lock_client, task_id):
+                    lock_acquired = bool(lock_client.set(lock_key, "1", nx=True, ex=max(lock_ttl_seconds, 30)))
+                if not lock_acquired:
+                    finished_at = datetime.now()
+                    duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                    _update_task_status(
+                        task_id,
+                        status="skipped",
+                        message="任务并发冲突，已跳过",
+                        duration_ms=duration_ms,
+                        add_run_count=1,
+                    )
+                    _create_execution_log(
+                        payload=payload,
+                        celery_task_id=self.request.id,
+                        status="skipped",
+                        message="任务并发冲突，已跳过",
+                        exception_info="已有同任务实例在执行",
+                        started_at=started_at,
+                        finished_at=finished_at,
+                    )
+                    return {"status": "skipped"}
+
+        if not allow_concurrent:
+            lock_client = lock_client or _build_lock_client()
+            lock_acquired = True
+        else:
+            lock_acquired = False
 
         _update_task_status(
             task_id,
@@ -596,3 +668,23 @@ def execute_registered_job(self, payload: dict):
                 runtime_client.delete(state_key, stop_key)
         except Exception as exc:
             logger.warning(f"释放任务锁失败[{task_id}]：{exc}")
+
+
+@worker_ready.connect
+def _recover_stale_job_locks_on_worker_ready(**kwargs):
+    """
+    在 Celery Worker 启动完成后回收失联任务锁。
+
+    :param kwargs: Celery 信号上下文参数。
+    :return: 无返回值。
+    """
+    try:
+        with SessionLocal() as session:
+            for owner_type in ("sys", "qtr"):
+                CeleryJobService._recover_stale_running_tasks(
+                    query_db=session,
+                    owner_type=owner_type,
+                    data_scope_sql=True,
+                )
+    except Exception as exc:
+        logger.warning(f"Worker 启动时回收任务锁失败：{exc}")
