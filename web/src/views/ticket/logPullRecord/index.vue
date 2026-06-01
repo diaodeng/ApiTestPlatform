@@ -379,6 +379,25 @@
               </el-select>
             </el-form-item>
           </el-col>
+          <el-col :span="24">
+            <el-form-item label="通知配置">
+              <el-select
+                v-model="createForm.notifyConfig.pushIds"
+                multiple
+                filterable
+                clearable
+                placeholder="选择已有推送配置"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in pushOptions"
+                  :key="item.pushId"
+                  :label="`${item.name || item.pushId} [${item.pushId}]`"
+                  :value="item.pushId"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
         </el-row>
       </el-form>
       <template #footer>
@@ -520,6 +539,7 @@ import {
   retryTicketLogPull
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
+import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
 import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
 
 const { proxy } = getCurrentInstance()
@@ -537,6 +557,7 @@ const ticketLoading = ref(false)
 const ticketOptions = ref([])
 const agentOptions = ref([])
 const vendorOptions = ref([])
+const pushOptions = ref([])
 const selectedRecord = ref(null)
 const contentDetail = ref(null)
 const contentText = ref('')
@@ -586,7 +607,19 @@ function createDefaultForm() {
     zipMaxSize: 500,
     storageMode: 'local',
     autoAiEnabled: false,
-    aiAgentCode: ''
+    aiAgentCode: '',
+    notifyConfig: {
+      allowPush: 1,
+      pushIds: [],
+      success: {
+        push: true,
+        reminder: 1
+      },
+      failed: {
+        push: true,
+        reminder: 1
+      }
+    }
   }
 }
 
@@ -659,6 +692,13 @@ function loadAgentOptions() {
   return listAllAgents().then(response => {
     const rows = response.data || []
     agentOptions.value = Array.isArray(rows) ? rows : []
+  })
+}
+
+function loadPushOptions() {
+  return listAllPushConfig({ pageNum: 1, pageSize: 500 }).then(response => {
+    const rows = response.data || []
+    pushOptions.value = Array.isArray(rows) ? rows : []
   })
 }
 
@@ -959,6 +999,7 @@ onMounted(() => {
   loadTicketOptions()
   loadAgentOptions()
   loadVendorOptions()
+  loadPushOptions()
   getList()
 })
 

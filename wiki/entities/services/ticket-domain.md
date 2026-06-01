@@ -15,6 +15,7 @@ related_files:
   - server/modules/ticket/service/ticket_sync_service.py
   - server/modules/ticket/service/ticket_log_pull_service.py
   - server/modules/ticket/service/ticket_ai_analysis_service.py
+  - server/modules/ticket/service/ticket_notify_service.py
   - server/modules/ticket/service/ticket_import_service.py
   - server/modules/ticket/service/ticket_embedding_service.py
   - server/modules/ticket/dao/ticket_dao.py
@@ -67,6 +68,8 @@ graph TD
 - 日志拉取记录已拆出独立管理菜单页，支持跨工单分页查看；新增日志拉取时可以关联工单，也可以不关联工单独立创建，未关联时不允许启用自动 AI。
 - 日志拉取管理页和新增弹窗中的商家/门店字段已改为联动下拉：必须先选商家才能选门店，门店候选只保留当前商家下的门店；日志拉取请求仍提交 `vendorId/storeId`，不改变后端记录结构和外部接口入参。
 - 日志拉取记录的 `command_content` 保存前端原始入参，实际提交给三方平台时再按既有过滤逻辑生成请求参数；重试同样基于原始入参重新过滤，避免丢失可恢复字段。
+- 日志拉取成功后会优先从日志正文直接提取版本号，命中后回写到 `ticket.extra_data.version_key`，未提取到则发送通知并终止后续自动 AI。
+- 工单自动化通知统一复用已有推送配置，页面侧可选择具体推送项和成功/失败通知开关；自动 AI 成功和失败都会发送消息，便于业务闭环确认。
 - 参数配置说明改为通用提示按钮组件 `PromptButton`，后续可在其他页面复用。
 - 日志拉取时间范围支持可空：有时间范围时按“开始/结束时间”或“时间点+前后分钟范围”提取入库；未填时间范围时只下载整包压缩文件，不落日志正文，供 AI 分析时由 Agent 基于 `commandResultUrl` 在本地工作区下载并解压整包。
 - 日志包解析阶段只读取文件名包含 `_pos.log` 的条目，其他文件不进入时间戳切片流程。
@@ -85,12 +88,14 @@ graph TD
 - 工单 AI 分析已接入 Codex CLI：新增仓库映射表 `ticket_ai_repo_mapping`、分析任务表 `ticket_ai_analysis_task`，分析结果写回 `ticket.ai_analysis` 并同步更新 RCA/事件。
 - 工单二阶段闭环新增消息流 `ticket_message` 和 ACR 快照 `ticket_snapshot`：评论、追问、AI 回复、开发/测试补充会进入消息流；AI 分析、RCA 保存、状态闭环或手工操作会生成快照版本。
 - AI 分析上下文现在包含工单消息、最近 ACR 快照和相似工单推荐，追问入口会先保存消息，再按工单版本和 Agent 配置提交新的 AI 分析任务。
+- AI 分析结束后无论成功失败都会发送通知，通知内容会包含工单号、工单标题、项目名称、状态和摘要说明。
 - AI 协同追问的输出契约需要满足 Codex structured output 约束，`evidence`、`risk_items`、`next_steps` 也必须出现在 `required` 中；`symptom`、`similar_cases`、`sop_suggestion`、`monitoring_suggestion` 等增强字段允许为空或缺省，由服务端归一化补默认值，避免模型未产出扩展字段时任务失败。
 - AI 分析下发给 Agent 的日志正文会做中间截断，默认最多保留首尾约 80 万字符，并记录 `textTruncatedForAi` 与原始字符数，避免追问请求因超大上下文触发 Codex/OpenAI `bad_response_status_code`。
 - 工单关闭时会尝试从工单、RCA、事件和消息流自动生成知识库案例，知识文章关联原工单并刷新工单向量，供下一次相似工单检索复用。
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
 - AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本号匹配映射，未命中时拒绝提交。
+- 版本号现在也可由日志正文自动提取，减少人工手动补录 `extra_data.version_key` 的次数。
 - AI 分析任务列表新增“重试”入口，基于原任务 ID 重新提交；Agent 会先检查工作区 `result.json`，存在可用历史结果时直接返回，任务仍在运行则返回“正在分析中”的提示。
 - AI 分析任务入库时只保留轻量上下文快照，完整工单/时间线/日志内容由执行端工作区生成 `context.json` 和 `logs.txt`，执行阶段优先从工作区读取，避免任务表被超大日志正文撑爆。
 - 服务端容器不再把 AI 分析工作区当持久化存储，任务状态只记录路径字符串和轻量快照；日志内容按“数据库压缩内容 -> 本地归档 -> FTP 归档 -> 外部下载地址”逐级回退获取，避免重启后本地文件丢失。
