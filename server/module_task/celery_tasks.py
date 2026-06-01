@@ -14,7 +14,7 @@ from sqlalchemy import update
 from config.celery_app import celery_app
 from config.database import SessionLocal
 from config.env import RedisConfig
-from module_task import scheduler_promo, scheduler_qtr, scheduler_test  # noqa: F401
+from module_task import scheduler_maintenance, scheduler_promo, scheduler_qtr, scheduler_test  # noqa: F401
 from module_task.celery_contract import (
     CELERY_EXECUTE_JOB_TASK,
     parse_payload_args,

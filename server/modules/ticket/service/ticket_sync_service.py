@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 from typing import Any
 
+import requests
 from sqlalchemy.orm import Session
 
 from module_admin.entity.do.config_do import SysConfig
@@ -71,6 +72,7 @@ class TicketSyncService:
         return {
             "autoRunOnSync": False,
             "defaultPullLimit": 50,
+            "remoteSync": cls._default_remote_sync_config(),
             "projectMappings": [],
             "moduleMappings": [],
             "vendorMappings": [],
@@ -92,6 +94,29 @@ class TicketSyncService:
             },
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
+            },
+        }
+
+    @classmethod
+    def _default_remote_sync_config(cls) -> dict[str, Any]:
+        """
+        构建远端工单同步默认配置。
+
+        :return: 默认远端同步配置。
+        """
+        return {
+            "enabled": False,
+            "pullUrl": "",
+            "ackUrl": "",
+            "consumer": "",
+            "sourceSystem": "public",
+            "limit": 50,
+            "includeClosed": True,
+            "timeoutSec": 30,
+            "headers": {
+                "cookie": "",
+                "authorization": "",
+                "origin": "",
             },
         }
 
@@ -129,7 +154,42 @@ class TicketSyncService:
             merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
         if not isinstance(merged.get("promptTemplates"), dict):
             merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
+        if not isinstance(merged.get("remoteSync"), dict):
+            merged["remoteSync"] = cls._default_remote_sync_config()
+        else:
+            remote_sync = dict(cls._default_remote_sync_config())
+            remote_sync.update(merged.get("remoteSync") or {})
+            remote_headers = remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}
+            remote_sync["headers"] = {**cls._default_remote_sync_config()["headers"], **remote_headers}
+            remote_sync["enabled"] = bool(remote_sync.get("enabled"))
+            remote_sync["limit"] = min(max(int(remote_sync.get("limit") or 50), 1), 200)
+            remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
+            remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
+            remote_sync["pullUrl"] = str(remote_sync.get("pullUrl") or "").strip()
+            remote_sync["ackUrl"] = str(remote_sync.get("ackUrl") or "").strip()
+            remote_sync["consumer"] = str(remote_sync.get("consumer") or "").strip()
+            remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
+            merged["remoteSync"] = remote_sync
         return merged
+
+    @classmethod
+    def _build_remote_sync_request_headers(cls, remote_sync: dict[str, Any]) -> dict[str, str]:
+        """
+        构建远端工单同步请求头。
+
+        :param remote_sync: 远端同步配置。
+        :return: 请求头字典。
+        """
+        headers = dict(remote_sync.get("headers") or {})
+        normalized = {str(key).strip().lower(): str(value or "").strip() for key, value in headers.items()}
+        result = {"Content-Type": "application/json", "Accept": "application/json"}
+        if normalized.get("cookie"):
+            result["Cookie"] = normalized["cookie"]
+        if normalized.get("authorization"):
+            result["Authorization"] = normalized["authorization"]
+        if normalized.get("origin"):
+            result["Origin"] = normalized["origin"]
+        return result
 
     @classmethod
     def _build_meta(cls, extra_data: dict[str, Any] | None) -> dict[str, Any]:
@@ -866,3 +926,234 @@ class TicketSyncService:
         except Exception:
             db.rollback()
             raise
+
+    @classmethod
+    def _build_remote_sync_upsert_model(
+        cls,
+        item: dict[str, Any],
+        *,
+        remote_sync: dict[str, Any],
+    ) -> TicketExternalSyncUpsertModel | None:
+        """
+        将远端拉取的工单数据转换为外部同步入库模型。
+
+        :param item: 远端返回的工单字典。
+        :param remote_sync: 远端同步配置。
+        :return: 可用于外部同步入库的模型，失败时返回 None。
+        """
+        ticket_no = str(item.get("ticketNo") or item.get("ticket_no") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if not ticket_no or not title:
+            return None
+
+        source_payload = {
+            "system": str(remote_sync.get("sourceSystem") or "public").strip() or "public",
+            "recordId": str(item.get("ticketId") or item.get("ticket_id") or ticket_no).strip() or ticket_no,
+            "recordUrl": str(item.get("ticketUrl") or item.get("ticket_url") or "").strip() or None,
+            "pushedAt": (
+                item.get("updateTime")
+                or item.get("update_time")
+                or item.get("createTime")
+                or item.get("create_time")
+            ),
+        }
+        sync_payload = {
+            "source": source_payload,
+            "syncConsumer": str(remote_sync.get("consumer") or "").strip() or None,
+            "rawPayload": item,
+            "ticketNo": ticket_no,
+            "title": title,
+            "description": item.get("description") or "",
+            "projectId": item.get("projectId") or item.get("project_id"),
+            "projectName": item.get("projectName") or item.get("project_name") or item.get("merchantName") or "",
+            "merchantName": item.get("merchantName") or item.get("projectName") or item.get("project_name") or "",
+            "moduleId": item.get("moduleId") or item.get("module_id"),
+            "moduleName": item.get("moduleName") or item.get("module_name") or "",
+            "versionKey": item.get("versionKey") or item.get("version_key") or "",
+            "status": item.get("status") or "",
+            "customerPriority": item.get("customerPriority") or item.get("customer_priority") or "P3",
+            "internalPriority": item.get("internalPriority") or item.get("internal_priority") or "P3",
+            "severity": item.get("severity") or "",
+            "reporterId": item.get("reporterId") or item.get("reporter_id"),
+            "reporterName": item.get("reporterName") or item.get("reporter_name") or "",
+            "currentAssigneeId": item.get("currentAssigneeId") or item.get("current_assignee_id"),
+            "currentAssigneeName": item.get("currentAssigneeName") or item.get("current_assignee_name") or "",
+            "rootCause": item.get("rootCause") or item.get("root_cause") or "",
+            "solution": item.get("solution") or "",
+            "tags": item.get("tags"),
+            "extraData": item.get("extraData") or item.get("extra_data") or {},
+            "createBy": item.get("createBy") or item.get("create_by") or "",
+            "updateBy": item.get("updateBy") or item.get("update_by") or "",
+        }
+        try:
+            return TicketExternalSyncUpsertModel.model_validate(sync_payload)
+        except Exception as exc:
+            logger.warning(f"转换远端工单同步模型失败，ticket_no={ticket_no}, error={exc}")
+            return None
+
+    @classmethod
+    def sync_remote_pending_tickets(
+        cls,
+        db: Session,
+        current_user: CurrentUserModel | None = None,
+        remote_sync_override: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        从远端公网环境拉取未同步工单，入库后回写远端交付状态。
+
+        :param db: 数据库会话。
+        :param current_user: 当前用户，定时任务场景可为空。
+        :param remote_sync_override: 可选远端同步覆盖配置。
+        :return: 同步汇总结果。
+        """
+        config = cls._load_sync_config(db)
+        remote_sync = dict(config.get("remoteSync") or cls._default_remote_sync_config())
+        if remote_sync_override:
+            override_remote_sync = (
+                remote_sync_override.get("remoteSync")
+                if isinstance(remote_sync_override, dict)
+                else None
+            )
+            if isinstance(override_remote_sync, dict):
+                remote_sync.update(override_remote_sync)
+            elif isinstance(remote_sync_override, dict):
+                remote_sync.update(remote_sync_override)
+        remote_sync["pullUrl"] = str(remote_sync.get("pullUrl") or "").strip()
+        remote_sync["ackUrl"] = str(remote_sync.get("ackUrl") or "").strip()
+        remote_sync["consumer"] = str(remote_sync.get("consumer") or "").strip()
+        remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
+        remote_sync["limit"] = min(max(int(remote_sync.get("limit") or config.get("defaultPullLimit") or 50), 1), 200)
+        remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
+        remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
+        remote_sync["headers"] = {
+            **cls._default_remote_sync_config()["headers"],
+            **(remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}),
+        }
+
+        if not remote_sync.get("pullUrl"):
+            raise ValueError("远端工单拉取地址未配置，请检查 ticket.sync.automation.remoteSync.pullUrl")
+        if not remote_sync.get("ackUrl"):
+            raise ValueError("远端工单回写地址未配置，请检查 ticket.sync.automation.remoteSync.ackUrl")
+        if not remote_sync.get("consumer"):
+            raise ValueError("远端工单同步消费者未配置，请检查 ticket.sync.automation.remoteSync.consumer")
+
+        logger.info(
+            f"开始拉取远端工单同步数据 | pull_url={remote_sync['pullUrl']} ack_url={remote_sync['ackUrl']} "
+            f"consumer={remote_sync['consumer']} limit={remote_sync['limit']} "
+            f"include_closed={remote_sync['includeClosed']}"
+        )
+        response = requests.get(
+            remote_sync["pullUrl"],
+            params={
+                "consumer": remote_sync["consumer"],
+                "limit": remote_sync["limit"],
+                "includeClosed": remote_sync["includeClosed"],
+            },
+            timeout=(10, remote_sync["timeoutSec"]),
+            headers=cls._build_remote_sync_request_headers(remote_sync),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if int(payload.get("code") or 0) != 200:
+            raise RuntimeError(f"远端工单拉取失败: {payload.get('msg') or payload}")
+
+        data = payload.get("data")
+        if isinstance(data, dict):
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            batch_id = str(data.get("batchId") or "")
+        elif isinstance(data, list):
+            items = data
+            batch_id = ""
+        else:
+            items = []
+            batch_id = ""
+
+        summary = {
+            "consumer": remote_sync["consumer"],
+            "batchId": batch_id,
+            "pulledCount": len(items),
+            "syncedCount": 0,
+            "failedCount": 0,
+            "ackedCount": 0,
+        }
+        ack_items: list[dict[str, Any]] = []
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            remote_ticket_id = int(item.get("ticketId") or item.get("ticket_id") or 0)
+            sync_revision = int(
+                item.get("syncRevision")
+                or (item.get("syncSummary") or {}).get("revision")
+                or item.get("revision")
+                or 0
+            )
+            upsert_model = cls._build_remote_sync_upsert_model(item, remote_sync=remote_sync)
+            if not upsert_model:
+                summary["failedCount"] += 1
+                if remote_ticket_id:
+                    ack_items.append(
+                        {
+                            "ticketId": remote_ticket_id,
+                            "syncRevision": sync_revision,
+                            "deliveryStatus": "failed",
+                            "message": "远端工单数据缺少 ticketNo 或 title",
+                        }
+                    )
+                continue
+
+            try:
+                sync_result = cls.sync_external_ticket(db, upsert_model, current_user)
+                if sync_result.is_success:
+                    summary["syncedCount"] += 1
+                    local_ticket_id = None
+                    if isinstance(sync_result.result, dict):
+                        local_ticket_id = sync_result.result.get("ticketId") or sync_result.result.get("ticket_id")
+                    ack_items.append(
+                        {
+                            "ticketId": remote_ticket_id,
+                            "syncRevision": sync_revision,
+                            "deliveryStatus": "delivered",
+                            "message": sync_result.message,
+                            "detail": {"localTicketId": local_ticket_id},
+                        }
+                    )
+                else:
+                    summary["failedCount"] += 1
+                    if remote_ticket_id:
+                        ack_items.append(
+                            {
+                                "ticketId": remote_ticket_id,
+                                "syncRevision": sync_revision,
+                                "deliveryStatus": "failed",
+                                "message": sync_result.message,
+                            }
+                        )
+            except Exception as exc:
+                summary["failedCount"] += 1
+                logger.exception(f"远端工单同步入库失败，ticketId={remote_ticket_id}, error={exc}")
+                if remote_ticket_id:
+                    ack_items.append(
+                        {
+                            "ticketId": remote_ticket_id,
+                            "syncRevision": sync_revision,
+                            "deliveryStatus": "failed",
+                            "message": str(exc),
+                            "detail": {"error": str(exc)},
+                        }
+                    )
+
+        if ack_items:
+            ack_response = requests.post(
+                remote_sync["ackUrl"],
+                json={"consumer": remote_sync["consumer"], "items": ack_items},
+                timeout=(10, remote_sync["timeoutSec"]),
+                headers=cls._build_remote_sync_request_headers(remote_sync),
+            )
+            ack_response.raise_for_status()
+            ack_payload = ack_response.json()
+            if int(ack_payload.get("code") or 0) != 200:
+                raise RuntimeError(f"远端工单回写失败: {ack_payload.get('msg') or ack_payload}")
+            summary["ackedCount"] = len(ack_items)
+
+        return summary
