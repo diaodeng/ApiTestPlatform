@@ -96,20 +96,25 @@ async def report_error_records(
                          response_model=PageResponseModel,
                          dependencies=[Depends(CheckUserInterfaceAuth(['hrm:report:delete']))])
 async def report_del(request: Request, query_info: ReportDelModel, query_db: Session = Depends(get_db)):
-    await ReportDao.delete(query_db, query_info.report_ids)
-    return ResponseUtil.success(dict_content={"msg": "删除成功"})
+    result = await ReportService.delete_reports(query_db, query_info)
+    if result.is_success:
+        return ResponseUtil.success(
+            dict_content={"msg": result.message, "deletedCount": result.result.get("deletedCount", 0)}
+        )
+    return ResponseUtil.failure(msg=result.message)
 
 
 @reportController.get("/export/htmlold",
                       response_class=HTMLResponse,
                       dependencies=[Depends(CheckUserInterfaceAuth(['hrm:report:downloadHtml']))]
                       )
-async def export_html(request: Request,
-                      query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
-                      query_db: Session = Depends(get_db),
-                      current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-                      # data_scope_sql: DataScopeExpr = Depends(GetDataScope('HrmRunDetail', user_alias='manager'))
-                      ):
+async def export_html_old(
+    request: Request,
+    query_info: RunDetailQueryModel = Depends(RunDetailQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+    # data_scope_sql: DataScopeExpr = Depends(GetDataScope('HrmRunDetail', user_alias='manager'))
+):
     try:
         # 1. 从数据库获取数据 (示例使用伪代码)
         # data = await db.fetch("SELECT * FROM items")

@@ -112,7 +112,7 @@ class CeleryJobService:
 
         :return: 任务注册键字符串列表。
         """
-        from module_task import scheduler_promo, scheduler_qtr, scheduler_test  # noqa: F401
+        from module_task import scheduler_maintenance, scheduler_promo, scheduler_qtr, scheduler_test  # noqa: F401
         from module_task.task_register import JOB_REGISTRY
 
         return sorted(JOB_REGISTRY.keys())

@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import datetime
 import json
 import os
@@ -6,17 +7,23 @@ from collections.abc import AsyncGenerator
 from jinja2 import Template
 from sqlalchemy.orm import Session
 
+from module_admin.entity.vo.common_vo import DataScopeExpr
 from module_hrm.dao.report_dao import ReportDao
 from module_hrm.dao.run_detail_dao import RunDetailDao
 from module_hrm.entity.do.report_do import HrmReport
 from module_hrm.entity.vo.case_vo_detail_for_run import StepLogs
+from module_hrm.entity.vo.common_vo import CrudResponseModel
+from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.entity.vo.run_detail_vo import HrmRunDetailModel, RunDetailQueryModel
 from module_hrm.utils.util import compress_text, decompress_text
-from module_admin.entity.vo.common_vo import DataScopeExpr
 from utils.jinja_template import TemplateHandler
 
 
 class ReportService:
+    """
+    测试报告服务层。
+    """
+
     def __init__(self):
         pass
 
@@ -35,16 +42,42 @@ class ReportService:
     def delete_report(self, report_id: int) -> HrmReport:
         pass
 
+    @classmethod
+    async def delete_reports(cls, db: Session, cleanup_model: ReportDelModel) -> CrudResponseModel:
+        """
+        删除测试报告，支持按报告ID、时间范围和用户ID过滤。
+
+        :param db: 数据库会话。
+        :param cleanup_model: 删除参数模型。
+        :return: 统一 CRUD 响应。
+        """
+        deleted_count = await ReportDao.delete_by_filters(db, cleanup_model)
+        message = "删除成功" if deleted_count else "没有符合条件的测试报告"
+        return CrudResponseModel(is_success=True, message=message, result={"deletedCount": deleted_count})
+
     def create_report(self, report_name: str, **kwargs) -> HrmReport:
+        """
+        创建测试报告实体。
+
+        :param report_name: 报告名称。
+        :param kwargs: 其他报告字段。
+        :return: 新建的报告实体。
+        """
         report = HrmReport(report_name=report_name, **kwargs)
+        return report
 
     @classmethod
-    async def generate_html_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:DataScopeExpr|None = None) -> AsyncGenerator[str, None]:
+    async def generate_html_report(
+        cls,
+        query_db: Session,
+        query_info: RunDetailQueryModel,
+        data_scope_sql: DataScopeExpr | None = None,
+    ) -> AsyncGenerator[str, None]:
         count_info = await RunDetailDao.get_report_count_info(query_db, query_info, data_scope_sql)
         report = await ReportDao.get_by_id(query_db, query_info.report_id)
         data = {
             "title": f"{report.report_name}",
-            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "report_name": report.report_name,
             "start_time": report.start_at.strftime("%Y-%m-%d %H:%M:%S"),
             "info": count_info,
@@ -55,8 +88,7 @@ class ReportService:
         batch_size = 1024*1024
 
         async for item in RunDetailDao.list_iter(query_db, query_info, data_scope_sql):
-            item:HrmRunDetailModel = HrmRunDetailModel.model_validate(item)
-            new_detail_data = ""
+            item: HrmRunDetailModel = HrmRunDetailModel.model_validate(item)
             all_error_log = ""
             for step in item.run_detail.teststeps:
                 logs:StepLogs = step.result.logs
@@ -79,7 +111,12 @@ class ReportService:
 
 
     @classmethod
-    async def generate_pdf_report(cls, query_db: Session, query_info: RunDetailQueryModel, data_scope_sql:DataScopeExpr|None = None) -> bytes|bool:
+    async def generate_pdf_report(
+        cls,
+        query_db: Session,
+        query_info: RunDetailQueryModel,
+        data_scope_sql: DataScopeExpr | None = None,
+    ) -> bytes | bool:
         result = await RunDetailDao.list(query_db, query_info, data_scope_sql)
 
         curren_dir = os.path.dirname(__file__)
@@ -89,7 +126,7 @@ class ReportService:
             template_file="report.html",
             data={
                 "title": "数据报告",
-                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "data": result,
             })
         return pdf_content
