@@ -252,12 +252,38 @@
           <template v-if="form.needLogPull">
             <el-col :span="8">
               <el-form-item label="vendorId" prop="vendorId">
-                <el-input-number v-model="form.logPullConfig.vendorId" :min="1" controls-position="right" />
+                <el-select
+                  v-model="form.logPullConfig.vendorId"
+                  placeholder="选择商家"
+                  clearable
+                  filterable
+                  @change="handleFormVendorChange"
+                >
+                  <el-option
+                    v-for="item in vendorOptions"
+                    :key="item.vendorId"
+                    :label="item.label"
+                    :value="item.vendorId"
+                  />
+                </el-select>
               </el-form-item>
             </el-col>
             <el-col :span="8">
               <el-form-item label="storeId" prop="storeId">
-                <el-input-number v-model="form.logPullConfig.storeId" :min="1" controls-position="right" />
+                <el-select
+                  v-model="form.logPullConfig.storeId"
+                  placeholder="先选择商家"
+                  clearable
+                  filterable
+                  :disabled="!form.logPullConfig.vendorId"
+                >
+                  <el-option
+                    v-for="item in formLogPullStoreOptions"
+                    :key="item.storeId"
+                    :label="item.label"
+                    :value="item.storeId"
+                  />
+                </el-select>
               </el-form-item>
             </el-col>
             <el-col :span="8">
@@ -387,6 +413,63 @@
                     :value="item.agentCode"
                   />
                 </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="24">
+              <el-divider content-position="left">通知配置</el-divider>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="启用通知">
+                <el-switch
+                  v-model="form.logPullConfig.notifyConfig.allowPush"
+                  inline-prompt
+                  :active-value="1"
+                  :inactive-value="0"
+                  active-text="是"
+                  inactive-text="否"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="推送配置">
+                <el-select
+                  v-model="form.logPullConfig.notifyConfig.pushIds"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="选择已有推送配置"
+                >
+                  <el-option
+                    v-for="item in pushOptions"
+                    :key="item.pushId"
+                    :label="`${item.name || item.pushId} [${item.pushId}]`"
+                    :value="item.pushId"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="成功通知">
+                <el-switch
+                  v-model="form.logPullConfig.notifyConfig.success.push"
+                  inline-prompt
+                  :active-value="true"
+                  :inactive-value="false"
+                  active-text="是"
+                  inactive-text="否"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="失败通知">
+                <el-switch
+                  v-model="form.logPullConfig.notifyConfig.failed.push"
+                  inline-prompt
+                  :active-value="true"
+                  :inactive-value="false"
+                  active-text="是"
+                  inactive-text="否"
+                />
               </el-form-item>
             </el-col>
           </template>
@@ -961,10 +1044,36 @@
                 >
                   <el-form ref="logPullRef" :model="logPullForm" :rules="logPullRules" label-width="110px">
                     <el-form-item label="vendorId" prop="vendorId">
-                      <el-input-number v-model="logPullForm.vendorId" :min="1" controls-position="right" />
+                      <el-select
+                        v-model="logPullForm.vendorId"
+                        placeholder="选择商家"
+                        clearable
+                        filterable
+                        @change="handleLogPullVendorChange"
+                      >
+                        <el-option
+                          v-for="item in vendorOptions"
+                          :key="item.vendorId"
+                          :label="item.label"
+                          :value="item.vendorId"
+                        />
+                      </el-select>
                     </el-form-item>
                     <el-form-item label="storeId" prop="storeId">
-                      <el-input-number v-model="logPullForm.storeId" :min="1" controls-position="right" />
+                      <el-select
+                        v-model="logPullForm.storeId"
+                        placeholder="先选择商家"
+                        clearable
+                        filterable
+                        :disabled="!logPullForm.vendorId"
+                      >
+                        <el-option
+                          v-for="item in logPullStoreOptions"
+                          :key="item.storeId"
+                          :label="item.label"
+                          :value="item.storeId"
+                        />
+                      </el-select>
                     </el-form-item>
                     <el-form-item label="posNo" prop="posNo">
                       <el-input-number v-model="logPullForm.posNo" :min="1" controls-position="right" />
@@ -1069,6 +1178,22 @@
                           :key="item.agentCode"
                           :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
                           :value="item.agentCode"
+                        />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="通知配置">
+                      <el-select
+                        v-model="logPullForm.notifyConfig.pushIds"
+                        multiple
+                        filterable
+                        clearable
+                        placeholder="选择已有推送配置"
+                      >
+                        <el-option
+                          v-for="item in pushOptions"
+                          :key="item.pushId"
+                          :label="`${item.name || item.pushId} [${item.pushId}]`"
+                          :value="item.pushId"
                         />
                       </el-select>
                     </el-form-item>
@@ -1423,6 +1548,7 @@
 import { saveAs } from 'file-saver'
 import { decompressText } from '@/utils/tools'
 import { all as listAllAgents } from '@/api/hrm/agent'
+import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
 import {
   addTicket,
   addTicketMessage,
@@ -1439,6 +1565,7 @@ import {
   extractTicketKnowledge,
   getTicket,
   getTicketLogPullContent,
+  getTicketLogPullVendorStoreOptions,
   getTicketTimeline,
   importTicketExcel,
   listTicket,
@@ -1482,6 +1609,8 @@ const projectOptions = ref([])
 const formModuleOptions = ref([])
 const queryModuleOptions = ref([])
 const agentOptions = ref([])
+const vendorOptions = ref([])
+const pushOptions = ref([])
 const open = ref(false)
 const assignOpen = ref(false)
 const statusOpen = ref(false)
@@ -1584,8 +1713,93 @@ function createDefaultLogPullForm() {
     rangeAfterMinutes: 30,
     storageMode: undefined,
     autoAiEnabled: false,
-    aiAgentCode: ''
+    aiAgentCode: '',
+    notifyConfig: {
+      allowPush: 1,
+      pushIds: [],
+      success: {
+        push: true,
+        reminder: 1
+      },
+      failed: {
+        push: true,
+        reminder: 1
+      }
+    }
   }
+}
+
+function normalizeVendorOptions(rows = []) {
+  return rows.map(item => ({
+    vendorId: Number(item.vendorId),
+    vendorCode: String(item.vendorCode || '').trim(),
+    vendorName: String(item.vendorName || item.vendorId || '').trim(),
+    label: buildVendorOptionLabel(item),
+    stores: Array.isArray(item.stores)
+      ? item.stores.map(store => ({
+        storeId: Number(store.storeId),
+        storeCode: String(store.storeCode || '').trim(),
+        storeName: String(store.storeName || store.storeId || '').trim(),
+        label: buildStoreOptionLabel(store)
+      }))
+      : []
+  }))
+}
+
+function buildVendorOptionLabel(vendor) {
+  const name = String(vendor.vendorName || vendor.vendorId || '').trim()
+  const code = String(vendor.vendorCode || '').trim()
+  const id = String(vendor.vendorId || '').trim()
+  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+}
+
+function buildStoreOptionLabel(store) {
+  const name = String(store.storeName || store.storeId || '').trim()
+  const code = String(store.storeCode || '').trim()
+  const id = String(store.storeId || '').trim()
+  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+}
+
+function loadVendorOptions() {
+  return getTicketLogPullVendorStoreOptions().then(response => {
+    vendorOptions.value = normalizeVendorOptions(response.data?.vendors || [])
+  })
+}
+
+function loadPushOptions() {
+  return listAllPushConfig({ pageNum: 1, pageSize: 500 }).then(response => {
+    const rows = response.data || []
+    pushOptions.value = Array.isArray(rows) ? rows : []
+  })
+}
+
+function getVendorStoreOptions(vendorId) {
+  const resolvedVendorId = Number(vendorId)
+  if (!resolvedVendorId) {
+    return []
+  }
+  const vendor = vendorOptions.value.find(item => item.vendorId === resolvedVendorId)
+  return vendor?.stores || []
+}
+
+function resetStoreSelection(target, vendorId) {
+  const storeId = Number(target.storeId)
+  if (!storeId) {
+    target.storeId = undefined
+    return
+  }
+  const storeExists = getVendorStoreOptions(vendorId).some(item => item.storeId === storeId)
+  if (!storeExists) {
+    target.storeId = undefined
+  }
+}
+
+function handleFormVendorChange(vendorId) {
+  resetStoreSelection(form.value.logPullConfig, vendorId)
+}
+
+function handleLogPullVendorChange(vendorId) {
+  resetStoreSelection(logPullForm.value, vendorId)
 }
 
 function createDefaultTicketForm() {
@@ -1751,6 +1965,8 @@ const latestMessageItems = computed(() => (ticketMessages.value || []).slice(-3)
 const latestSimilarTickets = computed(() => (similarTickets.value || []).slice(0, 3))
 const aiTaskDetailPayload = computed(() => selectedAiTask.value || {})
 const aiPromptLayers = computed(() => detail.value.aiPromptLayers || {})
+const formLogPullStoreOptions = computed(() => getVendorStoreOptions(form.value.logPullConfig?.vendorId))
+const logPullStoreOptions = computed(() => getVendorStoreOptions(logPullForm.value.vendorId))
 const aiPromptHintTitle = computed(() => {
   const projectName = aiPromptLayers.value?.project?.projectName || detail.value.projectName || ''
   const moduleName = aiPromptLayers.value?.module?.moduleName || detail.value.moduleName || ''
@@ -2865,6 +3081,8 @@ onBeforeUnmount(() => {
 
 loadProjectOptions()
 loadAgentOptions()
+loadVendorOptions()
+loadPushOptions()
 loadQueryModuleOptions()
 getList()
 </script>

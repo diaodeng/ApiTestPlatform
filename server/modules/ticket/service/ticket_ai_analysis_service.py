@@ -48,6 +48,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.ticket_notify_service import TicketNotifyService
 from modules.ticket.service.ticket_prompt_service import TicketPromptService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -846,7 +847,8 @@ class TicketAiAnalysisService:
 - 仓库地址: {mapping.repo_url}
 - 分支: {mapping.branch_name}
 - 本地仓库路径: {mapping.local_repo_path}
-- 说明: 如果 Agent 本地配置中提供了本地仓库路径或工作区根目录，则以 Agent 本地配置为准；映射中的路径仅保留兼容和审计用途.
+        - 说明: 如果 Agent 本地配置中提供了本地仓库路径或工作区根目录，则以 Agent 本地配置为准；
+          映射中的路径仅保留兼容和审计用途.
 
 {layered_prompt_text}
 
@@ -1767,6 +1769,15 @@ class TicketAiAnalysisService:
             )
             db.commit()
             return
+        source_log_pull_record = None
+        notify_config: dict[str, Any] | None = None
+        if getattr(task, "source_log_pull_record_id", None):
+            source_log_pull_record = TicketLogPullDao.get_record_by_id(db, int(task.source_log_pull_record_id))
+        if source_log_pull_record and isinstance(source_log_pull_record.command_content, dict):
+            notify_config = (
+                source_log_pull_record.command_content.get("notifyConfig")
+                or source_log_pull_record.command_content.get("notify_config")
+            )
         cls._log_task_step(
             task_id,
             "RESOLVE",
@@ -1967,6 +1978,15 @@ class TicketAiAnalysisService:
                 command_line=f"agent:{agent_code}",
             )
             db.commit()
+            TicketNotifyService.send_ticket_notification(
+                db,
+                ticket,
+                title="工单AI分析结果通知",
+                status="success",
+                message="AI分析已完成",
+                detail=f"task_id={task_id}, version_key={task.version_key}",
+                notify_config=notify_config,
+            )
             cls._log_task_step(task_id, "DONE", "AI 分析任务完成")
             return
         except Exception as exc:
@@ -1983,4 +2003,14 @@ class TicketAiAnalysisService:
                 command_line=f"agent:{agent_code}",
             )
             db.commit()
+            if "ticket" in locals() and ticket:
+                TicketNotifyService.send_ticket_notification(
+                    db,
+                    ticket,
+                    title="工单AI分析结果通知",
+                    status="failed",
+                    message="AI分析执行失败",
+                    detail=f"task_id={task_id}, error={failure_message}",
+                    notify_config=notify_config,
+                )
             return

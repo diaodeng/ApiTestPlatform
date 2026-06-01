@@ -101,6 +101,7 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     storage_mode: str | None = Field(default=None, description="本次任务使用的存储模式，支持 local/ftp")
     auto_ai_enabled: bool = Field(default=False, description="日志拉取成功后是否自动发起AI分析")
     ai_agent_code: str | None = Field(default=None, description="自动AI分析使用的Agent编码")
+    notify_config: dict[str, Any] | None = Field(default=None, description="日志拉取后的通知配置")
 
     @model_validator(mode="before")
     @classmethod

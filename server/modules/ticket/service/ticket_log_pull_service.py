@@ -42,6 +42,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullVendorStoreOptionsModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
+from modules.ticket.service.ticket_notify_service import TicketNotifyService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 
@@ -72,6 +73,7 @@ class TicketLogPullService:
     _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ticket-log-pull")
     _executor_lock = threading.Lock()
     _active_record_ids: set[int] = set()
+    VERSION_PATTERN = re.compile(r"(?:版本号|版本|version|app[_\s-]*version)[:：\s-]*([A-Za-z0-9._/-]+)", re.IGNORECASE)
 
     @staticmethod
     def _user_id(current_user: CurrentUserModel) -> int | None:
@@ -395,6 +397,84 @@ class TicketLogPullService:
         if not payload:
             return CrudResponseModel(is_success=False, message="当前记录缺少可重新拉取的原始参数")
         return cls.create_log_pull_services(query_db, record.ticket_id, payload, current_user)
+
+    @classmethod
+    def _extract_version_key_from_text(cls, text: str | None) -> str:
+        """
+        从日志文本中提取版本号。
+
+        :param text: 日志文本。
+        :return: 版本号，失败返回空字符串。
+        """
+        if not text:
+            return ""
+        match = cls.VERSION_PATTERN.search(text)
+        if not match:
+            return ""
+        return str(match.group(1) or "").strip()
+
+    @classmethod
+    def _update_ticket_version_key(cls, query_db: Session, ticket_id: int, version_key: str) -> None:
+        """
+        回写工单版本号到扩展字段。
+
+        :param query_db: 数据库会话。
+        :param ticket_id: 工单ID。
+        :param version_key: 版本号。
+        :return: 无。
+        """
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
+            return
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        if str(extra_data.get("version_key") or "").strip() == version_key:
+            return
+        extra_data["version_key"] = version_key
+        TicketDao.update_ticket(
+            query_db,
+            ticket_id,
+            {
+                "extra_data": extra_data,
+                "update_by": "system",
+                "update_time": datetime.now(),
+            },
+        )
+
+    @classmethod
+    def _notify_automation(
+        cls,
+        query_db: Session,
+        ticket_id: int | None,
+        *,
+        status: str,
+        message: str,
+        detail: str | None = None,
+        notify_config: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        按工单自动化配置发送通知。
+
+        :param query_db: 数据库会话。
+        :param ticket_id: 工单ID。
+        :param status: 状态，success 或 failed。
+        :param message: 简要说明。
+        :param detail: 额外说明。
+        :return: 无。
+        """
+        if not ticket_id:
+            return
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
+            return
+        TicketNotifyService.send_ticket_notification(
+            query_db,
+            ticket,
+            title="工单自动化通知",
+            status=status,
+            message=message,
+            detail=detail,
+            notify_config=notify_config,
+        )
 
     @classmethod
     def redownload_log_pull_services(
@@ -1035,6 +1115,20 @@ class TicketLogPullService:
             return
         if not record.ticket_id:
             return
+        ticket = TicketDao.get_ticket_by_id(db, record.ticket_id)
+        if not ticket:
+            logger.warning("日志拉取记录[%s] 自动AI触发失败，工单不存在", record_id)
+            return
+        record_notify_config = {}
+        command_notify = record.command_content.get("notifyConfig") or record.command_content.get("notify_config")
+        if isinstance(command_notify, dict):
+            record_notify_config = command_notify
+        else:
+            automation_notify = record.command_content.get("_automation")
+            if isinstance(automation_notify, dict):
+                nested_notify = automation_notify.get("notifyConfig") or automation_notify.get("notify_config")
+                if isinstance(nested_notify, dict):
+                    record_notify_config = nested_notify
         automation = record.command_content.get("_automation")
         if isinstance(automation, dict):
             auto_ai_enabled = bool(automation.get("autoAiEnabled"))
@@ -1046,16 +1140,38 @@ class TicketLogPullService:
             return
         if not agent_code:
             logger.warning("日志拉取记录[%s] 已配置自动AI但未填写Agent", record_id)
-            return
-        ticket = TicketDao.get_ticket_by_id(db, record.ticket_id)
-        if not ticket:
-            logger.warning("日志拉取记录[%s] 自动AI触发失败，工单不存在", record_id)
+            cls._notify_automation(
+                db,
+                ticket.ticket_id,
+                status="failed",
+                message="日志拉取后自动AI已启用，但未配置Agent，已跳过分析",
+                detail=f"record_id={record_id}",
+                notify_config=record_notify_config,
+            )
             return
         version_key = str(getattr(ticket, "version_key", "") or "").strip()
         if not version_key and isinstance(ticket.extra_data, dict):
             version_key = str(ticket.extra_data.get("version_key") or "").strip()
         if not version_key:
+            log_text = ""
+            try:
+                log_content_model = cls.get_log_pull_content_services(db, record.id)
+                log_text = cls._decode_log_text(log_content_model.text) if log_content_model else ""
+            except Exception as exc:
+                logger.warning("日志拉取记录[%s] 提取版本号前读取日志失败: %s", record_id, exc)
+            version_key = cls._extract_version_key_from_text(log_text)
+            if version_key:
+                cls._update_ticket_version_key(db, ticket.ticket_id, version_key)
+        if not version_key:
             logger.warning("日志拉取记录[%s] 自动AI触发失败，工单缺少版本号", record_id)
+            cls._notify_automation(
+                db,
+                ticket.ticket_id,
+                status="failed",
+                message="日志拉取成功但未从日志中提取到版本号，后续AI分析已跳过",
+                detail=f"record_id={record_id}",
+                notify_config=record_notify_config,
+            )
             return
         try:
             from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel
@@ -1081,8 +1197,24 @@ class TicketLogPullService:
                     record.ticket_id,
                     result.message,
                 )
+                cls._notify_automation(
+                    db,
+                    record.ticket_id,
+                    status="failed",
+                    message=f"日志拉取后自动AI提交失败：{result.message}",
+                    detail=f"record_id={record_id}, version_key={version_key}",
+                    notify_config=record_notify_config,
+                )
         except Exception as exc:
             logger.exception("日志拉取记录[%s] 触发自动AI分析失败: %s", record_id, exc)
+            cls._notify_automation(
+                db,
+                record.ticket_id,
+                status="failed",
+                message="日志拉取后自动AI分析触发异常",
+                detail=f"record_id={record_id}, error={exc}",
+                notify_config=record_notify_config,
+            )
 
     @classmethod
     def _submit_external_request(cls, db: Session, record: TicketLogPullRecord) -> None:
@@ -1899,6 +2031,16 @@ class TicketLogPullService:
                     "logEndTime": command_content.get("logEndTime") or record.log_end_time,
                 }
             )
+        notify_config = command_content.get("notifyConfig") or command_content.get("notify_config")
+        if not isinstance(notify_config, dict):
+            automation = (
+                command_content.get("_automation")
+                if isinstance(command_content.get("_automation"), dict)
+                else {}
+            )
+            notify_config = automation.get("notifyConfig") or automation.get("notify_config")
+        if isinstance(notify_config, dict):
+            payload_data["notifyConfig"] = notify_config
         automation = command_content.get("_automation") if isinstance(command_content.get("_automation"), dict) else {}
         if automation:
             payload_data["autoAiEnabled"] = automation.get("autoAiEnabled")
