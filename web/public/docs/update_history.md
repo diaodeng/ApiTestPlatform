@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 修复线程模式定时任务在服务重启后残留 Redis 并发锁的问题：任务运行态新增 worker 启动标识，执行入口会在发现旧 worker 留下的 `state/lock` 时自动回收僵尸锁，避免服务恢复后持续提示“并发冲突，已跳过”。
 1. 新增工单外部同步与内网拉取链路：后端增加 `POST /ticket/sync/external`、`GET /ticket/sync/pending`，并提供可选 `POST /ticket/sync/ack`；同步状态统一写入 `ticket.extra_data.external_sync`，改用 `revision + consumer.delivered_revision` 跟踪每个消费方的拉取进度，同时记录自动识别、相似工单检索、自动日志拉取和自动 AI 分析的步骤状态，便于后续断点排查。
 1. 日志拉取页面的商家、门店改为复用服务端参数 `ticket.logPull.external.vendors` 的联动下拉；商家包含名称/编码/ID，门店包含名称/编码/ID，选择商家后才允许选择所属门店，门店下拉支持按编码、ID、名称搜索。
 1. 日志拉取管理页新增按商家、门店、POS、拉取日期筛选；其中拉取日期按页面配置的 `modifyTime` 查询，后端直接基于日志记录保存的 `command_content.modifyTime` 过滤。
