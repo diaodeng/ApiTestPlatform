@@ -46,7 +46,7 @@ class ReportDao:
         await run_in_threadpool(db.commit)
 
     @classmethod
-    def _delete_sync(cls, db: Session, report_ids: list, batch_size: int = 5000):
+    def _delete_sync(cls, db: Session, report_ids: list, batch_size: int = 1000):
         """
         同步删除报告及其明细、错误记录。
 
