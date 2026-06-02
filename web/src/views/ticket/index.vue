@@ -254,9 +254,11 @@
               <el-form-item label="vendorId" prop="vendorId">
                 <el-select
                   v-model="form.logPullConfig.vendorId"
-                  placeholder="选择商家"
+                  placeholder="选择或输入商家"
                   clearable
                   filterable
+                  allow-create
+                  default-first-option
                   @change="handleFormVendorChange"
                 >
                   <el-option
@@ -272,10 +274,11 @@
               <el-form-item label="storeId" prop="storeId">
                 <el-select
                   v-model="form.logPullConfig.storeId"
-                  placeholder="先选择商家"
+                  placeholder="选择或输入门店"
                   clearable
                   filterable
-                  :disabled="!form.logPullConfig.vendorId"
+                  allow-create
+                  default-first-option
                 >
                   <el-option
                     v-for="item in formLogPullStoreOptions"
@@ -1046,9 +1049,11 @@
                     <el-form-item label="vendorId" prop="vendorId">
                       <el-select
                         v-model="logPullForm.vendorId"
-                        placeholder="选择商家"
+                        placeholder="选择或输入商家"
                         clearable
                         filterable
+                        allow-create
+                        default-first-option
                         @change="handleLogPullVendorChange"
                       >
                         <el-option
@@ -1062,10 +1067,11 @@
                     <el-form-item label="storeId" prop="storeId">
                       <el-select
                         v-model="logPullForm.storeId"
-                        placeholder="先选择商家"
+                        placeholder="选择或输入门店"
                         clearable
                         filterable
-                        :disabled="!logPullForm.vendorId"
+                        allow-create
+                        default-first-option
                       >
                         <el-option
                           v-for="item in logPullStoreOptions"
@@ -1788,8 +1794,8 @@ function resetStoreSelection(target, vendorId) {
     target.storeId = undefined
     return
   }
-  const storeExists = getVendorStoreOptions(vendorId).some(item => item.storeId === storeId)
-  if (!storeExists) {
+  const storeOptions = getVendorStoreOptions(vendorId)
+  if (storeOptions.length && !storeOptions.some(item => item.storeId === storeId)) {
     target.storeId = undefined
   }
 }

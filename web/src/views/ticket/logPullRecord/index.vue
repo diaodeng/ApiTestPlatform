@@ -225,15 +225,17 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="商家" prop="vendorId">
-              <el-select
-                v-model="createForm.vendorId"
-                placeholder="选择商家"
-                clearable
-                filterable
-                style="width: 100%"
-                @change="handleCreateVendorChange"
-              >
+          <el-form-item label="商家" prop="vendorId">
+            <el-select
+              v-model="createForm.vendorId"
+              placeholder="选择或输入商家"
+              clearable
+              filterable
+              allow-create
+              default-first-option
+              style="width: 100%"
+              @change="handleCreateVendorChange"
+            >
                 <el-option
                   v-for="item in vendorOptions"
                   :key="item.vendorId"
@@ -244,15 +246,16 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="门店" prop="storeId">
-              <el-select
-                v-model="createForm.storeId"
-                placeholder="先选择商家"
-                clearable
-                filterable
-                :disabled="!createForm.vendorId"
-                style="width: 100%"
-              >
+          <el-form-item label="门店" prop="storeId">
+            <el-select
+              v-model="createForm.storeId"
+              placeholder="选择或输入门店"
+              clearable
+              filterable
+              allow-create
+              default-first-option
+              style="width: 100%"
+            >
                 <el-option
                   v-for="item in createStoreOptions"
                   :key="item.storeId"
@@ -757,8 +760,8 @@ function resetStoreSelection(target, vendorId) {
     target.storeId = undefined
     return
   }
-  const storeExists = getVendorStoreOptions(vendorId).some(item => item.storeId === storeId)
-  if (!storeExists) {
+  const storeOptions = getVendorStoreOptions(vendorId)
+  if (storeOptions.length && !storeOptions.some(item => item.storeId === storeId)) {
     target.storeId = undefined
   }
 }

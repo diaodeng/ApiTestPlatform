@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "concepts/module-landscape.md",
+                "file": "entities/services/new-client-services.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "module-landscape"
+              "title": "new-client-services"
             }
           }
         ]
@@ -185,11 +185,11 @@
   },
   "active": "4c7ec8a52d7767e3",
   "lastOpenFiles": [
+    "index.md",
+    "concepts/module-landscape.md",
     "entities/services/ticket-domain.md",
     "flows/ticket-workflow-routing.md",
     "entities/data-models/ticket-core-models.md",
-    "index.md",
-    "concepts/module-landscape.md",
     "entities/components/web-shell.md",
     "log.md",
     "entities/services/hrm-domain.md",
