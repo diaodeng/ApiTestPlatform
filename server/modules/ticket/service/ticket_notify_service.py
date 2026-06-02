@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from module_hrm.entity.do.ticket_do import Ticket
 from sqlalchemy.orm import Session
 
 from module_hrm.dao.push_dao import PushDao
 from module_hrm.entity.vo.push_vo import PushModel
+from modules.ticket.entity.do.ticket_do import Ticket
 from utils.log_util import logger
 from utils.message_util import MessageHandler
 
