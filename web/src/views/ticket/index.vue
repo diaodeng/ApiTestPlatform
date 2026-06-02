@@ -24,6 +24,20 @@
           <el-option v-for="item in ticketStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
+      <el-form-item label="外部工单号" prop="ticketNo">
+        <el-input
+          v-model="queryParams.ticketNo"
+          placeholder="请输入外部工单号"
+          clearable
+          style="width: 180px"
+          @keyup.enter="handleQuery"
+        />
+      </el-form-item>
+      <el-form-item label="处理状态" prop="processStatus">
+        <el-select v-model="queryParams.processStatus" placeholder="处理状态" clearable style="width: 180px">
+          <el-option v-for="item in ticketProcessStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="项目" prop="projectId">
         <el-select v-model="queryParams.projectId" placeholder="所属项目" clearable filterable style="width: 180px">
           <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
@@ -1599,6 +1613,7 @@ import {
   logPullStatusOptions,
   logPullStorageModeOptions,
   priorityOptions,
+  ticketProcessStatusOptions,
   severityOptions,
   sourceOptions,
   ticketStatusOptions
@@ -1835,6 +1850,8 @@ const data = reactive({
     pageSize: 10,
     keyword: undefined,
     status: undefined,
+    ticketNo: undefined,
+    processStatus: undefined,
     projectId: undefined,
     moduleId: undefined,
     internalPriority: undefined

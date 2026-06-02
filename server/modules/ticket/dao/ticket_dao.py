@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from typing import Any
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from module_admin.entity.do.user_do import SysUser
@@ -9,6 +9,7 @@ from modules.ticket.entity.do.ticket_do import (
     EmbeddingRecord,
     KnowledgeArticle,
     Ticket,
+    TicketAiAnalysisTask,
     TicketAssignHistory,
     TicketComment,
     TicketEvent,
@@ -19,6 +20,7 @@ from modules.ticket.entity.do.ticket_do import (
     WorkflowStatus,
     WorkflowTransition,
 )
+from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
 from modules.ticket.entity.vo.ticket_vo import KnowledgeArticleQueryModel, TicketQueryModel
 from utils.page_util import PageUtil
 
@@ -84,6 +86,61 @@ def _json_safe_value(value: Any) -> Any:
     return str(value)
 
 
+def _latest_log_pull_status_expr(ticket_id_column):
+    """
+    构造工单最新日志拉取状态的关联子查询表达式。
+    :param ticket_id_column: 工单ID列
+    :return: 状态子查询
+    """
+    return (
+        select(TicketLogPullRecord.status)
+        .where(TicketLogPullRecord.ticket_id == ticket_id_column)
+        .order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _latest_ai_status_expr(ticket_id_column):
+    """
+    构造工单最新 AI 分析状态的关联子查询表达式。
+    :param ticket_id_column: 工单ID列
+    :return: 状态子查询
+    """
+    return (
+        select(TicketAiAnalysisTask.status)
+        .where(TicketAiAnalysisTask.ticket_id == ticket_id_column)
+        .order_by(TicketAiAnalysisTask.create_time.desc(), TicketAiAnalysisTask.task_id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _build_ticket_process_status_filter(latest_log_status, latest_ai_status, process_status: str):
+    """
+    根据工单处理状态构造过滤条件。
+    :param latest_log_status: 最新日志拉取状态表达式
+    :param latest_ai_status: 最新 AI 分析状态表达式
+    :param process_status: 处理状态编码
+    :return: 过滤条件表达式
+    """
+    if process_status == "no_log_pull":
+        return latest_log_status.is_(None)
+    if process_status == "log_pull_success":
+        return latest_log_status == "success"
+    if process_status == "log_pull_failed":
+        return latest_log_status.in_(["failed", "exception"])
+    if process_status == "ai_not_analyzed":
+        return and_(latest_log_status == "success", latest_ai_status.is_(None))
+    if process_status == "ai_running":
+        return and_(latest_log_status == "success", latest_ai_status.in_(["created", "running"]))
+    if process_status == "ai_success":
+        return latest_ai_status == "success"
+    if process_status == "ai_failed":
+        return latest_ai_status.in_(["failed", "canceled"])
+    return True
+
+
 class TicketDao:
     """
     工单模块数据库访问层。
@@ -136,11 +193,15 @@ class TicketDao:
         """
         begin_time = _date_start(query.begin_time)
         end_time = _date_end(query.end_time)
+        ticket_no = str(query.ticket_no or "").strip()
+        process_status = str(query.process_status or "").strip()
+        latest_log_status = _latest_log_pull_status_expr(Ticket.ticket_id)
+        latest_ai_status = _latest_ai_status_expr(Ticket.ticket_id)
         ticket_query = (
             db.query(Ticket)
             .filter(
                 Ticket.del_flag == "0",
-                Ticket.ticket_no.like(f"%{query.ticket_no}%") if query.ticket_no else True,
+                Ticket.ticket_no.like(f"%{ticket_no}%") if ticket_no else True,
                 Ticket.title.like(f"%{query.title}%") if query.title else True,
                 Ticket.status == query.status if query.status else True,
                 Ticket.project_id == query.project_id if query.project_id else True,
@@ -154,6 +215,7 @@ class TicketDao:
                 Ticket.create_time >= begin_time if begin_time else True,
                 Ticket.create_time <= end_time if end_time else True,
             )
+            .filter(_build_ticket_process_status_filter(latest_log_status, latest_ai_status, process_status))
             .filter(
                 or_(
                     Ticket.title.like(f"%{query.keyword}%"),
