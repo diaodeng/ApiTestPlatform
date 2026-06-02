@@ -1006,7 +1006,9 @@ class CeleryJobService:
                     )
                 except Exception as exc:
                     logger.warning(f"写入任务停止请求失败[{task_id}]：{exc}")
-            should_update_status = terminate or runtime_state in {"reserved", "scheduled"}
+            should_update_status = runtime_state in {"reserved", "scheduled"} or (
+                not terminate and runtime_state != "active"
+            )
             if should_update_status:
                 try:
                     query_db.query(CeleryPeriodicTask).filter(
@@ -1016,6 +1018,20 @@ class CeleryJobService:
                         {
                             "last_status": "revoked",
                             "last_message": "任务已手动终止" if terminate else "任务已手动取消",
+                            "update_time": datetime.now(),
+                        }
+                    )
+                    query_db.commit()
+                except Exception:
+                    query_db.rollback()
+            elif terminate:
+                try:
+                    query_db.query(CeleryPeriodicTask).filter(
+                        CeleryPeriodicTask.owner_type == owner_type,
+                        CeleryPeriodicTask.task_id == task_id,
+                    ).update(
+                        {
+                            "last_message": "已发送任务终止请求，等待当前任务结束",
                             "update_time": datetime.now(),
                         }
                     )

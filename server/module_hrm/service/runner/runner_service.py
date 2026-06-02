@@ -37,9 +37,10 @@ from module_hrm.service.debugtalk_service import DebugTalkHandler, DebugTalkServ
 from module_hrm.service.runner.case_data_handler import CaseInfoHandle, ParametersHandler
 from module_hrm.service.runner.case_runner import TestRunner
 from module_hrm.service.runner.run_error_service import build_run_error_records, mark_case_run_failed
-from utils.snowflake import snowIdWorker
+from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
 from utils.log_util import logger
 from utils.message_util import TestResultPushHandler
+from utils.snowflake import snowIdWorker
 
 logger.info(f"平台信息：{platform.platform()}")
 if "WSL" in str(platform.platform()):
@@ -71,7 +72,12 @@ def build_run_detail_info(case_data, run_info) -> tuple[HrmRunDetailModel | None
         run_detail_obj.run_duration = case_data.config.result.duration
         run_detail_obj.run_detail = case_data.model_dump_json(by_alias=True)
         run_detail_obj.status = case_data.config.result.status
-        return run_detail_obj, build_run_error_records(case_data, run_info, run_detail_obj.detail_id, run_detail_obj.run_name)
+        return run_detail_obj, build_run_error_records(
+            case_data,
+            run_info,
+            run_detail_obj.detail_id,
+            run_detail_obj.run_name,
+        )
     return None, []
 
 
@@ -207,6 +213,9 @@ async def run_by_batch(run_info: CaseRunModel, user=None) -> list[bool | int]:
         async with httpx.AsyncClient(limits=limit, http2=True) as client:
             run_info.http_client = client
             for project_id, ids in all_cases.items():  # 按项目执行
+                task_id = int((run_info.global_vars or {}).get("_task_id") or 0)
+                if task_id and is_task_stop_requested(task_id):
+                    raise TaskStopRequestedError("任务已手动终止")
                 if not ids:
                     continue
 
@@ -307,6 +316,10 @@ async def _run_worker(
             await result_queue.put(None)
             queue.task_done()
             break
+        task_id = int((getattr(run_info, "global_vars", {}) or {}).get("_task_id") or 0)
+        if task_id and is_task_stop_requested(task_id):
+            queue.task_done()
+            raise TaskStopRequestedError("任务已手动终止")
         try:
             res_list = await run_by_single(case_data, run_info, semaphore, debugtalk_info=debugtalk_info)
         except Exception as e:
@@ -362,6 +375,9 @@ async def run_by_concurrent(
     )
 
     async for case_data in get_case_info_batch(case_ids, env_obj):
+        task_id = int((run_info.global_vars or {}).get("_task_id") or 0)
+        if task_id and is_task_stop_requested(task_id):
+            raise TaskStopRequestedError("任务已手动终止")
         await run_queue.put(case_data)
 
     # await queue.join()
@@ -430,6 +446,17 @@ async def run_by_async(
 
             TestResultPushHandler(run_info, report_info).push()
         return f"执行成功，执行了{run_info.repeat_num}次，请前往报告查看"
+    except TaskStopRequestedError as e:
+        logger.warning(f"用例:{run_info.report_name}[{run_info.report_id}]执行已中止：{e}")
+        if report_id:
+            with SessionLocal() as query_db:
+                report_info = await ReportDao.get_by_id(query_db, report_id)
+                report_info.test_duration = time.time() - test_start_time
+                report_info.status = CaseRunStatus.failed.value
+                report_info.total = 0
+                report_info.success = 0
+                await run_in_threadpool(query_db.commit)
+        raise
     except Exception as e:
         logger.error(f"用例:{run_info.report_name}[{run_info.report_id}]执行失败，异常信息：{e}", exc_info=True)
         if report_id:  # 如果报告创建成功则更新报告状态

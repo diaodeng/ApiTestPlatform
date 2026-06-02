@@ -1717,13 +1717,23 @@ class TicketAiAnalysisService:
     @classmethod
     def resume_pending_tasks(cls) -> None:
         """
-        服务启动后恢复待执行和运行中的 AI 任务。
+        服务启动后清理待执行和运行中的 AI 任务。
         :return: 无
         """
         with SessionLocal() as db:
             tasks = TicketAiDao.list_recoverable_tasks(db, list(cls.ACTIVE_STATUSES))
+            now = datetime.now()
             for task in tasks:
-                cls.queue_task(task.task_id)
+                cls._mark_task_status(
+                    db,
+                    task.task_id,
+                    status=TicketAiAnalysisStatus.FAILED.value,
+                    status_desc="服务重启前任务未完成，已清理为失败",
+                    error_message="服务重启前任务未完成，已清理为失败",
+                    finished_at=now,
+                )
+            if tasks:
+                db.commit()
 
     @classmethod
     def _run_task(cls, task_id: int) -> None:

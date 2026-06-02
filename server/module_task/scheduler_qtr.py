@@ -8,6 +8,7 @@ from module_hrm.entity.vo.case_vo import CaseRunModel
 from module_hrm.entity.vo.push_vo import FeishuRobotModel
 from module_hrm.service.runner.runner_service import run_by_async
 from module_hrm.utils.util import get_system_stats
+from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
 from utils.log_util import logger
 
 from .task_register import register_job
@@ -55,7 +56,12 @@ def job_run_test(*args, **kwargs):
     logger.debug(f"任务执行参数: {args}  {kwargs}")
     try:
         logger.info("测试任务执行开始")
+        task_id = int(kwargs.get("_task_id") or 0)
+        if task_id and is_task_stop_requested(task_id):
+            raise TaskStopRequestedError("任务已手动终止")
         data = CaseRunModel(**kwargs)
+        if task_id:
+            data.global_vars["_task_id"] = task_id
         new_data_format = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         user_info_module = UserInfoModel()
         user_info_module.user_name = data.user_name
@@ -82,6 +88,8 @@ def job_run_test(*args, **kwargs):
         new_loop.stop()
         new_loop.close()
         logger.info(f"测试任务执行完成：{data.report_name}-{data.report_id}")
+    except TaskStopRequestedError as e:
+        logger.warning(f"测试任务已中止：{e}")
     except Exception as e:
         logger.error(f"执行测试任务失败：{e}")
         logger.exception(e)
