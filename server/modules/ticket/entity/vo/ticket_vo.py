@@ -82,6 +82,7 @@ class TicketQueryModel(QueryModel):
     ticket_no: str | None = Field(default=None, description="工单编号")
     title: str | None = Field(default=None, description="工单标题")
     status: str | None = Field(default=None, description="当前状态")
+    process_status: str | None = Field(default=None, description="工单处理状态")
     project_id: int | None = Field(default=None, description="所属项目ID")
     module_id: int | None = Field(default=None, description="所属模块ID")
     category_id: int | None = Field(default=None, description="问题分类ID")
@@ -91,7 +92,6 @@ class TicketQueryModel(QueryModel):
     current_assignee_id: int | None = Field(default=None, description="当前处理人ID")
     reporter_id: int | None = Field(default=None, description="提单人ID")
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
-
 
     sync_consumer: str | None = Field(default=None, description="同步消费者标识，用于筛选未同步数据")
 

@@ -70,6 +70,16 @@ export const logPullStorageModeOptions = [
   { label: 'FTP', value: 'ftp' }
 ]
 
+export const ticketProcessStatusOptions = [
+  { label: '未拉取', value: 'no_log_pull' },
+  { label: '日志拉取成功', value: 'log_pull_success' },
+  { label: '拉取失败', value: 'log_pull_failed' },
+  { label: 'AI未分析', value: 'ai_not_analyzed' },
+  { label: 'AI分析中', value: 'ai_running' },
+  { label: 'AI分析完成', value: 'ai_success' },
+  { label: 'AI分析失败', value: 'ai_failed' }
+]
+
 export function getOptionLabel(options, value) {
   return options.find(item => item.value === value)?.label || value || '-'
 }

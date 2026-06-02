@@ -356,8 +356,9 @@ class TicketService:
         if "merchantName" not in item:
             item["merchantName"] = project_name
         extra_data = item.get("extraData")
+        sync_summary = _extract_ticket_sync_summary(extra_data)
         item["versionKey"] = item.get("versionKey") or _extract_ticket_version_key(extra_data)
-        item["syncSummary"] = _extract_ticket_sync_summary(extra_data)
+        item["syncSummary"] = sync_summary
         return item
 
     @classmethod

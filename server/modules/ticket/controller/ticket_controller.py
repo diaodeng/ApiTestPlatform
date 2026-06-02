@@ -59,7 +59,7 @@ async def get_ticket_list(
     """
     获取工单列表接口。
     :param request: 请求对象
-    :param query: 工单查询条件，支持状态、项目、商家、模块、优先级、来源和关键字筛选
+    :param query: 工单查询条件，支持工单状态、工单号、处理状态、项目、商家、模块、优先级、来源和关键字筛选
     :param query_db: 数据库会话
     :return: 工单分页列表
     """
