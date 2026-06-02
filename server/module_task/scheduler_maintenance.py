@@ -4,6 +4,7 @@ from typing import Any
 from config.database import SessionLocal
 from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.service.report_service import ReportService
+from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 from utils.log_util import logger
 
@@ -71,6 +72,9 @@ def cleanup_test_reports(
     :param user_id: 用户ID，选填后仅清理该用户对应报告。
     :return: 清理结果摘要。
     """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
     cleanup_model = ReportDelModel.model_validate(
         {
             "reportIds": report_ids or kwargs.pop("reportIds", None) or kwargs.pop("report_ids", None) or [],
@@ -120,6 +124,9 @@ def pull_public_ticket_sync(
     :param headers: 请求头覆盖值。
     :return: 同步结果摘要。
     """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
     override = _build_remote_sync_override(
         consumer=consumer if consumer is not None else kwargs.pop("consumer", None),
         limit=limit if limit is not None else kwargs.pop("limit", None),

@@ -287,6 +287,7 @@ def _execute_job_inline(payload: dict, started_at: datetime) -> dict:
 
         args = parse_payload_args(payload.get("args_json"))
         kwargs = parse_payload_kwargs(payload.get("kwargs_json"))
+        kwargs["_task_id"] = task_id
         _execute_job_function(task_key=str(payload.get("task_key") or ""), args=args, kwargs=kwargs)
         finished_at = datetime.now()
         return {

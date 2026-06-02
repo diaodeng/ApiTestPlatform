@@ -859,13 +859,30 @@ class TicketLogPullService:
     @classmethod
     def resume_pending_records(cls) -> None:
         """
-        服务启动后恢复未完成的日志拉取记录。
+        服务启动后清理未完成的日志拉取记录。
         :return: 无
         """
         with SessionLocal() as db:
             records = TicketLogPullDao.list_recoverable_records(db, cls.ACTIVE_STATUSES)
+            now = datetime.now()
             for record in records:
-                cls.queue_record(record.id)
+                cls._fail_record(
+                    db,
+                    record.id,
+                    status=TicketLogPullStatus.FAILED.value,
+                    status_desc="服务重启前任务未完成，已清理为失败",
+                    error_message="服务重启前任务未完成，已清理为失败",
+                )
+                cls._add_ticket_event(
+                    db,
+                    ticket_id=record.ticket_id,
+                    operator_id=None,
+                    operator_name="system",
+                    content="日志拉取任务因服务重启清理为失败",
+                    event_data={"record_id": record.id, "status": record.status, "cleaned_at": now.isoformat()},
+                )
+            if records:
+                db.commit()
 
     @classmethod
     def _run_record(cls, record_id: int) -> None:
