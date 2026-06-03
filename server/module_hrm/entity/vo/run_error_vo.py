@@ -74,6 +74,9 @@ class RunErrorSummaryModel(BaseModel):
 
     report_id: int
     total_count: int = 0
+    case_total_count: int = 0
+    success_case_count: int = 0
+    fail_case_count: int = 0
     assert_fail_count: int = 0
     exception_count: int = 0
     error_type_stats: list[RunErrorTypeStatModel] = Field(default_factory=list)

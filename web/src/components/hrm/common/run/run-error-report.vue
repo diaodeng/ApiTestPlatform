@@ -23,10 +23,14 @@
     page: false,
     runDetail: false,
     errorRecords: false,
+    summary: false,
   });
 
   const reportErrorSummary = ref({
     totalCount: 0,
+    caseTotalCount: 0,
+    successCaseCount: 0,
+    failCaseCount: 0,
     assertFailCount: 0,
     exceptionCount: 0,
     errorTypeStats: [],
@@ -43,21 +47,34 @@
     fingerprint: undefined,
   });
 
-  function loadReportErrorSummary() {
-    console.log('Loading Report', queryParams.value.reportId);
+  function resetReportErrorSummary() {
+    reportErrorSummary.value = {
+      totalCount: 0,
+      caseTotalCount: 0,
+      successCaseCount: 0,
+      failCaseCount: 0,
+      assertFailCount: 0,
+      exceptionCount: 0,
+      errorTypeStats: [],
+      assertReasonStats: [],
+    };
+  }
+
+  async function loadReportErrorSummary() {
     if (!queryParams.value.reportId) {
-      reportErrorSummary.value = {
-        totalCount: 0,
-        assertFailCount: 0,
-        exceptionCount: 0,
-        errorTypeStats: [],
-        assertReasonStats: [],
-      };
+      resetReportErrorSummary();
       return;
     }
-    fetchErrorSummary(queryParams.value.reportId, { onlySelf: false }).then((response) => {
-      reportErrorSummary.value = response;
-    });
+    loading.value.summary = true;
+    try {
+      const response = await fetchErrorSummary(queryParams.value.reportId, { onlySelf: false });
+      reportErrorSummary.value = {
+        ...reportErrorSummary.value,
+        ...response,
+      };
+    } finally {
+      loading.value.summary = false;
+    }
   }
 
   function formatErrorTypeLabel(type) {
@@ -117,29 +134,65 @@
 
   watch(
     () => props.reportId,
-    () => {
-      console.log('id变化');
-      queryParams.value.reportId = props.reportId;
-      loadReportErrorSummary();
+    (reportId) => {
+      queryParams.value.reportId = reportId;
+      if (!reportId) {
+        resetReportErrorSummary();
+        return;
+      }
+      if (openErrorSummaryDialog.value) {
+        loadReportErrorSummary();
+      }
     }
   );
 
-  onMounted(() => {
-    console.log('启动');
-    loadReportErrorSummary();
+  watch(openErrorSummaryDialog, (visible) => {
+    if (visible) {
+      loadReportErrorSummary();
+    } else {
+      errorDrawerOpen.value = false;
+    }
   });
 </script>
 
 <template>
   <el-dialog v-model="openErrorSummaryDialog" width="80%" append-to-body>
-    <el-card v-if="queryParams.reportId" class="error-summary-card" shadow="never">
+    <el-card
+      v-if="queryParams.reportId"
+      v-loading="loading.summary"
+      class="error-summary-card"
+      shadow="never"
+    >
       <template #header>
         <div class="error-summary-header">
           <span>失败原因统计</span>
-          <el-button type="default" @click="reportErrorSummary">刷新</el-button>
+          <el-button type="default" :loading="loading.summary" @click="loadReportErrorSummary">
+            刷新
+          </el-button>
           <el-button link type="primary" @click="openErrorDrawer()">查看全部错误</el-button>
         </div>
       </template>
+
+      <el-row :gutter="12" class="error-metric-row">
+        <el-col :xs="24" :sm="8">
+          <div class="error-metric error-metric--total">
+            <div class="error-metric__label">用例总数</div>
+            <div class="error-metric__value">{{ reportErrorSummary.caseTotalCount || 0 }}</div>
+          </div>
+        </el-col>
+        <el-col :xs="24" :sm="8">
+          <div class="error-metric error-metric--success">
+            <div class="error-metric__label">成功用例数</div>
+            <div class="error-metric__value">{{ reportErrorSummary.successCaseCount || 0 }}</div>
+          </div>
+        </el-col>
+        <el-col :xs="24" :sm="8">
+          <div class="error-metric error-metric--fail">
+            <div class="error-metric__label">失败用例数</div>
+            <div class="error-metric__value">{{ reportErrorSummary.failCaseCount || 0 }}</div>
+          </div>
+        </el-col>
+      </el-row>
 
       <el-row :gutter="12" class="error-metric-row">
         <el-col :xs="24" :sm="8">
@@ -310,6 +363,18 @@
 
   .error-metric--all {
     background: linear-gradient(135deg, #f7f4ea, #f1e2bd);
+  }
+
+  .error-metric--total {
+    background: linear-gradient(135deg, #e9f5ff, #cfe7ff);
+  }
+
+  .error-metric--success {
+    background: linear-gradient(135deg, #e8f8ef, #c8efd9);
+  }
+
+  .error-metric--fail {
+    background: linear-gradient(135deg, #fce9e4, #f9c7bd);
   }
 
   .error-metric--assert {
