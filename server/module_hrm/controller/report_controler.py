@@ -65,12 +65,37 @@ async def report_error_summary(
     query_db: Session = Depends(get_db),
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
+    """
+    获取测试报告的异常统计和执行统计。
+
+    :param request: FastAPI 请求对象。
+    :param report_id: 测试报告ID。
+    :param only_self: 是否只统计当前用户的数据。
+    :param query_db: 数据库会话。
+    :param current_user: 当前登录用户。
+    :return: 报告异常统计与用例统计信息。
+    """
     summary = await RunErrorDao.get_summary_by_report(
         query_db,
         report_id,
         manager=current_user.user.user_id,
         only_self=only_self,
     )
+    count_info = await RunDetailDao.get_report_count_info(
+        query_db,
+        RunDetailQueryModel(
+            **{
+                "report_id": report_id,
+                "only_self": only_self,
+                "manager": current_user.user.user_id,
+            }
+        ),
+    )
+    summary.case_total_count = int(count_info.get("success", 0)) + int(count_info.get("fail", 0)) + int(
+        count_info.get("skip", 0)
+    )
+    summary.success_case_count = int(count_info.get("success", 0))
+    summary.fail_case_count = int(count_info.get("fail", 0))
     return ResponseUtil.success(model_content=summary)
 
 
