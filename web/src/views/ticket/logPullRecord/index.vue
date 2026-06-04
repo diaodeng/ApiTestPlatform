@@ -224,183 +224,18 @@
               />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
-          <el-form-item label="商家" prop="vendorId">
-            <el-select
-              v-model="createForm.vendorId"
-              placeholder="选择或输入商家"
-              clearable
-              filterable
-              allow-create
-              default-first-option
-              style="width: 100%"
-              @change="handleCreateVendorChange"
-            >
-                <el-option
-                  v-for="item in vendorOptions"
-                  :key="item.vendorId"
-                  :label="item.label"
-                  :value="item.vendorId"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-          <el-form-item label="门店" prop="storeId">
-            <el-select
-              v-model="createForm.storeId"
-              placeholder="选择或输入门店"
-              clearable
-              filterable
-              allow-create
-              default-first-option
-              style="width: 100%"
-            >
-                <el-option
-                  v-for="item in createStoreOptions"
-                  :key="item.storeId"
-                  :label="item.label"
-                  :value="item.storeId"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="posNo" prop="posNo">
-              <el-input-number v-model="createForm.posNo" :min="1" controls-position="right" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="数据类型">
-              <el-select v-model="createForm.commandDataType" placeholder="请选择" style="width: 100%">
-                <el-option v-for="item in logPullDataTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="modifyTime">
-              <el-date-picker
-                v-model="createForm.modifyTime"
-                type="date"
-                value-format="YYYY-MM-DD"
-                placeholder="按日期拉取"
-                clearable
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="path">
-              <el-input v-model="createForm.path" placeholder="可选，按路径拉取" clearable />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="时间方式">
-              <el-radio-group v-model="createForm.timeRangeMode">
-                <el-radio value="between">开始 + 结束</el-radio>
-                <el-radio value="point">时间点 + 前后范围</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-          <template v-if="createForm.timeRangeMode === 'between'">
-            <el-col :span="12">
-              <el-form-item label="开始时间">
-                <el-date-picker
-                  v-model="createForm.logBeginTime"
-                  type="datetime"
-                  value-format="YYYY-MM-DD HH:mm:ss"
-                  placeholder="必填，筛选日志开始时间"
-                  clearable
-                  style="width: 100%"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="结束时间">
-                <el-date-picker
-                  v-model="createForm.logEndTime"
-                  type="datetime"
-                  value-format="YYYY-MM-DD HH:mm:ss"
-                  placeholder="必填，筛选日志结束时间"
-                  clearable
-                  style="width: 100%"
-                />
-              </el-form-item>
-            </el-col>
-          </template>
-          <template v-else>
-            <el-col :span="12">
-              <el-form-item label="时间点">
-                <el-date-picker
-                  v-model="createForm.logPointTime"
-                  type="datetime"
-                  value-format="YYYY-MM-DD HH:mm:ss"
-                  placeholder="必填，基准时间点"
-                  clearable
-                  style="width: 100%"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="前后范围">
-                <div class="time-range-inline">
-                  <span>前</span>
-                  <el-input-number v-model="createForm.rangeBeforeMinutes" :min="0" controls-position="right" />
-                  <span>分钟，后</span>
-                  <el-input-number v-model="createForm.rangeAfterMinutes" :min="0" controls-position="right" />
-                  <span>分钟</span>
-                </div>
-              </el-form-item>
-            </el-col>
-          </template>
-          <el-col :span="12">
-            <el-form-item label="单文件上限">
-              <el-input-number v-model="createForm.fileMaxSize" :min="1" controls-position="right" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="压缩包上限">
-              <el-input-number v-model="createForm.zipMaxSize" :min="1" controls-position="right" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="保存方式">
-              <el-select v-model="createForm.storageMode" placeholder="请选择" style="width: 100%">
-                <el-option
-                  v-for="item in logPullStorageModeOptions"
-                  :key="item.value"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="AI Agent">
-              <el-select v-model="createForm.aiAgentCode" placeholder="选择Agent" filterable clearable :disabled="!createForm.autoAiEnabled" style="width: 100%">
-                <el-option v-for="item in agentOptions" :key="item.agentCode" :label="`${item.agentName || item.agentCode} [${item.agentCode}]`" :value="item.agentCode" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="通知配置">
-              <el-select
-                v-model="createForm.notifyConfig.pushIds"
-                multiple
-                filterable
-                clearable
-                placeholder="选择已有推送配置"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in pushOptions"
-                  :key="item.pushId"
-                  :label="`${item.name || item.pushId} [${item.pushId}]`"
-                  :value="item.pushId"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
+          <LogPullConfigFields
+            v-model="createForm"
+            :vendor-options="vendorOptions"
+            :agent-options="agentOptions"
+            :data-type-options="logPullDataTypeOptions"
+            :storage-mode-options="logPullStorageModeOptions"
+            :show-auto-ai="false"
+          />
+          <LogPullNotifyConfigFields
+            v-model="createForm.notifyConfig"
+            :push-options="pushOptions"
+          />
         </el-row>
       </el-form>
       <template #footer>
@@ -543,7 +378,10 @@ import {
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
+import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
+import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
 import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
+import { buildOptionalLogPullTimeRangePayload, getOptionalLogPullTimeRangeError } from '../logPull.shared'
 
 const { proxy } = getCurrentInstance()
 
@@ -752,7 +590,6 @@ function getVendorStoreOptions(vendorId) {
 }
 
 const queryStoreOptions = computed(() => getVendorStoreOptions(queryParams.value.vendorId))
-const createStoreOptions = computed(() => getVendorStoreOptions(createForm.value.vendorId))
 
 function resetStoreSelection(target, vendorId) {
   const storeId = Number(target.storeId)
@@ -768,10 +605,6 @@ function resetStoreSelection(target, vendorId) {
 
 function handleQueryVendorChange(vendorId) {
   resetStoreSelection(queryParams.value, vendorId)
-}
-
-function handleCreateVendorChange(vendorId) {
-  resetStoreSelection(createForm.value, vendorId)
 }
 
 function openCreateDialog() {
@@ -813,31 +646,10 @@ function submitCreateForm() {
       proxy.$modal.msgWarning('modifyTime 和 path 至少需要填写一个')
       return
     }
-    if (createForm.value.timeRangeMode === 'between') {
-      const hasAnyDirectValue = Boolean(createForm.value.logBeginTime || createForm.value.logEndTime)
-      if (hasAnyDirectValue) {
-        if (!createForm.value.logBeginTime || !createForm.value.logEndTime) {
-          proxy.$modal.msgWarning('开始时间和结束时间需要同时填写')
-          return
-        }
-        const begin = new Date(createForm.value.logBeginTime)
-        const end = new Date(createForm.value.logEndTime)
-        if (begin > end) {
-          proxy.$modal.msgWarning('开始时间不能晚于结束时间')
-          return
-        }
-      }
-    } else if (createForm.value.timeRangeMode === 'point') {
-      if (!createForm.value.logPointTime) {
-        proxy.$modal.msgWarning('时间点不能为空')
-        return
-      }
-      const beforeMinutes = Number(createForm.value.rangeBeforeMinutes ?? 0)
-      const afterMinutes = Number(createForm.value.rangeAfterMinutes ?? 0)
-      if (beforeMinutes === 0 && afterMinutes === 0) {
-        proxy.$modal.msgWarning('时间点前后范围至少需要一侧大于 0')
-        return
-      }
+    const timeRangeError = getOptionalLogPullTimeRangeError(createForm.value)
+    if (timeRangeError) {
+      proxy.$modal.msgWarning(timeRangeError)
+      return
     }
     if (createForm.value.autoAiEnabled && !createForm.value.ticketId) {
       proxy.$modal.msgWarning('未关联工单时不能启用自动AI分析')
@@ -852,6 +664,23 @@ function submitCreateForm() {
     const payload = {
       ...createForm.value,
       ticketId: createForm.value.ticketId || null
+    }
+    const timeRangePayload = buildOptionalLogPullTimeRangePayload(createForm.value)
+    Object.assign(payload, timeRangePayload)
+    if (!timeRangePayload.timeRangeMode) {
+      delete payload.timeRangeMode
+      delete payload.logBeginTime
+      delete payload.logEndTime
+      delete payload.logPointTime
+      delete payload.rangeBeforeMinutes
+      delete payload.rangeAfterMinutes
+    } else if (timeRangePayload.timeRangeMode === 'between') {
+      delete payload.logPointTime
+      delete payload.rangeBeforeMinutes
+      delete payload.rangeAfterMinutes
+    } else {
+      delete payload.logBeginTime
+      delete payload.logEndTime
     }
     if (!payload.autoAiEnabled) {
       payload.aiAgentCode = ''

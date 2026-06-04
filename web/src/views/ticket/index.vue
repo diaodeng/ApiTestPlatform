@@ -159,7 +159,7 @@
       @pagination="getList"
     />
 
-    <el-dialog :title="title" v-model="open" width="980px" append-to-body>
+    <el-dialog :title="title" v-model="open" width="980px" append-to-body @closed="reset">
       <el-form ref="ticketRef" :model="form" :rules="rules" label-width="100px">
         <el-row :gutter="16">
           <el-col :span="24">
@@ -252,243 +252,20 @@
               <el-switch v-model="form.needLogPull" inline-prompt active-text="是" inactive-text="否" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="日志后AI">
-              <el-switch
-                v-model="form.logPullConfig.autoAiEnabled"
-                inline-prompt
-                active-text="是"
-                inactive-text="否"
-                :disabled="!form.needLogPull"
-              />
-            </el-form-item>
-          </el-col>
           <template v-if="form.needLogPull">
-            <el-col :span="8">
-              <el-form-item label="vendorId" prop="vendorId">
-                <el-select
-                  v-model="form.logPullConfig.vendorId"
-                  placeholder="选择或输入商家"
-                  clearable
-                  filterable
-                  allow-create
-                  default-first-option
-                  @change="handleFormVendorChange"
-                >
-                  <el-option
-                    v-for="item in vendorOptions"
-                    :key="item.vendorId"
-                    :label="item.label"
-                    :value="item.vendorId"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="storeId" prop="storeId">
-                <el-select
-                  v-model="form.logPullConfig.storeId"
-                  placeholder="选择或输入门店"
-                  clearable
-                  filterable
-                  allow-create
-                  default-first-option
-                >
-                  <el-option
-                    v-for="item in formLogPullStoreOptions"
-                    :key="item.storeId"
-                    :label="item.label"
-                    :value="item.storeId"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="posNo" prop="posNo">
-                <el-input-number v-model="form.logPullConfig.posNo" :min="1" controls-position="right" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="数据类型">
-                <el-select v-model="form.logPullConfig.commandDataType" placeholder="请选择">
-                  <el-option
-                    v-for="item in logPullDataTypeOptions"
-                    :key="item.value"
-                    :label="item.label"
-                    :value="item.value"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="modifyTime">
-                <el-date-picker
-                  v-model="form.logPullConfig.modifyTime"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="按日期拉取"
-                  clearable
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="path">
-                <el-input v-model="form.logPullConfig.path" placeholder="可选，按路径拉取" clearable />
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="时间方式">
-                <el-radio-group v-model="form.logPullConfig.timeRangeMode">
-                  <el-radio value="between">开始 + 结束</el-radio>
-                  <el-radio value="point">时间点 + 前后范围</el-radio>
-                </el-radio-group>
-              </el-form-item>
-            </el-col>
-            <template v-if="form.logPullConfig.timeRangeMode === 'between'">
-              <el-col :span="12">
-                <el-form-item label="开始时间">
-                  <el-date-picker
-                    v-model="form.logPullConfig.logBeginTime"
-                    type="datetime"
-                    value-format="YYYY-MM-DD HH:mm:ss"
-                    placeholder="必填，筛选日志开始时间"
-                    clearable
-                  />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="结束时间">
-                  <el-date-picker
-                    v-model="form.logPullConfig.logEndTime"
-                    type="datetime"
-                    value-format="YYYY-MM-DD HH:mm:ss"
-                    placeholder="必填，筛选日志结束时间"
-                    clearable
-                  />
-                </el-form-item>
-              </el-col>
-            </template>
-            <template v-else>
-              <el-col :span="12">
-                <el-form-item label="时间点">
-                  <el-date-picker
-                    v-model="form.logPullConfig.logPointTime"
-                    type="datetime"
-                    value-format="YYYY-MM-DD HH:mm:ss"
-                    placeholder="必填，基准时间点"
-                    clearable
-                  />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="前后范围">
-                  <div class="time-range-inline">
-                    <span>前</span>
-                    <el-input-number v-model="form.logPullConfig.rangeBeforeMinutes" :min="0" controls-position="right" />
-                    <span>分钟，后</span>
-                    <el-input-number v-model="form.logPullConfig.rangeAfterMinutes" :min="0" controls-position="right" />
-                    <span>分钟</span>
-                  </div>
-                </el-form-item>
-              </el-col>
-            </template>
-            <el-col :span="12">
-              <el-form-item label="单文件上限">
-                <el-input-number v-model="form.logPullConfig.fileMaxSize" :min="1" controls-position="right" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="压缩包上限">
-                <el-input-number v-model="form.logPullConfig.zipMaxSize" :min="1" controls-position="right" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="保存方式">
-                <el-select v-model="form.logPullConfig.storageMode" placeholder="请选择">
-                  <el-option
-                    v-for="item in logPullStorageModeOptions"
-                    :key="item.value"
-                    :label="item.label"
-                    :value="item.value"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="自动AI Agent">
-                <el-select
-                  v-model="form.logPullConfig.aiAgentCode"
-                  placeholder="请选择Agent"
-                  filterable
-                  clearable
-                  :disabled="!form.logPullConfig.autoAiEnabled"
-                >
-                  <el-option
-                    v-for="item in agentOptions"
-                    :key="item.agentCode"
-                    :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
-                    :value="item.agentCode"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-divider content-position="left">通知配置</el-divider>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="启用通知">
-                <el-switch
-                  v-model="form.logPullConfig.notifyConfig.allowPush"
-                  inline-prompt
-                  :active-value="1"
-                  :inactive-value="0"
-                  active-text="是"
-                  inactive-text="否"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="推送配置">
-                <el-select
-                  v-model="form.logPullConfig.notifyConfig.pushIds"
-                  multiple
-                  filterable
-                  clearable
-                  placeholder="选择已有推送配置"
-                >
-                  <el-option
-                    v-for="item in pushOptions"
-                    :key="item.pushId"
-                    :label="`${item.name || item.pushId} [${item.pushId}]`"
-                    :value="item.pushId"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="成功通知">
-                <el-switch
-                  v-model="form.logPullConfig.notifyConfig.success.push"
-                  inline-prompt
-                  :active-value="true"
-                  :inactive-value="false"
-                  active-text="是"
-                  inactive-text="否"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="失败通知">
-                <el-switch
-                  v-model="form.logPullConfig.notifyConfig.failed.push"
-                  inline-prompt
-                  :active-value="true"
-                  :inactive-value="false"
-                  active-text="是"
-                  inactive-text="否"
-                />
-              </el-form-item>
-            </el-col>
+            <LogPullConfigFields
+              v-model="form.logPullConfig"
+              :field-prefix="'logPullConfig'"
+              :vendor-options="vendorOptions"
+              :agent-options="agentOptions"
+              :data-type-options="logPullDataTypeOptions"
+              :storage-mode-options="logPullStorageModeOptions"
+            />
+            <LogPullNotifyConfigFields
+              v-model="form.logPullConfig.notifyConfig"
+              :field-prefix="'logPullConfig.notifyConfig'"
+              :push-options="pushOptions"
+            />
           </template>
         </el-row>
       </el-form>
@@ -595,8 +372,18 @@
       </template>
     </el-dialog>
 
-    <el-drawer v-model="detailOpen" :title="detailTitle" size="70%" append-to-body>
+    <el-dialog
+      v-model="detailOpen"
+      :title="detailTitle"
+      fullscreen
+      class="ticket-detail-dialog"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetDetailDialog"
+    >
       <template v-if="detail.ticketId">
+        <div class="ticket-detail-scroll">
         <el-descriptions :column="3" border>
           <el-descriptions-item label="编号">{{ detail.ticketNo }}</el-descriptions-item>
           <el-descriptions-item label="状态">
@@ -654,16 +441,21 @@
                       </el-tag>
                       <span v-else>-</span>
                     </el-descriptions-item>
-                    <el-descriptions-item label="最新提交时间">
-                      {{ parseTime(latestAiAnalysisTask?.createTime) || '-' }}
+                    <el-descriptions-item label="快照版本">
+                      {{ latestSnapshot?.version || '-' }}
                     </el-descriptions-item>
-                    <el-descriptions-item label="最新完成时间">
-                      {{ parseTime(latestAiAnalysisTask?.finishedAt || latestAiAnalysisTask?.updateTime) || '-' }}
+                    <el-descriptions-item label="快照时间">
+                      {{ parseTime(latestSnapshot?.createTime) || '-' }}
                     </el-descriptions-item>
-                    <el-descriptions-item label="置信度">{{ formatAiConfidence(aiAnalysisResult?.confidence) }}</el-descriptions-item>
-                    <el-descriptions-item label="根因" :span="2">{{ aiAnalysisResult?.rootCause || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="分析摘要" :span="2">{{ aiAnalysisResult?.analysisSummary || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="修复建议" :span="2">{{ aiAnalysisResult?.fixSuggestion || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="创建人">
+                      {{ latestSnapshot?.createdByName || '-' }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="摘要" :span="2">{{ latestSnapshot?.summary || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="根因" :span="2">{{ latestSnapshot?.rootCause || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="解决方案" :span="2">{{ latestSnapshot?.solution || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="预防建议" :span="2">{{ latestSnapshot?.prevention || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="风险说明" :span="2">{{ latestSnapshot?.risk || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="负责人" :span="2">{{ latestSnapshot?.owner || '-' }}</el-descriptions-item>
                   </el-descriptions>
                   <el-alert
                     v-if="latestAiAnalysisTask?.errorMessage"
@@ -675,18 +467,6 @@
                 </el-card>
               </el-col>
               <el-col :span="8">
-                <el-card shadow="never" class="mb16">
-                  <template #header>最近消息</template>
-                  <el-empty v-if="!latestMessageItems.length" description="暂无消息" />
-                  <div v-for="item in latestMessageItems" :key="item.id" class="mb12">
-                    <div class="record-head">
-                      <span>{{ item.roleLabel }}</span>
-                      <el-tag size="small">{{ item.typeLabel }}</el-tag>
-                      <span>{{ parseTime(item.createTime) }}</span>
-                    </div>
-                    <div>{{ item.content || '-' }}</div>
-                  </div>
-                </el-card>
                 <el-card shadow="never">
                   <template #header>相似工单</template>
                   <el-empty v-if="!latestSimilarTickets.length" description="暂无相似工单" />
@@ -702,9 +482,148 @@
             </el-row>
           </el-tab-pane>
 
+          <el-tab-pane label="日志拉取" name="logPull" lazy>
+            <div class="panel-header mb16">
+              <div class="panel-inline">
+                <span>拉取记录</span>
+                <el-tag v-if="logPullAutoRefreshing" size="small" type="warning">自动刷新中</el-tag>
+              </div>
+              <div class="panel-inline">
+                <PromptButton button-text="参数提示" title="参数配置入口" width="420">
+                  <div>
+                    日志拉取地址、Cookie、FTP/本地归档配置已统一移到系统参数配置。
+                    <br />
+                    <code>ticket.logPull.external</code> 管理外部地址与 Cookie。
+                    <br />
+                    <code>ticket.logPull.storage</code> 管理本地/FTP 与轮询参数。
+                  </div>
+                </PromptButton>
+                <el-button type="primary" @click="openLogPullSubmitDialog" v-hasPermi="['ticket:logpull:add']">拉取日志</el-button>
+                <el-button link type="primary" @click="loadLogPullList">刷新</el-button>
+              </div>
+            </div>
+            <el-table v-loading="logPullLoading" :data="logPullList" row-key="id" class="mb16">
+              <el-table-column label="创建时间" prop="createTime" width="170">
+                <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
+              </el-table-column>
+              <el-table-column label="数据类型" width="90" align="center">
+                <template #default="scope">
+                  {{ getOptionLabel(logPullDataTypeOptions, scope.row.commandDataType) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" min-width="170">
+                <template #default="scope">
+                  <el-tag :type="getLogPullStatusTagType(scope.row.status)">
+                    {{ scope.row.statusDesc || getOptionLabel(logPullStatusOptions, scope.row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="保存方式" width="90" align="center">
+                <template #default="scope">{{ getOptionLabel(logPullStorageModeOptions, scope.row.storageMode) }}</template>
+              </el-table-column>
+              <el-table-column label="归档地址" prop="storagePath" min-width="220" show-overflow-tooltip />
+              <el-table-column label="原始压缩包" min-width="180" show-overflow-tooltip>
+                <template #default="scope">
+                  <el-link v-if="scope.row.commandResultUrl" :href="scope.row.commandResultUrl" target="_blank" type="primary">
+                    查看地址
+                  </el-link>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="摘要/异常" prop="contentSummary" min-width="220" show-overflow-tooltip>
+                <template #default="scope">
+                  <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="280" fixed="right">
+                <template #default="scope">
+                  <el-button-group>
+                    <el-button
+                      link
+                      type="primary"
+                      @click="viewLogPullContent(scope.row)"
+                      :disabled="!scope.row.hasContent || logPullActionLoading"
+                    >
+                      查看日志
+                    </el-button>
+                    <el-button
+                      link
+                      type="warning"
+                      @click="retryLogPull(scope.row)"
+                      :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
+                      v-hasPermi="['ticket:logpull:add']"
+                    >
+                      重新拉取
+                    </el-button>
+                    <el-button
+                      link
+                      type="success"
+                      @click="redownloadLogPull(scope.row)"
+                      :disabled="logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
+                      v-hasPermi="['ticket:logpull:add']"
+                    >
+                      重新下载
+                    </el-button>
+                    <el-button
+                      link
+                      type="danger"
+                      @click="reextractLogPull(scope.row)"
+                      :disabled="logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
+                      v-hasPermi="['ticket:logpull:add']"
+                    >
+                      重新截取
+                    </el-button>
+                  </el-button-group>
+                </template>
+              </el-table-column>
+            </el-table>
+            <pagination
+              v-show="logPullTotal > 0"
+              :total="logPullTotal"
+              v-model:page="logPullQuery.pageNum"
+              v-model:limit="logPullQuery.pageSize"
+              @pagination="loadLogPullList"
+            />
+            <el-dialog
+              v-model="logPullSubmitOpen"
+              title="提交拉取任务"
+              width="760px"
+              append-to-body
+              destroy-on-close
+              :close-on-click-modal="false"
+              @closed="resetLogPullForm"
+            >
+              <el-form ref="logPullRef" :model="logPullForm" :rules="logPullRules" label-width="110px">
+                <LogPullConfigFields
+                  v-model="logPullForm"
+                  :vendor-options="vendorOptions"
+                  :agent-options="agentOptions"
+                  :data-type-options="logPullDataTypeOptions"
+                  :storage-mode-options="logPullStorageModeOptions"
+                />
+                <LogPullNotifyConfigFields
+                  v-model="logPullForm.notifyConfig"
+                  :push-options="pushOptions"
+                />
+                <el-form-item>
+                  <el-button type="primary" @click="submitLogPull" :loading="logPullSubmitting">提交任务</el-button>
+                  <el-button @click="logPullSubmitOpen = false">取消</el-button>
+                </el-form-item>
+              </el-form>
+            </el-dialog>
+          </el-tab-pane>
+
           <el-tab-pane label="协同/AI" name="collab" lazy>
+            <div class="collab-toolbar mb16">
+              <el-button type="primary" @click="openAiAnalysisDialog" v-hasPermi="['ticket:ai:analysis:run']">
+                发起AI分析
+              </el-button>
+              <el-button @click="openAiTaskHistory" v-hasPermi="['ticket:ai:analysis:list']">
+                任务历史
+              </el-button>
+            </div>
             <el-row :gutter="16">
-              <el-col :span="14">
+              <el-col :span="16">
                 <el-form :model="messageForm" label-width="90px" class="mb16">
                   <el-row :gutter="12">
                     <el-col :span="8">
@@ -736,7 +655,7 @@
                     </el-col>
                     <el-col :span="24">
                       <el-alert
-                        :title="`协同消息默认沿用工单版本号：${detail.versionKey || detail.extraData?.versionKey || '-'}。如需发起新的 AI 分析，请使用右侧的「发起AI分析」。`"
+                        :title="`协同消息默认沿用工单版本号：${detail.versionKey || detail.extraData?.versionKey || '-'}。`"
                         type="info"
                         show-icon
                         :closable="false"
@@ -794,40 +713,8 @@
                   </div>
                 </el-card>
               </el-col>
-              <el-col :span="10">
-                <el-card shadow="never" class="mb16">
-                  <template #header>最新快照</template>
-                  <el-descriptions :column="1" border>
-                    <el-descriptions-item label="版本">{{ latestSnapshot?.version || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="摘要">{{ latestSnapshot?.summary || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="根因">{{ latestSnapshot?.rootCause || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="方案">{{ latestSnapshot?.solution || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="负责人">{{ latestSnapshot?.owner || '-' }}</el-descriptions-item>
-                  </el-descriptions>
-                </el-card>
+              <el-col :span="8">
                 <el-card shadow="never">
-                  <template #header>最新AI建议</template>
-                  <el-descriptions :column="1" border>
-                    <el-descriptions-item label="状态">
-                      <el-tag v-if="latestAiAnalysisTask?.status" :type="getAiStatusTagType(latestAiAnalysisTask.status)">
-                        {{ getAiStatusLabel(latestAiAnalysisTask.status) }}
-                      </el-tag>
-                      <span v-else>-</span>
-                    </el-descriptions-item>
-                    <el-descriptions-item label="摘要">{{ aiAnalysisResult?.analysisSummary || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="根因">{{ aiAnalysisResult?.rootCause || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="修复建议">{{ aiAnalysisResult?.fixSuggestion || '-' }}</el-descriptions-item>
-                  </el-descriptions>
-                  <div class="mt16 panel-inline">
-                    <el-button type="primary" @click="openAiAnalysisDialog" v-hasPermi="['ticket:ai:analysis:run']">
-                      发起AI分析
-                    </el-button>
-                    <el-button @click="openAiTaskHistory" v-hasPermi="['ticket:ai:analysis:list']">
-                      任务历史
-                    </el-button>
-                  </div>
-                </el-card>
-                <el-card shadow="never" class="mt16">
                   <template #header>相似工单</template>
                   <el-empty v-if="!similarTickets.length" description="暂无相似工单" />
                   <div v-for="item in similarTickets" :key="item.ticketId" class="similar-item">
@@ -948,7 +835,7 @@
                   </el-form-item>
                 </el-form>
               </el-tab-pane>
-              <el-tab-pane label="日志拉取" name="logPull" lazy>
+              <el-tab-pane v-if="false" label="日志拉取" name="logPull" lazy>
                 <div class="panel-header mb16">
                   <div class="panel-inline">
                     <span>拉取记录</span>
@@ -1234,8 +1121,9 @@
             </el-tabs>
           </el-tab-pane>
         </el-tabs>
+        </div>
       </template>
-    </el-drawer>
+    </el-dialog>
 
     <el-dialog
       v-model="aiAnalysisOpen"
@@ -1569,6 +1457,8 @@ import { saveAs } from 'file-saver'
 import { decompressText } from '@/utils/tools'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
+import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
+import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
 import {
   addTicket,
   addTicketMessage,
@@ -1618,6 +1508,7 @@ import {
   sourceOptions,
   ticketStatusOptions
 } from './constants'
+import { buildOptionalLogPullTimeRangePayload, getOptionalLogPullTimeRangeError } from './logPull.shared'
 import UserSelect from './components/UserSelect.vue'
 
 const { proxy } = getCurrentInstance()
@@ -1815,10 +1706,6 @@ function resetStoreSelection(target, vendorId) {
   }
 }
 
-function handleFormVendorChange(vendorId) {
-  resetStoreSelection(form.value.logPullConfig, vendorId)
-}
-
 function handleLogPullVendorChange(vendorId) {
   resetStoreSelection(logPullForm.value, vendorId)
 }
@@ -1867,7 +1754,7 @@ const data = reactive({
     role: 'user',
     messageType: 'question',
     content: '',
-    runAi: false,
+    runAi: true,
     versionKey: '',
     agentCode: ''
   },
@@ -1981,14 +1868,11 @@ function formatLogViewSource(source) {
 }
 
 const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null)
-const aiAnalysisResult = computed(() => detail.value.aiAnalysis || latestAiAnalysisTask.value?.analysisResult || null)
 
 const latestSnapshot = computed(() => detail.value.latestSnapshot || ticketSnapshots.value[0] || null)
-const latestMessageItems = computed(() => (ticketMessages.value || []).slice(-3))
 const latestSimilarTickets = computed(() => (similarTickets.value || []).slice(0, 3))
 const aiTaskDetailPayload = computed(() => selectedAiTask.value || {})
 const aiPromptLayers = computed(() => detail.value.aiPromptLayers || {})
-const formLogPullStoreOptions = computed(() => getVendorStoreOptions(form.value.logPullConfig?.vendorId))
 const logPullStoreOptions = computed(() => getVendorStoreOptions(logPullForm.value.vendorId))
 const aiPromptHintTitle = computed(() => {
   const projectName = aiPromptLayers.value?.project?.projectName || detail.value.projectName || ''
@@ -2170,6 +2054,10 @@ function handleUpdate(row) {
   })
 }
 
+function cancel() {
+  open.value = false
+}
+
 function validateTicketAutomationConfig() {
   if (!form.value.needLogPull) {
     return true
@@ -2179,32 +2067,10 @@ function validateTicketAutomationConfig() {
     proxy.$modal.msgWarning('启用日志拉取时，vendorId、storeId、posNo 不能为空')
     return false
   }
-  if (config.timeRangeMode === 'between') {
-    const hasAnyDirectValue = Boolean(config.logBeginTime || config.logEndTime)
-    if (!hasAnyDirectValue) {
-      return true
-    }
-    if (!config.logBeginTime || !config.logEndTime) {
-      proxy.$modal.msgWarning('启用日志拉取时，开始时间和结束时间需要同时填写')
-      return false
-    }
-    const begin = new Date(config.logBeginTime)
-    const end = new Date(config.logEndTime)
-    if (begin > end) {
-      proxy.$modal.msgWarning('启用日志拉取时，开始时间不能晚于结束时间')
-      return false
-    }
-  } else if (config.timeRangeMode === 'point') {
-    if (!config.logPointTime) {
-      proxy.$modal.msgWarning('启用日志拉取时，时间点不能为空')
-      return false
-    }
-    const beforeMinutes = Number(config.rangeBeforeMinutes ?? 0)
-    const afterMinutes = Number(config.rangeAfterMinutes ?? 0)
-    if (beforeMinutes < 0 || afterMinutes < 0 || (beforeMinutes === 0 && afterMinutes === 0)) {
-      proxy.$modal.msgWarning('启用日志拉取时，时间点前后范围至少需要一侧大于 0')
-      return false
-    }
+  const timeRangeError = getOptionalLogPullTimeRangeError(config)
+  if (timeRangeError) {
+    proxy.$modal.msgWarning(`启用日志拉取时，${timeRangeError}`)
+    return false
   }
   if (config.autoAiEnabled && !String(config.aiAgentCode || '').trim()) {
     proxy.$modal.msgWarning('启用自动AI分析时，请先选择Agent')
@@ -2625,6 +2491,21 @@ function openDetail(row) {
   })
 }
 
+function resetDetailDialog() {
+  detailMainTab.value = 'overview'
+  historyActiveTab.value = 'timeline'
+  detail.value = {}
+  timeline.value = {}
+  logPullContentOpen.value = false
+  logPullSubmitOpen.value = false
+  aiTaskHistoryOpen.value = false
+  aiTaskDetailOpen.value = false
+  selectedAiTask.value = null
+  aiAnalysisOpen.value = false
+  aiRepoMappingOpen.value = false
+  stopLogPullAutoRefresh()
+}
+
 function switchDetailSection(section) {
   detailMainTab.value = section
   handleDetailTabClick({ props: { name: section } })
@@ -2636,6 +2517,10 @@ function handleDetailTabClick(tab) {
     if (!timeline.value?.statusHistory && !timeline.value?.comments && !timeline.value?.events) {
       refreshTimeline()
     }
+    return
+  }
+  if (tabName === 'logPull') {
+    loadLogPullList()
     return
   }
   if (tabName === 'collab') {
@@ -2650,9 +2535,6 @@ function handleHistoryTabClick(tab) {
       refreshTimeline()
     }
     return
-  }
-  if (tabName === 'logPull') {
-    loadLogPullList()
   }
 }
 
@@ -2680,7 +2562,7 @@ function resetMessageForm() {
     role: 'user',
     messageType: 'question',
     content: '',
-    runAi: false,
+    runAi: true,
     versionKey: detail.value.versionKey || detail.value.extraData?.versionKey || '',
     agentCode: detail.value.latestAiAnalysis?.agentCode || ''
   }
@@ -2781,35 +2663,10 @@ function submitLogPull() {
       proxy.$modal.msgWarning('modifyTime 和 path 至少需要填写一个')
       return
     }
-    if (logPullForm.value.timeRangeMode === 'between') {
-      const hasAnyDirectValue = Boolean(logPullForm.value.logBeginTime || logPullForm.value.logEndTime)
-      if (hasAnyDirectValue) {
-        if (!logPullForm.value.logBeginTime || !logPullForm.value.logEndTime) {
-          proxy.$modal.msgWarning('开始时间和结束时间需要同时填写')
-          return
-        }
-        const begin = new Date(logPullForm.value.logBeginTime)
-        const end = new Date(logPullForm.value.logEndTime)
-        if (begin > end) {
-          proxy.$modal.msgWarning('日志开始时间不能晚于结束时间')
-          return
-        }
-      }
-    } else if (logPullForm.value.timeRangeMode === 'point') {
-      if (!logPullForm.value.logPointTime) {
-        proxy.$modal.msgWarning('时间点必填')
-        return
-      }
-      const beforeMinutes = Number(logPullForm.value.rangeBeforeMinutes ?? 0)
-      const afterMinutes = Number(logPullForm.value.rangeAfterMinutes ?? 0)
-      if (beforeMinutes < 0 || afterMinutes < 0) {
-        proxy.$modal.msgWarning('时间点前后范围不能为负数')
-        return
-      }
-      if (!beforeMinutes && !afterMinutes) {
-        proxy.$modal.msgWarning('时间点前后范围至少填写一侧大于 0 的时长')
-        return
-      }
+    const timeRangeError = getOptionalLogPullTimeRangeError(logPullForm.value)
+    if (timeRangeError) {
+      proxy.$modal.msgWarning(timeRangeError)
+      return
     }
     if (logPullForm.value.autoAiEnabled && !String(logPullForm.value.aiAgentCode || '').trim()) {
       proxy.$modal.msgWarning('启用自动AI分析时，请先选择Agent')
@@ -2826,14 +2683,7 @@ function submitLogPull() {
       zipMaxSize: logPullForm.value.zipMaxSize,
       storageMode: logPullForm.value.storageMode
     }
-    if (logPullForm.value.timeRangeMode === 'between') {
-      payload.logBeginTime = logPullForm.value.logBeginTime
-      payload.logEndTime = logPullForm.value.logEndTime
-    } else {
-      payload.logPointTime = logPullForm.value.logPointTime
-      payload.rangeBeforeMinutes = Number(logPullForm.value.rangeBeforeMinutes ?? 0)
-      payload.rangeAfterMinutes = Number(logPullForm.value.rangeAfterMinutes ?? 0)
-    }
+    Object.assign(payload, buildOptionalLogPullTimeRangePayload(logPullForm.value))
     payload.autoAiEnabled = Boolean(logPullForm.value.autoAiEnabled)
     payload.aiAgentCode = logPullForm.value.autoAiEnabled ? String(logPullForm.value.aiAgentCode || '').trim() : ''
     logPullSubmitting.value = true
@@ -3064,18 +2914,7 @@ function formatSeconds(seconds) {
 
 watch(detailOpen, value => {
   if (!value) {
-    stopLogPullAutoRefresh()
-    detailMainTab.value = 'overview'
-    historyActiveTab.value = 'timeline'
-    detail.value = {}
-    timeline.value = {}
-    logPullContentOpen.value = false
-    logPullSubmitOpen.value = false
-    aiTaskHistoryOpen.value = false
-    aiTaskDetailOpen.value = false
-    selectedAiTask.value = null
-    aiAnalysisOpen.value = false
-    aiRepoMappingOpen.value = false
+    resetDetailDialog()
   }
 })
 
@@ -3111,8 +2950,39 @@ getList()
 </script>
 
 <style scoped>
-.ticket-page :deep(.el-drawer__body) {
+.ticket-page :deep(.ticket-detail-dialog .el-dialog) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  margin: 0;
+}
+
+.ticket-page :deep(.ticket-detail-dialog .el-dialog__header) {
+  flex: 0 0 auto;
+}
+
+.ticket-page :deep(.ticket-detail-dialog .el-dialog__body) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
   padding-top: 8px;
+  padding-bottom: 12px;
+}
+
+.ticket-detail-scroll {
+  height: 100%;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.collab-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.ticket-page :deep(.ticket-detail-dialog .detail-main-tabs) {
+  height: auto;
 }
 
 .mt16 {
