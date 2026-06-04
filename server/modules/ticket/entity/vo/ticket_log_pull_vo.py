@@ -265,6 +265,7 @@ class TicketLogPullSummaryModel(TicketLogPullBaseModel):
     status_desc: str | None = Field(default=None, description="内部处理状态描述")
     is_error: bool = Field(default=False, description="是否异常")
     error_message: str | None = Field(default=None, description="异常信息")
+    modify_time: date | str | None = Field(default=None, description="日志拉取日期")
     create_time: datetime | None = None
 
 

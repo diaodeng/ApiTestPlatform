@@ -1,7 +1,9 @@
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
@@ -382,6 +384,45 @@ async def get_ticket_log_pull_content(
 
 
 @ticketController.get(
+    "/log-pulls/{record_id}/download",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def download_ticket_log_pull(
+    request: Request,
+    record_id: int,
+    query_db: Session = Depends(get_db),
+):
+    """
+    下载日志拉取压缩包接口。
+    :param request: 请求对象
+    :param record_id: 日志拉取记录ID
+    :param query_db: 数据库会话
+    :return: 压缩包文件
+    """
+    temp_file_path = None
+    try:
+        temp_file_path, should_cleanup, download_file_name = TicketLogPullService.download_log_pull_file_services(
+            query_db, record_id
+        )
+        if not temp_file_path:
+            return ResponseUtil.failure(msg="日志拉取记录不存在或没有可下载的文件")
+        background = BackgroundTask(temp_file_path.unlink, missing_ok=True) if should_cleanup else None
+        return FileResponse(
+            path=str(temp_file_path),
+            filename=download_file_name or temp_file_path.name,
+            background=background,
+        )
+    except Exception as e:
+        logger.exception(e)
+        if temp_file_path and getattr(temp_file_path, "exists", lambda: False)():
+            try:
+                temp_file_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
     "/log-pulls-by-ticket",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
 )
@@ -536,6 +577,33 @@ async def reextract_ticket_log_pull(
     """
     try:
         result = TicketLogPullService.reextract_log_pull_services(query_db, record_id, query, current_user)
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.delete(
+    "/log-pulls/{record_id}",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:remove"))],
+)
+@log_decorator(title="日志拉取记录", business_type=3)
+async def delete_ticket_log_pull(
+    request: Request,
+    record_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    删除日志拉取记录接口。
+    :param request: 请求对象
+    :param record_id: 日志拉取记录ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入审计信息
+    :return: 删除结果
+    """
+    try:
+        result = TicketLogPullService.delete_log_pull_services(query_db, record_id, current_user)
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)

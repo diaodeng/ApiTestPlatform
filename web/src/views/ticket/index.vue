@@ -425,6 +425,15 @@
                         <el-button type="primary" @click="openAiAnalysisDialog" v-hasPermi="['ticket:ai:analysis:run']">
                           发起AI分析
                         </el-button>
+                        <el-button
+                          type="info"
+                          plain
+                          @click="refreshAiAnalysisData"
+                          :loading="aiAnalysisRefreshLoading"
+                          v-hasPermi="['ticket:ai:analysis:list']"
+                        >
+                          刷新AI数据
+                        </el-button>
                         <el-button @click="openAiTaskHistory" v-hasPermi="['ticket:ai:analysis:list']">
                           查看任务历史
                         </el-button>
@@ -535,7 +544,7 @@
                   <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="280" fixed="right">
+              <el-table-column label="操作" width="340" fixed="right">
                 <template #default="scope">
                   <el-button-group>
                     <el-button
@@ -572,6 +581,15 @@
                       v-hasPermi="['ticket:logpull:add']"
                     >
                       重新截取
+                    </el-button>
+                    <el-button
+                      link
+                      type="danger"
+                      @click="deleteLogPull(scope.row)"
+                      :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
+                      v-hasPermi="['ticket:logpull:remove']"
+                    >
+                      删除
                     </el-button>
                   </el-button-group>
                 </template>
@@ -1470,6 +1488,7 @@ import {
   assignTicket,
   changeTicketStatus,
   delTicket,
+  delTicketLogPull,
   delTicketAiRepoMapping,
   downloadTicketImportTemplate,
   extractTicketKnowledge,
@@ -1555,6 +1574,7 @@ const logPullTotal = ref(0)
 const aiAnalysisLoading = ref(false)
 const aiAnalysisSubmitting = ref(false)
 const aiAnalysisRetryLoading = ref(false)
+const aiAnalysisRefreshLoading = ref(false)
 const aiAnalysisOpen = ref(false)
 const aiTaskHistoryOpen = ref(false)
 const aiTaskDetailOpen = ref(false)
@@ -2324,6 +2344,20 @@ function loadAiAnalysisTasks(silent = false) {
   })
 }
 
+function refreshAiAnalysisData(refreshTicketList = false) {
+  if (!currentTicketId.value) {
+    return Promise.resolve()
+  }
+  aiAnalysisRefreshLoading.value = true
+  const tasks = [refreshDetail(), loadAiAnalysisTasks(true)]
+  if (refreshTicketList) {
+    tasks.push(getList())
+  }
+  return Promise.all(tasks).finally(() => {
+    aiAnalysisRefreshLoading.value = false
+  })
+}
+
 function canRetryAiTask(row) {
   return Boolean(row?.taskId) && ['failed', 'canceled'].includes(String(row.status || '').toLowerCase())
 }
@@ -2379,7 +2413,7 @@ function submitAiAnalysis() {
     }).then(() => {
       proxy.$modal.msgSuccess('AI分析任务已提交')
       aiAnalysisOpen.value = false
-      Promise.all([refreshDetail(), loadAiAnalysisTasks(true), getList()])
+      refreshAiAnalysisData(true)
     }).finally(() => {
       aiAnalysisSubmitting.value = false
     })
@@ -2714,6 +2748,31 @@ function runLogPullAction(actionPromise, successMessage, refreshContent = false)
     .finally(() => {
       logPullActionLoading.value = false
     })
+}
+
+function deleteLogPull(row) {
+  if (!row?.id) {
+    return
+  }
+  if (activeLogPullStatuses.includes(row.status)) {
+    proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能删除')
+    return
+  }
+  proxy.$modal.confirm(`是否确认删除日志拉取记录 #${row.id}？删除后会同步清理关联文件数据。`).then(() => {
+    logPullActionLoading.value = true
+    return delTicketLogPull(row.id)
+  }).then(() => {
+    proxy.$modal.msgSuccess('日志拉取记录已删除')
+    if (selectedLogPullRecord.value?.id === row.id) {
+      logPullContentOpen.value = false
+      selectedLogPullRecord.value = null
+      selectedLogPullContent.value = null
+      logPullKeyword.value = ''
+    }
+    return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
+  }).catch(() => {}).finally(() => {
+    logPullActionLoading.value = false
+  })
 }
 
 function retryLogPull(row) {

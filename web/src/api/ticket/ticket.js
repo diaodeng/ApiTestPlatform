@@ -222,11 +222,28 @@ export function createTicketLogPullRecord(data) {
   });
 }
 
+// 下载日志拉取压缩包
+export function downloadTicketLogPull(recordId) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}/download`,
+    method: 'get',
+    responseType: 'blob',
+  });
+}
+
 // 重新拉取日志任务
 export function retryTicketLogPull(recordId) {
   return request({
     url: `/ticket/log-pulls/${recordId}/retry`,
     method: 'post',
+  });
+}
+
+// 删除日志拉取记录
+export function delTicketLogPull(recordId) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}`,
+    method: 'delete',
   });
 }
 

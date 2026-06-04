@@ -129,13 +129,26 @@
       <el-table-column label="摘要/异常" min-width="240" prop="contentSummary" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</template>
       </el-table-column>
+      <el-table-column label="拉取日期" width="120">
+        <template #default="scope">{{ scope.row.modifyTime || '-' }}</template>
+      </el-table-column>
       <el-table-column label="创建时间" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="280" fixed="right">
+      <el-table-column label="操作" width="420" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="View" @click="openContentDialog(scope.row)" v-hasPermi="['ticket:logpull:query']">
             查看日志
+          </el-button>
+          <el-button
+            link
+            type="success"
+            icon="Download"
+            @click="downloadLogPull(scope.row)"
+            :disabled="actionLoading"
+            v-hasPermi="['ticket:logpull:query']"
+          >
+            下载日志
           </el-button>
           <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
             重新拉取
@@ -159,6 +172,16 @@
             v-hasPermi="['ticket:logpull:add']"
           >
             重新截取
+          </el-button>
+          <el-button
+            link
+            type="danger"
+            icon="Delete"
+            @click="deleteLogPull(scope.row)"
+            :disabled="actionLoading"
+            v-hasPermi="['ticket:logpull:remove']"
+          >
+            删除
           </el-button>
         </template>
       </el-table-column>
@@ -367,7 +390,9 @@
 
 <script setup name="TicketLogPullRecord">
 import {
+  delTicketLogPull,
   createTicketLogPullRecord,
+  downloadTicketLogPull,
   getTicketLogPullContent,
   getTicketLogPullVendorStoreOptions,
   listTicket,
@@ -378,10 +403,12 @@ import {
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
+import { saveAs } from 'file-saver'
 import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
 import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
 import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
 import { buildOptionalLogPullTimeRangePayload, getOptionalLogPullTimeRangeError } from '../logPull.shared'
+import { blobValidate } from '@/utils/ruoyi'
 
 const { proxy } = getCurrentInstance()
 
@@ -795,6 +822,60 @@ function runAction(request, successMessage, refreshContent = false) {
   })
 }
 
+function resolveDownloadFileName(row) {
+  let remoteName = ''
+  if (row?.commandResultUrl) {
+    try {
+      remoteName = new URL(String(row.commandResultUrl)).pathname.split('/').pop() || ''
+    } catch (error) {
+      remoteName = String(row.commandResultUrl).split('/').pop() || ''
+    }
+  }
+  const candidates = [
+    row?.downloadFileName,
+    row?.storagePath ? String(row.storagePath).split(/[\\/]/).pop() : '',
+    remoteName,
+    `ticket_log_pull_${row?.id || Date.now()}.zip`
+  ]
+  for (const candidate of candidates) {
+    const text = String(candidate || '').trim()
+    if (text) {
+      return text
+    }
+  }
+  return `ticket_log_pull_${row?.id || Date.now()}.zip`
+}
+
+async function downloadLogPull(row) {
+  if (!row?.id) {
+    return
+  }
+  if (!row.commandResultUrl && !row.storagePath) {
+    proxy.$modal.msgWarning('当前记录缺少可下载的归档文件')
+    return
+  }
+  try {
+    actionLoading.value = true
+    const blob = await downloadTicketLogPull(row.id)
+    if (!blobValidate(blob)) {
+      try {
+        const text = await blob.text()
+        const payload = JSON.parse(text)
+        proxy.$modal.msgError(payload.msg || '下载失败')
+      } catch (error) {
+        proxy.$modal.msgError('下载失败')
+      }
+      return
+    }
+    saveAs(blob, resolveDownloadFileName(row))
+  } catch (error) {
+    console.error(error)
+    proxy.$modal.msgError('下载失败')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
 function retryLogPull(row) {
   if (!row?.id) return
   runAction(retryTicketLogPull(row.id), '已重新提交拉取任务')
@@ -808,6 +889,27 @@ function redownloadLogPull(row) {
 function reextractLogPull(row) {
   if (!row?.id) return
   runAction(reextractTicketLogPull(row.id, buildContentQuery()), '日志已重新截取', true)
+}
+
+function deleteLogPull(row) {
+  if (!row?.id) {
+    return
+  }
+  proxy.$modal.confirm(`是否确认删除日志拉取记录 #${row.id}？删除后会同步清理关联文件数据。`).then(() => {
+    actionLoading.value = true
+    return delTicketLogPull(row.id)
+  }).then(() => {
+    proxy.$modal.msgSuccess('日志拉取记录已删除')
+    if (selectedRecord.value?.id === row.id) {
+      contentOpen.value = false
+      selectedRecord.value = null
+      contentDetail.value = null
+      contentText.value = ''
+    }
+    return getList()
+  }).catch(() => {}).finally(() => {
+    actionLoading.value = false
+  })
 }
 
 function updateAutoRefresh() {

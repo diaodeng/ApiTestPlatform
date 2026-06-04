@@ -538,6 +538,44 @@ class TicketLogPullService:
                     logger.warning("删除重新下载产生的临时文件失败: %s", temp_file_path)
 
     @classmethod
+    def delete_log_pull_services(
+        cls, query_db: Session, record_id: int, current_user: CurrentUserModel
+    ) -> CrudResponseModel:
+        """
+        删除日志拉取记录并同步清理对应文件。
+        :param query_db: 数据库会话
+        :param record_id: 日志拉取记录ID
+        :param current_user: 当前登录用户
+        :return: 删除结果
+        """
+        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        if not record:
+            return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
+        if record.status in cls.ACTIVE_STATUSES:
+            return CrudResponseModel(is_success=False, message="当前日志拉取任务仍在执行中，暂不能删除")
+
+        try:
+            cls._delete_record_storage(record, query_db)
+            query_db.delete(record)
+            cls._add_ticket_event(
+                query_db,
+                ticket_id=record.ticket_id,
+                operator_id=cls._user_id(current_user),
+                operator_name=cls._user_name(current_user),
+                content="删除日志拉取记录",
+                event_data={
+                    "record_id": record.id,
+                    "storage_mode": record.storage_mode,
+                    "storage_path": record.storage_path,
+                },
+            )
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message="日志拉取记录已删除")
+        except Exception:
+            query_db.rollback()
+            raise
+
+    @classmethod
     def reextract_log_pull_services(
         cls,
         query_db: Session,
@@ -738,6 +776,24 @@ class TicketLogPullService:
             result.rows = cls._enrich_record_list_items(query_db, result.rows)
             return result
         return cls._enrich_record_list_items(query_db, result)
+
+    @classmethod
+    def download_log_pull_file_services(
+        cls, query_db: Session, record_id: int
+    ) -> tuple[Path | None, bool, str | None]:
+        """
+        获取日志拉取记录对应的可下载文件。
+        :param query_db: 数据库会话
+        :param record_id: 日志拉取记录ID
+        :return: 文件路径、是否需要清理临时文件、下载文件名
+        """
+        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        if not record:
+            return None, False, None
+        archive_path, should_cleanup = cls._resolve_archive_source_for_view(record, query_db)
+        if not archive_path:
+            return None, False, None
+        return archive_path, should_cleanup, cls._build_download_file_name(record, archive_path)
 
     @classmethod
     def get_log_pull_content_services(
@@ -1755,6 +1811,31 @@ class TicketLogPullService:
         return None, False
 
     @classmethod
+    def _build_download_file_name(cls, record: TicketLogPullRecord, archive_path: Path | None = None) -> str:
+        """
+        生成日志压缩包下载文件名。
+        :param record: 日志拉取记录
+        :param archive_path: 可选的归档文件路径
+        :return: 下载文件名
+        """
+        candidates = [
+            str(record.download_file_name or "").strip(),
+            Path(str(record.storage_path or "")).name if str(record.storage_path or "").strip() else "",
+            Path(urlparse(str(record.command_result_url or "")).path).name
+            if str(record.command_result_url or "").strip()
+            else "",
+            archive_path.name if archive_path else "",
+            f"ticket_log_pull_{record.id}.zip",
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            resolved = Path(candidate).name
+            if resolved:
+                return resolved
+        return f"ticket_log_pull_{record.id}.zip"
+
+    @classmethod
     def _download_file_from_ftp_to_temp(cls, db: Session, remote_path: str) -> Path:
         """
         从 FTP 下载文件到临时路径。
@@ -1787,6 +1868,45 @@ class TicketLogPullService:
                     ftp.close()
                 except Exception:
                     pass
+
+    @classmethod
+    def _delete_record_storage(cls, record: TicketLogPullRecord, db: Session) -> None:
+        """
+        删除日志拉取记录对应的文件数据。
+        :param record: 日志拉取记录
+        :param db: 数据库会话
+        :return: 无
+        """
+        storage_path = str(record.storage_path or "").strip()
+        if not storage_path:
+            return
+        storage_mode = str(record.storage_mode or cls._get_storage_config_dict(db).get("mode") or "local").strip().lower()
+        if storage_mode == "ftp":
+            ftp = cls._connect_ftp(cls._get_storage_config_dict(db))
+            try:
+                ftp.delete(storage_path)
+            except error_perm as exc:
+                message = str(exc)
+                if "550" in message or "not found" in message.lower() or "no such file" in message.lower():
+                    return
+                raise RuntimeError(f"FTP 删除失败: {exc}") from exc
+            except ftp_errors as exc:
+                raise RuntimeError(f"FTP 删除失败: {exc}") from exc
+            finally:
+                try:
+                    ftp.quit()
+                except Exception:
+                    try:
+                        ftp.close()
+                    except Exception:
+                        pass
+            return
+        local_path = Path(storage_path)
+        if local_path.exists():
+            try:
+                local_path.unlink()
+            except Exception as exc:
+                raise RuntimeError(f"删除本地文件失败: {exc}") from exc
 
     @staticmethod
     def _build_view_fallback_summary(base_summary: str | None, reason: str) -> str:
@@ -2312,6 +2432,9 @@ class TicketLogPullService:
         :return: 列表项字典
         """
         payload = row if isinstance(row, dict) else CamelCaseUtil.transform_result(row)
+        command_content = payload.get("commandContent")
+        if not payload.get("modifyTime") and isinstance(command_content, dict):
+            payload["modifyTime"] = command_content.get("modifyTime")
         payload["hasContent"] = bool(payload.get("compressedContent"))
         payload.pop("compressedContent", None)
         payload.pop("exceptionDetail", None)
