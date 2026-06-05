@@ -734,6 +734,7 @@ class TicketLogPullService:
                     "log_end_time": log_end_time,
                     "auto_ai_enabled": bool(payload.auto_ai_enabled),
                     "ai_agent_code": str(payload.ai_agent_code or "").strip() or None,
+                    "ai_provider_code": str(payload.ai_provider_code or "").strip() or None,
                 },
             )
             query_db.commit()
@@ -1206,18 +1207,20 @@ class TicketLogPullService:
         if isinstance(automation, dict):
             auto_ai_enabled = bool(automation.get("autoAiEnabled"))
             agent_code = str(automation.get("aiAgentCode") or "").strip()
+            provider_code = str(automation.get("aiProviderCode") or "").strip()
         else:
             auto_ai_enabled = bool(record.command_content.get("autoAiEnabled"))
             agent_code = str(record.command_content.get("aiAgentCode") or "").strip()
+            provider_code = str(record.command_content.get("aiProviderCode") or "").strip()
         if not auto_ai_enabled:
             return
-        if not agent_code:
-            logger.warning("日志拉取记录[%s] 已配置自动AI但未填写Agent", record_id)
+        if not agent_code and not provider_code:
+            logger.warning("日志拉取记录[%s] 已配置自动AI但未填写Provider或Agent", record_id)
             cls._notify_automation(
                 db,
                 ticket.ticket_id,
                 status="failed",
-                message="日志拉取后自动AI已启用，但未配置Agent，已跳过分析",
+                message="日志拉取后自动AI已启用，但未配置Provider或Agent，已跳过分析",
                 detail=f"record_id={record_id}",
                 notify_config=record_notify_config,
             )
@@ -1254,13 +1257,15 @@ class TicketLogPullService:
                 version_key=version_key,
                 log_pull_record_id=record.id,
                 agent_code=agent_code,
+                ai_provider_code=provider_code,
             )
             logger.info(
-                "日志拉取记录[%s] 触发自动AI分析 | ticket_id=%s, version_key=%s, agent_code=%s",
+                "日志拉取记录[%s] 触发自动AI分析 | ticket_id=%s, version_key=%s, agent_code=%s, provider_code=%s",
                 record_id,
                 record.ticket_id,
                 version_key,
                 agent_code,
+                provider_code,
             )
             result = TicketAiAnalysisService.create_analysis_task_services(db, record.ticket_id, request, None)
             if not result.is_success:
@@ -2182,6 +2187,7 @@ class TicketLogPullService:
         if automation:
             payload_data["autoAiEnabled"] = automation.get("autoAiEnabled")
             payload_data["aiAgentCode"] = automation.get("aiAgentCode")
+            payload_data["aiProviderCode"] = automation.get("aiProviderCode")
         try:
             return TicketLogPullCreateModel.model_validate(payload_data)
         except Exception as exc:

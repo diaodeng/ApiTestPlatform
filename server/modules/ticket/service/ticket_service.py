@@ -1390,6 +1390,7 @@ class TicketService:
                         ai_request = TicketAiAnalysisRequestModel(
                             versionKey=version_key,
                             agentCode=message_object.agent_code,
+                            aiProviderCode=message_object.ai_provider_code,
                             forceRefresh=True,
                         )
                         ai_result = TicketAiAnalysisService.create_analysis_task_services(

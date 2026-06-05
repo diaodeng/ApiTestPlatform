@@ -188,7 +188,23 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="版本号" prop="versionKey">
-              <el-input v-model="form.versionKey" placeholder="请输入版本号，供AI分析和追溯" />
+              <el-select
+                v-model="form.versionKey"
+                placeholder="请选择或输入版本号"
+                filterable
+                clearable
+                allow-create
+                default-first-option
+                :disabled="!form.projectId"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in formVersionOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -258,6 +274,7 @@
               :field-prefix="'logPullConfig'"
               :vendor-options="vendorOptions"
               :agent-options="agentOptions"
+              :provider-options="providerOptions"
               :data-type-options="logPullDataTypeOptions"
               :storage-mode-options="logPullStorageModeOptions"
             />
@@ -616,6 +633,7 @@
                   v-model="logPullForm"
                   :vendor-options="vendorOptions"
                   :agent-options="agentOptions"
+                  :provider-options="providerOptions"
                   :data-type-options="logPullDataTypeOptions"
                   :storage-mode-options="logPullStorageModeOptions"
                 />
@@ -681,6 +699,26 @@
                       />
                     </el-col>
                     <el-col :span="24">
+                      <el-form-item label="版本号">
+                        <el-select
+                          v-model="messageForm.versionKey"
+                          placeholder="请选择或输入版本号"
+                          filterable
+                          clearable
+                          allow-create
+                          default-first-option
+                          style="width: 100%"
+                        >
+                          <el-option
+                            v-for="item in detailVersionOptions"
+                            :key="item.value"
+                            :label="item.label"
+                            :value="item.value"
+                          />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="24">
                       <el-form-item label="Agent">
                         <el-select v-model="messageForm.agentCode" placeholder="可选" filterable clearable>
                           <el-option
@@ -688,6 +726,18 @@
                             :key="item.agentCode"
                             :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
                             :value="item.agentCode"
+                          />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="24">
+                      <el-form-item label="Provider">
+                        <el-select v-model="messageForm.aiProviderCode" placeholder="可选" filterable clearable style="width: 100%">
+                          <el-option
+                            v-for="item in providerOptions"
+                            :key="item.providerCode"
+                            :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.modelName ? `- ${item.modelName}` : ''}`"
+                            :value="item.providerCode"
                           />
                         </el-select>
                       </el-form-item>
@@ -1152,12 +1202,24 @@
       :close-on-click-modal="false"
       @closed="resetAiAnalysisDialog"
     >
-      <el-form ref="aiAnalysisRef" :model="aiAnalysisTaskForm" :rules="aiAnalysisRules" label-width="110px">
+        <el-form ref="aiAnalysisRef" :model="aiAnalysisTaskForm" :rules="aiAnalysisRules" label-width="110px">
         <el-form-item label="版本号" prop="versionKey">
-          <el-input
+          <el-select
             v-model="aiAnalysisTaskForm.versionKey"
-            placeholder="请输入版本号，系统将按工单所属项目 + 版本号自动匹配仓库映射"
-          />
+            placeholder="请选择或输入版本号，系统将按工单所属项目 + 版本号自动匹配仓库映射"
+            filterable
+            clearable
+            allow-create
+            default-first-option
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in detailVersionOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="Agent">
           <el-select v-model="aiAnalysisTaskForm.agentCode" placeholder="可选，优先使用指定Agent" filterable clearable>
@@ -1166,6 +1228,16 @@
               :key="item.agentCode"
               :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
               :value="item.agentCode"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Provider">
+          <el-select v-model="aiAnalysisTaskForm.aiProviderCode" placeholder="可选，优先使用指定Provider" filterable clearable style="width: 100%">
+            <el-option
+              v-for="item in providerOptions"
+              :key="item.providerCode"
+              :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.modelName ? `- ${item.modelName}` : ''}`"
+              :value="item.providerCode"
             />
           </el-select>
         </el-form-item>
@@ -1473,6 +1545,7 @@
 <script setup name="TicketIndex">
 import { saveAs } from 'file-saver'
 import { decompressText } from '@/utils/tools'
+import { listAiProviderOptions } from '@/api/system/aiprovider'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
 import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
@@ -1538,8 +1611,10 @@ const ticketList = ref([])
 const total = ref(0)
 const projectOptions = ref([])
 const formModuleOptions = ref([])
+const formVersionOptions = ref([])
 const queryModuleOptions = ref([])
 const agentOptions = ref([])
+const providerOptions = ref([])
 const vendorOptions = ref([])
 const pushOptions = ref([])
 const open = ref(false)
@@ -1587,9 +1662,11 @@ const aiTaskList = ref([])
 const aiTaskTotal = ref(0)
 const aiRepoMappingList = ref([])
 const aiRepoMappingTotal = ref(0)
+const detailVersionOptions = ref([])
 const aiAnalysisTaskForm = ref({
   versionKey: '',
   agentCode: '',
+  aiProviderCode: '',
   forceRefresh: false,
   extraInstruction: ''
 })
@@ -1646,6 +1723,7 @@ function createDefaultLogPullForm() {
     storageMode: undefined,
     autoAiEnabled: false,
     aiAgentCode: '',
+    aiProviderCode: '',
     notifyConfig: {
       allowPush: 1,
       pushIds: [],
@@ -1698,6 +1776,48 @@ function loadVendorOptions() {
   })
 }
 
+function loadProviderOptions() {
+  return listAiProviderOptions().then(response => {
+    providerOptions.value = response.data || []
+  })
+}
+
+function loadDetailVersionOptions(projectId) {
+  if (!projectId) {
+    detailVersionOptions.value = []
+    return Promise.resolve()
+  }
+  return listTicketAiRepoMappings({
+    pageNum: 1,
+    pageSize: 200,
+    projectId,
+    enabled: true
+  }).then(response => {
+    const rows = response.rows || []
+    const optionMap = new Map()
+    rows.forEach(item => {
+      const value = String(item.versionKey || '').trim()
+      if (!value || optionMap.has(value)) {
+        return
+      }
+      const branchName = String(item.branchName || '').trim()
+      const repoUrl = String(item.repoUrl || '').trim()
+      const labelParts = [value]
+      if (branchName) {
+        labelParts.push(`- ${branchName}`)
+      }
+      if (repoUrl) {
+        labelParts.push(`(${repoUrl})`)
+      }
+      optionMap.set(value, {
+        value,
+        label: labelParts.join(' ')
+      })
+    })
+    detailVersionOptions.value = Array.from(optionMap.values())
+  })
+}
+
 function loadPushOptions() {
   return listAllPushConfig({ pageNum: 1, pageSize: 500 }).then(response => {
     const rows = response.data || []
@@ -1738,7 +1858,7 @@ function createDefaultTicketForm() {
     description: undefined,
     projectId: undefined,
     moduleId: undefined,
-    versionKey: undefined,
+    versionKey: '',
     customerPriority: 'P3',
     internalPriority: 'P3',
     severity: undefined,
@@ -1776,7 +1896,8 @@ const data = reactive({
     content: '',
     runAi: true,
     versionKey: '',
-    agentCode: ''
+    agentCode: '',
+    aiProviderCode: ''
   },
   eventForm: {
     eventType: 'ANALYSIS',
@@ -1978,7 +2099,8 @@ function applyTicketAutomationConfig(ticketData) {
     ...createDefaultLogPullForm(),
     ...logPullConfig,
     autoAiEnabled: Boolean(logPullConfig.autoAiEnabled ?? logPullConfig.auto_ai_enabled ?? false),
-    aiAgentCode: logPullConfig.aiAgentCode || logPullConfig.ai_agent_code || ''
+    aiAgentCode: logPullConfig.aiAgentCode || logPullConfig.ai_agent_code || '',
+    aiProviderCode: logPullConfig.aiProviderCode || logPullConfig.ai_provider_code || ''
   }
 }
 
@@ -2050,6 +2172,7 @@ function handleImportRequest(option) {
 function handleAdd() {
   reset()
   formModuleOptions.value = []
+  formVersionOptions.value = []
   open.value = true
   title.value = '新增工单'
 }
@@ -2069,6 +2192,7 @@ function handleUpdate(row) {
     tagText.value = Array.isArray(form.value.tags) ? form.value.tags.join(',') : ''
     applyTicketAutomationConfig(form.value)
     loadFormModuleOptions(form.value.projectId)
+    loadFormVersionOptions(form.value.projectId)
     open.value = true
     title.value = '编辑工单'
   })
@@ -2092,8 +2216,12 @@ function validateTicketAutomationConfig() {
     proxy.$modal.msgWarning(`启用日志拉取时，${timeRangeError}`)
     return false
   }
-  if (config.autoAiEnabled && !String(config.aiAgentCode || '').trim()) {
-    proxy.$modal.msgWarning('启用自动AI分析时，请先选择Agent')
+  if (
+    config.autoAiEnabled
+    && !String(config.aiAgentCode || '').trim()
+    && !String(config.aiProviderCode || '').trim()
+  ) {
+    proxy.$modal.msgWarning('启用自动AI分析时，请先选择Provider或Agent')
     return false
   }
   return true
@@ -2139,6 +2267,7 @@ function submitForm() {
     }
     if (payload.logPullConfig && !payload.logPullConfig.autoAiEnabled) {
       payload.logPullConfig.aiAgentCode = ''
+      payload.logPullConfig.aiProviderCode = ''
     }
     const request = payload.ticketId ? updateTicket(payload) : addTicket(payload)
     request.then(() => {
@@ -2276,6 +2405,7 @@ function refreshDetail() {
   }
   return getTicket(currentTicketId.value).then(response => {
     syncDetailBundle(response.data || {})
+    loadDetailVersionOptions(detail.value.projectId)
   })
 }
 
@@ -2366,6 +2496,11 @@ function resetAiAnalysisDialog() {
   aiAnalysisTaskForm.value.versionKey = detail.value.versionKey || detail.value.extraData?.versionKey || ''
   aiAnalysisTaskForm.value.agentCode = detail.value.extraData?.ticketAutomation?.logPullConfig?.aiAgentCode
     || detail.value.extraData?.ticket_automation?.log_pull_config?.aiAgentCode
+    || detail.value.latestAiAnalysis?.analysisContext?.selectedAgentCode
+    || ''
+  aiAnalysisTaskForm.value.aiProviderCode = detail.value.extraData?.ticketAutomation?.logPullConfig?.aiProviderCode
+    || detail.value.extraData?.ticket_automation?.log_pull_config?.aiProviderCode
+    || detail.value.latestAiAnalysis?.analysisContext?.selectedAiProviderCode
     || ''
   aiAnalysisTaskForm.value.forceRefresh = false
   aiAnalysisTaskForm.value.extraInstruction = ''
@@ -2380,6 +2515,7 @@ function openAiAnalysisDialog() {
     proxy.$modal.msgWarning('当前工单缺少版本号，请先完善版本号信息')
     return
   }
+  resetAiAnalysisDialog()
   aiAnalysisTaskForm.value.versionKey = detail.value.versionKey || detail.value.extraData?.versionKey || aiAnalysisTaskForm.value.versionKey || ''
   aiAnalysisOpen.value = true
 }
@@ -2408,6 +2544,7 @@ function submitAiAnalysis() {
     addTicketAiAnalysis(currentTicketId.value, {
       versionKey: aiAnalysisTaskForm.value.versionKey,
       agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
+      aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
       forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
       extraInstruction: aiAnalysisTaskForm.value.extraInstruction || undefined
     }).then(() => {
@@ -2521,6 +2658,7 @@ function openDetail(row) {
   resetMessageForm()
   getTicket(row.ticketId).then(response => {
     syncDetailBundle(response.data || {})
+    loadDetailVersionOptions(detail.value.projectId)
     aiAnalysisTaskForm.value.mappingId = detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId
   })
 }
@@ -2529,6 +2667,7 @@ function resetDetailDialog() {
   detailMainTab.value = 'overview'
   historyActiveTab.value = 'timeline'
   detail.value = {}
+  detailVersionOptions.value = []
   timeline.value = {}
   logPullContentOpen.value = false
   logPullSubmitOpen.value = false
@@ -2598,7 +2737,14 @@ function resetMessageForm() {
     content: '',
     runAi: true,
     versionKey: detail.value.versionKey || detail.value.extraData?.versionKey || '',
-    agentCode: detail.value.latestAiAnalysis?.agentCode || ''
+    agentCode: detail.value.latestAiAnalysis?.agentCode
+      || detail.value.latestAiAnalysis?.analysisContext?.selectedAgentCode
+      || '',
+    aiProviderCode: detail.value.latestAiAnalysis?.aiProviderCode
+      || detail.value.latestAiAnalysis?.analysisContext?.selectedAiProviderCode
+      || detail.value.extraData?.ticketAutomation?.logPullConfig?.aiProviderCode
+      || detail.value.extraData?.ticket_automation?.log_pull_config?.aiProviderCode
+      || ''
   }
   messageDataText.value = ''
 }
@@ -2626,10 +2772,10 @@ function submitMessage() {
   if (attachments === null) {
     return
   }
-  addTicketMessage(currentTicketId.value, {
-    ...messageForm.value,
-    content,
-    attachments
+    addTicketMessage(currentTicketId.value, {
+      ...messageForm.value,
+      content,
+      attachments
   }).then(response => {
     const payload = response.data || {}
     proxy.$modal.msgSuccess(payload.message || '消息提交成功')
@@ -2702,8 +2848,12 @@ function submitLogPull() {
       proxy.$modal.msgWarning(timeRangeError)
       return
     }
-    if (logPullForm.value.autoAiEnabled && !String(logPullForm.value.aiAgentCode || '').trim()) {
-      proxy.$modal.msgWarning('启用自动AI分析时，请先选择Agent')
+    if (
+      logPullForm.value.autoAiEnabled
+      && !String(logPullForm.value.aiAgentCode || '').trim()
+      && !String(logPullForm.value.aiProviderCode || '').trim()
+    ) {
+      proxy.$modal.msgWarning('启用自动AI分析时，请先选择Provider或Agent')
       return
     }
     const payload = {
@@ -2720,6 +2870,7 @@ function submitLogPull() {
     Object.assign(payload, buildOptionalLogPullTimeRangePayload(logPullForm.value))
     payload.autoAiEnabled = Boolean(logPullForm.value.autoAiEnabled)
     payload.aiAgentCode = logPullForm.value.autoAiEnabled ? String(logPullForm.value.aiAgentCode || '').trim() : ''
+    payload.aiProviderCode = logPullForm.value.autoAiEnabled ? String(logPullForm.value.aiProviderCode || '').trim() : ''
     logPullSubmitting.value = true
     addTicketLogPull(currentTicketId.value, payload).then(() => {
       proxy.$modal.msgSuccess('日志拉取任务已提交')
@@ -2864,6 +3015,42 @@ function loadFormModuleOptions(projectId) {
   })
 }
 
+function loadFormVersionOptions(projectId) {
+  if (!projectId) {
+    formVersionOptions.value = []
+    return Promise.resolve()
+  }
+  return listTicketAiRepoMappings({
+    pageNum: 1,
+    pageSize: 200,
+    projectId,
+    enabled: true
+  }).then(response => {
+    const rows = response.rows || []
+    const optionMap = new Map()
+    rows.forEach(item => {
+      const value = String(item.versionKey || '').trim()
+      if (!value || optionMap.has(value)) {
+        return
+      }
+      const branchName = String(item.branchName || '').trim()
+      const repoUrl = String(item.repoUrl || '').trim()
+      const labelParts = [value]
+      if (branchName) {
+        labelParts.push(`- ${branchName}`)
+      }
+      if (repoUrl) {
+        labelParts.push(`(${repoUrl})`)
+      }
+      optionMap.set(value, {
+        value,
+        label: labelParts.join(' ')
+      })
+    })
+    formVersionOptions.value = Array.from(optionMap.values())
+  })
+}
+
 function viewLogPullContent(row) {
   if (!row?.id) {
     return
@@ -2993,6 +3180,7 @@ watch(
       return
     }
     loadFormModuleOptions(value)
+    loadFormVersionOptions(value)
   }
 )
 
@@ -3002,6 +3190,7 @@ onBeforeUnmount(() => {
 
 loadProjectOptions()
 loadAgentOptions()
+loadProviderOptions()
 loadVendorOptions()
 loadPushOptions()
 loadQueryModuleOptions()

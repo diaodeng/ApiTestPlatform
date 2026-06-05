@@ -81,6 +81,39 @@ class TicketAiAnalysisService:
             env_values.setdefault(key, value)
         return env_values
 
+    @staticmethod
+    def _apply_env_overrides(env_values: dict[str, str], overrides: dict[str, Any] | None) -> dict[str, str]:
+        """
+        将请求下发的环境变量覆盖到 Worker 运行环境。
+        :param env_values: 原始环境变量
+        :param overrides: 覆盖项
+        :return: 合并后的环境变量
+        """
+        merged_env = dict(env_values)
+        if not isinstance(overrides, dict):
+            return merged_env
+        for key, value in overrides.items():
+            if key in (None, "") or value in (None, ""):
+                continue
+            merged_env[str(key)] = str(value)
+        return merged_env
+
+    @staticmethod
+    def _inject_worker_model(command: list[str], model_name: str | None) -> list[str]:
+        """
+        将 Provider 选择的模型注入 Worker 命令参数。
+        :param command: 原始 Worker 命令
+        :param model_name: 模型名称
+        :return: 注入后的 Worker 命令
+        """
+        normalized_model = str(model_name or "").strip()
+        if not normalized_model:
+            return list(command)
+        command_parts = [str(part) for part in command]
+        if "-m" in command_parts or "--model" in command_parts:
+            return command_parts
+        return [*command_parts, "-m", normalized_model]
+
     @classmethod
     def _prepare_codex_home(cls, workspace_dir: Path) -> Path:
         """
@@ -536,6 +569,9 @@ class TicketAiAnalysisService:
         timeline_payload = req_data.get("timeline") or {}
         prompt_template = str(req_data.get("promptTemplate") or req_data.get("prompt_template") or "").strip()
         schema_payload = req_data.get("resultSchema") or {}
+        provider_env_overrides = req_data.get("providerEnv") or {}
+        selected_worker_model = str(context_payload.get("selectedWorkerModel") or "").strip()
+        request_provider_code = str(context_payload.get("selectedAiProviderCode") or "").strip()
         try:
             timeout_sec = int(req_data.get("timeoutSec") or req_data.get("timeout_sec") or cls.DEFAULT_TIMEOUT_SEC)
         except Exception:
@@ -576,13 +612,15 @@ class TicketAiAnalysisService:
             )
             try:
                 request_snapshot_file.write_text(
-                    cls._dumps(
+                cls._dumps(
                         {
                             "taskId": task_id,
                             "ticketId": ticket_id,
                             "requestType": req_data.get("requestType"),
                             "command": req_data.get("command"),
                             "payloadSize": len(cls._dumps(req_data, indent=None)),
+                            "providerCode": request_provider_code,
+                            "workerModel": selected_worker_model,
                             "createdAt": datetime.now().isoformat(),
                         }
                     ),
@@ -733,9 +771,11 @@ class TicketAiAnalysisService:
                         str(result_file),
                     ]
                 )
+                command = cls._inject_worker_model(command, selected_worker_model)
                 codex_home = cls._prepare_codex_home(workspace_dir)
                 env_values = cls._load_codex_env(codex_home)
                 env_values["CODEX_HOME"] = str(codex_home)
+                env_values = cls._apply_env_overrides(env_values, provider_env_overrides)
 
                 await cls._emit_event(
                     event_sender,
@@ -747,6 +787,8 @@ class TicketAiAnalysisService:
                     workspace_root=str(workspace_root),
                     workspace_path=str(workspace_dir),
                     codex_home=str(codex_home),
+                    provider_code=request_provider_code or "<none>",
+                    worker_model=selected_worker_model or "<default>",
                 )
                 worker_started_at = time.monotonic()
                 process = await cls._run_worker_process(command, resolved_prompt, repo_path, env_values, timeout_sec)

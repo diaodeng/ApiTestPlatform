@@ -91,6 +91,7 @@ class TicketSyncService:
                 "rangeAfterMinutes": 10,
                 "autoAiEnabled": False,
                 "aiAgentCode": "",
+                "aiProviderCode": "",
             },
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
@@ -776,6 +777,7 @@ class TicketSyncService:
                 if automation.auto_ai_analysis:
                     log_pull_payload["autoAiEnabled"] = True
                     log_pull_payload["aiAgentCode"] = automation.ai_agent_code
+                    log_pull_payload["aiProviderCode"] = automation.ai_provider_code
                 try:
                     create_model = TicketLogPullCreateModel.model_validate(log_pull_payload)
                     log_result = TicketLogPullService.create_log_pull_services(
@@ -807,6 +809,7 @@ class TicketSyncService:
                         version_key=version_key,
                         log_pull_record_id=int(latest_log["id"]),
                         agent_code=automation.ai_agent_code,
+                        ai_provider_code=automation.ai_provider_code,
                         extra_instruction=automation.extra_instruction or "",
                     )
                     ai_result = TicketAiAnalysisService.create_analysis_task_services(

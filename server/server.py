@@ -11,6 +11,7 @@ from config.get_redis import RedisUtil
 from exceptions.handle import handle_exception
 from middlewares.handle import handle_middleware
 from module_admin.controller.api_key_controller import apiKeyController
+from module_admin.controller.ai_provider_controller import aiProviderController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.common_controller import commonController
@@ -128,6 +129,7 @@ controller_list = [
     {'router': postController, 'tags': ['系统管理-岗位管理']},
     {'router': dictController, 'tags': ['系统管理-字典管理']},
     {'router': configController, 'tags': ['系统管理-参数管理']},
+    {'router': aiProviderController, 'tags': ['系统管理-AI Provider管理']},
     {'router': apiKeyController, 'tags': ['系统管理-API Key管理']},
     {'router': noticeController, 'tags': ['系统管理-通知公告管理']},
     {'router': logController, 'tags': ['系统管理-日志管理']},

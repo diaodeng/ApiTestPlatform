@@ -173,6 +173,25 @@
         </el-select>
       </el-form-item>
     </el-col>
+    <el-col :span="12">
+      <el-form-item label="AI Provider" :prop="getProp('aiProviderCode')">
+        <el-select
+          v-model="model.aiProviderCode"
+          placeholder="请选择Provider"
+          filterable
+          clearable
+          :disabled="!model.autoAiEnabled"
+          @change="handleProviderChange"
+        >
+          <el-option
+            v-for="item in providerOptions"
+            :key="item.providerCode"
+            :label="formatProviderOption(item)"
+            :value="item.providerCode"
+          />
+        </el-select>
+      </el-form-item>
+    </el-col>
   </template>
 </template>
 
@@ -195,6 +214,10 @@ const props = defineProps({
     default: ''
   },
   storageModeOptions: {
+    type: Array,
+    default: () => []
+  },
+  providerOptions: {
     type: Array,
     default: () => []
   },
@@ -236,10 +259,44 @@ function handleVendorChange() {
   syncStoreSelection()
 }
 
+function formatProviderOption(item) {
+  const name = String(item.providerName || item.providerCode || '').trim()
+  const code = String(item.providerCode || '').trim()
+  const type = String(item.providerType || '').trim()
+  const model = String(item.modelName || '').trim()
+  const level = item.providerLevel ?? ''
+  return [name, code ? `[${code}]` : '', type ? `(${type})` : '', model ? `- ${model}` : '', level !== '' ? `#${level}` : '']
+    .filter(Boolean)
+    .join(' ')
+}
+
+function handleProviderChange(providerCode) {
+  if (!providerCode) {
+    return
+  }
+  const provider = props.providerOptions.find(item => item.providerCode === providerCode)
+  if (!provider) {
+    return
+  }
+  if (provider.agentCode) {
+    model.value.aiAgentCode = provider.agentCode
+  }
+}
+
 watch(
   () => model.value?.vendorId,
   () => {
     syncStoreSelection()
+  }
+)
+
+watch(
+  () => model.value?.aiProviderCode,
+  providerCode => {
+    if (!providerCode) {
+      return
+    }
+    handleProviderChange(providerCode)
   }
 )
 </script>

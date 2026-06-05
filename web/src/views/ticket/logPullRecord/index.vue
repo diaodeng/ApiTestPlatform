@@ -251,6 +251,7 @@
             v-model="createForm"
             :vendor-options="vendorOptions"
             :agent-options="agentOptions"
+            :provider-options="providerOptions"
             :data-type-options="logPullDataTypeOptions"
             :storage-mode-options="logPullStorageModeOptions"
             :show-auto-ai="false"
@@ -403,6 +404,7 @@ import {
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
+import { listAiProviderOptions } from '@/api/system/aiprovider'
 import { saveAs } from 'file-saver'
 import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
 import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
@@ -424,6 +426,7 @@ const total = ref(0)
 const ticketLoading = ref(false)
 const ticketOptions = ref([])
 const agentOptions = ref([])
+const providerOptions = ref([])
 const vendorOptions = ref([])
 const pushOptions = ref([])
 const selectedRecord = ref(null)
@@ -476,6 +479,7 @@ function createDefaultForm() {
     storageMode: 'local',
     autoAiEnabled: false,
     aiAgentCode: '',
+    aiProviderCode: '',
     notifyConfig: {
       allowPush: 1,
       pushIds: [],
@@ -560,6 +564,12 @@ function loadAgentOptions() {
   return listAllAgents().then(response => {
     const rows = response.data || []
     agentOptions.value = Array.isArray(rows) ? rows : []
+  })
+}
+
+function loadProviderOptions() {
+  return listAiProviderOptions().then(response => {
+    providerOptions.value = response.data || []
   })
 }
 
@@ -656,6 +666,7 @@ function handleCreateTicketChange(ticketId) {
   if (!ticketId) {
     createForm.value.autoAiEnabled = false
     createForm.value.aiAgentCode = ''
+    createForm.value.aiProviderCode = ''
   }
 }
 
@@ -682,8 +693,12 @@ function submitCreateForm() {
       proxy.$modal.msgWarning('未关联工单时不能启用自动AI分析')
       return
     }
-    if (createForm.value.autoAiEnabled && !String(createForm.value.aiAgentCode || '').trim()) {
-      proxy.$modal.msgWarning('启用自动AI分析时必须选择Agent')
+    if (
+      createForm.value.autoAiEnabled
+      && !String(createForm.value.aiAgentCode || '').trim()
+      && !String(createForm.value.aiProviderCode || '').trim()
+    ) {
+      proxy.$modal.msgWarning('启用自动AI分析时必须选择Provider或Agent')
       return
     }
 
@@ -711,6 +726,7 @@ function submitCreateForm() {
     }
     if (!payload.autoAiEnabled) {
       payload.aiAgentCode = ''
+      payload.aiProviderCode = ''
     }
     createTicketLogPullRecord(payload).then(() => {
       proxy.$modal.msgSuccess('日志拉取任务已提交')
@@ -932,6 +948,7 @@ function updateAutoRefresh() {
 onMounted(() => {
   loadTicketOptions()
   loadAgentOptions()
+  loadProviderOptions()
   loadVendorOptions()
   loadPushOptions()
   getList()

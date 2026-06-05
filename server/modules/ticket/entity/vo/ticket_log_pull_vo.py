@@ -101,6 +101,7 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     storage_mode: str | None = Field(default=None, description="本次任务使用的存储模式，支持 local/ftp")
     auto_ai_enabled: bool = Field(default=False, description="日志拉取成功后是否自动发起AI分析")
     ai_agent_code: str | None = Field(default=None, description="自动AI分析使用的Agent编码")
+    ai_provider_code: str | None = Field(default=None, description="自动AI分析使用的Provider编码")
     notify_config: dict[str, Any] | None = Field(default=None, description="日志拉取后的通知配置")
 
     @model_validator(mode="before")
@@ -152,8 +153,9 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
                 raise ValueError("时间点前后时长至少需要填写一侧大于 0")
         self.auto_ai_enabled = bool(self.auto_ai_enabled)
         self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
-        if self.auto_ai_enabled and not self.ai_agent_code:
-            raise ValueError("日志拉取后自动AI分析时必须选择Agent")
+        self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
+        if self.auto_ai_enabled and not (self.ai_provider_code or self.ai_agent_code):
+            raise ValueError("日志拉取后自动AI分析时必须选择Provider或Agent")
         if self.auto_ai_enabled and not self.ticket_id:
             raise ValueError("未关联工单时不能启用自动AI分析")
         return self

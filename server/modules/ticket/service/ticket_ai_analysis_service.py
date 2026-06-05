@@ -17,6 +17,7 @@ from dotenv import dotenv_values
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
+from module_admin.dao.ai_provider_dao import AiProviderDao
 from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
@@ -51,6 +52,7 @@ from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_notify_service import TicketNotifyService
 from modules.ticket.service.ticket_prompt_service import TicketPromptService
 from utils.common_util import CamelCaseUtil
+from utils.api_key_util import ApiKeyUtil
 from utils.log_util import logger
 from utils.snowflake import snowIdWorker
 
@@ -498,6 +500,71 @@ class TicketAiAnalysisService:
             return next(iter(connected_agents.keys()))
         return ""
 
+    @classmethod
+    def _resolve_ai_provider(cls, db: Session, provider_code: str | None = None):
+        """
+        解析 AI Provider 配置。
+        :param db: 数据库会话
+        :param provider_code: Provider编码
+        :return: Provider数据库对象或None
+        """
+        normalized_code = str(provider_code or "").strip()
+        if not normalized_code:
+            return None
+        return AiProviderDao.get_ai_provider_by_code(db, normalized_code)
+
+    @staticmethod
+    def _normalize_provider_extra_config(extra_config: Any) -> dict[str, str]:
+        """
+        将 Provider 扩展配置归一化为环境变量字典。
+        :param extra_config: 扩展配置
+        :return: 环境变量字典
+        """
+        if not isinstance(extra_config, dict):
+            return {}
+        env_overrides: dict[str, str] = {}
+        for key, value in extra_config.items():
+            if key in (None, "") or value in (None, ""):
+                continue
+            env_overrides[str(key)] = str(value)
+        return env_overrides
+
+    @classmethod
+    def _build_provider_env_overrides(cls, provider) -> dict[str, str]:
+        """
+        根据 Provider 配置构建 Worker 环境变量覆盖项。
+        :param provider: Provider数据库对象
+        :return: 环境变量覆盖项
+        """
+        if not provider:
+            return {}
+        env_overrides: dict[str, str] = {}
+        try:
+            secret_key = ApiKeyUtil.decrypt_api_key(provider.api_key_cipher_text)
+        except Exception as exc:
+            raise ValueError(f"Provider密钥解密失败: {exc}") from exc
+        if secret_key:
+            env_overrides["OPENAI_API_KEY"] = secret_key
+        base_url = str(getattr(provider, "base_url", "") or "").strip()
+        if base_url:
+            env_overrides["OPENAI_BASE_URL"] = base_url
+        model_name = str(getattr(provider, "model_name", "") or "").strip()
+        if model_name:
+            env_overrides["OPENAI_MODEL"] = model_name
+        provider_code = str(getattr(provider, "provider_code", "") or "").strip()
+        provider_name = str(getattr(provider, "provider_name", "") or "").strip()
+        provider_type = str(getattr(provider, "provider_type", "") or "").strip()
+        if provider_code:
+            env_overrides["AI_PROVIDER_CODE"] = provider_code
+        if provider_name:
+            env_overrides["AI_PROVIDER_NAME"] = provider_name
+        if provider_type:
+            env_overrides["AI_PROVIDER_TYPE"] = provider_type
+        if getattr(provider, "provider_level", None) is not None:
+            env_overrides["AI_PROVIDER_LEVEL"] = str(provider.provider_level)
+        env_overrides.update(cls._normalize_provider_extra_config(getattr(provider, "extra_config", None)))
+        return env_overrides
+
     @staticmethod
     def _build_agent_request_payload(
         *,
@@ -505,6 +572,7 @@ class TicketAiAnalysisService:
         ticket: Ticket,
         mapping: TicketAiRepoMapping,
         context_payload: dict[str, Any],
+        provider_env_overrides: dict[str, str] | None = None,
         ticket_payload: dict[str, Any],
         timeline_payload: Any,
         prompt_template: str,
@@ -540,6 +608,7 @@ class TicketAiAnalysisService:
             "resultSchema": schema_payload,
             "resultPath": result_path,
             "timeoutSec": timeout_sec,
+            "providerEnv": TicketAiAnalysisService._json_safe_value(provider_env_overrides or {}),
         }
 
     @staticmethod
@@ -791,6 +860,10 @@ class TicketAiAnalysisService:
         if isinstance(compact_context, dict):
             for key in (
                 "selectedAgentCode",
+                "selectedAiProviderCode",
+                "selectedAiProviderName",
+                "selectedAiProviderType",
+                "selectedWorkerModel",
                 "forceRefresh",
                 "sourceLogPullRecordId",
                 "sourceLogViewMode",
@@ -942,6 +1015,8 @@ class TicketAiAnalysisService:
         workspace_dir: Path,
         schema_file: Path,
         result_file: Path,
+        *,
+        model_override: str | None = None,
     ) -> tuple[list[str], Path, int, Path]:
         """
         构建 Codex Worker 命令行。
@@ -963,7 +1038,7 @@ class TicketAiAnalysisService:
         if not str(repo_path).strip() or not repo_path.exists():
             repo_path = Path(__file__).resolve().parents[4]
         timeout_sec = int(settings["timeout_sec"] or cls.DEFAULT_WORKER_TIMEOUT)
-        worker_model = str(settings.get("model") or "").strip()
+        worker_model = str(model_override or settings.get("model") or "").strip()
         worker_sandbox = (
             str(settings.get("sandbox") or cls.DEFAULT_WORKER_SANDBOX).strip() or cls.DEFAULT_WORKER_SANDBOX
         )
@@ -995,6 +1070,7 @@ class TicketAiAnalysisService:
         timeout_sec: int,
         cwd: Path,
         codex_home: Path,
+        env_overrides: dict[str, str] | None = None,
     ) -> tuple[int, str, str]:
         """
         执行 Codex Worker 命令。
@@ -1006,6 +1082,8 @@ class TicketAiAnalysisService:
         """
         worker_env = os.environ.copy()
         worker_env.update(cls._load_codex_env(codex_home))
+        if env_overrides:
+            worker_env.update({str(key): str(value) for key, value in env_overrides.items() if key and value is not None})
         worker_env["CODEX_HOME"] = str(codex_home)
         process = subprocess.run(
             command,
@@ -1382,6 +1460,20 @@ class TicketAiAnalysisService:
         context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
         prompt_layers = TicketPromptService.resolve_prompt_layers(db, ticket)
         context_payload["forceRefresh"] = bool(request.force_refresh)
+        selected_provider = None
+        selected_provider_code = str(request.ai_provider_code or "").strip()
+        if selected_provider_code:
+            selected_provider = cls._resolve_ai_provider(db, selected_provider_code)
+            if not selected_provider:
+                return CrudResponseModel(is_success=False, message="未找到可用的AI Provider配置")
+            if not bool(getattr(selected_provider, "enabled", True)):
+                return CrudResponseModel(is_success=False, message="所选AI Provider已禁用")
+            context_payload["selectedAiProviderCode"] = selected_provider.provider_code
+            context_payload["selectedAiProviderName"] = selected_provider.provider_name
+            context_payload["selectedAiProviderType"] = selected_provider.provider_type
+            context_payload["selectedWorkerModel"] = selected_provider.model_name
+            if not request.agent_code and str(selected_provider.agent_code or "").strip():
+                context_payload["selectedAgentCode"] = str(selected_provider.agent_code).strip()
         if request.agent_code:
             context_payload["selectedAgentCode"] = request.agent_code
         if str(request.extra_instruction or "").strip():
@@ -1447,10 +1539,11 @@ class TicketAiAnalysisService:
                         "task_id": task.task_id,
                         "mapping_id": mapping.mapping_id,
                         "version_key": mapping.version_key,
-                        "repo_url": mapping.repo_url,
-                        "branch_name": mapping.branch_name,
-                        "agent_code": request.agent_code or None,
-                    },
+                    "repo_url": mapping.repo_url,
+                    "branch_name": mapping.branch_name,
+                    "agent_code": request.agent_code or None,
+                    "ai_provider_code": selected_provider.provider_code if selected_provider else None,
+                },
                     create_time=now,
                 ),
             )
@@ -1837,13 +1930,22 @@ class TicketAiAnalysisService:
         schema_payload = cls._build_result_schema(ticket, mapping)
         timeout_sec = cls._get_config_int(db, cls.CONFIG_WORKER_TIMEOUT, cls.DEFAULT_WORKER_TIMEOUT)
         context_payload = cls._load_workspace_context_payload(db, task, ticket, mapping, workspace_dir)
+        requested_provider_code = str((context_payload or {}).get("selectedAiProviderCode") or "").strip()
+        selected_provider = cls._resolve_ai_provider(db, requested_provider_code) if requested_provider_code else None
+        provider_env_overrides = cls._build_provider_env_overrides(selected_provider) if selected_provider else {}
         requested_agent_code = str((context_payload or {}).get("selectedAgentCode") or "").strip()
+        if not requested_agent_code and selected_provider and str(selected_provider.agent_code or "").strip():
+            requested_agent_code = str(selected_provider.agent_code).strip()
+        worker_model_override = str((context_payload or {}).get("selectedWorkerModel") or "").strip()
+        if not worker_model_override and selected_provider and str(selected_provider.model_name or "").strip():
+            worker_model_override = str(selected_provider.model_name).strip()
         agent_code = cls._resolve_agent_code(db, requested_agent_code)
         cls._log_task_step(
             task_id,
             "AGENT",
             "解析 AI 执行 Agent",
             agent_code=agent_code or "<none>",
+            provider_code=requested_provider_code or "<none>",
             configured_agent_code=cls._get_config_text(db, cls.CONFIG_AGENT_CODE, cls.DEFAULT_AGENT_CODE) or "<auto>",
             connected_agent_count=len(connected_agents),
         )
@@ -1892,6 +1994,7 @@ class TicketAiAnalysisService:
                 ticket=ticket,
                 mapping=mapping,
                 context_payload=context_payload,
+                provider_env_overrides=provider_env_overrides,
                 ticket_payload=ticket_payload,
                 timeline_payload=timeline_payload,
                 prompt_template=prompt_template,

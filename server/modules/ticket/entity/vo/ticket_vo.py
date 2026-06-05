@@ -150,6 +150,7 @@ class TicketMessageCreateModel(BaseModel):
     run_ai: bool = Field(default=False, description="提交后是否立即发起 AI 追问分析")
     version_key: str | None = Field(default=None, description="发起 AI 追问时使用的版本号")
     agent_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Agent 编码")
+    ai_provider_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Provider 编码")
 
 
 class TicketMessageModel(BaseModel):
@@ -300,6 +301,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     version_key: str = Field(description="版本标识，用于匹配仓库映射")
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
+    ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
     extra_instruction: str | None = Field(default="", description="本次分析的额外说明")
 
@@ -313,6 +315,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
         if not self.version_key:
             raise ValueError("版本号不能为空")
         self.agent_code = str(self.agent_code or "").strip() or None
+        self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip()
         return self
 
@@ -399,15 +402,17 @@ class TicketSyncAutomationModel(BaseModel):
     auto_log_pull: bool = Field(default=False, description="是否根据识别结果自动拉取日志")
     auto_ai_analysis: bool = Field(default=False, description="是否自动发起 AI 分析")
     ai_agent_code: str | None = Field(default=None, description="自动 AI 使用的 Agent 编码")
+    ai_provider_code: str | None = Field(default=None, description="自动 AI 使用的 Provider 编码")
     log_pull_config: dict[str, Any] | None = Field(default=None, description="默认日志拉取参数")
     extra_instruction: str | None = Field(default=None, description="自动 AI 额外说明")
 
     @model_validator(mode="after")
     def validate_automation(self):
         self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
+        self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip() or None
-        if self.auto_ai_analysis and not self.ai_agent_code:
-            raise ValueError("启用自动 AI 时需要 aiAgentCode")
+        if self.auto_ai_analysis and not (self.ai_provider_code or self.ai_agent_code):
+            raise ValueError("启用自动 AI 时需要 aiProviderCode 或 aiAgentCode")
         return self
 
 
