@@ -13,7 +13,12 @@ class AiProviderBaseModel(BaseModel):
     AI Provider 基础模型，用于新增、编辑和详情返回。
     """
 
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        from_attributes=True,
+        populate_by_name=True,
+        protected_namespaces=(),
+    )
 
     provider_id: int | None = None
     provider_code: str | None = Field(default=None, description="Provider编码")
@@ -102,7 +107,12 @@ class AiProviderOptionModel(BaseModel):
     AI Provider 下拉选项模型。
     """
 
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        from_attributes=True,
+        populate_by_name=True,
+        protected_namespaces=(),
+    )
 
     provider_id: int | None = None
     provider_code: str | None = None

@@ -304,6 +304,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
     extra_instruction: str | None = Field(default="", description="本次分析的额外说明")
+    prompt_template_codes: list[str] | None = Field(default=None, description="本次分析追加的提示词模板编码列表")
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -317,6 +318,12 @@ class TicketAiAnalysisRequestModel(BaseModel):
         self.agent_code = str(self.agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip()
+        normalized_codes: list[str] = []
+        for item in self.prompt_template_codes or []:
+            template_code = str(item or "").strip()
+            if template_code and template_code not in normalized_codes:
+                normalized_codes.append(template_code)
+        self.prompt_template_codes = normalized_codes or None
         return self
 
 

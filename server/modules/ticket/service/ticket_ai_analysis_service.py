@@ -21,6 +21,7 @@ from module_admin.dao.ai_provider_dao import AiProviderDao
 from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.enums.enums import QtrDataStatusEnum, TstepTypeEnum
 from module_qtr.service.agent_service import agents as connected_agents
@@ -775,6 +776,11 @@ class TicketAiAnalysisService:
             if request and request.agent_code
             else str(context_payload.get("selectedAgentCode") or "").strip()
         )
+        selected_prompt_template_codes = (
+            list(request.prompt_template_codes or [])
+            if request and request.prompt_template_codes
+            else list(context_payload.get("selectedPromptTemplateCodes") or [])
+        )
         extra_instruction = (
             str(request.extra_instruction or "").strip()
             if request and request.extra_instruction
@@ -788,10 +794,13 @@ class TicketAiAnalysisService:
             "sourceLogViewMode": context_payload.get("sourceLogViewMode") if is_context else None,
             "forceRefresh": force_refresh,
             "selectedAgentCode": selected_agent_code,
+            "selectedPromptTemplateCodes": selected_prompt_template_codes,
             "extraInstruction": extra_instruction,
         }
         if isinstance(context_payload.get("promptLayers"), dict):
             snapshot["promptLayers"] = context_payload.get("promptLayers")
+        if isinstance(context_payload.get("selectedPromptTemplates"), list):
+            snapshot["selectedPromptTemplates"] = context_payload.get("selectedPromptTemplates")
         if isinstance(latest_log_pull, dict) and latest_log_pull:
             snapshot["latestLogPullSummary"] = {
                 "id": latest_log_pull.get("id"),
@@ -882,6 +891,7 @@ class TicketAiAnalysisService:
         ticket: Ticket,
         *,
         prompt_layers: dict[str, Any] | None = None,
+        prompt_templates: list[dict[str, Any]] | None = None,
         extra_instruction: str = "",
     ) -> str:
         """
@@ -890,15 +900,29 @@ class TicketAiAnalysisService:
         :param mapping: 仓库映射
         :param ticket: 工单对象
         :param prompt_layers: 项目/模块默认提示词分层。
+        :param prompt_templates: 选择追加的提示词模板列表。
         :param extra_instruction: 本次提交的额外说明。
         :return: 提示词文本
         """
         prompt_layers = prompt_layers or {}
         default_prompt_text = str(prompt_layers.get("defaultPromptText") or "").strip()
+        selected_prompt_texts = []
+        for template in prompt_templates or []:
+            prompt_content = str(template.get("promptContent") or "").strip()
+            template_name = str(template.get("templateName") or template.get("templateCode") or "").strip()
+            if not prompt_content:
+                continue
+            selected_prompt_texts.append(
+                TicketPromptService._build_prompt_block(
+                    f"选择提示词：{template_name}",
+                    [prompt_content],
+                )
+            )
         extra_instruction_text = str(extra_instruction or "").strip()
         layered_prompt_text = TicketPromptService._join_text(
             [
                 default_prompt_text,
+                TicketPromptService._join_text(selected_prompt_texts, separator="\n\n"),
                 TicketPromptService._build_prompt_block(
                     "本次额外说明",
                     [
@@ -1459,7 +1483,14 @@ class TicketAiAnalysisService:
         log_record = cls._resolve_log_pull_record(db, ticket_id, request.log_pull_record_id)
         context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
         prompt_layers = TicketPromptService.resolve_prompt_layers(db, ticket)
+        selected_prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(
+            db, request.prompt_template_codes
+        )
         context_payload["forceRefresh"] = bool(request.force_refresh)
+        if request.prompt_template_codes:
+            context_payload["selectedPromptTemplateCodes"] = request.prompt_template_codes
+        if selected_prompt_templates:
+            context_payload["selectedPromptTemplates"] = selected_prompt_templates
         selected_provider = None
         selected_provider_code = str(request.ai_provider_code or "").strip()
         if selected_provider_code:
@@ -1489,6 +1520,7 @@ class TicketAiAnalysisService:
             mapping,
             ticket,
             prompt_layers=prompt_layers,
+            prompt_templates=selected_prompt_templates,
             extra_instruction=request.extra_instruction or "",
         )
 

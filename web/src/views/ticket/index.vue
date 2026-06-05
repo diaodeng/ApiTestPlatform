@@ -1254,6 +1254,23 @@
             placeholder="可填写本次分析的额外重点，例如优先排查的链路、已知异常现象、需要忽略的噪声等"
           />
         </el-form-item>
+        <el-form-item label="追加提示词">
+          <el-select
+            v-model="aiAnalysisTaskForm.promptTemplateCodes"
+            placeholder="可选，选择后会追加到当前分析提示词中"
+            multiple
+            filterable
+            clearable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in analysisPromptOptions"
+              :key="item.templateCode"
+              :label="`${item.templateName || item.templateCode} [${item.templateCode}]`"
+              :value="item.templateCode"
+            />
+          </el-select>
+        </el-form-item>
         <el-alert
           :title="aiPromptHintTitle"
           :description="aiPromptHintDesc"
@@ -1546,6 +1563,7 @@
 import { saveAs } from 'file-saver'
 import { decompressText } from '@/utils/tools'
 import { listAiProviderOptions } from '@/api/system/aiprovider'
+import { listAiPromptTemplateOptions } from '@/api/system/aiprompt'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
 import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
@@ -1615,6 +1633,7 @@ const formVersionOptions = ref([])
 const queryModuleOptions = ref([])
 const agentOptions = ref([])
 const providerOptions = ref([])
+const analysisPromptOptions = ref([])
 const vendorOptions = ref([])
 const pushOptions = ref([])
 const open = ref(false)
@@ -1668,7 +1687,8 @@ const aiAnalysisTaskForm = ref({
   agentCode: '',
   aiProviderCode: '',
   forceRefresh: false,
-  extraInstruction: ''
+  extraInstruction: '',
+  promptTemplateCodes: []
 })
 const aiRepoMappingForm = ref({
   mappingId: undefined,
@@ -1779,6 +1799,15 @@ function loadVendorOptions() {
 function loadProviderOptions() {
   return listAiProviderOptions().then(response => {
     providerOptions.value = response.data || []
+  })
+}
+
+function loadAnalysisPromptOptions() {
+  return listAiPromptTemplateOptions({
+    template_category: 'analysis,common',
+    enabled_only: true
+  }).then(response => {
+    analysisPromptOptions.value = response.data || []
   })
 }
 
@@ -2189,6 +2218,7 @@ function handleUpdate(row) {
         ...(ticketData.logPullConfig || ticketData.log_pull_config || ticketData.extraData?.ticketAutomation?.logPullConfig || ticketData.extraData?.ticket_automation?.log_pull_config || {})
       }
     }
+    form.value.description = ticketData.originalDescription || ticketData.extraData?.originDescription || ticketData.description || ''
     tagText.value = Array.isArray(form.value.tags) ? form.value.tags.join(',') : ''
     applyTicketAutomationConfig(form.value)
     loadFormModuleOptions(form.value.projectId)
@@ -2504,6 +2534,7 @@ function resetAiAnalysisDialog() {
     || ''
   aiAnalysisTaskForm.value.forceRefresh = false
   aiAnalysisTaskForm.value.extraInstruction = ''
+  aiAnalysisTaskForm.value.promptTemplateCodes = detail.value.latestAiAnalysis?.analysisContext?.selectedPromptTemplateCodes || []
 }
 
 function openAiAnalysisDialog() {
@@ -2546,7 +2577,10 @@ function submitAiAnalysis() {
       agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
       aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
       forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
-      extraInstruction: aiAnalysisTaskForm.value.extraInstruction || undefined
+      extraInstruction: aiAnalysisTaskForm.value.extraInstruction || undefined,
+      promptTemplateCodes: aiAnalysisTaskForm.value.promptTemplateCodes?.length
+        ? aiAnalysisTaskForm.value.promptTemplateCodes
+        : undefined
     }).then(() => {
       proxy.$modal.msgSuccess('AI分析任务已提交')
       aiAnalysisOpen.value = false
@@ -3192,6 +3226,7 @@ loadProjectOptions()
 loadAgentOptions()
 loadProviderOptions()
 loadVendorOptions()
+loadAnalysisPromptOptions()
 loadPushOptions()
 loadQueryModuleOptions()
 getList()

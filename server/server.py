@@ -11,7 +11,10 @@ from config.get_redis import RedisUtil
 from exceptions.handle import handle_exception
 from middlewares.handle import handle_middleware
 from module_admin.controller.api_key_controller import apiKeyController
+from module_admin.controller.ai_config_controller import aiConfigController
 from module_admin.controller.ai_provider_controller import aiProviderController
+from module_admin.controller.ai_task_execution_controller import aiTaskExecutionController
+from module_admin.controller.ai_prompt_template_controller import aiPromptTemplateController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.common_controller import commonController
@@ -59,6 +62,7 @@ from modules.ticket.perms import register as register_ticket_permission_defs
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService
+from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
 from utils.log_util import logger
@@ -78,8 +82,10 @@ async def lifespan(app: FastAPI):
         sync_registered_menus(app)
         with SessionLocal() as db:
             TicketService.init_default_workflow(db)
+            TicketService.ensure_param_config_rows(db)
             TicketLogPullService.ensure_param_config_rows(db)
             TicketAiAnalysisService.ensure_param_config_rows(db)
+            AiPromptTemplateService.ensure_default_prompt_templates(db)
             db.commit()
         TicketLogPullService.resume_pending_records()
         TicketAiAnalysisService.resume_pending_tasks()
@@ -129,7 +135,10 @@ controller_list = [
     {'router': postController, 'tags': ['系统管理-岗位管理']},
     {'router': dictController, 'tags': ['系统管理-字典管理']},
     {'router': configController, 'tags': ['系统管理-参数管理']},
+    {'router': aiConfigController, 'tags': ['系统管理-AI配置中心']},
     {'router': aiProviderController, 'tags': ['系统管理-AI Provider管理']},
+    {'router': aiTaskExecutionController, 'tags': ['系统管理-AI执行审计管理']},
+    {'router': aiPromptTemplateController, 'tags': ['系统管理-AI提示词管理']},
     {'router': apiKeyController, 'tags': ['系统管理-API Key管理']},
     {'router': noticeController, 'tags': ['系统管理-通知公告管理']},
     {'router': logController, 'tags': ['系统管理-日志管理']},

@@ -44,6 +44,7 @@ from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_prompt_service import TicketPromptService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -114,6 +115,17 @@ def _extract_ticket_version_key(extra_data: Any) -> str:
         if str(value or "").strip():
             return str(value).strip()
     return ""
+
+
+def _extract_ticket_origin_description(extra_data: Any) -> str:
+    """
+    从工单扩展信息中提取原始描述。
+    :param extra_data: 工单扩展字段
+    :return: 原始描述
+    """
+    if not isinstance(extra_data, dict):
+        return ""
+    return str(extra_data.get("origin_description") or "").strip()
 
 
 def _extract_ticket_sync_summary(extra_data: Any) -> dict[str, Any] | None:
@@ -340,9 +352,73 @@ class TicketService:
                         allowed_roles=[],
                         need_comment=need_comment,
                         need_resolution=need_resolution,
-                    )
+                )
                 )
         query_db.commit()
+
+    @classmethod
+    def ensure_param_config_rows(cls, query_db: Session) -> None:
+        """
+        初始化工单翻译与轻量 AI 相关系统参数。
+        :param query_db: 数据库会话
+        :return: 无
+        """
+        from module_admin.entity.do.config_do import SysConfig
+
+        defaults = [
+            (
+                "ticket.ai.translate.provider.code",
+                "工单AI翻译Provider编码",
+                "",
+                "工单创建或编辑后执行轻量翻译时使用的AI Provider编码",
+            ),
+            (
+                "ticket.ai.translate.prompt.code",
+                "工单AI翻译提示词编码",
+                "ticket_translate_default",
+                "工单创建或编辑后执行轻量翻译时使用的提示词模板编码",
+            ),
+            (
+                "ticket.ai.knowledge.provider.code",
+                "工单知识提炼Provider编码",
+                "",
+                "工单关闭后自动提炼知识库案例时使用的AI Provider编码",
+            ),
+            (
+                "ticket.ai.knowledge.prompt.code",
+                "工单知识提炼提示词编码",
+                "ticket_knowledge_extract_default",
+                "工单关闭后自动提炼知识库案例时使用的提示词模板编码",
+            ),
+        ]
+        now = datetime.now()
+        for config_key, config_name, config_value, remark in defaults:
+            existing = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
+            if existing:
+                continue
+            query_db.add(
+                SysConfig(
+                    config_name=config_name,
+                    config_key=config_key,
+                    config_value=config_value,
+                    config_type="Y",
+                    create_by="system",
+                    update_by="system",
+                    create_time=now,
+                    update_time=now,
+                    remark=remark,
+                )
+            )
+        query_db.flush()
+
+    @staticmethod
+    def _extract_version_key_from_text(text: str | None) -> str:
+        """
+        从工单正文或标题中提取版本号。
+        :param text: 待分析文本
+        :return: 版本号，未命中返回空字符串
+        """
+        return TicketLightAiService.extract_version_key_from_text(text)
 
     @classmethod
     def _decorate_ticket_item(cls, item: dict[str, Any]) -> dict[str, Any]:
@@ -358,6 +434,12 @@ class TicketService:
         extra_data = item.get("extraData")
         sync_summary = _extract_ticket_sync_summary(extra_data)
         item["versionKey"] = item.get("versionKey") or _extract_ticket_version_key(extra_data)
+        item["originalDescription"] = (
+            (extra_data or {}).get("origin_description")
+            or (extra_data or {}).get("original_description")
+            or item.get("description")
+        )
+        item["aiTranslation"] = (extra_data or {}).get("ai_translation") or ""
         item["syncSummary"] = sync_summary
         return item
 
@@ -742,14 +824,35 @@ class TicketService:
             data.pop("project_name", None)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()
+            original_description = str(data.get("description") or "").strip()
+            extracted_version_key = version_key or cls._extract_version_key_from_text(
+                "\n".join([str(data.get("title") or "").strip(), original_description]).strip()
+            )
             extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
-            if version_key:
-                extra_data["version_key"] = version_key
+            if extracted_version_key:
+                extra_data["version_key"] = extracted_version_key
             if log_pull_config:
                 extra_data["ticket_automation"] = {
                     "need_log_pull": need_log_pull or bool(log_pull_config),
                     "log_pull_config": log_pull_config,
                 }
+            translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
+                query_db,
+                title=str(data.get("title") or "").strip(),
+                content=original_description,
+                source_type="ticket",
+                source_id=None,
+                source_ref=str(data.get("ticket_no") or "").strip() or None,
+                current_user_name=_user_name(current_user),
+            )
+            if str(translation_meta.get("translated_text") or "").strip():
+                data["description"] = translated_description
+                extra_data["origin_description"] = original_description
+                extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                if translation_meta.get("provider_code"):
+                    extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
+                if translation_meta.get("prompt_code"):
+                    extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
             data["extra_data"] = extra_data or None
             is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
             if not is_valid:
@@ -907,11 +1010,16 @@ class TicketService:
             data.pop("project_name", None)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()
+            ticket_extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+            original_description = str(data.get("description") or ticket_extra_data.get("origin_description") or "").strip()
+            extracted_version_key = version_key or cls._extract_version_key_from_text(
+                "\n".join([str(data.get("title") or ticket.title or "").strip(), original_description]).strip()
+            )
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             form_extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
             extra_data.update(form_extra_data)
-            if version_key:
-                extra_data["version_key"] = version_key
+            if extracted_version_key:
+                extra_data["version_key"] = extracted_version_key
             elif "version_key" in extra_data:
                 extra_data.pop("version_key", None)
             if log_pull_config:
@@ -921,6 +1029,23 @@ class TicketService:
                 }
             elif "ticket_automation" in extra_data and not need_log_pull:
                 extra_data.pop("ticket_automation", None)
+            translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
+                query_db,
+                title=str(data.get("title") or ticket.title or "").strip(),
+                content=original_description,
+                source_type="ticket",
+                source_id=ticket.ticket_id,
+                source_ref=ticket.ticket_no,
+                current_user_name=_user_name(current_user),
+            )
+            if str(translation_meta.get("translated_text") or "").strip():
+                data["description"] = translated_description
+                extra_data["origin_description"] = original_description
+                extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                if translation_meta.get("provider_code"):
+                    extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
+                if translation_meta.get("prompt_code"):
+                    extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
             data["extra_data"] = extra_data or None
             is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
             if not is_valid:
@@ -1159,7 +1284,10 @@ class TicketService:
                     },
                 )
             if status_object.to_status == TicketStatus.CLOSED.value:
-                cls.create_knowledge_from_ticket(query_db, ticket_id, current_user)
+                try:
+                    cls.create_knowledge_from_ticket(query_db, ticket_id, current_user)
+                except Exception as exc:
+                    logger.warning("工单[%s]关闭后自动提炼知识库失败: %s", ticket_id, exc)
             query_db.commit()
             return CrudResponseModel(is_success=True, message="状态流转成功")
         except Exception:
@@ -1456,6 +1584,17 @@ class TicketService:
         messages = timeline.get("messages") or []
         events = timeline.get("events") or []
         ai_payload = ticket.ai_analysis if isinstance(ticket.ai_analysis, dict) else {}
+        ai_case_data: dict[str, Any] = {}
+        ai_case_meta: dict[str, Any] = {}
+        try:
+            ai_case_data, ai_case_meta = TicketLightAiService.generate_ticket_knowledge_case(
+                query_db,
+                ticket=ticket,
+                timeline=timeline,
+                current_user_name=_user_name(current_user) if current_user else "system",
+            )
+        except Exception as exc:
+            logger.warning("工单[%s]知识提炼AI执行失败，已回退规则方案: %s", ticket_id, exc)
         investigation_lines = [
             f"- {item.create_time:%Y-%m-%d %H:%M:%S} {item.event_type}: {item.content or ''}"
             for item in events[-20:]
@@ -1464,22 +1603,54 @@ class TicketService:
             f"- {item.create_time:%Y-%m-%d %H:%M:%S} [{item.role}/{item.message_type}] {item.content}"
             for item in messages[-20:]
         ]
-        symptom = getattr(rca, "symptom", None) or ticket.description or ai_payload.get("analysis_summary") or ""
-        root_cause = getattr(rca, "root_cause_detail", None) or ticket.root_cause or ai_payload.get("root_cause") or ""
-        solution = getattr(rca, "fix_solution", None) or ticket.solution or ai_payload.get("fix_suggestion") or ""
-        prevention = getattr(rca, "prevention_solution", None) or _join_text_lines(ai_payload.get("next_steps") or [])
-        content = "\n".join(
+        origin_description = _extract_ticket_origin_description(ticket.extra_data) or ticket.description or ""
+        symptom = (
+            ai_case_data.get("symptom")
+            or getattr(rca, "symptom", None)
+            or origin_description
+            or ai_payload.get("analysis_summary")
+            or ""
+        )
+        root_cause = (
+            ai_case_data.get("root_cause")
+            or getattr(rca, "root_cause_detail", None)
+            or ticket.root_cause
+            or ai_payload.get("root_cause")
+            or ""
+        )
+        solution = (
+            ai_case_data.get("solution")
+            or getattr(rca, "fix_solution", None)
+            or ticket.solution
+            or ai_payload.get("fix_suggestion")
+            or ""
+        )
+        prevention = (
+            ai_case_data.get("prevention")
+            or getattr(rca, "prevention_solution", None)
+            or _join_text_lines(ai_payload.get("next_steps") or [])
+        )
+        summary = ai_case_data.get("summary") or ai_payload.get("analysis_summary") or ""
+        title_suffix = ai_case_data.get("title_suffix") or ""
+        article_title = f"{ticket.ticket_no} {ticket.title}".strip()
+        if title_suffix:
+            article_title = f"{article_title} - {title_suffix}".strip()
+        content_sections = [
+            f"# {ticket.title}",
+        ]
+        if summary:
+            content_sections.extend(["", "## 提炼摘要", str(summary)])
+        content_sections.extend(
             [
-                f"# {ticket.title}",
                 "",
                 "## 问题现象",
-                symptom or "-",
+                str(symptom or "-"),
                 "",
                 "## 根因",
-                root_cause or "-",
+                str(root_cause or "-"),
                 "",
                 "## 解决方案",
-                solution or "-",
+                str(solution or "-"),
                 "",
                 "## 排查过程",
                 _join_text_lines(investigation_lines, empty="-"),
@@ -1488,14 +1659,25 @@ class TicketService:
                 _join_text_lines(message_lines, empty="-"),
                 "",
                 "## 验证与预防",
-                getattr(rca, "verify_method", None) or "-",
+                str(getattr(rca, "verify_method", None) or "-"),
                 "",
-                prevention or "-",
+                str(prevention or "-"),
             ]
         )
+        if ai_case_meta.get("status") == "success":
+            content_sections.extend(
+                [
+                    "",
+                    "## AI提炼信息",
+                    f"Provider：{ai_case_meta.get('provider_code') or '-'}",
+                    f"Prompt：{ai_case_meta.get('prompt_code') or '-'}",
+                ]
+            )
+        content = "\n".join(content_sections)
         tags = [
             item
             for item in {
+                *(ai_case_data.get("tags") or []),
                 ticket.merchant_name,
                 ticket.module_name,
                 ticket.category_name,
@@ -1507,7 +1689,7 @@ class TicketService:
         article = TicketDao.add_knowledge(
             query_db,
             KnowledgeArticle(
-                title=f"{ticket.ticket_no} {ticket.title}",
+                title=article_title,
                 content=content,
                 category=ticket.category_name or "工单案例",
                 tags=tags,

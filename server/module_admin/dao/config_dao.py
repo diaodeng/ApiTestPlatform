@@ -13,6 +13,22 @@ class ConfigDao:
     """
 
     @classmethod
+    def get_config_detail_by_key(cls, db: Session, config_key: str):
+        """
+        根据参数键名获取参数配置信息。
+        :param db: orm对象
+        :param config_key: 参数键名
+        :return: 参数配置信息对象，不存在时返回None
+        """
+        config_info = (
+            db.query(SysConfig)
+            .filter(SysConfig.config_key == config_key)
+            .first()
+        )
+
+        return config_info
+
+    @classmethod
     def get_config_detail_by_id(cls, db: Session, config_id: int):
         """
         根据参数配置id获取参数配置详细信息
