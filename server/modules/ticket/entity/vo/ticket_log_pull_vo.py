@@ -79,6 +79,101 @@ class TicketLogPullVendorStoreOptionsModel(TicketLogPullBaseModel):
     vendors: list[TicketLogPullVendorOptionModel] = Field(default_factory=list, description="商家列表")
 
 
+class TicketLogPullStoreConfigBaseModel(TicketLogPullBaseModel):
+    """
+    工单日志拉取门店配置基础模型。
+    """
+
+    id: int | None = None
+    group_no: str = Field(default="", description="集团编号")
+    vender_no: str = Field(default="", description="商户编号")
+    region_no: str = Field(default="", description="区域编号")
+    org_no: str | None = Field(default=None, description="机构编号")
+    org_name: str | None = Field(default=None, description="机构名称")
+    sap_org_no: str | None = Field(default=None, description="SAP机构编号")
+    platform_no: str = Field(default="", description="会员渠道编号")
+    parent_org_no: str | None = Field(default=None, description="上级机构编号")
+    perm_node_id: int = Field(default=0, description="权限树节点ID")
+    org_type: int = Field(default=1, description="机构类型：1-大区 2-业态 3-区本 4-门店")
+    company_no: str = Field(default="", description="所属公司代码")
+    city_no: str = Field(default="", description="城市编号")
+    biz_type_no: str = Field(default="1", description="业态编号")
+    status: int = Field(default=1, description="状态：0-未开 1-启用 2-关闭")
+    created: datetime | None = Field(default=None, description="创建时间")
+    modifid: datetime | None = Field(default=None, description="修改时间")
+    open_date: date | None = Field(default=None, description="开业日期")
+    language_desc: str | None = Field(default="zh_HK", description="默认语言")
+
+
+@as_query
+class TicketLogPullStoreConfigQueryModel(QueryModel):
+    """
+    工单日志拉取门店配置查询模型。
+    """
+
+    group_no: str | None = Field(default=None, description="集团编号")
+    vender_no: str | None = Field(default=None, description="商户编号")
+    org_no: str | None = Field(default=None, description="机构编号")
+    sap_org_no: str | None = Field(default=None, description="SAP机构编号")
+    keyword: str | None = Field(default=None, description="机构名称或编号关键字")
+
+
+class TicketLogPullStoreConfigModel(TicketLogPullStoreConfigBaseModel):
+    """
+    工单日志拉取门店配置返回模型。
+    """
+
+    pass
+
+
+class TicketLogPullStoreImportModel(TicketLogPullBaseModel):
+    """
+    工单日志拉取门店配置导入模型。
+    """
+
+    import_mode: str = Field(default="incremental", description="导入方式：incremental 增量，overwrite 覆盖")
+
+
+class TicketLogPullProjectVendorMapBaseModel(TicketLogPullBaseModel):
+    """
+    工单日志拉取项目商家映射基础模型。
+    """
+
+    id: int | None = None
+    project_id: int = Field(default=0, description="项目ID")
+    project_name: str = Field(default="", description="项目名称")
+    vender_no: str = Field(default="", description="商户编号")
+    created: datetime | None = Field(default=None, description="创建时间")
+    modifid: datetime | None = Field(default=None, description="修改时间")
+
+
+@as_query
+class TicketLogPullProjectVendorMapQueryModel(QueryModel):
+    """
+    工单日志拉取项目商家映射查询模型。
+    """
+
+    project_id: int | None = Field(default=None, description="项目ID")
+    keyword: str | None = Field(default=None, description="项目名称或商户编号关键字")
+
+
+class TicketLogPullProjectVendorMapModel(TicketLogPullProjectVendorMapBaseModel):
+    """
+    工单日志拉取项目商家映射返回模型。
+    """
+
+    pass
+
+
+class TicketLogPullProjectVendorMapUpsertModel(TicketLogPullProjectVendorMapBaseModel):
+    """
+    工单日志拉取项目商家映射保存模型。
+    """
+
+    project_id: int = Field(description="项目ID")
+    vender_no: str = Field(description="商户编号")
+
+
 class TicketLogPullCreateModel(TicketLogPullBaseModel):
     """
     提交工单日志拉取申请模型。

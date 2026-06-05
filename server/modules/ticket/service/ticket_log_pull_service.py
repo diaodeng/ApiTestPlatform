@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import gzip
 import io
 import json
@@ -20,6 +21,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+from openpyxl import Workbook, load_workbook
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
@@ -28,7 +30,11 @@ from module_hrm.entity.vo.common_vo import CrudResponseModel
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
 from modules.ticket.entity.do.ticket_do import TicketEvent
-from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
+from modules.ticket.entity.do.ticket_log_pull_do import (
+    TicketLogPullProjectVendorMap,
+    TicketLogPullRecord,
+    TicketLogPullStoreConfig,
+)
 from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullContentModel,
     TicketLogPullContentQueryModel,
@@ -36,10 +42,14 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullListItemModel,
     TicketLogPullQueryModel,
     TicketLogPullStorageConfigModel,
+    TicketLogPullStoreConfigQueryModel,
     TicketLogPullStoreOptionModel,
     TicketLogPullSummaryModel,
     TicketLogPullVendorOptionModel,
     TicketLogPullVendorStoreOptionsModel,
+    TicketLogPullProjectVendorMapModel,
+    TicketLogPullProjectVendorMapQueryModel,
+    TicketLogPullProjectVendorMapUpsertModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
 from modules.ticket.service.ticket_notify_service import TicketNotifyService
@@ -74,6 +84,46 @@ class TicketLogPullService:
     _executor_lock = threading.Lock()
     _active_record_ids: set[int] = set()
     VERSION_PATTERN = re.compile(r"(?:版本号|版本|version|app[_\s-]*version)[:：\s-]*([A-Za-z0-9._/-]+)", re.IGNORECASE)
+    STORE_IMPORT_HEADERS = [
+        "集团编号",
+        "商户编号",
+        "区域编号",
+        "机构编号",
+        "机构名称",
+        "SAP机构编号",
+        "会员渠道编号",
+        "上级机构编号",
+        "权限树节点ID",
+        "机构类型",
+        "所属公司代码",
+        "城市编号",
+        "业态编号",
+        "状态",
+        "创建时间",
+        "修改时间",
+        "开业日期",
+        "默认语言",
+    ]
+    STORE_IMPORT_SAMPLE = {
+        "集团编号": "G001",
+        "商户编号": "V10001",
+        "区域编号": "R001",
+        "机构编号": "O10001",
+        "机构名称": "示例门店",
+        "SAP机构编号": "SAP10001",
+        "会员渠道编号": "01",
+        "上级机构编号": "P1000",
+        "权限树节点ID": 0,
+        "机构类型": 4,
+        "所属公司代码": "C001",
+        "城市编号": "010",
+        "业态编号": "1",
+        "状态": 1,
+        "创建时间": "2026-01-01 10:00:00",
+        "修改时间": "2026-01-01 10:00:00",
+        "开业日期": "2026-01-01",
+        "默认语言": "zh_HK",
+    }
 
     @staticmethod
     def _user_id(current_user: CurrentUserModel) -> int | None:
@@ -120,6 +170,128 @@ class TicketLogPullService:
             return json.loads(str(value))
         except Exception:
             return default
+
+    @staticmethod
+    def _cell_text(value: Any) -> str:
+        """
+        将单元格值转为文本。
+        :param value: 原始单元格值
+        :return: 文本值
+        """
+        if value is None:
+            return ""
+        if isinstance(value, datetime):
+            return value.isoformat(sep=" ")
+        if isinstance(value, date):
+            return value.isoformat()
+        return str(value).strip()
+
+    @staticmethod
+    def _parse_import_datetime(value: Any) -> datetime | None:
+        """
+        解析导入文件中的日期时间值。
+        :param value: 原始值
+        :return: 日期时间
+        """
+        if value in (None, ""):
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, time.min)
+        text = str(value).strip()
+        if not text:
+            return None
+        for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                parsed = datetime.strptime(text, pattern)
+                if pattern == "%Y-%m-%d":
+                    return datetime.combine(parsed.date(), time.min)
+                return parsed
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _parse_import_date(value: Any) -> date | None:
+        """
+        解析导入文件中的日期值。
+        :param value: 原始值
+        :return: 日期
+        """
+        if value in (None, ""):
+            return None
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        text = str(value).strip()
+        if not text:
+            return None
+        for pattern in ("%Y-%m-%d", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(text, pattern).date()
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _parse_import_int(value: Any, default: int = 0) -> int:
+        """
+        解析导入文件中的整数。
+        :param value: 原始值
+        :param default: 失败时默认值
+        :return: 整数
+        """
+        if value in (None, ""):
+            return default
+        try:
+            return int(float(str(value).strip()))
+        except Exception:
+            return default
+
+    @classmethod
+    def _log_chain_step(
+        cls,
+        query_db: Session,
+        *,
+        ticket_id: int | None,
+        record_id: int | None,
+        step: str,
+        status: str,
+        reason: str = "",
+        detail: dict[str, Any] | None = None,
+        operator_name: str = "system",
+    ) -> None:
+        """
+        记录日志拉取链路步骤日志。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :param step: 当前步骤
+        :param status: 步骤状态
+        :param reason: 说明或跳过原因
+        :param detail: 结构化详情
+        :param operator_name: 操作人名称
+        :return: 无
+        """
+        payload = {
+            "record_id": record_id,
+            "step": step,
+            "status": status,
+            "reason": reason,
+            "detail": detail or {},
+        }
+        logger.info("日志拉取步骤: %s", payload)
+        if ticket_id:
+            cls._add_ticket_event(
+                query_db,
+                ticket_id=ticket_id,
+                operator_id=None,
+                operator_name=operator_name,
+                content=f"{step}:{status}",
+                event_data=payload,
+            )
 
     @classmethod
     def _default_storage_config(cls) -> dict[str, Any]:
@@ -308,6 +480,294 @@ class TicketLogPullService:
         return TicketLogPullVendorStoreOptionsModel(vendors=vendors)
 
     @classmethod
+    def build_store_config_import_template(cls) -> bytes:
+        """
+        生成门店配置导入模板。
+        :return: Excel 文件字节
+        """
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "门店配置导入模板"
+        for index, header in enumerate(cls.STORE_IMPORT_HEADERS, 1):
+            cell = sheet.cell(row=1, column=index, value=header)
+            sheet.column_dimensions[cell.column_letter].width = 18
+            sheet.cell(row=2, column=index, value=cls.STORE_IMPORT_SAMPLE.get(header, ""))
+        output = BytesIO()
+        workbook.save(output)
+        return output.getvalue()
+
+    @classmethod
+    def get_store_config_list_services(
+        cls, query_db: Session, query: TicketLogPullStoreConfigQueryModel
+    ):
+        """
+        查询门店配置列表。
+        :param query_db: 数据库会话
+        :param query: 查询参数
+        :return: 分页结果
+        """
+        result = TicketLogPullDao.list_store_configs(query_db, query)
+        if query.is_page:
+            result.rows = [CamelCaseUtil.transform_result(row) for row in result.rows]
+            return result
+        return [CamelCaseUtil.transform_result(row) for row in result]
+
+    @classmethod
+    def import_store_config_services(
+        cls,
+        query_db: Session,
+        file_content: bytes,
+        import_mode: str,
+        current_user: CurrentUserModel,
+    ) -> CrudResponseModel:
+        """
+        导入门店配置。
+        :param query_db: 数据库会话
+        :param file_content: Excel 文件内容
+        :param import_mode: 导入方式，incremental 或 overwrite
+        :param current_user: 当前登录用户
+        :return: 导入结果
+        """
+        workbook = load_workbook(filename=BytesIO(file_content), data_only=True)
+        sheet = workbook.active
+        header_map = cls._build_store_header_map([cell.value for cell in sheet[1]])
+        rows: list[tuple[int, dict[str, Any]]] = []
+        for row_index, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
+            row_data = cls._read_store_row(row, header_map)
+            if not any(value not in (None, "") for value in row_data.values()):
+                continue
+            rows.append((row_index, row_data))
+
+        normalized_mode = str(import_mode or "incremental").strip().lower()
+        if normalized_mode not in {"incremental", "overwrite"}:
+            return CrudResponseModel(is_success=False, message="导入方式仅支持 incremental 或 overwrite")
+
+        try:
+            if normalized_mode == "overwrite":
+                deleted_count = TicketLogPullDao.delete_all_store_configs(query_db)
+                cls._log_chain_step(
+                    query_db,
+                    ticket_id=None,
+                    record_id=None,
+                    step="store-import",
+                    status="overwrite",
+                    reason=f"覆盖导入前清空旧数据 {deleted_count} 条",
+                    detail={"deletedCount": deleted_count},
+                )
+
+            summary = {
+                "totalRows": len(rows),
+                "insertedCount": 0,
+                "updatedCount": 0,
+                "failedRows": [],
+                "importMode": normalized_mode,
+            }
+            now = datetime.now()
+            for row_index, row in rows:
+                try:
+                    store = cls._build_store_config_entity(row, now)
+                    if not store.vender_no and not store.org_no and not store.sap_org_no:
+                        raise ValueError("vender_no/org_no/sap_org_no 至少需要填写一个")
+                    existing = None
+                    if normalized_mode == "incremental":
+                        existing = TicketLogPullDao.get_store_config_by_match(
+                            query_db,
+                            vender_no=store.vender_no,
+                            org_no=store.org_no or "",
+                            sap_org_no=store.sap_org_no or "",
+                        )
+                    saved = TicketLogPullDao.save_store_config(query_db, store)
+                    if existing:
+                        summary["updatedCount"] += 1
+                    else:
+                        summary["insertedCount"] += 1
+                    cls._log_chain_step(
+                        query_db,
+                        ticket_id=None,
+                        record_id=int(saved.id),
+                        step="store-import",
+                        status="success",
+                        reason="覆盖保存完成" if existing else "新增保存完成",
+                        detail={
+                            "row": row_index,
+                            "venderNo": saved.vender_no,
+                            "orgNo": saved.org_no,
+                            "sapOrgNo": saved.sap_org_no,
+                            "importMode": normalized_mode,
+                        },
+                    )
+                except Exception as exc:
+                    summary["failedRows"].append({"row": row_index, "reason": str(exc)})
+                    cls._log_chain_step(
+                        query_db,
+                        ticket_id=None,
+                        record_id=None,
+                        step="store-import",
+                        status="failed",
+                        reason=str(exc),
+                        detail={"row": row_index},
+                    )
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message="门店配置导入完成", result=summary)
+        except Exception:
+            query_db.rollback()
+            raise
+
+    @classmethod
+    def get_project_vendor_map_list_services(cls, query_db: Session, query: TicketLogPullProjectVendorMapQueryModel):
+        """
+        查询项目商家映射列表。
+        :param query_db: 数据库会话
+        :param query: 查询参数
+        :return: 分页结果
+        """
+        result = TicketLogPullDao.list_project_vendor_maps(query_db, query)
+        if query.is_page:
+            result.rows = [CamelCaseUtil.transform_result(row) for row in result.rows]
+            return result
+        return [CamelCaseUtil.transform_result(row) for row in result]
+
+    @classmethod
+    def get_project_vendor_map_options_services(cls, query_db: Session) -> list[dict[str, Any]]:
+        """
+        获取全部项目商家映射选项。
+        :param query_db: 数据库会话
+        :return: 映射列表
+        """
+        return [CamelCaseUtil.transform_result(row) for row in TicketLogPullDao.list_all_project_vendor_maps(query_db)]
+
+    @classmethod
+    def get_project_vendor_map_by_project_services(
+        cls, query_db: Session, project_id: int
+    ) -> TicketLogPullProjectVendorMapModel | None:
+        """
+        根据项目ID获取商家映射。
+        :param query_db: 数据库会话
+        :param project_id: 项目ID
+        :return: 映射信息
+        """
+        row = TicketLogPullDao.get_project_vendor_map_by_project_id(query_db, project_id)
+        return TicketLogPullProjectVendorMapModel.model_validate(row) if row else None
+
+    @classmethod
+    def save_project_vendor_map_services(
+        cls,
+        query_db: Session,
+        payload: TicketLogPullProjectVendorMapUpsertModel,
+        current_user: CurrentUserModel,
+    ) -> CrudResponseModel:
+        """
+        保存项目商家映射。
+        :param query_db: 数据库会话
+        :param payload: 保存参数
+        :param current_user: 当前登录用户
+        :return: 保存结果
+        """
+        now = datetime.now()
+        try:
+            saved = TicketLogPullDao.save_project_vendor_map(
+                query_db,
+                TicketLogPullProjectVendorMap(
+                    project_id=int(payload.project_id),
+                    project_name=str(payload.project_name or "").strip(),
+                    vender_no=str(payload.vender_no or "").strip(),
+                    created=now,
+                    modifid=now,
+                ),
+            )
+            query_db.commit()
+            cls._log_chain_step(
+                query_db,
+                ticket_id=None,
+                record_id=int(saved.id),
+                step="project-vendor-map",
+                status="saved",
+                reason="项目商家映射已保存",
+                detail={"projectId": saved.project_id, "venderNo": saved.vender_no, "user": cls._user_name(current_user)},
+            )
+            return CrudResponseModel(is_success=True, message="项目商家映射已保存", result=CamelCaseUtil.transform_result(saved))
+        except Exception:
+            query_db.rollback()
+            raise
+
+    @classmethod
+    def _build_store_config_entity(cls, row: dict[str, Any], now: datetime) -> TicketLogPullStoreConfig:
+        """
+        根据导入行构建门店配置实体。
+        :param row: 导入行数据
+        :param now: 当前时间
+        :return: 门店配置实体
+        """
+        return TicketLogPullStoreConfig(
+            group_no=cls._cell_text(row.get("group_no")),
+            vender_no=cls._cell_text(row.get("vender_no")),
+            region_no=cls._cell_text(row.get("region_no")),
+            org_no=cls._cell_text(row.get("org_no")) or None,
+            org_name=cls._cell_text(row.get("org_name")) or None,
+            sap_org_no=cls._cell_text(row.get("sap_org_no")) or None,
+            platform_no=cls._cell_text(row.get("platform_no")),
+            parent_org_no=cls._cell_text(row.get("parent_org_no")) or None,
+            perm_node_id=cls._parse_import_int(row.get("perm_node_id"), 0),
+            org_type=cls._parse_import_int(row.get("org_type"), 1),
+            company_no=cls._cell_text(row.get("company_no")),
+            city_no=cls._cell_text(row.get("city_no")),
+            biz_type_no=cls._cell_text(row.get("biz_type_no")) or "1",
+            status=cls._parse_import_int(row.get("status"), 1),
+            created=cls._parse_import_datetime(row.get("created")) or now,
+            modifid=cls._parse_import_datetime(row.get("modifid")) or now,
+            open_date=cls._parse_import_date(row.get("open_date")) or date(1900, 1, 1),
+            language_desc=cls._cell_text(row.get("language_desc")) or "zh_HK",
+        )
+
+    @classmethod
+    def _build_store_header_map(cls, headers: list[Any]) -> dict[str, int]:
+        """
+        构建门店配置导入表头映射。
+        :param headers: 首行表头
+        :return: 字段映射
+        """
+        alias_map = {
+            "group_no": ["集团编号", "group_no", "groupNo"],
+            "vender_no": ["商户编号", "vender_no", "venderNo", "vendor_no", "vendorNo"],
+            "region_no": ["区域编号", "region_no", "regionNo"],
+            "org_no": ["机构编号", "org_no", "orgNo"],
+            "org_name": ["机构名称", "org_name", "orgName"],
+            "sap_org_no": ["SAP机构编号", "sap_org_no", "sapOrgNo"],
+            "platform_no": ["会员渠道编号", "platform_no", "platformNo"],
+            "parent_org_no": ["上级机构编号", "parent_org_no", "parentOrgNo"],
+            "perm_node_id": ["权限树节点ID", "perm_node_id", "permNodeId"],
+            "org_type": ["机构类型", "org_type", "orgType"],
+            "company_no": ["所属公司代码", "company_no", "companyNo"],
+            "city_no": ["城市编号", "city_no", "cityNo"],
+            "biz_type_no": ["业态编号", "biz_type_no", "bizTypeNo"],
+            "status": ["状态", "status"],
+            "created": ["创建时间", "created"],
+            "modifid": ["修改时间", "modifid"],
+            "open_date": ["开业日期", "open_date", "openDate"],
+            "language_desc": ["默认语言", "language_desc", "languageDesc"],
+        }
+        result: dict[str, int] = {}
+        for index, header in enumerate(headers):
+            header_text = cls._cell_text(header)
+            for field_name, aliases in alias_map.items():
+                if header_text in aliases and field_name not in result:
+                    result[field_name] = index
+        return result
+
+    @classmethod
+    def _read_store_row(cls, row: tuple[Any, ...], header_map: dict[str, int]) -> dict[str, Any]:
+        """
+        读取门店配置导入行。
+        :param row: 行数据
+        :param header_map: 表头映射
+        :return: 字段字典
+        """
+        data: dict[str, Any] = {}
+        for field_name, index in header_map.items():
+            data[field_name] = row[index] if index < len(row) else None
+        return data
+
+    @classmethod
     def ensure_param_config_rows(cls, query_db: Session) -> None:
         """
         初始化日志拉取相关系统参数，确保参数配置管理中存在默认项。
@@ -390,12 +850,44 @@ class TicketLogPullService:
         """
         record = TicketLogPullDao.get_record_by_id(query_db, record_id)
         if not record:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=None,
+                record_id=record_id,
+                step="retry-log-pull",
+                status="skipped",
+                reason="日志拉取记录不存在",
+            )
             return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
         if record.status in cls.ACTIVE_STATUSES:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="retry-log-pull",
+                status="skipped",
+                reason="当前日志拉取任务仍在执行中",
+            )
             return CrudResponseModel(is_success=False, message="当前日志拉取任务仍在执行中，暂不能重新拉取")
         payload = cls._build_retry_payload(record)
         if not payload:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="retry-log-pull",
+                status="skipped",
+                reason="当前记录缺少可重新拉取的原始参数",
+            )
             return CrudResponseModel(is_success=False, message="当前记录缺少可重新拉取的原始参数")
+        cls._log_chain_step(
+            query_db,
+            ticket_id=record.ticket_id,
+            record_id=record.id,
+            step="retry-log-pull",
+            status="requested",
+            reason="重新拉取已重新提交",
+        )
         return cls.create_log_pull_services(query_db, record.ticket_id, payload, current_user)
 
     @classmethod
@@ -489,10 +981,34 @@ class TicketLogPullService:
         """
         record = TicketLogPullDao.get_record_by_id(query_db, record_id)
         if not record:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=None,
+                record_id=record_id,
+                step="redownload-log-pull",
+                status="skipped",
+                reason="日志拉取记录不存在",
+            )
             return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
         if record.status in cls.ACTIVE_STATUSES:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="redownload-log-pull",
+                status="skipped",
+                reason="当前日志拉取任务仍在执行中",
+            )
             return CrudResponseModel(is_success=False, message="当前日志拉取任务仍在执行中，暂不能重新下载")
         if not str(record.command_result_url or "").strip():
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="redownload-log-pull",
+                status="skipped",
+                reason="当前记录缺少原始压缩包地址",
+            )
             return CrudResponseModel(is_success=False, message="当前记录缺少原始压缩包地址，无法重新下载")
 
         temp_file_path: Path | None = None
@@ -525,6 +1041,15 @@ class TicketLogPullService:
                     "download_file_size": file_size,
                 },
             )
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="redownload-log-pull",
+                status="success",
+                reason="日志压缩包已重新下载",
+                detail={"storagePath": storage_path, "fileSize": file_size},
+            )
             query_db.commit()
             return CrudResponseModel(is_success=True, message="日志压缩包已重新下载")
         except Exception:
@@ -550,11 +1075,35 @@ class TicketLogPullService:
         """
         record = TicketLogPullDao.get_record_by_id(query_db, record_id)
         if not record:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=None,
+                record_id=record_id,
+                step="delete-log-pull",
+                status="skipped",
+                reason="日志拉取记录不存在",
+            )
             return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
         if record.status in cls.ACTIVE_STATUSES:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="delete-log-pull",
+                status="skipped",
+                reason="当前日志拉取任务仍在执行中",
+            )
             return CrudResponseModel(is_success=False, message="当前日志拉取任务仍在执行中，暂不能删除")
 
         try:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="delete-log-pull",
+                status="requested",
+                reason="准备删除日志拉取记录并清理文件",
+            )
             cls._delete_record_storage(record, query_db)
             query_db.delete(record)
             cls._add_ticket_event(
@@ -570,6 +1119,14 @@ class TicketLogPullService:
                 },
             )
             query_db.commit()
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="delete-log-pull",
+                status="success",
+                reason="日志拉取记录已删除",
+            )
             return CrudResponseModel(is_success=True, message="日志拉取记录已删除")
         except Exception:
             query_db.rollback()
@@ -593,18 +1150,58 @@ class TicketLogPullService:
         """
         record = TicketLogPullDao.get_record_by_id(query_db, record_id)
         if not record:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=None,
+                record_id=record_id,
+                step="reextract-log-pull",
+                status="skipped",
+                reason="日志拉取记录不存在",
+            )
             return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
         if record.status in cls.ACTIVE_STATUSES:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="reextract-log-pull",
+                status="skipped",
+                reason="当前日志拉取任务仍在执行中",
+            )
             return CrudResponseModel(is_success=False, message="当前日志拉取任务仍在执行中，暂不能重新截取")
 
         begin_time, end_time = cls._resolve_view_log_time_range(query)
         if not begin_time or not end_time:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="reextract-log-pull",
+                status="skipped",
+                reason="重新截取时日志时间范围必填",
+            )
             return CrudResponseModel(is_success=False, message="重新截取时日志时间范围必填")
         if begin_time > end_time:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="reextract-log-pull",
+                status="skipped",
+                reason="开始时间不能晚于结束时间",
+            )
             return CrudResponseModel(is_success=False, message="重新截取时开始时间不能晚于结束时间")
 
         archive_path, should_cleanup = cls._resolve_archive_source_for_view(record, query_db)
         if not archive_path:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="reextract-log-pull",
+                status="skipped",
+                reason="当前记录没有可用压缩包",
+            )
             return CrudResponseModel(is_success=False, message="当前记录没有可用的压缩包文件，无法重新截取")
 
         try:
@@ -652,6 +1249,18 @@ class TicketLogPullService:
                     "archive_entry_count": content_result["archive_entry_count"],
                 },
             )
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="reextract-log-pull",
+                status="success",
+                reason="重新截取完成",
+                detail={
+                    "matchedEntryCount": content_result["matched_entry_count"],
+                    "archiveEntryCount": content_result["archive_entry_count"],
+                },
+            )
             query_db.commit()
             return CrudResponseModel(is_success=True, message="日志已按当前时间范围重新截取")
         except Exception:
@@ -679,6 +1288,14 @@ class TicketLogPullService:
         resolved_ticket_id = ticket_id if ticket_id is not None else payload.ticket_id
         ticket = TicketDao.get_ticket_by_id(query_db, resolved_ticket_id) if resolved_ticket_id else None
         if resolved_ticket_id and not ticket:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=resolved_ticket_id,
+                record_id=None,
+                step="create-log-pull",
+                status="skipped",
+                reason="工单不存在",
+            )
             return CrudResponseModel(is_success=False, message="工单不存在")
 
         storage_config = cls._get_storage_config_dict(query_db)
@@ -690,8 +1307,24 @@ class TicketLogPullService:
         log_begin_time, log_end_time = cls._resolve_log_time_range(payload)
         has_explicit_range = cls._has_explicit_log_time_range(payload)
         if has_explicit_range and (not log_begin_time or not log_end_time):
+            cls._log_chain_step(
+                query_db,
+                ticket_id=resolved_ticket_id,
+                record_id=None,
+                step="create-log-pull",
+                status="skipped",
+                reason="日志时间范围填写不完整",
+            )
             return CrudResponseModel(is_success=False, message="日志时间范围填写不完整")
         if log_begin_time and log_end_time and log_begin_time > log_end_time:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=resolved_ticket_id,
+                record_id=None,
+                step="create-log-pull",
+                status="skipped",
+                reason="日志开始时间不能晚于结束时间",
+            )
             return CrudResponseModel(is_success=False, message="日志开始时间不能晚于结束时间")
 
         try:
@@ -737,8 +1370,30 @@ class TicketLogPullService:
                     "ai_provider_code": str(payload.ai_provider_code or "").strip() or None,
                 },
             )
+            cls._log_chain_step(
+                query_db,
+                ticket_id=resolved_ticket_id,
+                record_id=record.id,
+                step="create-log-pull",
+                status="created",
+                reason="日志拉取记录已创建，等待后台执行",
+                detail={
+                    "vendorId": payload.vendor_id,
+                    "storeId": payload.store_id,
+                    "posNo": payload.pos_no,
+                    "commandDataType": payload.command_data_type,
+                },
+            )
             query_db.commit()
             cls.queue_record(record.id)
+            cls._log_chain_step(
+                query_db,
+                ticket_id=resolved_ticket_id,
+                record_id=record.id,
+                step="create-log-pull",
+                status="queued",
+                reason="后台任务已入队",
+            )
             return CrudResponseModel(
                 is_success=True,
                 message="日志拉取任务已提交",
@@ -790,10 +1445,34 @@ class TicketLogPullService:
         """
         record = TicketLogPullDao.get_record_by_id(query_db, record_id)
         if not record:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=None,
+                record_id=record_id,
+                step="download-log-pull",
+                status="skipped",
+                reason="日志拉取记录不存在",
+            )
             return None, False, None
         archive_path, should_cleanup = cls._resolve_archive_source_for_view(record, query_db)
         if not archive_path:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="download-log-pull",
+                status="skipped",
+                reason="没有可下载的归档文件",
+            )
             return None, False, None
+        cls._log_chain_step(
+            query_db,
+            ticket_id=record.ticket_id,
+            record_id=record.id,
+            step="download-log-pull",
+            status="requested",
+            reason="准备下载归档文件",
+        )
         return archive_path, should_cleanup, cls._build_download_file_name(record, archive_path)
 
     @classmethod
@@ -1140,6 +1819,19 @@ class TicketLogPullService:
                         finished_at=datetime.now(),
                         **update_kwargs,
                     )
+                cls._log_chain_step(
+                    db,
+                    ticket_id=record.ticket_id,
+                    record_id=record.id,
+                    step="archive-process",
+                    status="success",
+                    reason="归档与解析完成" if has_log_time_range else "仅归档完成",
+                    detail={
+                        "storagePath": storage_path,
+                        "fileSize": file_size,
+                        "hasLogTimeRange": has_log_time_range,
+                    },
+                )
                 cls._add_ticket_event(
                     db,
                     ticket_id=record.ticket_id,
@@ -1162,6 +1854,14 @@ class TicketLogPullService:
         except Exception as exc:
             logger.exception(exc)
             error_message = str(exc) or exc.__class__.__name__
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="archive-process",
+                status="failed",
+                reason=error_message,
+            )
             cls._exception_record(
                 db,
                 record_id,
@@ -1186,12 +1886,36 @@ class TicketLogPullService:
         """
         record = TicketLogPullDao.get_record_by_id(db, record_id)
         if not record or not isinstance(record.command_content, dict):
+            cls._log_chain_step(
+                db,
+                ticket_id=getattr(record, "ticket_id", None),
+                record_id=record_id,
+                step="auto-ai",
+                status="skipped",
+                reason="缺少可用的命令内容",
+            )
             return
         if not record.ticket_id:
+            cls._log_chain_step(
+                db,
+                ticket_id=None,
+                record_id=record_id,
+                step="auto-ai",
+                status="skipped",
+                reason="未关联工单",
+            )
             return
         ticket = TicketDao.get_ticket_by_id(db, record.ticket_id)
         if not ticket:
             logger.warning("日志拉取记录[%s] 自动AI触发失败，工单不存在", record_id)
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="skipped",
+                reason="工单不存在",
+            )
             return
         record_notify_config = {}
         command_notify = record.command_content.get("notifyConfig") or record.command_content.get("notify_config")
@@ -1213,9 +1937,25 @@ class TicketLogPullService:
             agent_code = str(record.command_content.get("aiAgentCode") or "").strip()
             provider_code = str(record.command_content.get("aiProviderCode") or "").strip()
         if not auto_ai_enabled:
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="skipped",
+                reason="未启用自动AI",
+            )
             return
         if not agent_code and not provider_code:
             logger.warning("日志拉取记录[%s] 已配置自动AI但未填写Provider或Agent", record_id)
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="skipped",
+                reason="未填写Provider或Agent",
+            )
             cls._notify_automation(
                 db,
                 ticket.ticket_id,
@@ -1240,6 +1980,14 @@ class TicketLogPullService:
                 cls._update_ticket_version_key(db, ticket.ticket_id, version_key)
         if not version_key:
             logger.warning("日志拉取记录[%s] 自动AI触发失败，工单缺少版本号", record_id)
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="skipped",
+                reason="工单缺少版本号",
+            )
             cls._notify_automation(
                 db,
                 ticket.ticket_id,
@@ -1283,8 +2031,31 @@ class TicketLogPullService:
                     detail=f"record_id={record_id}, version_key={version_key}",
                     notify_config=record_notify_config,
                 )
+            else:
+                cls._log_chain_step(
+                    db,
+                    ticket_id=record.ticket_id,
+                    record_id=record_id,
+                    step="auto-ai",
+                    status="submitted",
+                    reason="自动AI分析已提交",
+                    detail={
+                        "versionKey": version_key,
+                        "agentCode": agent_code,
+                        "providerCode": provider_code,
+                        "taskId": getattr(result.result, "task_id", None),
+                    },
+                )
         except Exception as exc:
             logger.exception("日志拉取记录[%s] 触发自动AI分析失败: %s", record_id, exc)
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="failed",
+                reason=str(exc),
+            )
             cls._notify_automation(
                 db,
                 record.ticket_id,
@@ -1321,6 +2092,14 @@ class TicketLogPullService:
             page_url,
         )
         if not request_url:
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="submit-external",
+                status="skipped",
+                reason="外部提交地址未配置",
+            )
             raise ValueError("日志拉取外部接口提交地址未配置，请检查 ticket.logPull.external.insertUrl")
         command_content = record.command_content if isinstance(record.command_content, dict) else cls._json_loads(
             record.command_content, {}
@@ -1342,6 +2121,14 @@ class TicketLogPullService:
         response.raise_for_status()
         payload = response.json()
         if int(payload.get("code") or 0) != 200 or payload.get("data") is not True:
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="submit-external",
+                status="failed",
+                reason=f"外部平台拒绝提交: {payload.get('msg') or payload}",
+            )
             raise RuntimeError(f"提交日志拉取申请失败: {payload.get('msg') or payload}")
         cls._update_status(
             db,
@@ -1350,6 +2137,15 @@ class TicketLogPullService:
             status_desc="已提交申请，等待外部平台生成压缩包",
             is_error=False,
             update_by="system",
+        )
+        cls._log_chain_step(
+            db,
+            ticket_id=record.ticket_id,
+            record_id=record.id,
+            step="submit-external",
+            status="success",
+            reason="外部平台提交成功",
+            detail={"requestUrl": request_url, "pageUrl": page_url},
         )
 
     @classmethod
@@ -1363,6 +2159,15 @@ class TicketLogPullService:
         storage_config = cls._get_storage_config_dict(db)
         deadline = datetime.now() + timedelta(seconds=int(storage_config.get("pollTimeoutSec") or 1800))
         interval_seconds = int(storage_config.get("pollIntervalSec") or 20)
+        cls._log_chain_step(
+            db,
+            ticket_id=record.ticket_id,
+            record_id=record.id,
+            step="poll-external",
+            status="running",
+            reason="开始轮询外部平台结果",
+            detail={"timeoutSeconds": int(storage_config.get("pollTimeoutSec") or 1800), "intervalSeconds": interval_seconds},
+        )
         while datetime.now() < deadline:
             rows = cls._fetch_external_rows(db, record)
             matched_row = cls._match_external_row(record, rows)
@@ -1395,6 +2200,15 @@ class TicketLogPullService:
                 TicketLogPullDao.update_record(db, record.id, update_data)
                 db.commit()
                 if external_status == 1:
+                    cls._log_chain_step(
+                        db,
+                        ticket_id=record.ticket_id,
+                        record_id=record.id,
+                        step="poll-external",
+                        status="matched",
+                        reason="外部平台已生成可下载结果",
+                        detail={"externalStatus": external_status, "serialNumber": matched_row.get("serialNumber")},
+                    )
                     return matched_row
                 if external_status == 2:
                     cls._fail_record(
@@ -1413,6 +2227,15 @@ class TicketLogPullService:
                         event_data={"record_id": record.id, "error_message": matched_row.get("errorMsg")},
                     )
                     db.commit()
+                    cls._log_chain_step(
+                        db,
+                        ticket_id=record.ticket_id,
+                        record_id=record.id,
+                        step="poll-external",
+                        status="failed",
+                        reason="外部平台返回失败",
+                        detail={"errorMessage": matched_row.get("errorMsg")},
+                    )
                     return None
             threading.Event().wait(interval_seconds)
         cls._fail_record(
@@ -1421,6 +2244,14 @@ class TicketLogPullService:
             status=TicketLogPullStatus.FAILED.value,
             status_desc="轮询外部平台超时",
             error_message="在配置的超时时间内未获取到日志拉取结果",
+        )
+        cls._log_chain_step(
+            db,
+            ticket_id=record.ticket_id,
+            record_id=record.id,
+            step="poll-external",
+            status="timeout",
+            reason="在配置超时时间内未获取到结果",
         )
         return None
 
@@ -1498,6 +2329,15 @@ class TicketLogPullService:
         config = cls._get_storage_config_dict(db)
         external_config = cls._get_external_config_dict(db)
         timeout_seconds = int(config.get("downloadTimeoutSec") or 300)
+        cls._log_chain_step(
+            db,
+            ticket_id=record.ticket_id,
+            record_id=record.id,
+            step="download-archive",
+            status="running",
+            reason="开始下载归档文件",
+            detail={"timeoutSeconds": timeout_seconds, "storageMode": record.storage_mode},
+        )
         cls.DEFAULT_TEMP_DIR.mkdir(parents=True, exist_ok=True)
         parsed_url = urlparse(str(record.command_result_url or ""))
         source_name = Path(parsed_url.path).name or f"{record.id}.zip"

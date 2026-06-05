@@ -204,6 +204,71 @@ export function getTicketLogPullVendorStoreOptions() {
   });
 }
 
+// 下载门店配置导入模板
+export function downloadTicketLogPullStoreConfigTemplate() {
+  return request({
+    url: '/ticket/log-pull/store-config/template',
+    method: 'get',
+    responseType: 'blob',
+  });
+}
+
+// 查询门店配置列表
+export function listTicketLogPullStoreConfigs(query) {
+  return request({
+    url: '/ticket/log-pull/store-configs',
+    method: 'get',
+    params: sanitizeQueryParams(query),
+  });
+}
+
+// 导入门店配置
+export function importTicketLogPullStoreConfigs(data) {
+  return request({
+    url: '/ticket/log-pull/store-configs/import',
+    method: 'post',
+    data,
+    headers: {
+      'Content-Type': 'multipart/form-data',
+      repeatSubmit: false,
+    },
+  });
+}
+
+// 查询项目商家映射列表
+export function listTicketLogPullProjectVendorMaps(query) {
+  return request({
+    url: '/ticket/log-pull/project-vendor-maps',
+    method: 'get',
+    params: sanitizeQueryParams(query),
+  });
+}
+
+// 查询项目商家映射选项
+export function listTicketLogPullProjectVendorMapOptions() {
+  return request({
+    url: '/ticket/log-pull/project-vendor-maps/options',
+    method: 'get',
+  });
+}
+
+// 根据项目ID查询项目商家映射
+export function getTicketLogPullProjectVendorMap(projectId) {
+  return request({
+    url: `/ticket/log-pull/project-vendor-maps/${projectId}`,
+    method: 'get',
+  });
+}
+
+// 保存项目商家映射
+export function saveTicketLogPullProjectVendorMap(data) {
+  return request({
+    url: '/ticket/log-pull/project-vendor-maps',
+    method: 'post',
+    data,
+  });
+}
+
 // 新增工单日志拉取任务
 export function addTicketLogPull(ticketId, data) {
   return request({

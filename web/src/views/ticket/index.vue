@@ -457,6 +457,9 @@
                         <el-button type="warning" plain @click="openAiRepoMappingDialog()" v-hasPermi="['ticket:ai:mapping:add']">
                           管理映射
                         </el-button>
+                        <el-button type="success" plain @click="openProjectVendorMapDialog()" v-hasPermi="['ticket:logpull:config']">
+                          商家映射
+                        </el-button>
                       </el-button-group>
                     </div>
                   </template>
@@ -1467,6 +1470,36 @@
     </el-dialog>
 
     <el-dialog
+      v-model="projectVendorMapOpen"
+      title="商家映射"
+      width="520px"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetProjectVendorMapForm"
+    >
+      <div v-loading="projectVendorMapLoading">
+        <el-form ref="projectVendorMapRef" :model="projectVendorMapForm" :rules="projectVendorMapRules" label-width="110px">
+          <el-form-item label="项目">
+            <el-select v-model="projectVendorMapForm.projectId" placeholder="项目" filterable style="width: 100%" disabled>
+              <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="项目名称">
+            <el-input v-model="projectVendorMapForm.projectName" disabled />
+          </el-form-item>
+          <el-form-item label="商户编号" prop="venderNo">
+            <el-input v-model="projectVendorMapForm.venderNo" placeholder="请输入 vender_no" maxlength="30" />
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button @click="projectVendorMapOpen = false">取消</el-button>
+        <el-button type="primary" :loading="projectVendorMapSubmitting" @click="submitProjectVendorMap">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="logPullContentOpen"
       title="日志内容"
       width="80%"
@@ -1584,6 +1617,7 @@ import {
   downloadTicketImportTemplate,
   extractTicketKnowledge,
   getTicket,
+  listTicketLogPullProjectVendorMapOptions,
   getTicketLogPullContent,
   getTicketLogPullVendorStoreOptions,
   getTicketTimeline,
@@ -1601,6 +1635,8 @@ import {
   addTicketSnapshot,
   saveTicketRca,
   searchTicketNaturalLanguage,
+  getTicketLogPullProjectVendorMap,
+  saveTicketLogPullProjectVendorMap,
   updateTicketAiRepoMapping,
   updateTicket
 } from '@/api/ticket/ticket'
@@ -1628,6 +1664,7 @@ const showSearch = ref(true)
 const ticketList = ref([])
 const total = ref(0)
 const projectOptions = ref([])
+const projectVendorMapOptions = ref([])
 const formModuleOptions = ref([])
 const formVersionOptions = ref([])
 const queryModuleOptions = ref([])
@@ -1676,6 +1713,9 @@ const selectedAiTask = ref(null)
 const aiRepoMappingOpen = ref(false)
 const aiRepoMappingLoading = ref(false)
 const aiRepoMappingSubmitting = ref(false)
+const projectVendorMapOpen = ref(false)
+const projectVendorMapLoading = ref(false)
+const projectVendorMapSubmitting = ref(false)
 const aiTaskLoading = ref(false)
 const aiTaskList = ref([])
 const aiTaskTotal = ref(0)
@@ -1703,6 +1743,11 @@ const aiRepoMappingForm = ref({
   isDefault: false,
   enabled: true,
   remark: ''
+})
+const projectVendorMapForm = ref({
+  projectId: undefined,
+  projectName: '',
+  venderNo: ''
 })
 const aiTaskQuery = ref({
   pageNum: 1,
@@ -1794,6 +1839,31 @@ function loadVendorOptions() {
   return getTicketLogPullVendorStoreOptions().then(response => {
     vendorOptions.value = normalizeVendorOptions(response.data?.vendors || [])
   })
+}
+
+function loadProjectVendorMapOptions() {
+  return listTicketLogPullProjectVendorMapOptions().then(response => {
+    projectVendorMapOptions.value = Array.isArray(response.data) ? response.data : []
+  })
+}
+
+function getProjectVendorNo(projectId) {
+  const resolvedProjectId = Number(projectId)
+  if (!resolvedProjectId) {
+    return ''
+  }
+  const mapping = projectVendorMapOptions.value.find(item => Number(item.projectId) === resolvedProjectId)
+  return String(mapping?.venderNo || '').trim()
+}
+
+function applyProjectVendorMapping(projectId) {
+  const vendorNo = getProjectVendorNo(projectId)
+  if (!vendorNo) {
+    return
+  }
+  const resolvedVendorId = Number(vendorNo)
+  logPullForm.value.vendorId = Number.isNaN(resolvedVendorId) ? vendorNo : resolvedVendorId
+  resetStoreSelection(logPullForm.value, logPullForm.value.vendorId)
 }
 
 function loadProviderOptions() {
@@ -1966,6 +2036,9 @@ const data = reactive({
     versionKey: [{ required: true, message: '版本标识不能为空', trigger: 'blur' }],
     repoUrl: [{ required: true, message: '仓库地址不能为空', trigger: 'blur' }],
     branchName: [{ required: true, message: '分支名称不能为空', trigger: 'blur' }]
+  },
+  projectVendorMapRules: {
+    venderNo: [{ required: true, message: '商户编号不能为空', trigger: 'blur' }]
   }
 })
 
@@ -1985,7 +2058,8 @@ const {
   statusRules,
   logPullRules,
   aiAnalysisRules,
-  aiRepoMappingRules
+  aiRepoMappingRules,
+  projectVendorMapRules
 } = toRefs(data)
 
 const detailTitle = computed(() => `工单详情：${detail.value.title || ''}`)
@@ -2380,10 +2454,12 @@ function resetLogPullForm() {
 }
 
 function openLogPullSubmitDialog() {
+  resetLogPullForm()
+  if (currentTicketId.value) {
+    logPullForm.value.ticketId = currentTicketId.value
+  }
+  applyProjectVendorMapping(detail.value.projectId)
   logPullSubmitOpen.value = true
-  nextTick(() => {
-    resetLogPullForm()
-  })
 }
 
 function stopLogPullAutoRefresh() {
@@ -2461,6 +2537,64 @@ function resetAiRepoMappingForm() {
   if (proxy.$refs.aiRepoMappingRef) {
     proxy.resetForm('aiRepoMappingRef')
   }
+}
+
+function createDefaultProjectVendorMapForm(projectId, projectName) {
+  return {
+    projectId,
+    projectName: projectName || '',
+    venderNo: ''
+  }
+}
+
+function resetProjectVendorMapForm() {
+  projectVendorMapForm.value = createDefaultProjectVendorMapForm(
+    detail.value.projectId,
+    detail.value.projectName || detail.value.merchantName || ''
+  )
+  if (proxy.$refs.projectVendorMapRef) {
+    proxy.resetForm('projectVendorMapRef')
+  }
+}
+
+function openProjectVendorMapDialog() {
+  if (!detail.value.projectId) {
+    proxy.$modal.msgWarning('当前工单缺少项目，无法维护商家映射')
+    return
+  }
+  projectVendorMapLoading.value = true
+  getTicketLogPullProjectVendorMap(detail.value.projectId).then(response => {
+    const row = response.data || {}
+    projectVendorMapForm.value = {
+      projectId: row.projectId || detail.value.projectId,
+      projectName: row.projectName || detail.value.projectName || detail.value.merchantName || '',
+      venderNo: row.venderNo || ''
+    }
+  }).catch(() => {
+    resetProjectVendorMapForm()
+  }).finally(() => {
+    projectVendorMapLoading.value = false
+    projectVendorMapOpen.value = true
+  })
+}
+
+function submitProjectVendorMap() {
+  proxy.$refs.projectVendorMapRef.validate(valid => {
+    if (!valid) return
+    projectVendorMapSubmitting.value = true
+    const payload = {
+      projectId: projectVendorMapForm.value.projectId,
+      projectName: projectVendorMapForm.value.projectName,
+      venderNo: projectVendorMapForm.value.venderNo
+    }
+    saveTicketLogPullProjectVendorMap(payload).then(() => {
+      proxy.$modal.msgSuccess('商家映射保存成功')
+      projectVendorMapOpen.value = false
+      loadProjectVendorMapOptions()
+    }).finally(() => {
+      projectVendorMapSubmitting.value = false
+    })
+  })
 }
 
 function loadAiRepoMappings(silent = false) {
@@ -2710,6 +2844,7 @@ function resetDetailDialog() {
   selectedAiTask.value = null
   aiAnalysisOpen.value = false
   aiRepoMappingOpen.value = false
+  projectVendorMapOpen.value = false
   stopLogPullAutoRefresh()
 }
 
@@ -3223,6 +3358,7 @@ onBeforeUnmount(() => {
 })
 
 loadProjectOptions()
+loadProjectVendorMapOptions()
 loadAgentOptions()
 loadProviderOptions()
 loadVendorOptions()

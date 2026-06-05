@@ -16,6 +16,11 @@
   - 记录工单ID、vendor/store/pos、commandContent、日志时间范围。
   - 记录外部命令ID、外部状态、压缩包地址、归档地址。
   - 记录内部状态、错误信息、异常堆栈、日志摘要、压缩入库文本。
+- `ticket_log_pull_store_config`
+  - 独立保存门店配置大表，覆盖 `group_no`、`vender_no`、`region_no`、`org_no`、`org_name`、`sap_org_no`、`platform_no`、`parent_org_no`、`perm_node_id`、`org_type`、`company_no`、`city_no`、`biz_type_no`、`status`、`created`、`modifid`、`open_date`、`language_desc` 等字段。
+  - 仅将门店配置从 `ticket.logPull.external` 中拆分出来，不再把一万多条基础数据塞进参数配置。
+- `ticket_log_pull_project_vendor_map`
+  - 保存当前系统项目 ID 与商户编号 `vender_no` 的映射，供日志拉取弹窗自动回填商家编号。
 
 ## 状态流转
 - `created`：任务已创建，等待后台执行。
@@ -94,6 +99,14 @@
   - 弹窗内展示“本次截取范围”，并允许在原始文档模式下调整后重新查看。
   - 日志内容默认不换行，支持通过开关切换换行显示。
   - 任务运行中自动轮询刷新列表状态。
+- 日志拉取管理页新增“门店配置”入口：
+  - 可按 `group_no`、`vender_no`、`org_no`、`sap_org_no`、关键字搜索。
+  - 支持下载 Excel 模板、选择 xlsx 文件导入。
+  - 导入方式分为增量导入和覆盖导入。
+  - 增量导入时按 `vender_no/org_no/sap_org_no` 查重，命中则覆盖更新，未命中则新增。
+  - 覆盖导入会先清空门店配置表再写入新数据。
+- 工单详情页新增项目到 `vender_no` 的映射维护能力，日志拉取提交前会按当前项目自动带出商家编号，减少人工填写。
+- 全链路新增步骤日志，记录跳过原因、执行节点和失败原因，方便排查工单号在“提交、轮询、下载、解析、导入”中的实际进度。
 
 ## 当前限制
 - 解析文本仅对 `commandDataType=1` 的日志包生效；DB 包当前只归档，不做文本展开。

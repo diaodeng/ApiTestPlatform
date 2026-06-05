@@ -1,6 +1,6 @@
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -14,7 +14,10 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
     TicketLogPullQueryModel,
+    TicketLogPullProjectVendorMapQueryModel,
+    TicketLogPullProjectVendorMapUpsertModel,
     TicketLogPullStorageConfigModel,
+    TicketLogPullStoreConfigQueryModel,
 )
 from modules.ticket.entity.vo.ticket_vo import (
     KnowledgeArticleModel,
@@ -378,6 +381,179 @@ async def get_ticket_log_pull_content(
     try:
         result = TicketLogPullService.get_log_pull_content_services(query_db, record_id, query)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="日志拉取记录不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/log-pull/store-config/template",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def download_ticket_log_pull_store_config_template(request: Request):
+    """
+    下载门店配置导入模板接口。
+    :param request: 请求对象
+    :return: 门店配置导入模板 Excel 文件
+    """
+    try:
+        filename = "门店配置导入模板.xlsx"
+        return Response(
+            content=TicketLogPullService.build_store_config_import_template(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+                "download-filename": quote(filename),
+            },
+        )
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/log-pull/store-configs",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_pull_store_configs(
+    request: Request,
+    query: TicketLogPullStoreConfigQueryModel = Depends(TicketLogPullStoreConfigQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    查询门店配置列表接口。
+    :param request: 请求对象
+    :param query: 查询条件，支持集团编号、商户编号、机构编号、SAP机构编号和关键字搜索
+    :param query_db: 数据库会话
+    :return: 门店配置分页列表
+    """
+    try:
+        return ResponseUtil.success(data=TicketLogPullService.get_store_config_list_services(query_db, query))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/log-pull/store-configs/import",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
+)
+@log_decorator(title="门店配置导入", business_type=1)
+async def import_ticket_log_pull_store_configs(
+    request: Request,
+    file: UploadFile = File(...),
+    import_mode: str = Form(default="incremental"),
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    导入门店配置接口。
+    :param request: 请求对象
+    :param file: 门店配置 Excel 文件
+    :param import_mode: 导入方式，incremental 为增量，overwrite 为覆盖
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 导入汇总结果
+    """
+    try:
+        if not file.filename.lower().endswith(".xlsx"):
+            return ResponseUtil.failure(msg="仅支持 xlsx 文件")
+        result = await TicketLogPullService.import_store_config_services(
+            query_db, await file.read(), import_mode, current_user
+        )
+        return ResponseUtil.success(data=result.result, msg=result.message) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/log-pull/project-vendor-maps",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_pull_project_vendor_maps(
+    request: Request,
+    query: TicketLogPullProjectVendorMapQueryModel = Depends(TicketLogPullProjectVendorMapQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    查询项目商家映射列表接口。
+    :param request: 请求对象
+    :param query: 查询条件，支持项目ID和关键字搜索
+    :param query_db: 数据库会话
+    :return: 项目商家映射列表
+    """
+    try:
+        return ResponseUtil.success(data=TicketLogPullService.get_project_vendor_map_list_services(query_db, query))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/log-pull/project-vendor-maps/options",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_pull_project_vendor_map_options(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取全部项目商家映射选项接口。
+    :param request: 请求对象
+    :param query_db: 数据库会话
+    :return: 项目商家映射选项列表
+    """
+    try:
+        return ResponseUtil.success(data=TicketLogPullService.get_project_vendor_map_options_services(query_db))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/log-pull/project-vendor-maps/{project_id:int}",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_pull_project_vendor_map_by_project(
+    request: Request,
+    project_id: int,
+    query_db: Session = Depends(get_db),
+):
+    """
+    根据项目ID获取项目商家映射接口。
+    :param request: 请求对象
+    :param project_id: 项目ID
+    :param query_db: 数据库会话
+    :return: 映射信息
+    """
+    try:
+        result = TicketLogPullService.get_project_vendor_map_by_project_services(query_db, project_id)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="映射不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/log-pull/project-vendor-maps",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
+)
+@log_decorator(title="项目商家映射", business_type=1)
+async def save_ticket_log_pull_project_vendor_map(
+    request: Request,
+    config_object: TicketLogPullProjectVendorMapUpsertModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    保存项目商家映射接口。
+    :param request: 请求对象
+    :param config_object: 项目ID、项目名称和商户编号
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 保存结果
+    """
+    try:
+        result = TicketLogPullService.save_project_vendor_map_services(query_db, config_object, current_user)
+        return ResponseUtil.success(data=result.result, msg=result.message) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

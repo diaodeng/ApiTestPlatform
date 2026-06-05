@@ -94,6 +94,11 @@
           新增拉取
         </el-button>
       </el-col>
+      <el-col :span="1.5">
+        <el-button type="success" plain icon="FolderOpened" @click="openStoreConfigDialog" v-hasPermi="['ticket:logpull:config']">
+          门店配置
+        </el-button>
+      </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
     </el-row>
 
@@ -386,6 +391,121 @@
         <pre :class="['log-content-block', { 'log-content-wrap': contentWrapEnabled }]">{{ filteredContentText }}</pre>
       </div>
     </el-dialog>
+
+    <el-dialog
+      v-model="storeConfigOpen"
+      title="门店配置"
+      width="88%"
+      top="5vh"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetStoreConfigQuery"
+    >
+      <el-form :model="storeConfigQuery" :inline="true" class="mb16">
+        <el-form-item label="集团编号">
+          <el-input v-model="storeConfigQuery.groupNo" placeholder="group_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+        <el-form-item label="商户编号">
+          <el-input v-model="storeConfigQuery.venderNo" placeholder="vender_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+        <el-form-item label="机构编号">
+          <el-input v-model="storeConfigQuery.orgNo" placeholder="org_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+        <el-form-item label="SAP机构编号">
+          <el-input v-model="storeConfigQuery.sapOrgNo" placeholder="sap_org_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+        <el-form-item label="关键字">
+          <el-input v-model="storeConfigQuery.keyword" placeholder="门店名称/编号" clearable style="width: 220px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+      <el-form-item>
+        <el-button type="primary" icon="Search" @click="handleStoreConfigQuery">搜索</el-button>
+        <el-button icon="Refresh" @click="resetStoreConfigQuery">重置</el-button>
+        <el-button type="success" plain icon="Download" @click="downloadStoreConfigTemplate">下载模板</el-button>
+        <el-button type="warning" plain icon="Upload" @click="storeConfigImportOpen = true">导入配置</el-button>
+      </el-form-item>
+      </el-form>
+
+      <el-table v-loading="storeConfigLoading" :data="storeConfigList" row-key="id">
+        <el-table-column label="ID" prop="id" width="110" />
+        <el-table-column label="集团编号" prop="groupNo" width="120" show-overflow-tooltip />
+        <el-table-column label="商户编号" prop="venderNo" width="140" show-overflow-tooltip />
+        <el-table-column label="区域编号" prop="regionNo" width="120" show-overflow-tooltip />
+        <el-table-column label="机构编号" prop="orgNo" width="140" show-overflow-tooltip />
+        <el-table-column label="SAP机构编号" prop="sapOrgNo" width="150" show-overflow-tooltip />
+        <el-table-column label="机构名称" prop="orgName" min-width="180" show-overflow-tooltip />
+        <el-table-column label="会员渠道" prop="platformNo" width="110" show-overflow-tooltip />
+        <el-table-column label="公司代码" prop="companyNo" width="120" show-overflow-tooltip />
+        <el-table-column label="状态" prop="status" width="90" align="center" />
+        <el-table-column label="修改时间" prop="modifid" width="170">
+          <template #default="scope">{{ parseTime(scope.row.modifid) }}</template>
+        </el-table-column>
+      </el-table>
+
+      <pagination
+        v-show="storeConfigTotal > 0"
+        :total="storeConfigTotal"
+        v-model:page="storeConfigQuery.pageNum"
+        v-model:limit="storeConfigQuery.pageSize"
+        @pagination="loadStoreConfigList"
+      />
+    </el-dialog>
+
+    <el-dialog
+      v-model="storeConfigImportOpen"
+      title="导入门店配置"
+      width="560px"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetStoreConfigImportDialog"
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="增量导入会按 vender_no / org_no / sap_org_no 匹配，存在则覆盖；覆盖导入会先清空旧数据再导入。"
+        class="mb16"
+      />
+      <el-form :model="storeConfigImportForm" label-width="100px">
+        <el-form-item label="导入方式">
+          <el-radio-group v-model="storeConfigImportMode">
+            <el-radio value="incremental">增量导入</el-radio>
+            <el-radio value="overwrite">覆盖导入</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="导入文件">
+          <el-upload
+            ref="storeConfigUploadRef"
+            :auto-upload="false"
+            :show-file-list="false"
+            :limit="1"
+            accept=".xlsx"
+            :on-change="handleStoreConfigUploadChange"
+          >
+            <template #trigger>
+              <el-button type="primary" plain icon="Upload">选择 xlsx 文件</el-button>
+            </template>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <el-alert
+        v-if="storeConfigImportResult"
+        type="success"
+        :closable="false"
+        show-icon
+        class="mb16"
+        :title="`导入完成：新增 ${storeConfigImportResult.insertedCount || 0} 条，更新 ${storeConfigImportResult.updatedCount || 0} 条，失败 ${storeConfigImportResult.failedRows?.length || 0} 条。`"
+      />
+      <el-table v-if="storeConfigImportResult?.failedRows?.length" :data="storeConfigImportResult.failedRows" size="small" border>
+        <el-table-column label="行号" prop="row" width="90" />
+        <el-table-column label="失败原因" prop="reason" min-width="280" show-overflow-tooltip />
+      </el-table>
+      <template #footer>
+        <el-button @click="storeConfigImportOpen = false">取消</el-button>
+        <el-button type="primary" :loading="storeConfigImporting" @click="submitStoreConfigImport">开始导入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -394,10 +514,13 @@ import {
   delTicketLogPull,
   createTicketLogPullRecord,
   downloadTicketLogPull,
+  downloadTicketLogPullStoreConfigTemplate,
   getTicketLogPullContent,
   getTicketLogPullVendorStoreOptions,
   listTicket,
+  listTicketLogPullStoreConfigs,
   listTicketLogPullRecords,
+  importTicketLogPullStoreConfigs,
   redownloadTicketLogPull,
   reextractTicketLogPull,
   retryTicketLogPull
@@ -435,6 +558,16 @@ const contentText = ref('')
 const contentKeyword = ref('')
 const contentWrapEnabled = ref(false)
 const logPullRefreshTimer = ref(null)
+const storeConfigOpen = ref(false)
+const storeConfigLoading = ref(false)
+const storeConfigList = ref([])
+const storeConfigTotal = ref(0)
+const storeConfigImportOpen = ref(false)
+const storeConfigImporting = ref(false)
+const storeConfigImportResult = ref(null)
+const storeConfigImportMode = ref('incremental')
+const storeConfigImportForm = ref({})
+const storeConfigUploadRef = ref()
 
 const activeLogPullStatuses = ['created', 'submitting', 'polling', 'downloading', 'processing']
 
@@ -448,6 +581,16 @@ const queryParams = ref({
   storeId: undefined,
   posNo: undefined,
   modifyTime: ''
+})
+
+const storeConfigQuery = ref({
+  pageNum: 1,
+  pageSize: 10,
+  groupNo: '',
+  venderNo: '',
+  orgNo: '',
+  sapOrgNo: '',
+  keyword: ''
 })
 
 const createForm = ref(createDefaultForm())
@@ -564,6 +707,102 @@ function loadAgentOptions() {
   return listAllAgents().then(response => {
     const rows = response.data || []
     agentOptions.value = Array.isArray(rows) ? rows : []
+  })
+}
+
+function openStoreConfigDialog() {
+  storeConfigOpen.value = true
+  loadStoreConfigList()
+}
+
+function loadStoreConfigList() {
+  storeConfigLoading.value = true
+  return listTicketLogPullStoreConfigs(storeConfigQuery.value).then(response => {
+    storeConfigList.value = response.rows || []
+    storeConfigTotal.value = response.total || 0
+  }).finally(() => {
+    storeConfigLoading.value = false
+  })
+}
+
+function handleStoreConfigQuery() {
+  storeConfigQuery.value.pageNum = 1
+  loadStoreConfigList()
+}
+
+function resetStoreConfigQuery() {
+  storeConfigQuery.value = {
+    pageNum: 1,
+    pageSize: 10,
+    groupNo: '',
+    venderNo: '',
+    orgNo: '',
+    sapOrgNo: '',
+    keyword: ''
+  }
+  loadStoreConfigList()
+}
+
+function resetStoreConfigImportDialog() {
+  storeConfigImportForm.value = {}
+  storeConfigImportResult.value = null
+  storeConfigImportMode.value = 'incremental'
+  if (storeConfigUploadRef.value) {
+    storeConfigUploadRef.value.clearFiles?.()
+  }
+}
+
+function downloadStoreConfigTemplate() {
+  downloadTicketLogPullStoreConfigTemplate().then(async blob => {
+    if (!blobValidate(blob)) {
+      try {
+        const text = await blob.text()
+        const payload = JSON.parse(text)
+        proxy.$modal.msgError(payload.msg || '模板下载失败')
+      } catch (error) {
+        proxy.$modal.msgError('模板下载失败')
+      }
+      return
+    }
+    saveAs(blob, '门店配置导入模板.xlsx')
+  }).catch(() => {
+    proxy.$modal.msgError('模板下载失败')
+  })
+}
+
+function handleStoreConfigUploadChange(uploadFile) {
+  const rawFile = uploadFile?.raw
+  if (!rawFile) {
+    return
+  }
+  if (!rawFile.name?.toLowerCase().endsWith('.xlsx')) {
+    proxy.$modal.msgWarning('仅支持 xlsx 文件')
+    return
+  }
+  storeConfigImportForm.value = {
+    file: rawFile
+  }
+  storeConfigImportOpen.value = true
+}
+
+function submitStoreConfigImport() {
+  const rawFile = storeConfigImportForm.value?.file
+  if (!rawFile) {
+    proxy.$modal.msgWarning('请先选择 xlsx 文件')
+    return
+  }
+  const formData = new FormData()
+  formData.append('file', rawFile)
+  formData.append('import_mode', storeConfigImportMode.value)
+  storeConfigImporting.value = true
+  importTicketLogPullStoreConfigs(formData).then(response => {
+    storeConfigImportResult.value = response.data || null
+    proxy.$modal.msgSuccess('门店配置导入完成')
+    loadStoreConfigList()
+  }).catch(() => {
+    proxy.$modal.msgError('门店配置导入失败')
+  }).finally(() => {
+    storeConfigImporting.value = false
   })
 }
 
