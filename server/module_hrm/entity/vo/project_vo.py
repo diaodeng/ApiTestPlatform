@@ -10,10 +10,11 @@ from module_hrm.enums.enums import QtrDataStatusEnum
 
 class ProjectModel(CommonDataModel):
     """
-    项目表对应pydantic模型
+    椤圭洰琛ㄥ搴攑ydantic妯″瀷
     """
 
     project_id: Optional[int] = None
+    project_code: Optional[str] = None
     project_name: Optional[str] = None
     responsible_name: Optional[str] = None
     test_user: Optional[str] = None
@@ -24,23 +25,19 @@ class ProjectModel(CommonDataModel):
     order_num: Optional[int] = None
     status: Optional[int] = QtrDataStatusEnum.normal.value
     del_flag: Optional[str] = None
-    # create_by: Optional[str] = None
-    # create_time: Optional[datetime] = None
-    # update_by: Optional[str] = None
-    # update_time: Optional[datetime] = None
 
 
 @as_query
 class ProjectQueryModel(QueryModel, ProjectModel):
     """
-    项目管理不分页查询模型
+    椤圭洰绠＄悊涓嶅垎椤垫煡璇㈡ā鍨?
     """
     pass
 
 
 class DeleteProjectModel(BaseModel):
     """
-    删除项目模型
+    鍒犻櫎椤圭洰妯″瀷
     """
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 

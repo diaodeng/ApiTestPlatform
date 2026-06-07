@@ -1,8 +1,10 @@
 from sqlalchemy.orm import Session
 
-from module_hrm.dao.module_dao import ModuleDao
-from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.common_vo import DataScopeExpr
+from module_hrm.dao.module_dao import ModuleDao
+from module_hrm.dao.project_dao import ProjectDao
+from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.entity.vo.module_vo import (
     AddModuleModel,
     DeleteModuleModel,
@@ -11,75 +13,109 @@ from module_hrm.entity.vo.module_vo import (
     ModuleProjectModel,
     ModuleQuery,
 )
+from module_hrm.utils.business_code import ensure_unique_code
 from utils.common_util import CamelCaseUtil, export_list2excel
 
 
 class ModuleService:
     """
-    模块管理模块服务层
+    妯″潡绠＄悊妯″潡鏈嶅姟灞?
     """
 
     @classmethod
-    def get_module_list_services(cls, query_db: Session, query_object: ModulePageQueryModel, data_scope_sql:DataScopeExpr, is_page: bool = False):
+    def _resolve_module_code(
+        cls,
+        query_db: Session,
+        module_name: str | None,
+        module_code: str | None,
+        *,
+        project_id: int | None,
+        current_module_id: int | None = None,
+        keep_existing: str | None = None,
+    ) -> str:
+        incoming_code = str(module_code or "").strip()
+        keep_existing_code = str(keep_existing or "").strip()
+        if not incoming_code:
+            if keep_existing_code:
+                return keep_existing_code
+            return ""
+        existing_codes = {
+            str(item[0] or "").strip()
+            for item in query_db.query(HrmModule.module_code)
+            .filter(HrmModule.module_code.isnot(None))
+            .filter(HrmModule.module_code != "")
+            .all()
+            if str(item[0] or "").strip()
+        }
+        if current_module_id is not None and keep_existing_code:
+            existing_codes.discard(keep_existing_code)
+        return ensure_unique_code(incoming_code, existing_codes)
+
+    @classmethod
+    def get_module_list_services(
+        cls,
+        query_db: Session,
+        query_object: ModulePageQueryModel,
+        data_scope_sql: DataScopeExpr,
+        is_page: bool = False,
+    ):
         """
-        获取模块列表信息service
-        :param query_db: orm对象
-        :param query_object: 查询参数对象
-        :param is_page: 是否开启分页
-        :return: 模块列表信息对象
+        鑾峰彇妯″潡鍒楄〃淇℃伅service
         """
         list_result = ModuleDao.get_module_list(query_db, query_object, data_scope_sql, is_page)
-
         return list_result
 
     @classmethod
-    def get_module_list_services_all(cls, query_db: Session, page_object: ModuleModel, data_scope_sql:DataScopeExpr):
+    def get_module_list_services_all(cls, query_db: Session, page_object: ModuleModel, data_scope_sql: DataScopeExpr):
         """
-        获取项目信息service
-        :param query_db: orm对象
-        :param page_object: 查询参数对象
-        :param data_scope_sql: 数据权限对应的查询sql语句
-        :return: 项目信息对象
+        鑾峰彇椤圭洰淇℃伅service
         """
         project_list_result = ModuleDao.get_module_list_all(query_db, page_object, data_scope_sql)
-
         return CamelCaseUtil.transform_result(project_list_result)
 
     @classmethod
-    def get_module_list_services_show(cls, query_db: Session, page_object: ModuleModel, data_scope_sql:DataScopeExpr):
+    def get_module_list_services_show(cls, query_db: Session, page_object: ModuleModel, data_scope_sql: DataScopeExpr):
         """
-        获取项目信息service
-        :param query_db: orm对象
-        :param page_object: 查询参数对象
-        :param data_scope_sql: 数据权限对应的查询sql语句
-        :return: 项目信息对象
+        鑾峰彇椤圭洰淇℃伅service
         """
         project_list_result = ModuleDao.get_module_list_show(query_db, page_object, data_scope_sql)
-
         return CamelCaseUtil.transform_result(project_list_result)
 
     @classmethod
     def add_module_services(cls, query_db: Session, page_object: AddModuleModel):
         """
-        新增模块信息service
-        :param query_db: orm对象
-        :param page_object: 新增模块对象
-        :return: 新增模块校验结果
+        鏂板妯″潡淇℃伅service
         """
         add_module = ModuleModel(**page_object.model_dump(by_alias=True))
-        module = ModuleDao.get_module_detail_by_info(query_db, ModuleQuery(moduleName=page_object.module_name,
-                                                                           projectId=page_object.project_id))
+        module = ModuleDao.get_module_detail_by_info(
+            query_db,
+            ModuleQuery(moduleName=page_object.module_name, projectId=page_object.project_id),
+        )
         if module:
-            result = {'is_success': False, 'message': '模块名称已存在'}
+            result = {'is_success': False, 'message': '妯″潡鍚嶇О宸插瓨鍦?'}
         else:
             try:
+                incoming_code = str(add_module.module_code or "").strip()
+                if incoming_code:
+                    duplicate = (
+                        query_db.query(HrmModule)
+                        .filter(HrmModule.module_code == incoming_code)
+                        .first()
+                    )
+                    if duplicate:
+                        return CrudResponseModel(is_success=False, message='妯″潡涓氬姟缂栫爜宸插瓨鍦?')
+                    add_module.module_code = incoming_code
+                else:
+                    add_module.module_code = ""
                 add_result = ModuleDao.add_module_dao(query_db, add_module)
                 module_id = add_result.module_id
                 if page_object.project_id:
-                    ModuleDao.add_module_project_dao(query_db, ModuleProjectModel(moduleId=module_id,
-                                                                                  projectId=page_object.project_id))
+                    ModuleDao.add_module_project_dao(
+                        query_db,
+                        ModuleProjectModel(moduleId=module_id, projectId=page_object.project_id),
+                    )
                 query_db.commit()
-                result = {'is_success': True, 'message': '新增成功'}
+                result = {'is_success': True, 'message': '鏂板鎴愬姛'}
             except Exception as e:
                 query_db.rollback()
                 raise e
@@ -89,10 +125,7 @@ class ModuleService:
     @classmethod
     def edit_module_services(cls, query_db: Session, page_object: ModuleModel):
         """
-        编辑模块信息service
-        :param query_db: orm对象
-        :param page_object: 编辑模块对象
-        :return: 编辑模块校验结果
+        缂栬緫妯″潡淇℃伅service
         """
         edit = page_object.model_dump(exclude_unset=True)
         info = cls.module_detail_services(query_db, edit.get('module_id'))
@@ -100,27 +133,40 @@ class ModuleService:
             if info.module_name != page_object.module_name:
                 module = ModuleDao.get_module_detail_by_info(query_db, ModuleModel(moduleName=page_object.module_name))
                 if module:
-                    result = {'is_success': False, 'message': '模块名称已存在'}
+                    result = {'is_success': False, 'message': '妯″潡鍚嶇О宸插瓨鍦?'}
                     return CrudResponseModel(**result)
+
+            edit_module_code = str(edit.get('module_code') or '').strip()
+            if edit_module_code:
+                duplicate = (
+                    query_db.query(HrmModule)
+                    .filter(
+                        HrmModule.module_code == edit_module_code,
+                        HrmModule.module_id != info.module_id,
+                    )
+                    .first()
+                )
+                if duplicate:
+                    return CrudResponseModel(is_success=False, message='妯″潡涓氬姟缂栫爜宸插瓨鍦?')
+            else:
+                edit['module_code'] = info.module_code or ""
+
             try:
                 ModuleDao.edit_module_dao(query_db, edit)
                 query_db.commit()
-                result = {'is_success': True, 'message': '更新成功'}
+                result = {'is_success': True, 'message': '鏇存柊鎴愬姛'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = {'is_success': False, 'message': '模块不存在'}
+            result = {'is_success': False, 'message': '妯″潡涓嶅瓨鍦?'}
 
         return CrudResponseModel(**result)
 
     @classmethod
     def delete_module_services(cls, query_db: Session, page_object: DeleteModuleModel):
         """
-        删除模块信息service
-        :param query_db: orm对象
-        :param page_object: 删除模块对象
-        :return: 删除模块校验结果
+        鍒犻櫎妯″潡淇℃伅service
         """
         if page_object.module_ids.split(','):
             id_list = page_object.module_ids.split(',')
@@ -128,59 +174,52 @@ class ModuleService:
                 for module_id in id_list:
                     ModuleDao.delete_module_dao(query_db, ModuleModel(moduleId=module_id))
                 query_db.commit()
-                result = {'is_success': True, 'message': '删除成功'}
+                result = {'is_success': True, 'message': '鍒犻櫎鎴愬姛'}
             except Exception as e:
                 query_db.rollback()
                 raise e
         else:
-            result = {'is_success': False, 'message': '传入模块id为空'}
+            result = {'is_success': False, 'message': '浼犲叆妯″潡id涓虹┖'}
         return CrudResponseModel(**result)
 
     @classmethod
     def module_detail_services(cls, query_db: Session, module_id: int):
         """
-        获取模块详细信息service
-        :param query_db: orm对象
-        :param module_id: 模块id
-        :return: 模块id对应的信息
+        鑾峰彇妯″潡璇︾粏淇℃伅service
         """
         module = ModuleDao.get_module_detail_by_id(query_db, module_id=module_id)
         result = ModuleModel(**CamelCaseUtil.transform_result(module))
-
         return result
 
     @staticmethod
     def export_module_list_services(module_list: list):
         """
-        导出模块信息service
-        :param module_list: 模块信息列表
-        :return: 模块信息对应excel的二进制数据
+        瀵煎嚭妯″潡淇℃伅service
         """
-        # 创建一个映射字典，将英文键映射到中文键
         mapping_dict = {
-            "moduleId": "模块编号",
-            "moduleName": "模块名称",
-            "testUser": "测试人员",
-            "simpleDesc": "简要说明",
-            "otherDesc": "全体说明",
-            "sort": "显示顺序",
-            "status": "状态",
-            "createBy": "创建者",
-            "createTime": "创建时间",
-            "updateBy": "更新者",
-            "updateTime": "更新时间",
-            "remark": "备注",
+            "moduleId": "妯″潡缂栧彿",
+            "moduleCode": "妯″潡涓氬姟缂栫爜",
+            "moduleName": "妯″潡鍚嶇О",
+            "testUser": "娴嬭瘯浜哄憳",
+            "simpleDesc": "绠€瑕佽鏄?",
+            "otherDesc": "鍏ㄤ綋璇存槑",
+            "sort": "鏄剧ず椤哄簭",
+            "status": "鐘舵€?",
+            "createBy": "鍒涘缓鑰?",
+            "createTime": "鍒涘缓鏃堕棿",
+            "updateBy": "鏇存柊鑰?",
+            "updateTime": "鏇存柊鏃堕棿",
+            "remark": "澶囨敞",
         }
 
         data = module_list
 
         for item in data:
             if item.get('status') == '0':
-                item['status'] = '正常'
+                item['status'] = '姝ｅ父'
             else:
-                item['status'] = '停用'
-        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in
-                    data]
+                item['status'] = '鍋滅敤'
+        new_data = [{mapping_dict.get(key): value for key, value in item.items() if mapping_dict.get(key)} for item in data]
         binary_data = export_list2excel(new_data)
 
         return binary_data

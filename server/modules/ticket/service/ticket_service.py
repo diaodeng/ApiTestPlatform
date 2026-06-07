@@ -453,6 +453,45 @@ class TicketService:
         return item
 
     @classmethod
+    def _attach_relation_codes(cls, query_db: Session, item: dict[str, Any]) -> dict[str, Any]:
+        """
+        根据项目/模块ID补充业务码，供外部同步链路传递。
+        """
+        project_id = item.get("projectId") or item.get("project_id")
+        if project_id is not None:
+            try:
+                project = (
+                    query_db.query(HrmProject)
+                    .filter(
+                        HrmProject.project_id == int(project_id),
+                        HrmProject.status == QtrDataStatusEnum.normal.value,
+                        HrmProject.del_flag == "0",
+                    )
+                    .first()
+                )
+                if project:
+                    item["projectCode"] = str(getattr(project, "project_code", "") or "").strip()
+            except Exception:
+                pass
+
+        module_id = item.get("moduleId") or item.get("module_id")
+        if module_id is not None:
+            try:
+                module = (
+                    query_db.query(HrmModule)
+                    .filter(
+                        HrmModule.module_id == int(module_id),
+                        HrmModule.status == QtrDataStatusEnum.normal.value,
+                    )
+                    .first()
+                )
+                if module:
+                    item["moduleCode"] = str(getattr(module, "module_code", "") or "").strip()
+            except Exception:
+                pass
+        return item
+
+    @classmethod
     def _resolve_ticket_relation_fields(
         cls, query_db: Session, data: dict[str, Any]
     ) -> tuple[bool, str, dict[str, Any]]:
@@ -997,6 +1036,7 @@ class TicketService:
             return None
         result = CamelCaseUtil.transform_result(ticket)
         cls._decorate_ticket_item(result)
+        cls._attach_relation_codes(query_db, result)
         result["latestLogPull"] = TicketLogPullService.get_latest_summary(query_db, ticket_id)
         result["latestAiAnalysis"] = TicketAiAnalysisService.get_latest_summary(query_db, ticket_id)
         message_bundle = cls.get_messages_services(query_db, ticket_id) or {}

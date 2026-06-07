@@ -2,158 +2,151 @@
   <div class="app-container ai-config-center-page" v-loading="loading">
     <section class="page-intro">
       <div class="page-intro__eyebrow">AI 配置中心</div>
-      <h2 class="page-intro__title">这里集中管理工单 AI 相关配置</h2>
+      <h2 class="page-intro__title">集中管理工单 AI 相关配置</h2>
       <p class="page-intro__desc">
-        轻量翻译与知识提炼在工单保存/关闭时触发，AI 分析 Worker 配置用于版本仓库分析任务。保存后会自动刷新系统缓存。
+        轻量翻译与知识提炼在工单保存/关闭时触发，AI 分析 Worker 配置用于版本仓库分析任务。提示词模板建议在模板页统一维护，这里只负责选择和组合。
       </p>
     </section>
 
-    <el-row :gutter="16">
-      <el-col :xs="24" :lg="14">
-        <el-card class="config-card" shadow="never">
-          <template #header>
-            <div class="card-header">
-              <span>轻量 AI 配置</span>
-              <el-tag type="success" effect="plain">保存即生效</el-tag>
-            </div>
-          </template>
-
-          <el-form ref="formRef" :model="form" :rules="rules" label-width="170px">
-            <el-row :gutter="16">
-              <el-col :span="24">
-                <el-divider content-position="left">工单翻译</el-divider>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="翻译 Provider" prop="translateProviderCode">
-                  <el-select
-                    v-model="form.translateProviderCode"
-                    placeholder="请选择 Provider"
-                    filterable
-                    clearable
-                    style="width: 100%"
-                  >
-                    <el-option
-                      v-for="item in providerOptions"
-                      :key="item.providerId || item.providerCode"
-                      :label="formatProviderLabel(item)"
-                      :value="item.providerCode"
-                    />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="翻译提示词" prop="translatePromptCode">
-                  <el-select
-                    v-model="form.translatePromptCode"
-                    placeholder="请选择提示词模板"
-                    filterable
-                    clearable
-                    style="width: 100%"
-                  >
-                    <el-option
-                      v-for="item in promptOptions.translate"
-                      :key="item.templateId || item.templateCode"
-                      :label="formatPromptLabel(item)"
-                      :value="item.templateCode"
-                    />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-
-              <el-col :span="24">
-                <el-divider content-position="left">知识提炼</el-divider>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="知识提炼 Provider" prop="knowledgeProviderCode">
-                  <el-select
-                    v-model="form.knowledgeProviderCode"
-                    placeholder="请选择 Provider"
-                    filterable
-                    clearable
-                    style="width: 100%"
-                  >
-                    <el-option
-                      v-for="item in providerOptions"
-                      :key="`knowledge-${item.providerId || item.providerCode}`"
-                      :label="formatProviderLabel(item)"
-                      :value="item.providerCode"
-                    />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="知识提炼提示词" prop="knowledgePromptCode">
-                  <el-select
-                    v-model="form.knowledgePromptCode"
-                    placeholder="请选择提示词模板"
-                    filterable
-                    clearable
-                    style="width: 100%"
-                  >
-                    <el-option
-                      v-for="item in promptOptions.knowledge"
-                      :key="`knowledge-${item.templateId || item.templateCode}`"
-                      :label="formatPromptLabel(item)"
-                      :value="item.templateCode"
-                    />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </el-form>
-        </el-card>
-
-        <el-card class="config-card mt16" shadow="never">
-          <template #header>
-            <div class="card-header">
-              <span>AI 分析 Worker 配置</span>
-              <el-tag type="warning" effect="plain">工单版本分析任务</el-tag>
-            </div>
-          </template>
-
-          <el-form ref="workerFormRef" :model="form" :rules="rules" label-width="170px">
-            <el-row :gutter="16">
-              <el-col :span="24">
-                <el-form-item label="Worker 命令" prop="analysisWorkerCommand">
-                  <el-input v-model="form.analysisWorkerCommand" placeholder="例如 codex exec" clearable />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="Worker 模型" prop="analysisWorkerModel">
-                  <el-input v-model="form.analysisWorkerModel" placeholder="例如 gpt-4.1-mini" clearable />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="Worker 沙箱" prop="analysisWorkerSandbox">
-                  <el-input v-model="form.analysisWorkerSandbox" placeholder="例如 workspace-write" clearable />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="超时秒数" prop="analysisWorkerTimeoutSec">
-                  <el-input-number v-model="form.analysisWorkerTimeoutSec" :min="60" :step="60" style="width: 100%" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="Agent 编码" prop="analysisAgentCode">
-                  <el-input v-model="form.analysisAgentCode" placeholder="留空则自动选择在线 Agent" clearable />
-                </el-form-item>
-              </el-col>
-              <el-col :span="24">
-                <el-form-item label="工作区根目录" prop="analysisWorkspaceRoot">
-                  <el-input v-model="form.analysisWorkspaceRoot" placeholder="例如 D:/xj/api-test-platform/logs/ticket_ai_analysis" clearable />
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </el-form>
-        </el-card>
-
-        <div class="action-bar">
-          <el-button type="primary" :loading="saving" @click="handleSave" v-hasPermi="['system:aiconfig:edit']">保存配置</el-button>
-          <el-button @click="loadSummary">刷新数据</el-button>
+    <el-card class="config-card" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>轻量 AI 配置</span>
+          <el-tag type="success" effect="plain">保存即生效</el-tag>
         </div>
-      </el-col>
+      </template>
 
-      <el-col :xs="24" :lg="10">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="170px">
+        <el-row :gutter="16">
+          <el-col :span="24">
+            <el-divider content-position="left">工单翻译</el-divider>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="翻译 Provider" prop="translateProviderCode">
+              <el-select
+                v-model="form.translateProviderCode"
+                placeholder="请选择 Provider"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in providerOptions"
+                  :key="item.providerId || item.providerCode"
+                  :label="formatProviderLabel(item)"
+                  :value="item.providerCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="翻译提示词" prop="translatePromptCode">
+              <el-select
+                v-model="form.translatePromptCode"
+                placeholder="请选择提示词模板"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in promptOptions.translate"
+                  :key="item.templateId || item.templateCode"
+                  :label="formatPromptLabel(item)"
+                  :value="item.templateCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+
+          <el-col :span="24">
+            <el-divider content-position="left">知识提炼</el-divider>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="知识提炼 Provider" prop="knowledgeProviderCode">
+              <el-select
+                v-model="form.knowledgeProviderCode"
+                placeholder="请选择 Provider"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in providerOptions"
+                  :key="`knowledge-${item.providerId || item.providerCode}`"
+                  :label="formatProviderLabel(item)"
+                  :value="item.providerCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="知识提炼提示词" prop="knowledgePromptCode">
+              <el-select
+                v-model="form.knowledgePromptCode"
+                placeholder="请选择提示词模板"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in promptOptions.knowledge"
+                  :key="`knowledge-${item.templateId || item.templateCode}`"
+                  :label="formatPromptLabel(item)"
+                  :value="item.templateCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-card class="config-card mt16" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>AI 分析 Worker 配置</span>
+          <el-tag type="warning" effect="plain">工单版本分析任务</el-tag>
+        </div>
+      </template>
+
+      <el-form ref="workerFormRef" :model="form" :rules="rules" label-width="170px">
+        <el-row :gutter="16">
+          <el-col :span="24">
+            <el-form-item label="Worker 命令" prop="analysisWorkerCommand">
+              <el-input v-model="form.analysisWorkerCommand" placeholder="例如 codex exec" clearable />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="Worker 模型" prop="analysisWorkerModel">
+              <el-input v-model="form.analysisWorkerModel" placeholder="例如 gpt-4.1-mini" clearable />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="Worker 沙箱" prop="analysisWorkerSandbox">
+              <el-input v-model="form.analysisWorkerSandbox" placeholder="例如 workspace-write" clearable />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="超时秒数" prop="analysisWorkerTimeoutSec">
+              <el-input-number v-model="form.analysisWorkerTimeoutSec" :min="60" :step="60" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="Agent 编码" prop="analysisAgentCode">
+              <el-input v-model="form.analysisAgentCode" placeholder="留空则自动选择在线 Agent" clearable />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="工作区根目录" prop="analysisWorkspaceRoot">
+              <el-input v-model="form.analysisWorkspaceRoot" placeholder="例如 D:/xj/api-test-platform/logs/ticket_ai_analysis" clearable />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-row :gutter="16" class="mt16">
+      <el-col :xs="24" :lg="12">
         <el-card class="config-card" shadow="never">
           <template #header>
             <div class="card-header">
@@ -170,8 +163,10 @@
             </div>
           </div>
         </el-card>
+      </el-col>
 
-        <el-card class="config-card mt16" shadow="never">
+      <el-col :xs="24" :lg="12">
+        <el-card class="config-card" shadow="never">
           <template #header>
             <div class="card-header">
               <span>配置清单</span>
@@ -188,6 +183,11 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <div class="action-bar">
+      <el-button type="primary" :loading="saving" @click="handleSave" v-hasPermi="['system:aiconfig:edit']">保存配置</el-button>
+      <el-button @click="loadSummary">刷新数据</el-button>
+    </div>
   </div>
 </template>
 
@@ -205,7 +205,7 @@ const promptOptions = reactive({
   translate: [],
   knowledge: [],
   analysis: [],
-  common: [],
+  common: []
 })
 
 const defaultForm = () => ({
@@ -218,13 +218,13 @@ const defaultForm = () => ({
   analysisWorkerSandbox: '',
   analysisWorkerTimeoutSec: 3600,
   analysisWorkspaceRoot: '',
-  analysisAgentCode: '',
+  analysisAgentCode: ''
 })
 
 const form = reactive(defaultForm())
 
 const rules = {
-  analysisWorkerTimeoutSec: [{ required: true, message: '超时秒数不能为空', trigger: 'change' }],
+  analysisWorkerTimeoutSec: [{ required: true, message: '超时秒数不能为空', trigger: 'change' }]
 }
 
 function normalizePayload(payload) {
@@ -303,7 +303,7 @@ function goToPath(path) {
 async function handleSave() {
   const [basicValid, workerValid] = await Promise.all([
     validateElForm('formRef'),
-    validateElForm('workerFormRef'),
+    validateElForm('workerFormRef')
   ])
   if (!basicValid || !workerValid) {
     return
@@ -377,6 +377,7 @@ onMounted(() => {
 .action-bar {
   display: flex;
   gap: 12px;
+  justify-content: flex-end;
   margin-top: 16px;
 }
 

@@ -542,7 +542,20 @@ class TicketSyncService:
     @classmethod
     def _match_project(cls, db: Session, text: str, mappings: list[dict[str, Any]]) -> HrmProject | None:
         matched = cls._match_mapping(text, mappings)
+        project_code = str(matched.get("projectCode") or matched.get("project_code") or "").strip() if isinstance(matched, dict) else ""
         project_id = cls._safe_int(matched.get("projectId") if isinstance(matched, dict) else None)
+        if project_code:
+            project = (
+                db.query(HrmProject)
+                .filter(
+                    HrmProject.project_code == project_code,
+                    HrmProject.status == QtrDataStatusEnum.normal.value,
+                    HrmProject.del_flag == "0",
+                )
+                .first()
+            )
+            if project:
+                return project
         if project_id:
             return (
                 db.query(HrmProject)
@@ -577,8 +590,13 @@ class TicketSyncService:
         project_id: int | None = None,
     ) -> HrmModule | None:
         matched = cls._match_mapping(text, mappings)
+        module_code = str(matched.get("moduleCode") or matched.get("module_code") or "").strip() if isinstance(matched, dict) else ""
         module_id = cls._safe_int(matched.get("moduleId") if isinstance(matched, dict) else None)
         query = db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
+        if module_code:
+            module = query.filter(HrmModule.module_code == module_code).first()
+            if module:
+                return module
         if module_id:
             return query.filter(HrmModule.module_id == module_id).first()
         if project_id:
@@ -602,13 +620,35 @@ class TicketSyncService:
         config: dict[str, Any],
     ) -> dict[str, Any]:
         text = cls._collect_text(sync_object).lower()
-        project = cls._match_project(db, text, config.get("projectMappings") or [])
-        module = cls._match_module(
-            db,
-            text,
-            config.get("moduleMappings") or [],
-            getattr(project, "project_id", None),
-        )
+        project = None
+        if str(sync_object.project_code or "").strip():
+            project = (
+                db.query(HrmProject)
+                .filter(
+                    HrmProject.project_code == str(sync_object.project_code).strip(),
+                    HrmProject.status == QtrDataStatusEnum.normal.value,
+                    HrmProject.del_flag == "0",
+                )
+                .first()
+            )
+        if not project:
+            project = cls._match_project(db, text, config.get("projectMappings") or [])
+        module = None
+        if str(sync_object.module_code or "").strip():
+            module_query = db.query(HrmModule).filter(
+                HrmModule.module_code == str(sync_object.module_code).strip(),
+                HrmModule.status == QtrDataStatusEnum.normal.value,
+            )
+            if getattr(project, "project_id", None):
+                module_query = module_query.filter(HrmModule.project_id == getattr(project, "project_id", None))
+            module = module_query.first()
+        if not module:
+            module = cls._match_module(
+                db,
+                text,
+                config.get("moduleMappings") or [],
+                getattr(project, "project_id", None),
+            )
         vendor_mapping = cls._match_mapping(text, config.get("vendorMappings") or [])
         store_mapping = cls._match_mapping(text, config.get("storeMappings") or [])
         status_code = cls._match_status(text, config.get("statusMappings") or [])
@@ -626,8 +666,10 @@ class TicketSyncService:
                 or sync_object.merchant_name
                 or ""
             ),
+            "projectCode": getattr(project, "project_code", "") or sync_object.project_code or "",
             "moduleId": getattr(module, "module_id", None) or sync_object.module_id,
             "moduleName": getattr(module, "module_name", "") or sync_object.module_name or "",
+            "moduleCode": getattr(module, "module_code", "") or sync_object.module_code or "",
             "vendorId": cls._safe_int((vendor_mapping or {}).get("vendorId"))
             or cls._safe_int((sync_object.log_pull_config or {}).get("vendorId")),
             "vendorName": (vendor_mapping or {}).get("vendorName") or "",
@@ -1227,9 +1269,11 @@ class TicketSyncService:
             "description": item.get("description") or "",
             "projectId": item.get("projectId") or item.get("project_id"),
             "projectName": item.get("projectName") or item.get("project_name") or item.get("merchantName") or "",
+            "projectCode": item.get("projectCode") or item.get("project_code") or "",
             "merchantName": item.get("merchantName") or item.get("projectName") or item.get("project_name") or "",
             "moduleId": item.get("moduleId") or item.get("module_id"),
             "moduleName": item.get("moduleName") or item.get("module_name") or "",
+            "moduleCode": item.get("moduleCode") or item.get("module_code") or "",
             "versionKey": item.get("versionKey") or item.get("version_key") or "",
             "status": item.get("status") or "",
             "customerPriority": item.get("customerPriority") or item.get("customer_priority") or "P3",

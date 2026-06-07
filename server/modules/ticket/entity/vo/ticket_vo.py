@@ -1,4 +1,4 @@
-from datetime import date, datetime
+﻿from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -22,9 +22,11 @@ class TicketBaseModel(BaseModel):
     description: str | None = Field(default=None, description="工单描述")
     project_id: int | None = Field(default=None, description="所属项目ID")
     project_name: str | None = Field(default=None, description="所属项目名称")
+    project_code: str | None = Field(default=None, description="所属项目业务码")
     merchant_name: str | None = Field(default=None, description="所属项目名称（兼容历史字段 merchantName）")
     module_id: int | None = Field(default=None, description="所属模块ID")
     module_name: str | None = Field(default=None, description="所属模块名称")
+    module_code: str | None = Field(default=None, description="所属模块业务码")
     version_key: str | None = Field(default=None, description="版本号")
     auto_translate: bool | None = Field(default=None, description="手动新增/编辑时是否自动翻译工单内容")
     need_log_pull: bool | None = Field(default=None, description="创建工单后是否自动拉取日志")

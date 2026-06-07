@@ -1,8 +1,8 @@
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy import text
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config.database import Base, DATABASE_BACKEND, SessionLocal, engine
@@ -11,21 +11,21 @@ from utils.log_util import logger
 
 
 class AsyncSessionProxy:
-    """把同步 SQLAlchemy Session 包装成可在 async 环境下调用的代理类"""
+    """把同步 SQLAlchemy Session 包装成可在 async 环境下调用的代理类。"""
 
     def __init__(self, sync_session: Session):
         self._sync_session = sync_session
 
     def __getattr__(self, item: str) -> Callable[..., Any]:
-        """拦截方法调用，自动转到 run_in_threadpool"""
+        """拦截方法调用，自动转成 run_in_threadpool。"""
         attr = getattr(self._sync_session, item)
 
         if callable(attr):
             async def async_attr(*args, **kwargs):
                 return await run_in_threadpool(attr, *args, **kwargs)
+
             return async_attr
-        else:
-            return attr
+        return attr
 
     async def __aenter__(self):
         return self
@@ -37,7 +37,6 @@ class AsyncSessionProxy:
 def get_db_pro():
     """
     每一个请求处理完毕后会关闭当前连接，不同的请求使用不同的连接
-    :return:
     """
     current_db = SessionLocal()
     try:
@@ -49,6 +48,7 @@ def get_db_pro():
     finally:
         current_db.close()
 
+
 async def async_get_db_pro():
     sync_session = SessionLocal()
     async with AsyncSessionProxy(sync_session) as session:
@@ -58,13 +58,14 @@ async def async_get_db_pro():
 async def init_create_table():
     """
     应用启动时初始化数据库连接
-    :return:
     """
     logger.info("初始化数据库连接...")
     Base.metadata.create_all(bind=engine)
     _ensure_large_sys_config_value_column()
     _ensure_ticket_log_pull_ticket_id_nullable()
     _ensure_celery_periodic_task_execution_mode_column()
+    _ensure_hrm_project_business_code_column()
+    _ensure_hrm_module_business_code_column()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
 
@@ -143,8 +144,6 @@ def _ensure_ticket_log_pull_ticket_id_nullable():
 def _ensure_celery_periodic_task_execution_mode_column():
     """
     为 celery_periodic_task 补齐 execution_mode 字段，兼容旧库。
-
-    :return: 无返回值。
     """
     try:
         with engine.begin() as connection:
@@ -189,3 +188,75 @@ def _ensure_celery_periodic_task_execution_mode_column():
                 )
     except Exception as exc:
         logger.warning(f"检查或升级 celery_periodic_task.execution_mode 字段失败: {exc}")
+
+
+def _ensure_hrm_project_business_code_column():
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                result = connection.execute(
+                    text(
+                        """
+                        SELECT COLUMN_NAME
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'hrm_project'
+                          AND COLUMN_NAME = 'project_code'
+                        """
+                    )
+                ).mappings().first()
+                if not result:
+                    connection.execute(
+                        text(
+                            """
+                            ALTER TABLE hrm_project
+                            ADD COLUMN project_code VARCHAR(128) NULL COMMENT '项目业务码'
+                            AFTER project_id
+                            """
+                        )
+                    )
+            else:
+                rows = connection.execute(text("PRAGMA table_info(hrm_project)")).mappings().all()
+                if not any(str(row.get("name") or "") == "project_code" for row in rows):
+                    connection.execute(text("ALTER TABLE hrm_project ADD COLUMN project_code VARCHAR(128)"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 hrm_project.project_code 字段失败: {exc}")
+
+
+def _ensure_hrm_module_business_code_column():
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                result = connection.execute(
+                    text(
+                        """
+                        SELECT COLUMN_NAME
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'hrm_module'
+                          AND COLUMN_NAME = 'module_code'
+                        """
+                    )
+                ).mappings().first()
+                if not result:
+                    connection.execute(
+                        text(
+                            """
+                            ALTER TABLE hrm_module
+                            ADD COLUMN module_code VARCHAR(128) NULL COMMENT '模块业务码'
+                            AFTER module_id
+                            """
+                        )
+                    )
+            else:
+                rows = connection.execute(text("PRAGMA table_info(hrm_module)")).mappings().all()
+                if not any(str(row.get("name") or "") == "module_code" for row in rows):
+                    connection.execute(text("ALTER TABLE hrm_module ADD COLUMN module_code VARCHAR(128)"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 hrm_module.module_code 字段失败: {exc}")

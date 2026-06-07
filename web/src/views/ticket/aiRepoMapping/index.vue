@@ -3,13 +3,18 @@
     <el-form ref="queryRef" :model="queryParams" :inline="true" label-width="90px" class="mb16">
       <el-form-item label="项目" prop="projectId">
         <el-select v-model="queryParams.projectId" placeholder="请选择项目" clearable filterable style="width: 220px">
-          <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
+          <el-option
+            v-for="item in projectOptions"
+            :key="item.projectId"
+            :label="item.projectName"
+            :value="item.projectId"
+          />
         </el-select>
       </el-form-item>
       <el-form-item label="版本号" prop="versionKey">
-        <el-input v-model="queryParams.versionKey" placeholder="版本标识" clearable style="width: 220px" />
+        <el-input v-model="queryParams.versionKey" placeholder="例如 release/2.1.3" clearable style="width: 220px" />
       </el-form-item>
-      <el-form-item label="关键字" prop="keyword">
+      <el-form-item label="关键词" prop="keyword">
         <el-input v-model="queryParams.keyword" placeholder="项目、版本、仓库或分支" clearable style="width: 220px" />
       </el-form-item>
       <el-form-item>
@@ -71,7 +76,12 @@
           <el-col :span="12">
             <el-form-item label="项目" prop="projectId">
               <el-select v-model="form.projectId" placeholder="请选择项目" filterable style="width: 100%" @change="handleProjectChange">
-                <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
+                <el-option
+                  v-for="item in projectOptions"
+                  :key="item.projectId"
+                  :label="item.projectName"
+                  :value="item.projectId"
+                />
               </el-select>
             </el-form-item>
           </el-col>
@@ -97,17 +107,17 @@
           </el-col>
           <el-col :span="24">
             <el-form-item label="本地仓库" prop="localRepoPath">
-              <el-input v-model="form.localRepoPath" placeholder="留空则使用 Agent 本地配置" />
+              <el-input v-model="form.localRepoPath" placeholder="可空，留空则使用 Agent 本地配置" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="工作区根目录">
-              <el-input v-model="form.workspaceRoot" placeholder="留空则使用 Agent 本地配置" />
+              <el-input v-model="form.workspaceRoot" placeholder="可空，留空则使用 Agent 本地配置" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="Worker命令">
-              <el-input v-model="form.workerCommand" placeholder="留空则使用系统默认 codex exec" />
+            <el-form-item label="Worker 命令">
+              <el-input v-model="form.workerCommand" placeholder="可空，默认使用 codex exec" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -198,12 +208,14 @@ function loadProjectOptions() {
 
 function getList() {
   loading.value = true
-  listTicketAiRepoMappings(queryParams.value).then(response => {
-    mappingList.value = response.rows || []
-    total.value = response.total || 0
-  }).finally(() => {
-    loading.value = false
-  })
+  listTicketAiRepoMappings(queryParams.value)
+    .then(response => {
+      mappingList.value = response.rows || []
+      total.value = response.total || 0
+    })
+    .finally(() => {
+      loading.value = false
+    })
 }
 
 function handleQuery() {
@@ -265,13 +277,15 @@ function submitForm() {
     submitting.value = true
     const payload = { ...form.value }
     const request = payload.mappingId ? updateTicketAiRepoMapping(payload) : addTicketAiRepoMapping(payload)
-    request.then(() => {
-      proxy.$modal.msgSuccess(payload.mappingId ? '映射更新成功' : '映射新增成功')
-      open.value = false
-      getList()
-    }).finally(() => {
-      submitting.value = false
-    })
+    request
+      .then(() => {
+        proxy.$modal.msgSuccess(payload.mappingId ? '映射更新成功' : '映射新增成功')
+        open.value = false
+        getList()
+      })
+      .finally(() => {
+        submitting.value = false
+      })
   })
 }
 
@@ -279,15 +293,20 @@ function handleDelete(row) {
   if (!row?.mappingId) {
     return
   }
-  proxy.$modal.confirm(`是否确认删除版本映射 "${row.versionKey}"？`).then(() => {
-    loading.value = true
-    return delTicketAiRepoMapping(row.mappingId)
-  }).then(() => {
-    proxy.$modal.msgSuccess('删除成功')
-    getList()
-  }).catch(() => {}).finally(() => {
-    loading.value = false
-  })
+  proxy.$modal
+    .confirm(`是否确认删除版本映射 "${row.versionKey}"？`)
+    .then(() => {
+      loading.value = true
+      return delTicketAiRepoMapping(row.mappingId)
+    })
+    .then(() => {
+      proxy.$modal.msgSuccess('删除成功')
+      getList()
+    })
+    .catch(() => {})
+    .finally(() => {
+      loading.value = false
+    })
 }
 
 loadProjectOptions()
