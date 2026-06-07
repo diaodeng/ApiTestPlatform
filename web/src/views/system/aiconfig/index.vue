@@ -1,16 +1,12 @@
 <template>
   <div class="app-container ai-config-center-page" v-loading="loading">
-    <el-alert
-      title="这里集中管理工单 AI 相关配置"
-      type="info"
-      show-icon
-      :closable="false"
-      class="mb16"
-    >
-      <template #default>
+    <section class="page-intro">
+      <div class="page-intro__eyebrow">AI 配置中心</div>
+      <h2 class="page-intro__title">这里集中管理工单 AI 相关配置</h2>
+      <p class="page-intro__desc">
         轻量翻译与知识提炼在工单保存/关闭时触发，AI 分析 Worker 配置用于版本仓库分析任务。保存后会自动刷新系统缓存。
-      </template>
-    </el-alert>
+      </p>
+    </section>
 
     <el-row :gutter="16">
       <el-col :xs="24" :lg="14">
@@ -331,6 +327,39 @@ onMounted(() => {
 <style scoped>
 .ai-config-center-page {
   background: linear-gradient(180deg, rgba(245, 247, 250, 0.96), rgba(255, 255, 255, 1));
+}
+
+.page-intro {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.92));
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+
+.page-intro__eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--el-color-primary);
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.page-intro__title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.35;
+  color: var(--el-text-color-primary);
+}
+
+.page-intro__desc {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--el-text-color-secondary);
+  max-width: 100%;
 }
 
 .config-card {

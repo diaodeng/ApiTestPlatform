@@ -18,12 +18,14 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import (
     TicketAiAnalysisRequestModel,
     TicketExternalSyncUpsertModel,
+    TicketSyncAutomationModel,
     TicketSyncAckRequestModel,
     TicketSyncPullQueryModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService, _extract_ticket_version_key, _user_id, _user_name
 from utils.common_util import CamelCaseUtil
@@ -71,12 +73,15 @@ class TicketSyncService:
     def _default_sync_config(cls) -> dict[str, Any]:
         return {
             "autoRunOnSync": False,
+            "autoTranslateOnSync": True,
             "defaultPullLimit": 50,
             "remoteSync": cls._default_remote_sync_config(),
             "projectMappings": [],
             "moduleMappings": [],
             "vendorMappings": [],
             "storeMappings": [],
+            "statusMappings": [],
+            "assigneeMappings": [],
             "posPatterns": [r"(?:^|[^A-Z0-9])POS[^0-9]{0,3}(\d{1,10})(?:[^A-Z0-9]|$)"],
             "scoPatterns": [r"(?:^|[^A-Z0-9])SCO[^0-9]{0,3}(\d{1,10})(?:[^A-Z0-9]|$)"],
             "versionPatterns": [
@@ -113,6 +118,7 @@ class TicketSyncService:
             "sourceSystem": "public",
             "limit": 50,
             "includeClosed": True,
+            "autoTranslateOnPull": True,
             "timeoutSec": 30,
             "headers": {
                 "cookie": "",
@@ -120,6 +126,55 @@ class TicketSyncService:
                 "origin": "",
             },
         }
+
+    @classmethod
+    def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
+        merged = cls._default_sync_config()
+        if isinstance(config, dict):
+            merged.update(config)
+        if not isinstance(merged.get("logPullDefaults"), dict):
+            merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
+        if not isinstance(merged.get("promptTemplates"), dict):
+            merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
+        if not isinstance(merged.get("remoteSync"), dict):
+            merged["remoteSync"] = cls._default_remote_sync_config()
+        else:
+            remote_sync = dict(cls._default_remote_sync_config())
+            remote_sync.update(merged.get("remoteSync") or {})
+            remote_headers = remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}
+            remote_sync["headers"] = {**cls._default_remote_sync_config()["headers"], **remote_headers}
+            remote_sync["enabled"] = bool(remote_sync.get("enabled"))
+            remote_sync["limit"] = min(max(int(remote_sync.get("limit") or 50), 1), 200)
+            remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
+            remote_sync["autoTranslateOnPull"] = bool(remote_sync.get("autoTranslateOnPull", True))
+            remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
+            remote_sync["pullUrl"] = str(remote_sync.get("pullUrl") or "").strip()
+            remote_sync["ackUrl"] = str(remote_sync.get("ackUrl") or "").strip()
+            remote_sync["consumer"] = str(remote_sync.get("consumer") or "").strip()
+            remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
+            merged["remoteSync"] = remote_sync
+        if not isinstance(merged.get("projectMappings"), list):
+            merged["projectMappings"] = []
+        if not isinstance(merged.get("moduleMappings"), list):
+            merged["moduleMappings"] = []
+        if not isinstance(merged.get("vendorMappings"), list):
+            merged["vendorMappings"] = []
+        if not isinstance(merged.get("storeMappings"), list):
+            merged["storeMappings"] = []
+        if not isinstance(merged.get("statusMappings"), list):
+            merged["statusMappings"] = []
+        if not isinstance(merged.get("assigneeMappings"), list):
+            merged["assigneeMappings"] = []
+        if not isinstance(merged.get("posPatterns"), list):
+            merged["posPatterns"] = cls._default_sync_config()["posPatterns"]
+        if not isinstance(merged.get("scoPatterns"), list):
+            merged["scoPatterns"] = cls._default_sync_config()["scoPatterns"]
+        if not isinstance(merged.get("versionPatterns"), list):
+            merged["versionPatterns"] = cls._default_sync_config()["versionPatterns"]
+        merged["autoRunOnSync"] = bool(merged.get("autoRunOnSync"))
+        merged["autoTranslateOnSync"] = bool(merged.get("autoTranslateOnSync", True))
+        merged["defaultPullLimit"] = min(max(int(merged.get("defaultPullLimit") or 50), 1), 200)
+        return merged
 
     @classmethod
     def ensure_param_config_rows(cls, db: Session) -> None:
@@ -149,29 +204,51 @@ class TicketSyncService:
         config = cls._json_loads(getattr(row, "config_value", None), cls._default_sync_config())
         if not isinstance(config, dict):
             return cls._default_sync_config()
-        merged = cls._default_sync_config()
-        merged.update(config)
-        if not isinstance(merged.get("logPullDefaults"), dict):
-            merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
-        if not isinstance(merged.get("promptTemplates"), dict):
-            merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
-        if not isinstance(merged.get("remoteSync"), dict):
-            merged["remoteSync"] = cls._default_remote_sync_config()
-        else:
-            remote_sync = dict(cls._default_remote_sync_config())
-            remote_sync.update(merged.get("remoteSync") or {})
-            remote_headers = remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}
-            remote_sync["headers"] = {**cls._default_remote_sync_config()["headers"], **remote_headers}
-            remote_sync["enabled"] = bool(remote_sync.get("enabled"))
-            remote_sync["limit"] = min(max(int(remote_sync.get("limit") or 50), 1), 200)
-            remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
-            remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
-            remote_sync["pullUrl"] = str(remote_sync.get("pullUrl") or "").strip()
-            remote_sync["ackUrl"] = str(remote_sync.get("ackUrl") or "").strip()
-            remote_sync["consumer"] = str(remote_sync.get("consumer") or "").strip()
-            remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
-            merged["remoteSync"] = remote_sync
-        return merged
+        return cls._normalize_sync_config(config)
+
+    @classmethod
+    def get_sync_automation_config_services(cls, db: Session) -> dict[str, Any]:
+        return {
+            "configKey": cls.CONFIG_KEY,
+            "configValue": cls._load_sync_config(db),
+        }
+
+    @classmethod
+    def update_sync_automation_config_services(
+        cls,
+        db: Session,
+        config_value: dict[str, Any],
+        current_user_name: str,
+    ) -> CrudResponseModel:
+        try:
+            merged = cls._normalize_sync_config(config_value)
+            now = datetime.now()
+            row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
+            if row:
+                row.config_name = "宸ュ崟鍚屾鑷姩鍖栭厤缃?"
+                row.config_value = cls._json_dumps(merged)
+                row.config_type = "Y"
+                row.update_by = current_user_name
+                row.update_time = now
+            else:
+                db.add(
+                    SysConfig(
+                        config_name="宸ュ崟鍚屾鑷姩鍖栭厤缃?",
+                        config_key=cls.CONFIG_KEY,
+                        config_value=cls._json_dumps(merged),
+                        config_type="Y",
+                        create_by=current_user_name,
+                        update_by=current_user_name,
+                        create_time=now,
+                        update_time=now,
+                        remark="澶栭儴宸ュ崟鍚屾銆佸唴缃戞媺鍙栥€佽鍒欒瘑鍒拰鑷姩鍖栭摼璺厤缃?JSON",
+                    )
+                )
+            db.commit()
+            return CrudResponseModel(is_success=True, message="淇濆瓨鎴愬姛", result=merged)
+        except Exception as exc:
+            db.rollback()
+            raise exc
 
     @classmethod
     def _build_remote_sync_request_headers(cls, remote_sync: dict[str, Any]) -> dict[str, str]:
@@ -300,6 +377,153 @@ class TicketSyncService:
         return best_match if best_score > 0 else None
 
     @classmethod
+    def _mapping_keywords(cls, mapping: dict[str, Any]) -> list[str]:
+        keywords = cls._normalize_keywords(mapping.get("keywords") or mapping.get("aliases"))
+        if mapping.get("matchText"):
+            keywords.extend(cls._normalize_keywords([mapping.get("matchText")]))
+        return [keyword for keyword in keywords if keyword]
+
+    @classmethod
+    def _match_status(cls, text: str, mappings: list[dict[str, Any]]) -> str | None:
+        status_map = {
+            "pending": TicketStatus.PENDING.value,
+            "processing": TicketStatus.PROCESSING.value,
+            "wait_user": TicketStatus.WAIT_USER.value,
+            "wait_dev": TicketStatus.WAIT_DEV.value,
+            "wait_release": TicketStatus.WAIT_RELEASE.value,
+            "wait_verify": TicketStatus.WAIT_VERIFY.value,
+            "resolved": TicketStatus.RESOLVED.value,
+            "closed": TicketStatus.CLOSED.value,
+            "rejected": TicketStatus.REJECTED.value,
+            "non_problem": TicketStatus.NON_PROBLEM.value,
+            "design_as_expected": TicketStatus.DESIGN_AS_EXPECTED.value,
+            "user_misoperation": TicketStatus.USER_MISOPERATION.value,
+            "duplicated": TicketStatus.DUPLICATED.value,
+        }
+        matched = cls._match_mapping(text, mappings)
+        if isinstance(matched, dict):
+            for key in ("status", "ticketStatus", "statusCode", "value"):
+                candidate = str(matched.get(key) or "").strip()
+                if candidate:
+                    return status_map.get(candidate.lower(), candidate)
+        lowered = text.lower()
+        for alias, status_code in (
+            ("待受理", TicketStatus.PENDING.value),
+            ("处理中", TicketStatus.PROCESSING.value),
+            ("待用户", TicketStatus.WAIT_USER.value),
+            ("待开发", TicketStatus.WAIT_DEV.value),
+            ("待上线", TicketStatus.WAIT_RELEASE.value),
+            ("待验证", TicketStatus.WAIT_VERIFY.value),
+            ("已解决", TicketStatus.RESOLVED.value),
+            ("已关闭", TicketStatus.CLOSED.value),
+            ("已拒绝", TicketStatus.REJECTED.value),
+            ("非问题", TicketStatus.NON_PROBLEM.value),
+            ("重复", TicketStatus.DUPLICATED.value),
+            ("误操作", TicketStatus.USER_MISOPERATION.value),
+            ("按预期", TicketStatus.DESIGN_AS_EXPECTED.value),
+        ):
+            if alias in lowered:
+                return status_code
+        return None
+
+    @classmethod
+    def _match_assignee(cls, db: Session, text: str, mappings: list[dict[str, Any]]) -> tuple[int | None, str]:
+        from module_admin.entity.do.user_do import SysUser
+
+        matched = cls._match_mapping(text, mappings)
+        if isinstance(matched, dict):
+            user_id = cls._safe_int(matched.get("userId") or matched.get("user_id") or matched.get("assigneeId"))
+            user_name = str(matched.get("userName") or matched.get("user_name") or matched.get("name") or "").strip()
+            if user_id:
+                user = db.query(SysUser).filter(SysUser.user_id == user_id, SysUser.status == "0", SysUser.del_flag == "0").first()
+                if user:
+                    return user.user_id, user.user_name or user.nick_name or user_name
+            if user_name:
+                user = (
+                    db.query(SysUser)
+                    .filter(
+                        SysUser.status == "0",
+                        SysUser.del_flag == "0",
+                        (SysUser.user_name == user_name) | (SysUser.nick_name == user_name),
+                    )
+                    .first()
+                )
+                if user:
+                    return user.user_id, user.user_name or user.nick_name or user_name
+                return None, user_name
+        lowered = text.lower()
+        for user in db.query(SysUser).filter(SysUser.status == "0", SysUser.del_flag == "0").all():
+            aliases = cls._normalize_keywords([user.user_name, user.nick_name, user.nick_name and f"{user.user_name}/{user.nick_name}"])
+            if any(alias in lowered for alias in aliases):
+                return user.user_id, user.user_name or user.nick_name or ""
+        return None, ""
+
+    @classmethod
+    def _merge_external_text_fields(
+        cls,
+        base_data: dict[str, Any],
+        detected: dict[str, Any],
+        sync_object: TicketExternalSyncUpsertModel,
+    ) -> dict[str, Any]:
+        merged = dict(base_data)
+        status_value = str(detected.get("status") or "").strip()
+        assignee_id = cls._safe_int(detected.get("assigneeId"))
+        assignee_name = str(detected.get("assigneeName") or "").strip()
+        if status_value:
+            merged["status"] = status_value
+        if assignee_id:
+            merged["current_assignee_id"] = assignee_id
+        if assignee_name:
+            merged["current_assignee_name"] = assignee_name
+
+        extra_data = dict(merged.get("extra_data") or {}) if isinstance(merged.get("extra_data"), dict) else {}
+        external_sync = extra_data.get(cls.META_KEY) if isinstance(extra_data.get(cls.META_KEY), dict) else {}
+        source_snapshot = external_sync.get("source") if isinstance(external_sync.get("source"), dict) else {}
+        source_snapshot.update(
+            {
+                "status": status_value or source_snapshot.get("status"),
+                "assigneeId": assignee_id or source_snapshot.get("assigneeId"),
+                "assigneeName": assignee_name or source_snapshot.get("assigneeName"),
+                "projectName": str(sync_object.project_name or "").strip() or source_snapshot.get("projectName"),
+                "moduleName": str(sync_object.module_name or "").strip() or source_snapshot.get("moduleName"),
+            }
+        )
+        external_sync["source"] = source_snapshot
+        extra_data[cls.META_KEY] = external_sync
+        merged["extra_data"] = extra_data
+        return merged
+
+    @classmethod
+    def _translate_sync_description(
+        cls,
+        db: Session,
+        *,
+        title: str,
+        description: str,
+        ticket_id: int | None,
+        ticket_no: str,
+        current_user: CurrentUserModel,
+        enabled: bool,
+    ) -> tuple[str, dict[str, Any], str]:
+        origin_description = str(description or "").strip()
+        if not origin_description:
+            return "", {"translated_text": "", "skipped": True}, ""
+        if not enabled:
+            return origin_description, {"translated_text": "", "skipped": True}, origin_description
+        translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
+            db,
+            title=title,
+            content=origin_description,
+            source_type="ticket",
+            source_id=ticket_id,
+            source_ref=ticket_no,
+            current_user_name=_user_name(current_user),
+        )
+        if translation_meta.get("skipped") or not str(translation_meta.get("translated_text") or "").strip():
+            return origin_description, {**translation_meta, "skipped": True}, origin_description
+        return translated_description, translation_meta, origin_description
+
+    @classmethod
     def _extract_pattern(cls, text: str, patterns: Any) -> str | None:
         if not isinstance(patterns, list):
             return None
@@ -387,6 +611,8 @@ class TicketSyncService:
         )
         vendor_mapping = cls._match_mapping(text, config.get("vendorMappings") or [])
         store_mapping = cls._match_mapping(text, config.get("storeMappings") or [])
+        status_code = cls._match_status(text, config.get("statusMappings") or [])
+        assignee_id, assignee_name = cls._match_assignee(db, text, config.get("assigneeMappings") or [])
         version_key = (
             str(sync_object.version_key or "").strip()
             or _extract_ticket_version_key(sync_object.extra_data)
@@ -408,6 +634,9 @@ class TicketSyncService:
             "storeId": cls._safe_int((store_mapping or {}).get("storeId"))
             or cls._safe_int((sync_object.log_pull_config or {}).get("storeId")),
             "storeName": (store_mapping or {}).get("storeName") or "",
+            "status": status_code or str(sync_object.status or "").strip(),
+            "assigneeId": assignee_id or cls._safe_int(sync_object.current_assignee_id),
+            "assigneeName": assignee_name or str(sync_object.current_assignee_name or "").strip(),
             "posNo": cls._safe_int((sync_object.log_pull_config or {}).get("posNo"))
             or cls._safe_int(cls._extract_pattern(text, config.get("posPatterns"))),
             "scoNo": cls._safe_int(cls._extract_pattern(text, config.get("scoPatterns"))),
@@ -588,6 +817,7 @@ class TicketSyncService:
                 or str((detected or {}).get("moduleName") or "").strip()
                 or ""
             )
+        payload = cls._merge_external_text_fields(payload, detected or {}, sync_object)
         version_key = str((detected or {}).get("versionKey") or sync_object.version_key or "").strip()
         if version_key:
             extra_data["version_key"] = version_key
@@ -600,6 +830,7 @@ class TicketSyncService:
                     "create_time": now,
                 }
             )
+        payload["extra_data"] = extra_data
         return payload, meta, revision
 
     @classmethod
@@ -612,7 +843,35 @@ class TicketSyncService:
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
         config = cls._load_sync_config(db)
         detected = cls._detect_fields(db, sync_object, config)
+        automation = sync_object.automation
+        translation_enabled = TicketLightAiService.is_translation_enabled(db)
+        sync_translate_enabled = (
+            automation.auto_translate
+            if automation is not None
+            else bool(config.get("autoTranslateOnSync", True))
+        )
+        should_translate = translation_enabled and sync_translate_enabled
+        translated_description, translation_meta, origin_description = cls._translate_sync_description(
+            db,
+            title=sync_object.title,
+            description=sync_object.description,
+            ticket_id=getattr(ticket, "ticket_id", None),
+            ticket_no=sync_object.ticket_no,
+            current_user=current_user,
+            enabled=should_translate,
+        )
+        if should_translate:
+            sync_object = sync_object.model_copy(update={"description": translated_description})
         payload, meta, revision = cls._build_upsert_payload(db, ticket, sync_object, detected, current_user)
+        if should_translate and origin_description and str(translation_meta.get("translated_text") or "").strip():
+            extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
+            extra_data["origin_description"] = origin_description
+            extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+            if translation_meta.get("provider_code"):
+                extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
+            if translation_meta.get("prompt_code"):
+                extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
+            payload["extra_data"] = extra_data
         now = datetime.now()
         try:
             created = ticket is None
@@ -673,7 +932,6 @@ class TicketSyncService:
             db.rollback()
             raise
 
-        automation = sync_object.automation
         should_run_automation = bool(
             (
                 automation
@@ -1027,11 +1285,29 @@ class TicketSyncService:
         remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
         remote_sync["limit"] = min(max(int(remote_sync.get("limit") or config.get("defaultPullLimit") or 50), 1), 200)
         remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
+        remote_sync["autoTranslateOnPull"] = bool(remote_sync.get("autoTranslateOnPull", True))
         remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
         remote_sync["headers"] = {
             **cls._default_remote_sync_config()["headers"],
             **(remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}),
         }
+
+        if not remote_sync.get("enabled"):
+            logger.info(
+                "远端工单拉取已跳过：配置未启用 | consumer={} source_system={}",
+                remote_sync["consumer"] or "-",
+                remote_sync["sourceSystem"],
+            )
+            return {
+                "consumer": remote_sync["consumer"],
+                "batchId": "",
+                "pulledCount": 0,
+                "syncedCount": 0,
+                "failedCount": 0,
+                "ackedCount": 0,
+                "skipped": True,
+                "skipReason": "远端同步未启用",
+            }
 
         if not remote_sync.get("pullUrl"):
             raise ValueError("远端工单拉取地址未配置，请检查 ticket.sync.automation.remoteSync.pullUrl")
@@ -1104,6 +1380,17 @@ class TicketSyncService:
                         }
                     )
                 continue
+
+            upsert_model = upsert_model.model_copy(
+                update={
+                    "automation": TicketSyncAutomationModel(
+                        auto_identify=False,
+                        auto_log_pull=False,
+                        auto_ai_analysis=False,
+                        auto_translate=bool(remote_sync.get("autoTranslateOnPull", True)),
+                    )
+                }
+            )
 
             try:
                 sync_result = cls.sync_external_ticket(db, upsert_model, current_user)

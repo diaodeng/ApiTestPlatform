@@ -26,6 +26,7 @@ class TicketBaseModel(BaseModel):
     module_id: int | None = Field(default=None, description="所属模块ID")
     module_name: str | None = Field(default=None, description="所属模块名称")
     version_key: str | None = Field(default=None, description="版本号")
+    auto_translate: bool | None = Field(default=None, description="手动新增/编辑时是否自动翻译工单内容")
     need_log_pull: bool | None = Field(default=None, description="创建工单后是否自动拉取日志")
     log_pull_config: dict[str, Any] | None = Field(default=None, description="创建工单时的日志拉取配置")
     category_id: int | None = Field(default=None, description="问题分类ID")
@@ -408,9 +409,12 @@ class TicketSyncAutomationModel(BaseModel):
     auto_identify: bool = Field(default=True, description="是否自动识别工单归属信息")
     auto_log_pull: bool = Field(default=False, description="是否根据识别结果自动拉取日志")
     auto_ai_analysis: bool = Field(default=False, description="是否自动发起 AI 分析")
+    auto_translate: bool = Field(default=True, description="是否自动翻译工单内容")
     ai_agent_code: str | None = Field(default=None, description="自动 AI 使用的 Agent 编码")
     ai_provider_code: str | None = Field(default=None, description="自动 AI 使用的 Provider 编码")
     log_pull_config: dict[str, Any] | None = Field(default=None, description="默认日志拉取参数")
+    status_mappings: list[dict[str, Any]] | None = Field(default=None, description="外部状态到本地状态的映射")
+    assignee_mappings: list[dict[str, Any]] | None = Field(default=None, description="外部处理人到本地用户的映射")
     extra_instruction: str | None = Field(default=None, description="自动 AI 额外说明")
 
     @model_validator(mode="after")
@@ -418,6 +422,8 @@ class TicketSyncAutomationModel(BaseModel):
         self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip() or None
+        self.status_mappings = self.status_mappings if isinstance(self.status_mappings, list) else None
+        self.assignee_mappings = self.assignee_mappings if isinstance(self.assignee_mappings, list) else None
         if self.auto_ai_analysis and not (self.ai_provider_code or self.ai_agent_code):
             raise ValueError("启用自动 AI 时需要 aiProviderCode 或 aiAgentCode")
         return self

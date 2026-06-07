@@ -73,6 +73,23 @@ export function saveTicketLogPullStorageConfig(data) {
   });
 }
 
+// 鏌ヨ宸ュ崟鍚屾鑷姩鍖栭厤缃?
+export function getTicketSyncAutomationConfig() {
+  return request({
+    url: '/ticket/sync/automation',
+    method: 'get',
+  });
+}
+
+// 淇濆瓨宸ュ崟鍚屾鑷姩鍖栭厤缃?
+export function saveTicketSyncAutomationConfig(data) {
+  return request({
+    url: '/ticket/sync/automation',
+    method: 'put',
+    data,
+  });
+}
+
 // 新增工单
 export function addTicket(data) {
   return request({

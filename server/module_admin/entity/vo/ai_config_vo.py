@@ -31,6 +31,7 @@ class AiConfigSummaryModel(BaseModel):
 
     translate_provider_code: str | None = Field(default=None, description="翻译Provider编码")
     translate_prompt_code: str | None = Field(default=None, description="翻译提示词编码")
+    translate_enabled: bool | None = Field(default=None, description="是否启用工单翻译")
     knowledge_provider_code: str | None = Field(default=None, description="知识提炼Provider编码")
     knowledge_prompt_code: str | None = Field(default=None, description="知识提炼提示词编码")
     analysis_worker_command: str | None = Field(default=None, description="分析Worker命令")
@@ -54,6 +55,7 @@ class AiConfigUpdateModel(BaseModel):
 
     translate_provider_code: str | None = Field(default=None, description="翻译Provider编码")
     translate_prompt_code: str | None = Field(default=None, description="翻译提示词编码")
+    translate_enabled: bool | None = Field(default=None, description="是否启用工单翻译")
     knowledge_provider_code: str | None = Field(default=None, description="知识提炼Provider编码")
     knowledge_prompt_code: str | None = Field(default=None, description="知识提炼提示词编码")
     analysis_worker_command: str | None = Field(default=None, description="分析Worker命令")

@@ -168,6 +168,15 @@ def _extract_ticket_automation_config(data: dict[str, Any]) -> tuple[bool, dict[
     return need_log_pull, None
 
 
+def _extract_ticket_manual_automation_config(data: dict[str, Any]) -> bool:
+    """
+    提取工单创建或编辑时的手动自动翻译开关。
+    :param data: 工单字段字典
+    :return: 是否自动翻译
+    """
+    return bool(data.pop("auto_translate", True))
+
+
 def _is_end_status(status: str) -> bool:
     """
     判断状态是否为结束态。
@@ -822,6 +831,7 @@ class TicketService:
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
             data.pop("project_name", None)
+            auto_translate = _extract_ticket_manual_automation_config(data)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()
             original_description = str(data.get("description") or "").strip()
@@ -829,6 +839,9 @@ class TicketService:
                 "\n".join([str(data.get("title") or "").strip(), original_description]).strip()
             )
             extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
+            manual_automation = dict(extra_data.get("manual_automation") or {}) if isinstance(extra_data.get("manual_automation"), dict) else {}
+            manual_automation["auto_translate"] = auto_translate
+            extra_data["manual_automation"] = manual_automation
             if extracted_version_key:
                 extra_data["version_key"] = extracted_version_key
             if log_pull_config:
@@ -836,24 +849,28 @@ class TicketService:
                     "need_log_pull": need_log_pull or bool(log_pull_config),
                     "log_pull_config": log_pull_config,
                 }
-            translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
-                query_db,
-                title=str(data.get("title") or "").strip(),
-                content=original_description,
-                source_type="ticket",
-                source_id=None,
-                source_ref=str(data.get("ticket_no") or "").strip() or None,
-                current_user_name=_user_name(current_user),
-            )
-            if str(translation_meta.get("translated_text") or "").strip():
-                data["description"] = translated_description
-                extra_data["origin_description"] = original_description
-                extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
-                if translation_meta.get("provider_code"):
-                    extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
-                if translation_meta.get("prompt_code"):
-                    extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
+            if auto_translate:
+                translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
+                    query_db,
+                    title=str(data.get("title") or "").strip(),
+                    content=original_description,
+                    source_type="ticket",
+                    source_id=None,
+                    source_ref=str(data.get("ticket_no") or "").strip() or None,
+                    current_user_name=_user_name(current_user),
+                )
+                if translation_meta.get("skipped"):
+                    data["description"] = original_description
+                elif str(translation_meta.get("translated_text") or "").strip():
+                    data["description"] = translated_description
+                    extra_data["origin_description"] = original_description
+                    extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                    if translation_meta.get("provider_code"):
+                        extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
+                    if translation_meta.get("prompt_code"):
+                        extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
             data["extra_data"] = extra_data or None
+            data.pop("auto_translate", None)
             is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
             if not is_valid:
                 return CrudResponseModel(is_success=False, message=message)
@@ -1008,6 +1025,7 @@ class TicketService:
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
             data.pop("project_name", None)
+            auto_translate = _extract_ticket_manual_automation_config(data)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()
             ticket_extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
@@ -1018,6 +1036,9 @@ class TicketService:
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             form_extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
             extra_data.update(form_extra_data)
+            manual_automation = dict(extra_data.get("manual_automation") or {}) if isinstance(extra_data.get("manual_automation"), dict) else {}
+            manual_automation["auto_translate"] = auto_translate
+            extra_data["manual_automation"] = manual_automation
             if extracted_version_key:
                 extra_data["version_key"] = extracted_version_key
             elif "version_key" in extra_data:
@@ -1029,24 +1050,28 @@ class TicketService:
                 }
             elif "ticket_automation" in extra_data and not need_log_pull:
                 extra_data.pop("ticket_automation", None)
-            translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
-                query_db,
-                title=str(data.get("title") or ticket.title or "").strip(),
-                content=original_description,
-                source_type="ticket",
-                source_id=ticket.ticket_id,
-                source_ref=ticket.ticket_no,
-                current_user_name=_user_name(current_user),
-            )
-            if str(translation_meta.get("translated_text") or "").strip():
-                data["description"] = translated_description
-                extra_data["origin_description"] = original_description
-                extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
-                if translation_meta.get("provider_code"):
-                    extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
-                if translation_meta.get("prompt_code"):
-                    extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
+            if auto_translate:
+                translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
+                    query_db,
+                    title=str(data.get("title") or ticket.title or "").strip(),
+                    content=original_description,
+                    source_type="ticket",
+                    source_id=ticket.ticket_id,
+                    source_ref=ticket.ticket_no,
+                    current_user_name=_user_name(current_user),
+                )
+                if translation_meta.get("skipped"):
+                    data["description"] = original_description
+                elif str(translation_meta.get("translated_text") or "").strip():
+                    data["description"] = translated_description
+                    extra_data["origin_description"] = original_description
+                    extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                    if translation_meta.get("provider_code"):
+                        extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
+                    if translation_meta.get("prompt_code"):
+                        extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
             data["extra_data"] = extra_data or None
+            data.pop("auto_translate", None)
             is_valid, message, relation_fields = cls._resolve_ticket_relation_fields(query_db, data)
             if not is_valid:
                 return CrudResponseModel(is_success=False, message=message)

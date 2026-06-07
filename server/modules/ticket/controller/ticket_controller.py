@@ -291,6 +291,48 @@ async def ack_sync_tickets(
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketController.get(
+    "/sync/automation",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:list"))],
+)
+async def get_sync_automation_config(request: Request, query_db: Session = Depends(get_db)):
+    """
+    鑾峰彇宸ュ崟鍚屾鑷姩鍖栭厤缃€?
+    """
+    try:
+        return ResponseUtil.success(data=TicketSyncService.get_sync_automation_config_services(query_db))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.put(
+    "/sync/automation",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def update_sync_automation_config(
+    request: Request,
+    config_value: dict,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    淇濆瓨宸ュ崟鍚屾鑷姩鍖栭厤缃€?
+    """
+    try:
+        result = TicketSyncService.update_sync_automation_config_services(
+            query_db,
+            config_value,
+            current_user.user.user_name,
+        )
+        if result.is_success:
+            return ResponseUtil.success(data=result.result, msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketController.put("", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:edit"))])
 @log_decorator(title="工单管理", business_type=2)
 async def edit_ticket(

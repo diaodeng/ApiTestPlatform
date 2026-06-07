@@ -23,6 +23,14 @@ class AiConfigService:
 
     CONFIG_DEFS: tuple[dict[str, Any], ...] = (
         {
+            "field_name": "translate_enabled",
+            "config_key": "ticket.ai.translate.enabled",
+            "config_name": "工单AI翻译开关",
+            "default_value": "false",
+            "remark": "控制工单创建、编辑和外部同步后是否自动执行轻量翻译",
+            "section": "light_translate",
+        },
+        {
             "field_name": "translate_provider_code",
             "config_key": "ticket.ai.translate.provider.code",
             "config_name": "工单AI翻译Provider编码",
@@ -256,6 +264,7 @@ class AiConfigService:
             for category in ("translate", "knowledge", "analysis", "common")
         }
         summary = AiConfigSummaryModel(
+            translate_enabled=str(cls._get_config_text(db, "ticket.ai.translate.enabled", "false")).lower() == "true",
             translate_provider_code=cls._get_config_text(db, "ticket.ai.translate.provider.code", ""),
             translate_prompt_code=cls._get_config_text(db, "ticket.ai.translate.prompt.code", "ticket_translate_default"),
             knowledge_provider_code=cls._get_config_text(db, "ticket.ai.knowledge.provider.code", ""),
@@ -307,16 +316,17 @@ class AiConfigService:
         """
         edit_data = page_object.model_dump(exclude_unset=True)
         field_to_config = {
-            "translate_provider_code": cls.CONFIG_DEFS[0],
-            "translate_prompt_code": cls.CONFIG_DEFS[1],
-            "knowledge_provider_code": cls.CONFIG_DEFS[2],
-            "knowledge_prompt_code": cls.CONFIG_DEFS[3],
-            "analysis_worker_command": cls.CONFIG_DEFS[4],
-            "analysis_worker_model": cls.CONFIG_DEFS[5],
-            "analysis_worker_sandbox": cls.CONFIG_DEFS[6],
-            "analysis_worker_timeout_sec": cls.CONFIG_DEFS[7],
-            "analysis_workspace_root": cls.CONFIG_DEFS[8],
-            "analysis_agent_code": cls.CONFIG_DEFS[9],
+            "translate_enabled": cls.CONFIG_DEFS[0],
+            "translate_provider_code": cls.CONFIG_DEFS[1],
+            "translate_prompt_code": cls.CONFIG_DEFS[2],
+            "knowledge_provider_code": cls.CONFIG_DEFS[3],
+            "knowledge_prompt_code": cls.CONFIG_DEFS[4],
+            "analysis_worker_command": cls.CONFIG_DEFS[5],
+            "analysis_worker_model": cls.CONFIG_DEFS[6],
+            "analysis_worker_sandbox": cls.CONFIG_DEFS[7],
+            "analysis_worker_timeout_sec": cls.CONFIG_DEFS[8],
+            "analysis_workspace_root": cls.CONFIG_DEFS[9],
+            "analysis_agent_code": cls.CONFIG_DEFS[10],
         }
         try:
             for field_name, value in edit_data.items():

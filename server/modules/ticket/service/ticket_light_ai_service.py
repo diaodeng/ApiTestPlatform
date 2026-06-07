@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
 from module_admin.dao.ai_provider_dao import AiProviderDao
+from module_admin.entity.do.config_do import SysConfig
 from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_admin.service.ai_task_execution_service import AiTaskExecutionService
 from utils.api_key_util import ApiKeyUtil
@@ -23,6 +24,16 @@ class TicketLightAiService:
     DEFAULT_TIMEOUT_SEC = 60
     VERSION_PATTERN = re.compile(r"(?:版本号|版本|version|app[_\s-]*version)[:：\s-]*([A-Za-z0-9._/-]+)", re.IGNORECASE)
     JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+
+    @classmethod
+    def is_translation_enabled(cls, db: Session) -> bool:
+        """
+        读取工单轻量翻译总开关。
+        :param db: 数据库会话
+        :return: 是否启用翻译
+        """
+        config_row = db.query(SysConfig).filter(SysConfig.config_key == "ticket.ai.translate.enabled").first()
+        return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
 
     @classmethod
     def extract_version_key_from_text(cls, text: str | None) -> str:
@@ -619,6 +630,8 @@ class TicketLightAiService:
         origin_text = str(content or "").strip()
         if not origin_text:
             return "", {}
+        if not cls.is_translation_enabled(db):
+            return origin_text, {"provider_code": "", "prompt_code": "", "translated_text": "", "skipped": True}
         provider_code, prompt_code = cls._resolve_task_settings(
             db, "ticket.ai.translate.provider.code", "ticket.ai.translate.prompt.code"
         )

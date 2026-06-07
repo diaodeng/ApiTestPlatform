@@ -268,6 +268,11 @@
               <el-switch v-model="form.needLogPull" inline-prompt active-text="是" inactive-text="否" />
             </el-form-item>
           </el-col>
+          <el-col :span="12">
+            <el-form-item label="手动自动翻译">
+              <el-switch v-model="form.autoTranslate" inline-prompt active-text="是" inactive-text="否" />
+            </el-form-item>
+          </el-col>
           <template v-if="form.needLogPull">
             <LogPullConfigFields
               v-model="form.logPullConfig"
@@ -1966,6 +1971,7 @@ function createDefaultTicketForm() {
     rootCause: undefined,
     solution: undefined,
     needLogPull: false,
+    autoTranslate: true,
     logPullConfig: createDefaultLogPullForm()
   }
 }
@@ -2293,6 +2299,11 @@ function handleUpdate(row) {
       }
     }
     form.value.description = ticketData.originalDescription || ticketData.extraData?.originDescription || ticketData.description || ''
+    form.value.autoTranslate = ticketData.extraData?.manualAutomation?.autoTranslate
+      ?? ticketData.extraData?.manual_automation?.auto_translate
+      ?? ticketData.autoTranslate
+      ?? ticketData.auto_translate
+      ?? true
     tagText.value = Array.isArray(form.value.tags) ? form.value.tags.join(',') : ''
     applyTicketAutomationConfig(form.value)
     loadFormModuleOptions(form.value.projectId)
@@ -2367,6 +2378,7 @@ function submitForm() {
       ...form.value,
       tags: tagText.value ? tagText.value.split(',').map(item => item.trim()).filter(Boolean) : undefined,
       needLogPull: Boolean(form.value.needLogPull),
+      autoTranslate: Boolean(form.value.autoTranslate),
       logPullConfig
     }
     if (payload.logPullConfig && !payload.logPullConfig.autoAiEnabled) {
