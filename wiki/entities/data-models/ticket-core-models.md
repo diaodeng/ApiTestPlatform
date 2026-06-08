@@ -49,6 +49,7 @@ erDiagram
 - `Ticket.extra_data.ticket_automation` 可记录创建工单时的自动拉日志与自动 AI 配置，便于后续追溯和重试。
 - `Ticket.extra_data.ticket_automation.notifyConfig` 可记录自动化链路使用的推送配置，便于日志拉取失败、版本号缺失和 AI 结束时直接发送消息。
 - `Ticket.extra_data.version_key` 除了手工维护外，也可由日志正文中的版本号自动提取回写。
+- `Ticket.current_assignee_*` 继续表示当前处理人；新增 `Ticket.first_line_assignee_*` 表示一线接单人员，`Ticket.internal_owner_*` 表示内部模块/工单负责人，三者语义分离，避免一个字段同时承载多种职责。
 - `Ticket.merchant_name` 继续作为兼容字段保存项目名称，保证旧前端字段 `merchantName` 和历史数据可平滑读取。
 - `WorkflowTransition.allowed_roles` 现承载扩展 JSON，内部包含 `roles`、`assignee`、`notification` 三类配置。
 - `TicketLogPullRecord` 只保存每次拉取任务过程与结果，外部地址、Cookie、归档与轮询参数不进该表，而是进入系统参数表。

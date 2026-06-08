@@ -5,7 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from config.database import Base, DATABASE_BACKEND, SessionLocal, engine
+from config.database import DATABASE_BACKEND, Base, SessionLocal, engine
 from scripts.seed_sqlite_from_init_sql import auto_seed_current_sqlite_if_needed
 from utils.log_util import logger
 
@@ -21,6 +21,7 @@ class AsyncSessionProxy:
         attr = getattr(self._sync_session, item)
 
         if callable(attr):
+
             async def async_attr(*args, **kwargs):
                 return await run_in_threadpool(attr, *args, **kwargs)
 
@@ -66,6 +67,7 @@ async def init_create_table():
     _ensure_celery_periodic_task_execution_mode_column()
     _ensure_hrm_project_business_code_column()
     _ensure_hrm_module_business_code_column()
+    _ensure_ticket_role_columns()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
 
@@ -79,17 +81,21 @@ def _ensure_large_sys_config_value_column():
 
     try:
         with engine.begin() as connection:
-            result = connection.execute(
-                text(
-                    """
+            result = (
+                connection.execute(
+                    text(
+                        """
                     SELECT DATA_TYPE
                     FROM information_schema.COLUMNS
                     WHERE TABLE_SCHEMA = DATABASE()
                       AND TABLE_NAME = 'sys_config'
                       AND COLUMN_NAME = 'config_value'
                     """
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             current_type = str((result or {}).get("DATA_TYPE") or "").lower()
             if current_type in {"longtext", ""}:
                 return
@@ -113,17 +119,21 @@ def _ensure_ticket_log_pull_ticket_id_nullable():
 
     try:
         with engine.begin() as connection:
-            result = connection.execute(
-                text(
-                    """
+            result = (
+                connection.execute(
+                    text(
+                        """
                     SELECT IS_NULLABLE
                     FROM information_schema.COLUMNS
                     WHERE TABLE_SCHEMA = DATABASE()
                       AND TABLE_NAME = 'ticket_log_pull_record'
                       AND COLUMN_NAME = 'ticket_id'
                     """
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             is_nullable = str((result or {}).get("IS_NULLABLE") or "").upper()
             if is_nullable == "YES":
                 return
@@ -148,17 +158,21 @@ def _ensure_celery_periodic_task_execution_mode_column():
     try:
         with engine.begin() as connection:
             if DATABASE_BACKEND == "mysql":
-                result = connection.execute(
-                    text(
-                        """
+                result = (
+                    connection.execute(
+                        text(
+                            """
                         SELECT COLUMN_NAME
                         FROM information_schema.COLUMNS
                         WHERE TABLE_SCHEMA = DATABASE()
                           AND TABLE_NAME = 'celery_periodic_task'
                           AND COLUMN_NAME = 'execution_mode'
                         """
+                        )
                     )
-                ).mappings().first()
+                    .mappings()
+                    .first()
+                )
                 if result:
                     return
                 logger.info("检测到 celery_periodic_task 缺少 execution_mode 列，自动补齐")
@@ -197,17 +211,21 @@ def _ensure_hrm_project_business_code_column():
     try:
         with engine.begin() as connection:
             if DATABASE_BACKEND == "mysql":
-                result = connection.execute(
-                    text(
-                        """
+                result = (
+                    connection.execute(
+                        text(
+                            """
                         SELECT COLUMN_NAME
                         FROM information_schema.COLUMNS
                         WHERE TABLE_SCHEMA = DATABASE()
                           AND TABLE_NAME = 'hrm_project'
                           AND COLUMN_NAME = 'project_code'
                         """
+                        )
                     )
-                ).mappings().first()
+                    .mappings()
+                    .first()
+                )
                 if not result:
                     connection.execute(
                         text(
@@ -233,17 +251,21 @@ def _ensure_hrm_module_business_code_column():
     try:
         with engine.begin() as connection:
             if DATABASE_BACKEND == "mysql":
-                result = connection.execute(
-                    text(
-                        """
+                result = (
+                    connection.execute(
+                        text(
+                            """
                         SELECT COLUMN_NAME
                         FROM information_schema.COLUMNS
                         WHERE TABLE_SCHEMA = DATABASE()
                           AND TABLE_NAME = 'hrm_module'
                           AND COLUMN_NAME = 'module_code'
                         """
+                        )
                     )
-                ).mappings().first()
+                    .mappings()
+                    .first()
+                )
                 if not result:
                     connection.execute(
                         text(
@@ -260,3 +282,61 @@ def _ensure_hrm_module_business_code_column():
                     connection.execute(text("ALTER TABLE hrm_module ADD COLUMN module_code VARCHAR(128)"))
     except Exception as exc:
         logger.warning(f"检查或升级 hrm_module.module_code 字段失败: {exc}")
+
+
+def _ensure_ticket_role_columns():
+    """
+    为工单主表补齐 1线人员和内部负责人字段，兼容旧库。
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    column_specs = [
+        ("first_line_assignee_id", "BIGINT", "1线人员ID", "first_line_assignee_name"),
+        ("first_line_assignee_name", "VARCHAR(100)", "1线人员名称", "internal_owner_id"),
+        ("internal_owner_id", "BIGINT", "内部工单负责人ID", "internal_owner_name"),
+        ("internal_owner_name", "VARCHAR(100)", "内部工单负责人名称", None),
+    ]
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                existing_columns = {
+                    row["COLUMN_NAME"]
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'ticket'
+                            """
+                        )
+                    )
+                    .mappings()
+                    .all()
+                }
+                for column_name, column_type, _comment, after_column in column_specs:
+                    if column_name in existing_columns:
+                        continue
+                    logger.info("检测到 ticket.%s 缺少，自动补齐", column_name)
+                    after_clause = f" AFTER {after_column}" if after_column and after_column in existing_columns else ""
+                    connection.execute(
+                        text(
+                            f"""
+                            ALTER TABLE ticket
+                            ADD COLUMN {column_name} {column_type} NULL COMMENT '{_comment}'{after_clause}
+                            """
+                        )
+                    )
+                return
+
+            rows = connection.execute(text("PRAGMA table_info(ticket)")).mappings().all()
+            existing_columns = {str(row.get("name") or "") for row in rows}
+            for column_name, column_type, _comment, _ in column_specs:
+                if column_name in existing_columns:
+                    continue
+                logger.info("检测到 sqlite ticket.%s 缺少，自动补齐", column_name)
+                connection.execute(text(f"ALTER TABLE ticket ADD COLUMN {column_name} {column_type}"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 ticket 角色字段失败: {exc}")

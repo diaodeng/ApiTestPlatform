@@ -211,6 +211,19 @@ class TicketDao:
                 Ticket.internal_priority == query.internal_priority if query.internal_priority else True,
                 Ticket.source == query.source if query.source else True,
                 Ticket.current_assignee_id == query.current_assignee_id if query.current_assignee_id else True,
+                Ticket.current_assignee_name.like(f"%{query.current_assignee_name}%")
+                if query.current_assignee_name
+                else True,
+                Ticket.first_line_assignee_id == query.first_line_assignee_id
+                if query.first_line_assignee_id
+                else True,
+                Ticket.first_line_assignee_name.like(f"%{query.first_line_assignee_name}%")
+                if query.first_line_assignee_name
+                else True,
+                Ticket.internal_owner_id == query.internal_owner_id if query.internal_owner_id else True,
+                Ticket.internal_owner_name.like(f"%{query.internal_owner_name}%")
+                if query.internal_owner_name
+                else True,
                 Ticket.reporter_id == query.reporter_id if query.reporter_id else True,
                 Ticket.create_time >= begin_time if begin_time else True,
                 Ticket.create_time <= end_time if end_time else True,

@@ -13,9 +13,9 @@ from module_admin.service.login_service import LoginService
 from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
-    TicketLogPullQueryModel,
     TicketLogPullProjectVendorMapQueryModel,
     TicketLogPullProjectVendorMapUpsertModel,
+    TicketLogPullQueryModel,
     TicketLogPullStorageConfigModel,
     TicketLogPullStoreConfigQueryModel,
 )
@@ -221,7 +221,7 @@ async def add_ticket(
     """
     新增工单接口。
     :param request: 请求对象
-    :param add_ticket_object: 工单标题、描述、所属项目ID、所属模块ID、优先级、来源和扩展上下文
+    :param add_ticket_object: 工单标题、描述、所属项目ID、所属模块ID、1线人员、内部负责人、优先级、来源和扩展上下文
     :param query_db: 数据库会话
     :param current_user: 当前登录用户，用于写入提单人和审计信息
     :return: 新增结果
@@ -344,7 +344,7 @@ async def edit_ticket(
     """
     编辑工单接口。
     :param request: 请求对象
-    :param edit_ticket_object: 工单基础字段、标签、扩展上下文和 AI 分析预留字段
+    :param edit_ticket_object: 工单基础字段、1线人员、内部负责人、标签、扩展上下文和 AI 分析预留字段
     :param query_db: 数据库会话
     :param current_user: 当前登录用户，用于写入更新人
     :return: 编辑结果
@@ -503,7 +503,11 @@ async def import_ticket_log_pull_store_configs(
         result = await TicketLogPullService.import_store_config_services(
             query_db, await file.read(), import_mode, current_user
         )
-        return ResponseUtil.success(data=result.result, msg=result.message) if result.is_success else ResponseUtil.failure(msg=result.message)
+        return (
+            ResponseUtil.success(data=result.result, msg=result.message)
+            if result.is_success
+            else ResponseUtil.failure(msg=result.message)
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -595,7 +599,11 @@ async def save_ticket_log_pull_project_vendor_map(
     """
     try:
         result = TicketLogPullService.save_project_vendor_map_services(query_db, config_object, current_user)
-        return ResponseUtil.success(data=result.result, msg=result.message) if result.is_success else ResponseUtil.failure(msg=result.message)
+        return (
+            ResponseUtil.success(data=result.result, msg=result.message)
+            if result.is_success
+            else ResponseUtil.failure(msg=result.message)
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -1017,7 +1025,9 @@ async def create_ticket_ai_analysis(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id:int}/assign", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:assign"))])
+@ticketController.post(
+    "/{ticket_id:int}/assign", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:assign"))]
+)
 @log_decorator(title="工单指派", business_type=2)
 async def assign_ticket(
     request: Request,
@@ -1045,7 +1055,9 @@ async def assign_ticket(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id:int}/status", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:status"))])
+@ticketController.post(
+    "/{ticket_id:int}/status", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:status"))]
+)
 @log_decorator(title="工单状态流转", business_type=2)
 async def change_ticket_status(
     request: Request,
@@ -1073,7 +1085,9 @@ async def change_ticket_status(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id:int}/comments", dependencies=[Depends(CheckUserInterfaceAuth("ticket:comment:add"))])
+@ticketController.post(
+    "/{ticket_id:int}/comments", dependencies=[Depends(CheckUserInterfaceAuth("ticket:comment:add"))]
+)
 async def add_ticket_comment(
     request: Request,
     ticket_id: int,
@@ -1123,7 +1137,9 @@ async def add_ticket_event(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.get("/{ticket_id:int}/timeline", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:timeline"))])
+@ticketController.get(
+    "/{ticket_id:int}/timeline", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:timeline"))]
+)
 async def get_ticket_timeline(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
     """
     获取工单时间线接口。
@@ -1140,7 +1156,9 @@ async def get_ticket_timeline(request: Request, ticket_id: int, query_db: Sessio
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.get("/{ticket_id:int}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))])
+@ticketController.get(
+    "/{ticket_id:int}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))]
+)
 async def get_ticket_messages(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
     """
     获取工单协同消息接口。
@@ -1176,14 +1194,18 @@ async def create_ticket_log_pull_manage(
     :return: 创建结果
     """
     try:
-        result = TicketLogPullService.create_log_pull_services(query_db, create_object.ticket_id, create_object, current_user)
+        result = TicketLogPullService.create_log_pull_services(
+            query_db, create_object.ticket_id, create_object, current_user
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id:int}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:add"))])
+@ticketController.post(
+    "/{ticket_id:int}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:add"))]
+)
 async def add_ticket_message(
     request: Request,
     ticket_id: int,
@@ -1210,7 +1232,9 @@ async def add_ticket_message(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.post("/{ticket_id:int}/snapshots", dependencies=[Depends(CheckUserInterfaceAuth("ticket:snapshot:add"))])
+@ticketController.post(
+    "/{ticket_id:int}/snapshots", dependencies=[Depends(CheckUserInterfaceAuth("ticket:snapshot:add"))]
+)
 async def add_ticket_snapshot(
     request: Request,
     ticket_id: int,

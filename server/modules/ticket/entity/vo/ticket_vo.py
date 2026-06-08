@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -42,6 +42,10 @@ class TicketBaseModel(BaseModel):
     reporter_name: str | None = Field(default=None, description="提单人名称")
     current_assignee_id: int | None = Field(default=None, description="当前处理人ID")
     current_assignee_name: str | None = Field(default=None, description="当前处理人名称")
+    first_line_assignee_id: int | None = Field(default=None, description="1线人员ID")
+    first_line_assignee_name: str | None = Field(default=None, description="1线人员名称")
+    internal_owner_id: int | None = Field(default=None, description="内部工单负责人ID")
+    internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     is_problem: bool | None = Field(default=None, description="是否真实问题")
     root_cause: str | None = Field(default=None, description="最终根因")
     solution: str | None = Field(default=None, description="最终解决方案")
@@ -93,6 +97,11 @@ class TicketQueryModel(QueryModel):
     internal_priority: str | None = Field(default=None, description="内部优先级")
     source: str | None = Field(default=None, description="工单来源")
     current_assignee_id: int | None = Field(default=None, description="当前处理人ID")
+    current_assignee_name: str | None = Field(default=None, description="当前处理人名称")
+    first_line_assignee_id: int | None = Field(default=None, description="1线人员ID")
+    first_line_assignee_name: str | None = Field(default=None, description="1线人员名称")
+    internal_owner_id: int | None = Field(default=None, description="内部工单负责人ID")
+    internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     reporter_id: int | None = Field(default=None, description="提单人ID")
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
 

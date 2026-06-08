@@ -39,6 +39,12 @@ class Ticket(Base):
     reporter_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="提单人名称")
     current_assignee_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="当前处理人ID")
     current_assignee_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="当前处理人名称")
+    first_line_assignee_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="1线人员ID")
+    first_line_assignee_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="1线人员名称")
+    internal_owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="内部工单负责人ID")
+    internal_owner_name: Mapped[str] = mapped_column(
+        String(100), nullable=True, default="", comment="内部工单负责人名称"
+    )
     is_problem: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment="是否真实问题")
     root_cause: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终根因")
     solution: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终解决方案")

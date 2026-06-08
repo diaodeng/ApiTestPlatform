@@ -53,6 +53,27 @@
           <el-option v-for="item in priorityOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
+      <el-form-item label="当前处理人" prop="currentAssigneeId">
+        <UserSelect
+          v-model="queryParams.currentAssigneeId"
+          :initial-option="currentAssigneeOption"
+          @change="handleQueryCurrentAssigneeChange"
+        />
+      </el-form-item>
+      <el-form-item label="1线人员" prop="firstLineAssigneeId">
+        <UserSelect
+          v-model="queryParams.firstLineAssigneeId"
+          :initial-option="firstLineQueryAssigneeOption"
+          @change="handleQueryFirstLineAssigneeChange"
+        />
+      </el-form-item>
+      <el-form-item label="内部负责人" prop="internalOwnerId">
+        <UserSelect
+          v-model="queryParams.internalOwnerId"
+          :initial-option="internalOwnerQueryOption"
+          @change="handleQueryInternalOwnerChange"
+        />
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleSearch">搜索</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -108,6 +129,8 @@
       <el-table-column label="来源" prop="source" width="110">
         <template #default="scope">{{ getOptionLabel(sourceOptions, scope.row.source) }}</template>
       </el-table-column>
+      <el-table-column label="1线人员" prop="firstLineAssigneeName" width="130" show-overflow-tooltip />
+      <el-table-column label="内部负责人" prop="internalOwnerName" width="130" show-overflow-tooltip />
       <el-table-column label="当前处理人" prop="currentAssigneeName" width="130" show-overflow-tooltip />
       <el-table-column label="创建时间" prop="createTime" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
@@ -205,6 +228,37 @@
                   :value="item.value"
                 />
               </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-divider content-position="left">角色分工</el-divider>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="1线人员" prop="firstLineAssigneeId">
+              <UserSelect
+                v-model="form.firstLineAssigneeId"
+                :initial-option="firstLineAssigneeOption"
+                @change="handleFirstLineAssigneeChange"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="1线名称" prop="firstLineAssigneeName">
+              <el-input v-model="form.firstLineAssigneeName" placeholder="选择用户后自动填充，也可手动调整" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="内部负责人" prop="internalOwnerId">
+              <UserSelect
+                v-model="form.internalOwnerId"
+                :initial-option="internalOwnerOption"
+                @change="handleInternalOwnerChange"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="负责人名称" prop="internalOwnerName">
+              <el-input v-model="form.internalOwnerName" placeholder="选择用户后自动填充，也可手动调整" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -414,6 +468,8 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="当前处理人">{{ detail.currentAssigneeName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="1线人员">{{ detail.firstLineAssigneeName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="内部负责人">{{ detail.internalOwnerName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="所属项目">{{ detail.projectName || detail.merchantName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="所属模块">{{ detail.moduleName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="版本号">{{ detail.versionKey || detail.extraData?.versionKey || '-' }}</el-descriptions-item>
@@ -1689,6 +1745,11 @@ const historyActiveTab = ref('timeline')
 const title = ref('')
 const currentTicketId = ref()
 const currentAssigneeOption = ref(null)
+const queryCurrentAssigneeOption = ref(null)
+const queryFirstLineAssigneeOption = ref(null)
+const queryInternalOwnerOption = ref(null)
+const firstLineAssigneeOption = ref(null)
+const internalOwnerOption = ref(null)
 const detail = ref({})
 const timeline = ref({})
 const ticketMessages = ref([])
@@ -1963,6 +2024,10 @@ function createDefaultTicketForm() {
     projectId: undefined,
     moduleId: undefined,
     versionKey: '',
+    firstLineAssigneeId: undefined,
+    firstLineAssigneeName: '',
+    internalOwnerId: undefined,
+    internalOwnerName: '',
     customerPriority: 'P3',
     internalPriority: 'P3',
     severity: undefined,
@@ -1986,7 +2051,10 @@ const data = reactive({
     processStatus: undefined,
     projectId: undefined,
     moduleId: undefined,
-    internalPriority: undefined
+    internalPriority: undefined,
+    currentAssigneeId: undefined,
+    firstLineAssigneeId: undefined,
+    internalOwnerId: undefined
   },
   form: createDefaultTicketForm(),
   assignForm: {},
@@ -2194,6 +2262,8 @@ function getList() {
 function reset() {
   form.value = createDefaultTicketForm()
   tagText.value = ''
+  firstLineAssigneeOption.value = null
+  internalOwnerOption.value = null
   proxy.resetForm('ticketRef')
 }
 
@@ -2236,6 +2306,9 @@ function handleSearch() {
 function resetQuery() {
   proxy.resetForm('queryRef')
   naturalKeyword.value = ''
+  queryCurrentAssigneeOption.value = null
+  queryFirstLineAssigneeOption.value = null
+  queryInternalOwnerOption.value = null
   handleQuery()
 }
 
@@ -2306,6 +2379,8 @@ function handleUpdate(row) {
       ?? true
     tagText.value = Array.isArray(form.value.tags) ? form.value.tags.join(',') : ''
     applyTicketAutomationConfig(form.value)
+    firstLineAssigneeOption.value = buildTicketUserOption(form.value.firstLineAssigneeId, form.value.firstLineAssigneeName)
+    internalOwnerOption.value = buildTicketUserOption(form.value.internalOwnerId, form.value.internalOwnerName)
     loadFormModuleOptions(form.value.projectId)
     loadFormVersionOptions(form.value.projectId)
     open.value = true
@@ -2433,6 +2508,41 @@ function submitAssign() {
 function handleAssigneeChange(user) {
   assignForm.value.toUserName = user?.nickName || user?.userName || ''
   currentAssigneeOption.value = user
+}
+
+function handleQueryCurrentAssigneeChange(user) {
+  queryCurrentAssigneeOption.value = user || null
+}
+
+function handleQueryFirstLineAssigneeChange(user) {
+  queryFirstLineAssigneeOption.value = user || null
+}
+
+function handleQueryInternalOwnerChange(user) {
+  queryInternalOwnerOption.value = user || null
+}
+
+function buildTicketUserOption(userId, userName) {
+  if (!userId) {
+    return null
+  }
+  const resolvedName = String(userName || '').trim()
+  return {
+    userId,
+    userName: resolvedName,
+    nickName: resolvedName,
+    label: resolvedName
+  }
+}
+
+function handleFirstLineAssigneeChange(user) {
+  form.value.firstLineAssigneeName = user?.nickName || user?.userName || ''
+  firstLineAssigneeOption.value = user
+}
+
+function handleInternalOwnerChange(user) {
+  form.value.internalOwnerName = user?.nickName || user?.userName || ''
+  internalOwnerOption.value = user
 }
 
 function openStatus(row) {
