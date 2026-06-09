@@ -462,6 +462,38 @@ onMounted(() => {
 .ticket-sync-automation-page {
   background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 1));
   padding-bottom: 96px;
+  display: block;
+  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+}
+
+.ticket-sync-automation-page :deep(.el-form),
+.ticket-sync-automation-page :deep(.el-row),
+.ticket-sync-automation-page :deep(.el-col),
+.ticket-sync-automation-page :deep(.el-card),
+.ticket-sync-automation-page :deep(.el-card__body) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.ticket-sync-automation-page :deep(.el-form-item) {
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.ticket-sync-automation-page :deep(.el-form-item__content) {
+  min-width: 0;
+  width: 100%;
+}
+
+.ticket-sync-automation-page :deep(.el-input),
+.ticket-sync-automation-page :deep(.el-select),
+.ticket-sync-automation-page :deep(.el-input-number),
+.ticket-sync-automation-page :deep(.el-date-editor),
+.ticket-sync-automation-page :deep(.el-textarea) {
+  width: 100%;
 }
 
 .page-intro {
@@ -499,6 +531,7 @@ onMounted(() => {
 
 .config-card {
   border-radius: 12px;
+  width: 100%;
 }
 
 .card-header {

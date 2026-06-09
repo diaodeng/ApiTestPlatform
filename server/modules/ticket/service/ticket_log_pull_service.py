@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-from io import BytesIO
 import gzip
 import io
 import json
@@ -16,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 from ftplib import FTP, error_perm
 from ftplib import all_errors as ftp_errors
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
@@ -40,6 +40,9 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
     TicketLogPullListItemModel,
+    TicketLogPullProjectVendorMapModel,
+    TicketLogPullProjectVendorMapQueryModel,
+    TicketLogPullProjectVendorMapUpsertModel,
     TicketLogPullQueryModel,
     TicketLogPullStorageConfigModel,
     TicketLogPullStoreConfigQueryModel,
@@ -47,9 +50,6 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullSummaryModel,
     TicketLogPullVendorOptionModel,
     TicketLogPullVendorStoreOptionsModel,
-    TicketLogPullProjectVendorMapModel,
-    TicketLogPullProjectVendorMapQueryModel,
-    TicketLogPullProjectVendorMapUpsertModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
 from modules.ticket.service.ticket_notify_service import TicketNotifyService
@@ -453,6 +453,93 @@ class TicketLogPullService:
             )
         return normalized_vendors
 
+    @staticmethod
+    def _extract_option_id(*values: Any) -> int | None:
+        """
+        从门店配置字段中提取联动选项ID。
+        :param values: 候选值，优先使用可直接转成整数的值，其次提取文本中的数字
+        :return: 可用于前端联动的整数ID
+        """
+        for value in values:
+            if value in (None, ""):
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            try:
+                return int(text)
+            except (TypeError, ValueError):
+                match = re.search(r"\d+", text)
+                if match:
+                    return int(match.group(0))
+        return None
+
+    @classmethod
+    def _build_vendor_store_options_from_store_configs(
+        cls, store_configs: list[TicketLogPullStoreConfig]
+    ) -> list[TicketLogPullVendorOptionModel]:
+        """
+        按门店配置表聚合商家与门店联动选项。
+        :param store_configs: 门店配置列表
+        :return: 商家门店联动选项
+        """
+        vendor_map: dict[str, dict[str, Any]] = {}
+        vendor_order: list[str] = []
+        for store_config in store_configs:
+            vendor_code = str(store_config.vender_no or "").strip()
+            vendor_id = cls._extract_option_id(store_config.vender_no, store_config.id)
+            if vendor_id is None:
+                continue
+            vendor_key = vendor_code or str(vendor_id)
+            vendor_entry = vendor_map.get(vendor_key)
+            if not vendor_entry:
+                vendor_entry = {
+                    "vendor_id": vendor_id,
+                    "vendor_code": vendor_code or None,
+                    "vendor_name": vendor_code or str(store_config.group_no or "").strip() or "未命名商家",
+                    "stores": [],
+                    "store_ids": set(),
+                }
+                vendor_map[vendor_key] = vendor_entry
+                vendor_order.append(vendor_key)
+
+            store_id = cls._extract_option_id(store_config.org_no, store_config.sap_org_no, store_config.id)
+            if store_id is None:
+                continue
+            store_key = str(store_id)
+            if store_key in vendor_entry["store_ids"]:
+                continue
+            vendor_entry["store_ids"].add(store_key)
+            store_code = str(store_config.org_no or store_config.sap_org_no or "").strip() or None
+            store_name = (
+                str(store_config.org_name or "").strip()
+                or store_code
+                or str(store_config.vender_no or "").strip()
+                or str(store_id)
+            )
+            vendor_entry["stores"].append(
+                TicketLogPullStoreOptionModel(
+                    store_id=store_id,
+                    store_code=store_code,
+                    store_name=store_name,
+                )
+            )
+
+        vendors: list[TicketLogPullVendorOptionModel] = []
+        for vendor_key in vendor_order:
+            vendor_entry = vendor_map[vendor_key]
+            if not vendor_entry["stores"]:
+                continue
+            vendors.append(
+                TicketLogPullVendorOptionModel(
+                    vendor_id=int(vendor_entry["vendor_id"]),
+                    vendor_code=vendor_entry["vendor_code"],
+                    vendor_name=vendor_entry["vendor_name"],
+                    stores=vendor_entry["stores"],
+                )
+            )
+        return vendors
+
     @classmethod
     def get_vendor_store_options_services(cls, query_db: Session) -> TicketLogPullVendorStoreOptionsModel:
         """
@@ -460,23 +547,7 @@ class TicketLogPullService:
         :param query_db: 数据库会话
         :return: 商家/门店联动配置
         """
-        external_config = cls._get_external_config_dict(query_db)
-        vendors = [
-            TicketLogPullVendorOptionModel(
-                vendor_id=int(item.get("vendorId")),
-                vendor_code=item.get("vendorCode"),
-                vendor_name=str(item.get("vendorName") or item.get("vendorId")),
-                stores=[
-                    TicketLogPullStoreOptionModel(
-                        store_id=int(store.get("storeId")),
-                        store_code=store.get("storeCode"),
-                        store_name=str(store.get("storeName") or store.get("storeId")),
-                    )
-                    for store in item.get("stores", [])
-                ],
-            )
-            for item in external_config.get("vendors", [])
-        ]
+        vendors = cls._build_vendor_store_options_from_store_configs(TicketLogPullDao.list_all_store_configs(query_db))
         return TicketLogPullVendorStoreOptionsModel(vendors=vendors)
 
     @classmethod

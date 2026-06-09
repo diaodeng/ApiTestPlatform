@@ -327,6 +327,38 @@ onMounted(() => {
 <style scoped>
 .ai-config-center-page {
   background: linear-gradient(180deg, rgba(245, 247, 250, 0.96), rgba(255, 255, 255, 1));
+  display: block;
+  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+}
+
+.ai-config-center-page :deep(.el-form),
+.ai-config-center-page :deep(.el-row),
+.ai-config-center-page :deep(.el-col),
+.ai-config-center-page :deep(.el-card),
+.ai-config-center-page :deep(.el-card__body) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.ai-config-center-page :deep(.el-form-item) {
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.ai-config-center-page :deep(.el-form-item__content) {
+  min-width: 0;
+  width: 100%;
+}
+
+.ai-config-center-page :deep(.el-input),
+.ai-config-center-page :deep(.el-select),
+.ai-config-center-page :deep(.el-input-number),
+.ai-config-center-page :deep(.el-date-editor),
+.ai-config-center-page :deep(.el-textarea) {
+  width: 100%;
 }
 
 .page-intro {
@@ -364,6 +396,7 @@ onMounted(() => {
 
 .config-card {
   border-radius: 12px;
+  width: 100%;
 }
 
 .card-header {
