@@ -20,6 +20,9 @@ class EnvVendorStoreSelector(QWidget):
         self._bind()
 
     def _init_data(self):
+        self.env_combo.blockSignals(True)
+        self.vendor_combo.blockSignals(True)
+        self.store_combo.blockSignals(True)
         self.env_combo.clear()
         env_list = []
         if self.config and getattr(self.config, "data", None):
@@ -30,12 +33,21 @@ class EnvVendorStoreSelector(QWidget):
 
         if self.env_combo.count() > 0:
             self._refresh_vendor()
+        else:
+            self.vendor_combo.clear()
+            self.store_combo.clear()
+
+        self.env_combo.blockSignals(False)
+        self.vendor_combo.blockSignals(False)
+        self.store_combo.blockSignals(False)
 
     def _bind(self):
         self.env_combo.currentIndexChanged.connect(self._refresh_vendor)
         self.vendor_combo.currentIndexChanged.connect(self._refresh_store)
 
     def _refresh_vendor(self):
+        self.vendor_combo.blockSignals(True)
+        self.store_combo.blockSignals(True)
         self.vendor_combo.clear()
         env = self.env_combo.currentData()
         store_list = []
@@ -51,8 +63,11 @@ class EnvVendorStoreSelector(QWidget):
             self.vendor_combo.addItem(v, k)
 
         self._refresh_store()
+        self.vendor_combo.blockSignals(False)
+        self.store_combo.blockSignals(False)
 
     def _refresh_store(self):
+        self.store_combo.blockSignals(True)
         self.store_combo.clear()
         store_list = []
         if self.config and getattr(self.config, "data", None):
@@ -64,6 +79,13 @@ class EnvVendorStoreSelector(QWidget):
         for item in store_list:
             if item.env == env and item.vender_id == vendor:
                 self.store_combo.addItem(item.store_name, item.store_id)
+        self.store_combo.blockSignals(False)
+
+    def set_config(self, config):
+        self.config = config
+        self._init_data()
+        if self.config and getattr(self.config, "data", None):
+            self.set_value(None, None, None)
 
     def set_value(self, env: str | None, vendor_id: str | None, store_id: str | None):
         if env:

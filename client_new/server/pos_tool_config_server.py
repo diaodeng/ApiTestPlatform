@@ -1,6 +1,8 @@
 import json
 import os
 
+from loguru import logger
+
 from common.excptions import PosParamsException
 from model.config import PosParamsModel
 from model.pos_network_model import PosInitRespModel, PosInitRespStoreModel, PosInitRespEnvModel
@@ -11,13 +13,18 @@ from server.config import PosToolConfig
 
 class PosToolConfigServer:
     @classmethod
-    def read_pos_tool_config(cls) -> PosInitRespModel:
-        local_data = PosToolConfig.read_local_pos_tool_config()
-        if local_data:
-            return local_data
-        data = pos_tool_init()
-        PosToolConfig.save_local_pos_tool_config(data)
-        return data
+    def read_pos_tool_config(cls) -> PosInitRespModel | None:
+        try:
+            local_data = PosToolConfig.read_local_pos_tool_config()
+            if local_data:
+                return local_data
+            data = pos_tool_init()
+            if data:
+                PosToolConfig.save_local_pos_tool_config(data)
+            return data
+        except Exception as exc:
+            logger.warning(f"读取POS切换配置失败: {exc}")
+            return None
 
     @classmethod
     def get_store_list(cls, pos_path: str) -> (PosParamsModel, list[PosInitRespStoreModel], list[PosInitRespEnvModel]):
@@ -26,7 +33,7 @@ class PosToolConfigServer:
             return res_data
 
         data = cls.read_pos_tool_config()
-        if data:
+        if data and getattr(data, "data", None):
             res_data[2] = data.data.env_list
 
         params = PosConfig.read_pos_params(pos_path)
@@ -39,7 +46,7 @@ class PosToolConfigServer:
         store_list = []
         env = PosConfig.get_local_pos_env(pos_path)
         group, account = PosConfig.get_pos_group(params.venderNo, env)
-        if group:
+        if group and data and getattr(data, "data", None):
             for store in data.data.store_list:
                 if store.env == group and store.vender_id == params.venderNo:
                     store_list.append(store)
