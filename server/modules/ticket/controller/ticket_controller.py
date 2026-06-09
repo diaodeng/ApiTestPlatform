@@ -1,9 +1,11 @@
+import json
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
+from pydantic import ValidationError
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
@@ -55,6 +57,144 @@ from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
 ticketController = APIRouter(prefix="/ticket", dependencies=[Depends(LoginService.get_current_user)])
+
+
+def _first_non_empty_value(payload: dict, *keys: str, default=None):
+    """
+    从多个候选键中取第一个非空值。
+    :param payload: 原始请求数据。
+    :param keys: 候选字段名，按优先级从高到低排列。
+    :param default: 所有候选字段都为空时返回的默认值。
+    :return: 第一个非空值或默认值。
+    """
+    for key in keys:
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if value not in (None, "", []):
+            return value
+    return default
+
+
+def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
+    """
+    将外部工单同步请求归一化为统一结构。
+    :param payload: 原始请求体。
+    :return: 可用于 TicketExternalSyncUpsertModel 的数据。
+    """
+    data = dict(payload or {})
+    raw_payload = dict(data)
+
+    source = data.get("source") if isinstance(data.get("source"), dict) else {}
+    source_system = _first_non_empty_value(
+        data,
+        "sourceSystem",
+        "source_system",
+        "system",
+        "ticketVender",
+        "ticket_vendor",
+        default="external",
+    )
+    record_id = _first_non_empty_value(
+        data,
+        "sourceRecordId",
+        "source_record_id",
+        "recordId",
+        "record_id",
+        "ticket_no",
+        "ticketNo",
+    )
+    record_url = _first_non_empty_value(
+        data,
+        "sourceRecordUrl",
+        "source_record_url",
+        "recordUrl",
+        "record_url",
+        "url",
+        "link",
+    )
+    pushed_at = _first_non_empty_value(
+        data,
+        "sourcePushedAt",
+        "source_pushed_at",
+        "pushedAt",
+        "pushed_at",
+        "creatTime",
+        "createTime",
+        "createdAt",
+        "created_at",
+    )
+    ticket_no = str(_first_non_empty_value(data, "ticket_no", "ticketNo", default="") or "").strip()
+    title = str(
+        _first_non_empty_value(
+            data,
+            "title",
+            "ticketModle",
+            "ticket_model",
+            "ticketVender",
+            "ticket_vendor",
+            "reason",
+            "stepReason",
+            "description",
+            "ticket_no",
+            "ticketNo",
+            default="",
+        )
+        or ""
+    ).strip()
+    description = str(
+        _first_non_empty_value(data, "description", "reason", "stepReason", default="")
+        or ""
+    ).strip()
+
+    data["source"] = {
+        "system": str((source.get("system") or source_system or "external") or "external").strip() or "external",
+        "record_id": str((source.get("record_id") or record_id or "")).strip() or None,
+        "record_url": str((source.get("record_url") or record_url or "")).strip() or None,
+        "pushed_at": source.get("pushed_at") or pushed_at,
+    }
+    if ticket_no:
+        data["ticket_no"] = ticket_no
+    if not title:
+        title = ticket_no or "外部工单"
+    data["title"] = title
+    if description and not str(data.get("description") or "").strip():
+        data["description"] = description
+    if raw_payload:
+        data["raw_payload"] = raw_payload
+    return data
+
+
+async def _load_external_sync_payload(request: Request) -> dict:
+    """
+    读取并归一化外部工单同步请求体，兼容 JSON 和表单提交。
+    :param request: 当前请求对象。
+    :return: 归一化后的请求数据。
+    """
+    content_type = (request.headers.get("content-type") or "").lower()
+    raw_payload: dict | None = None
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        form_data = await request.form()
+        raw_payload = dict(form_data.multi_items())
+    else:
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if isinstance(body, dict):
+            raw_payload = body
+        else:
+            try:
+                body_bytes = await request.body()
+                if body_bytes:
+                    raw_payload = json.loads(body_bytes.decode("utf-8"))
+            except Exception:
+                raw_payload = None
+
+    if not isinstance(raw_payload, dict):
+        raise HTTPException(status_code=422, detail="请求体必须是 JSON 或表单数据")
+
+    return _normalize_ticket_external_sync_payload(raw_payload)
 
 
 @ticketController.get("/list", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
@@ -237,13 +377,26 @@ async def add_ticket(
 @ticketController.post("/sync/external", dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:external"))])
 async def sync_external_ticket(
     request: Request,
-    sync_object: TicketExternalSyncUpsertModel,
     query_db: Session = Depends(get_db),
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     """
     外部工单系统同步数据入库接口。
+
+    兼容 JSON 和 `multipart/form-data` / `application/x-www-form-urlencoded` 提交。
+    表单模式下支持扁平字段，会自动归一化为 `TicketExternalSyncUpsertModel`。
     """
+    try:
+        payload = await _load_external_sync_payload(request)
+        sync_object = TicketExternalSyncUpsertModel.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:
+        logger.exception(exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     try:
         result = TicketSyncService.sync_external_ticket(query_db, sync_object, current_user)
         if result.is_success:

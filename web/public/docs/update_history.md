@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 工单外部同步接口 `/ticket/sync/external` 现在同时兼容 JSON 和 `multipart/form-data` / `application/x-www-form-urlencoded`，表单扁平字段会自动归一化为统一同步模型。
 1. 修复 POS 启动链路中的“在线切换 POS”弹窗闪退问题：弹窗改为非阻塞打开，环境/商家/门店配置改为延迟加载并增加空配置兜底；`fatal_error.log` 现在会先写入时间戳头，便于定位原始崩溃时间。
 1. 修复全局页面根容器 `app-container` 在 `app-main` 横向 flex 布局下不伸展的问题，AI 配置中心和工单同步配置页不再被压成窄条。
 1. AI 配置中心和工单同步配置页补了统一的宽度兜底样式，表单项、卡片和行列布局都强制撑满可用宽度，修复配置项被挤成一小条横线的问题。
