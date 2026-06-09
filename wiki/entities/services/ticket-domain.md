@@ -66,7 +66,8 @@ graph TD
 - 日志拉取不再在工单详情页维护地址、Cookie 和归档参数，统一通过系统参数 `ticket.logPull.external`、`ticket.logPull.storage` 管理。
 - `ticket.logPull.external` 现同时承载日志页面商家/门店联动选项：新增 `vendors` 列表，商家项包含 `vendorId/vendorCode/vendorName`，门店项包含 `storeId/storeCode/storeName`；服务端通过 ticket 域只读接口向前端下发脱敏后的选项数据，不直接暴露 Cookie 等敏感配置。
 - `ticket.logPull.external` 的大体量门店基础数据已拆分到 `ticket_log_pull_store_config` 独立表，支持模板导入、增量覆盖、整表覆盖和 `org_no/sap_org_no` 搜索；同时新增 `ticket_log_pull_project_vendor_map` 保存项目 ID 到 `vender_no` 的映射，日志拉取弹窗会优先按项目自动回填商家编号。
-- 日志拉取页面和工单日志拉取记录页的商家/门店联动选项已改为直接聚合 `ticket_log_pull_store_config` 表，不再依赖系统参数里的商家门店配置；接口仍返回 `vendorId/vendorCode/vendorName` 与 `storeId/storeCode/storeName` 的联动结构，前端下拉逻辑保持不变。
+- 门店配置增量导入的判重逻辑已经改为 `vender_no + org_no + sap_org_no` 三字段联合唯一键精确匹配，只有三者同时一致才会覆盖，不再按任意单字段命中就覆盖；导入时也会先批量加载已有配置并在内存中 upsert，减少大文件导入的查库压力。
+- 日志拉取页面和工单日志拉取记录页的商家/门店联动选项已改为直接聚合 `ticket_log_pull_store_config` 表，不再依赖系统参数里的商家门店配置；接口仍返回 `vendorId/vendorCode/vendorName` 与 `storeId/storeCode/sapOrgNo/storeName` 的联动结构，其中 `storeId` 实际回填为 `org_no` 字符串，前端下拉可按 `org_no`、`sap_org_no` 和门店名称搜索。
 - 日志拉取查看入口改为弹窗模式，默认返回入库内容；切换为原始文档后可显示当前截取范围并按时间范围实时重截。
 - 日志拉取提交入口改为弹窗，标签页默认只保留记录列表，减少页面占用；后台会先查外部列表，命中可下载结果时只比较 `modifyTime/path`，且双方参数个数必须一致，满足时会跳过重新提交申请。
 - 日志拉取链路补充步骤级日志，提交、轮询、下载、解析、导入以及跳过原因都会写入系统日志和工单事件，方便定位工单号执行到哪一步。

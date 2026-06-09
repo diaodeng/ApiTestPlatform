@@ -718,8 +718,11 @@ function openStoreConfigDialog() {
 function loadStoreConfigList() {
   storeConfigLoading.value = true
   return listTicketLogPullStoreConfigs(storeConfigQuery.value).then(response => {
-    storeConfigList.value = response.rows || []
-    storeConfigTotal.value = response.total || 0
+    const pageData = response.data || response
+    storeConfigList.value = Array.isArray(pageData)
+      ? pageData
+      : (Array.isArray(pageData?.rows) ? pageData.rows : [])
+    storeConfigTotal.value = pageData?.total || 0
   }).finally(() => {
     storeConfigLoading.value = false
   })

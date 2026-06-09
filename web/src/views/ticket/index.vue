@@ -1878,8 +1878,9 @@ function normalizeVendorOptions(rows = []) {
     label: buildVendorOptionLabel(item),
     stores: Array.isArray(item.stores)
       ? item.stores.map(store => ({
-        storeId: Number(store.storeId),
+        storeId: String(store.storeId || '').trim(),
         storeCode: String(store.storeCode || '').trim(),
+        sapOrgNo: String(store.sapOrgNo || '').trim(),
         storeName: String(store.storeName || store.storeId || '').trim(),
         label: buildStoreOptionLabel(store)
       }))
@@ -1896,9 +1897,9 @@ function buildVendorOptionLabel(vendor) {
 
 function buildStoreOptionLabel(store) {
   const name = String(store.storeName || store.storeId || '').trim()
-  const code = String(store.storeCode || '').trim()
-  const id = String(store.storeId || '').trim()
-  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+  const orgNo = String(store.storeCode || store.storeId || '').trim()
+  const sapOrgNo = String(store.sapOrgNo || '').trim()
+  return [name, orgNo ? `[${orgNo}]` : '', sapOrgNo ? `(${sapOrgNo})` : ''].filter(Boolean).join(' ')
 }
 
 function loadVendorOptions() {
@@ -2000,13 +2001,13 @@ function getVendorStoreOptions(vendorId) {
 }
 
 function resetStoreSelection(target, vendorId) {
-  const storeId = Number(target.storeId)
+  const storeId = String(target.storeId || '').trim()
   if (!storeId) {
     target.storeId = undefined
     return
   }
   const storeOptions = getVendorStoreOptions(vendorId)
-  if (storeOptions.length && !storeOptions.some(item => item.storeId === storeId)) {
+  if (storeOptions.length && !storeOptions.some(item => String(item.storeId || '').trim() === storeId)) {
     target.storeId = undefined
   }
 }

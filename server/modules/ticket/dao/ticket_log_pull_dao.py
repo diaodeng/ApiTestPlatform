@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from datetime import date, datetime
 
 from loguru import logger
-from sqlalchemy import Date, cast, or_
+from sqlalchemy import Date, cast, func, or_
 from sqlalchemy.orm import Session, defer
 
 from module_admin.entity.do.config_do import SysConfig
@@ -372,7 +372,7 @@ class TicketLogPullDao:
         cls, db: Session, *, vender_no: str = "", org_no: str = "", sap_org_no: str = ""
     ) -> TicketLogPullStoreConfig | None:
         """
-        按商户编号、机构编号或 SAP 机构编号查找门店配置。
+        按 vender_no + org_no + sap_org_no 联合唯一键查找门店配置。
         :param db: 数据库会话
         :param vender_no: 商户编号
         :param org_no: 机构编号
@@ -380,16 +380,18 @@ class TicketLogPullDao:
         :return: 匹配到的配置
         """
         query = db.query(TicketLogPullStoreConfig)
-        conditions = []
-        if str(org_no or "").strip():
-            conditions.append(TicketLogPullStoreConfig.org_no == str(org_no).strip())
-        if str(sap_org_no or "").strip():
-            conditions.append(TicketLogPullStoreConfig.sap_org_no == str(sap_org_no).strip())
-        if str(vender_no or "").strip():
-            conditions.append(TicketLogPullStoreConfig.vender_no == str(vender_no).strip())
-        if not conditions:
-            return None
-        return query.filter(or_(*conditions)).order_by(TicketLogPullStoreConfig.modifid.desc()).first()
+        vender_no = str(vender_no or "").strip()
+        org_no = str(org_no or "").strip()
+        sap_org_no = str(sap_org_no or "").strip()
+        return (
+            query.filter(
+                func.coalesce(TicketLogPullStoreConfig.vender_no, "") == vender_no,
+                func.coalesce(TicketLogPullStoreConfig.org_no, "") == org_no,
+                func.coalesce(TicketLogPullStoreConfig.sap_org_no, "") == sap_org_no,
+            )
+            .order_by(TicketLogPullStoreConfig.modifid.desc())
+            .first()
+        )
 
     @classmethod
     def save_store_config(cls, db: Session, store: TicketLogPullStoreConfig) -> TicketLogPullStoreConfig:

@@ -31,7 +31,7 @@
           default-first-option
         >
           <el-option
-            v-for="item in storeOptions"
+            v-for="item in resolvedStoreOptions"
             :key="item.storeId"
             :label="item.label"
             :value="item.storeId"
@@ -196,6 +196,8 @@
 </template>
 
 <script setup>
+import { getTicketLogPullVendorStoreOptions } from '@/api/ticket/ticket'
+
 const props = defineProps({
   agentOptions: {
     type: Array,
@@ -224,6 +226,10 @@ const props = defineProps({
   vendorOptions: {
     type: Array,
     default: () => []
+  },
+  storeOptions: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -232,10 +238,20 @@ const model = defineModel({
   default: () => ({})
 })
 
-const storeOptions = computed(() => {
+const fetchedStoreOptions = ref([])
+const activeStoreVendorId = ref(null)
+let storeOptionsRequestSeq = 0
+
+const resolvedStoreOptions = computed(() => {
   const vendorId = Number(model.value?.vendorId)
   if (!vendorId) {
     return []
+  }
+  if (activeStoreVendorId.value === vendorId) {
+    return fetchedStoreOptions.value
+  }
+  if (props.storeOptions.length) {
+    return props.storeOptions
   }
   const vendor = props.vendorOptions.find(item => item.vendorId === vendorId)
   return vendor?.stores || []
@@ -245,18 +261,67 @@ function getProp(name) {
   return props.fieldPrefix ? `${props.fieldPrefix}.${name}` : name
 }
 
+function normalizeStoreOptions(responseData, vendorId) {
+  const resolvedVendorId = Number(vendorId)
+  if (!resolvedVendorId) {
+    return []
+  }
+  const vendors = Array.isArray(responseData?.vendors) ? responseData.vendors : []
+  const vendor = vendors.find(item => Number(item.vendorId) === resolvedVendorId)
+  return Array.isArray(vendor?.stores)
+    ? vendor.stores.map(store => ({
+      storeId: String(store.storeId || '').trim(),
+      storeCode: String(store.storeCode || '').trim(),
+      sapOrgNo: String(store.sapOrgNo || '').trim(),
+      storeName: String(store.storeName || store.storeId || '').trim(),
+      label: buildStoreOptionLabel(store)
+    }))
+    : []
+}
+
+function loadStoreOptions(vendorId) {
+  const resolvedVendorId = Number(vendorId)
+  activeStoreVendorId.value = resolvedVendorId || null
+  if (!resolvedVendorId) {
+    fetchedStoreOptions.value = []
+    return Promise.resolve()
+  }
+  const requestSeq = ++storeOptionsRequestSeq
+  fetchedStoreOptions.value = []
+  return getTicketLogPullVendorStoreOptions(resolvedVendorId).then(response => {
+    if (requestSeq !== storeOptionsRequestSeq) {
+      return
+    }
+    fetchedStoreOptions.value = normalizeStoreOptions(response.data, resolvedVendorId)
+  }).catch(() => {
+    if (requestSeq !== storeOptionsRequestSeq) {
+      return
+    }
+    fetchedStoreOptions.value = []
+  })
+}
+
 function syncStoreSelection() {
-  const storeId = Number(model.value?.storeId)
+  const storeId = String(model.value?.storeId || '').trim()
   if (!storeId) {
     return
   }
-  if (!storeOptions.value.some(item => item.storeId === storeId)) {
+  if (!resolvedStoreOptions.value.some(item => String(item.storeId || '').trim() === storeId)) {
     model.value.storeId = undefined
   }
 }
 
 function handleVendorChange() {
-  syncStoreSelection()
+  model.value.storeId = undefined
+}
+
+function buildStoreOptionLabel(store) {
+  const name = String(store.storeName || '').trim()
+  const orgNo = String(store.storeCode || store.storeId || '').trim()
+  const sapOrgNo = String(store.sapOrgNo || '').trim()
+  return [name, orgNo ? `[${orgNo}]` : '', sapOrgNo ? `(${sapOrgNo})` : '']
+    .filter(Boolean)
+    .join(' ')
 }
 
 function formatProviderOption(item) {
@@ -285,9 +350,12 @@ function handleProviderChange(providerCode) {
 
 watch(
   () => model.value?.vendorId,
-  () => {
-    syncStoreSelection()
-  }
+  vendorId => {
+    loadStoreOptions(vendorId).then(() => {
+      syncStoreSelection()
+    })
+  },
+  { immediate: true }
 )
 
 watch(

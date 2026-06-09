@@ -8,6 +8,33 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-09] INGEST-CODE | 修复日志拉取弹窗门店联动不重新查询
+- 触发：用户反馈在日志拉取弹窗中输入或选择商家后，门店下拉没有只显示对应商家的门店。
+- 架构层：工单域 / 日志拉取 / Web 控制台
+- 创建的页面：无
+- 更新的页面：`web/public/docs/ticket-log-pull-design.md`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/controller/ticket_controller.py` / `server/modules/ticket/service/ticket_log_pull_service.py` / `web/src/api/ticket/ticket.js` / `web/src/components/ticket/LogPullConfigFields.vue` -> 工单域知识页
+- 总共涉及页面：3
+
+## [2026-06-09] INGEST-CODE | 修复门店配置列表分页数据读取层级错误
+- 触发：用户反馈门店配置页面查询后后端已返回数据，但前端列表不显示。
+- 架构层：工单域 / 日志拉取 / Web 控制台
+- 创建的页面：无
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`web/src/views/ticket/logPullRecord/index.vue` -> 工单域知识页
+- 总共涉及页面：2
+
+## [2026-06-09] INGEST-CODE | 修复门店配置导入误去重与大文件导入卡顿
+- 触发：用户反馈 `/ticket/log-pull/store-configs/import` 上传 3K 门店配置后只剩少量记录，同时导入期间影响其他服务可用性。
+- 架构层：工单域 / 日志拉取 / 门店配置导入 / 知识库同步
+- 创建的页面：无
+- 更新的页面：`entities/services/ticket-domain.md`、`web/public/docs/ticket-log-pull-design.md`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_log_pull_service.py` / `server/modules/ticket/dao/ticket_log_pull_dao.py` -> 工单域知识页
+- 总共涉及页面：4
+
 ## [2026-06-05] INGEST-CODE | 日志拉取新增门店配置导入与项目商家映射
 - 触发：用户要求给日志拉取页面增加门店信息导入入口，支持增量/覆盖导入，并补充项目到商户编号的映射和链路日志。
 - 架构层：工单域 / 日志拉取 / Web 控制台 / 知识库同步
@@ -339,4 +366,13 @@ updated: 2026-05-20
 - 更新的页面：`entities/services/ticket-domain.md`、`entities/data-models/ticket-core-models.md`、`docs/2026-05-22-ticket-form-and-ai-flow-update.md`、`wiki/index.md`
 - 创建的双向链接：1 对
 - 变更传播链：`server/modules/ticket/service/ticket_service.py` / `server/modules/ticket/service/ticket_log_pull_service.py` / `server/modules/ticket/service/ticket_ai_analysis_service.py` / `web/src/views/ticket/index.vue` -> 工单自动化链路流程
+- 总共涉及页面：5
+
+## [2026-06-09] INGEST-CODE | 摄入日志拉取门店下拉的 org_no 语义
+- 触发：用户反馈日志拉取弹窗里的门店下拉不友好，需要支持按 `org_no`、`sap_org_no` 和门店名称搜索，并且实际提交值应使用 `org_no`
+- 架构层：工单域 / 日志拉取 / 前端联动选择
+- 创建的页面：无
+- 更新的页面：`entities/services/ticket-domain.md`、`docs/ticket-log-pull-design.md`、`docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_log_pull_service.py` / `server/modules/ticket/entity/vo/ticket_log_pull_vo.py` / `server/modules/ticket/entity/do/ticket_log_pull_do.py` / `web/src/components/ticket/LogPullConfigFields.vue` / `web/src/views/ticket/index.vue` -> 工单域知识页
 - 总共涉及页面：5

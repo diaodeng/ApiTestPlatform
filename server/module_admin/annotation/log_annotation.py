@@ -104,7 +104,9 @@ def log_decorator(title: str, business_type: int, log_type: str | None = "operat
                 }
                 kwargs["form_data"].login_info = login_log
             # 调用原始函数
-            result = await func(*args, **kwargs)
+            result = func(*args, **kwargs)
+            if inspect.isawaitable(result):
+                result = await result
             # 获取请求耗时
             cost_time = float(time.time() - start_time) * 100
             # 判断请求是否来自api文档

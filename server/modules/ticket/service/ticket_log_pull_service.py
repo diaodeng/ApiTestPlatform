@@ -282,7 +282,7 @@ class TicketLogPullService:
             "reason": reason,
             "detail": detail or {},
         }
-        logger.info("日志拉取步骤: %s", payload)
+        logger.info("日志拉取步骤: {}", payload)
         if ticket_id:
             cls._add_ticket_event(
                 query_db,
@@ -425,21 +425,19 @@ class TicketLogPullService:
             seen_vendor_ids.add(vendor_id)
             stores = vendor.get("stores") if isinstance(vendor.get("stores"), list) else []
             normalized_stores: list[dict[str, Any]] = []
-            seen_store_ids: set[int] = set()
+            seen_store_ids: set[str] = set()
             for store in stores:
                 if not isinstance(store, dict):
                     continue
-                try:
-                    store_id = int(store.get("storeId"))
-                except (TypeError, ValueError):
-                    continue
-                if store_id <= 0 or store_id in seen_store_ids:
+                store_id = cls._normalize_store_option_value(store.get("storeId"), store.get("storeCode"))
+                if not store_id or store_id in seen_store_ids:
                     continue
                 seen_store_ids.add(store_id)
                 normalized_stores.append(
                     {
                         "storeId": store_id,
                         "storeCode": str(store.get("storeCode") or "").strip() or None,
+                        "sapOrgNo": str(store.get("sapOrgNo") or "").strip() or None,
                         "storeName": str(store.get("storeName") or "").strip() or str(store_id),
                     }
                 )
@@ -474,6 +472,19 @@ class TicketLogPullService:
                     return int(match.group(0))
         return None
 
+    @staticmethod
+    def _normalize_store_option_value(*values: Any) -> str:
+        """
+        归一化门店下拉实际提交值，优先返回 org_no，其次回退到 SAP 编号。
+        :param values: 候选门店标识
+        :return: 非空字符串值
+        """
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
     @classmethod
     def _build_vendor_store_options_from_store_configs(
         cls, store_configs: list[TicketLogPullStoreConfig]
@@ -503,24 +514,23 @@ class TicketLogPullService:
                 vendor_map[vendor_key] = vendor_entry
                 vendor_order.append(vendor_key)
 
-            store_id = cls._extract_option_id(store_config.org_no, store_config.sap_org_no, store_config.id)
-            if store_id is None:
+            store_value = cls._normalize_store_option_value(store_config.org_no, store_config.sap_org_no)
+            if not store_value:
                 continue
-            store_key = str(store_id)
+            store_key = store_value
             if store_key in vendor_entry["store_ids"]:
                 continue
             vendor_entry["store_ids"].add(store_key)
-            store_code = str(store_config.org_no or store_config.sap_org_no or "").strip() or None
-            store_name = (
-                str(store_config.org_name or "").strip()
-                or store_code
-                or str(store_config.vender_no or "").strip()
-                or str(store_id)
-            )
+            store_code = str(store_config.org_no or "").strip() or None
+            sap_org_no = str(store_config.sap_org_no or "").strip() or None
+            store_name = str(store_config.org_name or "").strip() or store_code or sap_org_no or str(
+                store_config.vender_no or ""
+            ).strip() or store_value
             vendor_entry["stores"].append(
                 TicketLogPullStoreOptionModel(
-                    store_id=store_id,
+                    store_id=store_value,
                     store_code=store_code,
+                    sap_org_no=sap_org_no,
                     store_name=store_name,
                 )
             )
@@ -541,13 +551,24 @@ class TicketLogPullService:
         return vendors
 
     @classmethod
-    def get_vendor_store_options_services(cls, query_db: Session) -> TicketLogPullVendorStoreOptionsModel:
+    def get_vendor_store_options_services(
+        cls, query_db: Session, vendor_id: int | None = None
+    ) -> TicketLogPullVendorStoreOptionsModel:
         """
         获取日志拉取页面使用的商家/门店联动选项。
         :param query_db: 数据库会话
+        :param vendor_id: 可选商家ID，传入后只返回该商家对应的门店
         :return: 商家/门店联动配置
         """
-        vendors = cls._build_vendor_store_options_from_store_configs(TicketLogPullDao.list_all_store_configs(query_db))
+        store_configs = TicketLogPullDao.list_all_store_configs(query_db)
+        if vendor_id is not None:
+            resolved_vendor_id = int(vendor_id)
+            store_configs = [
+                store_config
+                for store_config in store_configs
+                if cls._extract_option_id(store_config.vender_no, store_config.id) == resolved_vendor_id
+            ]
+        vendors = cls._build_vendor_store_options_from_store_configs(store_configs)
         return TicketLogPullVendorStoreOptionsModel(vendors=vendors)
 
     @classmethod
@@ -614,6 +635,7 @@ class TicketLogPullService:
             return CrudResponseModel(is_success=False, message="导入方式仅支持 incremental 或 overwrite")
 
         try:
+            existing_store_map: dict[tuple[str, str, str], TicketLogPullStoreConfig] = {}
             if normalized_mode == "overwrite":
                 deleted_count = TicketLogPullDao.delete_all_store_configs(query_db)
                 cls._log_chain_step(
@@ -625,6 +647,12 @@ class TicketLogPullService:
                     reason=f"覆盖导入前清空旧数据 {deleted_count} 条",
                     detail={"deletedCount": deleted_count},
                 )
+            else:
+                # 先把已有配置放入内存，避免逐行查库和重复 flush。
+                for store in TicketLogPullDao.list_all_store_configs(query_db):
+                    match_key = cls._build_store_config_match_key(store)
+                    if any(match_key):
+                        existing_store_map[match_key] = store
 
             summary = {
                 "totalRows": len(rows),
@@ -637,25 +665,45 @@ class TicketLogPullService:
             for row_index, row in rows:
                 try:
                     store = cls._build_store_config_entity(row, now)
-                    if not store.vender_no and not store.org_no and not store.sap_org_no:
+                    match_key = cls._build_store_config_match_key(store)
+                    if not any(match_key):
                         raise ValueError("vender_no/org_no/sap_org_no 至少需要填写一个")
-                    existing = None
-                    if normalized_mode == "incremental":
-                        existing = TicketLogPullDao.get_store_config_by_match(
-                            query_db,
-                            vender_no=store.vender_no,
-                            org_no=store.org_no or "",
-                            sap_org_no=store.sap_org_no or "",
-                        )
-                    saved = TicketLogPullDao.save_store_config(query_db, store)
+
+                    existing = existing_store_map.get(match_key)
                     if existing:
+                        for field in (
+                            "group_no",
+                            "vender_no",
+                            "region_no",
+                            "org_no",
+                            "org_name",
+                            "sap_org_no",
+                            "platform_no",
+                            "parent_org_no",
+                            "perm_node_id",
+                            "org_type",
+                            "company_no",
+                            "city_no",
+                            "biz_type_no",
+                            "status",
+                            "created",
+                            "modifid",
+                            "open_date",
+                            "language_desc",
+                        ):
+                            setattr(existing, field, getattr(store, field))
+                        saved = existing
                         summary["updatedCount"] += 1
                     else:
+                        query_db.add(store)
+                        existing_store_map[match_key] = store
+                        saved = store
                         summary["insertedCount"] += 1
+
                     cls._log_chain_step(
                         query_db,
                         ticket_id=None,
-                        record_id=int(saved.id),
+                        record_id=int(saved.id) if getattr(saved, "id", None) else None,
                         step="store-import",
                         status="success",
                         reason="覆盖保存完成" if existing else "新增保存完成",
@@ -788,6 +836,20 @@ class TicketLogPullService:
             modifid=cls._parse_import_datetime(row.get("modifid")) or now,
             open_date=cls._parse_import_date(row.get("open_date")) or date(1900, 1, 1),
             language_desc=cls._cell_text(row.get("language_desc")) or "zh_HK",
+        )
+
+    @classmethod
+    def _build_store_config_match_key(cls, store: TicketLogPullStoreConfig) -> tuple[str, str, str]:
+        """
+        构建门店配置去重键。
+        :param store: 门店配置实体
+        :return: 去重键值元组
+        """
+        # 唯一键由 vender_no + org_no + sap_org_no 共同组成，必须三者同时一致才认为重复。
+        return (
+            cls._cell_text(getattr(store, "vender_no", "")),
+            cls._cell_text(getattr(store, "org_no", "")),
+            cls._cell_text(getattr(store, "sap_org_no", "")),
         )
 
     @classmethod
@@ -2180,7 +2242,7 @@ class TicketLogPullService:
             request_url,
             data={
                 "venderId": record.vendor_id,
-                "storeId": record.store_id,
+                "storeId": str(record.store_id or "").strip(),
                 "posNo": record.pos_no,
                 "commandType": record.command_type,
                 "commandDataType": record.command_data_type,
@@ -2341,7 +2403,7 @@ class TicketLogPullService:
                 "currentPage": 1,
                 "pageSize": 20,
                 "venderId": record.vendor_id,
-                "storeId": record.store_id,
+                "storeId": str(record.store_id or "").strip(),
                 "posNo": record.pos_no,
                 "commandType": "",
                 "commandStatus": "",
@@ -2372,7 +2434,7 @@ class TicketLogPullService:
                 return row
             if int(row.get("venderId") or 0) != int(record.vendor_id):
                 continue
-            if int(row.get("storeId") or 0) != int(record.store_id):
+            if str(row.get("storeId") or "").strip() != str(record.store_id or "").strip():
                 continue
             if int(row.get("posNo") or 0) != int(record.pos_no):
                 continue
@@ -3059,7 +3121,7 @@ class TicketLogPullService:
         time_range_mode = str(command_content.get("timeRangeMode") or "").strip().lower()
         payload_data: dict[str, Any] = {
             "vendorId": record.vendor_id,
-            "storeId": record.store_id,
+            "storeId": str(record.store_id or "").strip(),
             "posNo": record.pos_no,
             "commandDataType": record.command_data_type,
             "modifyTime": command_content.get("modifyTime"),

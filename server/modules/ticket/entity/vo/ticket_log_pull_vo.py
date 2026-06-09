@@ -55,8 +55,9 @@ class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):
     日志拉取门店选项模型。
     """
 
-    store_id: int = Field(description="门店ID")
-    store_code: str | None = Field(default=None, description="门店编码")
+    store_id: str = Field(description="门店org_no，作为日志拉取实际提交值")
+    store_code: str | None = Field(default=None, description="门店编码，通常与org_no一致")
+    sap_org_no: str | None = Field(default=None, description="SAP机构编号")
     store_name: str = Field(description="门店名称")
 
 
@@ -181,7 +182,7 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
 
     ticket_id: int | None = Field(default=None, description="关联工单ID，可为空表示独立管理记录")
     vendor_id: int = Field(description="外部接口 venderId")
-    store_id: int = Field(description="外部接口 storeId")
+    store_id: str = Field(description="外部接口 storeId，实际使用门店org_no")
     pos_no: int = Field(description="外部接口 posNo")
     command_data_type: int = Field(default=1, description="数据类型：1日志，2DB")
     modify_time: date | str | None = Field(default=None, description="命令内容里的修改日期")
@@ -253,6 +254,9 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
             raise ValueError("日志拉取后自动AI分析时必须选择Provider或Agent")
         if self.auto_ai_enabled and not self.ticket_id:
             raise ValueError("未关联工单时不能启用自动AI分析")
+        self.store_id = str(self.store_id or "").strip()
+        if not self.store_id:
+            raise ValueError("storeId 不能为空")
         return self
 
 
@@ -267,7 +271,7 @@ class TicketLogPullQueryModel(QueryModel):
     keyword: str | None = Field(default=None, description="关键字")
     status: str | None = Field(default=None, description="内部处理状态")
     vendor_id: int | None = Field(default=None, description="商家vendorId")
-    store_id: int | None = Field(default=None, description="门店storeId")
+    store_id: str | None = Field(default=None, description="门店org_no")
     pos_no: int | None = Field(default=None, description="POS编号")
     modify_time: date | str | None = Field(default=None, description="页面配置的拉取日期")
 
@@ -377,7 +381,7 @@ class TicketLogPullListItemModel(TicketLogPullSummaryModel):
     project_name: str | None = Field(default=None, description="项目名称")
     module_name: str | None = Field(default=None, description="模块名称")
     vendor_id: int | None = None
-    store_id: int | None = None
+    store_id: str | None = None
     pos_no: int | None = None
     command_data_type: int | None = None
     command_content: dict[str, Any] | None = None

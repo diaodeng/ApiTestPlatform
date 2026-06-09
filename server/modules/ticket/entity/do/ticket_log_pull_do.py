@@ -22,7 +22,7 @@ class TicketLogPullRecord(Base):
     )
     ticket_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="工单ID")
     vendor_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="商户vendorId")
-    store_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="门店storeId")
+    store_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="门店org_no")
     pos_no: Mapped[int] = mapped_column(Integer, nullable=False, comment="POS编号")
     command_type: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="命令类型")
     command_data_type: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="命令数据类型")

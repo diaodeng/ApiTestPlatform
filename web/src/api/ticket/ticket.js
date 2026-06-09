@@ -214,10 +214,11 @@ export function listTicketLogPullRecords(query) {
 }
 
 // 查询日志拉取商家/门店联动选项
-export function getTicketLogPullVendorStoreOptions() {
+export function getTicketLogPullVendorStoreOptions(vendorId) {
   return request({
     url: '/ticket/log-pull/vendor-store-options',
     method: 'get',
+    params: vendorId ? { vendor_id: vendorId } : undefined,
   });
 }
 
