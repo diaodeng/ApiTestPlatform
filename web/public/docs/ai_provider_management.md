@@ -6,6 +6,11 @@
 ## 配置入口
 - 路径：`系统管理 -> AI Provider管理`
 - 菜单权限：`system:aiprovider:list`
+- 按钮权限：
+  - `system:aiprovider:query`：查看详情
+  - `system:aiprovider:add`：新增
+  - `system:aiprovider:edit`：修改
+  - `system:aiprovider:remove`：删除
 
 ## 支持的配置项
 - `providerCode`：Provider 编码，作为唯一标识。
@@ -35,3 +40,4 @@
 ## 变更说明
 - 该能力已经接入工单 AI 分析、消息发起 AI、日志拉取自动 AI 三条链路。
 - 后续如果新增流程节点，需要复用同一套 Provider 选择和下发逻辑。
+- AI Provider 的角色权限现在已补齐目录和按钮级权限，启动时会自动同步到系统菜单表，角色权限设置页面可以直接勾选对应权限码。
