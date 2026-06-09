@@ -263,10 +263,30 @@ const rules = {
   defaultPullLimit: [{ required: true, message: '默认拉取数量不能为空', trigger: 'change' }]
 }
 
+/**
+ * 创建远端同步字段的条件必填校验器。
+ * 仅在启用远端同步时校验字段是否为空。
+ * @param {string} message 校验失败提示文案。
+ * @returns {(rule: any, value: any, callback: (error?: Error) => void) => void} Element Plus 表单校验回调。
+ */
+function createRemoteRequiredValidator(message) {
+  return (_rule, value, callback) => {
+    if (!form.remoteSync.enabled) {
+      callback()
+      return
+    }
+    if (String(value ?? '').trim()) {
+      callback()
+      return
+    }
+    callback(new Error(message))
+  }
+}
+
 const remoteRules = {
-  pullUrl: [{ required: true, message: '拉取地址不能为空', trigger: 'blur' }],
-  ackUrl: [{ required: true, message: '回写地址不能为空', trigger: 'blur' }],
-  consumer: [{ required: true, message: '消费者标识不能为空', trigger: 'blur' }],
+  pullUrl: [{ validator: createRemoteRequiredValidator('拉取地址不能为空'), trigger: 'blur' }],
+  ackUrl: [{ validator: createRemoteRequiredValidator('回写地址不能为空'), trigger: 'blur' }],
+  consumer: [{ validator: createRemoteRequiredValidator('消费者标识不能为空'), trigger: 'blur' }],
   limit: [{ required: true, message: '每次拉取数量不能为空', trigger: 'change' }],
   timeoutSec: [{ required: true, message: '抓取超时不能为空', trigger: 'change' }]
 }
@@ -424,6 +444,20 @@ function validateElForm(refName) {
     formRef.validate(valid => resolve(valid))
   })
 }
+
+watch(
+  () => form.remoteSync.enabled,
+  enabled => {
+    if (enabled) {
+      return
+    }
+    const remoteFormRef = proxy.$refs.remoteFormRef
+    if (!remoteFormRef || typeof remoteFormRef.clearValidate !== 'function') {
+      return
+    }
+    remoteFormRef.clearValidate(['pullUrl', 'ackUrl', 'consumer'])
+  }
+)
 
 async function handleSave() {
   const [basicValid, remoteValid] = await Promise.all([

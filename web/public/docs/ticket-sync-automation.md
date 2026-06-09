@@ -34,6 +34,7 @@
 - `remoteSync.enabled`
   - 是否允许远端拉取任务执行。
   - 这不是“启动定时任务”的按钮，只是控制任务是否放行；任务仍然由调度器或手动触发。
+  - 关闭时，页面不再强制校验 `pullUrl/ackUrl/consumer` 必填，可直接保存其他配置项。
 - `remoteSync.pullUrl`
   - 拉取未同步工单的地址。
 - `remoteSync.ackUrl`
