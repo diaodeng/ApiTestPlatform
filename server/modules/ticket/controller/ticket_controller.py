@@ -634,7 +634,7 @@ async def get_ticket_log_pull_store_configs(
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
 )
 @log_decorator(title="门店配置导入", business_type=1)
-async def import_ticket_log_pull_store_configs(
+def import_ticket_log_pull_store_configs(
     request: Request,
     file: UploadFile = File(...),
     import_mode: str = Form(default="incremental"),
@@ -653,8 +653,8 @@ async def import_ticket_log_pull_store_configs(
     try:
         if not file.filename.lower().endswith(".xlsx"):
             return ResponseUtil.failure(msg="仅支持 xlsx 文件")
-        result = await TicketLogPullService.import_store_config_services(
-            query_db, await file.read(), import_mode, current_user
+        result = TicketLogPullService.import_store_config_services(
+            query_db, file.file.read(), import_mode, current_user
         )
         return (
             ResponseUtil.success(data=result.result, msg=result.message)
