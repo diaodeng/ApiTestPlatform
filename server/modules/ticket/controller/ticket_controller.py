@@ -1,7 +1,7 @@
 import json
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -414,6 +414,7 @@ async def add_ticket(
 @ticketController.post("/sync/external", dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:external"))])
 async def sync_external_ticket(
     request: Request,
+    background_tasks: BackgroundTasks,
     query_db: Session = Depends(get_db),
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
@@ -424,6 +425,7 @@ async def sync_external_ticket(
     表单模式下支持扁平字段，会自动归一化为 `TicketExternalSyncUpsertModel`。
     必填字段：`ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`。
     `title` 可选，缺省时由服务层按“轻量AI总结 -> 描述前100字符”规则补齐。
+    为避免长时间阻塞主请求，AI翻译、AI标题总结、自动化和群推送改为入库成功后后台异步执行。
     """
     try:
         payload = await _load_external_sync_payload(request)
@@ -437,8 +439,20 @@ async def sync_external_ticket(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        result = TicketSyncService.sync_external_ticket(query_db, sync_object, current_user)
+        result = TicketSyncService.sync_external_ticket(
+            query_db,
+            sync_object,
+            current_user,
+            sync_scene="external_sync",
+            defer_post_process=True,
+        )
         if result.is_success:
+            background_tasks.add_task(
+                TicketSyncService.run_deferred_sync_post_process,
+                sync_object.model_dump(),
+                current_user.model_dump(),
+                "external_sync",
+            )
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
     except Exception as e:

@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 优化外部工单同步接口 `POST /ticket/sync/external`：主链路改为“先入库后返回”，AI翻译/标题总结、自动化与群推送改为后台异步后处理，降低接口阻塞与数据库会话长占用风险；后台AI异常不再影响入库成功结果。
 1. 修复工单日志拉取列表接口 `GET /ticket/log-pulls-by-ticket` 的 `storeId` 类型问题：返回前统一将 `storeId` 归一化为字符串，避免 `TicketLogPullListItemModel` 校验因整型输入报错。
 1. 调整外部工单同步映射规则：`ticketVender`/`ticketModle`/商家映射改为关键词“包含匹配”；处理人映射保持完整匹配并新增 `email` 支持；门店按“商家ID + sap_org_no”查 `ticket_log_pull_store_config`，未命中原样保存。
 1. 补充外部工单同步接口文档标准请求示例：新增驼峰与下划线两份 JSON 示例，明确可直接用于 `POST /ticket/sync/external` 对接联调。

@@ -7,6 +7,7 @@ import requests
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from config.database import SessionLocal
 from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.do.module_do import HrmModule
@@ -1444,6 +1445,7 @@ class TicketSyncService:
         sync_object: TicketExternalSyncUpsertModel,
         current_user: CurrentUserModel,
         sync_scene: str = "external_sync",
+        defer_post_process: bool = False,
     ) -> CrudResponseModel:
         """
         外部工单同步入库并按配置执行后续动作。
@@ -1452,46 +1454,78 @@ class TicketSyncService:
         :param sync_object: 外部同步入参。
         :param current_user: 当前登录用户。
         :param sync_scene: 同步触发场景，支持 external_sync/remote_pull。
+        :param defer_post_process: 是否延后执行AI、自动化和群推送，开启后先快速入库返回。
         :return: 同步结果。
         """
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
         config = cls._load_sync_config(db)
         automation = sync_object.automation
-        resolved_title, title_meta = cls._resolve_sync_title(
-            db,
-            sync_object=sync_object,
-            ticket_id=getattr(ticket, "ticket_id", None),
-            current_user=current_user,
-        )
-        if resolved_title != str(sync_object.title or "").strip():
-            sync_object = sync_object.model_copy(update={"title": resolved_title})
-        detected = cls._detect_fields(db, sync_object, config)
-        translation_enabled = TicketLightAiService.is_translation_enabled(db)
-        if sync_scene == "remote_pull":
-            sync_translate_enabled = bool(
-                automation.auto_translate
-                if automation is not None
-                else (config.get("remoteSync") or {}).get("autoTranslateOnPull", True)
-            )
+        title_meta: dict[str, Any] = {"mode": "raw", "title": str(sync_object.title or "").strip()}
+        if defer_post_process:
+            # 延后AI时先用稳定兜底标题入库，避免主链路被AI网络调用阻塞。
+            resolved_title = str(sync_object.title or "").strip() or str(sync_object.description or "").strip()[:100]
+            if not resolved_title:
+                resolved_title = sync_object.ticket_no
+            if resolved_title != str(sync_object.title or "").strip():
+                sync_object = sync_object.model_copy(update={"title": resolved_title})
+            if not str(title_meta.get("title") or "").strip():
+                title_meta = {"mode": "fallback", "fallback_title": resolved_title}
         else:
-            sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
-        should_translate = translation_enabled and sync_translate_enabled
-        logger.info(
-            f"外部工单同步翻译决策: ticket_no={sync_object.ticket_no}, scene={sync_scene}, "
-            f"global_switch={translation_enabled}, scene_switch={sync_translate_enabled}, "
-            f"should_translate={should_translate}"
-        )
-        translated_description, translation_meta, origin_description = cls._translate_sync_description(
-            db,
-            title=sync_object.title or "",
-            description=sync_object.description,
-            ticket_id=getattr(ticket, "ticket_id", None),
-            ticket_no=sync_object.ticket_no,
-            current_user=current_user,
-            enabled=should_translate,
-        )
-        if should_translate:
-            sync_object = sync_object.model_copy(update={"description": translated_description})
+            try:
+                resolved_title, title_meta = cls._resolve_sync_title(
+                    db,
+                    sync_object=sync_object,
+                    ticket_id=getattr(ticket, "ticket_id", None),
+                    current_user=current_user,
+                )
+            except Exception as exc:
+                logger.warning(f"外部工单同步标题处理异常，已回退描述截断: ticket_no={sync_object.ticket_no}, error={exc}")
+                resolved_title = str(sync_object.title or "").strip() or str(sync_object.description or "").strip()[:100]
+                if not resolved_title:
+                    resolved_title = sync_object.ticket_no
+                title_meta = {"mode": "fallback", "fallback_title": resolved_title, "error": str(exc)}
+            if resolved_title != str(sync_object.title or "").strip():
+                sync_object = sync_object.model_copy(update={"title": resolved_title})
+        detected = cls._detect_fields(db, sync_object, config)
+        should_translate = False
+        translated_description = str(sync_object.description or "").strip()
+        translation_meta: dict[str, Any] = {"translated_text": "", "skipped": True}
+        origin_description = str(sync_object.description or "").strip()
+        if not defer_post_process:
+            translation_enabled = TicketLightAiService.is_translation_enabled(db)
+            if sync_scene == "remote_pull":
+                sync_translate_enabled = bool(
+                    automation.auto_translate
+                    if automation is not None
+                    else (config.get("remoteSync") or {}).get("autoTranslateOnPull", True)
+                )
+            else:
+                sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
+            should_translate = translation_enabled and sync_translate_enabled
+            logger.info(
+                f"外部工单同步翻译决策: ticket_no={sync_object.ticket_no}, scene={sync_scene}, "
+                f"global_switch={translation_enabled}, scene_switch={sync_translate_enabled}, "
+                f"should_translate={should_translate}"
+            )
+            try:
+                translated_description, translation_meta, origin_description = cls._translate_sync_description(
+                    db,
+                    title=sync_object.title or "",
+                    description=sync_object.description,
+                    ticket_id=getattr(ticket, "ticket_id", None),
+                    ticket_no=sync_object.ticket_no,
+                    current_user=current_user,
+                    enabled=should_translate,
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"外部工单同步翻译异常，已回退原文: ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}"
+                )
+                translated_description = str(sync_object.description or "").strip()
+                translation_meta = {"translated_text": "", "skipped": True, "error": str(exc)}
+                origin_description = str(sync_object.description or "").strip()
+            if should_translate:
+                sync_object = sync_object.model_copy(update={"description": translated_description})
         payload, meta, revision = cls._build_upsert_payload(db, ticket, sync_object, detected, current_user)
         if title_meta and title_meta.get("mode") != "raw":
             extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
@@ -1566,6 +1600,19 @@ class TicketSyncService:
             db.rollback()
             raise
 
+        if defer_post_process:
+            result = (
+                TicketService.get_ticket_detail_services(db, ticket.ticket_id)
+                or CamelCaseUtil.transform_result(ticket)
+            )
+            result["syncSummary"] = cls.extract_sync_summary(result.get("extraData"))
+            result["syncDeferred"] = True
+            return CrudResponseModel(
+                is_success=True,
+                message="外部工单同步成功（AI与自动化已转后台处理）",
+                result=result,
+            )
+
         should_run_automation = bool(
             (
                 automation
@@ -1612,6 +1659,146 @@ class TicketSyncService:
             message="外部工单同步成功",
             result=result,
         )
+
+    @classmethod
+    def run_deferred_sync_post_process(
+        cls,
+        sync_payload: dict[str, Any],
+        current_user_payload: dict[str, Any],
+        sync_scene: str = "external_sync",
+    ) -> None:
+        """
+        执行外部工单同步的延后后处理任务（AI、自动化、群推送）。
+        :param sync_payload: 外部同步入参字典。
+        :param current_user_payload: 当前用户字典。
+        :param sync_scene: 同步触发场景。
+        :return: 无。
+        """
+        query_db = SessionLocal()
+        try:
+            sync_object = TicketExternalSyncUpsertModel.model_validate(sync_payload)
+            current_user = CurrentUserModel.model_validate(current_user_payload)
+            cls._execute_deferred_sync_post_process(query_db, sync_object, current_user, sync_scene)
+        except Exception as exc:
+            logger.warning(f"外部工单同步延后后处理异常: ticket_no={sync_payload.get('ticketNo') or sync_payload.get('ticket_no')}, error={exc}")
+        finally:
+            query_db.close()
+
+    @classmethod
+    def _execute_deferred_sync_post_process(
+        cls,
+        db: Session,
+        sync_object: TicketExternalSyncUpsertModel,
+        current_user: CurrentUserModel,
+        sync_scene: str,
+    ) -> None:
+        """
+        处理外部同步入库后的重任务，避免阻塞主入库链路。
+        :param db: 数据库会话。
+        :param sync_object: 外部同步入参。
+        :param current_user: 当前用户。
+        :param sync_scene: 同步触发场景。
+        :return: 无。
+        """
+        ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
+        if not ticket:
+            logger.warning(f"外部工单同步延后后处理跳过: 未找到工单 ticket_no={sync_object.ticket_no}")
+            return
+        config = cls._load_sync_config(db)
+        detected = cls._detect_fields(db, sync_object, config)
+        automation = sync_object.automation
+        update_data: dict[str, Any] = {}
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+
+        try:
+            if not str(sync_object.title or "").strip():
+                resolved_title, title_meta = cls._resolve_sync_title(
+                    db,
+                    sync_object=sync_object,
+                    ticket_id=ticket.ticket_id,
+                    current_user=current_user,
+                )
+                if resolved_title and resolved_title != str(ticket.title or "").strip():
+                    update_data["title"] = resolved_title
+                if title_meta and title_meta.get("mode") != "raw":
+                    extra_data["title_summary"] = title_meta
+        except Exception as exc:
+            logger.warning(f"外部工单同步延后标题处理失败: ticket_no={sync_object.ticket_no}, error={exc}")
+
+        try:
+            translation_enabled = TicketLightAiService.is_translation_enabled(db)
+            if sync_scene == "remote_pull":
+                sync_translate_enabled = bool(
+                    automation.auto_translate
+                    if automation is not None
+                    else (config.get("remoteSync") or {}).get("autoTranslateOnPull", True)
+                )
+            else:
+                sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
+            should_translate = translation_enabled and sync_translate_enabled
+            translated_description, translation_meta, origin_description = cls._translate_sync_description(
+                db,
+                title=str(update_data.get("title") or ticket.title or ""),
+                description=sync_object.description,
+                ticket_id=ticket.ticket_id,
+                ticket_no=sync_object.ticket_no,
+                current_user=current_user,
+                enabled=should_translate,
+            )
+            if should_translate and translated_description and translated_description != str(ticket.description or "").strip():
+                update_data["description"] = translated_description
+            if should_translate and origin_description and str(translation_meta.get("translated_text") or "").strip():
+                extra_data["origin_description"] = origin_description
+                extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                if translation_meta.get("provider_code"):
+                    extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
+                if translation_meta.get("prompt_code"):
+                    extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
+        except Exception as exc:
+            logger.warning(f"外部工单同步延后翻译处理失败: ticket_no={sync_object.ticket_no}, error={exc}")
+
+        if update_data or extra_data != (ticket.extra_data or {}):
+            update_data["extra_data"] = extra_data
+            update_data["update_by"] = _user_name(current_user)
+            update_data["update_time"] = datetime.now()
+            try:
+                TicketDao.update_ticket(db, ticket.ticket_id, update_data)
+                db.commit()
+                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            except Exception as exc:
+                db.rollback()
+                logger.warning(f"外部工单同步延后更新工单失败: ticket_no={sync_object.ticket_no}, error={exc}")
+
+        should_run_automation = bool(
+            (
+                automation
+                and (
+                    automation.auto_identify
+                    or automation.auto_log_pull
+                    or automation.auto_ai_analysis
+                )
+            )
+            or config.get("autoRunOnSync")
+        )
+        if should_run_automation:
+            try:
+                cls.run_sync_automation(db, ticket.ticket_id, sync_object, detected, current_user)
+            except Exception as exc:
+                logger.warning(f"外部工单同步延后自动化失败: ticket_no={sync_object.ticket_no}, error={exc}")
+
+        try:
+            group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+            sync_summary = cls.extract_sync_summary(ticket.extra_data) or {}
+            TicketSyncNotifyService.send_group_message_for_ticket(
+                db,
+                ticket=ticket,
+                group_config=group_config,
+                scene=sync_scene,
+                manual_trigger=False,
+                sync_summary=sync_summary,
+            )
+        except Exception as exc:
+            logger.warning(f"外部工单同步延后群推送失败: ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}")
 
     @classmethod
     def run_sync_automation(

@@ -59,7 +59,7 @@ sequenceDiagram
 | 1 | 外部系统调用 `POST /ticket/sync/external`，必填 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`；`title` 允许缺省。 |
 | 2 | `TicketSyncService.sync_external_ticket` 以 `ticketNo` 为幂等键创建或更新工单，并在 `extra_data.external_sync` 中递增 `revision`。 |
 | 3 | 同步元数据会记录来源系统、来源记录 ID、最近导入时间、最近一次交付状态、每个消费方的交付 revision 以及自动化执行状态。 |
-| 4 | 如果本次请求携带 `automation`，或者系统参数 `ticket.sync.automation.autoRunOnSync=true`，同步服务会继续执行自动识别、相似工单检索、自动拉日志和自动 AI 分析。 |
+| 4 | 主链路会先完成工单入库并快速返回；AI翻译、AI标题总结、自动化与群推送改为后台异步后处理，避免阻塞 `POST /ticket/sync/external` 请求。 |
 | 5 | 字段识别采用可配置映射和正则规则：项目/模块/商家按关键词包含匹配；处理人按完整名称匹配（支持 email）；门店按商家ID+`sap_org_no` 查询配置。规则统一存放在 `ticket.sync.automation`。 |
 | 6 | 内网消费方调用 `GET /ticket/sync/pending` 时，只会拿到 `external_sync.revision > consumers.{consumer}.delivered_revision` 的工单。 |
 | 7 | 拉取成功后，服务端立即回写该消费方的 `delivered_revision`、`last_batch_id` 和 `last_pulled_at`，防止同一 revision 被重复返回。 |
