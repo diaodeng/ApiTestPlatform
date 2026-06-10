@@ -3,9 +3,9 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
-from pydantic import ValidationError
 
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
@@ -41,6 +41,9 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketStatisticsQueryModel,
     TicketStatusChangeModel,
     TicketSyncAckRequestModel,
+    TicketSyncGroupPushSendModel,
+    TicketSyncPersonReminderPreviewModel,
+    TicketSyncPersonReminderRunModel,
     TicketSyncPullQueryModel,
     TicketUpdateModel,
     TicketUserOptionQueryModel,
@@ -149,8 +152,8 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
 
     data["source"] = {
         "system": str((source.get("system") or source_system or "external") or "external").strip() or "external",
-        "record_id": str((source.get("record_id") or record_id or "")).strip() or None,
-        "record_url": str((source.get("record_url") or record_url or "")).strip() or None,
+        "record_id": str(source.get("record_id") or record_id or "").strip() or None,
+        "record_url": str(source.get("record_url") or record_url or "").strip() or None,
         "pushed_at": source.get("pushed_at") or pushed_at,
     }
     if ticket_no:
@@ -486,6 +489,110 @@ async def update_sync_automation_config(
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/sync/notify/push-options",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:list"))],
+)
+async def get_sync_notify_push_options(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取工单通知可用推送配置选项。
+    :param request: 请求对象。
+    :param query_db: 数据库会话。
+    :return: 推送配置列表。
+    """
+    try:
+        return ResponseUtil.success(data=TicketSyncService.get_sync_notify_push_options_services(query_db))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/sync/notify/person/preview",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:list"))],
+)
+async def preview_sync_person_reminder(
+    request: Request,
+    query_object: TicketSyncPersonReminderPreviewModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    按用户ID或邮箱预览工单催办统计。
+    :param request: 请求对象。
+    :param query_object: 预览参数，支持 userId 或 email。
+    :param query_db: 数据库会话。
+    :return: 人维度超时统计结果。
+    """
+    try:
+        result = TicketSyncService.preview_person_reminder_services(
+            query_db,
+            user_id=query_object.user_id,
+            email=query_object.email,
+        )
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/sync/notify/person/run",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def run_sync_person_reminder(
+    request: Request,
+    query_object: TicketSyncPersonReminderRunModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    手动执行工单人维度催办通知。
+    :param request: 请求对象。
+    :param query_object: 执行参数，支持限定 userId 或 email。
+    :param query_db: 数据库会话。
+    :return: 执行结果摘要。
+    """
+    try:
+        result = TicketSyncService.run_person_reminder_services(
+            query_db,
+            trigger_source="manual",
+            user_id=query_object.user_id,
+            email=query_object.email,
+        )
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/sync/notify/group/send-by-ticket",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def send_sync_group_push_by_ticket(
+    request: Request,
+    query_object: TicketSyncGroupPushSendModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    按工单号手动发送群消息通知。
+    :param request: 请求对象。
+    :param query_object: 发送参数，包含工单号、可选推送渠道和模板。
+    :param query_db: 数据库会话。
+    :return: 推送执行结果。
+    """
+    try:
+        result = TicketSyncService.send_group_push_by_ticket_no_services(
+            query_db,
+            ticket_no=query_object.ticket_no,
+            push_ids=query_object.push_ids,
+            message_template=query_object.message_template,
+        )
+        return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

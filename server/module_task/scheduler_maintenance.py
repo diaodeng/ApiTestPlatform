@@ -147,3 +147,49 @@ def pull_public_ticket_sync(
         result.get("ackedCount"),
     )
     return result
+
+
+@register_job("module_task.scheduler_maintenance.ticket_person_overdue_reminder")
+def ticket_person_overdue_reminder(
+    *args,
+    user_id: int | None = None,
+    email: str | None = None,
+    **kwargs,
+):
+    """
+    工单人维度催办定时任务。
+
+    :param user_id: 可选用户ID，传入后仅提醒该用户。
+    :param email: 可选邮箱，传入后仅提醒该邮箱对应用户。
+    :return: 执行结果摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+
+    resolved_user_id = user_id if user_id is not None else kwargs.pop("userId", None)
+    resolved_email = email if email is not None else kwargs.pop("email", None)
+
+    normalized_user_id = None
+    try:
+        if resolved_user_id not in (None, ""):
+            normalized_user_id = int(resolved_user_id)
+    except Exception:
+        normalized_user_id = None
+
+    with SessionLocal() as db:
+        result = TicketSyncService.run_person_reminder_services(
+            db,
+            trigger_source="scheduler",
+            user_id=normalized_user_id,
+            email=str(resolved_email or "").strip() or None,
+        )
+    logger.info(
+        "工单人维度催办任务执行完成 | user_id={} email={} sent_people={} sent_push_count={} skipped={}",
+        resolved_user_id or "-",
+        resolved_email or "-",
+        result.get("sentPeople"),
+        result.get("sentPushCount"),
+        result.get("skipped"),
+    )
+    return result

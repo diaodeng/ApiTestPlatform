@@ -204,3 +204,10 @@
 
 ### 20260609
 1. 日志拉取弹窗的门店下拉改为以 `org_no` 作为实际回填值，并补齐 `org_no / sap_org_no / 门店名称` 展示与搜索，避免把数值门店主键继续当成下拉提交值。
+
+### 20260610
+1. 工单同步配置页新增“工单群消息推送”和“按人催办通知”可视化配置，支持消息模板变量、触发场景开关、手动按工单号发送群消息、按用户ID/邮箱统计并催办。
+2. 新增工单同步通知后端服务，支持飞书 tenant_access_token 缓存、按邮箱查用户 open_id、按多维表格字段聚合超时记录并按人发送消息（动态 @）。
+3. 新增接口：推送配置下拉、按人催办预览、按人催办执行、按工单号手动发群消息；并扩展同步配置结构 `groupPush/personReminder`。
+4. 新增定时任务键 `module_task.scheduler_maintenance.ticket_person_overdue_reminder`，可在任务调度中定时执行按人催办。
+5. AI 翻译开关收敛：总开关在 AI 配置中心；外部直推由 `autoTranslateOnSync` 控制；远端拉取由 `remoteSync.autoTranslateOnPull` 控制；同时补充关键执行日志用于排查“为什么未执行”。

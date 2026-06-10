@@ -99,6 +99,232 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
+          <span>工单群消息推送</span>
+          <el-tag type="success" effect="plain">推送项来自推送配置管理</el-tag>
+        </div>
+      </template>
+
+      <el-form :model="form.groupPush" label-width="150px">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="启用群推送">
+              <el-switch v-model="form.groupPush.enabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="推送渠道">
+              <el-select
+                v-model="form.groupPush.pushIds"
+                multiple
+                filterable
+                collapse-tags
+                :loading="pushOptionsLoading"
+                placeholder="请选择推送配置"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in pushOptions"
+                  :key="item.pushId"
+                  :label="item.label"
+                  :value="item.pushId"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="外部推送后发送">
+              <el-switch v-model="form.groupPush.sendAfterExternalSync" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="远端拉取后发送">
+              <el-switch v-model="form.groupPush.sendAfterRemotePull" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="自动推送模板">
+              <el-input
+                v-model="form.groupPush.template"
+                type="textarea"
+                :rows="5"
+                placeholder="可用变量：${ticket_no} ${ticket_title} ${project_name} ${module_name} ${ticket_status} ${assignee_name} ${description}"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="手动发送模板">
+              <el-input
+                v-model="form.groupPush.manualTemplate"
+                type="textarea"
+                :rows="4"
+                placeholder="留空时复用自动推送模板"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
+          <span>按人催办通知</span>
+          <el-tag type="warning" effect="plain">按人和时间阈值聚合后通知</el-tag>
+        </div>
+      </template>
+
+      <el-form :model="form.personReminder" label-width="150px">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="启用按人催办">
+              <el-switch v-model="form.personReminder.enabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="催办推送渠道">
+              <el-select
+                v-model="form.personReminder.pushIds"
+                multiple
+                filterable
+                collapse-tags
+                :loading="pushOptionsLoading"
+                placeholder="请选择推送配置"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in pushOptions"
+                  :key="`person-${item.pushId}`"
+                  :label="item.label"
+                  :value="item.pushId"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="飞书 appId">
+              <el-input v-model="form.personReminder.feishuAppId" placeholder="用于查询飞书人员信息" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="飞书 appSecret">
+              <el-input v-model="form.personReminder.feishuAppSecret" show-password placeholder="用于查询飞书人员信息" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="多维表格 appToken">
+              <el-input v-model="form.personReminder.appToken" placeholder="飞书多维表格应用 Token" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="多维表格 tableId">
+              <el-input v-model="form.personReminder.tableId" placeholder="飞书多维表格表ID" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="视图 viewId">
+              <el-input v-model="form.personReminder.viewId" placeholder="可选，不填默认表视图" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="阈值(分钟)">
+              <el-input-number v-model="form.personReminder.thresholdMinutes" :min="1" :max="10080" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="人员字段名">
+              <el-input v-model="form.personReminder.personField" placeholder="多维表格中的人员字段名" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="时间字段名">
+              <el-input v-model="form.personReminder.timeField" placeholder="多维表格中的时间字段名" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="明细条数上限">
+              <el-input-number v-model="form.personReminder.maxRowsPerPerson" :min="1" :max="200" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="分页大小">
+              <el-input-number v-model="form.personReminder.pageSize" :min="1" :max="500" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="过滤公式">
+              <el-input
+                v-model="form.personReminder.filterFormula"
+                type="textarea"
+                :rows="3"
+                placeholder='可选，飞书 filter 公式，例如 CurrentValue.[状态] != "已关闭"'
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="催办消息模板">
+              <el-input
+                v-model="form.personReminder.messageTemplate"
+                type="textarea"
+                :rows="6"
+                placeholder="可用变量：${person_name} ${overdue_count} ${threshold_minutes} ${rows_markdown} ${now_time} ${email}"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
+          <span>手动触发入口</span>
+          <el-tag effect="plain">输入工单号或用户信息后直接执行</el-tag>
+        </div>
+      </template>
+
+      <el-row :gutter="16">
+        <el-col :xs="24" :lg="12">
+          <el-form :model="groupSendForm" label-width="110px">
+            <el-form-item label="工单号">
+              <el-input v-model="groupSendForm.ticketNo" placeholder="输入工单号后发送群消息" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="groupSendLoading" @click="handleSendGroupPushByTicket">
+                发送工单群消息
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </el-col>
+        <el-col :xs="24" :lg="12">
+          <el-form :model="personQueryForm" label-width="110px">
+            <el-form-item label="用户ID">
+              <el-input v-model="personQueryForm.userId" placeholder="可选，支持数字ID" />
+            </el-form-item>
+            <el-form-item label="邮箱">
+              <el-input v-model="personQueryForm.email" placeholder="可选，支持邮箱" />
+            </el-form-item>
+            <el-form-item>
+              <el-button :loading="personPreviewLoading" @click="handlePreviewPersonReminder">统计该用户</el-button>
+              <el-button type="primary" :loading="personRunLoading" @click="handleRunPersonReminder">
+                发送该用户催办
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </el-col>
+      </el-row>
+
+      <el-alert
+        v-if="personPreviewResult"
+        type="info"
+        show-icon
+        :closable="false"
+        :title="`统计结果：命中 ${personPreviewResult.personCount || 0} 人，超时记录 ${personPreviewResult.overdueRecordCount || 0} 条`"
+      />
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
           <span>识别规则</span>
           <el-tag effect="plain">按文本匹配，找不到则保留原值</el-tag>
         </div>
@@ -230,12 +456,32 @@
 </template>
 
 <script setup name="TicketSyncAutomation">
-import { getTicketSyncAutomationConfig, saveTicketSyncAutomationConfig } from '@/api/ticket/ticket'
+import {
+  getTicketSyncAutomationConfig,
+  listTicketSyncNotifyPushOptions,
+  previewTicketSyncPersonReminder,
+  runTicketSyncPersonReminder,
+  saveTicketSyncAutomationConfig,
+  sendTicketSyncGroupPushByTicket
+} from '@/api/ticket/ticket'
 
 const { proxy } = getCurrentInstance()
 
 const loading = ref(false)
 const saving = ref(false)
+const pushOptionsLoading = ref(false)
+const pushOptions = ref([])
+const groupSendLoading = ref(false)
+const personPreviewLoading = ref(false)
+const personRunLoading = ref(false)
+const personPreviewResult = ref(null)
+const groupSendForm = reactive({
+  ticketNo: ''
+})
+const personQueryForm = reactive({
+  userId: '',
+  email: ''
+})
 
 const form = reactive(createDefaultForm())
 const mappingTexts = reactive({
@@ -312,6 +558,30 @@ function createDefaultForm() {
         origin: ''
       }
     },
+    groupPush: {
+      enabled: false,
+      pushIds: [],
+      sendAfterExternalSync: false,
+      sendAfterRemotePull: false,
+      template: '',
+      manualTemplate: ''
+    },
+    personReminder: {
+      enabled: false,
+      pushIds: [],
+      feishuAppId: '',
+      feishuAppSecret: '',
+      appToken: '',
+      tableId: '',
+      viewId: '',
+      filterFormula: '',
+      personField: '',
+      timeField: '',
+      thresholdMinutes: 30,
+      messageTemplate: '',
+      maxRowsPerPerson: 20,
+      pageSize: 500
+    },
     projectMappings: [],
     moduleMappings: [],
     vendorMappings: [],
@@ -376,6 +646,34 @@ function applyConfig(payload) {
     }
   }
 
+  const groupPush = payload.groupPush || {}
+  form.groupPush = {
+    enabled: Boolean(groupPush.enabled),
+    pushIds: Array.isArray(groupPush.pushIds) ? groupPush.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
+    sendAfterExternalSync: Boolean(groupPush.sendAfterExternalSync),
+    sendAfterRemotePull: Boolean(groupPush.sendAfterRemotePull),
+    template: groupPush.template || '',
+    manualTemplate: groupPush.manualTemplate || ''
+  }
+
+  const personReminder = payload.personReminder || {}
+  form.personReminder = {
+    enabled: Boolean(personReminder.enabled),
+    pushIds: Array.isArray(personReminder.pushIds) ? personReminder.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
+    feishuAppId: personReminder.feishuAppId || '',
+    feishuAppSecret: personReminder.feishuAppSecret || '',
+    appToken: personReminder.appToken || '',
+    tableId: personReminder.tableId || '',
+    viewId: personReminder.viewId || '',
+    filterFormula: personReminder.filterFormula || '',
+    personField: personReminder.personField || '',
+    timeField: personReminder.timeField || '',
+    thresholdMinutes: Number(personReminder.thresholdMinutes || 30),
+    messageTemplate: personReminder.messageTemplate || '',
+    maxRowsPerPerson: Number(personReminder.maxRowsPerPerson || 20),
+    pageSize: Number(personReminder.pageSize || 500)
+  }
+
   form.projectMappings = normalizeArray(payload.projectMappings)
   form.moduleMappings = normalizeArray(payload.moduleMappings)
   form.vendorMappings = normalizeArray(payload.vendorMappings)
@@ -434,6 +732,17 @@ function loadConfig() {
     })
 }
 
+function loadPushOptions() {
+  pushOptionsLoading.value = true
+  listTicketSyncNotifyPushOptions()
+    .then(response => {
+      pushOptions.value = Array.isArray(response.data) ? response.data : []
+    })
+    .finally(() => {
+      pushOptionsLoading.value = false
+    })
+}
+
 function validateElForm(refName) {
   return new Promise(resolve => {
     const formRef = proxy.$refs[refName]
@@ -487,8 +796,98 @@ async function handleSave() {
   }
 }
 
+function normalizeOptionalInt(value) {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return null
+  }
+  return Math.trunc(parsed)
+}
+
+function normalizeOptionalEmail(value) {
+  const text = String(value || '').trim()
+  return text || null
+}
+
+function validatePersonQuery() {
+  const hasUserId = normalizeOptionalInt(personQueryForm.userId)
+  const hasEmail = normalizeOptionalEmail(personQueryForm.email)
+  if (!hasUserId && !hasEmail) {
+    proxy.$modal.msgWarning('请输入用户ID或邮箱')
+    return null
+  }
+  return {
+    userId: hasUserId,
+    email: hasEmail
+  }
+}
+
+function handlePreviewPersonReminder() {
+  const payload = validatePersonQuery()
+  if (!payload) {
+    return
+  }
+  personPreviewLoading.value = true
+  previewTicketSyncPersonReminder(payload)
+    .then(response => {
+      personPreviewResult.value = response.data || null
+      proxy.$modal.msgSuccess('统计完成')
+    })
+    .catch(error => {
+      personPreviewResult.value = null
+      proxy.$modal.msgError(error?.message || '统计失败')
+    })
+    .finally(() => {
+      personPreviewLoading.value = false
+    })
+}
+
+function handleRunPersonReminder() {
+  personRunLoading.value = true
+  const payload = {
+    userId: normalizeOptionalInt(personQueryForm.userId),
+    email: normalizeOptionalEmail(personQueryForm.email)
+  }
+  runTicketSyncPersonReminder(payload)
+    .then(response => {
+      proxy.$modal.msgSuccess(`催办执行完成，已发送 ${response.data?.sentPeople || 0} 人`)
+    })
+    .catch(error => {
+      proxy.$modal.msgError(error?.message || '催办执行失败')
+    })
+    .finally(() => {
+      personRunLoading.value = false
+    })
+}
+
+function handleSendGroupPushByTicket() {
+  const ticketNo = String(groupSendForm.ticketNo || '').trim()
+  if (!ticketNo) {
+    proxy.$modal.msgWarning('请输入工单号')
+    return
+  }
+  groupSendLoading.value = true
+  sendTicketSyncGroupPushByTicket({
+    ticketNo
+  })
+    .then(response => {
+      const successCount = response.data?.pushSuccessCount || 0
+      proxy.$modal.msgSuccess(`发送完成，成功渠道数：${successCount}`)
+    })
+    .catch(error => {
+      proxy.$modal.msgError(error?.message || '发送失败')
+    })
+    .finally(() => {
+      groupSendLoading.value = false
+    })
+}
+
 onMounted(() => {
   loadConfig()
+  loadPushOptions()
 })
 </script>
 

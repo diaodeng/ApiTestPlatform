@@ -90,6 +90,41 @@ export function saveTicketSyncAutomationConfig(data) {
   });
 }
 
+// 查询同步通知推送配置选项
+export function listTicketSyncNotifyPushOptions() {
+  return request({
+    url: '/ticket/sync/notify/push-options',
+    method: 'get',
+  });
+}
+
+// 预览按人催办统计
+export function previewTicketSyncPersonReminder(data) {
+  return request({
+    url: '/ticket/sync/notify/person/preview',
+    method: 'post',
+    data,
+  });
+}
+
+// 执行按人催办通知
+export function runTicketSyncPersonReminder(data) {
+  return request({
+    url: '/ticket/sync/notify/person/run',
+    method: 'post',
+    data,
+  });
+}
+
+// 按工单号手动发送群消息
+export function sendTicketSyncGroupPushByTicket(data) {
+  return request({
+    url: '/ticket/sync/notify/group/send-by-ticket',
+    method: 'post',
+    data,
+  });
+}
+
 // 新增工单
 export function addTicket(data) {
   return request({

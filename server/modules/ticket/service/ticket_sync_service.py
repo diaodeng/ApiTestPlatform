@@ -18,8 +18,8 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import (
     TicketAiAnalysisRequestModel,
     TicketExternalSyncUpsertModel,
-    TicketSyncAutomationModel,
     TicketSyncAckRequestModel,
+    TicketSyncAutomationModel,
     TicketSyncPullQueryModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
@@ -28,6 +28,7 @@ from modules.ticket.service.ticket_embedding_service import TicketEmbeddingServi
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService, _extract_ticket_version_key, _user_id, _user_name
+from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 
@@ -76,6 +77,8 @@ class TicketSyncService:
             "autoTranslateOnSync": True,
             "defaultPullLimit": 50,
             "remoteSync": cls._default_remote_sync_config(),
+            "groupPush": cls._default_group_push_config(),
+            "personReminder": cls._default_person_reminder_config(),
             "projectMappings": [],
             "moduleMappings": [],
             "vendorMappings": [],
@@ -101,6 +104,46 @@ class TicketSyncService:
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
             },
+        }
+
+    @classmethod
+    def _default_group_push_config(cls) -> dict[str, Any]:
+        """
+        构建工单群推送默认配置。
+
+        :return: 群推送配置默认值。
+        """
+        return {
+            "enabled": False,
+            "pushIds": [],
+            "sendAfterExternalSync": False,
+            "sendAfterRemotePull": False,
+            "template": "",
+            "manualTemplate": "",
+        }
+
+    @classmethod
+    def _default_person_reminder_config(cls) -> dict[str, Any]:
+        """
+        构建按人催办默认配置。
+
+        :return: 人维度催办配置默认值。
+        """
+        return {
+            "enabled": False,
+            "pushIds": [],
+            "feishuAppId": "",
+            "feishuAppSecret": "",
+            "appToken": "",
+            "tableId": "",
+            "viewId": "",
+            "filterFormula": "",
+            "personField": "",
+            "timeField": "",
+            "thresholdMinutes": 30,
+            "messageTemplate": "",
+            "maxRowsPerPerson": 20,
+            "pageSize": 500,
         }
 
     @classmethod
@@ -153,6 +196,35 @@ class TicketSyncService:
             remote_sync["consumer"] = str(remote_sync.get("consumer") or "").strip()
             remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
             merged["remoteSync"] = remote_sync
+        group_push = merged.get("groupPush") if isinstance(merged.get("groupPush"), dict) else {}
+        default_group_push = cls._default_group_push_config()
+        group_push = {**default_group_push, **group_push}
+        group_push["enabled"] = bool(group_push.get("enabled"))
+        group_push["sendAfterExternalSync"] = bool(group_push.get("sendAfterExternalSync"))
+        group_push["sendAfterRemotePull"] = bool(group_push.get("sendAfterRemotePull"))
+        group_push["pushIds"] = TicketSyncNotifyService._normalize_push_ids(group_push.get("pushIds"))
+        group_push["template"] = str(group_push.get("template") or "").strip()
+        group_push["manualTemplate"] = str(group_push.get("manualTemplate") or "").strip()
+        merged["groupPush"] = group_push
+
+        person_reminder = merged.get("personReminder") if isinstance(merged.get("personReminder"), dict) else {}
+        default_person_reminder = cls._default_person_reminder_config()
+        person_reminder = {**default_person_reminder, **person_reminder}
+        person_reminder["enabled"] = bool(person_reminder.get("enabled"))
+        person_reminder["pushIds"] = TicketSyncNotifyService._normalize_push_ids(person_reminder.get("pushIds"))
+        person_reminder["feishuAppId"] = str(person_reminder.get("feishuAppId") or "").strip()
+        person_reminder["feishuAppSecret"] = str(person_reminder.get("feishuAppSecret") or "").strip()
+        person_reminder["appToken"] = str(person_reminder.get("appToken") or "").strip()
+        person_reminder["tableId"] = str(person_reminder.get("tableId") or "").strip()
+        person_reminder["viewId"] = str(person_reminder.get("viewId") or "").strip()
+        person_reminder["filterFormula"] = str(person_reminder.get("filterFormula") or "").strip()
+        person_reminder["personField"] = str(person_reminder.get("personField") or "").strip()
+        person_reminder["timeField"] = str(person_reminder.get("timeField") or "").strip()
+        person_reminder["thresholdMinutes"] = max(cls._safe_int(person_reminder.get("thresholdMinutes")) or 30, 1)
+        person_reminder["messageTemplate"] = str(person_reminder.get("messageTemplate") or "").strip()
+        person_reminder["maxRowsPerPerson"] = max(cls._safe_int(person_reminder.get("maxRowsPerPerson")) or 20, 1)
+        person_reminder["pageSize"] = min(max(cls._safe_int(person_reminder.get("pageSize")) or 500, 1), 500)
+        merged["personReminder"] = person_reminder
         if not isinstance(merged.get("projectMappings"), list):
             merged["projectMappings"] = []
         if not isinstance(merged.get("moduleMappings"), list):
@@ -249,6 +321,104 @@ class TicketSyncService:
         except Exception as exc:
             db.rollback()
             raise exc
+
+    @classmethod
+    def get_sync_notify_push_options_services(cls, db: Session) -> list[dict[str, Any]]:
+        """
+        查询通知相关可选推送配置。
+
+        :param db: 数据库会话。
+        :return: 推送配置列表。
+        """
+        return TicketSyncNotifyService.list_push_options(db)
+
+    @classmethod
+    def preview_person_reminder_services(
+        cls,
+        db: Session,
+        *,
+        user_id: int | None = None,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        预览人维度催办统计。
+
+        :param db: 数据库会话。
+        :param user_id: 可选用户ID。
+        :param email: 可选邮箱。
+        :return: 统计结果。
+        """
+        config = cls._load_sync_config(db)
+        person_config = config.get("personReminder") if isinstance(config.get("personReminder"), dict) else {}
+        return TicketSyncNotifyService.preview_person_overdue_statistics(
+            db,
+            config=person_config,
+            user_id=user_id,
+            email=email,
+        )
+
+    @classmethod
+    def run_person_reminder_services(
+        cls,
+        db: Session,
+        *,
+        trigger_source: str,
+        user_id: int | None = None,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        执行人维度催办通知。
+
+        :param db: 数据库会话。
+        :param trigger_source: 触发来源。
+        :param user_id: 可选用户ID。
+        :param email: 可选邮箱。
+        :return: 执行结果摘要。
+        """
+        config = cls._load_sync_config(db)
+        person_config = config.get("personReminder") if isinstance(config.get("personReminder"), dict) else {}
+        return TicketSyncNotifyService.run_person_overdue_reminder(
+            db,
+            config=person_config,
+            trigger_source=trigger_source,
+            user_id=user_id,
+            email=email,
+        )
+
+    @classmethod
+    def send_group_push_by_ticket_no_services(
+        cls,
+        db: Session,
+        *,
+        ticket_no: str,
+        push_ids: list[int] | None = None,
+        message_template: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        手动按工单号发送群消息。
+
+        :param db: 数据库会话。
+        :param ticket_no: 工单号。
+        :param push_ids: 覆盖推送渠道ID列表。
+        :param message_template: 覆盖消息模板。
+        :return: 发送结果。
+        """
+        ticket = TicketDao.get_ticket_by_no(db, ticket_no)
+        if not ticket:
+            raise ValueError(f"工单不存在: {ticket_no}")
+        config = cls._load_sync_config(db)
+        group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+        sync_summary = cls.extract_sync_summary(ticket.extra_data) or {}
+        return TicketSyncNotifyService.send_group_message_for_ticket(
+            db,
+            ticket=ticket,
+            group_config=group_config,
+            scene="manual",
+            manual_trigger=True,
+            override_push_ids=push_ids,
+            override_template=message_template,
+            sync_summary=sync_summary,
+        )
 
     @classmethod
     def _build_remote_sync_request_headers(cls, remote_sync: dict[str, Any]) -> dict[str, str]:
@@ -435,7 +605,15 @@ class TicketSyncService:
             user_id = cls._safe_int(matched.get("userId") or matched.get("user_id") or matched.get("assigneeId"))
             user_name = str(matched.get("userName") or matched.get("user_name") or matched.get("name") or "").strip()
             if user_id:
-                user = db.query(SysUser).filter(SysUser.user_id == user_id, SysUser.status == "0", SysUser.del_flag == "0").first()
+                user = (
+                    db.query(SysUser)
+                    .filter(
+                        SysUser.user_id == user_id,
+                        SysUser.status == "0",
+                        SysUser.del_flag == "0",
+                    )
+                    .first()
+                )
                 if user:
                     return user.user_id, user.user_name or user.nick_name or user_name
             if user_name:
@@ -453,7 +631,13 @@ class TicketSyncService:
                 return None, user_name
         lowered = text.lower()
         for user in db.query(SysUser).filter(SysUser.status == "0", SysUser.del_flag == "0").all():
-            aliases = cls._normalize_keywords([user.user_name, user.nick_name, user.nick_name and f"{user.user_name}/{user.nick_name}"])
+            aliases = cls._normalize_keywords(
+                [
+                    user.user_name,
+                    user.nick_name,
+                    user.nick_name and f"{user.user_name}/{user.nick_name}",
+                ]
+            )
             if any(alias in lowered for alias in aliases):
                 return user.user_id, user.user_name or user.nick_name or ""
         return None, ""
@@ -542,7 +726,11 @@ class TicketSyncService:
     @classmethod
     def _match_project(cls, db: Session, text: str, mappings: list[dict[str, Any]]) -> HrmProject | None:
         matched = cls._match_mapping(text, mappings)
-        project_code = str(matched.get("projectCode") or matched.get("project_code") or "").strip() if isinstance(matched, dict) else ""
+        project_code = (
+            str(matched.get("projectCode") or matched.get("project_code") or "").strip()
+            if isinstance(matched, dict)
+            else ""
+        )
         project_id = cls._safe_int(matched.get("projectId") if isinstance(matched, dict) else None)
         if project_code:
             project = (
@@ -590,7 +778,11 @@ class TicketSyncService:
         project_id: int | None = None,
     ) -> HrmModule | None:
         matched = cls._match_mapping(text, mappings)
-        module_code = str(matched.get("moduleCode") or matched.get("module_code") or "").strip() if isinstance(matched, dict) else ""
+        module_code = (
+            str(matched.get("moduleCode") or matched.get("module_code") or "").strip()
+            if isinstance(matched, dict)
+            else ""
+        )
         module_id = cls._safe_int(matched.get("moduleId") if isinstance(matched, dict) else None)
         query = db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
         if module_code:
@@ -881,18 +1073,36 @@ class TicketSyncService:
         db: Session,
         sync_object: TicketExternalSyncUpsertModel,
         current_user: CurrentUserModel,
+        sync_scene: str = "external_sync",
     ) -> CrudResponseModel:
+        """
+        外部工单同步入库并按配置执行后续动作。
+
+        :param db: 数据库会话。
+        :param sync_object: 外部同步入参。
+        :param current_user: 当前登录用户。
+        :param sync_scene: 同步触发场景，支持 external_sync/remote_pull。
+        :return: 同步结果。
+        """
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
         config = cls._load_sync_config(db)
         detected = cls._detect_fields(db, sync_object, config)
         automation = sync_object.automation
         translation_enabled = TicketLightAiService.is_translation_enabled(db)
-        sync_translate_enabled = (
-            automation.auto_translate
-            if automation is not None
-            else bool(config.get("autoTranslateOnSync", True))
-        )
+        if sync_scene == "remote_pull":
+            sync_translate_enabled = bool(
+                automation.auto_translate
+                if automation is not None
+                else (config.get("remoteSync") or {}).get("autoTranslateOnPull", True)
+            )
+        else:
+            sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
         should_translate = translation_enabled and sync_translate_enabled
+        logger.info(
+            f"外部工单同步翻译决策: ticket_no={sync_object.ticket_no}, scene={sync_scene}, "
+            f"global_switch={translation_enabled}, scene_switch={sync_translate_enabled}, "
+            f"should_translate={should_translate}"
+        )
         translated_description, translation_meta, origin_description = cls._translate_sync_description(
             db,
             title=sync_object.title,
@@ -989,6 +1199,23 @@ class TicketSyncService:
         if should_run_automation:
             automation_summary = cls.run_sync_automation(db, ticket.ticket_id, sync_object, detected, current_user)
 
+        group_push_summary = None
+        try:
+            group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+            sync_summary = cls.extract_sync_summary(ticket.extra_data) or {}
+            group_push_summary = TicketSyncNotifyService.send_group_message_for_ticket(
+                db,
+                ticket=ticket,
+                group_config=group_config,
+                scene=sync_scene,
+                manual_trigger=False,
+                sync_summary=sync_summary,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"工单同步群推送执行失败: ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}"
+            )
+
         result = (
             TicketService.get_ticket_detail_services(db, ticket.ticket_id)
             or CamelCaseUtil.transform_result(ticket)
@@ -996,6 +1223,8 @@ class TicketSyncService:
         result["syncSummary"] = cls.extract_sync_summary(result.get("extraData"))
         if automation_summary:
             result["syncAutomation"] = automation_summary
+        if group_push_summary is not None:
+            result["syncGroupPush"] = group_push_summary
         return CrudResponseModel(
             is_success=True,
             message="外部工单同步成功",
@@ -1437,7 +1666,12 @@ class TicketSyncService:
             )
 
             try:
-                sync_result = cls.sync_external_ticket(db, upsert_model, current_user)
+                sync_result = cls.sync_external_ticket(
+                    db,
+                    upsert_model,
+                    current_user,
+                    sync_scene="remote_pull",
+                )
                 if sync_result.is_success:
                     summary["syncedCount"] += 1
                     local_ticket_id = None

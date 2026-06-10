@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-10] INGEST-CODE | 工单通知系统（群消息推送 + 按人催办）落地
+- 触发：用户要求基于飞书多维表格按人催办、支持工单群消息推送、并将同步链路翻译开关收敛到清晰配置。
+- 架构层：工单域 / 外部同步链路 / 飞书通知 / 任务调度 / Web 控制台
+- 创建的页面：无
+- 更新的页面：`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_sync_notify_service.py` / `server/modules/ticket/service/ticket_sync_service.py` / `server/modules/ticket/controller/ticket_controller.py` / `server/module_task/scheduler_maintenance.py` / `web/src/views/ticket/syncAutomation/index.vue` / `web/src/views/system/aiconfig/index.vue` -> 工单域知识页
+- 总共涉及页面：3
+
 ## [2026-06-09] INGEST-CODE | 修复日志拉取弹窗门店联动不重新查询
 - 触发：用户反馈在日志拉取弹窗中输入或选择商家后，门店下拉没有只显示对应商家的门店。
 - 架构层：工单域 / 日志拉取 / Web 控制台

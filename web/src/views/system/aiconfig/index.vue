@@ -16,10 +16,15 @@
         </div>
       </template>
 
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="170px">
+        <el-form ref="formRef" :model="form" :rules="rules" label-width="170px">
         <el-row :gutter="16">
           <el-col :span="24">
             <el-divider content-position="left">工单翻译</el-divider>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="翻译总开关" prop="translateEnabled">
+              <el-switch v-model="form.translateEnabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
             <el-form-item label="翻译 Provider" prop="translateProviderCode">
@@ -209,6 +214,7 @@ const promptOptions = reactive({
 })
 
 const defaultForm = () => ({
+  translateEnabled: true,
   translateProviderCode: '',
   translatePromptCode: '',
   knowledgeProviderCode: '',
@@ -246,6 +252,7 @@ function formatPromptLabel(item) {
 }
 
 function applyFormData(payload) {
+  form.translateEnabled = payload.translateEnabled ?? payload.translate_enabled ?? true
   form.translateProviderCode = payload.translateProviderCode ?? payload.translate_provider_code ?? ''
   form.translatePromptCode = payload.translatePromptCode ?? payload.translate_prompt_code ?? ''
   form.knowledgeProviderCode = payload.knowledgeProviderCode ?? payload.knowledge_provider_code ?? ''

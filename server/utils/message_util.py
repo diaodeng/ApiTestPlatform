@@ -161,10 +161,20 @@ class MessageHandler:
     def _push_content_parse(self, content):
         return parse_string(content or self.default_test_push_temp, self.push_obj or {}, {}, False)
 
-    def push(self, content=None, at_reminder: int = None):
+    def push(self, content=None, at_reminder: int = None, at_user_ids: list[str] | None = None):
+        """
+        按推送配置发送消息。
+
+        :param content: 自定义消息内容；为空时使用推送配置中的默认模板内容。
+        :param at_reminder: @提醒策略，默认沿用推送配置。
+        :param at_user_ids: 运行时指定的飞书用户ID列表，优先覆盖配置中的 at_user_id。
+        :return: 无。
+        """
         if self.push_info.type == PushTypeEnum.feishu_bot.value:
             feishu_push_config = FeishuRobotModel(**self.push_info.config_content or {})
             feishu_push_config.at_reminder = at_reminder
+            if isinstance(at_user_ids, list):
+                feishu_push_config.at_user_id = [str(item).strip() for item in at_user_ids if str(item).strip()]
             FeiShuHandler(feishu_push_config).push(
                 self._push_content_parse(content) if content else self._push_content_parse(feishu_push_config.content)
             )

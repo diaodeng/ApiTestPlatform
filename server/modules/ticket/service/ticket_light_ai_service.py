@@ -109,8 +109,26 @@ class TicketLightAiService:
         messages = timeline.get("messages") or []
         events = timeline.get("events") or []
         ai_payload = ticket.ai_analysis if isinstance(ticket.ai_analysis, dict) else {}
-        origin_description = str(ticket.extra_data.get("origin_description") or "").strip() if isinstance(ticket.extra_data, dict) else ""
+        origin_description = (
+            str(ticket.extra_data.get("origin_description") or "").strip()
+            if isinstance(ticket.extra_data, dict)
+            else ""
+        )
         description = origin_description or str(getattr(ticket, "description", "") or "").strip()
+        current_root_cause = (
+            getattr(ticket, "root_cause", None)
+            or getattr(rca, "root_cause_detail", None)
+            or ai_payload.get("root_cause")
+            or "-"
+        )
+        current_solution = (
+            getattr(ticket, "solution", None)
+            or getattr(rca, "fix_solution", None)
+            or ai_payload.get("fix_suggestion")
+            or "-"
+        )
+        verify_method = getattr(rca, "verify_method", None) or "-"
+        prevention_solution = getattr(rca, "prevention_solution", None) or "-"
         investigation_lines = [
             f"- {item.create_time:%Y-%m-%d %H:%M:%S} {item.event_type}: {item.content or ''}"
             for item in events[-20:]
@@ -127,9 +145,9 @@ class TicketLightAiService:
             f"模块：{getattr(ticket, 'module_name', '') or ''}",
             f"分类：{getattr(ticket, 'category_name', '') or ''}",
             f"原始描述：\n{description or '-'}",
-            f"当前根因：\n{getattr(ticket, 'root_cause', None) or getattr(rca, 'root_cause_detail', None) or ai_payload.get('root_cause') or '-'}",
-            f"当前解决方案：\n{getattr(ticket, 'solution', None) or getattr(rca, 'fix_solution', None) or ai_payload.get('fix_suggestion') or '-'}",
-            f"验证与预防：\n{getattr(rca, 'verify_method', None) or '-'}\n{getattr(rca, 'prevention_solution', None) or '-'}",
+            f"当前根因：\n{current_root_cause}",
+            f"当前解决方案：\n{current_solution}",
+            f"验证与预防：\n{verify_method}\n{prevention_solution}",
             f"AI分析摘要：\n{ai_payload.get('analysis_summary') or '-'}",
             f"排查过程：\n{cls._join_text_lines(investigation_lines, empty='-')}",
             f"协同消息：\n{cls._join_text_lines(message_lines, empty='-')}",
@@ -297,7 +315,9 @@ class TicketLightAiService:
         )
         context_text = cls._build_knowledge_context(ticket, timeline)
         extra_data = getattr(ticket, "extra_data", None)
-        origin_description = str(extra_data.get("origin_description") or "").strip() if isinstance(extra_data, dict) else ""
+        origin_description = (
+            str(extra_data.get("origin_description") or "").strip() if isinstance(extra_data, dict) else ""
+        )
         request_payload = {
             "ticketNo": getattr(ticket, "ticket_no", None),
             "title": getattr(ticket, "title", None),
@@ -319,7 +339,12 @@ class TicketLightAiService:
                     created_by_name=current_user_name,
                 ),
             )
-            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未配置知识提炼Provider或提示词")
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="未配置知识提炼Provider或提示词",
+            )
             return {}, {"provider_code": provider_code, "prompt_code": prompt_code, "status": "skipped"}
 
         provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
@@ -411,7 +436,12 @@ class TicketLightAiService:
         except Exception as exc:
             logger.warning("工单知识库提炼失败，已回退规则提炼: %s", exc)
             cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
-            return {}, {"provider_code": provider_code, "prompt_code": prompt_code, "status": "failed", "error": str(exc)}
+            return {}, {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "status": "failed",
+                "error": str(exc),
+            }
 
     @classmethod
     def _write_execution_record(
@@ -463,7 +493,9 @@ class TicketLightAiService:
                     execution_id,
                     {
                         "status": status,
-                        "response_payload": cls._json_safe_value(response_payload) if response_payload is not None else None,
+                        "response_payload": (
+                            cls._json_safe_value(response_payload) if response_payload is not None else None
+                        ),
                         "response_text": response_text,
                         "token_usage": cls._json_safe_value(token_usage) if token_usage is not None else None,
                         "error_message": error_message,
@@ -629,13 +661,24 @@ class TicketLightAiService:
         """
         origin_text = str(content or "").strip()
         if not origin_text:
+            logger.info(
+                f"工单轻量翻译跳过: 原文为空, source_type={source_type}, source_id={source_id}, source_ref={source_ref}"
+            )
             return "", {}
         if not cls.is_translation_enabled(db):
+            logger.info(
+                f"工单轻量翻译跳过: 总开关关闭, source_type={source_type}, "
+                f"source_id={source_id}, source_ref={source_ref}"
+            )
             return origin_text, {"provider_code": "", "prompt_code": "", "translated_text": "", "skipped": True}
         provider_code, prompt_code = cls._resolve_task_settings(
             db, "ticket.ai.translate.provider.code", "ticket.ai.translate.prompt.code"
         )
         if not provider_code or not prompt_code:
+            logger.info(
+                f"工单轻量翻译跳过: provider/prompt 未配置, provider={provider_code or '-'}, "
+                f"prompt={prompt_code or '-'}, source_ref={source_ref}"
+            )
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_translate",
@@ -695,7 +738,10 @@ class TicketLightAiService:
             cls._finish_execution_record(db, execution_id, status="skipped", error_message="未找到提示词模板")
             return origin_text, {"provider_code": provider_code, "prompt_code": prompt_code, "translated_text": ""}
         prompt_template = prompt_templates[0]
-        system_prompt = AiPromptTemplateService.render_prompt_text(prompt_template["promptContent"], {"content": origin_text})
+        system_prompt = AiPromptTemplateService.render_prompt_text(
+            prompt_template["promptContent"],
+            {"content": origin_text},
+        )
         user_prompt = cls._build_translation_prompt(title, origin_text)
         execution_id = cls._write_execution_record(
             execution_data=cls._build_execution_payload(

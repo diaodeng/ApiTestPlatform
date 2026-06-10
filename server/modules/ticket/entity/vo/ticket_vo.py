@@ -524,6 +524,84 @@ class TicketSyncAckRequestModel(BaseModel):
         return self
 
 
+class TicketSyncPersonReminderPreviewModel(BaseModel):
+    """
+    人维度催办统计预览请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    user_id: int | None = Field(default=None, description="系统用户ID")
+    email: str | None = Field(default=None, description="用户邮箱")
+
+    @model_validator(mode="after")
+    def validate_preview_request(self):
+        """
+        校验预览请求参数。
+        :return: 当前模型。
+        """
+        self.email = str(self.email or "").strip() or None
+        if not self.user_id and not self.email:
+            raise ValueError("userId 或 email 至少填写一个")
+        return self
+
+
+class TicketSyncPersonReminderRunModel(BaseModel):
+    """
+    人维度催办执行请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    user_id: int | None = Field(default=None, description="系统用户ID，留空表示全量执行")
+    email: str | None = Field(default=None, description="用户邮箱，留空表示全量执行")
+
+    @model_validator(mode="after")
+    def validate_run_request(self):
+        """
+        校验执行请求参数。
+        :return: 当前模型。
+        """
+        self.email = str(self.email or "").strip() or None
+        return self
+
+
+class TicketSyncGroupPushSendModel(BaseModel):
+    """
+    按工单号手动发送群消息请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_no: str = Field(description="工单号")
+    push_ids: list[int] | None = Field(default=None, description="覆盖推送配置ID列表")
+    message_template: str | None = Field(default=None, description="覆盖消息模板")
+
+    @model_validator(mode="after")
+    def validate_group_push_request(self):
+        """
+        校验手动群推送请求参数。
+        :return: 当前模型。
+        """
+        self.ticket_no = str(self.ticket_no or "").strip()
+        if not self.ticket_no:
+            raise ValueError("ticketNo 不能为空")
+        if isinstance(self.push_ids, list):
+            normalized_ids: list[int] = []
+            for item in self.push_ids:
+                try:
+                    parsed = int(item)
+                except Exception:
+                    continue
+                if parsed > 0 and parsed not in normalized_ids:
+                    normalized_ids.append(parsed)
+            self.push_ids = normalized_ids or None
+        else:
+            self.push_ids = None
+        self.message_template = str(self.message_template or "").strip() or None
+        return self
+
+
 class KnowledgeArticleModel(BaseModel):
     """
     知识库文章模型，用于沉淀历史解决方案和复盘内容。

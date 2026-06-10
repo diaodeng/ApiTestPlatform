@@ -77,6 +77,22 @@
 - `promptTemplates.classificationHint`
   - 后续扩展 AI 识别时复用的分类提示词。
 
+### 6. 工单通知配置
+
+- `groupPush`
+  - `enabled`：是否启用工单群消息推送。
+  - `pushIds`：推送目标ID列表，候选项来自“推送配置管理”（`qtr_push_target`）。
+  - `triggerScenes`：触发场景，支持外部直推（`external_sync`）和远端拉取（`remote_pull`）。
+  - `messageTemplate`：群消息模板，支持变量渲染。
+  - `allowManualByTicketNo`：是否允许页面输入工单号手动发送。
+- `personReminder`
+  - `enabled`：是否启用按人催办。
+  - `source`：飞书多维表格配置（`appToken` / `tableId` / `viewId` / `fieldMappings` / `filter`）。
+  - `overdueMinutes`：超时阈值（分钟）。
+  - `messageTemplate`：催办模板，支持变量渲染。
+  - `allowManualByUser`：是否允许页面按用户ID或邮箱手动触发统计与催办。
+  - 催办链路：先按系统用户匹配邮箱，再到飞书查询 open_id，最后按人汇总并发送。
+
 ## 逻辑梳理
 
 ### 第三方直推
@@ -92,11 +108,19 @@
 2. 只有 `remoteSync.enabled=true` 才会真正执行拉取
 3. 每次拉取完成后，服务端会再走一次外部同步入库
 4. 是否自动翻译由 `remoteSync.autoTranslateOnPull` 单独控制
+5. 如命中 `groupPush.triggerScenes` 且 `groupPush.enabled=true`，会按模板推送到配置群
 
 ### 回写交付状态
 
 1. 入库成功或失败后，服务端调用 `/ticket/sync/ack`
 2. 远端系统据此更新拉取状态
+
+### 按人催办（手动与定时）
+
+1. 页面可通过用户ID或邮箱预览“本人名下超时记录统计”。
+2. 页面可直接手动触发催办发送。
+3. 可通过调度任务 `module_task.scheduler_maintenance.ticket_person_overdue_reminder` 定时执行。
+4. 触发后会记录关键日志：配置是否启用、飞书数据读取结果、人员匹配结果、发送结果与失败原因。
 
 ## 说明
 
