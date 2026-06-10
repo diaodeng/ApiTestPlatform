@@ -103,6 +103,7 @@
   - `priorityRoutes`：按优先级分流路由（例如 P1 -> P1 群，P2 -> P2 群，P3/P4 -> P3/P4 群）。
   - `sendAfterExternalSync` / `sendAfterRemotePull`：自动触发场景开关。
   - `template` / `manualTemplate`：模板变量渲染，手动模板留空时回退自动模板。
+  - 常用模板变量：`${ticket_no}` `${ticket_title}` `${ticket_status}` `${assignee_name}` `${ticket_url}` `${sync_source_record_url}`。
 - `personReminder`
   - `enabled`：是否启用按人催办。
   - `sendMode`：发送模式（`push_config` / `feishu_app` / `hybrid`）。
@@ -125,9 +126,10 @@
 
 1. 外部系统调用 `/ticket/sync/external`
 2. 服务端按同步来源和映射规则写入工单
-3. 如开启 `autoTranslateOnSync`，会自动翻译描述
-4. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
-5. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
+3. 如果推送体包含 `url/ticketUrl/detailUrl`，会写入工单详情链接 `ticket_url`
+4. 如开启 `autoTranslateOnSync`，会自动翻译描述
+5. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
+6. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
 
 ### 内网拉取外网工单
 

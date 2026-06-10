@@ -135,10 +135,19 @@
       <el-table-column label="创建时间" prop="createTime" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" align="center" width="330" fixed="right">
+      <el-table-column label="操作" align="center" width="390" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="View" @click="openDetail(scope.row)" v-hasPermi="['ticket:ticket:query']">
             详情
+          </el-button>
+          <el-button
+            v-if="resolveTicketDetailUrl(scope.row)"
+            link
+            type="info"
+            icon="Link"
+            @click="openTicketLink(scope.row)"
+          >
+            跳转
           </el-button>
           <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['ticket:ticket:edit']">
             编辑
@@ -483,6 +492,17 @@
             <span v-else>-</span>
           </el-descriptions-item>
           <el-descriptions-item label="来源">{{ getOptionLabel(sourceOptions, detail.source) }}</el-descriptions-item>
+          <el-descriptions-item label="外部链接">
+            <el-link
+              v-if="resolveTicketDetailUrl(detail)"
+              :href="resolveTicketDetailUrl(detail)"
+              target="_blank"
+              type="primary"
+            >
+              打开详情
+            </el-link>
+            <span v-else>-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="对方优先级">{{ detail.customerPriority || '-' }}</el-descriptions-item>
           <el-descriptions-item label="内部优先级">{{ detail.internalPriority || '-' }}</el-descriptions-item>
           <el-descriptions-item label="总耗时">{{ formatSeconds(detail.totalProcessSeconds) }}</el-descriptions-item>
@@ -2114,6 +2134,7 @@ function createDefaultTicketForm() {
   return {
     ticketId: undefined,
     ticketNo: undefined,
+    ticketUrl: '',
     title: undefined,
     description: undefined,
     projectId: undefined,
@@ -2352,6 +2373,38 @@ function getList() {
   }).finally(() => {
     loading.value = false
   })
+}
+
+function resolveTicketDetailUrl(ticketRow) {
+  const row = ticketRow || {}
+  const syncSummary = row.syncSummary || row.sync_summary || {}
+  const extraData = row.extraData || row.extra_data || {}
+  const externalSync = extraData.externalSync || extraData.external_sync || {}
+  const source = externalSync.source || {}
+  const value = String(
+    row.ticketUrl
+      || row.ticket_url
+      || row.url
+      || syncSummary.ticketUrl
+      || syncSummary.ticket_url
+      || syncSummary.sourceRecordUrl
+      || syncSummary.source_record_url
+      || source.ticketUrl
+      || source.ticket_url
+      || source.recordUrl
+      || source.record_url
+      || ''
+  ).trim()
+  return value || ''
+}
+
+function openTicketLink(ticketRow) {
+  const ticketUrl = resolveTicketDetailUrl(ticketRow)
+  if (!ticketUrl) {
+    proxy.$modal.msgWarning('当前工单未配置详情链接')
+    return
+  }
+  window.open(ticketUrl, '_blank', 'noopener')
 }
 
 function reset() {

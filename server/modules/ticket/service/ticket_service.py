@@ -145,6 +145,7 @@ def _extract_ticket_sync_summary(extra_data: Any) -> dict[str, Any] | None:
         "revision": int(sync_meta.get("revision") or 0),
         "sourceSystem": sync_meta.get("sourceSystem") or (sync_meta.get("source") or {}).get("system"),
         "sourceRecordId": sync_meta.get("sourceRecordId") or (sync_meta.get("source") or {}).get("recordId"),
+        "sourceRecordUrl": sync_meta.get("sourceRecordUrl") or (sync_meta.get("source") or {}).get("recordUrl"),
         "status": sync_state.get("status") or "pending",
         "lastPulledAt": sync_state.get("last_pulled_at"),
         "lastConsumer": sync_state.get("last_consumer"),
@@ -443,6 +444,8 @@ class TicketService:
         extra_data = item.get("extraData")
         sync_summary = _extract_ticket_sync_summary(extra_data)
         item["versionKey"] = item.get("versionKey") or _extract_ticket_version_key(extra_data)
+        if not str(item.get("ticketUrl") or "").strip() and isinstance(sync_summary, dict):
+            item["ticketUrl"] = sync_summary.get("ticketUrl") or sync_summary.get("sourceRecordUrl")
         item["originalDescription"] = (
             (extra_data or {}).get("origin_description")
             or (extra_data or {}).get("original_description")

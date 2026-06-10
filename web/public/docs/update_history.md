@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 修复外部推单后的群消息优先级分流：外部同步入参现在会显式回填 `customerPriority/customer_priority`（默认跟随 `internalPriority`），避免被模型默认值 `P3` 覆盖导致路由失效；群推送路由新增 `appChatIds` 兼容，并补充“优先级未命中 priorityRoutes 时回退默认目标”的告警日志。
 1. AI 配置中心补齐默认提示词初始化：新增 `ticket_category_classify_default`、`ticket_log_extract_default` 两条 `common` 分类模板（内容允许为空），解决“自动分类提示词/日志参数提取提示词下拉无可选项”的问题。
 1. 调整 `ticket.ai.log_extract.prompt.code` 默认值为 `ticket_log_extract_default`，并在 AI 配置汇总读取时对“空字符串配置”做默认编码回退，兼容老数据。
 1. 工单同步配置新增“飞书统一凭证 + 通知发送模式”：`feishuAuth` 统一管理 `appId/appSecret`，`groupPush/personReminder/summaryReport` 支持 `push_config`、`feishu_app`、`hybrid` 三种发送模式，并支持子配置覆盖凭证。

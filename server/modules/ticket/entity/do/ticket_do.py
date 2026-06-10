@@ -20,6 +20,7 @@ class Ticket(Base):
         BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment="工单ID"
     )
     ticket_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, comment="工单编号")
+    ticket_url: Mapped[str | None] = mapped_column(String(1000), nullable=True, comment="工单详情链接")
     title: Mapped[str] = mapped_column(String(500), nullable=False, comment="工单标题")
     description: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="工单描述")
     project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="所属项目ID")

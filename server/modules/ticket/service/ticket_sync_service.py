@@ -758,7 +758,7 @@ class TicketSyncService:
                 priorities = []
             priorities = [item for item in priorities if item]
             push_ids = TicketSyncNotifyService._normalize_push_ids(route.get("pushIds"))
-            chat_ids = TicketSyncNotifyService._normalize_chat_ids(route.get("chatIds"))
+            chat_ids = TicketSyncNotifyService._normalize_chat_ids(route.get("chatIds") or route.get("appChatIds"))
             if not priorities:
                 continue
             normalized_priority_routes.append(
@@ -1113,6 +1113,12 @@ class TicketSyncService:
             "revision": int(meta.get("revision") or 0),
             "sourceSystem": meta.get("sourceSystem") or meta.get("source", {}).get("system"),
             "sourceRecordId": meta.get("sourceRecordId") or meta.get("source", {}).get("recordId"),
+            "sourceRecordUrl": meta.get("sourceRecordUrl") or meta.get("source", {}).get("recordUrl"),
+            "ticketUrl": (
+                meta.get("ticketUrl")
+                or meta.get("sourceRecordUrl")
+                or (meta.get("source", {}) or {}).get("recordUrl")
+            ),
             "sourceRevision": cls._safe_int(meta.get("sourceRevision")) or 0,
             "externalCreateTime": (
                 meta.get("externalCreateTime")
@@ -1881,6 +1887,7 @@ class TicketSyncService:
                 "status": status_value or source_snapshot.get("status"),
                 "assigneeId": assignee_id or source_snapshot.get("assigneeId"),
                 "assigneeName": assignee_name or source_snapshot.get("assigneeName"),
+                "ticketUrl": str(sync_object.ticket_url or "").strip() or source_snapshot.get("ticketUrl"),
                 "projectName": str(sync_object.project_name or "").strip() or source_snapshot.get("projectName"),
                 "moduleName": str(sync_object.module_name or "").strip() or source_snapshot.get("moduleName"),
                 "vendorId": cls._safe_int(detected.get("vendorId")) or source_snapshot.get("vendorId"),
@@ -2328,10 +2335,16 @@ class TicketSyncService:
         remote_source_revision = cls._safe_int((sync_object.extra_data or {}).get("_remote_sync_revision"))
         if remote_source_revision is None:
             remote_source_revision = cls._safe_int(meta.get("sourceRevision"))
+        resolved_ticket_url = (
+            str(sync_object.ticket_url or "").strip()
+            or str(sync_object.source.record_url or "").strip()
+            or (str(getattr(ticket, "ticket_url", "") or "").strip() if ticket else "")
+        )
         source_snapshot = {
             "system": sync_object.source.system,
             "recordId": sync_object.source.record_id,
             "recordUrl": sync_object.source.record_url,
+            "ticketUrl": resolved_ticket_url or None,
             "pushedAt": sync_object.source.pushed_at.isoformat() if sync_object.source.pushed_at else cls._now_iso(),
             "externalCreateTime": external_create_time,
         }
@@ -2341,6 +2354,7 @@ class TicketSyncService:
                 "sourceSystem": sync_object.source.system,
                 "sourceRecordId": sync_object.source.record_id,
                 "sourceRecordUrl": sync_object.source.record_url,
+                "ticketUrl": resolved_ticket_url or None,
                 "lastImportedAt": cls._now_iso(),
                 "externalCreateTime": external_create_time,
                 "source": source_snapshot,
@@ -2370,6 +2384,7 @@ class TicketSyncService:
             "root_cause": sync_object.root_cause or (ticket.root_cause if ticket else None),
             "solution": sync_object.solution or (ticket.solution if ticket else None),
             "tags": sync_object.tags or (ticket.tags if ticket else None),
+            "ticket_url": resolved_ticket_url or None,
             "update_by": _user_name(current_user),
             "update_time": now,
         }
@@ -3214,6 +3229,13 @@ class TicketSyncService:
             item["syncRevision"] = revision
             sync_summary = cls.extract_sync_summary(extra_data)
             item["syncSummary"] = sync_summary
+            item["ticketUrl"] = str(
+                item.get("ticketUrl")
+                or item.get("ticket_url")
+                or (sync_summary.get("ticketUrl") if isinstance(sync_summary, dict) else "")
+                or (sync_summary.get("sourceRecordUrl") if isinstance(sync_summary, dict) else "")
+                or ""
+            ).strip() or None
             if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):
                 item["externalCreateTime"] = sync_summary.get("externalCreateTime")
             payload_rows.append(item)
@@ -3375,11 +3397,21 @@ class TicketSyncService:
             or item.get("createTime")
             or item.get("create_time")
         )
+        remote_ticket_url = str(
+            item.get("ticketUrl")
+            or item.get("ticket_url")
+            or item.get("url")
+            or item.get("detailUrl")
+            or item.get("detail_url")
+            or sync_summary.get("ticketUrl")
+            or sync_summary.get("sourceRecordUrl")
+            or ""
+        ).strip() or None
 
         source_payload = {
             "system": str(remote_sync.get("sourceSystem") or "public").strip() or "public",
             "recordId": str(item.get("ticketId") or item.get("ticket_id") or ticket_no).strip() or ticket_no,
-            "recordUrl": str(item.get("ticketUrl") or item.get("ticket_url") or "").strip() or None,
+            "recordUrl": remote_ticket_url,
             "pushedAt": (
                 item.get("updateTime")
                 or item.get("update_time")
@@ -3397,6 +3429,7 @@ class TicketSyncService:
             "syncConsumer": str(remote_sync.get("consumer") or "").strip() or None,
             "rawPayload": item,
             "ticketNo": ticket_no,
+            "ticketUrl": remote_ticket_url,
             "title": title,
             "description": description,
             "createTime": external_create_time or source_payload.get("pushedAt"),

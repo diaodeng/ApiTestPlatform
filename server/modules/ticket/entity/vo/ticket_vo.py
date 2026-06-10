@@ -18,6 +18,7 @@ class TicketBaseModel(BaseModel):
 
     ticket_id: int | None = None
     ticket_no: str | None = None
+    ticket_url: str | None = Field(default=None, description="工单详情链接")
     title: str | None = Field(default=None, description="工单标题")
     description: str | None = Field(default=None, description="工单描述")
     project_id: int | None = Field(default=None, description="所属项目ID")

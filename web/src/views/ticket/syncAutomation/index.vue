@@ -353,7 +353,7 @@
                 v-model="form.groupPush.template"
                 type="textarea"
                 :rows="5"
-                placeholder="可用变量：${ticket_no} ${ticket_title} ${project_name} ${module_name} ${ticket_status} ${assignee_name} ${description}"
+                placeholder="可用变量：${ticket_no} ${ticket_title} ${project_name} ${module_name} ${ticket_status} ${assignee_name} ${ticket_url} ${sync_source_record_url} ${description}"
               />
             </el-form-item>
           </el-col>

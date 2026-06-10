@@ -100,6 +100,15 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         _compatible_field_value(data, "internalPriority", "internal_priority", default="")
         or ""
     ).strip()
+    customer_priority = str(
+        _compatible_field_value(
+            data,
+            "customerPriority",
+            "customer_priority",
+            default=_compatible_field_value(data, "ticketPriority", "ticket_priority", default=internal_priority),
+        )
+        or ""
+    ).strip()
     ticket_vender = str(_compatible_field_value(data, "ticketVender", "ticket_vender", default="") or "").strip()
     ticket_modle = str(_compatible_field_value(data, "ticketModle", "ticket_modle", default="") or "").strip()
     create_time = _compatible_field_value(data, "createTime", "create_time")
@@ -121,15 +130,37 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
     title = str(_compatible_field_value(data, "title", "title", default="") or "").strip()
     reason = str(_compatible_field_value(data, "reason", "reason", default="") or "").strip()
 
-    record_id = str(_compatible_field_value(data, "sourceRecordId", "source_record_id", default=ticket_no) or "").strip()
+    record_id = str(
+        _compatible_field_value(data, "sourceRecordId", "source_record_id", default=ticket_no) or ""
+    ).strip()
     if not record_id:
         record_id = ticket_no
+    ticket_url = str(
+        _compatible_field_value(
+            data,
+            "ticketUrl",
+            "ticket_url",
+            default=_compatible_field_value(
+                data,
+                "url",
+                "url",
+                default=_compatible_field_value(data, "detailUrl", "detail_url", default=""),
+            ),
+        )
+        or ""
+    ).strip() or None
     record_url = str(
         _compatible_field_value(
             data,
             "sourceRecordUrl",
             "source_record_url",
-            default=_compatible_field_value(data, "recordUrl", "record_url", default=""),
+            default=_compatible_field_value(
+                data,
+                "recordUrl",
+                "record_url",
+                default=ticket_url
+                or str(source.get("record_url") or source.get("recordUrl") or source.get("url") or "").strip(),
+            ),
         )
         or ""
     ).strip() or None
@@ -195,9 +226,11 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         "record_url": str(source.get("record_url") or record_url or "").strip() or None,
         "pushed_at": source.get("pushed_at") or create_time,
     }
+    data["ticket_url"] = ticket_url or record_url
     data["ticket_no"] = ticket_no
     data["title"] = title
     data["description"] = description
+    data["customer_priority"] = customer_priority or internal_priority
     data["internal_priority"] = internal_priority
     data["reporter_name"] = reporter_name
     data["module_name"] = ticket_modle
@@ -456,6 +489,7 @@ async def sync_external_ticket(
     兼容 JSON 和 `multipart/form-data` / `application/x-www-form-urlencoded` 提交。
     表单模式下支持扁平字段，会自动归一化为 `TicketExternalSyncUpsertModel`。
     必填字段：`ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`。
+    可选链接字段：`url` / `ticketUrl` / `detailUrl`（将写入 `ticket_url` 供页面跳转和消息模板使用）。
     `title` 可选，缺省时由服务层按“轻量AI总结 -> 描述前100字符”规则补齐。
     为避免长时间阻塞主请求，AI翻译、AI标题总结、自动化和群推送改为入库成功后后台异步执行。
     """

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -44,6 +45,7 @@ class TicketSyncNotifyService:
         "当前处理人：${assignee_name}\n"
         "来源：${sync_source_system}\n"
         "修订：${sync_revision}\n"
+        "链接：${ticket_url}\n"
         "说明：${description}"
     )
     DEFAULT_SUMMARY_TEMPLATE = (
@@ -148,13 +150,37 @@ class TicketSyncNotifyService:
         :param value: 原始优先级。
         :return: 规范化优先级（P1/P2/P3/P4）。
         """
-        text = str(value or "").strip().upper().replace(" ", "")
+        raw_text = str(value or "").strip()
+        text = raw_text.upper().replace(" ", "")
         if not text:
             return ""
         if not text.startswith("P") and text.isdigit():
             text = f"P{text}"
-        if text in {"P1", "P2", "P3", "P4"}:
+        if text in {"P0", "P1", "P2", "P3", "P4"}:
             return text
+        priority_match = re.search(r"P\s*([0-4])", raw_text, flags=re.IGNORECASE)
+        if priority_match:
+            return f"P{priority_match.group(1)}"
+        number_match = re.search(r"([0-4])", raw_text)
+        if number_match:
+            return f"P{number_match.group(1)}"
+        normalized_text = text.replace("-", "").replace("_", "").replace("/", "").replace("：", "").replace(":", "")
+        if normalized_text in {"CRITICAL", "URGENT", "SEV1", "S1", "LEVELA"}:
+            return "P1"
+        if normalized_text in {"HIGH", "SEV2", "S2", "LEVELB"}:
+            return "P2"
+        if normalized_text in {"MEDIUM", "NORMAL", "SEV3", "S3", "LEVELC"}:
+            return "P3"
+        if normalized_text in {"LOW", "SEV4", "S4", "LEVELD"}:
+            return "P4"
+        if any(keyword in raw_text for keyword in ["紧急", "特急", "最高"]):
+            return "P1"
+        if any(keyword in raw_text for keyword in ["高优", "高"]):
+            return "P2"
+        if any(keyword in raw_text for keyword in ["中优", "中", "一般", "普通"]):
+            return "P3"
+        if any(keyword in raw_text for keyword in ["低优", "低"]):
+            return "P4"
         return text
 
     @classmethod
@@ -358,7 +384,7 @@ class TicketSyncNotifyService:
             if normalized_priority and normalized_priority not in candidate_priorities:
                 continue
             route_push_ids = cls._normalize_push_ids(route.get("pushIds"))
-            route_chat_ids = cls._normalize_chat_ids(route.get("chatIds"))
+            route_chat_ids = cls._normalize_chat_ids(route.get("chatIds") or route.get("appChatIds"))
             if route_push_ids:
                 base_push_ids = route_push_ids
             if route_chat_ids:
@@ -1120,6 +1146,10 @@ class TicketSyncNotifyService:
         description = str(ticket.description or "").strip()
         if len(description) > 200:
             description = f"{description[:200]}..."
+        ticket_url = (
+            str(getattr(ticket, "ticket_url", "") or "").strip()
+            or str(sync_data.get("ticketUrl") or sync_data.get("sourceRecordUrl") or "").strip()
+        )
         return {
             "ticket_id": ticket.ticket_id,
             "ticket_no": ticket.ticket_no or "-",
@@ -1132,8 +1162,10 @@ class TicketSyncNotifyService:
             "internal_priority": ticket.internal_priority or "-",
             "source": ticket.source or "-",
             "description": description or "-",
+            "ticket_url": ticket_url or "-",
             "sync_revision": sync_data.get("revision") or "-",
             "sync_source_system": sync_data.get("sourceSystem") or "-",
+            "sync_source_record_url": sync_data.get("sourceRecordUrl") or "-",
             "sync_status": sync_data.get("status") or "-",
             "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -1187,6 +1219,29 @@ class TicketSyncNotifyService:
             override_push_ids=override_push_ids,
             override_chat_ids=override_chat_ids,
         )
+        configured_routes = (
+            group_config.get("priorityRoutes") if isinstance(group_config.get("priorityRoutes"), list) else []
+        )
+        if configured_routes and not route_info.get("matchedRoute"):
+            route_priorities: list[list[str]] = []
+            for route in configured_routes:
+                if not isinstance(route, dict):
+                    continue
+                priorities = route.get("priorities")
+                if isinstance(priorities, list):
+                    normalized_route_priorities = [cls._normalize_priority(item) for item in priorities]
+                elif isinstance(priorities, str):
+                    normalized_route_priorities = [cls._normalize_priority(item) for item in priorities.split(",")]
+                else:
+                    normalized_route_priorities = []
+                normalized_route_priorities = [item for item in normalized_route_priorities if item]
+                if normalized_route_priorities:
+                    route_priorities.append(normalized_route_priorities)
+            logger.warning(
+                f"群推送优先级路由未命中，将回退默认目标: "
+                f"ticket_no={ticket.ticket_no}, scene={scene}, resolved_priority={ticket_priority or '-'}, "
+                f"route_priorities={route_priorities}, fallback_push_ids={push_ids}, fallback_chat_ids={chat_ids}"
+            )
 
         require_push_channel = send_mode in {cls.SEND_MODE_PUSH_CONFIG, cls.SEND_MODE_HYBRID}
         require_feishu_app = send_mode in {cls.SEND_MODE_FEISHU_APP, cls.SEND_MODE_HYBRID}
