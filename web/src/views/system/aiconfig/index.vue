@@ -4,7 +4,7 @@
       <div class="page-intro__eyebrow">AI 配置中心</div>
       <h2 class="page-intro__title">集中管理工单 AI 相关配置</h2>
       <p class="page-intro__desc">
-        轻量翻译与知识提炼在工单保存/关闭时触发，AI 分析 Worker 配置用于版本仓库分析任务。提示词模板建议在模板页统一维护，这里只负责选择和组合。
+        轻量翻译、标题总结与知识提炼在工单链路中触发，AI 分析 Worker 配置用于版本仓库分析任务。提示词模板建议在模板页统一维护，这里只负责选择和组合。
       </p>
     </section>
 
@@ -56,6 +56,47 @@
                 <el-option
                   v-for="item in promptOptions.translate"
                   :key="item.templateId || item.templateCode"
+                  :label="formatPromptLabel(item)"
+                  :value="item.templateCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="标题总结开关" prop="titleSummaryEnabled">
+              <el-switch v-model="form.titleSummaryEnabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="标题总结 Provider" prop="titleSummaryProviderCode">
+              <el-select
+                v-model="form.titleSummaryProviderCode"
+                placeholder="请选择 Provider"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in providerOptions"
+                  :key="`title-summary-${item.providerId || item.providerCode}`"
+                  :label="formatProviderLabel(item)"
+                  :value="item.providerCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="标题总结提示词" prop="titleSummaryPromptCode">
+              <el-select
+                v-model="form.titleSummaryPromptCode"
+                placeholder="请选择提示词模板"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in promptOptions.translate"
+                  :key="`title-summary-${item.templateId || item.templateCode}`"
                   :label="formatPromptLabel(item)"
                   :value="item.templateCode"
                 />
@@ -217,6 +258,9 @@ const defaultForm = () => ({
   translateEnabled: true,
   translateProviderCode: '',
   translatePromptCode: '',
+  titleSummaryEnabled: false,
+  titleSummaryProviderCode: '',
+  titleSummaryPromptCode: '',
   knowledgeProviderCode: '',
   knowledgePromptCode: '',
   analysisWorkerCommand: '',
@@ -255,6 +299,9 @@ function applyFormData(payload) {
   form.translateEnabled = payload.translateEnabled ?? payload.translate_enabled ?? true
   form.translateProviderCode = payload.translateProviderCode ?? payload.translate_provider_code ?? ''
   form.translatePromptCode = payload.translatePromptCode ?? payload.translate_prompt_code ?? ''
+  form.titleSummaryEnabled = payload.titleSummaryEnabled ?? payload.title_summary_enabled ?? false
+  form.titleSummaryProviderCode = payload.titleSummaryProviderCode ?? payload.title_summary_provider_code ?? ''
+  form.titleSummaryPromptCode = payload.titleSummaryPromptCode ?? payload.title_summary_prompt_code ?? ''
   form.knowledgeProviderCode = payload.knowledgeProviderCode ?? payload.knowledge_provider_code ?? ''
   form.knowledgePromptCode = payload.knowledgePromptCode ?? payload.knowledge_prompt_code ?? ''
   form.analysisWorkerCommand = payload.analysisWorkerCommand ?? payload.analysis_worker_command ?? ''

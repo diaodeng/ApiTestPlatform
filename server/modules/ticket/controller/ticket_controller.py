@@ -62,20 +62,23 @@ from utils.response_util import ResponseUtil
 ticketController = APIRouter(prefix="/ticket", dependencies=[Depends(LoginService.get_current_user)])
 
 
-def _first_non_empty_value(payload: dict, *keys: str, default=None):
+def _compatible_field_value(payload: dict, camel_key: str, snake_key: str | None = None, default=None):
     """
-    从多个候选键中取第一个非空值。
+    读取外部字段值，仅兼容驼峰与下划线写法，不做猜测。
     :param payload: 原始请求数据。
-    :param keys: 候选字段名，按优先级从高到低排列。
-    :param default: 所有候选字段都为空时返回的默认值。
-    :return: 第一个非空值或默认值。
+    :param camel_key: 驼峰字段名。
+    :param snake_key: 下划线字段名，未传时由驼峰自动转换。
+    :param default: 字段缺失时返回的默认值。
+    :return: 匹配字段值或默认值。
     """
-    for key in keys:
+    normalized_snake_key = snake_key or "".join([f"_{char.lower()}" if char.isupper() else char for char in camel_key])
+    for key in (camel_key, normalized_snake_key):
         if key not in payload:
             continue
         value = payload.get(key)
-        if value not in (None, "", []):
-            return value
+        if value in (None, "", []):
+            continue
+        return value
     return default
 
 
@@ -89,80 +92,101 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
     raw_payload = dict(data)
 
     source = data.get("source") if isinstance(data.get("source"), dict) else {}
-    source_system = _first_non_empty_value(
-        data,
-        "sourceSystem",
-        "source_system",
-        "system",
-        "ticketVender",
-        "ticket_vendor",
-        default="external",
-    )
-    record_id = _first_non_empty_value(
-        data,
-        "sourceRecordId",
-        "source_record_id",
-        "recordId",
-        "record_id",
-        "ticket_no",
-        "ticketNo",
-    )
-    record_url = _first_non_empty_value(
-        data,
-        "sourceRecordUrl",
-        "source_record_url",
-        "recordUrl",
-        "record_url",
-        "url",
-        "link",
-    )
-    pushed_at = _first_non_empty_value(
-        data,
-        "sourcePushedAt",
-        "source_pushed_at",
-        "pushedAt",
-        "pushed_at",
-        "creatTime",
-        "createTime",
-        "createdAt",
-        "created_at",
-    )
-    ticket_no = str(_first_non_empty_value(data, "ticket_no", "ticketNo", default="") or "").strip()
-    title = str(
-        _first_non_empty_value(
+    ticket_no = str(_compatible_field_value(data, "ticketNo", "ticket_no", default="") or "").strip()
+    description = str(_compatible_field_value(data, "description", "description", default="") or "").strip()
+    internal_priority = str(
+        _compatible_field_value(data, "internalPriority", "internal_priority", default="")
+        or ""
+    ).strip()
+    ticket_vender = str(_compatible_field_value(data, "ticketVender", "ticket_vender", default="") or "").strip()
+    ticket_modle = str(_compatible_field_value(data, "ticketModle", "ticket_modle", default="") or "").strip()
+    create_time = _compatible_field_value(data, "createTime", "create_time")
+    reporter_name = str(_compatible_field_value(data, "reporterName", "reporter_name", default="") or "").strip()
+
+    required_items = {
+        "ticketNo": ticket_no,
+        "description": description,
+        "internalPriority": internal_priority,
+        "ticketVender": ticket_vender,
+        "ticketModle": ticket_modle,
+        "createTime": create_time,
+        "reporterName": reporter_name,
+    }
+    missing_fields = [field for field, value in required_items.items() if value in (None, "", [])]
+    if missing_fields:
+        raise ValueError(f"外部工单同步缺少必填字段: {', '.join(missing_fields)}")
+
+    title = str(_compatible_field_value(data, "title", "title", default="") or "").strip()
+    reason = str(_compatible_field_value(data, "reason", "reason", default="") or "").strip()
+
+    record_id = str(_compatible_field_value(data, "sourceRecordId", "source_record_id", default=ticket_no) or "").strip()
+    if not record_id:
+        record_id = ticket_no
+    record_url = str(
+        _compatible_field_value(
             data,
-            "title",
-            "ticketModle",
-            "ticket_model",
-            "ticketVender",
-            "ticket_vendor",
-            "reason",
-            "stepReason",
-            "description",
-            "ticket_no",
-            "ticketNo",
-            default="",
+            "sourceRecordUrl",
+            "source_record_url",
+            default=_compatible_field_value(data, "recordUrl", "record_url", default=""),
+        )
+        or ""
+    ).strip() or None
+    status_value = str(
+        _compatible_field_value(
+            data,
+            "ticketStatus",
+            "ticket_status",
+            default=_compatible_field_value(data, "status", "status", default=""),
         )
         or ""
     ).strip()
-    description = str(
-        _first_non_empty_value(data, "description", "reason", "stepReason", default="")
+    assignee_value = str(
+        _compatible_field_value(
+            data,
+            "ticketAssignee",
+            "ticket_assignee",
+            default=_compatible_field_value(data, "currentAssigneeName", "current_assignee_name", default=""),
+        )
+        or ""
+    ).strip()
+    store_value = str(
+        _compatible_field_value(
+            data,
+            "ticketStore",
+            "ticket_store",
+            default=_compatible_field_value(data, "storeId", "store_id", default=""),
+        )
         or ""
     ).strip()
 
     data["source"] = {
-        "system": str((source.get("system") or source_system or "external") or "external").strip() or "external",
+        "system": str((source.get("system") or ticket_vender) or "").strip(),
         "record_id": str(source.get("record_id") or record_id or "").strip() or None,
         "record_url": str(source.get("record_url") or record_url or "").strip() or None,
-        "pushed_at": source.get("pushed_at") or pushed_at,
+        "pushed_at": source.get("pushed_at") or create_time,
     }
-    if ticket_no:
-        data["ticket_no"] = ticket_no
-    if not title:
-        title = ticket_no or "外部工单"
+    data["ticket_no"] = ticket_no
     data["title"] = title
-    if description and not str(data.get("description") or "").strip():
-        data["description"] = description
+    data["description"] = description
+    data["internal_priority"] = internal_priority
+    data["reporter_name"] = reporter_name
+    data["module_name"] = ticket_modle
+    if reason:
+        data["root_cause"] = reason
+    if status_value:
+        data["status"] = status_value
+    if assignee_value:
+        data["current_assignee_name"] = assignee_value
+    raw_extra_data = _compatible_field_value(data, "extraData", "extra_data", default={})
+    extra_data = dict(raw_extra_data) if isinstance(raw_extra_data, dict) else {}
+    extra_data["external_field_mapping"] = {
+        "ticketVender": ticket_vender,
+        "ticketModle": ticket_modle,
+        "ticketStatus": status_value,
+        "ticketStore": store_value,
+        "ticketAssignee": assignee_value,
+    }
+    data["extra_data"] = extra_data
     if raw_payload:
         data["raw_payload"] = raw_payload
     return data
@@ -196,8 +220,13 @@ async def _load_external_sync_payload(request: Request) -> dict:
 
     if not isinstance(raw_payload, dict):
         raise HTTPException(status_code=422, detail="请求体必须是 JSON 或表单数据")
+    logger.info(f"请求参数:{json.dumps(raw_payload)}")
 
-    return _normalize_ticket_external_sync_payload(raw_payload)
+    try:
+        return _normalize_ticket_external_sync_payload(raw_payload)
+    except ValueError as exc:
+        logger.warning(f"外部工单同步入参校验失败: {exc}; payload={json.dumps(raw_payload, ensure_ascii=False)}")
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @ticketController.get("/list", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
@@ -393,6 +422,8 @@ async def sync_external_ticket(
 
     兼容 JSON 和 `multipart/form-data` / `application/x-www-form-urlencoded` 提交。
     表单模式下支持扁平字段，会自动归一化为 `TicketExternalSyncUpsertModel`。
+    必填字段：`ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`。
+    `title` 可选，缺省时由服务层按“轻量AI总结 -> 描述前100字符”规则补齐。
     """
     try:
         payload = await _load_external_sync_payload(request)

@@ -36,6 +36,19 @@ class AiPromptTemplateService:
             "remark": "工单创建时默认翻译模板",
         },
         {
+            "template_code": "ticket_title_summary_default",
+            "template_name": "工单标题总结默认提示词",
+            "template_category": "translate",
+            "prompt_content": (
+                "你是资深工单助手，请根据工单描述生成一句简洁标题。要求："
+                "1) 只输出标题，不要解释；2) 不超过30个中文字符；3) 保留版本号、错误码、模块等关键信息；"
+                "4) 不确定的信息不要编造。\n\n工单描述：\n{{content}}"
+            ),
+            "sort": 2,
+            "enabled": True,
+            "remark": "外部工单未传标题时用于自动总结标题",
+        },
+        {
             "template_code": "ticket_knowledge_extract_default",
             "template_name": "工单知识提炼默认提示词",
             "template_category": "knowledge",
@@ -46,7 +59,7 @@ class AiPromptTemplateService:
                 "summary（50字以内摘要）、title_suffix（适合补充到标题后的短语）、tags（字符串数组）。"
                 "如果某个字段没有足够信息，请根据上下文合理归纳，但不要编造不存在的事实。\n\n工单信息：\n{{content}}"
             ),
-            "sort": 2,
+            "sort": 3,
             "enabled": True,
             "remark": "工单关闭后自动提炼知识库案例使用的默认模板",
         },

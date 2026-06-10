@@ -450,17 +450,15 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
     sync_consumer: str | None = Field(default=None, description="同步消费者名称，用于预初始化交付状态")
     raw_payload: dict[str, Any] | None = Field(default=None, description="外部工单原始载荷")
     ticket_no: str = Field(description="工单编号")
-    title: str = Field(description="工单标题")
+    title: str | None = Field(default=None, description="工单标题，可为空后由服务端自动生成")
 
     @model_validator(mode="after")
     def validate_sync_upsert(self):
         self.ticket_no = str(self.ticket_no or "").strip()
-        self.title = str(self.title or "").strip()
+        self.title = str(self.title or "").strip() or None
         self.sync_consumer = str(self.sync_consumer or "").strip() or None
         if not self.ticket_no:
             raise ValueError("ticketNo 不能为空")
-        if not self.title:
-            raise ValueError("title 不能为空")
         return self
 
 

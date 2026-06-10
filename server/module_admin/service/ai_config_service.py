@@ -47,6 +47,30 @@ class AiConfigService:
             "section": "light_translate",
         },
         {
+            "field_name": "title_summary_enabled",
+            "config_key": "ticket.ai.title.summary.enabled",
+            "config_name": "工单标题总结开关",
+            "default_value": "false",
+            "remark": "控制外部工单未传标题时是否自动调用轻量AI总结标题",
+            "section": "light_translate",
+        },
+        {
+            "field_name": "title_summary_provider_code",
+            "config_key": "ticket.ai.title.summary.provider.code",
+            "config_name": "工单标题总结Provider编码",
+            "default_value": "",
+            "remark": "外部工单标题总结时使用的AI Provider编码",
+            "section": "light_translate",
+        },
+        {
+            "field_name": "title_summary_prompt_code",
+            "config_key": "ticket.ai.title.summary.prompt.code",
+            "config_name": "工单标题总结提示词编码",
+            "default_value": "ticket_title_summary_default",
+            "remark": "外部工单标题总结时使用的提示词模板编码",
+            "section": "light_translate",
+        },
+        {
             "field_name": "knowledge_provider_code",
             "config_key": "ticket.ai.knowledge.provider.code",
             "config_name": "工单知识提炼Provider编码",
@@ -267,6 +291,12 @@ class AiConfigService:
             translate_enabled=str(cls._get_config_text(db, "ticket.ai.translate.enabled", "false")).lower() == "true",
             translate_provider_code=cls._get_config_text(db, "ticket.ai.translate.provider.code", ""),
             translate_prompt_code=cls._get_config_text(db, "ticket.ai.translate.prompt.code", "ticket_translate_default"),
+            title_summary_enabled=str(cls._get_config_text(db, "ticket.ai.title.summary.enabled", "false")).lower()
+            == "true",
+            title_summary_provider_code=cls._get_config_text(db, "ticket.ai.title.summary.provider.code", ""),
+            title_summary_prompt_code=cls._get_config_text(
+                db, "ticket.ai.title.summary.prompt.code", "ticket_title_summary_default"
+            ),
             knowledge_provider_code=cls._get_config_text(db, "ticket.ai.knowledge.provider.code", ""),
             knowledge_prompt_code=cls._get_config_text(
                 db, "ticket.ai.knowledge.prompt.code", "ticket_knowledge_extract_default"
@@ -315,19 +345,7 @@ class AiConfigService:
         :return: 更新结果
         """
         edit_data = page_object.model_dump(exclude_unset=True)
-        field_to_config = {
-            "translate_enabled": cls.CONFIG_DEFS[0],
-            "translate_provider_code": cls.CONFIG_DEFS[1],
-            "translate_prompt_code": cls.CONFIG_DEFS[2],
-            "knowledge_provider_code": cls.CONFIG_DEFS[3],
-            "knowledge_prompt_code": cls.CONFIG_DEFS[4],
-            "analysis_worker_command": cls.CONFIG_DEFS[5],
-            "analysis_worker_model": cls.CONFIG_DEFS[6],
-            "analysis_worker_sandbox": cls.CONFIG_DEFS[7],
-            "analysis_worker_timeout_sec": cls.CONFIG_DEFS[8],
-            "analysis_workspace_root": cls.CONFIG_DEFS[9],
-            "analysis_agent_code": cls.CONFIG_DEFS[10],
-        }
+        field_to_config = {item["field_name"]: item for item in cls.CONFIG_DEFS}
         try:
             for field_name, value in edit_data.items():
                 if field_name not in field_to_config:

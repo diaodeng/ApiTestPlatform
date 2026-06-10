@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 import requests
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from module_admin.entity.do.config_do import SysConfig
@@ -14,6 +15,7 @@ from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketMessage, TicketStatusHistory
+from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullProjectVendorMap, TicketLogPullStoreConfig
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import (
     TicketAiAnalysisRequestModel,
@@ -499,6 +501,519 @@ class TicketSyncService:
         return result
 
     @classmethod
+    def _payload_field_value(
+        cls,
+        payload: dict[str, Any] | None,
+        camel_key: str,
+        snake_key: str | None = None,
+        default=None,
+    ):
+        """
+        从外部载荷中读取字段值，仅兼容驼峰与下划线写法。
+        :param payload: 外部载荷字典
+        :param camel_key: 驼峰字段名
+        :param snake_key: 下划线字段名，未传时自动转换
+        :param default: 默认值
+        :return: 命中的字段值或默认值
+        """
+        if not isinstance(payload, dict):
+            return default
+        normalized_snake_key = snake_key or "".join(
+            [f"_{char.lower()}" if char.isupper() else char for char in camel_key]
+        )
+        for key in (camel_key, normalized_snake_key):
+            if key not in payload:
+                continue
+            value = payload.get(key)
+            if value in (None, "", []):
+                continue
+            return value
+        return default
+
+    @classmethod
+    def _extract_external_mapping_fields(cls, sync_object: TicketExternalSyncUpsertModel) -> dict[str, str]:
+        """
+        提取外部同步字段映射上下文。
+        :param sync_object: 外部同步模型
+        :return: 字段映射字典
+        """
+        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
+        extra_data = sync_object.extra_data if isinstance(sync_object.extra_data, dict) else {}
+        mapping_payload = (
+            extra_data.get("external_field_mapping")
+            if isinstance(extra_data.get("external_field_mapping"), dict)
+            else {}
+        )
+        ticket_vender = str(
+            cls._payload_field_value(
+                raw_payload,
+                "ticketVender",
+                "ticket_vender",
+                default=cls._payload_field_value(mapping_payload, "ticketVender", "ticket_vender", default=""),
+            )
+            or ""
+        ).strip()
+        ticket_modle = str(
+            cls._payload_field_value(
+                raw_payload,
+                "ticketModle",
+                "ticket_modle",
+                default=cls._payload_field_value(mapping_payload, "ticketModle", "ticket_modle", default=""),
+            )
+            or ""
+        ).strip()
+        ticket_status = str(
+            cls._payload_field_value(
+                raw_payload,
+                "ticketStatus",
+                "ticket_status",
+                default=cls._payload_field_value(raw_payload, "status", "status", default=""),
+            )
+            or ""
+        ).strip()
+        ticket_store = str(
+            cls._payload_field_value(
+                raw_payload,
+                "ticketStore",
+                "ticket_store",
+                default=cls._payload_field_value(raw_payload, "storeId", "store_id", default=""),
+            )
+            or ""
+        ).strip()
+        ticket_assignee = str(
+            cls._payload_field_value(
+                raw_payload,
+                "ticketAssignee",
+                "ticket_assignee",
+                default=cls._payload_field_value(raw_payload, "currentAssigneeName", "current_assignee_name", default=""),
+            )
+            or ""
+        ).strip()
+        return {
+            "ticketVender": ticket_vender,
+            "ticketModle": ticket_modle,
+            "ticketStatus": ticket_status,
+            "ticketStore": ticket_store,
+            "ticketAssignee": ticket_assignee,
+        }
+
+    @classmethod
+    def _match_mapping_exact(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
+        """
+        按完整关键字做精确映射，不进行模糊猜测。
+        :param field_value: 外部字段值
+        :param mappings: 映射配置列表
+        :return: 命中的映射对象
+        """
+        target = str(field_value or "").strip().lower()
+        if not target or not isinstance(mappings, list):
+            return None
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+            keywords = cls._mapping_keywords(mapping)
+            if target in keywords:
+                return mapping
+        return None
+
+    @classmethod
+    def _match_mapping_contains(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
+        """
+        按关键字“包含关系”匹配映射配置（外部字段包含任意关键词即命中）。
+        :param field_value: 外部字段值
+        :param mappings: 映射配置列表
+        :return: 命中的映射对象
+        """
+        target = str(field_value or "").strip().lower()
+        if not target or not isinstance(mappings, list):
+            return None
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+            keywords = cls._mapping_keywords(mapping)
+            if any(keyword and keyword in target for keyword in keywords):
+                return mapping
+        return None
+
+    @classmethod
+    def _resolve_project_by_ticket_vender(
+        cls,
+        db: Session,
+        *,
+        ticket_vender: str,
+        project_mappings: list[dict[str, Any]],
+    ) -> tuple[HrmProject | None, str]:
+        """
+        按 ticketVender 匹配所属项目与项目名称。
+        :param db: 数据库会话
+        :param ticket_vender: 外部商家文本
+        :param project_mappings: 项目映射配置
+        :return: (项目对象, 项目名称)
+        """
+        vendor_text = str(ticket_vender or "").strip()
+        if not vendor_text:
+            return None, ""
+        matched_mapping = cls._match_mapping_contains(vendor_text, project_mappings)
+        if isinstance(matched_mapping, dict):
+            project_id = cls._safe_int(
+                matched_mapping.get("projectId")
+                or matched_mapping.get("project_id")
+                or matched_mapping.get("id")
+            )
+            project_code = str(
+                matched_mapping.get("projectCode")
+                or matched_mapping.get("project_code")
+                or ""
+            ).strip()
+            project_name = str(
+                matched_mapping.get("projectName")
+                or matched_mapping.get("project_name")
+                or ""
+            ).strip()
+            query = db.query(HrmProject).filter(
+                HrmProject.status == QtrDataStatusEnum.normal.value,
+                HrmProject.del_flag == "0",
+            )
+            if project_id:
+                project = query.filter(HrmProject.project_id == project_id).first()
+                if project:
+                    return project, str(project.project_name or "").strip()
+            if project_code:
+                project = query.filter(HrmProject.project_code == project_code).first()
+                if project:
+                    return project, str(project.project_name or "").strip()
+            if project_name:
+                project = query.filter(func.lower(HrmProject.project_name) == project_name.lower()).first()
+                if project:
+                    return project, str(project.project_name or "").strip()
+                return None, project_name
+
+        # 向后兼容：若商户编号本身可直接匹配项目商家映射表，则仍可命中项目。
+        project_vendor_row = (
+            db.query(TicketLogPullProjectVendorMap)
+            .filter(TicketLogPullProjectVendorMap.vender_no == vendor_text)
+            .order_by(TicketLogPullProjectVendorMap.modifid.desc(), TicketLogPullProjectVendorMap.id.desc())
+            .first()
+        )
+        if not project_vendor_row:
+            return None, ""
+        project = (
+            db.query(HrmProject)
+            .filter(
+                HrmProject.project_id == project_vendor_row.project_id,
+                HrmProject.status == QtrDataStatusEnum.normal.value,
+                HrmProject.del_flag == "0",
+            )
+            .first()
+        )
+        if project:
+            return project, str(project.project_name or "").strip()
+        return None, str(project_vendor_row.project_name or "").strip()
+
+    @classmethod
+    def _resolve_module_by_ticket_modle(
+        cls,
+        db: Session,
+        *,
+        ticket_modle: str,
+        project_id: int | None,
+        module_mappings: list[dict[str, Any]],
+    ) -> HrmModule | None:
+        """
+        按 ticketModle 匹配所属模块。
+        :param db: 数据库会话
+        :param ticket_modle: 外部模块字段
+        :param project_id: 已匹配项目ID
+        :param module_mappings: 模块映射配置
+        :return: 模块对象
+        """
+        module_text = str(ticket_modle or "").strip()
+        if not module_text:
+            return None
+        matched_mapping = cls._match_mapping_contains(module_text, module_mappings)
+        module_id = cls._safe_int((matched_mapping or {}).get("moduleId") or (matched_mapping or {}).get("module_id"))
+        module_code = str(
+            (matched_mapping or {}).get("moduleCode")
+            or (matched_mapping or {}).get("module_code")
+            or ""
+        ).strip()
+        module_name = str(
+            (matched_mapping or {}).get("moduleName")
+            or (matched_mapping or {}).get("module_name")
+            or ""
+        ).strip()
+        query = db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
+        if project_id:
+            query = query.filter(HrmModule.project_id == project_id)
+        if module_id:
+            module = query.filter(HrmModule.module_id == module_id).first()
+            if module:
+                return module
+        if module_code:
+            module = query.filter(func.lower(HrmModule.module_code) == module_code.lower()).first()
+            if module:
+                return module
+        if module_name:
+            module = query.filter(func.lower(HrmModule.module_name) == module_name.lower()).first()
+            if module:
+                return module
+        module = query.filter(func.lower(HrmModule.module_code) == module_text.lower()).first()
+        if module:
+            return module
+        return query.filter(func.lower(HrmModule.module_name) == module_text.lower()).first()
+
+    @classmethod
+    def _resolve_status_by_external_value(
+        cls,
+        *,
+        status_text: str,
+        status_mappings: list[dict[str, Any]],
+    ) -> str:
+        """
+        按显式外部状态字段匹配本地状态，不做模糊猜测。
+        :param status_text: 外部状态值
+        :param status_mappings: 状态映射配置
+        :return: 本地状态编码或原始状态值
+        """
+        source_status = str(status_text or "").strip()
+        if not source_status:
+            return ""
+        status_map = {
+            "pending": TicketStatus.PENDING.value,
+            "processing": TicketStatus.PROCESSING.value,
+            "wait_user": TicketStatus.WAIT_USER.value,
+            "wait_dev": TicketStatus.WAIT_DEV.value,
+            "wait_release": TicketStatus.WAIT_RELEASE.value,
+            "wait_verify": TicketStatus.WAIT_VERIFY.value,
+            "resolved": TicketStatus.RESOLVED.value,
+            "closed": TicketStatus.CLOSED.value,
+            "rejected": TicketStatus.REJECTED.value,
+            "non_problem": TicketStatus.NON_PROBLEM.value,
+            "design_as_expected": TicketStatus.DESIGN_AS_EXPECTED.value,
+            "user_misoperation": TicketStatus.USER_MISOPERATION.value,
+            "duplicated": TicketStatus.DUPLICATED.value,
+        }
+        matched_mapping = cls._match_mapping_exact(source_status, status_mappings)
+        status_candidate = source_status
+        if isinstance(matched_mapping, dict):
+            status_candidate = str(
+                matched_mapping.get("status")
+                or matched_mapping.get("ticketStatus")
+                or matched_mapping.get("statusCode")
+                or matched_mapping.get("value")
+                or source_status
+            ).strip()
+        return status_map.get(status_candidate.lower(), status_candidate)
+
+    @classmethod
+    def _resolve_vendor_by_ticket_vender(
+        cls,
+        *,
+        ticket_vender: str,
+        vendor_mappings: list[dict[str, Any]],
+    ) -> tuple[int | None, str]:
+        """
+        按 ticketVender 解析日志拉取商家信息。
+        :param ticket_vender: 外部商家文本
+        :param vendor_mappings: 商家映射配置
+        :return: (vendor_id, vendor_name)
+        """
+        vendor_text = str(ticket_vender or "").strip()
+        if not vendor_text:
+            return None, ""
+        matched_mapping = cls._match_mapping_contains(vendor_text, vendor_mappings)
+        if isinstance(matched_mapping, dict):
+            vendor_id = cls._safe_int(
+                matched_mapping.get("vendorId")
+                or matched_mapping.get("vendor_id")
+                or matched_mapping.get("id")
+            )
+            vendor_name = str(matched_mapping.get("vendorName") or matched_mapping.get("vendor_name") or "").strip()
+            if vendor_id:
+                return vendor_id, vendor_name or vendor_text
+        return None, vendor_text
+
+    @classmethod
+    def _resolve_store_by_external_value(
+        cls,
+        db: Session,
+        *,
+        vendor_id: int | None,
+        ticket_store: str,
+    ) -> tuple[str, str]:
+        """
+        按商家ID + 外部门店字段（sap_org_no）匹配门店配置。
+        :param db: 数据库会话
+        :param vendor_id: 已匹配商家ID
+        :param ticket_store: 外部门店字段
+        :return: (store_id, store_name)
+        """
+        store_text = str(ticket_store or "").strip()
+        if not store_text:
+            return "", ""
+        if not vendor_id:
+            return store_text, ""
+
+        query = db.query(TicketLogPullStoreConfig).filter(TicketLogPullStoreConfig.sap_org_no == store_text)
+        query = query.filter(TicketLogPullStoreConfig.vender_no == str(vendor_id))
+        row = query.order_by(TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc()).first()
+        if not row:
+            return store_text, ""
+        resolved_store_id = str(row.org_no or row.sap_org_no or "").strip() or store_text
+        return resolved_store_id, str(row.org_name or "").strip()
+
+    @classmethod
+    def _match_assignee_mapping_exact(cls, assignee_text: str, assignee_mappings: Any) -> dict[str, Any] | None:
+        """
+        按人员名称做完整匹配（不支持模糊包含）。
+        :param assignee_text: 外部处理人文本
+        :param assignee_mappings: 处理人映射配置
+        :return: 命中的映射对象
+        """
+        target = str(assignee_text or "").strip().lower()
+        if not target or not isinstance(assignee_mappings, list):
+            return None
+        for mapping in assignee_mappings:
+            if not isinstance(mapping, dict):
+                continue
+            candidates = cls._mapping_keywords(mapping)
+            candidates.extend(
+                cls._normalize_keywords(
+                    [
+                        mapping.get("userName"),
+                        mapping.get("user_name"),
+                        mapping.get("name"),
+                        mapping.get("email"),
+                    ]
+                )
+            )
+            if any(target == candidate for candidate in candidates if candidate):
+                return mapping
+        return None
+
+    @classmethod
+    def _resolve_assignee_by_external_value(
+        cls,
+        db: Session,
+        *,
+        assignee_text: str,
+        assignee_mappings: list[dict[str, Any]],
+    ) -> tuple[int | None, str]:
+        """
+        按显式处理人字段匹配本地用户，不做包含式猜测。
+        :param db: 数据库会话
+        :param assignee_text: 外部处理人字段
+        :param assignee_mappings: 处理人映射配置
+        :return: (处理人ID, 处理人名称)
+        """
+        from module_admin.entity.do.user_do import SysUser
+
+        source_text = str(assignee_text or "").strip()
+        matched_mapping = cls._match_assignee_mapping_exact(source_text, assignee_mappings)
+        mapped_user_id = cls._safe_int(
+            (matched_mapping or {}).get("userId")
+            or (matched_mapping or {}).get("user_id")
+            or (matched_mapping or {}).get("assigneeId")
+        )
+        mapped_email = str((matched_mapping or {}).get("email") or "").strip()
+        mapped_user_name = str(
+            (matched_mapping or {}).get("userName")
+            or (matched_mapping or {}).get("user_name")
+            or (matched_mapping or {}).get("name")
+            or source_text
+        ).strip()
+        if mapped_user_id:
+            user = (
+                db.query(SysUser)
+                .filter(
+                    SysUser.user_id == mapped_user_id,
+                    SysUser.status == "0",
+                    SysUser.del_flag == "0",
+                )
+                .first()
+            )
+            if user:
+                return user.user_id, user.user_name or user.nick_name or mapped_user_name
+        if mapped_email:
+            user = (
+                db.query(SysUser)
+                .filter(
+                    SysUser.status == "0",
+                    SysUser.del_flag == "0",
+                    func.lower(SysUser.email) == mapped_email.lower(),
+                )
+                .first()
+            )
+            if user:
+                return user.user_id, user.user_name or user.nick_name or mapped_user_name
+        if mapped_user_name:
+            user = (
+                db.query(SysUser)
+                .filter(
+                    SysUser.status == "0",
+                    SysUser.del_flag == "0",
+                    (SysUser.user_name == mapped_user_name) | (SysUser.nick_name == mapped_user_name),
+                )
+                .first()
+            )
+            if user:
+                return user.user_id, user.user_name or user.nick_name or mapped_user_name
+        if source_text:
+            user = (
+                db.query(SysUser)
+                .filter(
+                    SysUser.status == "0",
+                    SysUser.del_flag == "0",
+                    (
+                        (SysUser.user_name == source_text)
+                        | (SysUser.nick_name == source_text)
+                        | (func.lower(SysUser.email) == source_text.lower())
+                    ),
+                )
+                .first()
+            )
+            if user:
+                return user.user_id, user.user_name or user.nick_name or source_text
+        return None, mapped_user_name or source_text
+
+    @classmethod
+    def _resolve_sync_title(
+        cls,
+        db: Session,
+        *,
+        sync_object: TicketExternalSyncUpsertModel,
+        ticket_id: int | None,
+        current_user: CurrentUserModel,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        解析外部同步工单标题：优先原始标题，其次轻量AI总结，最后回退描述截断。
+        :param db: 数据库会话
+        :param sync_object: 外部同步模型
+        :param ticket_id: 工单ID
+        :param current_user: 当前用户
+        :return: (最终标题, 标题元信息)
+        """
+        raw_title = str(sync_object.title or "").strip()
+        if raw_title:
+            return raw_title, {"mode": "raw", "title": raw_title}
+        description = str(sync_object.description or "").strip()
+        if not description:
+            return sync_object.ticket_no, {"mode": "fallback", "fallback_reason": "description_empty"}
+        ai_title, title_meta = TicketLightAiService.summarize_ticket_title(
+            db,
+            description=description,
+            source_type="ticket",
+            source_id=ticket_id,
+            source_ref=sync_object.ticket_no,
+            current_user_name=_user_name(current_user),
+        )
+        normalized_ai_title = str(ai_title or "").strip()
+        if normalized_ai_title:
+            return normalized_ai_title, {**title_meta, "mode": "ai"}
+        fallback_title = description[:100]
+        return fallback_title, {**title_meta, "mode": "fallback", "fallback_title": fallback_title}
+
+    @classmethod
     def _collect_text(cls, payload: TicketExternalSyncUpsertModel | Ticket) -> str:
         if isinstance(payload, Ticket):
             extra_data = payload.extra_data if isinstance(payload.extra_data, dict) else {}
@@ -529,118 +1044,11 @@ class TicketSyncService:
         return "\n".join(str(item).strip() for item in parts if str(item or "").strip())
 
     @classmethod
-    def _match_mapping(cls, text: str, mappings: Any) -> dict[str, Any] | None:
-        if not isinstance(mappings, list):
-            return None
-        best_match = None
-        best_score = 0
-        for mapping in mappings:
-            if not isinstance(mapping, dict):
-                continue
-            keywords = cls._normalize_keywords(mapping.get("keywords") or mapping.get("aliases"))
-            if not keywords:
-                continue
-            score = sum(1 for keyword in keywords if keyword in text)
-            if score > best_score:
-                best_score = score
-                best_match = mapping
-        return best_match if best_score > 0 else None
-
-    @classmethod
     def _mapping_keywords(cls, mapping: dict[str, Any]) -> list[str]:
         keywords = cls._normalize_keywords(mapping.get("keywords") or mapping.get("aliases"))
         if mapping.get("matchText"):
             keywords.extend(cls._normalize_keywords([mapping.get("matchText")]))
         return [keyword for keyword in keywords if keyword]
-
-    @classmethod
-    def _match_status(cls, text: str, mappings: list[dict[str, Any]]) -> str | None:
-        status_map = {
-            "pending": TicketStatus.PENDING.value,
-            "processing": TicketStatus.PROCESSING.value,
-            "wait_user": TicketStatus.WAIT_USER.value,
-            "wait_dev": TicketStatus.WAIT_DEV.value,
-            "wait_release": TicketStatus.WAIT_RELEASE.value,
-            "wait_verify": TicketStatus.WAIT_VERIFY.value,
-            "resolved": TicketStatus.RESOLVED.value,
-            "closed": TicketStatus.CLOSED.value,
-            "rejected": TicketStatus.REJECTED.value,
-            "non_problem": TicketStatus.NON_PROBLEM.value,
-            "design_as_expected": TicketStatus.DESIGN_AS_EXPECTED.value,
-            "user_misoperation": TicketStatus.USER_MISOPERATION.value,
-            "duplicated": TicketStatus.DUPLICATED.value,
-        }
-        matched = cls._match_mapping(text, mappings)
-        if isinstance(matched, dict):
-            for key in ("status", "ticketStatus", "statusCode", "value"):
-                candidate = str(matched.get(key) or "").strip()
-                if candidate:
-                    return status_map.get(candidate.lower(), candidate)
-        lowered = text.lower()
-        for alias, status_code in (
-            ("待受理", TicketStatus.PENDING.value),
-            ("处理中", TicketStatus.PROCESSING.value),
-            ("待用户", TicketStatus.WAIT_USER.value),
-            ("待开发", TicketStatus.WAIT_DEV.value),
-            ("待上线", TicketStatus.WAIT_RELEASE.value),
-            ("待验证", TicketStatus.WAIT_VERIFY.value),
-            ("已解决", TicketStatus.RESOLVED.value),
-            ("已关闭", TicketStatus.CLOSED.value),
-            ("已拒绝", TicketStatus.REJECTED.value),
-            ("非问题", TicketStatus.NON_PROBLEM.value),
-            ("重复", TicketStatus.DUPLICATED.value),
-            ("误操作", TicketStatus.USER_MISOPERATION.value),
-            ("按预期", TicketStatus.DESIGN_AS_EXPECTED.value),
-        ):
-            if alias in lowered:
-                return status_code
-        return None
-
-    @classmethod
-    def _match_assignee(cls, db: Session, text: str, mappings: list[dict[str, Any]]) -> tuple[int | None, str]:
-        from module_admin.entity.do.user_do import SysUser
-
-        matched = cls._match_mapping(text, mappings)
-        if isinstance(matched, dict):
-            user_id = cls._safe_int(matched.get("userId") or matched.get("user_id") or matched.get("assigneeId"))
-            user_name = str(matched.get("userName") or matched.get("user_name") or matched.get("name") or "").strip()
-            if user_id:
-                user = (
-                    db.query(SysUser)
-                    .filter(
-                        SysUser.user_id == user_id,
-                        SysUser.status == "0",
-                        SysUser.del_flag == "0",
-                    )
-                    .first()
-                )
-                if user:
-                    return user.user_id, user.user_name or user.nick_name or user_name
-            if user_name:
-                user = (
-                    db.query(SysUser)
-                    .filter(
-                        SysUser.status == "0",
-                        SysUser.del_flag == "0",
-                        (SysUser.user_name == user_name) | (SysUser.nick_name == user_name),
-                    )
-                    .first()
-                )
-                if user:
-                    return user.user_id, user.user_name or user.nick_name or user_name
-                return None, user_name
-        lowered = text.lower()
-        for user in db.query(SysUser).filter(SysUser.status == "0", SysUser.del_flag == "0").all():
-            aliases = cls._normalize_keywords(
-                [
-                    user.user_name,
-                    user.nick_name,
-                    user.nick_name and f"{user.user_name}/{user.nick_name}",
-                ]
-            )
-            if any(alias in lowered for alias in aliases):
-                return user.user_id, user.user_name or user.nick_name or ""
-        return None, ""
 
     @classmethod
     def _merge_external_text_fields(
@@ -724,87 +1132,6 @@ class TicketSyncService:
         return None
 
     @classmethod
-    def _match_project(cls, db: Session, text: str, mappings: list[dict[str, Any]]) -> HrmProject | None:
-        matched = cls._match_mapping(text, mappings)
-        project_code = (
-            str(matched.get("projectCode") or matched.get("project_code") or "").strip()
-            if isinstance(matched, dict)
-            else ""
-        )
-        project_id = cls._safe_int(matched.get("projectId") if isinstance(matched, dict) else None)
-        if project_code:
-            project = (
-                db.query(HrmProject)
-                .filter(
-                    HrmProject.project_code == project_code,
-                    HrmProject.status == QtrDataStatusEnum.normal.value,
-                    HrmProject.del_flag == "0",
-                )
-                .first()
-            )
-            if project:
-                return project
-        if project_id:
-            return (
-                db.query(HrmProject)
-                .filter(
-                    HrmProject.project_id == project_id,
-                    HrmProject.status == QtrDataStatusEnum.normal.value,
-                    HrmProject.del_flag == "0",
-                )
-                .first()
-            )
-        projects = (
-            db.query(HrmProject)
-            .filter(HrmProject.status == QtrDataStatusEnum.normal.value, HrmProject.del_flag == "0")
-            .all()
-        )
-        best_project = None
-        best_score = 0
-        for project in projects:
-            aliases = cls._normalize_keywords([project.project_name])
-            score = sum(1 for alias in aliases if alias in text)
-            if score > best_score:
-                best_score = score
-                best_project = project
-        return best_project if best_score > 0 else None
-
-    @classmethod
-    def _match_module(
-        cls,
-        db: Session,
-        text: str,
-        mappings: list[dict[str, Any]],
-        project_id: int | None = None,
-    ) -> HrmModule | None:
-        matched = cls._match_mapping(text, mappings)
-        module_code = (
-            str(matched.get("moduleCode") or matched.get("module_code") or "").strip()
-            if isinstance(matched, dict)
-            else ""
-        )
-        module_id = cls._safe_int(matched.get("moduleId") if isinstance(matched, dict) else None)
-        query = db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
-        if module_code:
-            module = query.filter(HrmModule.module_code == module_code).first()
-            if module:
-                return module
-        if module_id:
-            return query.filter(HrmModule.module_id == module_id).first()
-        if project_id:
-            query = query.filter(HrmModule.project_id == project_id)
-        modules = query.all()
-        best_module = None
-        best_score = 0
-        for module in modules:
-            aliases = cls._normalize_keywords([module.module_name])
-            score = sum(1 for alias in aliases if alias in text)
-            if score > best_score:
-                best_score = score
-                best_module = module
-        return best_module if best_score > 0 else None
-
-    @classmethod
     def _detect_fields(
         cls,
         db: Session,
@@ -812,8 +1139,22 @@ class TicketSyncService:
         config: dict[str, Any],
     ) -> dict[str, Any]:
         text = cls._collect_text(sync_object).lower()
+        external_fields = cls._extract_external_mapping_fields(sync_object)
+        ticket_vender = external_fields.get("ticketVender") or ""
+        ticket_modle = external_fields.get("ticketModle") or ""
+        ticket_status = external_fields.get("ticketStatus") or ""
+        ticket_store = external_fields.get("ticketStore") or ""
+        ticket_assignee = external_fields.get("ticketAssignee") or ""
+
         project = None
-        if str(sync_object.project_code or "").strip():
+        project_name_by_vendor = ""
+        if ticket_vender:
+            project, project_name_by_vendor = cls._resolve_project_by_ticket_vender(
+                db,
+                ticket_vender=ticket_vender,
+                project_mappings=config.get("projectMappings") or [],
+            )
+        if not project and str(sync_object.project_code or "").strip():
             project = (
                 db.query(HrmProject)
                 .filter(
@@ -823,28 +1164,58 @@ class TicketSyncService:
                 )
                 .first()
             )
-        if not project:
-            project = cls._match_project(db, text, config.get("projectMappings") or [])
-        module = None
-        if str(sync_object.module_code or "").strip():
+        if not project and sync_object.project_id:
+            project = (
+                db.query(HrmProject)
+                .filter(
+                    HrmProject.project_id == sync_object.project_id,
+                    HrmProject.status == QtrDataStatusEnum.normal.value,
+                    HrmProject.del_flag == "0",
+                )
+                .first()
+            )
+
+        module = cls._resolve_module_by_ticket_modle(
+            db,
+            ticket_modle=ticket_modle or str(sync_object.module_code or sync_object.module_name or "").strip(),
+            project_id=getattr(project, "project_id", None),
+            module_mappings=config.get("moduleMappings") or [],
+        )
+        if not module and sync_object.module_id:
             module_query = db.query(HrmModule).filter(
-                HrmModule.module_code == str(sync_object.module_code).strip(),
+                HrmModule.module_id == sync_object.module_id,
                 HrmModule.status == QtrDataStatusEnum.normal.value,
             )
             if getattr(project, "project_id", None):
                 module_query = module_query.filter(HrmModule.project_id == getattr(project, "project_id", None))
             module = module_query.first()
-        if not module:
-            module = cls._match_module(
-                db,
-                text,
-                config.get("moduleMappings") or [],
-                getattr(project, "project_id", None),
-            )
-        vendor_mapping = cls._match_mapping(text, config.get("vendorMappings") or [])
-        store_mapping = cls._match_mapping(text, config.get("storeMappings") or [])
-        status_code = cls._match_status(text, config.get("statusMappings") or [])
-        assignee_id, assignee_name = cls._match_assignee(db, text, config.get("assigneeMappings") or [])
+
+        vendor_id, vendor_name = cls._resolve_vendor_by_ticket_vender(
+            ticket_vender=ticket_vender,
+            vendor_mappings=config.get("vendorMappings") or [],
+        )
+        if not vendor_id:
+            vendor_id = cls._safe_int((sync_object.log_pull_config or {}).get("vendorId"))
+        store_id, store_name = cls._resolve_store_by_external_value(
+            db,
+            vendor_id=vendor_id,
+            ticket_store=ticket_store,
+        )
+        if not store_id:
+            store_id = str((sync_object.log_pull_config or {}).get("storeId") or "").strip()
+        status_code = cls._resolve_status_by_external_value(
+            status_text=ticket_status or str(sync_object.status or "").strip(),
+            status_mappings=config.get("statusMappings") or [],
+        )
+        assignee_id, assignee_name = cls._resolve_assignee_by_external_value(
+            db,
+            assignee_text=ticket_assignee or str(sync_object.current_assignee_name or "").strip(),
+            assignee_mappings=config.get("assigneeMappings") or [],
+        )
+        if not assignee_id:
+            assignee_id = cls._safe_int(sync_object.current_assignee_id)
+        if not assignee_name:
+            assignee_name = str(sync_object.current_assignee_name or "").strip()
         version_key = (
             str(sync_object.version_key or "").strip()
             or _extract_ticket_version_key(sync_object.extra_data)
@@ -854,6 +1225,7 @@ class TicketSyncService:
             "projectId": getattr(project, "project_id", None) or sync_object.project_id,
             "projectName": (
                 getattr(project, "project_name", "")
+                or project_name_by_vendor
                 or sync_object.project_name
                 or sync_object.merchant_name
                 or ""
@@ -862,15 +1234,13 @@ class TicketSyncService:
             "moduleId": getattr(module, "module_id", None) or sync_object.module_id,
             "moduleName": getattr(module, "module_name", "") or sync_object.module_name or "",
             "moduleCode": getattr(module, "module_code", "") or sync_object.module_code or "",
-            "vendorId": cls._safe_int((vendor_mapping or {}).get("vendorId"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("vendorId")),
-            "vendorName": (vendor_mapping or {}).get("vendorName") or "",
-            "storeId": cls._safe_int((store_mapping or {}).get("storeId"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("storeId")),
-            "storeName": (store_mapping or {}).get("storeName") or "",
+            "vendorId": vendor_id,
+            "vendorName": vendor_name,
+            "storeId": store_id,
+            "storeName": store_name,
             "status": status_code or str(sync_object.status or "").strip(),
-            "assigneeId": assignee_id or cls._safe_int(sync_object.current_assignee_id),
-            "assigneeName": assignee_name or str(sync_object.current_assignee_name or "").strip(),
+            "assigneeId": assignee_id,
+            "assigneeName": assignee_name,
             "posNo": cls._safe_int((sync_object.log_pull_config or {}).get("posNo"))
             or cls._safe_int(cls._extract_pattern(text, config.get("posPatterns"))),
             "scoNo": cls._safe_int(cls._extract_pattern(text, config.get("scoPatterns"))),
@@ -1086,8 +1456,16 @@ class TicketSyncService:
         """
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
         config = cls._load_sync_config(db)
-        detected = cls._detect_fields(db, sync_object, config)
         automation = sync_object.automation
+        resolved_title, title_meta = cls._resolve_sync_title(
+            db,
+            sync_object=sync_object,
+            ticket_id=getattr(ticket, "ticket_id", None),
+            current_user=current_user,
+        )
+        if resolved_title != str(sync_object.title or "").strip():
+            sync_object = sync_object.model_copy(update={"title": resolved_title})
+        detected = cls._detect_fields(db, sync_object, config)
         translation_enabled = TicketLightAiService.is_translation_enabled(db)
         if sync_scene == "remote_pull":
             sync_translate_enabled = bool(
@@ -1105,7 +1483,7 @@ class TicketSyncService:
         )
         translated_description, translation_meta, origin_description = cls._translate_sync_description(
             db,
-            title=sync_object.title,
+            title=sync_object.title or "",
             description=sync_object.description,
             ticket_id=getattr(ticket, "ticket_id", None),
             ticket_no=sync_object.ticket_no,
@@ -1115,6 +1493,10 @@ class TicketSyncService:
         if should_translate:
             sync_object = sync_object.model_copy(update={"description": translated_description})
         payload, meta, revision = cls._build_upsert_payload(db, ticket, sync_object, detected, current_user)
+        if title_meta and title_meta.get("mode") != "raw":
+            extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
+            extra_data["title_summary"] = title_meta
+            payload["extra_data"] = extra_data
         if should_translate and origin_description and str(translation_meta.get("translated_text") or "").strip():
             extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
             extra_data["origin_description"] = origin_description
@@ -1474,8 +1856,9 @@ class TicketSyncService:
         :return: 可用于外部同步入库的模型，失败时返回 None。
         """
         ticket_no = str(item.get("ticketNo") or item.get("ticket_no") or "").strip()
+        description = str(item.get("description") or "").strip()
         title = str(item.get("title") or "").strip()
-        if not ticket_no or not title:
+        if not ticket_no or not description:
             return None
 
         source_payload = {
@@ -1495,7 +1878,7 @@ class TicketSyncService:
             "rawPayload": item,
             "ticketNo": ticket_no,
             "title": title,
-            "description": item.get("description") or "",
+            "description": description,
             "projectId": item.get("projectId") or item.get("project_id"),
             "projectName": item.get("projectName") or item.get("project_name") or item.get("merchantName") or "",
             "projectCode": item.get("projectCode") or item.get("project_code") or "",
@@ -1649,7 +2032,7 @@ class TicketSyncService:
                             "ticketId": remote_ticket_id,
                             "syncRevision": sync_revision,
                             "deliveryStatus": "failed",
-                            "message": "远端工单数据缺少 ticketNo 或 title",
+                            "message": "远端工单数据缺少 ticketNo 或 description",
                         }
                     )
                 continue

@@ -24,6 +24,12 @@ class TicketLightAiService:
     DEFAULT_TIMEOUT_SEC = 60
     VERSION_PATTERN = re.compile(r"(?:版本号|版本|version|app[_\s-]*version)[:：\s-]*([A-Za-z0-9._/-]+)", re.IGNORECASE)
     JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+    CONFIG_TRANSLATE_ENABLED = "ticket.ai.translate.enabled"
+    CONFIG_TRANSLATE_PROVIDER = "ticket.ai.translate.provider.code"
+    CONFIG_TRANSLATE_PROMPT = "ticket.ai.translate.prompt.code"
+    CONFIG_TITLE_SUMMARY_ENABLED = "ticket.ai.title.summary.enabled"
+    CONFIG_TITLE_SUMMARY_PROVIDER = "ticket.ai.title.summary.provider.code"
+    CONFIG_TITLE_SUMMARY_PROMPT = "ticket.ai.title.summary.prompt.code"
 
     @classmethod
     def is_translation_enabled(cls, db: Session) -> bool:
@@ -32,7 +38,17 @@ class TicketLightAiService:
         :param db: 数据库会话
         :return: 是否启用翻译
         """
-        config_row = db.query(SysConfig).filter(SysConfig.config_key == "ticket.ai.translate.enabled").first()
+        config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_TRANSLATE_ENABLED).first()
+        return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
+
+    @classmethod
+    def is_title_summary_enabled(cls, db: Session) -> bool:
+        """
+        读取工单标题总结总开关。
+        :param db: 数据库会话
+        :return: 是否启用标题总结
+        """
+        config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_TITLE_SUMMARY_ENABLED).first()
         return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
 
     @classmethod
@@ -59,6 +75,15 @@ class TicketLightAiService:
         """
         parts = [f"标题：{title}".strip(), f"原文：\n{content}".strip()]
         return "\n\n".join([part for part in parts if part.strip()])
+
+    @staticmethod
+    def _build_title_summary_prompt(content: str) -> str:
+        """
+        构建工单标题总结请求内容。
+        :param content: 工单描述
+        :return: 请求文本
+        """
+        return f"工单描述：\n{content}".strip()
 
     @classmethod
     def _resolve_task_settings(cls, db: Session, provider_config_key: str, prompt_config_key: str) -> tuple[str, str]:
@@ -637,6 +662,157 @@ class TicketLightAiService:
         return str(content).strip()
 
     @classmethod
+    def summarize_ticket_title(
+        cls,
+        db: Session,
+        *,
+        description: str,
+        source_type: str = "ticket",
+        source_id: int | None = None,
+        source_ref: str | None = None,
+        current_user_name: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        根据工单描述生成标题。
+        :param db: 数据库会话
+        :param description: 工单描述
+        :param source_type: 来源类型
+        :param source_id: 来源ID
+        :param source_ref: 来源引用
+        :param current_user_name: 当前用户名称
+        :return: (标题, 元信息)
+        """
+        content = str(description or "").strip()
+        if not content:
+            return "", {"provider_code": "", "prompt_code": "", "summary_title": "", "skipped": True}
+        if not cls.is_title_summary_enabled(db):
+            logger.info(
+                f"工单标题总结跳过: 总开关关闭, source_type={source_type}, "
+                f"source_id={source_id}, source_ref={source_ref}"
+            )
+            return "", {"provider_code": "", "prompt_code": "", "summary_title": "", "skipped": True}
+
+        provider_code, prompt_code = cls._resolve_task_settings(
+            db, cls.CONFIG_TITLE_SUMMARY_PROVIDER, cls.CONFIG_TITLE_SUMMARY_PROMPT
+        )
+        if not provider_code or not prompt_code:
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_title_summary",
+                    task_name="工单标题总结",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    status="skipped",
+                    error_message="未配置标题总结Provider或提示词",
+                    request_payload={"description": content},
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未配置标题总结Provider或提示词")
+            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "summary_title": "", "skipped": True}
+
+        provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
+        if not provider or not bool(getattr(provider, "enabled", True)):
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_title_summary",
+                    task_name="工单标题总结",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    provider_code=provider_code,
+                    prompt_code=prompt_code,
+                    status="skipped",
+                    error_message="Provider不存在或已停用",
+                    request_payload={"description": content},
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="Provider不存在或已停用")
+            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "summary_title": "", "skipped": True}
+
+        prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
+        if not prompt_templates:
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_title_summary",
+                    task_name="工单标题总结",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    provider_code=provider_code,
+                    prompt_code=prompt_code,
+                    model_name=str(getattr(provider, "model_name", "") or "").strip() or None,
+                    base_url=str(getattr(provider, "base_url", "") or "").strip() or None,
+                    status="skipped",
+                    error_message="未找到提示词模板",
+                    request_payload={"description": content},
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未找到提示词模板")
+            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "summary_title": "", "skipped": True}
+
+        prompt_template = prompt_templates[0]
+        system_prompt = AiPromptTemplateService.render_prompt_text(
+            prompt_template["promptContent"],
+            {"content": content},
+        )
+        user_prompt = cls._build_title_summary_prompt(content)
+        execution_id = cls._write_execution_record(
+            execution_data=cls._build_execution_payload(
+                task_type="ticket_title_summary",
+                task_name="工单标题总结",
+                source_type=source_type,
+                source_id=source_id,
+                source_ref=source_ref,
+                provider_code=provider_code,
+                prompt_code=prompt_code,
+                model_name=str(getattr(provider, "model_name", "") or "").strip() or None,
+                base_url=str(getattr(provider, "base_url", "") or "").strip() or None,
+                request_payload={
+                    "description": content,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                status="running",
+                created_by_name=current_user_name,
+            ),
+        )
+        try:
+            summary_title = str(
+                cls._call_model_api(
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                )
+                or ""
+            ).strip()
+            summary_title = summary_title.replace("\r", " ").replace("\n", " ").strip()
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="success",
+                response_text=summary_title,
+                response_payload={"summaryTitle": summary_title},
+            )
+            return summary_title, {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "summary_title": summary_title,
+            }
+        except Exception as exc:
+            logger.warning(f"工单标题总结失败，已回退描述截断: {exc}")
+            cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
+            return "", {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "summary_title": "",
+                "error": str(exc),
+            }
+
+    @classmethod
     def translate_ticket_description(
         cls,
         db: Session,
@@ -671,9 +847,7 @@ class TicketLightAiService:
                 f"source_id={source_id}, source_ref={source_ref}"
             )
             return origin_text, {"provider_code": "", "prompt_code": "", "translated_text": "", "skipped": True}
-        provider_code, prompt_code = cls._resolve_task_settings(
-            db, "ticket.ai.translate.provider.code", "ticket.ai.translate.prompt.code"
-        )
+        provider_code, prompt_code = cls._resolve_task_settings(db, cls.CONFIG_TRANSLATE_PROVIDER, cls.CONFIG_TRANSLATE_PROMPT)
         if not provider_code or not prompt_code:
             logger.info(
                 f"工单轻量翻译跳过: provider/prompt 未配置, provider={provider_code or '-'}, "
@@ -696,7 +870,7 @@ class TicketLightAiService:
             return origin_text, {"provider_code": provider_code, "prompt_code": prompt_code, "translated_text": ""}
         provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
         if not provider or not bool(getattr(provider, "enabled", True)):
-            logger.warning("工单翻译跳过：Provider[%s]不存在或已停用", provider_code)
+            logger.warning(f"工单翻译跳过：Provider{provider_code}不存在或已停用")
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_translate",
@@ -717,7 +891,7 @@ class TicketLightAiService:
 
         prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
         if not prompt_templates:
-            logger.warning("工单翻译跳过：未找到提示词模板[%s]", prompt_code)
+            logger.warning(f"工单翻译跳过：未找到提示词模板{prompt_code}")
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_translate",
@@ -778,7 +952,7 @@ class TicketLightAiService:
                 response_payload={"translatedText": translated_text},
             )
         except Exception as exc:
-            logger.warning("工单翻译失败，已回退原文: %s", exc)
+            logger.warning(f"工单翻译失败，已回退原文: {exc}")
             cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
             return origin_text, {
                 "provider_code": provider_code,

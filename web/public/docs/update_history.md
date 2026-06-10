@@ -1,6 +1,12 @@
 ## 更新历史
 
 ### latest
+1. 调整外部工单同步映射规则：`ticketVender`/`ticketModle`/商家映射改为关键词“包含匹配”；处理人映射保持完整匹配并新增 `email` 支持；门店按“商家ID + sap_org_no”查 `ticket_log_pull_store_config`，未命中原样保存。
+1. 补充外部工单同步接口文档标准请求示例：新增驼峰与下划线两份 JSON 示例，明确可直接用于 `POST /ticket/sync/external` 对接联调。
+1. 外部工单同步接口 `POST /ticket/sync/external` 收紧为“仅驼峰/下划线兼容，不做猜测映射”，并新增必填校验：`ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`；缺失时直接 `422`、记录日志且不入库。
+1. 外部工单同步字段转换改为显式规则：`reason -> rootCause`；项目/商家按 `ticketVender` 匹配；模块/状态/门店/处理人按显式字段与映射规则解析，不再做自由猜测。
+1. 外部工单 `title` 支持缺省：先走轻量 AI 标题总结，AI关闭或不可用时自动回退为 `description` 前100字符。
+1. AI 配置中心“轻量 AI 配置”新增工单标题总结开关与 Provider/Prompt 三项，并新增默认提示词模板 `ticket_title_summary_default`。
 1. 工单同步配置页调整远端同步字段校验：当 `remoteSync.enabled=false` 时，不再强制 `pullUrl/ackUrl/consumer` 必填，支持仅保存基础开关和规则配置。
 1. 修复日志拉取弹窗门店下拉不跟随商家重新查询的问题：商家 ID 变化后会重新请求对应门店，只展示当前商家的门店，避免跨商家误选。
 1. 修复日志拉取管理页的门店配置列表不显示问题：该接口返回的分页数据实际在 `response.data.rows` / `response.data.total`，前端已改为兼容读取，列表现在可以正常渲染。

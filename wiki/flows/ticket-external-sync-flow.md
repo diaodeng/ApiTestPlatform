@@ -56,11 +56,11 @@ sequenceDiagram
 
 | 步骤 | 说明 |
 |---|---|
-| 1 | 外部系统调用 `POST /ticket/sync/external`，至少提供 `ticketNo`、`title` 和 `source.system`。 |
+| 1 | 外部系统调用 `POST /ticket/sync/external`，必填 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`；`title` 允许缺省。 |
 | 2 | `TicketSyncService.sync_external_ticket` 以 `ticketNo` 为幂等键创建或更新工单，并在 `extra_data.external_sync` 中递增 `revision`。 |
 | 3 | 同步元数据会记录来源系统、来源记录 ID、最近导入时间、最近一次交付状态、每个消费方的交付 revision 以及自动化执行状态。 |
 | 4 | 如果本次请求携带 `automation`，或者系统参数 `ticket.sync.automation.autoRunOnSync=true`，同步服务会继续执行自动识别、相似工单检索、自动拉日志和自动 AI 分析。 |
-| 5 | 字段识别当前采用可配置映射和正则规则，规则统一存放在 `ticket.sync.automation`，便于适配不同工单系统的话术。 |
+| 5 | 字段识别采用可配置映射和正则规则：项目/模块/商家按关键词包含匹配；处理人按完整名称匹配（支持 email）；门店按商家ID+`sap_org_no` 查询配置。规则统一存放在 `ticket.sync.automation`。 |
 | 6 | 内网消费方调用 `GET /ticket/sync/pending` 时，只会拿到 `external_sync.revision > consumers.{consumer}.delivered_revision` 的工单。 |
 | 7 | 拉取成功后，服务端立即回写该消费方的 `delivered_revision`、`last_batch_id` 和 `last_pulled_at`，防止同一 revision 被重复返回。 |
 | 8 | 如果消费方还需要把“已处理”“处理失败”“部分成功”等结果反馈回公网环境，可调用可选接口 `POST /ticket/sync/ack`。 |
@@ -70,7 +70,7 @@ sequenceDiagram
 
 | 场景 | 处理方式 |
 |---|---|
-| 外部同步缺少 `ticketNo`、`title` 或 `source.system` | 直接参数校验失败，拒绝入站 |
+| 外部同步缺少必填字段（`ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`） | 直接参数校验失败并记录日志，拒绝入站 |
 | 自动识别无法确定项目/模块归属 | 保留原始工单与同步元数据，识别步骤状态照常落库，不阻断同步主流程 |
 | 自动拉日志或自动 AI 异常 | 在 `extra_data.external_sync.sync_state.automation` 中记录失败步骤和错误信息，便于后续继续排查 |
 | 消费方拉取后自身处理失败 | 当前 revision 已标记为 delivered；如需补充处理结果，可再调用 `POST /ticket/sync/ack` 记录失败原因 |

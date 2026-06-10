@@ -502,7 +502,7 @@ const mappingSections = [
   { key: 'vendorMappings', label: '商家映射', description: '示例：[{"keywords":["京东","jd"],"vendorId":3001,"vendorName":"京东商户"}]', rows: 6 },
   { key: 'storeMappings', label: '门店映射', description: '示例：[{"keywords":["北京一店","bj-01"],"storeId":4001,"storeName":"北京一店"}]', rows: 6 },
   { key: 'statusMappings', label: '状态映射', description: '示例：[{"keywords":["处理中","processing"],"status":"PROCESSING"}]', rows: 6 },
-  { key: 'assigneeMappings', label: '处理人映射', description: '示例：[{"keywords":["张三","zhangsan"],"userId":5001,"userName":"张三"}]', rows: 6 }
+  { key: 'assigneeMappings', label: '处理人映射', description: '示例：[{"keywords":["张三"],"userId":5001,"userName":"张三","email":"zhangsan@example.com"}]', rows: 6 }
 ]
 
 const rules = {
