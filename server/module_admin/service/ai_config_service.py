@@ -95,6 +95,30 @@ class AiConfigService:
             "section": "light_translate",
         },
         {
+            "field_name": "log_extract_enabled",
+            "config_key": "ticket.ai.log_extract.enabled",
+            "config_name": "工单日志参数提取开关",
+            "default_value": "false",
+            "remark": "控制外部工单同步后是否调用轻量AI提取POS/SCO与日志日期，并复用同次结果做标题/分类理解",
+            "section": "light_translate",
+        },
+        {
+            "field_name": "log_extract_provider_code",
+            "config_key": "ticket.ai.log_extract.provider.code",
+            "config_name": "工单日志参数提取Provider编码",
+            "default_value": "",
+            "remark": "工单日志参数提取时使用的AI Provider编码",
+            "section": "light_translate",
+        },
+        {
+            "field_name": "log_extract_prompt_code",
+            "config_key": "ticket.ai.log_extract.prompt.code",
+            "config_name": "工单日志参数提取提示词编码",
+            "default_value": "",
+            "remark": "工单日志参数提取时使用的提示词模板编码",
+            "section": "light_translate",
+        },
+        {
             "field_name": "knowledge_provider_code",
             "config_key": "ticket.ai.knowledge.provider.code",
             "config_name": "工单知识提炼Provider编码",
@@ -327,6 +351,9 @@ class AiConfigService:
             category_classify_prompt_code=cls._get_config_text(
                 db, "ticket.ai.category.classify.prompt.code", "ticket_category_classify_default"
             ),
+            log_extract_enabled=str(cls._get_config_text(db, "ticket.ai.log_extract.enabled", "false")).lower() == "true",
+            log_extract_provider_code=cls._get_config_text(db, "ticket.ai.log_extract.provider.code", ""),
+            log_extract_prompt_code=cls._get_config_text(db, "ticket.ai.log_extract.prompt.code", ""),
             knowledge_provider_code=cls._get_config_text(db, "ticket.ai.knowledge.provider.code", ""),
             knowledge_prompt_code=cls._get_config_text(
                 db, "ticket.ai.knowledge.prompt.code", "ticket_knowledge_extract_default"

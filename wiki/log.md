@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-10] INGEST-CODE | 修复日志拉取列表 modify_time 字段异常
+- 触发：用户反馈工单列表页报错 `'TicketLogPullRecord' object has no attribute 'modify_time'`
+- 架构层：工单域 / 日志拉取
+- 创建的页面：无
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_log_pull_service.py` -> 工单域知识页
+- 总共涉及页面：2
+
 ## [2026-06-10] INGEST-CODE | 修复日志拉取弹窗关联工单回填缺失
 - 触发：用户反馈日志拉取弹窗中关联工单后，商家ID/门店/POS未自动回填。
 - 架构层：工单域 / 日志拉取 / Web 控制台
@@ -402,4 +411,13 @@ updated: 2026-05-20
 - 更新的页面：`entities/services/ticket-domain.md`、`docs/ticket-log-pull-design.md`、`docs/update_history.md`
 - 创建的双向链接：0 对
 - 变更传播链：`server/modules/ticket/service/ticket_log_pull_service.py` / `server/modules/ticket/entity/vo/ticket_log_pull_vo.py` / `server/modules/ticket/entity/do/ticket_log_pull_do.py` / `web/src/components/ticket/LogPullConfigFields.vue` / `web/src/views/ticket/index.vue` -> 工单域知识页
+- 总共涉及页面：5
+
+## [2026-06-10] INGEST-CODE | 摄入工单同步“统一提取 + 半合并AI调用”链路
+- 触发：用户要求将工单同步中的标题总结、分类整理、日志参数提取尽量合并为一次轻量 AI 调用，翻译保留独立调用；并新增日志参数提取配置能力
+- 架构层：工单域 / 轻量AI配置中心 / 同步自动化
+- 创建的页面：无
+- 更新的页面：`docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_light_ai_service.py` / `server/modules/ticket/service/ticket_sync_service.py` / `server/module_admin/service/ai_config_service.py` / `server/module_admin/entity/vo/ai_config_vo.py` / `web/src/views/system/aiconfig/index.vue` -> 工单域知识页
 - 总共涉及页面：5

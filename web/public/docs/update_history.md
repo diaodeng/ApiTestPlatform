@@ -230,3 +230,8 @@
 3. 新增接口：推送配置下拉、按人催办预览、按人催办执行、按工单号手动发群消息；并扩展同步配置结构 `groupPush/personReminder`。
 4. 新增定时任务键 `module_task.scheduler_maintenance.ticket_person_overdue_reminder`，可在任务调度中定时执行按人催办。
 5. AI 翻译开关收敛：总开关在 AI 配置中心；外部直推由 `autoTranslateOnSync` 控制；远端拉取由 `remoteSync.autoTranslateOnPull` 控制；同时补充关键执行日志用于排查“为什么未执行”。
+6. AI 配置中心新增“日志参数提取”轻量 AI 配置（开关、Provider、提示词），并纳入统一配置读写与页面展示。
+7. 外部工单同步链路新增“统一提取”能力：单次轻量 AI 调用同时提取标题、分类、POS/SCO、日志日期；其中 POS/SCO 强制数字化，日期缺少年份时默认当前年份。
+8. 同步流程优化为“翻译独立、提取合并复用”：标题优先复用统一提取结果，自动分类优先使用统一提取分类，日志自动拉取参数优先使用统一提取的 `posNo/scoNo/modifyTime`。
+9. 新增“更新且带标题跳过 AI 分析类步骤”规则：更新场景入参若已提供标题，将跳过统一提取与自动分类，避免不必要的 AI 调用；翻译仍按“历史已成功则跳过”规则执行。
+10. 修复工单日志拉取列表接口异常：`TicketLogPullRecord` 模型不存在 `modify_time` 字段时，摘要转换改为安全读取并回退到 `command_content.modifyTime`，避免列表页报错 `'TicketLogPullRecord' object has no attribute 'modify_time'`。

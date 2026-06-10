@@ -144,6 +144,47 @@
               </el-select>
             </el-form-item>
           </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="日志参数提取开关" prop="logExtractEnabled">
+              <el-switch v-model="form.logExtractEnabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="日志参数提取 Provider" prop="logExtractProviderCode">
+              <el-select
+                v-model="form.logExtractProviderCode"
+                placeholder="请选择 Provider"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in providerOptions"
+                  :key="`log-extract-${item.providerId || item.providerCode}`"
+                  :label="formatProviderLabel(item)"
+                  :value="item.providerCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="日志参数提取提示词" prop="logExtractPromptCode">
+              <el-select
+                v-model="form.logExtractPromptCode"
+                placeholder="请选择提示词模板"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in promptOptions.common"
+                  :key="`log-extract-${item.templateId || item.templateCode}`"
+                  :label="formatPromptLabel(item)"
+                  :value="item.templateCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
 
           <el-col :span="24">
             <el-divider content-position="left">知识提炼</el-divider>
@@ -305,6 +346,9 @@ const defaultForm = () => ({
   categoryClassifyEnabled: false,
   categoryClassifyProviderCode: '',
   categoryClassifyPromptCode: '',
+  logExtractEnabled: false,
+  logExtractProviderCode: '',
+  logExtractPromptCode: '',
   knowledgeProviderCode: '',
   knowledgePromptCode: '',
   analysisWorkerCommand: '',
@@ -349,6 +393,9 @@ function applyFormData(payload) {
   form.categoryClassifyEnabled = payload.categoryClassifyEnabled ?? payload.category_classify_enabled ?? false
   form.categoryClassifyProviderCode = payload.categoryClassifyProviderCode ?? payload.category_classify_provider_code ?? ''
   form.categoryClassifyPromptCode = payload.categoryClassifyPromptCode ?? payload.category_classify_prompt_code ?? ''
+  form.logExtractEnabled = payload.logExtractEnabled ?? payload.log_extract_enabled ?? false
+  form.logExtractProviderCode = payload.logExtractProviderCode ?? payload.log_extract_provider_code ?? ''
+  form.logExtractPromptCode = payload.logExtractPromptCode ?? payload.log_extract_prompt_code ?? ''
   form.knowledgeProviderCode = payload.knowledgeProviderCode ?? payload.knowledge_provider_code ?? ''
   form.knowledgePromptCode = payload.knowledgePromptCode ?? payload.knowledge_prompt_code ?? ''
   form.analysisWorkerCommand = payload.analysisWorkerCommand ?? payload.analysis_worker_command ?? ''

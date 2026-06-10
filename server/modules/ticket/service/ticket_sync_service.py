@@ -1580,6 +1580,105 @@ class TicketSyncService:
         return fallback_title, {**title_meta, "mode": "fallback", "fallback_title": fallback_title}
 
     @classmethod
+    def _should_skip_ai_analysis_for_update_with_title(
+        cls,
+        *,
+        ticket: Ticket | None,
+        incoming_title: str,
+        meta: dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        判断是否因“更新且已带标题”跳过 AI 分析类任务（标题总结/分类/日志参数提取）。
+        :param ticket: 当前工单对象
+        :param incoming_title: 本次入参标题
+        :param meta: 可选同步元数据，用于补充判断是否更新场景
+        :return: 是否跳过
+        """
+        if not ticket:
+            return False
+        if not str(incoming_title or "").strip():
+            return False
+        revision = cls._safe_int((meta or {}).get("revision"))
+        if revision is None:
+            return True
+        return revision > 1
+
+    @classmethod
+    def _apply_ai_extract_to_sync_object(
+        cls,
+        sync_object: TicketExternalSyncUpsertModel,
+        extract_result: dict[str, Any] | None,
+    ) -> tuple[TicketExternalSyncUpsertModel, dict[str, Any]]:
+        """
+        将统一提取结果回填到同步对象（当前仅回填日志拉取参数）。
+        :param sync_object: 外部同步对象
+        :param extract_result: 统一提取结果
+        :return: (回填后的同步对象, 回填摘要)
+        """
+        result = extract_result if isinstance(extract_result, dict) else {}
+        pos_no = cls._safe_int(result.get("posNo"))
+        sco_no = cls._safe_int(result.get("scoNo"))
+        log_date = cls._normalize_auto_log_pull_date_text(result.get("logDate"))
+
+        log_pull_payload = dict(sync_object.log_pull_config or {}) if isinstance(sync_object.log_pull_config, dict) else {}
+        changed = False
+        if pos_no:
+            if cls._safe_int(log_pull_payload.get("posNo")) != pos_no:
+                log_pull_payload["posNo"] = pos_no
+                changed = True
+        elif sco_no:
+            if cls._safe_int(log_pull_payload.get("scoNo")) != sco_no:
+                log_pull_payload["scoNo"] = sco_no
+                changed = True
+        if log_date:
+            previous_date = cls._normalize_auto_log_pull_date_text(
+                log_pull_payload.get("modifyTime") or log_pull_payload.get("logDate")
+            )
+            if previous_date != log_date:
+                log_pull_payload["modifyTime"] = log_date
+                changed = True
+
+        if not changed:
+            return sync_object, {"updated": False}
+        updated_sync_object = sync_object.model_copy(update={"log_pull_config": log_pull_payload})
+        return updated_sync_object, {
+            "updated": True,
+            "logPullConfig": {
+                "posNo": cls._safe_int(log_pull_payload.get("posNo")),
+                "scoNo": cls._safe_int(log_pull_payload.get("scoNo")),
+                "modifyTime": cls._normalize_auto_log_pull_date_text(log_pull_payload.get("modifyTime")),
+            },
+        }
+
+    @classmethod
+    def _attach_sync_ai_extract_meta(
+        cls,
+        extra_data: dict[str, Any],
+        *,
+        extract_result: dict[str, Any] | None,
+        extract_meta: dict[str, Any] | None,
+        applied_meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        将统一提取执行信息写入 extra_data，便于排查和复盘。
+        :param extra_data: 工单扩展字段
+        :param extract_result: 提取结果
+        :param extract_meta: 提取元信息
+        :param applied_meta: 回填摘要
+        :return: 更新后的扩展字段
+        """
+        payload = dict(extra_data or {})
+        if not isinstance(extract_meta, dict):
+            return payload
+        payload["ai_sync_extract"] = {
+            "executedAt": cls._now_iso(),
+            "result": extract_result if isinstance(extract_result, dict) else {},
+            "meta": extract_meta,
+            "applied": applied_meta if isinstance(applied_meta, dict) else {},
+        }
+        return payload
+
+    @classmethod
     def _collect_text(cls, payload: TicketExternalSyncUpsertModel | Ticket) -> str:
         if isinstance(payload, Ticket):
             extra_data = payload.extra_data if isinstance(payload.extra_data, dict) else {}
@@ -1757,6 +1856,9 @@ class TicketSyncService:
         source_type: str,
         source_ref: str,
         force_reclassify: bool = False,
+        pre_classified_category: str | None = None,
+        pre_classified_meta: dict[str, Any] | None = None,
+        prefer_no_ai_fallback: bool = False,
     ) -> tuple[Ticket, dict[str, Any]]:
         """
         执行工单自动分类并在成功时回填工单分类字段。
@@ -1768,6 +1870,9 @@ class TicketSyncService:
         :param source_type: 分类来源类型
         :param source_ref: 分类来源引用
         :param force_reclassify: 是否强制覆盖已有分类
+        :param pre_classified_category: 预提取分类结果，非空时优先使用
+        :param pre_classified_meta: 预提取分类元信息
+        :param prefer_no_ai_fallback: 预提取场景下，分类缺失时是否不再追加第二次 AI 分类调用
         :return: (最新工单对象, 分类执行摘要)
         """
         existing_category = str(getattr(ticket, "category_name", "") or "").strip()
@@ -1778,16 +1883,26 @@ class TicketSyncService:
                 "categoryName": existing_category,
             }
 
-        category_name, category_meta = TicketLightAiService.classify_ticket_category(
-            db,
-            title=title,
-            description=description,
-            source_type=source_type,
-            source_id=ticket.ticket_id,
-            source_ref=source_ref,
-            current_user_name=current_user_name,
-        )
-        normalized_category = str(category_name or "").strip()
+        normalized_category = str(pre_classified_category or "").strip()
+        category_meta = dict(pre_classified_meta or {})
+        if not normalized_category:
+            if prefer_no_ai_fallback:
+                return ticket, {
+                    "skipped": True,
+                    "skipReason": "统一提取未返回分类，已按配置跳过二次分类AI调用",
+                    "categoryName": existing_category,
+                    "meta": category_meta,
+                }
+            category_name, category_meta = TicketLightAiService.classify_ticket_category(
+                db,
+                title=title,
+                description=description,
+                source_type=source_type,
+                source_id=ticket.ticket_id,
+                source_ref=source_ref,
+                current_user_name=current_user_name,
+            )
+            normalized_category = str(category_name or "").strip()
         if not normalized_category:
             return ticket, {
                 "skipped": True,
@@ -2222,6 +2337,13 @@ class TicketSyncService:
         automation = sync_object.automation
         raw_title = str(sync_object.title or "").strip()
         existing_title = str(ticket.title or "").strip() if ticket else ""
+        skip_ai_analysis_due_to_update_title = cls._should_skip_ai_analysis_for_update_with_title(
+            ticket=ticket,
+            incoming_title=raw_title,
+        )
+        ai_extract_result: dict[str, Any] = {}
+        ai_extract_meta: dict[str, Any] = {"skipped": True}
+        ai_extract_apply_meta: dict[str, Any] = {"updated": False}
         title_meta: dict[str, Any] = {"mode": "raw", "title": raw_title}
         if defer_post_process:
             # 延后AI时先用稳定兜底标题入库，避免主链路被AI网络调用阻塞。
@@ -2235,27 +2357,62 @@ class TicketSyncService:
             elif not raw_title:
                 title_meta = {"mode": "fallback", "fallback_title": resolved_title}
         else:
+            if skip_ai_analysis_due_to_update_title:
+                logger.info(
+                    "外部工单同步跳过统一提取与标题AI：更新场景且已携带标题, ticket_no=%s",
+                    sync_object.ticket_no,
+                )
+            else:
+                try:
+                    ai_extract_result, ai_extract_meta = TicketLightAiService.extract_ticket_sync_fields(
+                        db,
+                        title=raw_title or existing_title,
+                        description=str(sync_object.description or "").strip(),
+                        raw_payload=sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {},
+                        source_type=f"{sync_scene}_sync_extract",
+                        source_id=getattr(ticket, "ticket_id", None),
+                        source_ref=sync_object.ticket_no,
+                        current_user_name=_user_name(current_user),
+                    )
+                    sync_object, ai_extract_apply_meta = cls._apply_ai_extract_to_sync_object(
+                        sync_object,
+                        ai_extract_result,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "外部工单同步统一提取执行失败，已继续后续流程: ticket_no=%s, error=%s",
+                        sync_object.ticket_no,
+                        exc,
+                    )
+                    ai_extract_result = {}
+                    ai_extract_meta = {"skipped": True, "error": str(exc)}
+                    ai_extract_apply_meta = {"updated": False}
             resolved_title = raw_title or existing_title
             if resolved_title:
                 if not raw_title and existing_title:
                     title_meta = {"mode": "keep_existing", "title": existing_title}
             else:
-                try:
-                    resolved_title, title_meta = cls._resolve_sync_title(
-                        db,
-                        sync_object=sync_object,
-                        ticket_id=getattr(ticket, "ticket_id", None),
-                        current_user=current_user,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        f"外部工单同步标题处理异常，已回退描述截断: "
-                        f"ticket_no={sync_object.ticket_no}, error={exc}"
-                    )
-                    resolved_title = str(sync_object.description or "").strip()[:100]
-                    if not resolved_title:
-                        resolved_title = sync_object.ticket_no
-                    title_meta = {"mode": "fallback", "fallback_title": resolved_title, "error": str(exc)}
+                ai_extract_title = str((ai_extract_result or {}).get("title") or "").strip()
+                if ai_extract_title:
+                    resolved_title = ai_extract_title
+                    title_meta = {"mode": "ai_extract", "title": ai_extract_title}
+                else:
+                    try:
+                        resolved_title, title_meta = cls._resolve_sync_title(
+                            db,
+                            sync_object=sync_object,
+                            ticket_id=getattr(ticket, "ticket_id", None),
+                            current_user=current_user,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"外部工单同步标题处理异常，已回退描述截断: "
+                            f"ticket_no={sync_object.ticket_no}, error={exc}"
+                        )
+                        resolved_title = str(sync_object.description or "").strip()[:100]
+                        if not resolved_title:
+                            resolved_title = sync_object.ticket_no
+                        title_meta = {"mode": "fallback", "fallback_title": resolved_title, "error": str(exc)}
             if resolved_title != raw_title:
                 sync_object = sync_object.model_copy(update={"title": resolved_title})
         detected = cls._detect_fields(db, sync_object, config)
@@ -2324,6 +2481,16 @@ class TicketSyncService:
             if translation_meta.get("prompt_code"):
                 extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
             payload["extra_data"] = extra_data
+        if not defer_post_process and isinstance(ai_extract_meta, dict):
+            if not bool(ai_extract_meta.get("skipped")) or str(ai_extract_meta.get("error") or "").strip():
+                extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
+                extra_data = cls._attach_sync_ai_extract_meta(
+                    extra_data,
+                    extract_result=ai_extract_result,
+                    extract_meta=ai_extract_meta,
+                    applied_meta=ai_extract_apply_meta,
+                )
+                payload["extra_data"] = extra_data
         now = datetime.now()
         try:
             created = ticket is None
@@ -2398,20 +2565,28 @@ class TicketSyncService:
             )
 
         category_summary = None
-        try:
-            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
-            ticket, category_summary = cls._run_auto_ticket_category_classification(
-                db,
-                ticket=ticket,
-                title=str(sync_object.title or ticket.title or "").strip(),
-                description=str(sync_object.description or ticket.description or "").strip(),
-                current_user_name=_user_name(current_user),
-                source_type=f"{sync_scene}_auto_category",
-                source_ref=sync_object.ticket_no,
-                force_reclassify=False,
-            )
-        except Exception as exc:
-            logger.warning(f"外部工单同步自动分类执行失败: ticket_no={sync_object.ticket_no}, error={exc}")
+        if skip_ai_analysis_due_to_update_title:
+            category_summary = {"skipped": True, "skipReason": "更新场景且已携带标题，跳过AI分类"}
+        else:
+            try:
+                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+                pre_category_name = str((ai_extract_result or {}).get("categoryName") or "").strip()
+                prefer_no_ai_fallback = not bool(ai_extract_meta.get("skipped", True)) if isinstance(ai_extract_meta, dict) else False
+                ticket, category_summary = cls._run_auto_ticket_category_classification(
+                    db,
+                    ticket=ticket,
+                    title=str(sync_object.title or ticket.title or "").strip(),
+                    description=str(sync_object.description or ticket.description or "").strip(),
+                    current_user_name=_user_name(current_user),
+                    source_type=f"{sync_scene}_auto_category",
+                    source_ref=sync_object.ticket_no,
+                    force_reclassify=False,
+                    pre_classified_category=pre_category_name,
+                    pre_classified_meta=ai_extract_meta if isinstance(ai_extract_meta, dict) else None,
+                    prefer_no_ai_fallback=prefer_no_ai_fallback,
+                )
+            except Exception as exc:
+                logger.warning(f"外部工单同步自动分类执行失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
         should_run_automation = bool(
             (
@@ -2508,15 +2683,51 @@ class TicketSyncService:
             logger.warning(f"外部工单同步延后后处理跳过: 未找到工单 ticket_no={sync_object.ticket_no}")
             return
         config = cls._load_sync_config(db)
-        detected = cls._detect_fields(db, sync_object, config)
         automation = sync_object.automation
         update_data: dict[str, Any] = {}
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
         existing_title = str(ticket.title or "").strip()
         incoming_title = str(sync_object.title or "").strip()
+        meta = cls._build_meta(extra_data)
+        skip_ai_analysis_due_to_update_title = cls._should_skip_ai_analysis_for_update_with_title(
+            ticket=ticket,
+            incoming_title=incoming_title,
+            meta=meta,
+        )
+        ai_extract_result: dict[str, Any] = {}
+        ai_extract_meta: dict[str, Any] = {"skipped": True}
+        ai_extract_apply_meta: dict[str, Any] = {"updated": False}
+
+        if skip_ai_analysis_due_to_update_title:
+            logger.info(
+                "外部工单同步延后处理跳过统一提取与分类AI：更新场景且已携带标题, ticket_no=%s",
+                sync_object.ticket_no,
+            )
+        else:
+            try:
+                ai_extract_result, ai_extract_meta = TicketLightAiService.extract_ticket_sync_fields(
+                    db,
+                    title=incoming_title or existing_title,
+                    description=str(sync_object.description or "").strip(),
+                    raw_payload=sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {},
+                    source_type=f"{sync_scene}_sync_extract",
+                    source_id=ticket.ticket_id,
+                    source_ref=sync_object.ticket_no,
+                    current_user_name=_user_name(current_user),
+                )
+                sync_object, ai_extract_apply_meta = cls._apply_ai_extract_to_sync_object(sync_object, ai_extract_result)
+                ai_extract_title = str((ai_extract_result or {}).get("title") or "").strip()
+                if not incoming_title and not existing_title and ai_extract_title:
+                    update_data["title"] = ai_extract_title
+                    extra_data["title_summary"] = {"mode": "ai_extract", "title": ai_extract_title}
+            except Exception as exc:
+                logger.warning(f"外部工单同步延后统一提取失败: ticket_no={sync_object.ticket_no}, error={exc}")
+                ai_extract_result = {}
+                ai_extract_meta = {"skipped": True, "error": str(exc)}
+                ai_extract_apply_meta = {"updated": False}
 
         try:
-            if not incoming_title and not existing_title:
+            if not incoming_title and not existing_title and "title" not in update_data:
                 resolved_title, title_meta = cls._resolve_sync_title(
                     db,
                     sync_object=sync_object,
@@ -2565,6 +2776,15 @@ class TicketSyncService:
         except Exception as exc:
             logger.warning(f"外部工单同步延后翻译处理失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
+        if isinstance(ai_extract_meta, dict):
+            if not bool(ai_extract_meta.get("skipped")) or str(ai_extract_meta.get("error") or "").strip():
+                extra_data = cls._attach_sync_ai_extract_meta(
+                    extra_data,
+                    extract_result=ai_extract_result,
+                    extract_meta=ai_extract_meta,
+                    applied_meta=ai_extract_apply_meta,
+                )
+
         if update_data or extra_data != (ticket.extra_data or {}):
             update_data["extra_data"] = extra_data
             update_data["update_by"] = _user_name(current_user)
@@ -2577,20 +2797,28 @@ class TicketSyncService:
                 db.rollback()
                 logger.warning(f"外部工单同步延后更新工单失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
-        try:
-            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
-            cls._run_auto_ticket_category_classification(
-                db,
-                ticket=ticket,
-                title=str(update_data.get("title") or ticket.title or "").strip(),
-                description=str(update_data.get("description") or sync_object.description or ticket.description or "").strip(),
-                current_user_name=_user_name(current_user),
-                source_type=f"{sync_scene}_auto_category",
-                source_ref=sync_object.ticket_no,
-                force_reclassify=False,
-            )
-        except Exception as exc:
-            logger.warning(f"外部工单同步延后自动分类失败: ticket_no={sync_object.ticket_no}, error={exc}")
+        if not skip_ai_analysis_due_to_update_title:
+            try:
+                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+                pre_category_name = str((ai_extract_result or {}).get("categoryName") or "").strip()
+                prefer_no_ai_fallback = not bool(ai_extract_meta.get("skipped", True)) if isinstance(ai_extract_meta, dict) else False
+                cls._run_auto_ticket_category_classification(
+                    db,
+                    ticket=ticket,
+                    title=str(update_data.get("title") or ticket.title or "").strip(),
+                    description=str(update_data.get("description") or sync_object.description or ticket.description or "").strip(),
+                    current_user_name=_user_name(current_user),
+                    source_type=f"{sync_scene}_auto_category",
+                    source_ref=sync_object.ticket_no,
+                    force_reclassify=False,
+                    pre_classified_category=pre_category_name,
+                    pre_classified_meta=ai_extract_meta if isinstance(ai_extract_meta, dict) else None,
+                    prefer_no_ai_fallback=prefer_no_ai_fallback,
+                )
+            except Exception as exc:
+                logger.warning(f"外部工单同步延后自动分类失败: ticket_no={sync_object.ticket_no}, error={exc}")
+
+        detected = cls._detect_fields(db, sync_object, config)
 
         should_run_automation = bool(
             (

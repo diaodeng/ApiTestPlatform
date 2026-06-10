@@ -3452,7 +3452,7 @@ class TicketLogPullService:
         """
         command_content = record.command_content if isinstance(record.command_content, dict) else {}
         modify_time = (
-            record.modify_time
+            getattr(record, "modify_time", None)
             or command_content.get("modifyTime")
             or command_content.get("modify_time")
         )

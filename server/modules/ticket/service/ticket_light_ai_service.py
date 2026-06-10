@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -33,6 +34,9 @@ class TicketLightAiService:
     CONFIG_CATEGORY_CLASSIFY_ENABLED = "ticket.ai.category.classify.enabled"
     CONFIG_CATEGORY_CLASSIFY_PROVIDER = "ticket.ai.category.classify.provider.code"
     CONFIG_CATEGORY_CLASSIFY_PROMPT = "ticket.ai.category.classify.prompt.code"
+    CONFIG_LOG_EXTRACT_ENABLED = "ticket.ai.log_extract.enabled"
+    CONFIG_LOG_EXTRACT_PROVIDER = "ticket.ai.log_extract.provider.code"
+    CONFIG_LOG_EXTRACT_PROMPT = "ticket.ai.log_extract.prompt.code"
     TICKET_CATEGORY_CANDIDATES = (
         "促销",
         "券",
@@ -106,6 +110,16 @@ class TicketLightAiService:
         return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
 
     @classmethod
+    def is_log_extract_enabled(cls, db: Session) -> bool:
+        """
+        读取工单日志参数提取总开关。
+        :param db: 数据库会话
+        :return: 是否启用日志参数提取
+        """
+        config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_LOG_EXTRACT_ENABLED).first()
+        return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
+
+    @classmethod
     def extract_version_key_from_text(cls, text: str | None) -> str:
         """
         从文本中提取版本号。
@@ -157,6 +171,34 @@ class TicketLightAiService:
         return "\n\n".join([part for part in parts if str(part or "").strip()])
 
     @classmethod
+    def _build_sync_extract_prompt(cls, title: str, content: str, raw_payload: dict[str, Any] | None = None) -> str:
+        """
+        构建工单同步统一提取请求内容。
+        :param title: 工单标题
+        :param content: 工单描述
+        :param raw_payload: 原始外部入参
+        :return: 请求文本
+        """
+        categories = "、".join(cls.TICKET_CATEGORY_CANDIDATES)
+        raw_payload_text = (
+            json.dumps(raw_payload, ensure_ascii=False, separators=(",", ":"), default=str)
+            if isinstance(raw_payload, dict)
+            else ""
+        )
+        parts = [
+            f"可选分类：{categories}",
+            f"工单标题：{title}".strip(),
+            f"工单描述：\n{content}".strip(),
+            f"外部原始入参：\n{raw_payload_text}".strip(),
+            (
+                "请只输出JSON对象，字段尽量包含："
+                "title, category, posNo, scoNo, logDate。"
+                "其中 posNo/scoNo 必须是纯数字，logDate 输出 YYYY-MM-DD。"
+            ),
+        ]
+        return "\n\n".join([part for part in parts if str(part or "").strip()])
+
+    @classmethod
     def _normalize_ticket_category(cls, raw_category: str) -> str:
         """
         将模型返回的分类值归一化为标准分类名称。
@@ -177,6 +219,83 @@ class TicketLightAiService:
         for alias, target in cls.TICKET_CATEGORY_ALIASES.items():
             if alias and alias in lowered:
                 return target
+        return ""
+
+    @staticmethod
+    def _normalize_pos_or_sco_no(value: Any) -> int | None:
+        """
+        将 POS/SCO 值归一化为整数编号。
+        :param value: 原始值
+        :return: 纯数字编号，无法解析返回 None
+        """
+        if value in (None, "", []):
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            number = int(value)
+            return number if number > 0 else None
+        text = str(value).strip()
+        if not text:
+            return None
+        matched = re.search(r"\d{1,10}", text)
+        if not matched:
+            return None
+        try:
+            number = int(matched.group(0))
+        except Exception:
+            return None
+        return number if number > 0 else None
+
+    @classmethod
+    def _normalize_log_date_text(cls, value: Any, default_year: int | None = None) -> str:
+        """
+        将 AI 返回的日期归一化为 YYYY-MM-DD，缺少年份时补当前年份。
+        :param value: 原始日期文本或日期对象
+        :param default_year: 缺少年份时使用的年份
+        :return: 归一化日期文本，无法解析返回空字符串
+        """
+        if value in (None, "", []):
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d")
+        if isinstance(value, date):
+            return value.strftime("%Y-%m-%d")
+        default_year = int(default_year or datetime.now().year)
+        text = str(value).strip()
+        if not text:
+            return ""
+
+        normalized_text = (
+            text.replace("年", "-")
+            .replace("月", "-")
+            .replace("日", "")
+            .replace(".", "-")
+            .replace("/", "-")
+        )
+        year_match = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", normalized_text)
+        if year_match:
+            try:
+                parsed = datetime(
+                    int(year_match.group(1)),
+                    int(year_match.group(2)),
+                    int(year_match.group(3)),
+                )
+                return parsed.strftime("%Y-%m-%d")
+            except Exception:
+                return ""
+
+        month_day_match = re.search(r"(\d{1,2})-(\d{1,2})", normalized_text)
+        if month_day_match:
+            try:
+                parsed = datetime(
+                    default_year,
+                    int(month_day_match.group(1)),
+                    int(month_day_match.group(2)),
+                )
+                return parsed.strftime("%Y-%m-%d")
+            except Exception:
+                return ""
         return ""
 
     @classmethod
@@ -754,6 +873,220 @@ class TicketLightAiService:
         if not str(content or "").strip():
             raise ValueError("AI接口未返回可解析的内容")
         return str(content).strip()
+
+    @classmethod
+    def extract_ticket_sync_fields(
+        cls,
+        db: Session,
+        *,
+        title: str,
+        description: str,
+        raw_payload: dict[str, Any] | None = None,
+        source_type: str = "ticket",
+        source_id: int | None = None,
+        source_ref: str | None = None,
+        current_user_name: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """
+        统一提取工单同步所需信息（标题、分类、POS/SCO、日志日期）。
+        :param db: 数据库会话
+        :param title: 工单标题
+        :param description: 工单描述
+        :param raw_payload: 外部原始载荷
+        :param source_type: 来源类型
+        :param source_id: 来源ID
+        :param source_ref: 来源引用
+        :param current_user_name: 当前用户名称
+        :return: (提取结果, 元信息)
+        """
+        title_text = str(title or "").strip()
+        content = str(description or "").strip()
+        request_payload = {
+            "title": title_text,
+            "description": content,
+            "rawPayload": raw_payload if isinstance(raw_payload, dict) else {},
+            "categories": list(cls.TICKET_CATEGORY_CANDIDATES),
+        }
+        empty_result = {
+            "title": "",
+            "categoryName": "",
+            "posNo": None,
+            "scoNo": None,
+            "logDate": "",
+        }
+        if not title_text and not content and not isinstance(raw_payload, dict):
+            return empty_result, {"provider_code": "", "prompt_code": "", "skipped": True}
+        if not cls.is_log_extract_enabled(db):
+            return empty_result, {"provider_code": "", "prompt_code": "", "skipped": True}
+
+        provider_code, prompt_code = cls._resolve_task_settings(
+            db, cls.CONFIG_LOG_EXTRACT_PROVIDER, cls.CONFIG_LOG_EXTRACT_PROMPT
+        )
+        if not provider_code or not prompt_code:
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_sync_extract",
+                    task_name="工单同步统一提取",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    status="skipped",
+                    error_message="未配置日志参数提取Provider或提示词",
+                    request_payload=request_payload,
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未配置日志参数提取Provider或提示词")
+            return empty_result, {"provider_code": provider_code, "prompt_code": prompt_code, "skipped": True}
+
+        provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
+        if not provider or not bool(getattr(provider, "enabled", True)):
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_sync_extract",
+                    task_name="工单同步统一提取",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    provider_code=provider_code,
+                    prompt_code=prompt_code,
+                    status="skipped",
+                    error_message="Provider不存在或已停用",
+                    request_payload=request_payload,
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="Provider不存在或已停用")
+            return empty_result, {"provider_code": provider_code, "prompt_code": prompt_code, "skipped": True}
+
+        prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
+        if not prompt_templates:
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_sync_extract",
+                    task_name="工单同步统一提取",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    provider_code=provider_code,
+                    prompt_code=prompt_code,
+                    model_name=str(getattr(provider, "model_name", "") or "").strip() or None,
+                    base_url=str(getattr(provider, "base_url", "") or "").strip() or None,
+                    status="skipped",
+                    error_message="未找到提示词模板",
+                    request_payload=request_payload,
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未找到提示词模板")
+            return empty_result, {"provider_code": provider_code, "prompt_code": prompt_code, "skipped": True}
+
+        prompt_template = prompt_templates[0]
+        system_prompt = AiPromptTemplateService.render_prompt_text(
+            prompt_template["promptContent"],
+            {
+                "title": title_text,
+                "content": content,
+                "description": content,
+                "raw_payload": (
+                    json.dumps(raw_payload, ensure_ascii=False, default=str) if isinstance(raw_payload, dict) else ""
+                ),
+                "categories": "、".join(cls.TICKET_CATEGORY_CANDIDATES),
+            },
+        )
+        user_prompt = cls._build_sync_extract_prompt(title_text, content, raw_payload)
+        execution_id = cls._write_execution_record(
+            execution_data=cls._build_execution_payload(
+                task_type="ticket_sync_extract",
+                task_name="工单同步统一提取",
+                source_type=source_type,
+                source_id=source_id,
+                source_ref=source_ref,
+                provider_code=provider_code,
+                prompt_code=prompt_code,
+                model_name=str(getattr(provider, "model_name", "") or "").strip() or None,
+                base_url=str(getattr(provider, "base_url", "") or "").strip() or None,
+                request_payload={
+                    **request_payload,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                status="running",
+                created_by_name=current_user_name,
+            ),
+        )
+        try:
+            response_text = cls._call_model_api(
+                provider=provider,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+            parsed_payload = cls._extract_json_object(response_text)
+            title_candidate = str(
+                parsed_payload.get("title")
+                or parsed_payload.get("summaryTitle")
+                or parsed_payload.get("ticketTitle")
+                or ""
+            ).strip()
+            category_candidate = str(
+                parsed_payload.get("category")
+                or parsed_payload.get("categoryName")
+                or parsed_payload.get("classification")
+                or ""
+            ).strip()
+            pos_no = cls._normalize_pos_or_sco_no(
+                parsed_payload.get("posNo")
+                or parsed_payload.get("pos_no")
+                or parsed_payload.get("pos")
+                or parsed_payload.get("posId")
+            )
+            sco_no = cls._normalize_pos_or_sco_no(
+                parsed_payload.get("scoNo")
+                or parsed_payload.get("sco_no")
+                or parsed_payload.get("sco")
+                or parsed_payload.get("scoId")
+            )
+            log_date = cls._normalize_log_date_text(
+                parsed_payload.get("logDate")
+                or parsed_payload.get("log_date")
+                or parsed_payload.get("date")
+                or parsed_payload.get("modifyTime")
+                or parsed_payload.get("modify_time")
+            )
+            normalized_category = cls._normalize_ticket_category(category_candidate)
+            extracted = {
+                "title": title_candidate,
+                "categoryName": normalized_category,
+                "posNo": pos_no,
+                "scoNo": sco_no,
+                "logDate": log_date,
+            }
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="success",
+                response_text=response_text,
+                response_payload={
+                    "rawText": response_text,
+                    "parsed": parsed_payload,
+                    "normalized": extracted,
+                },
+            )
+            return extracted, {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "raw_payload": parsed_payload,
+                "raw_text": response_text,
+                "result": extracted,
+            }
+        except Exception as exc:
+            cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
+            logger.warning("工单同步统一提取失败: %s", exc)
+            return empty_result, {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "error": str(exc),
+            }
 
     @classmethod
     def summarize_ticket_title(
