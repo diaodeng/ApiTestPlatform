@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 工单外部同步补充更新判定与时间保留：更新场景下若已有标题不再走标题 AI，总开关开启时若历史翻译已成功则不重复翻译；内网拉取公网工单改为“远端较新才覆盖更新”，项目/模块优先按 `projectCode/moduleCode` 匹配；外部 `createTime` 固定保存到同步元数据并在公网/内网链路透传，后续更新不覆盖。
 1. 工单外部同步新增“发布就绪”状态与群推送幂等：入库后先标记 `publish_ready=false`（AI处理中），内网拉取接口只返回 `publish_ready=true` 数据；AI任务成功或失败后统一置为可发布；自动群推送增加 `group_push_sent_once` 标记，成功发送一次后不再重复自动发群。
 1. 优化外部工单同步接口 `POST /ticket/sync/external`：主链路改为“先入库后返回”，AI翻译/标题总结、自动化与群推送改为后台异步后处理，降低接口阻塞与数据库会话长占用风险；后台AI异常不再影响入库成功结果。
 1. 修复工单日志拉取列表接口 `GET /ticket/log-pulls-by-ticket` 的 `storeId` 类型问题：返回前统一将 `storeId` 归一化为字符串，避免 `TicketLogPullListItemModel` 校验因整型输入报错。

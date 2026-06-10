@@ -125,3 +125,11 @@ updated: 2026-06-10
 - `GET /ticket/sync/pending` 仅返回 `publish_ready=true` 的工单；
 - 自动群推送新增“仅一次成功发送”标记：`group_push_sent_once=true` 后，同工单后续更新不再重复自动发群；
 - 手动按工单号发送群消息不受 `group_push_sent_once` 限制。
+
+## 8. 内网拉取更新策略与外部时间保留
+
+- 内网定时任务拉取公网数据时，工单不存在则新增；存在则仅在“远端更高 `syncRevision` 或远端更新时间更晚”时覆盖更新；
+- 公网/内网项目与模块匹配优先按 `projectCode/moduleCode` 解析本地 ID，不再依赖跨环境 ID 一致性；
+- 外部 `createTime` 会持久化到同步元数据 `external_sync.externalCreateTime`，并在公网->内网拉取链路透传；
+- 更新工单时不会改写已落库的 `externalCreateTime`，避免与系统自身 `create_time` 混淆；
+- 若外部或拉取数据未提供可解析时间，则使用入库时间兜底。

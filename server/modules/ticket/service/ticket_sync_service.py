@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -419,6 +419,146 @@ class TicketSyncService:
             return None
 
     @classmethod
+    def _parse_datetime_value(cls, value: Any) -> datetime | None:
+        """
+        将多种时间格式解析为可比较的 datetime。
+        :param value: 原始时间值
+        :return: datetime，失败返回 None
+        """
+        if value in (None, ""):
+            return None
+        parsed: datetime | None = None
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, (int, float)):
+            timestamp = float(value)
+            if timestamp > 10_000_000_000:
+                timestamp = timestamp / 1000.0
+            try:
+                parsed = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            except Exception:
+                parsed = None
+        else:
+            text = str(value or "").strip()
+            if not text:
+                return None
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except Exception:
+                parsed = None
+            if parsed is None:
+                for fmt in (
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y/%m/%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%Y/%m/%d %H:%M",
+                    "%Y-%m-%d",
+                    "%Y/%m/%d",
+                ):
+                    try:
+                        parsed = datetime.strptime(text, fmt)
+                        break
+                    except Exception:
+                        continue
+        if parsed is None:
+            return None
+        if parsed.tzinfo is not None:
+            try:
+                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            except Exception:
+                parsed = parsed.replace(tzinfo=None)
+        return parsed
+
+    @classmethod
+    def _resolve_external_create_time(
+        cls,
+        *,
+        sync_object: TicketExternalSyncUpsertModel,
+        existing_meta: dict[str, Any] | None,
+    ) -> str:
+        """
+        解析并固定外部工单创建时间。
+        :param sync_object: 外部同步模型
+        :param existing_meta: 已存在的同步元数据
+        :return: ISO 格式创建时间文本
+        """
+        current_meta = existing_meta if isinstance(existing_meta, dict) else {}
+        source_snapshot = current_meta.get("source") if isinstance(current_meta.get("source"), dict) else {}
+        existing_external_time = (
+            current_meta.get("externalCreateTime")
+            or source_snapshot.get("externalCreateTime")
+        )
+        parsed_existing = cls._parse_datetime_value(existing_external_time)
+        if parsed_existing:
+            return parsed_existing.isoformat()
+
+        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
+        parsed_candidate = (
+            cls._parse_datetime_value(sync_object.create_time)
+            or cls._parse_datetime_value(raw_payload.get("externalCreateTime"))
+            or cls._parse_datetime_value(raw_payload.get("external_create_time"))
+            or cls._parse_datetime_value(raw_payload.get("createTime"))
+            or cls._parse_datetime_value(raw_payload.get("create_time"))
+            or cls._parse_datetime_value(sync_object.source.pushed_at)
+            or datetime.now()
+        )
+        return parsed_candidate.isoformat()
+
+    @classmethod
+    def _has_successful_ai_translation(cls, ticket: Ticket | None) -> bool:
+        """
+        判断工单是否已有成功的 AI 翻译结果。
+        :param ticket: 工单对象
+        :return: 是否已存在翻译结果
+        """
+        if not ticket or not isinstance(ticket.extra_data, dict):
+            return False
+        translated_text = str(ticket.extra_data.get("ai_translation") or "").strip()
+        return bool(translated_text)
+
+    @classmethod
+    def _should_apply_remote_sync_item(
+        cls,
+        *,
+        local_ticket: Ticket | None,
+        remote_sync_revision: int,
+        remote_pushed_at: Any,
+    ) -> tuple[bool, str]:
+        """
+        判断远端工单是否需要覆盖本地数据（仅远端较新时更新）。
+        :param local_ticket: 本地工单
+        :param remote_sync_revision: 远端同步修订号
+        :param remote_pushed_at: 远端最新更新时间
+        :return: (是否需要同步, 原因)
+        """
+        if not local_ticket:
+            return True, "local_missing"
+        extra_data = local_ticket.extra_data if isinstance(local_ticket.extra_data, dict) else {}
+        local_meta = cls._build_meta(extra_data)
+        local_source_revision = cls._safe_int(local_meta.get("sourceRevision"))
+        if remote_sync_revision > 0 and local_source_revision is not None:
+            if remote_sync_revision <= local_source_revision:
+                return (
+                    False,
+                    f"remote_revision_not_newer(remote={remote_sync_revision}, local={local_source_revision})",
+                )
+            return True, "remote_revision_newer"
+
+        local_source = local_meta.get("source") if isinstance(local_meta.get("source"), dict) else {}
+        local_pushed_at = (
+            local_source.get("pushedAt")
+            or local_meta.get("lastImportedAt")
+        )
+        parsed_remote_time = cls._parse_datetime_value(remote_pushed_at)
+        parsed_local_time = cls._parse_datetime_value(local_pushed_at)
+        if parsed_remote_time and parsed_local_time and parsed_remote_time <= parsed_local_time:
+            return (
+                False,
+                f"remote_time_not_newer(remote={parsed_remote_time.isoformat()}, local={parsed_local_time.isoformat()})",
+            )
+        return True, "remote_time_newer_or_unknown"
+
+    @classmethod
     def _default_sync_config(cls) -> dict[str, Any]:
         return {
             "autoRunOnSync": False,
@@ -832,6 +972,11 @@ class TicketSyncService:
             "revision": int(meta.get("revision") or 0),
             "sourceSystem": meta.get("sourceSystem") or meta.get("source", {}).get("system"),
             "sourceRecordId": meta.get("sourceRecordId") or meta.get("source", {}).get("recordId"),
+            "sourceRevision": cls._safe_int(meta.get("sourceRevision")) or 0,
+            "externalCreateTime": (
+                meta.get("externalCreateTime")
+                or (meta.get("source") or {}).get("externalCreateTime")
+            ),
             "status": sync_state.get("status") or "pending",
             "publishReady": bool(sync_state.get("publish_ready", True)),
             "publishStatus": sync_state.get("publish_status") or cls.PUBLISH_STATUS_READY,
@@ -1695,11 +1840,16 @@ class TicketSyncService:
             extra_data["raw_payload"] = sync_object.raw_payload
         meta = cls._build_meta(extra_data)
         revision = int(meta.get("revision") or 0) + 1
+        external_create_time = cls._resolve_external_create_time(sync_object=sync_object, existing_meta=meta)
+        remote_source_revision = cls._safe_int((sync_object.extra_data or {}).get("_remote_sync_revision"))
+        if remote_source_revision is None:
+            remote_source_revision = cls._safe_int(meta.get("sourceRevision"))
         source_snapshot = {
             "system": sync_object.source.system,
             "recordId": sync_object.source.record_id,
             "recordUrl": sync_object.source.record_url,
             "pushedAt": sync_object.source.pushed_at.isoformat() if sync_object.source.pushed_at else cls._now_iso(),
+            "externalCreateTime": external_create_time,
         }
         meta.update(
             {
@@ -1708,9 +1858,12 @@ class TicketSyncService:
                 "sourceRecordId": sync_object.source.record_id,
                 "sourceRecordUrl": sync_object.source.record_url,
                 "lastImportedAt": cls._now_iso(),
+                "externalCreateTime": external_create_time,
                 "source": source_snapshot,
             }
         )
+        if remote_source_revision is not None:
+            meta["sourceRevision"] = remote_source_revision
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
         sync_state.setdefault("status", "pending")
         sync_state.setdefault("automation", {})
@@ -1736,8 +1889,8 @@ class TicketSyncService:
             "update_by": _user_name(current_user),
             "update_time": now,
         }
-        project_id = sync_object.project_id or cls._safe_int((detected or {}).get("projectId"))
-        module_id = sync_object.module_id or cls._safe_int((detected or {}).get("moduleId"))
+        project_id = cls._safe_int((detected or {}).get("projectId")) or sync_object.project_id
+        module_id = cls._safe_int((detected or {}).get("moduleId")) or sync_object.module_id
         if project_id:
             project = (
                 db.query(HrmProject)
@@ -1819,31 +1972,43 @@ class TicketSyncService:
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
         config = cls._load_sync_config(db)
         automation = sync_object.automation
-        title_meta: dict[str, Any] = {"mode": "raw", "title": str(sync_object.title or "").strip()}
+        raw_title = str(sync_object.title or "").strip()
+        existing_title = str(ticket.title or "").strip() if ticket else ""
+        title_meta: dict[str, Any] = {"mode": "raw", "title": raw_title}
         if defer_post_process:
             # 延后AI时先用稳定兜底标题入库，避免主链路被AI网络调用阻塞。
-            resolved_title = str(sync_object.title or "").strip() or str(sync_object.description or "").strip()[:100]
+            resolved_title = raw_title or existing_title or str(sync_object.description or "").strip()[:100]
             if not resolved_title:
                 resolved_title = sync_object.ticket_no
-            if resolved_title != str(sync_object.title or "").strip():
+            if resolved_title != raw_title:
                 sync_object = sync_object.model_copy(update={"title": resolved_title})
-            if not str(title_meta.get("title") or "").strip():
+            if not raw_title and existing_title:
+                title_meta = {"mode": "keep_existing", "title": existing_title}
+            elif not raw_title:
                 title_meta = {"mode": "fallback", "fallback_title": resolved_title}
         else:
-            try:
-                resolved_title, title_meta = cls._resolve_sync_title(
-                    db,
-                    sync_object=sync_object,
-                    ticket_id=getattr(ticket, "ticket_id", None),
-                    current_user=current_user,
-                )
-            except Exception as exc:
-                logger.warning(f"外部工单同步标题处理异常，已回退描述截断: ticket_no={sync_object.ticket_no}, error={exc}")
-                resolved_title = str(sync_object.title or "").strip() or str(sync_object.description or "").strip()[:100]
-                if not resolved_title:
-                    resolved_title = sync_object.ticket_no
-                title_meta = {"mode": "fallback", "fallback_title": resolved_title, "error": str(exc)}
-            if resolved_title != str(sync_object.title or "").strip():
+            resolved_title = raw_title or existing_title
+            if resolved_title:
+                if not raw_title and existing_title:
+                    title_meta = {"mode": "keep_existing", "title": existing_title}
+            else:
+                try:
+                    resolved_title, title_meta = cls._resolve_sync_title(
+                        db,
+                        sync_object=sync_object,
+                        ticket_id=getattr(ticket, "ticket_id", None),
+                        current_user=current_user,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"外部工单同步标题处理异常，已回退描述截断: "
+                        f"ticket_no={sync_object.ticket_no}, error={exc}"
+                    )
+                    resolved_title = str(sync_object.description or "").strip()[:100]
+                    if not resolved_title:
+                        resolved_title = sync_object.ticket_no
+                    title_meta = {"mode": "fallback", "fallback_title": resolved_title, "error": str(exc)}
+            if resolved_title != raw_title:
                 sync_object = sync_object.model_copy(update={"title": resolved_title})
         detected = cls._detect_fields(db, sync_object, config)
         should_translate = False
@@ -1852,6 +2017,7 @@ class TicketSyncService:
         origin_description = str(sync_object.description or "").strip()
         if not defer_post_process:
             translation_enabled = TicketLightAiService.is_translation_enabled(db)
+            translation_already_succeeded = cls._has_successful_ai_translation(ticket)
             if sync_scene == "remote_pull":
                 sync_translate_enabled = bool(
                     automation.auto_translate
@@ -1860,11 +2026,11 @@ class TicketSyncService:
                 )
             else:
                 sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
-            should_translate = translation_enabled and sync_translate_enabled
+            should_translate = translation_enabled and sync_translate_enabled and not translation_already_succeeded
             logger.info(
                 f"外部工单同步翻译决策: ticket_no={sync_object.ticket_no}, scene={sync_scene}, "
                 f"global_switch={translation_enabled}, scene_switch={sync_translate_enabled}, "
-                f"should_translate={should_translate}"
+                f"already_translated={translation_already_succeeded}, should_translate={should_translate}"
             )
             try:
                 translated_description, translation_meta, origin_description = cls._translate_sync_description(
@@ -2080,9 +2246,11 @@ class TicketSyncService:
         automation = sync_object.automation
         update_data: dict[str, Any] = {}
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        existing_title = str(ticket.title or "").strip()
+        incoming_title = str(sync_object.title or "").strip()
 
         try:
-            if not str(sync_object.title or "").strip():
+            if not incoming_title and not existing_title:
                 resolved_title, title_meta = cls._resolve_sync_title(
                     db,
                     sync_object=sync_object,
@@ -2106,7 +2274,10 @@ class TicketSyncService:
                 )
             else:
                 sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
-            should_translate = translation_enabled and sync_translate_enabled
+            translation_already_succeeded = cls._has_successful_ai_translation(ticket)
+            should_translate = translation_enabled and sync_translate_enabled and not translation_already_succeeded
+            if translation_already_succeeded:
+                logger.info(f"外部工单同步延后翻译跳过：已有历史翻译结果, ticket_no={sync_object.ticket_no}")
             translated_description, translation_meta, origin_description = cls._translate_sync_description(
                 db,
                 title=str(update_data.get("title") or ticket.title or ""),
@@ -2349,7 +2520,10 @@ class TicketSyncService:
                 or CamelCaseUtil.transform_result(ticket)
             )
             item["syncRevision"] = revision
-            item["syncSummary"] = cls.extract_sync_summary(extra_data)
+            sync_summary = cls.extract_sync_summary(extra_data)
+            item["syncSummary"] = sync_summary
+            if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):
+                item["externalCreateTime"] = sync_summary.get("externalCreateTime")
             payload_rows.append(item)
         db.commit()
         return {
@@ -2419,6 +2593,20 @@ class TicketSyncService:
         title = str(item.get("title") or "").strip()
         if not ticket_no or not description:
             return None
+        sync_summary = item.get("syncSummary") if isinstance(item.get("syncSummary"), dict) else {}
+        remote_sync_revision = int(
+            item.get("syncRevision")
+            or sync_summary.get("revision")
+            or item.get("revision")
+            or 0
+        )
+        external_create_time = (
+            item.get("externalCreateTime")
+            or item.get("external_create_time")
+            or sync_summary.get("externalCreateTime")
+            or item.get("createTime")
+            or item.get("create_time")
+        )
 
         source_payload = {
             "system": str(remote_sync.get("sourceSystem") or "public").strip() or "public",
@@ -2431,6 +2619,11 @@ class TicketSyncService:
                 or item.get("create_time")
             ),
         }
+        sync_extra_data = item.get("extraData") if isinstance(item.get("extraData"), dict) else {}
+        if not sync_extra_data and isinstance(item.get("extra_data"), dict):
+            sync_extra_data = item.get("extra_data")
+        sync_extra_data = dict(sync_extra_data or {})
+        sync_extra_data["_remote_sync_revision"] = remote_sync_revision
         sync_payload = {
             "source": source_payload,
             "syncConsumer": str(remote_sync.get("consumer") or "").strip() or None,
@@ -2438,6 +2631,7 @@ class TicketSyncService:
             "ticketNo": ticket_no,
             "title": title,
             "description": description,
+            "createTime": external_create_time or source_payload.get("pushedAt"),
             "projectId": item.get("projectId") or item.get("project_id"),
             "projectName": item.get("projectName") or item.get("project_name") or item.get("merchantName") or "",
             "projectCode": item.get("projectCode") or item.get("project_code") or "",
@@ -2457,7 +2651,7 @@ class TicketSyncService:
             "rootCause": item.get("rootCause") or item.get("root_cause") or "",
             "solution": item.get("solution") or "",
             "tags": item.get("tags"),
-            "extraData": item.get("extraData") or item.get("extra_data") or {},
+            "extraData": sync_extra_data,
             "createBy": item.get("createBy") or item.get("create_by") or "",
             "updateBy": item.get("updateBy") or item.get("update_by") or "",
         }
@@ -2569,6 +2763,7 @@ class TicketSyncService:
             "syncedCount": 0,
             "failedCount": 0,
             "ackedCount": 0,
+            "skippedCount": 0,
         }
         ack_items: list[dict[str, Any]] = []
 
@@ -2606,6 +2801,29 @@ class TicketSyncService:
                     )
                 }
             )
+            local_ticket = TicketDao.get_ticket_by_no(db, upsert_model.ticket_no)
+            should_apply_remote, apply_reason = cls._should_apply_remote_sync_item(
+                local_ticket=local_ticket,
+                remote_sync_revision=sync_revision,
+                remote_pushed_at=upsert_model.source.pushed_at,
+            )
+            if not should_apply_remote:
+                summary["skippedCount"] += 1
+                summary["syncedCount"] += 1
+                if remote_ticket_id:
+                    ack_items.append(
+                        {
+                            "ticketId": remote_ticket_id,
+                            "syncRevision": sync_revision,
+                            "deliveryStatus": "delivered",
+                            "message": "本地数据已是最新，跳过覆盖更新",
+                            "detail": {
+                                "skipReason": apply_reason,
+                                "localTicketId": getattr(local_ticket, "ticket_id", None),
+                            },
+                        }
+                    )
+                continue
 
             try:
                 sync_result = cls.sync_external_ticket(

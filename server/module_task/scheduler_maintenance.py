@@ -139,10 +139,11 @@ def pull_public_ticket_sync(
     with SessionLocal() as db:
         result = TicketSyncService.sync_remote_pending_tickets(db, current_user=None, remote_sync_override=override)
     logger.info(
-        "远端工单拉取任务执行完成 | consumer={}, pulled={}, synced={}, failed={}, acked={}",
+        "远端工单拉取任务执行完成 | consumer={}, pulled={}, synced={}, skipped={}, failed={}, acked={}",
         result.get("consumer"),
         result.get("pulledCount"),
         result.get("syncedCount"),
+        result.get("skippedCount"),
         result.get("failedCount"),
         result.get("ackedCount"),
     )
