@@ -3412,6 +3412,9 @@ class TicketLogPullService:
         """
         payload = row if isinstance(row, dict) else CamelCaseUtil.transform_result(row)
         command_content = payload.get("commandContent")
+        store_id = payload.get("storeId")
+        if store_id is not None:
+            payload["storeId"] = str(store_id).strip() or None
         if not payload.get("modifyTime") and isinstance(command_content, dict):
             payload["modifyTime"] = command_content.get("modifyTime")
         payload["hasContent"] = bool(payload.get("compressedContent"))
