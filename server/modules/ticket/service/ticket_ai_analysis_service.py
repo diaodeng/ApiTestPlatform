@@ -1878,6 +1878,27 @@ class TicketAiAnalysisService:
                 cls._active_task_ids.discard(task_id)
 
     @classmethod
+    def _finalize_sync_publish_after_ai(cls, db: Session, *, ticket_id: int, status: str) -> None:
+        """
+        AI 任务终态后回写工单同步发布状态。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param status: AI任务状态
+        :return: 无
+        """
+        try:
+            from modules.ticket.service.ticket_sync_service import TicketSyncService
+
+            TicketSyncService.finalize_sync_after_ai(
+                db,
+                ticket_id=ticket_id,
+                ai_task_status=status,
+                sync_scene="external_sync",
+            )
+        except Exception as exc:
+            logger.warning(f"AI任务终态回写同步发布状态失败: ticket_id={ticket_id}, status={status}, error={exc}")
+
+    @classmethod
     def _process_task(cls, db: Session, task_id: int) -> None:
         """
         执行 AI 分析全流程。
@@ -1940,6 +1961,11 @@ class TicketAiAnalysisService:
                 finished_at=datetime.now(),
             )
             db.commit()
+            cls._finalize_sync_publish_after_ai(
+                db,
+                ticket_id=ticket.ticket_id,
+                status=TicketAiAnalysisStatus.FAILED.value,
+            )
             return
 
         cls._log_task_step(
@@ -1993,6 +2019,11 @@ class TicketAiAnalysisService:
                 command_line="agent:<none>",
             )
             db.commit()
+            cls._finalize_sync_publish_after_ai(
+                db,
+                ticket_id=ticket.ticket_id,
+                status=TicketAiAnalysisStatus.FAILED.value,
+            )
             return
         started_at = datetime.now()
         cls._log_task_step(
@@ -2123,6 +2154,11 @@ class TicketAiAnalysisService:
                 command_line=f"agent:{agent_code}",
             )
             db.commit()
+            cls._finalize_sync_publish_after_ai(
+                db,
+                ticket_id=ticket.ticket_id,
+                status=TicketAiAnalysisStatus.SUCCESS.value,
+            )
             TicketNotifyService.send_ticket_notification(
                 db,
                 ticket,
@@ -2148,6 +2184,12 @@ class TicketAiAnalysisService:
                 command_line=f"agent:{agent_code}",
             )
             db.commit()
+            if "ticket" in locals() and ticket:
+                cls._finalize_sync_publish_after_ai(
+                    db,
+                    ticket_id=ticket.ticket_id,
+                    status=TicketAiAnalysisStatus.FAILED.value,
+                )
             if "ticket" in locals() and ticket:
                 TicketNotifyService.send_ticket_notification(
                     db,

@@ -14,6 +14,7 @@ from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.enums.enums import QtrDataStatusEnum
+from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketMessage, TicketStatusHistory
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullProjectVendorMap, TicketLogPullStoreConfig
@@ -25,7 +26,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketSyncAutomationModel,
     TicketSyncPullQueryModel,
 )
-from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
+from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType, TicketStatus
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
@@ -44,6 +45,13 @@ class TicketSyncService:
     CONFIG_KEY = "ticket.sync.automation"
     SOURCE_CODE = "external_sync"
     META_KEY = "external_sync"
+    PUBLISH_STATUS_READY = "ready"
+    PUBLISH_STATUS_PROCESSING_AI = "processing_ai"
+    AI_PENDING_AUTOMATION_STATUSES = {"queued", "submitted", "running"}
+    AI_PENDING_TASK_STATUSES = {
+        TicketAiAnalysisStatus.CREATED.value,
+        TicketAiAnalysisStatus.RUNNING.value,
+    }
 
     @classmethod
     def _json_dumps(cls, value: Any) -> str:
@@ -63,6 +71,343 @@ class TicketSyncService:
     @classmethod
     def _now_iso(cls) -> str:
         return datetime.now().isoformat()
+
+    @classmethod
+    def _set_publish_state(
+        cls,
+        meta: dict[str, Any],
+        *,
+        ready: bool,
+        status: str,
+        reason: str = "",
+        ai_task_status: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        更新同步数据发布状态。
+        :param meta: 同步元数据
+        :param ready: 是否允许对外发布（内网拉取/群推送）
+        :param status: 发布状态编码
+        :param reason: 状态说明
+        :param ai_task_status: AI任务状态
+        :return: 更新后的同步元数据
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        sync_state["publish_ready"] = bool(ready)
+        sync_state["publish_status"] = str(status or "").strip() or cls.PUBLISH_STATUS_READY
+        sync_state["publish_reason"] = str(reason or "").strip()
+        sync_state["publish_updated_at"] = cls._now_iso()
+        if ai_task_status is not None:
+            sync_state["ai_task_status"] = str(ai_task_status or "").strip()
+        meta["sync_state"] = sync_state
+        return meta
+
+    @classmethod
+    def _is_publish_ready(cls, meta: dict[str, Any]) -> bool:
+        """
+        判断同步数据是否允许对外发布。
+        :param meta: 同步元数据
+        :return: 是否可发布
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        if "publish_ready" not in sync_state:
+            return True
+        return bool(sync_state.get("publish_ready"))
+
+    @classmethod
+    def _is_group_push_sent_once(cls, meta: dict[str, Any]) -> bool:
+        """
+        判断工单是否已成功发送过群推送。
+        :param meta: 同步元数据
+        :return: 是否已发送过
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        return bool(sync_state.get("group_push_sent_once"))
+
+    @classmethod
+    def _mark_group_push_sent_once(
+        cls,
+        meta: dict[str, Any],
+        *,
+        scene: str,
+        revision: int,
+    ) -> dict[str, Any]:
+        """
+        标记工单已成功发送过群推送（仅一次）。
+        :param meta: 同步元数据
+        :param scene: 触发场景
+        :param revision: 同步修订号
+        :return: 更新后的同步元数据
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        sync_state["group_push_sent_once"] = True
+        sync_state["group_push_sent_at"] = cls._now_iso()
+        sync_state["group_push_scene"] = str(scene or "").strip() or "external_sync"
+        sync_state["group_push_revision"] = int(revision or 0)
+        meta["sync_state"] = sync_state
+        return meta
+
+    @classmethod
+    def _resolve_ai_pending_state(
+        cls,
+        db: Session,
+        *,
+        ticket_id: int,
+        meta: dict[str, Any],
+    ) -> tuple[bool, str]:
+        """
+        判断工单是否仍处于 AI 处理中状态。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param meta: 同步元数据
+        :return: (是否处理中, AI状态文本)
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        automation = sync_state.get("automation") if isinstance(sync_state.get("automation"), dict) else {}
+        steps = automation.get("steps") if isinstance(automation.get("steps"), dict) else {}
+        ai_step = steps.get("ai_analysis") if isinstance(steps.get("ai_analysis"), dict) else {}
+        ai_step_status = str(ai_step.get("status") or "").strip().lower()
+        ai_task_status = str(sync_state.get("ai_task_status") or "").strip().lower()
+        ai_terminal_statuses = {
+            TicketAiAnalysisStatus.SUCCESS.value,
+            TicketAiAnalysisStatus.FAILED.value,
+            TicketAiAnalysisStatus.CANCELED.value,
+        }
+
+        latest_task = TicketAiDao.get_latest_task_by_ticket_id(db, ticket_id)
+        latest_status = str(getattr(latest_task, "status", "") or "").strip().lower()
+        if latest_status in cls.AI_PENDING_TASK_STATUSES:
+            return True, latest_status
+        if latest_status in ai_terminal_statuses:
+            return False, latest_status
+        if ai_task_status in ai_terminal_statuses:
+            return False, ai_task_status
+        if ai_task_status in cls.AI_PENDING_TASK_STATUSES:
+            return True, ai_task_status
+        if ai_step_status in cls.AI_PENDING_AUTOMATION_STATUSES:
+            return True, ai_task_status or ai_step_status
+        if latest_status:
+            return False, latest_status
+        if ai_task_status:
+            return False, ai_task_status
+        return False, ai_step_status
+
+    @classmethod
+    def _persist_sync_meta(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        meta: dict[str, Any],
+        update_by: str,
+    ) -> Ticket:
+        """
+        将同步元数据回写到工单并提交。
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param meta: 同步元数据
+        :param update_by: 更新人
+        :return: 刷新后的工单对象
+        """
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        extra_data = cls._attach_meta(extra_data, meta)
+        TicketDao.update_ticket(
+            db,
+            ticket.ticket_id,
+            {
+                "extra_data": extra_data,
+                "update_by": update_by,
+                "update_time": datetime.now(),
+            },
+        )
+        db.commit()
+        return TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+
+    @classmethod
+    def _send_auto_group_message_once(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        meta: dict[str, Any],
+        group_config: dict[str, Any],
+        scene: str,
+        update_by: str,
+    ) -> tuple[dict[str, Any], Ticket, dict[str, Any]]:
+        """
+        自动触发群推送（仅发送一次）。
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param meta: 同步元数据
+        :param group_config: 群推送配置
+        :param scene: 触发场景
+        :param update_by: 更新人
+        :return: (推送结果, 刷新后的工单, 最新元数据)
+        """
+        if not cls._is_publish_ready(meta):
+            return (
+                {"skipped": True, "skipReason": "同步数据未发布就绪", "scene": scene},
+                ticket,
+                meta,
+            )
+        if cls._is_group_push_sent_once(meta):
+            return (
+                {"skipped": True, "skipReason": "工单已发送过群推送", "scene": scene},
+                ticket,
+                meta,
+            )
+
+        sync_summary = cls.extract_sync_summary(
+            cls._attach_meta(dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}, meta)
+        ) or {}
+        result = TicketSyncNotifyService.send_group_message_for_ticket(
+            db,
+            ticket=ticket,
+            group_config=group_config,
+            scene=scene,
+            manual_trigger=False,
+            sync_summary=sync_summary,
+        )
+        if not bool(result.get("skipped")) and int(result.get("pushSuccessCount") or 0) > 0:
+            meta = cls._mark_group_push_sent_once(
+                meta,
+                scene=scene,
+                revision=int(meta.get("revision") or 0),
+            )
+            ticket = cls._persist_sync_meta(
+                db,
+                ticket=ticket,
+                meta=meta,
+                update_by=update_by,
+            )
+        return result, ticket, meta
+
+    @classmethod
+    def _finalize_publish_state_after_post_process(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        sync_scene: str,
+        update_by: str,
+    ) -> tuple[Ticket, dict[str, Any], dict[str, Any] | None]:
+        """
+        根据 AI 状态收敛发布状态，并按需触发自动群推送。
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param sync_scene: 触发场景
+        :param update_by: 更新人
+        :return: (刷新后的工单, 元数据, 群推送结果)
+        """
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        meta = cls._build_meta(extra_data)
+        ai_pending, ai_status = cls._resolve_ai_pending_state(db, ticket_id=ticket.ticket_id, meta=meta)
+        ai_task_status = str(ai_status or "").strip().lower()
+        if ai_pending:
+            meta = cls._set_publish_state(
+                meta,
+                ready=False,
+                status=cls.PUBLISH_STATUS_PROCESSING_AI,
+                reason="AI分析处理中，暂不对外发布",
+                ai_task_status=ai_task_status or TicketAiAnalysisStatus.RUNNING.value,
+            )
+            ticket = cls._persist_sync_meta(
+                db,
+                ticket=ticket,
+                meta=meta,
+                update_by=update_by,
+            )
+            return ticket, meta, {"skipped": True, "skipReason": "AI分析处理中，暂不推送", "scene": sync_scene}
+
+        reason = "AI分析已结束，允许对外发布" if ai_task_status else "后处理完成，允许对外发布"
+        meta = cls._set_publish_state(
+            meta,
+            ready=True,
+            status=cls.PUBLISH_STATUS_READY,
+            reason=reason,
+            ai_task_status=ai_task_status,
+        )
+        ticket = cls._persist_sync_meta(
+            db,
+            ticket=ticket,
+            meta=meta,
+            update_by=update_by,
+        )
+        config = cls._load_sync_config(db)
+        group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+        group_push_result, ticket, meta = cls._send_auto_group_message_once(
+            db,
+            ticket=ticket,
+            meta=meta,
+            group_config=group_config,
+            scene=sync_scene,
+            update_by=update_by,
+        )
+        return ticket, meta, group_push_result
+
+    @classmethod
+    def finalize_sync_after_ai(
+        cls,
+        db: Session,
+        *,
+        ticket_id: int,
+        ai_task_status: str,
+        sync_scene: str = "external_sync",
+    ) -> None:
+        """
+        在 AI 任务终态后收敛同步发布状态并补发一次自动群推送。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param ai_task_status: AI任务状态
+        :param sync_scene: 触发场景
+        :return: 无
+        """
+        try:
+            ticket = TicketDao.get_ticket_by_id(db, ticket_id)
+            if not ticket:
+                return
+            extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+            meta = cls._build_meta(extra_data)
+            normalized_status = str(ai_task_status or "").strip().lower()
+            if normalized_status in cls.AI_PENDING_TASK_STATUSES:
+                meta = cls._set_publish_state(
+                    meta,
+                    ready=False,
+                    status=cls.PUBLISH_STATUS_PROCESSING_AI,
+                    reason="AI分析处理中，暂不对外发布",
+                    ai_task_status=normalized_status,
+                )
+                cls._persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
+                return
+
+            reason = (
+                "AI分析成功，允许对外发布"
+                if normalized_status == TicketAiAnalysisStatus.SUCCESS.value
+                else "AI分析结束，允许对外发布"
+            )
+            meta = cls._set_publish_state(
+                meta,
+                ready=True,
+                status=cls.PUBLISH_STATUS_READY,
+                reason=reason,
+                ai_task_status=normalized_status,
+            )
+            ticket = cls._persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
+            config = cls._load_sync_config(db)
+            group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+            cls._send_auto_group_message_once(
+                db,
+                ticket=ticket,
+                meta=meta,
+                group_config=group_config,
+                scene=sync_scene,
+                update_by="system",
+            )
+        except Exception as exc:
+            db.rollback()
+            logger.warning(
+                f"AI任务完成后同步发布状态回写失败: "
+                f"ticket_id={ticket_id}, ai_task_status={ai_task_status}, error={exc}"
+            )
 
     @classmethod
     def _safe_int(cls, value: Any) -> int | None:
@@ -456,6 +801,15 @@ class TicketSyncService:
             "last_batch_id": sync_state.get("last_batch_id"),
             "consumers": sync_state.get("consumers") if isinstance(sync_state.get("consumers"), dict) else {},
             "automation": sync_state.get("automation") if isinstance(sync_state.get("automation"), dict) else {},
+            "publish_ready": bool(sync_state.get("publish_ready", True)),
+            "publish_status": str(sync_state.get("publish_status") or cls.PUBLISH_STATUS_READY),
+            "publish_reason": str(sync_state.get("publish_reason") or "").strip(),
+            "publish_updated_at": sync_state.get("publish_updated_at"),
+            "ai_task_status": str(sync_state.get("ai_task_status") or "").strip(),
+            "group_push_sent_once": bool(sync_state.get("group_push_sent_once", False)),
+            "group_push_sent_at": sync_state.get("group_push_sent_at"),
+            "group_push_scene": sync_state.get("group_push_scene"),
+            "group_push_revision": sync_state.get("group_push_revision"),
         }
         return meta
 
@@ -479,6 +833,11 @@ class TicketSyncService:
             "sourceSystem": meta.get("sourceSystem") or meta.get("source", {}).get("system"),
             "sourceRecordId": meta.get("sourceRecordId") or meta.get("source", {}).get("recordId"),
             "status": sync_state.get("status") or "pending",
+            "publishReady": bool(sync_state.get("publish_ready", True)),
+            "publishStatus": sync_state.get("publish_status") or cls.PUBLISH_STATUS_READY,
+            "publishReason": sync_state.get("publish_reason") or "",
+            "aiTaskStatus": sync_state.get("ai_task_status") or "",
+            "groupPushSentOnce": bool(sync_state.get("group_push_sent_once", False)),
             "lastPulledAt": sync_state.get("last_pulled_at"),
             "lastConsumer": sync_state.get("last_consumer"),
             "automationStatus": automation.get("status"),
@@ -1527,6 +1886,17 @@ class TicketSyncService:
             if should_translate:
                 sync_object = sync_object.model_copy(update={"description": translated_description})
         payload, meta, revision = cls._build_upsert_payload(db, ticket, sync_object, detected, current_user)
+        if defer_post_process:
+            meta = cls._set_publish_state(
+                meta,
+                ready=False,
+                status=cls.PUBLISH_STATUS_PROCESSING_AI,
+                reason="工单已入库，等待后台后处理完成",
+                ai_task_status="pending",
+            )
+            extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
+            extra_data = cls._attach_meta(extra_data, meta)
+            payload["extra_data"] = extra_data
         if title_meta and title_meta.get("mode") != "raw":
             extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
             extra_data["title_summary"] = title_meta
@@ -1630,19 +2000,17 @@ class TicketSyncService:
 
         group_push_summary = None
         try:
-            group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
-            sync_summary = cls.extract_sync_summary(ticket.extra_data) or {}
-            group_push_summary = TicketSyncNotifyService.send_group_message_for_ticket(
+            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            ticket, _, group_push_summary = cls._finalize_publish_state_after_post_process(
                 db,
                 ticket=ticket,
-                group_config=group_config,
-                scene=sync_scene,
-                manual_trigger=False,
-                sync_summary=sync_summary,
+                sync_scene=sync_scene,
+                update_by=_user_name(current_user),
             )
         except Exception as exc:
             logger.warning(
-                f"工单同步群推送执行失败: ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}"
+                f"工单同步发布状态收敛失败: ticket_no={sync_object.ticket_no}, "
+                f"scene={sync_scene}, error={exc}"
             )
 
         result = (
@@ -1680,7 +2048,10 @@ class TicketSyncService:
             current_user = CurrentUserModel.model_validate(current_user_payload)
             cls._execute_deferred_sync_post_process(query_db, sync_object, current_user, sync_scene)
         except Exception as exc:
-            logger.warning(f"外部工单同步延后后处理异常: ticket_no={sync_payload.get('ticketNo') or sync_payload.get('ticket_no')}, error={exc}")
+            logger.warning(
+                f"外部工单同步延后后处理异常: "
+                f"ticket_no={sync_payload.get('ticketNo') or sync_payload.get('ticket_no')}, error={exc}"
+            )
         finally:
             query_db.close()
 
@@ -1785,20 +2156,19 @@ class TicketSyncService:
                 cls.run_sync_automation(db, ticket.ticket_id, sync_object, detected, current_user)
             except Exception as exc:
                 logger.warning(f"外部工单同步延后自动化失败: ticket_no={sync_object.ticket_no}, error={exc}")
-
+        ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
         try:
-            group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
-            sync_summary = cls.extract_sync_summary(ticket.extra_data) or {}
-            TicketSyncNotifyService.send_group_message_for_ticket(
+            cls._finalize_publish_state_after_post_process(
                 db,
                 ticket=ticket,
-                group_config=group_config,
-                scene=sync_scene,
-                manual_trigger=False,
-                sync_summary=sync_summary,
+                sync_scene=sync_scene,
+                update_by=_user_name(current_user),
             )
         except Exception as exc:
-            logger.warning(f"外部工单同步延后群推送失败: ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}")
+            logger.warning(
+                f"外部工单同步延后发布状态收敛失败: ticket_no={sync_object.ticket_no}, "
+                f"scene={sync_scene}, error={exc}"
+            )
 
     @classmethod
     def run_sync_automation(
@@ -1960,6 +2330,8 @@ class TicketSyncService:
         for ticket in rows:
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             meta = cls._build_meta(extra_data)
+            if not cls._is_publish_ready(meta):
+                continue
             revision = int(meta.get("revision") or 0)
             meta = cls._update_consumer_state(meta, consumer=query.consumer, revision=revision, batch_id=batch_id)
             extra_data = cls._attach_meta(extra_data, meta)

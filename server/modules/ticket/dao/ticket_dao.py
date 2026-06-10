@@ -282,6 +282,8 @@ class TicketDao:
             extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
             sync_meta = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
             state = sync_meta.get("sync_state") if isinstance(sync_meta.get("sync_state"), dict) else {}
+            if not bool(state.get("publish_ready", True)):
+                continue
             consumers = state.get("consumers") if isinstance(state.get("consumers"), dict) else {}
             consumer_state = consumers.get(consumer_key) if isinstance(consumers.get(consumer_key), dict) else {}
             current_revision = int(sync_meta.get("revision") or 0)

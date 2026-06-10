@@ -117,3 +117,11 @@ updated: 2026-06-10
 - `POST /ticket/sync/external` 先执行主入库链路并快速返回；
 - AI 翻译、AI 标题总结、自动化识别/拉日志/分析、群推送在入库成功后后台异步执行；
 - 后台 AI 处理异常不会回滚已成功入库的数据，只记录日志并按规则回退。
+
+## 7. 发布就绪与群推送幂等
+
+- 外部同步入库后，先写入 `external_sync.sync_state.publish_ready=false`、`publish_status=processing_ai`；
+- 在 AI 任务终态（`success`/`failed`/`canceled`）或无需 AI 时，回写 `publish_ready=true`、`publish_status=ready`；
+- `GET /ticket/sync/pending` 仅返回 `publish_ready=true` 的工单；
+- 自动群推送新增“仅一次成功发送”标记：`group_push_sent_once=true` 后，同工单后续更新不再重复自动发群；
+- 手动按工单号发送群消息不受 `group_push_sent_once` 限制。
