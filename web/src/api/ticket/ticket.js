@@ -125,6 +125,15 @@ export function sendTicketSyncGroupPushByTicket(data) {
   });
 }
 
+// 批量重跑工单自动分类
+export function batchReclassifyTicketSync(data) {
+  return request({
+    url: '/ticket/sync/auto-category/reclassify',
+    method: 'post',
+    data,
+  });
+}
+
 // 新增工单
 export function addTicket(data) {
   return request({

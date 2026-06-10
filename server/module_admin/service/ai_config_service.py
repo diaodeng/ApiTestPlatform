@@ -71,6 +71,30 @@ class AiConfigService:
             "section": "light_translate",
         },
         {
+            "field_name": "category_classify_enabled",
+            "config_key": "ticket.ai.category.classify.enabled",
+            "config_name": "工单自动分类开关",
+            "default_value": "false",
+            "remark": "控制工单同步后是否自动执行轻量AI分类",
+            "section": "light_translate",
+        },
+        {
+            "field_name": "category_classify_provider_code",
+            "config_key": "ticket.ai.category.classify.provider.code",
+            "config_name": "工单自动分类Provider编码",
+            "default_value": "",
+            "remark": "工单自动分类时使用的AI Provider编码",
+            "section": "light_translate",
+        },
+        {
+            "field_name": "category_classify_prompt_code",
+            "config_key": "ticket.ai.category.classify.prompt.code",
+            "config_name": "工单自动分类提示词编码",
+            "default_value": "ticket_category_classify_default",
+            "remark": "工单自动分类时使用的提示词模板编码",
+            "section": "light_translate",
+        },
+        {
             "field_name": "knowledge_provider_code",
             "config_key": "ticket.ai.knowledge.provider.code",
             "config_name": "工单知识提炼Provider编码",
@@ -296,6 +320,12 @@ class AiConfigService:
             title_summary_provider_code=cls._get_config_text(db, "ticket.ai.title.summary.provider.code", ""),
             title_summary_prompt_code=cls._get_config_text(
                 db, "ticket.ai.title.summary.prompt.code", "ticket_title_summary_default"
+            ),
+            category_classify_enabled=str(cls._get_config_text(db, "ticket.ai.category.classify.enabled", "false")).lower()
+            == "true",
+            category_classify_provider_code=cls._get_config_text(db, "ticket.ai.category.classify.provider.code", ""),
+            category_classify_prompt_code=cls._get_config_text(
+                db, "ticket.ai.category.classify.prompt.code", "ticket_category_classify_default"
             ),
             knowledge_provider_code=cls._get_config_text(db, "ticket.ai.knowledge.provider.code", ""),
             knowledge_prompt_code=cls._get_config_text(

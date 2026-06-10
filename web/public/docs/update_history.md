@@ -1,6 +1,15 @@
 ## 更新历史
 
 ### latest
+1. 修复日志拉取弹窗“关联工单自动回填”不生效问题：回填来源从仅 `externalSync/logPullHints` 扩展为 `externalSync + logPullHints + ticketAutomation.logPullConfig + latestLogPull`，关联工单后可自动回填 `vendorId/storeId/posNo(SCO)`。
+1. 补充工单详情接口中的 `latestLogPull` 摘要字段：新增返回 `vendorId`、`storeId`、`posNo`、`modifyTime`，用于日志拉取弹窗稳定回填历史拉取参数。
+1. 自动拉日志参数识别补强：商家ID支持“`ticketVender` 关键字映射 -> 项目映射回退（`ticket_log_pull_project_vendor_map`）”，POS/SCO新增显式字段提取（`ticketPos/posNo/posId`、`ticketSco/scoNo/scoId`，兼容驼峰/下划线）；自动拉日志仍严格要求 `vendorId + storeId + posNo/SCO + modifyTime` 四项齐全才提交。
+1. 日志拉取成功后新增版本号补全：当工单缺少版本号时，自动从日志文本提取并回写 `ticket.version_key` 与 `extra_data.version_key`；该流程不依赖“日志后自动AI”开关，AI关闭时也会执行版本号回填。
+1. 手动新增工单链路新增自动分类：受 `ticket.ai.category.classify.*` 配置控制，仅在未归类工单触发，归类成功回写 `category_name` 并记录 `extra_data.auto_category_classify`，失败不影响工单新增成功。
+1. 工单同步自动化新增日志拉取参数硬门槛：自动拉日志必须同时具备 `vendorId`、`storeId`、`posNo/SCO`、`modifyTime`（日期）才会提交；参数不齐时自动跳过并记录步骤原因，避免误拉取。
+1. 轻量 AI 新增工单自动分类能力：支持配置 `ticket.ai.category.classify.enabled/provider/prompt`，在外部直推与内网拉取入库后按配置自动分类；已归类工单默认不重复分类，AI失败不影响入库。
+1. 新增批量重归类接口 `POST /ticket/sync/auto-category/reclassify`，支持按 `ticketIds` 精确重跑或按分页扫描历史工单重跑，支持 `forceReclassify` 覆盖已有分类。
+1. 日志拉取弹窗增强工单回填：关联工单后自动回填商家ID、门店ID、POS/SCO，并允许保留非下拉配置内门店值，兼容外部同步原样门店。
 1. 工单外部同步补充更新判定与时间保留：更新场景下若已有标题不再走标题 AI，总开关开启时若历史翻译已成功则不重复翻译；内网拉取公网工单改为“远端较新才覆盖更新”，项目/模块优先按 `projectCode/moduleCode` 匹配；外部 `createTime` 固定保存到同步元数据并在公网/内网链路透传，后续更新不覆盖。
 1. 工单外部同步新增“发布就绪”状态与群推送幂等：入库后先标记 `publish_ready=false`（AI处理中），内网拉取接口只返回 `publish_ready=true` 数据；AI任务成功或失败后统一置为可发布；自动群推送增加 `group_push_sent_once` 标记，成功发送一次后不再重复自动发群。
 1. 优化外部工单同步接口 `POST /ticket/sync/external`：主链路改为“先入库后返回”，AI翻译/标题总结、自动化与群推送改为后台异步后处理，降低接口阻塞与数据库会话长占用风险；后台AI异常不再影响入库成功结果。

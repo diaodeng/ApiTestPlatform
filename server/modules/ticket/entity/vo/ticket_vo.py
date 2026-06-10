@@ -600,6 +600,39 @@ class TicketSyncGroupPushSendModel(BaseModel):
         return self
 
 
+class TicketBatchReclassifyRequestModel(BaseModel):
+    """
+    工单批量重归类请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_ids: list[int] | None = Field(default=None, description="指定重归类的工单ID列表，留空时按分页扫描")
+    page_num: int = Field(default=1, description="分页页码，ticketIds 为空时生效")
+    page_size: int = Field(default=100, description="分页大小，ticketIds 为空时生效")
+    force_reclassify: bool = Field(default=False, description="是否覆盖已归类工单")
+
+    @model_validator(mode="after")
+    def validate_batch_reclassify_request(self):
+        """
+        校验批量重归类请求参数。
+        :return: 当前模型。
+        """
+        normalized_ids: list[int] = []
+        for item in self.ticket_ids or []:
+            try:
+                ticket_id = int(item)
+            except Exception:
+                continue
+            if ticket_id > 0 and ticket_id not in normalized_ids:
+                normalized_ids.append(ticket_id)
+        self.ticket_ids = normalized_ids or None
+        self.page_num = max(int(self.page_num or 1), 1)
+        self.page_size = min(max(int(self.page_size or 100), 1), 500)
+        self.force_reclassify = bool(self.force_reclassify)
+        return self
+
+
 class KnowledgeArticleModel(BaseModel):
     """
     知识库文章模型，用于沉淀历史解决方案和复盘内容。

@@ -30,6 +30,50 @@ class TicketLightAiService:
     CONFIG_TITLE_SUMMARY_ENABLED = "ticket.ai.title.summary.enabled"
     CONFIG_TITLE_SUMMARY_PROVIDER = "ticket.ai.title.summary.provider.code"
     CONFIG_TITLE_SUMMARY_PROMPT = "ticket.ai.title.summary.prompt.code"
+    CONFIG_CATEGORY_CLASSIFY_ENABLED = "ticket.ai.category.classify.enabled"
+    CONFIG_CATEGORY_CLASSIFY_PROVIDER = "ticket.ai.category.classify.provider.code"
+    CONFIG_CATEGORY_CLASSIFY_PROMPT = "ticket.ai.category.classify.prompt.code"
+    TICKET_CATEGORY_CANDIDATES = (
+        "促销",
+        "券",
+        "会员",
+        "取单挂单",
+        "eservice",
+        "POS卡死",
+        "POS客户端",
+        "现金管理",
+        "销售回传",
+        "日结",
+        "支持类",
+    )
+    TICKET_CATEGORY_ALIASES = {
+        "促销": "促销",
+        "promotion": "促销",
+        "券": "券",
+        "优惠券": "券",
+        "coupon": "券",
+        "会员": "会员",
+        "member": "会员",
+        "取单挂单": "取单挂单",
+        "挂单": "取单挂单",
+        "取单": "取单挂单",
+        "eservice": "eservice",
+        "e-service": "eservice",
+        "pos卡死": "POS卡死",
+        "卡死": "POS卡死",
+        "死机": "POS卡死",
+        "pos客户端": "POS客户端",
+        "客户端": "POS客户端",
+        "cash": "现金管理",
+        "现金管理": "现金管理",
+        "销售回传": "销售回传",
+        "销售上传": "销售回传",
+        "sale upload": "销售回传",
+        "日结": "日结",
+        "日结算": "日结",
+        "支持类": "支持类",
+        "support": "支持类",
+    }
 
     @classmethod
     def is_translation_enabled(cls, db: Session) -> bool:
@@ -49,6 +93,16 @@ class TicketLightAiService:
         :return: 是否启用标题总结
         """
         config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_TITLE_SUMMARY_ENABLED).first()
+        return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
+
+    @classmethod
+    def is_category_classification_enabled(cls, db: Session) -> bool:
+        """
+        读取工单自动分类总开关。
+        :param db: 数据库会话
+        :return: 是否启用自动分类
+        """
+        config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_CATEGORY_CLASSIFY_ENABLED).first()
         return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
 
     @classmethod
@@ -84,6 +138,46 @@ class TicketLightAiService:
         :return: 请求文本
         """
         return f"工单描述：\n{content}".strip()
+
+    @classmethod
+    def _build_category_classification_prompt(cls, title: str, content: str) -> str:
+        """
+        构建工单自动分类请求内容。
+        :param title: 工单标题
+        :param content: 工单描述
+        :return: 请求文本
+        """
+        categories = "、".join(cls.TICKET_CATEGORY_CANDIDATES)
+        parts = [
+            f"可选分类：{categories}",
+            f"工单标题：{title}".strip(),
+            f"工单描述：\n{content}".strip(),
+            "请仅输出最匹配的一个分类名称。",
+        ]
+        return "\n\n".join([part for part in parts if str(part or "").strip()])
+
+    @classmethod
+    def _normalize_ticket_category(cls, raw_category: str) -> str:
+        """
+        将模型返回的分类值归一化为标准分类名称。
+        :param raw_category: 模型返回分类文本
+        :return: 标准分类，无法识别时返回空字符串
+        """
+        category_text = str(raw_category or "").strip()
+        if not category_text:
+            return ""
+        lowered = category_text.lower()
+        if lowered in cls.TICKET_CATEGORY_ALIASES:
+            return cls.TICKET_CATEGORY_ALIASES[lowered]
+        if category_text in cls.TICKET_CATEGORY_CANDIDATES:
+            return category_text
+        for candidate in cls.TICKET_CATEGORY_CANDIDATES:
+            if candidate.lower() in lowered or lowered in candidate.lower():
+                return candidate
+        for alias, target in cls.TICKET_CATEGORY_ALIASES.items():
+            if alias and alias in lowered:
+                return target
+        return ""
 
     @classmethod
     def _resolve_task_settings(cls, db: Session, provider_config_key: str, prompt_config_key: str) -> tuple[str, str]:
@@ -809,6 +903,181 @@ class TicketLightAiService:
                 "provider_code": provider_code,
                 "prompt_code": prompt_code,
                 "summary_title": "",
+                "error": str(exc),
+            }
+
+    @classmethod
+    def classify_ticket_category(
+        cls,
+        db: Session,
+        *,
+        title: str,
+        description: str,
+        source_type: str = "ticket",
+        source_id: int | None = None,
+        source_ref: str | None = None,
+        current_user_name: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        轻量AI自动归类工单分类。
+        :param db: 数据库会话
+        :param title: 工单标题
+        :param description: 工单描述
+        :param source_type: 来源类型
+        :param source_id: 来源ID
+        :param source_ref: 来源引用
+        :param current_user_name: 当前用户名称
+        :return: (分类名称, 元信息)
+        """
+        title_text = str(title or "").strip()
+        content = str(description or "").strip()
+        if not title_text and not content:
+            return "", {"provider_code": "", "prompt_code": "", "category_name": "", "skipped": True}
+        if not cls.is_category_classification_enabled(db):
+            logger.info(
+                f"工单自动分类跳过: 总开关关闭, source_type={source_type}, "
+                f"source_id={source_id}, source_ref={source_ref}"
+            )
+            return "", {"provider_code": "", "prompt_code": "", "category_name": "", "skipped": True}
+
+        provider_code, prompt_code = cls._resolve_task_settings(
+            db, cls.CONFIG_CATEGORY_CLASSIFY_PROVIDER, cls.CONFIG_CATEGORY_CLASSIFY_PROMPT
+        )
+        request_payload = {
+            "title": title_text,
+            "description": content,
+            "categories": list(cls.TICKET_CATEGORY_CANDIDATES),
+        }
+        if not provider_code or not prompt_code:
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_category_classify",
+                    task_name="工单自动分类",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    status="skipped",
+                    error_message="未配置自动分类Provider或提示词",
+                    request_payload=request_payload,
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未配置自动分类Provider或提示词")
+            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "category_name": "", "skipped": True}
+
+        provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
+        if not provider or not bool(getattr(provider, "enabled", True)):
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_category_classify",
+                    task_name="工单自动分类",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    provider_code=provider_code,
+                    prompt_code=prompt_code,
+                    status="skipped",
+                    error_message="Provider不存在或已停用",
+                    request_payload=request_payload,
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="Provider不存在或已停用")
+            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "category_name": "", "skipped": True}
+
+        prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
+        if not prompt_templates:
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_category_classify",
+                    task_name="工单自动分类",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    provider_code=provider_code,
+                    prompt_code=prompt_code,
+                    model_name=str(getattr(provider, "model_name", "") or "").strip() or None,
+                    base_url=str(getattr(provider, "base_url", "") or "").strip() or None,
+                    status="skipped",
+                    error_message="未找到提示词模板",
+                    request_payload=request_payload,
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未找到提示词模板")
+            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "category_name": "", "skipped": True}
+
+        prompt_template = prompt_templates[0]
+        system_prompt = AiPromptTemplateService.render_prompt_text(
+            prompt_template["promptContent"],
+            {
+                "title": title_text,
+                "content": content,
+                "categories": "、".join(cls.TICKET_CATEGORY_CANDIDATES),
+            },
+        )
+        user_prompt = cls._build_category_classification_prompt(title_text, content)
+        execution_id = cls._write_execution_record(
+            execution_data=cls._build_execution_payload(
+                task_type="ticket_category_classify",
+                task_name="工单自动分类",
+                source_type=source_type,
+                source_id=source_id,
+                source_ref=source_ref,
+                provider_code=provider_code,
+                prompt_code=prompt_code,
+                model_name=str(getattr(provider, "model_name", "") or "").strip() or None,
+                base_url=str(getattr(provider, "base_url", "") or "").strip() or None,
+                request_payload={
+                    **request_payload,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                status="running",
+                created_by_name=current_user_name,
+            ),
+        )
+        try:
+            response_text = str(
+                cls._call_model_api(
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                )
+                or ""
+            ).strip()
+            parsed_payload = cls._extract_json_object(response_text)
+            category_candidate = str(
+                parsed_payload.get("category")
+                or parsed_payload.get("categoryName")
+                or parsed_payload.get("classification")
+                or response_text
+                or ""
+            ).strip()
+            normalized_category = cls._normalize_ticket_category(category_candidate)
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="success",
+                response_text=response_text,
+                response_payload={
+                    "categoryCandidate": category_candidate,
+                    "categoryName": normalized_category,
+                },
+            )
+            return normalized_category, {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "category_name": normalized_category,
+                "raw_category": category_candidate,
+            }
+        except Exception as exc:
+            logger.warning(f"工单自动分类失败: {exc}")
+            cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
+            return "", {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "category_name": "",
                 "error": str(exc),
             }
 

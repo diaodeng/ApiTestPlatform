@@ -2008,12 +2008,106 @@ function resetStoreSelection(target, vendorId) {
   }
   const storeOptions = getVendorStoreOptions(vendorId)
   if (storeOptions.length && !storeOptions.some(item => String(item.storeId || '').trim() === storeId)) {
-    target.storeId = undefined
+    target.storeId = storeId
   }
 }
 
 function handleLogPullVendorChange(vendorId) {
   resetStoreSelection(logPullForm.value, vendorId)
+}
+
+function pickFirstFilledValue(candidates = []) {
+  for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined) {
+      continue
+    }
+    if (typeof candidate === 'string' && !candidate.trim()) {
+      continue
+    }
+    return candidate
+  }
+  return undefined
+}
+
+function resolveTicketLogPullHintsFromDetail(ticketDetail) {
+  const detailPayload = ticketDetail || {}
+  const extraData = detailPayload.extraData || detailPayload.extra_data || {}
+  const externalSync = extraData.externalSync || extraData.external_sync || {}
+  const source = externalSync.source || {}
+  const logPullHints = extraData.logPullHints || extraData.log_pull_hints || {}
+  const ticketAutomation = extraData.ticketAutomation || extraData.ticket_automation || {}
+  const automationLogPullConfig = ticketAutomation.logPullConfig || ticketAutomation.log_pull_config || {}
+  const latestLogPull = detailPayload.latestLogPull || detailPayload.latest_log_pull || {}
+  const directLogPullConfig = detailPayload.logPullConfig || detailPayload.log_pull_config || {}
+  return {
+    vendorId: pickFirstFilledValue([
+      source.vendorId,
+      source.vendor_id,
+      logPullHints.vendorId,
+      logPullHints.vendor_id,
+      latestLogPull.vendorId,
+      latestLogPull.vendor_id,
+      automationLogPullConfig.vendorId,
+      automationLogPullConfig.vendor_id,
+      directLogPullConfig.vendorId,
+      directLogPullConfig.vendor_id
+    ]),
+    storeId: pickFirstFilledValue([
+      source.storeId,
+      source.store_id,
+      logPullHints.storeId,
+      logPullHints.store_id,
+      latestLogPull.storeId,
+      latestLogPull.store_id,
+      automationLogPullConfig.storeId,
+      automationLogPullConfig.store_id,
+      directLogPullConfig.storeId,
+      directLogPullConfig.store_id
+    ]),
+    posNo: pickFirstFilledValue([
+      source.posNo,
+      source.pos_no,
+      source.posId,
+      source.pos_id,
+      source.scoNo,
+      source.sco_no,
+      logPullHints.posNo,
+      logPullHints.pos_no,
+      latestLogPull.posNo,
+      latestLogPull.pos_no,
+      automationLogPullConfig.posNo,
+      automationLogPullConfig.pos_no,
+      automationLogPullConfig.posId,
+      automationLogPullConfig.pos_id,
+      automationLogPullConfig.scoNo,
+      automationLogPullConfig.sco_no,
+      directLogPullConfig.posNo,
+      directLogPullConfig.pos_no,
+      directLogPullConfig.posId,
+      directLogPullConfig.pos_id,
+      directLogPullConfig.scoNo,
+      directLogPullConfig.sco_no
+    ])
+  }
+}
+
+function applyTicketDetailLogPullPrefill(ticketDetail) {
+  const hints = resolveTicketLogPullHintsFromDetail(ticketDetail)
+  let vendorApplied = false
+  const vendorId = Number(hints.vendorId)
+  if (Number.isFinite(vendorId) && vendorId > 0) {
+    logPullForm.value.vendorId = vendorId
+    vendorApplied = true
+  }
+  const storeId = String(hints.storeId || '').trim()
+  if (storeId) {
+    logPullForm.value.storeId = storeId
+  }
+  const posNo = Number(hints.posNo)
+  if (Number.isFinite(posNo) && posNo > 0) {
+    logPullForm.value.posNo = posNo
+  }
+  return { vendorApplied }
 }
 
 function createDefaultTicketForm() {
@@ -2581,7 +2675,10 @@ function openLogPullSubmitDialog() {
   if (currentTicketId.value) {
     logPullForm.value.ticketId = currentTicketId.value
   }
-  applyProjectVendorMapping(detail.value.projectId)
+  const prefillResult = applyTicketDetailLogPullPrefill(detail.value)
+  if (!prefillResult.vendorApplied) {
+    applyProjectVendorMapping(detail.value.projectId)
+  }
   logPullSubmitOpen.value = true
 }
 

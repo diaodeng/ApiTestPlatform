@@ -13,7 +13,7 @@
 - 内网系统调用 `/ticket/sync/pending` 拉取外网工单
 - 拉取后回写 `/ticket/sync/ack` 的交付状态
 
-手动新增/编辑工单的“创建后拉日志”不在这里配置，走工单新增页；手动新增工单的轻量翻译则走 `ticket.ai.translate.*` 和 AI 配置中心。
+手动新增/编辑工单的“创建后拉日志”不在这里配置，走工单新增页；手动新增工单的轻量翻译与自动分类走 AI 配置中心（`ticket.ai.translate.*` / `ticket.ai.category.classify.*`）。
 工单新增/编辑页现在额外提供“手动自动翻译”开关，最终值会写到 `extraData.manualAutomation.autoTranslate`。
 
 ## 配置项
@@ -77,6 +77,19 @@
 - `promptTemplates.classificationHint`
   - 后续扩展 AI 识别时复用的分类提示词。
 
+### 5.5 工单自动分类（AI 配置中心）
+
+- `ticket.ai.category.classify.enabled`
+  - 工单自动分类总开关。
+- `ticket.ai.category.classify.provider.code`
+  - 工单自动分类使用的 Provider。
+- `ticket.ai.category.classify.prompt.code`
+  - 工单自动分类使用的提示词。
+- 生效范围
+  - 外部系统直推、内网拉取入库后都可触发自动分类；
+  - 已有分类的工单默认不重复分类；
+  - 可通过接口批量重跑历史工单分类。
+
 ### 6. 工单通知配置
 
 - `groupPush`
@@ -101,6 +114,7 @@
 2. 服务端按同步来源和映射规则写入工单
 3. 如开启 `autoTranslateOnSync`，会自动翻译描述
 4. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
+5. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
 
 ### 内网拉取外网工单
 

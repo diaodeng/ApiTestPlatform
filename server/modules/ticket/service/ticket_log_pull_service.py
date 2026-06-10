@@ -1039,31 +1039,99 @@ class TicketLogPullService:
         return str(match.group(1) or "").strip()
 
     @classmethod
-    def _update_ticket_version_key(cls, query_db: Session, ticket_id: int, version_key: str) -> None:
+    def _update_ticket_version_key(cls, query_db: Session, ticket_id: int, version_key: str) -> bool:
         """
-        回写工单版本号到扩展字段。
+        回写工单版本号到工单字段与扩展字段。
 
         :param query_db: 数据库会话。
         :param ticket_id: 工单ID。
         :param version_key: 版本号。
-        :return: 无。
+        :return: 是否发生更新。
         """
         ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
         if not ticket:
-            return
+            return False
+        normalized_version_key = str(version_key or "").strip()
+        if not normalized_version_key:
+            return False
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        if str(extra_data.get("version_key") or "").strip() == version_key:
-            return
-        extra_data["version_key"] = version_key
+        current_ticket_version = str(getattr(ticket, "version_key", "") or "").strip()
+        current_extra_version = str(extra_data.get("version_key") or "").strip()
+        if current_ticket_version == normalized_version_key and current_extra_version == normalized_version_key:
+            return False
+        extra_data["version_key"] = normalized_version_key
         TicketDao.update_ticket(
             query_db,
             ticket_id,
             {
+                "version_key": normalized_version_key,
                 "extra_data": extra_data,
                 "update_by": "system",
                 "update_time": datetime.now(),
             },
         )
+        query_db.commit()
+        return True
+
+    @classmethod
+    def _ensure_ticket_version_key_from_log(cls, query_db: Session, ticket_id: int, record_id: int) -> str:
+        """
+        日志拉取成功后确保工单具备版本号，缺失时从日志正文提取并回填。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :return: 可用版本号，未命中返回空字符串
+        """
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
+            return ""
+        version_key = str(getattr(ticket, "version_key", "") or "").strip()
+        if not version_key and isinstance(ticket.extra_data, dict):
+            version_key = str(ticket.extra_data.get("version_key") or "").strip()
+        if version_key:
+            return version_key
+
+        log_text = ""
+        try:
+            log_content_model = cls.get_log_pull_content_services(query_db, record_id)
+            log_text = cls._decode_log_text(log_content_model.text) if log_content_model else ""
+        except Exception as exc:
+            logger.warning("日志拉取记录[%s] 提取版本号前读取日志失败: %s", record_id, exc)
+        version_key = cls._extract_version_key_from_text(log_text)
+        if not version_key:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=ticket_id,
+                record_id=record_id,
+                step="version-backfill",
+                status="skipped",
+                reason="未从日志中提取到版本号",
+            )
+            return ""
+        try:
+            updated = cls._update_ticket_version_key(query_db, ticket_id, version_key)
+            cls._log_chain_step(
+                query_db,
+                ticket_id=ticket_id,
+                record_id=record_id,
+                step="version-backfill",
+                status="success" if updated else "skipped",
+                reason="已从日志提取并回填版本号" if updated else "工单版本号已是最新值",
+                detail={"versionKey": version_key},
+            )
+        except Exception as exc:
+            query_db.rollback()
+            logger.warning("日志拉取记录[%s] 回填工单版本号失败: %s", record_id, exc)
+            cls._log_chain_step(
+                query_db,
+                ticket_id=ticket_id,
+                record_id=record_id,
+                step="version-backfill",
+                status="failed",
+                reason=str(exc),
+            )
+            return ""
+        return version_key
 
     @classmethod
     def _notify_automation(
@@ -2050,6 +2118,7 @@ class TicketLogPullService:
                 reason="工单不存在",
             )
             return
+        version_key = cls._ensure_ticket_version_key_from_log(db, ticket.ticket_id, record_id)
         record_notify_config = {}
         command_notify = record.command_content.get("notifyConfig") or record.command_content.get("notify_config")
         if isinstance(command_notify, dict):
@@ -2098,19 +2167,6 @@ class TicketLogPullService:
                 notify_config=record_notify_config,
             )
             return
-        version_key = str(getattr(ticket, "version_key", "") or "").strip()
-        if not version_key and isinstance(ticket.extra_data, dict):
-            version_key = str(ticket.extra_data.get("version_key") or "").strip()
-        if not version_key:
-            log_text = ""
-            try:
-                log_content_model = cls.get_log_pull_content_services(db, record.id)
-                log_text = cls._decode_log_text(log_content_model.text) if log_content_model else ""
-            except Exception as exc:
-                logger.warning("日志拉取记录[%s] 提取版本号前读取日志失败: %s", record_id, exc)
-            version_key = cls._extract_version_key_from_text(log_text)
-            if version_key:
-                cls._update_ticket_version_key(db, ticket.ticket_id, version_key)
         if not version_key:
             logger.warning("日志拉取记录[%s] 自动AI触发失败，工单缺少版本号", record_id)
             cls._log_chain_step(
@@ -3394,12 +3450,22 @@ class TicketLogPullService:
         :param record: 日志拉取记录
         :return: 摘要字典
         """
+        command_content = record.command_content if isinstance(record.command_content, dict) else {}
+        modify_time = (
+            record.modify_time
+            or command_content.get("modifyTime")
+            or command_content.get("modify_time")
+        )
         return {
             "id": record.id,
             "status": record.status,
             "statusDesc": record.status_desc,
             "isError": record.is_error,
             "errorMessage": record.error_message,
+            "vendorId": record.vendor_id,
+            "storeId": str(record.store_id or "").strip() or None,
+            "posNo": record.pos_no,
+            "modifyTime": modify_time,
             "createTime": record.create_time,
         }
 

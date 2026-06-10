@@ -4,7 +4,7 @@
       <div class="page-intro__eyebrow">AI 配置中心</div>
       <h2 class="page-intro__title">集中管理工单 AI 相关配置</h2>
       <p class="page-intro__desc">
-        轻量翻译、标题总结与知识提炼在工单链路中触发，AI 分析 Worker 配置用于版本仓库分析任务。提示词模板建议在模板页统一维护，这里只负责选择和组合。
+        轻量翻译、标题总结、自动分类与知识提炼在工单链路中触发，AI 分析 Worker 配置用于版本仓库分析任务。提示词模板建议在模板页统一维护，这里只负责选择和组合。
       </p>
     </section>
 
@@ -97,6 +97,47 @@
                 <el-option
                   v-for="item in promptOptions.translate"
                   :key="`title-summary-${item.templateId || item.templateCode}`"
+                  :label="formatPromptLabel(item)"
+                  :value="item.templateCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="自动分类开关" prop="categoryClassifyEnabled">
+              <el-switch v-model="form.categoryClassifyEnabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="自动分类 Provider" prop="categoryClassifyProviderCode">
+              <el-select
+                v-model="form.categoryClassifyProviderCode"
+                placeholder="请选择 Provider"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in providerOptions"
+                  :key="`category-${item.providerId || item.providerCode}`"
+                  :label="formatProviderLabel(item)"
+                  :value="item.providerCode"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="自动分类提示词" prop="categoryClassifyPromptCode">
+              <el-select
+                v-model="form.categoryClassifyPromptCode"
+                placeholder="请选择提示词模板"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in promptOptions.common"
+                  :key="`category-${item.templateId || item.templateCode}`"
                   :label="formatPromptLabel(item)"
                   :value="item.templateCode"
                 />
@@ -261,6 +302,9 @@ const defaultForm = () => ({
   titleSummaryEnabled: false,
   titleSummaryProviderCode: '',
   titleSummaryPromptCode: '',
+  categoryClassifyEnabled: false,
+  categoryClassifyProviderCode: '',
+  categoryClassifyPromptCode: '',
   knowledgeProviderCode: '',
   knowledgePromptCode: '',
   analysisWorkerCommand: '',
@@ -302,6 +346,9 @@ function applyFormData(payload) {
   form.titleSummaryEnabled = payload.titleSummaryEnabled ?? payload.title_summary_enabled ?? false
   form.titleSummaryProviderCode = payload.titleSummaryProviderCode ?? payload.title_summary_provider_code ?? ''
   form.titleSummaryPromptCode = payload.titleSummaryPromptCode ?? payload.title_summary_prompt_code ?? ''
+  form.categoryClassifyEnabled = payload.categoryClassifyEnabled ?? payload.category_classify_enabled ?? false
+  form.categoryClassifyProviderCode = payload.categoryClassifyProviderCode ?? payload.category_classify_provider_code ?? ''
+  form.categoryClassifyPromptCode = payload.categoryClassifyPromptCode ?? payload.category_classify_prompt_code ?? ''
   form.knowledgeProviderCode = payload.knowledgeProviderCode ?? payload.knowledge_provider_code ?? ''
   form.knowledgePromptCode = payload.knowledgePromptCode ?? payload.knowledge_prompt_code ?? ''
   form.analysisWorkerCommand = payload.analysisWorkerCommand ?? payload.analysis_worker_command ?? ''

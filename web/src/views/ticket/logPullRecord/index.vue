@@ -515,6 +515,7 @@ import {
   createTicketLogPullRecord,
   downloadTicketLogPull,
   downloadTicketLogPullStoreConfigTemplate,
+  getTicket,
   getTicketLogPullContent,
   getTicketLogPullVendorStoreOptions,
   listTicket,
@@ -830,8 +831,9 @@ function normalizeVendorOptions(rows = []) {
     label: buildVendorOptionLabel(item),
     stores: Array.isArray(item.stores)
       ? item.stores.map(store => ({
-        storeId: Number(store.storeId),
+        storeId: String(store.storeId || '').trim(),
         storeCode: String(store.storeCode || '').trim(),
+        sapOrgNo: String(store.sapOrgNo || '').trim(),
         storeName: String(store.storeName || store.storeId || '').trim(),
         label: buildStoreOptionLabel(store),
       }))
@@ -848,9 +850,9 @@ function buildVendorOptionLabel(vendor) {
 
 function buildStoreOptionLabel(store) {
   const name = String(store.storeName || store.storeId || '').trim()
-  const code = String(store.storeCode || '').trim()
-  const id = String(store.storeId || '').trim()
-  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+  const code = String(store.storeCode || store.storeId || '').trim()
+  const sapOrgNo = String(store.sapOrgNo || '').trim()
+  return [name, code ? `[${code}]` : '', sapOrgNo ? `(${sapOrgNo})` : ''].filter(Boolean).join(' ')
 }
 
 function loadVendorOptions() {
@@ -871,14 +873,14 @@ function getVendorStoreOptions(vendorId) {
 const queryStoreOptions = computed(() => getVendorStoreOptions(queryParams.value.vendorId))
 
 function resetStoreSelection(target, vendorId) {
-  const storeId = Number(target.storeId)
+  const storeId = String(target.storeId || '').trim()
   if (!storeId) {
     target.storeId = undefined
     return
   }
   const storeOptions = getVendorStoreOptions(vendorId)
-  if (storeOptions.length && !storeOptions.some(item => item.storeId === storeId)) {
-    target.storeId = undefined
+  if (storeOptions.length && !storeOptions.some(item => String(item.storeId || '').trim() === storeId)) {
+    target.storeId = storeId
   }
 }
 
@@ -902,6 +904,100 @@ function openCreateDialog() {
   }
   createOpen.value = true
   loadTicketOptions()
+  if (createForm.value.ticketId) {
+    handleCreateTicketChange(createForm.value.ticketId)
+  }
+}
+
+function pickFirstFilledValue(candidates = []) {
+  for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined) {
+      continue
+    }
+    if (typeof candidate === 'string' && !candidate.trim()) {
+      continue
+    }
+    return candidate
+  }
+  return undefined
+}
+
+function resolveTicketSyncSource(detail) {
+  const payload = detail || {}
+  const extraData = payload.extraData || payload.extra_data || {}
+  const externalSync = extraData.externalSync || extraData.external_sync || {}
+  const source = externalSync.source || {}
+  const logPullHints = extraData.logPullHints || extraData.log_pull_hints || {}
+  const ticketAutomation = extraData.ticketAutomation || extraData.ticket_automation || {}
+  const automationLogPullConfig = ticketAutomation.logPullConfig || ticketAutomation.log_pull_config || {}
+  const latestLogPull = payload.latestLogPull || payload.latest_log_pull || {}
+  const directLogPullConfig = payload.logPullConfig || payload.log_pull_config || {}
+  return {
+    vendorId: pickFirstFilledValue([
+      source.vendorId,
+      source.vendor_id,
+      logPullHints.vendorId,
+      logPullHints.vendor_id,
+      latestLogPull.vendorId,
+      latestLogPull.vendor_id,
+      automationLogPullConfig.vendorId,
+      automationLogPullConfig.vendor_id,
+      directLogPullConfig.vendorId,
+      directLogPullConfig.vendor_id
+    ]),
+    storeId: pickFirstFilledValue([
+      source.storeId,
+      source.store_id,
+      logPullHints.storeId,
+      logPullHints.store_id,
+      latestLogPull.storeId,
+      latestLogPull.store_id,
+      automationLogPullConfig.storeId,
+      automationLogPullConfig.store_id,
+      directLogPullConfig.storeId,
+      directLogPullConfig.store_id
+    ]),
+    posNo: pickFirstFilledValue([
+      source.posNo,
+      source.pos_no,
+      source.posId,
+      source.pos_id,
+      source.scoNo,
+      source.sco_no,
+      logPullHints.posNo,
+      logPullHints.pos_no,
+      latestLogPull.posNo,
+      latestLogPull.pos_no,
+      automationLogPullConfig.posNo,
+      automationLogPullConfig.pos_no,
+      automationLogPullConfig.posId,
+      automationLogPullConfig.pos_id,
+      automationLogPullConfig.scoNo,
+      automationLogPullConfig.sco_no,
+      directLogPullConfig.posNo,
+      directLogPullConfig.pos_no,
+      directLogPullConfig.posId,
+      directLogPullConfig.pos_id,
+      directLogPullConfig.scoNo,
+      directLogPullConfig.sco_no
+    ])
+  }
+}
+
+function applyTicketLogPullPrefill(ticketDetail) {
+  const source = resolveTicketSyncSource(ticketDetail)
+  const vendorId = Number(source.vendorId)
+  if (Number.isFinite(vendorId) && vendorId > 0) {
+    createForm.value.vendorId = vendorId
+  }
+  const storeId = String(source.storeId || '').trim()
+  if (storeId) {
+    createForm.value.storeId = storeId
+  }
+  const posNo = Number(source.posNo)
+  if (Number.isFinite(posNo) && posNo > 0) {
+    createForm.value.posNo = posNo
+  }
 }
 
 function handleCreateTicketChange(ticketId) {
@@ -909,7 +1005,11 @@ function handleCreateTicketChange(ticketId) {
     createForm.value.autoAiEnabled = false
     createForm.value.aiAgentCode = ''
     createForm.value.aiProviderCode = ''
+    return
   }
+  getTicket(ticketId).then(response => {
+    applyTicketLogPullPrefill(response.data || {})
+  }).catch(() => {})
 }
 
 function resetCreateForm() {

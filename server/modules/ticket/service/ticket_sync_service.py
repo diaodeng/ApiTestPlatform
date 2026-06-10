@@ -21,6 +21,7 @@ from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullProjectVend
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import (
     TicketAiAnalysisRequestModel,
+    TicketBatchReclassifyRequestModel,
     TicketExternalSyncUpsertModel,
     TicketSyncAckRequestModel,
     TicketSyncAutomationModel,
@@ -1094,12 +1095,52 @@ class TicketSyncService:
             )
             or ""
         ).strip()
+        ticket_pos = str(
+            cls._payload_field_value(
+                raw_payload,
+                "ticketPos",
+                "ticket_pos",
+                default=cls._payload_field_value(
+                    raw_payload,
+                    "posNo",
+                    "pos_no",
+                    default=cls._payload_field_value(
+                        raw_payload,
+                        "posId",
+                        "pos_id",
+                        default=cls._payload_field_value(mapping_payload, "ticketPos", "ticket_pos", default=""),
+                    ),
+                ),
+            )
+            or ""
+        ).strip()
+        ticket_sco = str(
+            cls._payload_field_value(
+                raw_payload,
+                "ticketSco",
+                "ticket_sco",
+                default=cls._payload_field_value(
+                    raw_payload,
+                    "scoNo",
+                    "sco_no",
+                    default=cls._payload_field_value(
+                        raw_payload,
+                        "scoId",
+                        "sco_id",
+                        default=cls._payload_field_value(mapping_payload, "ticketSco", "ticket_sco", default=""),
+                    ),
+                ),
+            )
+            or ""
+        ).strip()
         return {
             "ticketVender": ticket_vender,
             "ticketModle": ticket_modle,
             "ticketStatus": ticket_status,
             "ticketStore": ticket_store,
             "ticketAssignee": ticket_assignee,
+            "ticketPos": ticket_pos,
+            "ticketSco": ticket_sco,
         }
 
     @classmethod
@@ -1337,6 +1378,26 @@ class TicketSyncService:
             if vendor_id:
                 return vendor_id, vendor_name or vendor_text
         return None, vendor_text
+
+    @classmethod
+    def _resolve_vendor_by_project(cls, db: Session, *, project_id: int | None) -> int | None:
+        """
+        按项目映射配置回退解析商家ID。
+        :param db: 数据库会话
+        :param project_id: 项目ID
+        :return: 商家ID，未命中返回 None
+        """
+        if not project_id:
+            return None
+        row = (
+            db.query(TicketLogPullProjectVendorMap)
+            .filter(TicketLogPullProjectVendorMap.project_id == project_id)
+            .order_by(TicketLogPullProjectVendorMap.modifid.desc(), TicketLogPullProjectVendorMap.id.desc())
+            .first()
+        )
+        if not row:
+            return None
+        return cls._safe_int(getattr(row, "vender_no", None))
 
     @classmethod
     def _resolve_store_by_external_value(
@@ -1583,6 +1644,12 @@ class TicketSyncService:
                 "assigneeName": assignee_name or source_snapshot.get("assigneeName"),
                 "projectName": str(sync_object.project_name or "").strip() or source_snapshot.get("projectName"),
                 "moduleName": str(sync_object.module_name or "").strip() or source_snapshot.get("moduleName"),
+                "vendorId": cls._safe_int(detected.get("vendorId")) or source_snapshot.get("vendorId"),
+                "vendorName": str(detected.get("vendorName") or "").strip() or source_snapshot.get("vendorName"),
+                "storeId": str(detected.get("storeId") or "").strip() or source_snapshot.get("storeId"),
+                "storeName": str(detected.get("storeName") or "").strip() or source_snapshot.get("storeName"),
+                "posNo": cls._safe_int(detected.get("posNo")) or source_snapshot.get("posNo"),
+                "scoNo": cls._safe_int(detected.get("scoNo")) or source_snapshot.get("scoNo"),
             }
         )
         external_sync["source"] = source_snapshot
@@ -1621,6 +1688,150 @@ class TicketSyncService:
         return translated_description, translation_meta, origin_description
 
     @classmethod
+    def _normalize_auto_log_pull_date_text(cls, value: Any) -> str:
+        """
+        将任意输入归一化为日志拉取日期（YYYY-MM-DD）。
+        :param value: 原始日期值
+        :return: 标准日期文本，无法解析时返回空字符串
+        """
+        if value in (None, "", []):
+            return ""
+        parsed = cls._parse_datetime_value(value)
+        if parsed:
+            return parsed.strftime("%Y-%m-%d")
+        value_text = str(value).strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value_text):
+            return value_text
+        if re.fullmatch(r"\d{4}/\d{2}/\d{2}", value_text):
+            return value_text.replace("/", "-")
+        return ""
+
+    @classmethod
+    def _resolve_auto_log_pull_modify_time(
+        cls,
+        *,
+        sync_object: TicketExternalSyncUpsertModel,
+        log_pull_payload: dict[str, Any] | None,
+    ) -> str:
+        """
+        解析自动拉日志使用的 modifyTime（日期）。
+        :param sync_object: 外部同步模型
+        :param log_pull_payload: 当前日志拉取参数
+        :return: YYYY-MM-DD 日期文本，缺失时返回空字符串
+        """
+        payload = log_pull_payload if isinstance(log_pull_payload, dict) else {}
+        payload_candidate = (
+            cls._payload_field_value(payload, "modifyTime", "modify_time", default="")
+            or cls._payload_field_value(payload, "logDate", "log_date", default="")
+            or cls._payload_field_value(payload, "ticketDate", "ticket_date", default="")
+        )
+        normalized_payload_date = cls._normalize_auto_log_pull_date_text(payload_candidate)
+        if normalized_payload_date:
+            return normalized_payload_date
+
+        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
+        for camel_key, snake_key in (
+            ("modifyTime", "modify_time"),
+            ("logDate", "log_date"),
+            ("businessDate", "business_date"),
+            ("ticketDate", "ticket_date"),
+            ("occurDate", "occur_date"),
+            ("date", "date"),
+            ("createTime", "create_time"),
+        ):
+            candidate = cls._payload_field_value(raw_payload, camel_key, snake_key, default="")
+            normalized_date = cls._normalize_auto_log_pull_date_text(candidate)
+            if normalized_date:
+                return normalized_date
+        return cls._normalize_auto_log_pull_date_text(sync_object.create_time)
+
+    @classmethod
+    def _run_auto_ticket_category_classification(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        title: str,
+        description: str,
+        current_user_name: str,
+        source_type: str,
+        source_ref: str,
+        force_reclassify: bool = False,
+    ) -> tuple[Ticket, dict[str, Any]]:
+        """
+        执行工单自动分类并在成功时回填工单分类字段。
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param title: 工单标题
+        :param description: 工单描述
+        :param current_user_name: 当前用户名
+        :param source_type: 分类来源类型
+        :param source_ref: 分类来源引用
+        :param force_reclassify: 是否强制覆盖已有分类
+        :return: (最新工单对象, 分类执行摘要)
+        """
+        existing_category = str(getattr(ticket, "category_name", "") or "").strip()
+        if existing_category and not force_reclassify:
+            return ticket, {
+                "skipped": True,
+                "skipReason": "工单已归类，跳过自动分类",
+                "categoryName": existing_category,
+            }
+
+        category_name, category_meta = TicketLightAiService.classify_ticket_category(
+            db,
+            title=title,
+            description=description,
+            source_type=source_type,
+            source_id=ticket.ticket_id,
+            source_ref=source_ref,
+            current_user_name=current_user_name,
+        )
+        normalized_category = str(category_name or "").strip()
+        if not normalized_category:
+            return ticket, {
+                "skipped": True,
+                "skipReason": str(category_meta.get("error") or "AI未返回可识别分类").strip(),
+                "categoryName": existing_category,
+                "meta": category_meta,
+            }
+
+        next_extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        next_extra_data["auto_category_classify"] = {
+            "categoryName": normalized_category,
+            "providerCode": category_meta.get("provider_code"),
+            "promptCode": category_meta.get("prompt_code"),
+            "rawCategory": category_meta.get("raw_category"),
+            "classifiedAt": cls._now_iso(),
+            "forceReclassify": bool(force_reclassify),
+        }
+        if normalized_category == existing_category and ticket.extra_data == next_extra_data:
+            return ticket, {"skipped": True, "skipReason": "分类结果未变化", "categoryName": normalized_category}
+
+        update_by = str(current_user_name or "").strip() or "system"
+        try:
+            TicketDao.update_ticket(
+                db,
+                ticket.ticket_id,
+                {
+                    "category_name": normalized_category,
+                    "extra_data": next_extra_data,
+                    "update_by": update_by,
+                    "update_time": datetime.now(),
+                },
+            )
+            db.commit()
+            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            return ticket, {
+                "skipped": False,
+                "categoryName": normalized_category,
+                "meta": category_meta,
+            }
+        except Exception:
+            db.rollback()
+            raise
+
+    @classmethod
     def _extract_pattern(cls, text: str, patterns: Any) -> str | None:
         if not isinstance(patterns, list):
             return None
@@ -1650,6 +1861,8 @@ class TicketSyncService:
         ticket_status = external_fields.get("ticketStatus") or ""
         ticket_store = external_fields.get("ticketStore") or ""
         ticket_assignee = external_fields.get("ticketAssignee") or ""
+        ticket_pos = external_fields.get("ticketPos") or ""
+        ticket_sco = external_fields.get("ticketSco") or ""
 
         project = None
         project_name_by_vendor = ""
@@ -1700,7 +1913,15 @@ class TicketSyncService:
             vendor_mappings=config.get("vendorMappings") or [],
         )
         if not vendor_id:
+            vendor_id = cls._resolve_vendor_by_project(db, project_id=getattr(project, "project_id", None))
+        if not vendor_id:
             vendor_id = cls._safe_int((sync_object.log_pull_config or {}).get("vendorId"))
+        if vendor_id and not vendor_name:
+            vendor_name = (
+                ticket_vender
+                or project_name_by_vendor
+                or str(getattr(project, "project_name", "") or "").strip()
+            )
         store_id, store_name = cls._resolve_store_by_external_value(
             db,
             vendor_id=vendor_id,
@@ -1746,9 +1967,17 @@ class TicketSyncService:
             "status": status_code or str(sync_object.status or "").strip(),
             "assigneeId": assignee_id,
             "assigneeName": assignee_name,
-            "posNo": cls._safe_int((sync_object.log_pull_config or {}).get("posNo"))
+            "posNo": cls._safe_int(ticket_pos)
+            or cls._safe_int((sync_object.log_pull_config or {}).get("posNo"))
+            or cls._safe_int((sync_object.log_pull_config or {}).get("pos_id"))
+            or cls._safe_int((sync_object.log_pull_config or {}).get("posId"))
             or cls._safe_int(cls._extract_pattern(text, config.get("posPatterns"))),
-            "scoNo": cls._safe_int(cls._extract_pattern(text, config.get("scoPatterns"))),
+            "scoNo": cls._safe_int(ticket_sco)
+            or cls._safe_int((sync_object.log_pull_config or {}).get("scoNo"))
+            or cls._safe_int((sync_object.log_pull_config or {}).get("sco_no"))
+            or cls._safe_int((sync_object.log_pull_config or {}).get("scoId"))
+            or cls._safe_int((sync_object.log_pull_config or {}).get("sco_id"))
+            or cls._safe_int(cls._extract_pattern(text, config.get("scoPatterns"))),
             "versionKey": version_key,
             "rawTextLength": len(text),
         }
@@ -1938,6 +2167,25 @@ class TicketSyncService:
         version_key = str((detected or {}).get("versionKey") or sync_object.version_key or "").strip()
         if version_key:
             extra_data["version_key"] = version_key
+        log_pull_hints = (
+            dict(extra_data.get("log_pull_hints") or {})
+            if isinstance(extra_data.get("log_pull_hints"), dict)
+            else {}
+        )
+        vendor_id_hint = cls._safe_int((detected or {}).get("vendorId"))
+        store_id_hint = str((detected or {}).get("storeId") or "").strip()
+        pos_no_hint = cls._safe_int((detected or {}).get("posNo")) or cls._safe_int((detected or {}).get("scoNo"))
+        modify_time_hint = cls._resolve_auto_log_pull_modify_time(sync_object=sync_object, log_pull_payload=sync_object.log_pull_config)
+        if vendor_id_hint:
+            log_pull_hints["vendorId"] = vendor_id_hint
+        if store_id_hint:
+            log_pull_hints["storeId"] = store_id_hint
+        if pos_no_hint:
+            log_pull_hints["posNo"] = pos_no_hint
+        if modify_time_hint:
+            log_pull_hints["modifyTime"] = modify_time_hint
+        if log_pull_hints:
+            extra_data["log_pull_hints"] = log_pull_hints
         extra_data = cls._attach_meta(extra_data, meta)
         payload["extra_data"] = extra_data
         if not ticket:
@@ -2149,6 +2397,22 @@ class TicketSyncService:
                 result=result,
             )
 
+        category_summary = None
+        try:
+            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            ticket, category_summary = cls._run_auto_ticket_category_classification(
+                db,
+                ticket=ticket,
+                title=str(sync_object.title or ticket.title or "").strip(),
+                description=str(sync_object.description or ticket.description or "").strip(),
+                current_user_name=_user_name(current_user),
+                source_type=f"{sync_scene}_auto_category",
+                source_ref=sync_object.ticket_no,
+                force_reclassify=False,
+            )
+        except Exception as exc:
+            logger.warning(f"外部工单同步自动分类执行失败: ticket_no={sync_object.ticket_no}, error={exc}")
+
         should_run_automation = bool(
             (
                 automation
@@ -2186,6 +2450,8 @@ class TicketSyncService:
         result["syncSummary"] = cls.extract_sync_summary(result.get("extraData"))
         if automation_summary:
             result["syncAutomation"] = automation_summary
+        if category_summary:
+            result["syncCategory"] = category_summary
         if group_push_summary is not None:
             result["syncGroupPush"] = group_push_summary
         return CrudResponseModel(
@@ -2311,6 +2577,21 @@ class TicketSyncService:
                 db.rollback()
                 logger.warning(f"外部工单同步延后更新工单失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
+        try:
+            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            cls._run_auto_ticket_category_classification(
+                db,
+                ticket=ticket,
+                title=str(update_data.get("title") or ticket.title or "").strip(),
+                description=str(update_data.get("description") or sync_object.description or ticket.description or "").strip(),
+                current_user_name=_user_name(current_user),
+                source_type=f"{sync_scene}_auto_category",
+                source_ref=sync_object.ticket_no,
+                force_reclassify=False,
+            )
+        except Exception as exc:
+            logger.warning(f"外部工单同步延后自动分类失败: ticket_no={sync_object.ticket_no}, error={exc}")
+
         should_run_automation = bool(
             (
                 automation
@@ -2405,39 +2686,82 @@ class TicketSyncService:
                     log_pull_payload.update(automation.log_pull_config)
                 if isinstance(sync_object.log_pull_config, dict):
                     log_pull_payload.update(sync_object.log_pull_config)
+                resolved_vendor_id = cls._safe_int(detected.get("vendorId") or log_pull_payload.get("vendorId"))
+                resolved_store_id = str(detected.get("storeId") or log_pull_payload.get("storeId") or "").strip()
+                resolved_pos_no = cls._safe_int(
+                    detected.get("posNo") or detected.get("scoNo") or log_pull_payload.get("posNo")
+                )
+                resolved_modify_time = cls._resolve_auto_log_pull_modify_time(
+                    sync_object=sync_object,
+                    log_pull_payload=log_pull_payload,
+                )
                 log_pull_payload.update(
                     {
                         "ticketId": ticket_id,
-                        "vendorId": detected.get("vendorId") or log_pull_payload.get("vendorId"),
-                        "storeId": detected.get("storeId") or log_pull_payload.get("storeId"),
-                        "posNo": detected.get("posNo") or detected.get("scoNo") or log_pull_payload.get("posNo"),
+                        "vendorId": resolved_vendor_id,
+                        "storeId": resolved_store_id,
+                        "posNo": resolved_pos_no,
+                        "modifyTime": resolved_modify_time,
                     }
                 )
                 if automation.auto_ai_analysis:
                     log_pull_payload["autoAiEnabled"] = True
                     log_pull_payload["aiAgentCode"] = automation.ai_agent_code
                     log_pull_payload["aiProviderCode"] = automation.ai_provider_code
-                try:
-                    create_model = TicketLogPullCreateModel.model_validate(log_pull_payload)
-                    log_result = TicketLogPullService.create_log_pull_services(
-                        db, ticket_id, create_model, current_user
+                missing_log_pull_fields: list[str] = []
+                if not resolved_vendor_id:
+                    missing_log_pull_fields.append("vendorId")
+                if not resolved_store_id:
+                    missing_log_pull_fields.append("storeId")
+                if not resolved_pos_no:
+                    missing_log_pull_fields.append("posNo/SCO")
+                if not resolved_modify_time:
+                    missing_log_pull_fields.append("modifyTime")
+                if missing_log_pull_fields:
+                    skip_reason = f"自动拉日志参数不完整，缺少: {', '.join(missing_log_pull_fields)}"
+                    summary["logPullSkipReason"] = skip_reason
+                    cls._mark_automation_step(
+                        meta,
+                        step="log_pull",
+                        status="skipped",
+                        detail={
+                            "reason": skip_reason,
+                            "vendorId": resolved_vendor_id,
+                            "storeId": resolved_store_id,
+                            "posNo": resolved_pos_no,
+                            "modifyTime": resolved_modify_time,
+                        },
                     )
-                    if log_result.is_success:
-                        summary["logPull"] = log_result.result
-                        cls._mark_automation_step(meta, step="log_pull", status="submitted", detail=log_result.result)
-                        if automation.auto_ai_analysis:
-                            cls._mark_automation_step(
-                                meta,
-                                step="ai_analysis",
-                                status="queued",
-                                detail={"via": "log_pull_auto_ai", "agentCode": automation.ai_agent_code},
-                            )
-                    else:
-                        summary["logPullError"] = log_result.message
-                        cls._mark_automation_step(meta, step="log_pull", status="failed", error=log_result.message)
-                except Exception as exc:
-                    summary["logPullError"] = str(exc)
-                    cls._mark_automation_step(meta, step="log_pull", status="failed", error=str(exc))
+                    if automation.auto_ai_analysis:
+                        summary["aiAnalysisSkipReason"] = "自动拉日志未触发，自动AI分析跳过"
+                        cls._mark_automation_step(
+                            meta,
+                            step="ai_analysis",
+                            status="skipped",
+                            detail={"reason": "自动拉日志参数不完整，跳过自动AI分析"},
+                        )
+                else:
+                    try:
+                        create_model = TicketLogPullCreateModel.model_validate(log_pull_payload)
+                        log_result = TicketLogPullService.create_log_pull_services(
+                            db, ticket_id, create_model, current_user
+                        )
+                        if log_result.is_success:
+                            summary["logPull"] = log_result.result
+                            cls._mark_automation_step(meta, step="log_pull", status="submitted", detail=log_result.result)
+                            if automation.auto_ai_analysis:
+                                cls._mark_automation_step(
+                                    meta,
+                                    step="ai_analysis",
+                                    status="queued",
+                                    detail={"via": "log_pull_auto_ai", "agentCode": automation.ai_agent_code},
+                                )
+                        else:
+                            summary["logPullError"] = log_result.message
+                            cls._mark_automation_step(meta, step="log_pull", status="failed", error=log_result.message)
+                    except Exception as exc:
+                        summary["logPullError"] = str(exc)
+                        cls._mark_automation_step(meta, step="log_pull", status="failed", error=str(exc))
             elif automation and automation.auto_ai_analysis:
                 version_key = str(detected.get("versionKey") or "").strip() or _extract_ticket_version_key(
                     ticket.extra_data
@@ -2573,6 +2897,82 @@ class TicketSyncService:
         except Exception:
             db.rollback()
             raise
+
+    @classmethod
+    def batch_reclassify_ticket_categories_services(
+        cls,
+        db: Session,
+        request: TicketBatchReclassifyRequestModel,
+        current_user: CurrentUserModel,
+    ) -> dict[str, Any]:
+        """
+        批量执行工单自动分类。
+        :param db: 数据库会话
+        :param request: 批量重归类请求模型
+        :param current_user: 当前登录用户
+        :return: 执行结果摘要
+        """
+        current_user_name = _user_name(current_user) or "system"
+        if getattr(request, "ticket_ids", None):
+            query = (
+                db.query(Ticket)
+                .filter(Ticket.del_flag == "0", Ticket.ticket_id.in_(request.ticket_ids))
+                .order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc())
+            )
+            total = query.count()
+            tickets = query.all()
+        else:
+            page_num = max(int(getattr(request, "page_num", 1) or 1), 1)
+            page_size = min(max(int(getattr(request, "page_size", 100) or 100), 1), 500)
+            query = db.query(Ticket).filter(Ticket.del_flag == "0").order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc())
+            total = query.count()
+            tickets = query.offset((page_num - 1) * page_size).limit(page_size).all()
+
+        summary = {
+            "total": total,
+            "selectedCount": len(tickets),
+            "successCount": 0,
+            "skippedCount": 0,
+            "failedCount": 0,
+            "details": [],
+        }
+        for ticket in tickets:
+            try:
+                _, category_result = cls._run_auto_ticket_category_classification(
+                    db,
+                    ticket=ticket,
+                    title=str(ticket.title or "").strip(),
+                    description=str(ticket.description or "").strip(),
+                    current_user_name=current_user_name,
+                    source_type="ticket_batch_reclassify",
+                    source_ref=str(ticket.ticket_no or ticket.ticket_id),
+                    force_reclassify=bool(getattr(request, "force_reclassify", False)),
+                )
+                detail = {
+                    "ticketId": ticket.ticket_id,
+                    "ticketNo": ticket.ticket_no,
+                    **category_result,
+                }
+                summary["details"].append(detail)
+                if category_result.get("skipped"):
+                    summary["skippedCount"] += 1
+                else:
+                    summary["successCount"] += 1
+            except Exception as exc:
+                logger.warning(
+                    f"批量工单自动分类失败: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, error={exc}"
+                )
+                summary["failedCount"] += 1
+                summary["details"].append(
+                    {
+                        "ticketId": ticket.ticket_id,
+                        "ticketNo": ticket.ticket_no,
+                        "skipped": False,
+                        "failed": True,
+                        "error": str(exc),
+                    }
+                )
+        return summary
 
     @classmethod
     def _build_remote_sync_upsert_model(

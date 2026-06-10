@@ -30,6 +30,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketAiRepoMappingQueryModel,
     TicketAiRepoMappingUpdateModel,
     TicketAssignModel,
+    TicketBatchReclassifyRequestModel,
     TicketCommentCreateModel,
     TicketCreateModel,
     TicketEventCreateModel,
@@ -158,6 +159,34 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         )
         or ""
     ).strip()
+    pos_value = str(
+        _compatible_field_value(
+            data,
+            "ticketPos",
+            "ticket_pos",
+            default=_compatible_field_value(
+                data,
+                "posNo",
+                "pos_no",
+                default=_compatible_field_value(data, "posId", "pos_id", default=""),
+            ),
+        )
+        or ""
+    ).strip()
+    sco_value = str(
+        _compatible_field_value(
+            data,
+            "ticketSco",
+            "ticket_sco",
+            default=_compatible_field_value(
+                data,
+                "scoNo",
+                "sco_no",
+                default=_compatible_field_value(data, "scoId", "sco_id", default=""),
+            ),
+        )
+        or ""
+    ).strip()
 
     data["source"] = {
         "system": str((source.get("system") or ticket_vender) or "").strip(),
@@ -185,6 +214,8 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         "ticketStatus": status_value,
         "ticketStore": store_value,
         "ticketAssignee": assignee_value,
+        "ticketPos": pos_value,
+        "ticketSco": sco_value,
     }
     data["extra_data"] = extra_data
     if raw_payload:
@@ -637,6 +668,32 @@ async def send_sync_group_push_by_ticket(
             push_ids=query_object.push_ids,
             message_template=query_object.message_template,
         )
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/sync/auto-category/reclassify",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def batch_reclassify_sync_tickets(
+    request: Request,
+    query_object: TicketBatchReclassifyRequestModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    批量重跑工单自动分类。
+    :param request: 请求对象。
+    :param query_object: 批量重归类参数，支持指定 ticketIds 或按分页扫描。
+    :param query_db: 数据库会话。
+    :param current_user: 当前登录用户。
+    :return: 批量重归类执行结果。
+    """
+    try:
+        result = TicketSyncService.batch_reclassify_ticket_categories_services(query_db, query_object, current_user)
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)

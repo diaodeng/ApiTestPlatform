@@ -306,8 +306,12 @@ function syncStoreSelection() {
   if (!storeId) {
     return
   }
+  if (!resolvedStoreOptions.value.length) {
+    return
+  }
   if (!resolvedStoreOptions.value.some(item => String(item.storeId || '').trim() === storeId)) {
-    model.value.storeId = undefined
+    // 允许保留非配置内门店值（兼容外部同步原样保存场景）。
+    model.value.storeId = storeId
   }
 }
 

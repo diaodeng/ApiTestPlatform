@@ -8,6 +8,24 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-10] INGEST-CODE | 修复日志拉取弹窗关联工单回填缺失
+- 触发：用户反馈日志拉取弹窗中关联工单后，商家ID/门店/POS未自动回填。
+- 架构层：工单域 / 日志拉取 / Web 控制台
+- 创建的页面：无
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`web/src/views/ticket/index.vue` / `web/src/views/ticket/logPullRecord/index.vue` / `server/modules/ticket/entity/vo/ticket_log_pull_vo.py` / `server/modules/ticket/service/ticket_log_pull_service.py` -> 工单域知识页
+- 总共涉及页面：2
+
+## [2026-06-10] INGEST-CODE | 工单自动拉日志门槛 + 自动分类 + 日志弹窗回填
+- 触发：用户要求自动拉日志必须参数齐全才执行，并新增工单自动分类能力（含批量重跑），同时增强日志拉取弹窗回填与“日志成功后版本号自动回填”。
+- 架构层：工单域 / 外部同步链路 / 轻量 AI 配置中心 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-10-ticket-auto-logpull-and-auto-category.md`
+- 更新的页面：`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_sync_service.py` / `server/modules/ticket/service/ticket_log_pull_service.py` / `server/modules/ticket/service/ticket_service.py` / `server/modules/ticket/service/ticket_light_ai_service.py` / `server/modules/ticket/controller/ticket_controller.py` / `server/modules/ticket/entity/vo/ticket_vo.py` / `server/module_admin/service/ai_config_service.py` / `server/module_admin/entity/vo/ai_config_vo.py` / `web/src/views/system/aiconfig/index.vue` / `web/src/views/ticket/index.vue` / `web/src/views/ticket/logPullRecord/index.vue` / `web/src/components/ticket/LogPullConfigFields.vue` / `web/src/api/ticket/ticket.js` -> 工单域知识页
+- 总共涉及页面：4
+
 ## [2026-06-10] INGEST-CODE | 工单通知系统（群消息推送 + 按人催办）落地
 - 触发：用户要求基于飞书多维表格按人催办、支持工单群消息推送、并将同步链路翻译开关收敛到清晰配置。
 - 架构层：工单域 / 外部同步链路 / 飞书通知 / 任务调度 / Web 控制台

@@ -972,6 +972,45 @@ class TicketService:
                 create_time=now,
             )
             query_db.commit()
+            if not str(getattr(ticket, "category_name", "") or "").strip():
+                try:
+                    if TicketLightAiService.is_category_classification_enabled(query_db):
+                        category_name, category_meta = TicketLightAiService.classify_ticket_category(
+                            query_db,
+                            ticket=ticket,
+                            title=str(ticket.title or "").strip(),
+                            description=str(ticket.description or "").strip(),
+                            source_type="ticket_manual_create_auto_category",
+                            source_id=ticket.ticket_id,
+                            source_ref=ticket.ticket_no,
+                            current_user_name=_user_name(current_user),
+                        )
+                        normalized_category = str(category_name or "").strip()
+                        if normalized_category:
+                            next_extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+                            next_extra_data["auto_category_classify"] = {
+                                "sourceType": "ticket_manual_create_auto_category",
+                                "categoryName": normalized_category,
+                                "providerCode": str(category_meta.get("provider_code") or "").strip(),
+                                "promptCode": str(category_meta.get("prompt_code") or "").strip(),
+                                "successAt": datetime.now().isoformat(),
+                                "forceReclassify": False,
+                            }
+                            TicketDao.update_ticket(
+                                query_db,
+                                ticket.ticket_id,
+                                {
+                                    "category_name": normalized_category,
+                                    "extra_data": next_extra_data,
+                                    "update_by": _user_name(current_user),
+                                    "update_time": datetime.now(),
+                                },
+                            )
+                            query_db.commit()
+                            ticket = TicketDao.get_ticket_by_id(query_db, ticket.ticket_id) or ticket
+                except Exception as exc:
+                    query_db.rollback()
+                    logger.warning("工单[%s]自动分类执行失败: %s", ticket.ticket_id, exc)
             if need_log_pull or log_pull_config:
                 try:
                     log_pull_result = TicketLogPullService.create_log_pull_services(
