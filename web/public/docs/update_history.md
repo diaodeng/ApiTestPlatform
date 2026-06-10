@@ -1,6 +1,13 @@
 ## 更新历史
 
 ### latest
+1. AI 配置中心补齐默认提示词初始化：新增 `ticket_category_classify_default`、`ticket_log_extract_default` 两条 `common` 分类模板（内容允许为空），解决“自动分类提示词/日志参数提取提示词下拉无可选项”的问题。
+1. 调整 `ticket.ai.log_extract.prompt.code` 默认值为 `ticket_log_extract_default`，并在 AI 配置汇总读取时对“空字符串配置”做默认编码回退，兼容老数据。
+1. 工单同步配置新增“飞书统一凭证 + 通知发送模式”：`feishuAuth` 统一管理 `appId/appSecret`，`groupPush/personReminder/summaryReport` 支持 `push_config`、`feishu_app`、`hybrid` 三种发送模式，并支持子配置覆盖凭证。
+1. 工单群消息推送新增“优先级分流路由”能力：可按 `P1/P2/P3-P4` 路由到不同机器人推送渠道或不同飞书群 `chat_id`，未命中时回退默认目标，`hybrid` 模式支持自动降级。
+1. 按人催办新增飞书应用私发能力：支持按邮箱直接发送 IM（`receive_id_type=email`），并与原机器人推送并行或独立使用。
+1. 新增工单汇总统计通知能力：按时间范围统计状态/分类/优先级数量，支持手动接口 `POST /ticket/sync/notify/summary/run` 与定时任务 `module_task.scheduler_maintenance.ticket_summary_report`。
+1. 工单同步配置页新增可视化模块：飞书统一凭证、优先级路由配置、汇总统计配置、汇总手动触发入口，说明文案同步补全。
 1. 修复日志拉取弹窗“关联工单自动回填”不生效问题：回填来源从仅 `externalSync/logPullHints` 扩展为 `externalSync + logPullHints + ticketAutomation.logPullConfig + latestLogPull`，关联工单后可自动回填 `vendorId/storeId/posNo(SCO)`。
 1. 补充工单详情接口中的 `latestLogPull` 摘要字段：新增返回 `vendorId`、`storeId`、`posNo`、`modifyTime`，用于日志拉取弹窗稳定回填历史拉取参数。
 1. 自动拉日志参数识别补强：商家ID支持“`ticketVender` 关键字映射 -> 项目映射回退（`ticket_log_pull_project_vendor_map`）”，POS/SCO新增显式字段提取（`ticketPos/posNo/posId`、`ticketSco/scoNo/scoId`，兼容驼峰/下划线）；自动拉日志仍严格要求 `vendorId + storeId + posNo/SCO + modifyTime` 四项齐全才提交。

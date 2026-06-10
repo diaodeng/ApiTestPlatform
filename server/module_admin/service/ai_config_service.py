@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import Request
@@ -114,7 +113,7 @@ class AiConfigService:
             "field_name": "log_extract_prompt_code",
             "config_key": "ticket.ai.log_extract.prompt.code",
             "config_name": "工单日志参数提取提示词编码",
-            "default_value": "",
+            "default_value": "ticket_log_extract_default",
             "remark": "工单日志参数提取时使用的提示词模板编码",
             "section": "light_translate",
         },
@@ -262,6 +261,20 @@ class AiConfigService:
             return int(default_value)
 
     @classmethod
+    def _get_config_text_with_blank_default(cls, db: Session, config_key: str, default_value: str) -> str:
+        """
+        获取系统参数文本值，若值为空字符串则回退默认值。
+        :param db: orm对象
+        :param config_key: 参数键名
+        :param default_value: 默认值
+        :return: 参数值
+        """
+        value = cls._get_config_text(db, config_key, "")
+        if str(value or "").strip():
+            return str(value)
+        return str(default_value)
+
+    @classmethod
     def _upsert_config(cls, db: Session, *, config_key: str, config_name: str, config_value: Any, remark: str, current_user_name: str):
         """
         新增或更新系统参数。
@@ -348,12 +361,14 @@ class AiConfigService:
             category_classify_enabled=str(cls._get_config_text(db, "ticket.ai.category.classify.enabled", "false")).lower()
             == "true",
             category_classify_provider_code=cls._get_config_text(db, "ticket.ai.category.classify.provider.code", ""),
-            category_classify_prompt_code=cls._get_config_text(
+            category_classify_prompt_code=cls._get_config_text_with_blank_default(
                 db, "ticket.ai.category.classify.prompt.code", "ticket_category_classify_default"
             ),
             log_extract_enabled=str(cls._get_config_text(db, "ticket.ai.log_extract.enabled", "false")).lower() == "true",
             log_extract_provider_code=cls._get_config_text(db, "ticket.ai.log_extract.provider.code", ""),
-            log_extract_prompt_code=cls._get_config_text(db, "ticket.ai.log_extract.prompt.code", ""),
+            log_extract_prompt_code=cls._get_config_text_with_blank_default(
+                db, "ticket.ai.log_extract.prompt.code", "ticket_log_extract_default"
+            ),
             knowledge_provider_code=cls._get_config_text(db, "ticket.ai.knowledge.provider.code", ""),
             knowledge_prompt_code=cls._get_config_text(
                 db, "ticket.ai.knowledge.prompt.code", "ticket_knowledge_extract_default"

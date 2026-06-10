@@ -75,6 +75,24 @@ class AiPromptTemplateService:
             "enabled": True,
             "remark": "工单分析可选追加模板",
         },
+        {
+            "template_code": "ticket_category_classify_default",
+            "template_name": "工单自动分类默认提示词",
+            "template_category": "common",
+            "prompt_content": "",
+            "sort": 20,
+            "enabled": True,
+            "remark": "工单自动分类的默认提示词占位模板，允许先选中后再补充内容",
+        },
+        {
+            "template_code": "ticket_log_extract_default",
+            "template_name": "工单日志参数提取默认提示词",
+            "template_category": "common",
+            "prompt_content": "",
+            "sort": 21,
+            "enabled": True,
+            "remark": "工单日志参数提取默认提示词占位模板，允许先选中后再补充内容",
+        },
     )
 
     @classmethod

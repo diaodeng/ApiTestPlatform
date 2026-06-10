@@ -565,9 +565,11 @@ class TicketSyncService:
             "autoRunOnSync": False,
             "autoTranslateOnSync": True,
             "defaultPullLimit": 50,
+            "feishuAuth": cls._default_feishu_auth_config(),
             "remoteSync": cls._default_remote_sync_config(),
             "groupPush": cls._default_group_push_config(),
             "personReminder": cls._default_person_reminder_config(),
+            "summaryReport": cls._default_summary_report_config(),
             "projectMappings": [],
             "moduleMappings": [],
             "vendorMappings": [],
@@ -596,6 +598,18 @@ class TicketSyncService:
         }
 
     @classmethod
+    def _default_feishu_auth_config(cls) -> dict[str, Any]:
+        """
+        构建飞书应用统一凭证默认配置。
+
+        :return: 统一凭证配置默认值。
+        """
+        return {
+            "appId": "",
+            "appSecret": "",
+        }
+
+    @classmethod
     def _default_group_push_config(cls) -> dict[str, Any]:
         """
         构建工单群推送默认配置。
@@ -604,7 +618,10 @@ class TicketSyncService:
         """
         return {
             "enabled": False,
+            "sendMode": "push_config",
             "pushIds": [],
+            "appChatIds": [],
+            "priorityRoutes": [],
             "sendAfterExternalSync": False,
             "sendAfterRemotePull": False,
             "template": "",
@@ -620,7 +637,10 @@ class TicketSyncService:
         """
         return {
             "enabled": False,
+            "sendMode": "push_config",
             "pushIds": [],
+            "appId": "",
+            "appSecret": "",
             "feishuAppId": "",
             "feishuAppSecret": "",
             "appToken": "",
@@ -633,6 +653,29 @@ class TicketSyncService:
             "messageTemplate": "",
             "maxRowsPerPerson": 20,
             "pageSize": 500,
+        }
+
+    @classmethod
+    def _default_summary_report_config(cls) -> dict[str, Any]:
+        """
+        构建工单汇总通知默认配置。
+
+        :return: 汇总通知配置默认值。
+        """
+        return {
+            "enabled": False,
+            "sendMode": "push_config",
+            "pushIds": [],
+            "appChatIds": [],
+            "appId": "",
+            "appSecret": "",
+            "timeField": "create_time",
+            "windowMinutes": 60,
+            "endDelayMinutes": 0,
+            "startTime": "",
+            "endTime": "",
+            "includeClosed": True,
+            "messageTemplate": "",
         }
 
     @classmethod
@@ -664,6 +707,11 @@ class TicketSyncService:
         merged = cls._default_sync_config()
         if isinstance(config, dict):
             merged.update(config)
+        feishu_auth = merged.get("feishuAuth") if isinstance(merged.get("feishuAuth"), dict) else {}
+        feishu_auth = {**cls._default_feishu_auth_config(), **feishu_auth}
+        feishu_auth["appId"] = str(feishu_auth.get("appId") or "").strip()
+        feishu_auth["appSecret"] = str(feishu_auth.get("appSecret") or "").strip()
+        merged["feishuAuth"] = feishu_auth
         if not isinstance(merged.get("logPullDefaults"), dict):
             merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
         if not isinstance(merged.get("promptTemplates"), dict):
@@ -688,19 +736,55 @@ class TicketSyncService:
         group_push = merged.get("groupPush") if isinstance(merged.get("groupPush"), dict) else {}
         default_group_push = cls._default_group_push_config()
         group_push = {**default_group_push, **group_push}
+        group_push["sendMode"] = TicketSyncNotifyService._normalize_send_mode(group_push.get("sendMode"))
         group_push["enabled"] = bool(group_push.get("enabled"))
         group_push["sendAfterExternalSync"] = bool(group_push.get("sendAfterExternalSync"))
         group_push["sendAfterRemotePull"] = bool(group_push.get("sendAfterRemotePull"))
         group_push["pushIds"] = TicketSyncNotifyService._normalize_push_ids(group_push.get("pushIds"))
+        group_push["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(group_push.get("appChatIds"))
+        group_push["appId"] = str(group_push.get("appId") or "").strip()
+        group_push["appSecret"] = str(group_push.get("appSecret") or "").strip()
+        priority_routes = group_push.get("priorityRoutes") if isinstance(group_push.get("priorityRoutes"), list) else []
+        normalized_priority_routes: list[dict[str, Any]] = []
+        for route in priority_routes:
+            if not isinstance(route, dict):
+                continue
+            priorities_raw = route.get("priorities")
+            if isinstance(priorities_raw, str):
+                priorities = [TicketSyncNotifyService._normalize_priority(item) for item in priorities_raw.split(",")]
+            elif isinstance(priorities_raw, list):
+                priorities = [TicketSyncNotifyService._normalize_priority(item) for item in priorities_raw]
+            else:
+                priorities = []
+            priorities = [item for item in priorities if item]
+            push_ids = TicketSyncNotifyService._normalize_push_ids(route.get("pushIds"))
+            chat_ids = TicketSyncNotifyService._normalize_chat_ids(route.get("chatIds"))
+            if not priorities:
+                continue
+            normalized_priority_routes.append(
+                {
+                    "priorities": priorities,
+                    "pushIds": push_ids,
+                    "chatIds": chat_ids,
+                }
+            )
+        group_push["priorityRoutes"] = normalized_priority_routes
         group_push["template"] = str(group_push.get("template") or "").strip()
         group_push["manualTemplate"] = str(group_push.get("manualTemplate") or "").strip()
+        if not group_push["appId"]:
+            group_push["appId"] = feishu_auth["appId"]
+        if not group_push["appSecret"]:
+            group_push["appSecret"] = feishu_auth["appSecret"]
         merged["groupPush"] = group_push
 
         person_reminder = merged.get("personReminder") if isinstance(merged.get("personReminder"), dict) else {}
         default_person_reminder = cls._default_person_reminder_config()
         person_reminder = {**default_person_reminder, **person_reminder}
+        person_reminder["sendMode"] = TicketSyncNotifyService._normalize_send_mode(person_reminder.get("sendMode"))
         person_reminder["enabled"] = bool(person_reminder.get("enabled"))
         person_reminder["pushIds"] = TicketSyncNotifyService._normalize_push_ids(person_reminder.get("pushIds"))
+        person_reminder["appId"] = str(person_reminder.get("appId") or "").strip()
+        person_reminder["appSecret"] = str(person_reminder.get("appSecret") or "").strip()
         person_reminder["feishuAppId"] = str(person_reminder.get("feishuAppId") or "").strip()
         person_reminder["feishuAppSecret"] = str(person_reminder.get("feishuAppSecret") or "").strip()
         person_reminder["appToken"] = str(person_reminder.get("appToken") or "").strip()
@@ -713,7 +797,33 @@ class TicketSyncService:
         person_reminder["messageTemplate"] = str(person_reminder.get("messageTemplate") or "").strip()
         person_reminder["maxRowsPerPerson"] = max(cls._safe_int(person_reminder.get("maxRowsPerPerson")) or 20, 1)
         person_reminder["pageSize"] = min(max(cls._safe_int(person_reminder.get("pageSize")) or 500, 1), 500)
+        if not person_reminder["appId"]:
+            person_reminder["appId"] = person_reminder["feishuAppId"] or feishu_auth["appId"]
+        if not person_reminder["appSecret"]:
+            person_reminder["appSecret"] = person_reminder["feishuAppSecret"] or feishu_auth["appSecret"]
+        person_reminder["feishuAppId"] = person_reminder["appId"]
+        person_reminder["feishuAppSecret"] = person_reminder["appSecret"]
         merged["personReminder"] = person_reminder
+
+        summary_report = merged.get("summaryReport") if isinstance(merged.get("summaryReport"), dict) else {}
+        default_summary_report = cls._default_summary_report_config()
+        summary_report = {**default_summary_report, **summary_report}
+        summary_report["enabled"] = bool(summary_report.get("enabled"))
+        summary_report["sendMode"] = TicketSyncNotifyService._normalize_send_mode(summary_report.get("sendMode"))
+        summary_report["pushIds"] = TicketSyncNotifyService._normalize_push_ids(summary_report.get("pushIds"))
+        summary_report["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(summary_report.get("appChatIds"))
+        summary_report["appId"] = str(summary_report.get("appId") or "").strip() or feishu_auth["appId"]
+        summary_report["appSecret"] = str(summary_report.get("appSecret") or "").strip() or feishu_auth["appSecret"]
+        summary_report["timeField"] = TicketSyncNotifyService._resolve_summary_time_field(
+            summary_report.get("timeField")
+        )
+        summary_report["windowMinutes"] = max(cls._safe_int(summary_report.get("windowMinutes")) or 60, 1)
+        summary_report["endDelayMinutes"] = max(cls._safe_int(summary_report.get("endDelayMinutes")) or 0, 0)
+        summary_report["startTime"] = str(summary_report.get("startTime") or "").strip()
+        summary_report["endTime"] = str(summary_report.get("endTime") or "").strip()
+        summary_report["includeClosed"] = bool(summary_report.get("includeClosed", True))
+        summary_report["messageTemplate"] = str(summary_report.get("messageTemplate") or "").strip()
+        merged["summaryReport"] = summary_report
         if not isinstance(merged.get("projectMappings"), list):
             merged["projectMappings"] = []
         if not isinstance(merged.get("moduleMappings"), list):
@@ -872,6 +982,36 @@ class TicketSyncService:
             trigger_source=trigger_source,
             user_id=user_id,
             email=email,
+        )
+
+    @classmethod
+    def run_summary_report_services(
+        cls,
+        db: Session,
+        *,
+        trigger_source: str,
+        start_time: Any | None = None,
+        end_time: Any | None = None,
+    ) -> dict[str, Any]:
+        """
+        执行工单汇总统计通知。
+
+        :param db: 数据库会话。
+        :param trigger_source: 触发来源（manual/scheduler）。
+        :param start_time: 可选统计开始时间。
+        :param end_time: 可选统计结束时间。
+        :return: 执行结果摘要。
+        """
+        config = cls._load_sync_config(db)
+        summary_config = config.get("summaryReport") if isinstance(config.get("summaryReport"), dict) else {}
+        parsed_start_time = TicketSyncNotifyService._parse_datetime_value(start_time)
+        parsed_end_time = TicketSyncNotifyService._parse_datetime_value(end_time)
+        return TicketSyncNotifyService.run_ticket_summary_report(
+            db,
+            config=summary_config,
+            trigger_source=trigger_source,
+            start_time=parsed_start_time,
+            end_time=parsed_end_time,
         )
 
     @classmethod

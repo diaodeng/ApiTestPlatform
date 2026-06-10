@@ -99,6 +99,145 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
+          <span>工单汇总统计通知</span>
+          <el-tag type="success" effect="plain">可定时统计状态/分类/优先级并推送</el-tag>
+        </div>
+      </template>
+
+      <el-form :model="form.summaryReport" label-width="150px">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="启用汇总通知">
+              <el-switch v-model="form.summaryReport.enabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="发送模式">
+              <el-select v-model="form.summaryReport.sendMode" style="width: 100%">
+                <el-option v-for="item in notifySendModes" :key="`summary-mode-${item.value}`" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="推送渠道">
+              <el-select
+                v-model="form.summaryReport.pushIds"
+                multiple
+                filterable
+                collapse-tags
+                :loading="pushOptionsLoading"
+                placeholder="push_config/hybrid 模式使用"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in pushOptions"
+                  :key="`summary-push-${item.pushId}`"
+                  :label="item.label"
+                  :value="item.pushId"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="应用群 chat_id">
+              <el-select
+                v-model="form.summaryReport.appChatIds"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                placeholder="feishu_app/hybrid 模式使用"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="时间字段">
+              <el-select v-model="form.summaryReport.timeField" style="width: 100%">
+                <el-option
+                  v-for="item in summaryTimeFieldOptions"
+                  :key="`summary-time-${item.value}`"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="窗口分钟数">
+              <el-input-number v-model="form.summaryReport.windowMinutes" :min="1" :max="10080" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="结束延迟(分钟)">
+              <el-input-number v-model="form.summaryReport.endDelayMinutes" :min="0" :max="1440" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="包含已关闭">
+              <el-switch v-model="form.summaryReport.includeClosed" inline-prompt active-text="是" inactive-text="否" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="飞书 appId">
+              <el-input v-model="form.summaryReport.appId" placeholder="覆盖统一凭证（可选）" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="飞书 appSecret">
+              <el-input v-model="form.summaryReport.appSecret" show-password placeholder="覆盖统一凭证（可选）" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="固定开始时间">
+              <el-input v-model="form.summaryReport.startTime" placeholder="可选，格式如 2026-06-10 09:00:00" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="固定结束时间">
+              <el-input v-model="form.summaryReport.endTime" placeholder="可选，格式如 2026-06-10 18:00:00" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="汇总模板">
+              <el-input
+                v-model="form.summaryReport.messageTemplate"
+                type="textarea"
+                :rows="6"
+                placeholder="可用变量：${start_time} ${end_time} ${time_field} ${total_count} ${status_summary} ${category_summary} ${priority_summary} ${now_time}"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
+          <span>飞书统一凭证</span>
+          <el-tag type="info" effect="plain">群推送/按人催办/汇总通知共用，子配置可覆盖</el-tag>
+        </div>
+      </template>
+      <el-form :model="form.feishuAuth" label-width="150px">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="飞书 appId">
+              <el-input v-model="form.feishuAuth.appId" placeholder="开放平台应用 app_id" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="飞书 appSecret">
+              <el-input v-model="form.feishuAuth.appSecret" show-password placeholder="开放平台应用 app_secret" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
           <span>工单群消息推送</span>
           <el-tag type="success" effect="plain">推送项来自推送配置管理</el-tag>
         </div>
@@ -109,6 +248,13 @@
           <el-col :xs="24" :md="12">
             <el-form-item label="启用群推送">
               <el-switch v-model="form.groupPush.enabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="发送模式">
+              <el-select v-model="form.groupPush.sendMode" style="width: 100%">
+                <el-option v-for="item in notifySendModes" :key="`group-mode-${item.value}`" :label="item.label" :value="item.value" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
@@ -132,6 +278,19 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
+            <el-form-item label="应用群 chat_id">
+              <el-select
+                v-model="form.groupPush.appChatIds"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                placeholder="feishu_app/hybrid 模式必填"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
             <el-form-item label="外部推送后发送">
               <el-switch v-model="form.groupPush.sendAfterExternalSync" inline-prompt active-text="开" inactive-text="关" />
             </el-form-item>
@@ -139,6 +298,53 @@
           <el-col :xs="24" :md="12">
             <el-form-item label="远端拉取后发送">
               <el-switch v-model="form.groupPush.sendAfterRemotePull" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="优先级路由">
+              <div class="priority-route-list">
+                <div v-for="(route, idx) in form.groupPush.priorityRoutes" :key="`route-${idx}`" class="priority-route-item">
+                  <el-row :gutter="12">
+                    <el-col :xs="24" :md="6">
+                      <el-select v-model="route.priorities" multiple placeholder="优先级" style="width: 100%">
+                        <el-option label="P1" value="P1" />
+                        <el-option label="P2" value="P2" />
+                        <el-option label="P3" value="P3" />
+                        <el-option label="P4" value="P4" />
+                      </el-select>
+                    </el-col>
+                    <el-col :xs="24" :md="9">
+                      <el-select
+                        v-model="route.pushIds"
+                        multiple
+                        filterable
+                        collapse-tags
+                        :loading="pushOptionsLoading"
+                        placeholder="路由推送渠道（机器人）"
+                        style="width: 100%"
+                      >
+                        <el-option
+                          v-for="item in pushOptions"
+                          :key="`route-push-${idx}-${item.pushId}`"
+                          :label="item.label"
+                          :value="item.pushId"
+                        />
+                      </el-select>
+                    </el-col>
+                    <el-col :xs="24" :md="9">
+                      <el-select
+                        v-model="route.chatIds"
+                        multiple
+                        filterable
+                        allow-create
+                        default-first-option
+                        placeholder="路由群 chat_id（应用身份）"
+                        style="width: 100%"
+                      />
+                    </el-col>
+                  </el-row>
+                </div>
+              </div>
             </el-form-item>
           </el-col>
           <el-col :span="24">
@@ -181,6 +387,13 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
+            <el-form-item label="发送模式">
+              <el-select v-model="form.personReminder.sendMode" style="width: 100%">
+                <el-option v-for="item in notifySendModes" :key="`person-mode-${item.value}`" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
             <el-form-item label="催办推送渠道">
               <el-select
                 v-model="form.personReminder.pushIds"
@@ -202,12 +415,12 @@
           </el-col>
           <el-col :xs="24" :md="12">
             <el-form-item label="飞书 appId">
-              <el-input v-model="form.personReminder.feishuAppId" placeholder="用于查询飞书人员信息" />
+              <el-input v-model="form.personReminder.appId" placeholder="覆盖统一凭证（可选）" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
             <el-form-item label="飞书 appSecret">
-              <el-input v-model="form.personReminder.feishuAppSecret" show-password placeholder="用于查询飞书人员信息" />
+              <el-input v-model="form.personReminder.appSecret" show-password placeholder="覆盖统一凭证（可选）" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
@@ -307,6 +520,18 @@
               <el-button :loading="personPreviewLoading" @click="handlePreviewPersonReminder">统计该用户</el-button>
               <el-button type="primary" :loading="personRunLoading" @click="handleRunPersonReminder">
                 发送该用户催办
+              </el-button>
+            </el-form-item>
+            <el-divider content-position="left">汇总统计手动触发</el-divider>
+            <el-form-item label="开始时间">
+              <el-input v-model="summaryRunForm.startTime" placeholder="可选，格式如 2026-06-10 09:00:00" />
+            </el-form-item>
+            <el-form-item label="结束时间">
+              <el-input v-model="summaryRunForm.endTime" placeholder="可选，格式如 2026-06-10 18:00:00" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="success" :loading="summaryRunLoading" @click="handleRunSummaryReport">
+                发送汇总统计
               </el-button>
             </el-form-item>
           </el-form>
@@ -461,6 +686,7 @@ import {
   listTicketSyncNotifyPushOptions,
   previewTicketSyncPersonReminder,
   runTicketSyncPersonReminder,
+  runTicketSyncSummaryReport,
   saveTicketSyncAutomationConfig,
   sendTicketSyncGroupPushByTicket
 } from '@/api/ticket/ticket'
@@ -474,6 +700,7 @@ const pushOptions = ref([])
 const groupSendLoading = ref(false)
 const personPreviewLoading = ref(false)
 const personRunLoading = ref(false)
+const summaryRunLoading = ref(false)
 const personPreviewResult = ref(null)
 const groupSendForm = reactive({
   ticketNo: ''
@@ -481,6 +708,10 @@ const groupSendForm = reactive({
 const personQueryForm = reactive({
   userId: '',
   email: ''
+})
+const summaryRunForm = reactive({
+  startTime: '',
+  endTime: ''
 })
 
 const form = reactive(createDefaultForm())
@@ -503,6 +734,19 @@ const mappingSections = [
   { key: 'storeMappings', label: '门店映射', description: '示例：[{"keywords":["北京一店","bj-01"],"storeId":4001,"storeName":"北京一店"}]', rows: 6 },
   { key: 'statusMappings', label: '状态映射', description: '示例：[{"keywords":["处理中","processing"],"status":"PROCESSING"}]', rows: 6 },
   { key: 'assigneeMappings', label: '处理人映射', description: '示例：[{"keywords":["张三"],"userId":5001,"userName":"张三","email":"zhangsan@example.com"}]', rows: 6 }
+]
+
+const notifySendModes = [
+  { label: '推送配置(机器人)', value: 'push_config' },
+  { label: '飞书应用身份', value: 'feishu_app' },
+  { label: '两种都发', value: 'hybrid' }
+]
+
+const summaryTimeFieldOptions = [
+  { label: '创建时间', value: 'create_time' },
+  { label: '更新时间', value: 'update_time' },
+  { label: '关闭时间', value: 'closed_at' },
+  { label: '解决时间', value: 'resolved_at' }
 ]
 
 const rules = {
@@ -542,6 +786,10 @@ function createDefaultForm() {
     autoRunOnSync: false,
     autoTranslateOnSync: true,
     defaultPullLimit: 50,
+    feishuAuth: {
+      appId: '',
+      appSecret: ''
+    },
     remoteSync: {
       enabled: false,
       pullUrl: '',
@@ -560,7 +808,14 @@ function createDefaultForm() {
     },
     groupPush: {
       enabled: false,
+      sendMode: 'push_config',
       pushIds: [],
+      appChatIds: [],
+      priorityRoutes: [
+        { priorities: ['P1'], pushIds: [], chatIds: [] },
+        { priorities: ['P2'], pushIds: [], chatIds: [] },
+        { priorities: ['P3', 'P4'], pushIds: [], chatIds: [] }
+      ],
       sendAfterExternalSync: false,
       sendAfterRemotePull: false,
       template: '',
@@ -568,7 +823,10 @@ function createDefaultForm() {
     },
     personReminder: {
       enabled: false,
+      sendMode: 'push_config',
       pushIds: [],
+      appId: '',
+      appSecret: '',
       feishuAppId: '',
       feishuAppSecret: '',
       appToken: '',
@@ -581,6 +839,21 @@ function createDefaultForm() {
       messageTemplate: '',
       maxRowsPerPerson: 20,
       pageSize: 500
+    },
+    summaryReport: {
+      enabled: false,
+      sendMode: 'push_config',
+      pushIds: [],
+      appChatIds: [],
+      appId: '',
+      appSecret: '',
+      timeField: 'create_time',
+      windowMinutes: 60,
+      endDelayMinutes: 0,
+      startTime: '',
+      endTime: '',
+      includeClosed: true,
+      messageTemplate: ''
     },
     projectMappings: [],
     moduleMappings: [],
@@ -627,6 +900,11 @@ function applyConfig(payload) {
   form.autoRunOnSync = Boolean(payload.autoRunOnSync)
   form.autoTranslateOnSync = payload.autoTranslateOnSync !== false
   form.defaultPullLimit = Number(payload.defaultPullLimit || 50)
+  const feishuAuth = payload.feishuAuth || {}
+  form.feishuAuth = {
+    appId: feishuAuth.appId || '',
+    appSecret: feishuAuth.appSecret || ''
+  }
 
   const remoteSync = payload.remoteSync || {}
   form.remoteSync = {
@@ -649,17 +927,36 @@ function applyConfig(payload) {
   const groupPush = payload.groupPush || {}
   form.groupPush = {
     enabled: Boolean(groupPush.enabled),
+    sendMode: groupPush.sendMode || 'push_config',
     pushIds: Array.isArray(groupPush.pushIds) ? groupPush.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
+    appChatIds: Array.isArray(groupPush.appChatIds) ? groupPush.appChatIds.map(item => String(item).trim()).filter(Boolean) : [],
+    priorityRoutes: Array.isArray(groupPush.priorityRoutes)
+      ? groupPush.priorityRoutes.map(route => ({
+          priorities: Array.isArray(route?.priorities) ? route.priorities.map(item => String(item).trim()).filter(Boolean) : [],
+          pushIds: Array.isArray(route?.pushIds) ? route.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
+          chatIds: Array.isArray(route?.chatIds) ? route.chatIds.map(item => String(item).trim()).filter(Boolean) : []
+        }))
+      : [],
     sendAfterExternalSync: Boolean(groupPush.sendAfterExternalSync),
     sendAfterRemotePull: Boolean(groupPush.sendAfterRemotePull),
     template: groupPush.template || '',
     manualTemplate: groupPush.manualTemplate || ''
   }
+  if (!form.groupPush.priorityRoutes.length) {
+    form.groupPush.priorityRoutes = [
+      { priorities: ['P1'], pushIds: [], chatIds: [] },
+      { priorities: ['P2'], pushIds: [], chatIds: [] },
+      { priorities: ['P3', 'P4'], pushIds: [], chatIds: [] }
+    ]
+  }
 
   const personReminder = payload.personReminder || {}
   form.personReminder = {
     enabled: Boolean(personReminder.enabled),
+    sendMode: personReminder.sendMode || 'push_config',
     pushIds: Array.isArray(personReminder.pushIds) ? personReminder.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
+    appId: personReminder.appId || '',
+    appSecret: personReminder.appSecret || '',
     feishuAppId: personReminder.feishuAppId || '',
     feishuAppSecret: personReminder.feishuAppSecret || '',
     appToken: personReminder.appToken || '',
@@ -672,6 +969,22 @@ function applyConfig(payload) {
     messageTemplate: personReminder.messageTemplate || '',
     maxRowsPerPerson: Number(personReminder.maxRowsPerPerson || 20),
     pageSize: Number(personReminder.pageSize || 500)
+  }
+  const summaryReport = payload.summaryReport || {}
+  form.summaryReport = {
+    enabled: Boolean(summaryReport.enabled),
+    sendMode: summaryReport.sendMode || 'push_config',
+    pushIds: Array.isArray(summaryReport.pushIds) ? summaryReport.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
+    appChatIds: Array.isArray(summaryReport.appChatIds) ? summaryReport.appChatIds.map(item => String(item).trim()).filter(Boolean) : [],
+    appId: summaryReport.appId || '',
+    appSecret: summaryReport.appSecret || '',
+    timeField: summaryReport.timeField || 'create_time',
+    windowMinutes: Number(summaryReport.windowMinutes || 60),
+    endDelayMinutes: Number(summaryReport.endDelayMinutes || 0),
+    startTime: summaryReport.startTime || '',
+    endTime: summaryReport.endTime || '',
+    includeClosed: summaryReport.includeClosed !== false,
+    messageTemplate: summaryReport.messageTemplate || ''
   }
 
   form.projectMappings = normalizeArray(payload.projectMappings)
@@ -786,6 +1099,31 @@ async function handleSave() {
     payload.posPatterns = parseJsonArray(posPatternsText.value)
     payload.scoPatterns = parseJsonArray(scoPatternsText.value)
     payload.versionPatterns = parseJsonArray(versionPatternsText.value)
+    payload.feishuAuth = {
+      appId: String(payload.feishuAuth?.appId || '').trim(),
+      appSecret: String(payload.feishuAuth?.appSecret || '').trim()
+    }
+    payload.groupPush.appChatIds = Array.isArray(payload.groupPush?.appChatIds)
+      ? payload.groupPush.appChatIds.map(item => String(item || '').trim()).filter(Boolean)
+      : []
+    payload.groupPush.priorityRoutes = Array.isArray(payload.groupPush?.priorityRoutes)
+      ? payload.groupPush.priorityRoutes
+          .map(route => ({
+            priorities: Array.isArray(route?.priorities) ? route.priorities.map(item => String(item || '').trim().toUpperCase()).filter(Boolean) : [],
+            pushIds: Array.isArray(route?.pushIds) ? route.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
+            chatIds: Array.isArray(route?.chatIds) ? route.chatIds.map(item => String(item || '').trim()).filter(Boolean) : []
+          }))
+          .filter(route => route.priorities.length > 0)
+      : []
+    payload.personReminder.appId = String(payload.personReminder?.appId || '').trim()
+    payload.personReminder.appSecret = String(payload.personReminder?.appSecret || '').trim()
+    payload.personReminder.feishuAppId = payload.personReminder.appId
+    payload.personReminder.feishuAppSecret = payload.personReminder.appSecret
+    payload.summaryReport.appChatIds = Array.isArray(payload.summaryReport?.appChatIds)
+      ? payload.summaryReport.appChatIds.map(item => String(item || '').trim()).filter(Boolean)
+      : []
+    payload.summaryReport.appId = String(payload.summaryReport?.appId || '').trim()
+    payload.summaryReport.appSecret = String(payload.summaryReport?.appSecret || '').trim()
     await saveTicketSyncAutomationConfig(payload)
     proxy.$modal.msgSuccess('保存成功')
     loadConfig()
@@ -834,7 +1172,11 @@ function handlePreviewPersonReminder() {
   previewTicketSyncPersonReminder(payload)
     .then(response => {
       personPreviewResult.value = response.data || null
-      proxy.$modal.msgSuccess('统计完成')
+      if (response.data?.skipped) {
+        proxy.$modal.msgWarning(response.data?.skipReason || '统计已跳过')
+      } else {
+        proxy.$modal.msgSuccess('统计完成')
+      }
     })
     .catch(error => {
       personPreviewResult.value = null
@@ -853,13 +1195,36 @@ function handleRunPersonReminder() {
   }
   runTicketSyncPersonReminder(payload)
     .then(response => {
-      proxy.$modal.msgSuccess(`催办执行完成，已发送 ${response.data?.sentPeople || 0} 人`)
+      if (response.data?.skipped) {
+        proxy.$modal.msgWarning(response.data?.skipReason || '催办已跳过')
+      } else {
+        proxy.$modal.msgSuccess(`催办执行完成，已发送 ${response.data?.sentPeople || 0} 人`)
+      }
     })
     .catch(error => {
       proxy.$modal.msgError(error?.message || '催办执行失败')
     })
     .finally(() => {
       personRunLoading.value = false
+    })
+}
+
+function handleRunSummaryReport() {
+  const payload = {
+    startTime: summaryRunForm.startTime || null,
+    endTime: summaryRunForm.endTime || null
+  }
+  summaryRunLoading.value = true
+  runTicketSyncSummaryReport(payload)
+    .then(response => {
+      const totalCount = response.data?.statSummary?.totalCount || 0
+      proxy.$modal.msgSuccess(`汇总通知已执行，统计工单 ${totalCount} 条`)
+    })
+    .catch(error => {
+      proxy.$modal.msgError(error?.message || '汇总通知执行失败')
+    })
+    .finally(() => {
+      summaryRunLoading.value = false
     })
 }
 
@@ -978,6 +1343,19 @@ onMounted(() => {
 .mapping-blocks {
   display: grid;
   gap: 12px;
+}
+
+.priority-route-list {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.priority-route-item {
+  border: 1px dashed var(--el-border-color);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--el-fill-color-blank);
 }
 
 .mapping-section {

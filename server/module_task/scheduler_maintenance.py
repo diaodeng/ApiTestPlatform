@@ -194,3 +194,42 @@ def ticket_person_overdue_reminder(
         result.get("skipped"),
     )
     return result
+
+
+@register_job("module_task.scheduler_maintenance.ticket_summary_report")
+def ticket_summary_report(
+    *args,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    **kwargs,
+):
+    """
+    工单汇总统计通知定时任务。
+
+    :param start_time: 可选统计开始时间，支持日期时间字符串。
+    :param end_time: 可选统计结束时间，支持日期时间字符串。
+    :return: 执行结果摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+
+    resolved_start_time = start_time if start_time is not None else kwargs.pop("startTime", None)
+    resolved_end_time = end_time if end_time is not None else kwargs.pop("endTime", None)
+
+    with SessionLocal() as db:
+        result = TicketSyncService.run_summary_report_services(
+            db,
+            trigger_source="scheduler",
+            start_time=resolved_start_time,
+            end_time=resolved_end_time,
+        )
+    logger.info(
+        "工单汇总统计通知任务执行完成 | start_time={} end_time={} push_success={} chat_success={} skipped={}",
+        resolved_start_time or "-",
+        resolved_end_time or "-",
+        result.get("pushSuccessCount"),
+        result.get("chatSuccessCount"),
+        result.get("skipped"),
+    )
+    return result

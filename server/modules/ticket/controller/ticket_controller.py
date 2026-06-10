@@ -46,6 +46,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketSyncPersonReminderPreviewModel,
     TicketSyncPersonReminderRunModel,
     TicketSyncPullQueryModel,
+    TicketSyncSummaryRunModel,
     TicketUpdateModel,
     TicketUserOptionQueryModel,
     WorkflowStatusModel,
@@ -638,6 +639,35 @@ async def run_sync_person_reminder(
             trigger_source="manual",
             user_id=query_object.user_id,
             email=query_object.email,
+        )
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/sync/notify/summary/run",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def run_sync_summary_report(
+    request: Request,
+    query_object: TicketSyncSummaryRunModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    手动执行工单汇总统计通知。
+    :param request: 请求对象。
+    :param query_object: 汇总统计执行参数，支持可选起止时间。
+    :param query_db: 数据库会话。
+    :return: 执行结果摘要。
+    """
+    try:
+        result = TicketSyncService.run_summary_report_services(
+            query_db,
+            trigger_source="manual",
+            start_time=query_object.start_time,
+            end_time=query_object.end_time,
         )
         return ResponseUtil.success(data=result)
     except Exception as e:

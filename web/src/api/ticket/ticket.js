@@ -116,6 +116,15 @@ export function runTicketSyncPersonReminder(data) {
   });
 }
 
+// 执行工单汇总统计通知
+export function runTicketSyncSummaryReport(data) {
+  return request({
+    url: '/ticket/sync/notify/summary/run',
+    method: 'post',
+    data,
+  });
+}
+
 // 按工单号手动发送群消息
 export function sendTicketSyncGroupPushByTicket(data) {
   return request({

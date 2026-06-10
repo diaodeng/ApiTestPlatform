@@ -92,19 +92,32 @@
 
 ### 6. 工单通知配置
 
+- `feishuAuth`
+  - `appId` / `appSecret`：统一飞书应用凭证。
+  - `groupPush` / `personReminder` / `summaryReport` 默认继承该凭证，也支持各自覆盖。
 - `groupPush`
   - `enabled`：是否启用工单群消息推送。
-  - `pushIds`：推送目标ID列表，候选项来自“推送配置管理”（`qtr_push_target`）。
-  - `triggerScenes`：触发场景，支持外部直推（`external_sync`）和远端拉取（`remote_pull`）。
-  - `messageTemplate`：群消息模板，支持变量渲染。
-  - `allowManualByTicketNo`：是否允许页面输入工单号手动发送。
+  - `sendMode`：发送模式（`push_config` / `feishu_app` / `hybrid`）。
+  - `pushIds`：机器人推送渠道，候选项来自“推送配置管理”（`qtr_push_target`）。
+  - `appChatIds`：飞书应用身份发群的 `chat_id` 列表。
+  - `priorityRoutes`：按优先级分流路由（例如 P1 -> P1 群，P2 -> P2 群，P3/P4 -> P3/P4 群）。
+  - `sendAfterExternalSync` / `sendAfterRemotePull`：自动触发场景开关。
+  - `template` / `manualTemplate`：模板变量渲染，手动模板留空时回退自动模板。
 - `personReminder`
   - `enabled`：是否启用按人催办。
-  - `source`：飞书多维表格配置（`appToken` / `tableId` / `viewId` / `fieldMappings` / `filter`）。
-  - `overdueMinutes`：超时阈值（分钟）。
+  - `sendMode`：发送模式（`push_config` / `feishu_app` / `hybrid`）。
+  - `appToken` / `tableId` / `viewId` / `filterFormula`：飞书多维表格数据源。
+  - `personField` / `timeField` / `thresholdMinutes`：按人聚合与超时判定配置。
   - `messageTemplate`：催办模板，支持变量渲染。
-  - `allowManualByUser`：是否允许页面按用户ID或邮箱手动触发统计与催办。
-  - 催办链路：先按系统用户匹配邮箱，再到飞书查询 open_id，最后按人汇总并发送。
+  - 催办链路：按字段聚合超时记录 -> 关联系统用户邮箱 -> 按模式发送（机器人推送或应用私信邮箱）。
+- `summaryReport`
+  - `enabled`：是否启用工单汇总统计通知。
+  - `sendMode`：发送模式（`push_config` / `feishu_app` / `hybrid`）。
+  - `timeField`：统计时间字段（`create_time/update_time/closed_at/resolved_at`）。
+  - `windowMinutes` / `endDelayMinutes`：滚动窗口与延迟窗口。
+  - `startTime` / `endTime`：固定统计窗口（配置后优先于滚动窗口）。
+  - `includeClosed`：是否包含已关闭工单。
+  - `messageTemplate`：汇总模板，支持状态/分类/优先级统计变量。
 
 ## 逻辑梳理
 
@@ -135,6 +148,13 @@
 2. 页面可直接手动触发催办发送。
 3. 可通过调度任务 `module_task.scheduler_maintenance.ticket_person_overdue_reminder` 定时执行。
 4. 触发后会记录关键日志：配置是否启用、飞书数据读取结果、人员匹配结果、发送结果与失败原因。
+
+### 汇总统计通知（手动与定时）
+
+1. 页面支持手动触发 `POST /ticket/sync/notify/summary/run`，可选传开始/结束时间。
+2. 定时任务可执行 `module_task.scheduler_maintenance.ticket_summary_report`。
+3. 统计结果按状态/分类/优先级聚合后发送到指定渠道（机器人或飞书应用）。
+4. `hybrid` 模式会自动降级：一路配置缺失时仍发送另一路，避免整体通知丢失。
 
 ## 说明
 

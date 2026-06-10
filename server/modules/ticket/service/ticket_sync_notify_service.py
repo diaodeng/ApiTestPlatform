@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -45,6 +46,19 @@ class TicketSyncNotifyService:
         "修订：${sync_revision}\n"
         "说明：${description}"
     )
+    DEFAULT_SUMMARY_TEMPLATE = (
+        "【工单汇总统计】\n"
+        "统计范围：${start_time} ~ ${end_time}\n"
+        "统计字段：${time_field}\n"
+        "工单总数：${total_count}\n\n"
+        "状态统计：\n${status_summary}\n\n"
+        "分类统计：\n${category_summary}\n\n"
+        "优先级统计：\n${priority_summary}\n\n"
+        "生成时间：${now_time}"
+    )
+    SEND_MODE_PUSH_CONFIG = "push_config"
+    SEND_MODE_FEISHU_APP = "feishu_app"
+    SEND_MODE_HYBRID = "hybrid"
 
     @classmethod
     def _safe_int(cls, value: Any) -> int | None:
@@ -91,6 +105,90 @@ class TicketSyncNotifyService:
         :return: 小写邮箱字符串。
         """
         return str(value or "").strip().lower()
+
+    @classmethod
+    def _normalize_send_mode(cls, value: Any) -> str:
+        """
+        归一化通知发送模式。
+
+        :param value: 原始发送模式文本。
+        :return: 归一化后的发送模式。
+        """
+        mode = str(value or "").strip().lower()
+        if mode in {cls.SEND_MODE_PUSH_CONFIG, cls.SEND_MODE_FEISHU_APP, cls.SEND_MODE_HYBRID}:
+            return mode
+        return cls.SEND_MODE_PUSH_CONFIG
+
+    @classmethod
+    def _normalize_chat_ids(cls, value: Any) -> list[str]:
+        """
+        归一化群 chat_id 列表。
+
+        :param value: 原始 chat_id 列表或逗号分隔文本。
+        :return: 去重后的 chat_id 列表。
+        """
+        if isinstance(value, str):
+            source_list = [item.strip() for item in value.split(",")]
+        elif isinstance(value, list):
+            source_list = value
+        else:
+            source_list = []
+        result: list[str] = []
+        for item in source_list:
+            chat_id = str(item or "").strip()
+            if chat_id and chat_id not in result:
+                result.append(chat_id)
+        return result
+
+    @classmethod
+    def _normalize_priority(cls, value: Any) -> str:
+        """
+        归一化优先级文本。
+
+        :param value: 原始优先级。
+        :return: 规范化优先级（P1/P2/P3/P4）。
+        """
+        text = str(value or "").strip().upper().replace(" ", "")
+        if not text:
+            return ""
+        if not text.startswith("P") and text.isdigit():
+            text = f"P{text}"
+        if text in {"P1", "P2", "P3", "P4"}:
+            return text
+        return text
+
+    @classmethod
+    def _resolve_priority_from_ticket(cls, ticket: Ticket) -> str:
+        """
+        解析工单优先级（优先取 customer_priority，再取 internal_priority）。
+
+        :param ticket: 工单对象。
+        :return: 优先级文本。
+        """
+        customer_priority = cls._normalize_priority(getattr(ticket, "customer_priority", None))
+        if customer_priority:
+            return customer_priority
+        return cls._normalize_priority(getattr(ticket, "internal_priority", None))
+
+    @classmethod
+    def _resolve_feishu_auth(cls, config: dict[str, Any]) -> tuple[str, str]:
+        """
+        解析飞书应用凭证。
+
+        :param config: 通知配置。
+        :return: (app_id, app_secret)。
+        """
+        app_id = (
+            str(config.get("appId") or "").strip()
+            or str(config.get("feishuAppId") or "").strip()
+            or str(config.get("authAppId") or "").strip()
+        )
+        app_secret = (
+            str(config.get("appSecret") or "").strip()
+            or str(config.get("feishuAppSecret") or "").strip()
+            or str(config.get("authAppSecret") or "").strip()
+        )
+        return app_id, app_secret
 
     @classmethod
     def _request_feishu_json(
@@ -171,6 +269,107 @@ class TicketSyncNotifyService:
             "expire_at": now + timedelta(seconds=max(expire - 120, 60)),
         }
         return token
+
+    @classmethod
+    def _send_feishu_text_messages(
+        cls,
+        *,
+        app_id: str,
+        app_secret: str,
+        receive_id_type: str,
+        receive_ids: list[str],
+        content: str,
+    ) -> int:
+        """
+        通过飞书应用身份发送文本消息。
+
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :param receive_id_type: 接收ID类型（chat_id/email）。
+        :param receive_ids: 接收ID列表。
+        :param content: 消息正文。
+        :return: 发送成功条数。
+        """
+        normalized_ids = [str(item or "").strip() for item in receive_ids if str(item or "").strip()]
+        if not normalized_ids:
+            return 0
+        token = cls._get_tenant_access_token(app_id, app_secret)
+        sent_count = 0
+        for receive_id in normalized_ids:
+            try:
+                url = f"{cls.FEISHU_BASE_URL}/im/v1/messages"
+                cls._request_feishu_json(
+                    method="POST",
+                    url=url,
+                    tenant_access_token=token,
+                    params={"receive_id_type": receive_id_type},
+                    json_body={
+                        "receive_id": receive_id,
+                        "msg_type": "text",
+                        "content": json.dumps({"text": content}, ensure_ascii=False),
+                    },
+                )
+                sent_count += 1
+            except Exception as exc:
+                logger.warning(
+                    f"飞书应用消息发送失败: receive_id_type={receive_id_type}, receive_id={receive_id}, error={exc}"
+                )
+        return sent_count
+
+    @classmethod
+    def _resolve_group_route_targets(
+        cls,
+        *,
+        group_config: dict[str, Any],
+        ticket_priority: str,
+        override_push_ids: list[int] | None = None,
+        override_chat_ids: list[str] | None = None,
+    ) -> tuple[list[int], list[str], dict[str, Any]]:
+        """
+        按优先级解析群推送目标（推送配置ID/群chat_id）。
+
+        :param group_config: 群推送配置。
+        :param ticket_priority: 当前工单优先级。
+        :param override_push_ids: 覆盖 pushIds。
+        :param override_chat_ids: 覆盖 chatIds。
+        :return: (push_ids, chat_ids, 路由命中信息)。
+        """
+        base_push_ids = cls._normalize_push_ids(group_config.get("pushIds"))
+        base_chat_ids = cls._normalize_chat_ids(group_config.get("appChatIds"))
+        if override_push_ids is not None:
+            base_push_ids = cls._normalize_push_ids(override_push_ids)
+        if override_chat_ids is not None:
+            base_chat_ids = cls._normalize_chat_ids(override_chat_ids)
+
+        routes = group_config.get("priorityRoutes") if isinstance(group_config.get("priorityRoutes"), list) else []
+        normalized_priority = cls._normalize_priority(ticket_priority)
+        route_hit: dict[str, Any] | None = None
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            priorities = route.get("priorities")
+            if isinstance(priorities, str):
+                candidate_priorities = [cls._normalize_priority(item) for item in priorities.split(",")]
+            elif isinstance(priorities, list):
+                candidate_priorities = [cls._normalize_priority(item) for item in priorities]
+            else:
+                candidate_priorities = []
+            candidate_priorities = [item for item in candidate_priorities if item]
+            if normalized_priority and normalized_priority not in candidate_priorities:
+                continue
+            route_push_ids = cls._normalize_push_ids(route.get("pushIds"))
+            route_chat_ids = cls._normalize_chat_ids(route.get("chatIds"))
+            if route_push_ids:
+                base_push_ids = route_push_ids
+            if route_chat_ids:
+                base_chat_ids = route_chat_ids
+            route_hit = {
+                "priorities": candidate_priorities,
+                "pushIds": route_push_ids,
+                "chatIds": route_chat_ids,
+            }
+            break
+        return base_push_ids, base_chat_ids, {"matchedPriority": normalized_priority or None, "matchedRoute": route_hit}
 
     @classmethod
     def _parse_datetime_value(cls, value: Any) -> datetime | None:
@@ -380,8 +579,7 @@ class TicketSyncNotifyService:
         :param config: 人员催办配置。
         :return: 记录列表。
         """
-        app_id = str(config.get("feishuAppId") or "").strip()
-        app_secret = str(config.get("feishuAppSecret") or "").strip()
+        app_id, app_secret = cls._resolve_feishu_auth(config)
         app_token = str(config.get("appToken") or "").strip()
         table_id = str(config.get("tableId") or "").strip()
         view_id = str(config.get("viewId") or "").strip()
@@ -496,6 +694,91 @@ class TicketSyncNotifyService:
         return "\n".join(lines) if lines else "暂无明细"
 
     @classmethod
+    def _build_counter_markdown(cls, counter: dict[str, int]) -> str:
+        """
+        构建分组计数的文本摘要。
+
+        :param counter: 分组计数字典。
+        :return: 可读文本。
+        """
+        if not counter:
+            return "暂无数据"
+        ordered = sorted(counter.items(), key=lambda item: (-int(item[1] or 0), str(item[0] or "")))
+        return "\n".join([f"- {key}: {count}" for key, count in ordered])
+
+    @classmethod
+    def _resolve_summary_time_field(cls, value: Any) -> str:
+        """
+        归一化汇总统计时间字段。
+
+        :param value: 原始时间字段。
+        :return: 可用字段名。
+        """
+        time_field = str(value or "").strip()
+        if time_field in {"create_time", "update_time", "closed_at", "resolved_at", "started_at"}:
+            return time_field
+        return "create_time"
+
+    @classmethod
+    def _validate_person_reminder_config(cls, config: dict[str, Any]) -> list[str]:
+        """
+        校验人员催办统计的关键配置是否完整。
+
+        :param config: 人员催办配置。
+        :return: 缺失配置项对应的错误信息列表。
+        """
+        errors: list[str] = []
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        app_token = str(config.get("appToken") or "").strip()
+        table_id = str(config.get("tableId") or "").strip()
+        person_field = str(config.get("personField") or "").strip()
+        time_field = str(config.get("timeField") or "").strip()
+        if not app_id or not app_secret:
+            errors.append("飞书应用 appId/appSecret 未配置")
+        if not app_token or not table_id:
+            errors.append("多维表格 appToken/tableId 未配置")
+        if not person_field:
+            errors.append("人员字段(personField)未配置")
+        if not time_field:
+            errors.append("时间字段(timeField)未配置")
+        return errors
+
+    @classmethod
+    def _build_person_reminder_skipped_result(
+        cls,
+        *,
+        config: dict[str, Any],
+        skip_reason: str,
+        config_errors: list[str] | None = None,
+        trigger_source: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        构建人员催办跳过结果，避免配置缺失场景抛出异常。
+
+        :param config: 人员催办配置。
+        :param skip_reason: 跳过原因。
+        :param config_errors: 配置错误列表。
+        :param trigger_source: 可选触发来源。
+        :return: 统一的跳过结果。
+        """
+        result: dict[str, Any] = {
+            "skipped": True,
+            "skipReason": skip_reason,
+            "configErrors": config_errors or [],
+            "thresholdMinutes": max(int(config.get("thresholdMinutes") or 30), 1),
+            "totalRecordCount": 0,
+            "overdueRecordCount": 0,
+            "skippedNoPersonCount": 0,
+            "skippedNoTimeCount": 0,
+            "skippedNotOverdueCount": 0,
+            "personCount": 0,
+            "people": [],
+        }
+        if trigger_source:
+            result["triggerSource"] = trigger_source
+        return result
+
+    @classmethod
     def _collect_person_overdue_data(
         cls,
         db: Session,
@@ -565,8 +848,7 @@ class TicketSyncNotifyService:
                 overdue_rows += 1
 
         feishu_user_cache: dict[str, dict[str, Any] | None] = {}
-        app_id = str(config.get("feishuAppId") or "").strip()
-        app_secret = str(config.get("feishuAppSecret") or "").strip()
+        app_id, app_secret = cls._resolve_feishu_auth(config)
         people: list[dict[str, Any]] = []
         for person_name, person_rows in grouped.items():
             user = cls._resolve_sys_user_by_name(db, person_name)
@@ -577,7 +859,7 @@ class TicketSyncNotifyService:
             if target_email and user_email != target_email:
                 continue
             feishu_user = None
-            if user_email:
+            if user_email and app_id and app_secret:
                 if user_email not in feishu_user_cache:
                     feishu_user_cache[user_email] = cls.query_feishu_user_by_email(
                         app_id=app_id,
@@ -632,6 +914,17 @@ class TicketSyncNotifyService:
             f"开始预览人员催办统计: user_id={user_id or '-'}, email={email or '-'}, "
             f"enabled={bool(config.get('enabled'))}"
         )
+        config_errors = cls._validate_person_reminder_config(config)
+        if config_errors:
+            skip_reason = "；".join(config_errors)
+            logger.warning(
+                f"人员催办统计预览跳过: user_id={user_id or '-'}, email={email or '-'}, reason={skip_reason}"
+            )
+            return cls._build_person_reminder_skipped_result(
+                config=config,
+                skip_reason=skip_reason,
+                config_errors=config_errors,
+            )
         result = cls._collect_person_overdue_data(db, config=config, user_id=user_id, email=email)
         logger.info(
             f"人员催办统计完成: person_count={result.get('personCount')}, "
@@ -663,10 +956,44 @@ class TicketSyncNotifyService:
             logger.info(f"人员催办通知跳过: enabled=false, trigger={trigger_source}")
             return {"triggerSource": trigger_source, "skipped": True, "skipReason": "人员催办开关未启用"}
 
+        send_mode = cls._normalize_send_mode(config.get("sendMode"))
         push_ids = cls._normalize_push_ids(config.get("pushIds"))
-        if not push_ids:
-            logger.info(f"人员催办通知跳过: 未配置 pushIds, trigger={trigger_source}")
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        require_push_channel = send_mode in {cls.SEND_MODE_PUSH_CONFIG, cls.SEND_MODE_HYBRID}
+        require_feishu_app = send_mode in {cls.SEND_MODE_FEISHU_APP, cls.SEND_MODE_HYBRID}
+        enable_push_channel = require_push_channel and bool(push_ids)
+        enable_feishu_app = require_feishu_app and bool(app_id and app_secret)
+        if send_mode == cls.SEND_MODE_PUSH_CONFIG and not enable_push_channel:
+            logger.info(f"人员催办通知跳过: send_mode={send_mode}, pushIds 为空, trigger={trigger_source}")
             return {"triggerSource": trigger_source, "skipped": True, "skipReason": "未配置催办推送渠道"}
+        if send_mode == cls.SEND_MODE_FEISHU_APP and not enable_feishu_app:
+            logger.info(f"人员催办通知跳过: send_mode={send_mode}, 飞书凭证缺失, trigger={trigger_source}")
+            return {"triggerSource": trigger_source, "skipped": True, "skipReason": "飞书应用凭证未配置"}
+        if send_mode == cls.SEND_MODE_HYBRID and not (enable_push_channel or enable_feishu_app):
+            logger.info(f"人员催办通知跳过: send_mode={send_mode}, 推送与应用配置都不可用, trigger={trigger_source}")
+            return {"triggerSource": trigger_source, "skipped": True, "skipReason": "未配置可用的催办发送渠道"}
+        if send_mode == cls.SEND_MODE_HYBRID and not enable_push_channel:
+            logger.warning(
+                f"人员催办通知降级: send_mode=hybrid, pushIds 为空，仅使用飞书应用发送, trigger={trigger_source}"
+            )
+        if send_mode == cls.SEND_MODE_HYBRID and not enable_feishu_app:
+            logger.warning(
+                f"人员催办通知降级: send_mode=hybrid, 飞书凭证缺失，仅使用推送配置发送, trigger={trigger_source}"
+            )
+
+        config_errors = cls._validate_person_reminder_config(config)
+        if config_errors:
+            skip_reason = "；".join(config_errors)
+            logger.warning(
+                f"人员催办通知跳过: trigger={trigger_source}, user_id={user_id or '-'}, "
+                f"email={email or '-'}, reason={skip_reason}"
+            )
+            return cls._build_person_reminder_skipped_result(
+                config=config,
+                skip_reason=skip_reason,
+                config_errors=config_errors,
+                trigger_source=trigger_source,
+            )
 
         summary = cls._collect_person_overdue_data(db, config=config, user_id=user_id, email=email)
         message_template = str(config.get("messageTemplate") or "").strip() or cls.DEFAULT_PERSON_TEMPLATE
@@ -674,7 +1001,9 @@ class TicketSyncNotifyService:
 
         sent_people = 0
         sent_push_count = 0
+        sent_private_count = 0
         skipped_people = 0
+        skipped_private_count = 0
         person_results: list[dict[str, Any]] = []
         for person in summary.get("people") or []:
             overdue_count = int(person.get("overdueCount") or 0)
@@ -695,35 +1024,56 @@ class TicketSyncNotifyService:
             feishu_user = person.get("feishuUser") if isinstance(person.get("feishuUser"), dict) else {}
             open_id = str(feishu_user.get("openId") or "").strip()
             at_user_ids = [open_id] if open_id else None
-            success_count = cls._send_push_messages(
-                db,
-                push_ids=push_ids,
-                content=content,
-                at_user_ids=at_user_ids,
-            )
+            push_success_count = 0
+            if enable_push_channel:
+                push_success_count = cls._send_push_messages(
+                    db,
+                    push_ids=push_ids,
+                    content=content,
+                    at_user_ids=at_user_ids,
+                )
+            private_success_count = 0
+            person_email = cls._normalize_email(person.get("email"))
+            if enable_feishu_app:
+                if person_email:
+                    private_success_count = cls._send_feishu_text_messages(
+                        app_id=app_id,
+                        app_secret=app_secret,
+                        receive_id_type="email",
+                        receive_ids=[person_email],
+                        content=content,
+                    )
+                else:
+                    skipped_private_count += 1
             sent_people += 1
-            sent_push_count += success_count
+            sent_push_count += push_success_count
+            sent_private_count += private_success_count
             person_results.append(
                 {
                     "personName": person.get("personName"),
                     "email": person.get("email"),
                     "overdueCount": overdue_count,
-                    "pushSuccessCount": success_count,
+                    "pushSuccessCount": push_success_count,
+                    "privateSuccessCount": private_success_count,
                     "atOpenId": open_id or None,
                 }
             )
             logger.info(
                 f"人员催办发送完成: person={person.get('personName')}, overdue={overdue_count}, "
-                f"push_success={success_count}, trigger={trigger_source}"
+                f"push_success={push_success_count}, private_success={private_success_count}, "
+                f"send_mode={send_mode}, trigger={trigger_source}"
             )
 
         return {
             "triggerSource": trigger_source,
             "skipped": False,
+            "sendMode": send_mode,
             "personCount": summary.get("personCount"),
             "sentPeople": sent_people,
             "sentPushCount": sent_push_count,
+            "sentPrivateCount": sent_private_count,
             "skippedPeople": skipped_people,
+            "skippedPrivateCount": skipped_private_count,
             "statSummary": summary,
             "personResults": person_results,
         }
@@ -798,6 +1148,7 @@ class TicketSyncNotifyService:
         scene: str,
         manual_trigger: bool = False,
         override_push_ids: list[int] | None = None,
+        override_chat_ids: list[str] | None = None,
         override_template: str | None = None,
         sync_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -810,6 +1161,7 @@ class TicketSyncNotifyService:
         :param scene: 触发场景，支持 external_sync/remote_pull/manual。
         :param manual_trigger: 是否手动触发。
         :param override_push_ids: 手动触发时覆盖推送ID。
+        :param override_chat_ids: 手动触发时覆盖群 chat_id。
         :param override_template: 手动触发时覆盖消息模板。
         :param sync_summary: 同步摘要信息。
         :return: 推送结果摘要。
@@ -826,11 +1178,38 @@ class TicketSyncNotifyService:
             if scene == "remote_pull" and not bool(group_config.get("sendAfterRemotePull")):
                 logger.info("群推送跳过: sendAfterRemotePull=false")
                 return {"skipped": True, "skipReason": "远端拉取后群推送未启用", "scene": scene}
+        send_mode = cls._normalize_send_mode(group_config.get("sendMode"))
+        app_id, app_secret = cls._resolve_feishu_auth(group_config)
+        ticket_priority = cls._resolve_priority_from_ticket(ticket)
+        push_ids, chat_ids, route_info = cls._resolve_group_route_targets(
+            group_config=group_config,
+            ticket_priority=ticket_priority,
+            override_push_ids=override_push_ids,
+            override_chat_ids=override_chat_ids,
+        )
 
-        push_ids = override_push_ids if override_push_ids else cls._normalize_push_ids(group_config.get("pushIds"))
-        if not push_ids:
-            logger.info("群推送跳过: pushIds 为空")
+        require_push_channel = send_mode in {cls.SEND_MODE_PUSH_CONFIG, cls.SEND_MODE_HYBRID}
+        require_feishu_app = send_mode in {cls.SEND_MODE_FEISHU_APP, cls.SEND_MODE_HYBRID}
+        enable_push_channel = require_push_channel and bool(push_ids)
+        enable_feishu_app = require_feishu_app and bool(chat_ids and app_id and app_secret)
+        if send_mode == cls.SEND_MODE_PUSH_CONFIG and not enable_push_channel:
+            logger.info(f"群推送跳过: send_mode={send_mode}, pushIds 为空, ticket_no={ticket.ticket_no}")
             return {"skipped": True, "skipReason": "未配置群推送渠道", "scene": scene}
+        if send_mode == cls.SEND_MODE_FEISHU_APP and not chat_ids:
+            logger.info(f"群推送跳过: send_mode={send_mode}, appChatIds 为空, ticket_no={ticket.ticket_no}")
+            return {"skipped": True, "skipReason": "未配置群 chat_id", "scene": scene}
+        if send_mode == cls.SEND_MODE_FEISHU_APP and (not app_id or not app_secret):
+            logger.info(f"群推送跳过: send_mode={send_mode}, 飞书凭证缺失, ticket_no={ticket.ticket_no}")
+            return {"skipped": True, "skipReason": "飞书应用凭证未配置", "scene": scene}
+        if send_mode == cls.SEND_MODE_HYBRID and not (enable_push_channel or enable_feishu_app):
+            logger.info(f"群推送跳过: send_mode={send_mode}, 推送与应用配置都不可用, ticket_no={ticket.ticket_no}")
+            return {"skipped": True, "skipReason": "未配置可用的群推送渠道", "scene": scene}
+        if send_mode == cls.SEND_MODE_HYBRID and not enable_push_channel:
+            logger.warning(f"群推送降级: ticket_no={ticket.ticket_no}, send_mode=hybrid, pushIds 为空，仅应用身份发送")
+        if send_mode == cls.SEND_MODE_HYBRID and not enable_feishu_app:
+            logger.warning(
+                f"群推送降级: ticket_no={ticket.ticket_no}, send_mode=hybrid, 应用 chat_id/凭证不可用，仅推送配置发送"
+            )
 
         message_template = str(override_template or "").strip()
         if not message_template:
@@ -840,16 +1219,199 @@ class TicketSyncNotifyService:
 
         template_variables = cls._build_group_ticket_variables(ticket, sync_summary=sync_summary)
         content = cls._render_template(message_template, template_variables, cls.DEFAULT_GROUP_TEMPLATE)
-        push_success_count = cls._send_push_messages(db, push_ids=push_ids, content=content, at_user_ids=None)
+        push_success_count = 0
+        if enable_push_channel:
+            push_success_count = cls._send_push_messages(db, push_ids=push_ids, content=content, at_user_ids=None)
+        app_success_count = 0
+        if enable_feishu_app:
+            app_success_count = cls._send_feishu_text_messages(
+                app_id=app_id,
+                app_secret=app_secret,
+                receive_id_type="chat_id",
+                receive_ids=chat_ids,
+                content=content,
+            )
         logger.info(
             f"群推送发送完成: ticket_no={ticket.ticket_no}, scene={scene}, "
-            f"push_success_count={push_success_count}, push_count={len(push_ids)}"
+            f"ticket_priority={ticket_priority or '-'}, push_success_count={push_success_count}, "
+            f"app_success_count={app_success_count}, send_mode={send_mode}"
         )
         return {
             "skipped": False,
             "scene": scene,
             "ticketNo": ticket.ticket_no,
+            "ticketPriority": ticket_priority or None,
+            "sendMode": send_mode,
+            "routeInfo": route_info,
             "pushCount": len(push_ids),
             "pushSuccessCount": push_success_count,
+            "chatCount": len(chat_ids),
+            "chatSuccessCount": app_success_count,
             "templateVariables": template_variables,
+        }
+
+    @classmethod
+    def _collect_ticket_summary(
+        cls,
+        db: Session,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+        time_field: str,
+        include_closed: bool,
+    ) -> dict[str, Any]:
+        """
+        在指定时间窗口内统计工单状态/分类/优先级数量。
+
+        :param db: 数据库会话。
+        :param start_time: 统计开始时间。
+        :param end_time: 统计结束时间。
+        :param time_field: 时间字段。
+        :param include_closed: 是否包含已关闭工单。
+        :return: 统计结果摘要。
+        """
+        time_column = getattr(Ticket, time_field, Ticket.create_time)
+        query = db.query(Ticket).filter(Ticket.del_flag == "0", time_column >= start_time, time_column <= end_time)
+        if not include_closed:
+            query = query.filter(~Ticket.status.in_(["CLOSED", "closed", "已关闭"]))
+        rows = query.all()
+
+        status_counter: dict[str, int] = {}
+        category_counter: dict[str, int] = {}
+        priority_counter: dict[str, int] = {}
+        for row in rows:
+            status_value = str(getattr(row, "status", "") or "").strip() or "未知状态"
+            category_value = str(getattr(row, "category_name", "") or "").strip() or "未分类"
+            priority_value = cls._resolve_priority_from_ticket(row) or "未知优先级"
+            status_counter[status_value] = status_counter.get(status_value, 0) + 1
+            category_counter[category_value] = category_counter.get(category_value, 0) + 1
+            priority_counter[priority_value] = priority_counter.get(priority_value, 0) + 1
+
+        return {
+            "timeField": time_field,
+            "startTime": start_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "totalCount": len(rows),
+            "statusCounter": status_counter,
+            "categoryCounter": category_counter,
+            "priorityCounter": priority_counter,
+        }
+
+    @classmethod
+    def run_ticket_summary_report(
+        cls,
+        db: Session,
+        *,
+        config: dict[str, Any],
+        trigger_source: str,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> dict[str, Any]:
+        """
+        执行工单汇总统计通知。
+
+        :param db: 数据库会话。
+        :param config: 汇总通知配置。
+        :param trigger_source: 触发来源（scheduler/manual）。
+        :param start_time: 可选统计开始时间。
+        :param end_time: 可选统计结束时间。
+        :return: 发送结果摘要。
+        """
+        if not bool(config.get("enabled")):
+            logger.info(f"工单汇总通知跳过: enabled=false, trigger={trigger_source}")
+            return {"triggerSource": trigger_source, "skipped": True, "skipReason": "汇总通知开关未启用"}
+
+        time_field = cls._resolve_summary_time_field(config.get("timeField"))
+        include_closed = bool(config.get("includeClosed", True))
+        now = datetime.now()
+        resolved_end_time = end_time
+        if resolved_end_time is None:
+            resolved_end_time = cls._parse_datetime_value(config.get("endTime"))
+        if resolved_end_time is None:
+            end_delay_minutes = max(cls._safe_int(config.get("endDelayMinutes")) or 0, 0)
+            resolved_end_time = now - timedelta(minutes=end_delay_minutes)
+
+        resolved_start_time = start_time
+        if resolved_start_time is None:
+            resolved_start_time = cls._parse_datetime_value(config.get("startTime"))
+        if resolved_start_time is None:
+            window_minutes = max(cls._safe_int(config.get("windowMinutes")) or 60, 1)
+            resolved_start_time = resolved_end_time - timedelta(minutes=window_minutes)
+
+        if resolved_start_time > resolved_end_time:
+            resolved_start_time, resolved_end_time = resolved_end_time, resolved_start_time
+
+        summary = cls._collect_ticket_summary(
+            db,
+            start_time=resolved_start_time,
+            end_time=resolved_end_time,
+            time_field=time_field,
+            include_closed=include_closed,
+        )
+        message_template = str(config.get("messageTemplate") or "").strip() or cls.DEFAULT_SUMMARY_TEMPLATE
+        variables = {
+            "start_time": summary.get("startTime"),
+            "end_time": summary.get("endTime"),
+            "time_field": summary.get("timeField"),
+            "total_count": summary.get("totalCount"),
+            "status_summary": cls._build_counter_markdown(summary.get("statusCounter") or {}),
+            "category_summary": cls._build_counter_markdown(summary.get("categoryCounter") or {}),
+            "priority_summary": cls._build_counter_markdown(summary.get("priorityCounter") or {}),
+            "now_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        content = cls._render_template(message_template, variables, cls.DEFAULT_SUMMARY_TEMPLATE)
+
+        send_mode = cls._normalize_send_mode(config.get("sendMode"))
+        push_ids = cls._normalize_push_ids(config.get("pushIds"))
+        chat_ids = cls._normalize_chat_ids(config.get("appChatIds"))
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        require_push_channel = send_mode in {cls.SEND_MODE_PUSH_CONFIG, cls.SEND_MODE_HYBRID}
+        require_feishu_app = send_mode in {cls.SEND_MODE_FEISHU_APP, cls.SEND_MODE_HYBRID}
+        enable_push_channel = require_push_channel and bool(push_ids)
+        enable_feishu_app = require_feishu_app and bool(chat_ids and app_id and app_secret)
+        if send_mode == cls.SEND_MODE_PUSH_CONFIG and not enable_push_channel:
+            logger.info(f"工单汇总通知跳过: send_mode={send_mode}, pushIds 为空")
+            return {"triggerSource": trigger_source, "skipped": True, "skipReason": "未配置汇总推送渠道"}
+        if send_mode == cls.SEND_MODE_FEISHU_APP and not chat_ids:
+            logger.info(f"工单汇总通知跳过: send_mode={send_mode}, appChatIds 为空")
+            return {"triggerSource": trigger_source, "skipped": True, "skipReason": "未配置汇总群 chat_id"}
+        if send_mode == cls.SEND_MODE_FEISHU_APP and (not app_id or not app_secret):
+            logger.info(f"工单汇总通知跳过: send_mode={send_mode}, 飞书凭证缺失")
+            return {"triggerSource": trigger_source, "skipped": True, "skipReason": "飞书应用凭证未配置"}
+        if send_mode == cls.SEND_MODE_HYBRID and not (enable_push_channel or enable_feishu_app):
+            logger.info(f"工单汇总通知跳过: send_mode={send_mode}, 推送与应用配置都不可用")
+            return {"triggerSource": trigger_source, "skipped": True, "skipReason": "未配置可用的汇总发送渠道"}
+        if send_mode == cls.SEND_MODE_HYBRID and not enable_push_channel:
+            logger.warning("工单汇总通知降级: send_mode=hybrid, pushIds 为空，仅应用身份发送")
+        if send_mode == cls.SEND_MODE_HYBRID and not enable_feishu_app:
+            logger.warning("工单汇总通知降级: send_mode=hybrid, 应用 chat_id/凭证不可用，仅推送配置发送")
+
+        push_success_count = 0
+        if enable_push_channel:
+            push_success_count = cls._send_push_messages(db, push_ids=push_ids, content=content, at_user_ids=None)
+        chat_success_count = 0
+        if enable_feishu_app:
+            chat_success_count = cls._send_feishu_text_messages(
+                app_id=app_id,
+                app_secret=app_secret,
+                receive_id_type="chat_id",
+                receive_ids=chat_ids,
+                content=content,
+            )
+
+        logger.info(
+            f"工单汇总通知发送完成: trigger={trigger_source}, send_mode={send_mode}, "
+            f"push_success_count={push_success_count}, chat_success_count={chat_success_count}, "
+            f"total_count={summary.get('totalCount')}, time_field={summary.get('timeField')}"
+        )
+        return {
+            "triggerSource": trigger_source,
+            "skipped": False,
+            "sendMode": send_mode,
+            "pushCount": len(push_ids),
+            "pushSuccessCount": push_success_count,
+            "chatCount": len(chat_ids),
+            "chatSuccessCount": chat_success_count,
+            "statSummary": summary,
+            "messageVariables": variables,
         }

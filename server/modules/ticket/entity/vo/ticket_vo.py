@@ -600,6 +600,27 @@ class TicketSyncGroupPushSendModel(BaseModel):
         return self
 
 
+class TicketSyncSummaryRunModel(BaseModel):
+    """
+    工单汇总统计通知手动执行请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    start_time: datetime | None = Field(default=None, description="统计开始时间，可选")
+    end_time: datetime | None = Field(default=None, description="统计结束时间，可选")
+
+    @model_validator(mode="after")
+    def validate_summary_run_request(self):
+        """
+        校验汇总统计执行参数。
+        :return: 当前模型。
+        """
+        if self.start_time and self.end_time and self.start_time > self.end_time:
+            raise ValueError("startTime 不能晚于 endTime")
+        return self
+
+
 class TicketBatchReclassifyRequestModel(BaseModel):
     """
     工单批量重归类请求模型。

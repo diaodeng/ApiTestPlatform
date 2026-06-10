@@ -8,6 +8,24 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-10] INGEST-CODE | AI配置中心默认提示词补齐（自动分类/日志参数提取）
+- 触发：用户反馈 AI 配置中心“自动分类提示词、日志参数提取提示词”默认无法选择，要求系统默认插入可选模板，内容可为空以便后续填写。
+- 架构层：系统管理 / AI配置中心 / 提示词模板
+- 创建的页面：`web/public/docs/2026-06-10-ai-config-default-common-prompts.md`
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_admin/service/ai_prompt_template_service.py` / `server/module_admin/service/ai_config_service.py` -> AI配置中心文档
+- 总共涉及页面：3
+
+## [2026-06-10] INGEST-CODE | 工单通知补强（优先级分流 + 汇总统计 + 统一飞书凭证）
+- 触发：用户提供“工单通知相关”需求，要求补齐优先级分流发群、按人催办、定时汇总统计、统一 app_id/app_secret 与配置可视化。
+- 架构层：工单域 / 飞书通知 / 任务调度 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-10-ticket-notify-routing-and-summary.md`
+- 更新的页面：`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_sync_notify_service.py` / `server/modules/ticket/service/ticket_sync_service.py` / `server/modules/ticket/controller/ticket_controller.py` / `server/modules/ticket/entity/vo/ticket_vo.py` / `server/module_task/scheduler_maintenance.py` / `web/src/views/ticket/syncAutomation/index.vue` / `web/src/api/ticket/ticket.js` -> 工单域知识页
+- 总共涉及页面：4
+
 ## [2026-06-10] INGEST-CODE | 修复日志拉取列表 modify_time 字段异常
 - 触发：用户反馈工单列表页报错 `'TicketLogPullRecord' object has no attribute 'modify_time'`
 - 架构层：工单域 / 日志拉取
