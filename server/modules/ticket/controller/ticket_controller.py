@@ -187,7 +187,12 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
             data,
             "ticketStore",
             "ticket_store",
-            default=_compatible_field_value(data, "storeId", "store_id", default=""),
+            default=_compatible_field_value(
+                data,
+                "storeInfo",
+                "store_info",
+                default=_compatible_field_value(data, "storeId", "store_id", default=""),
+            ),
         )
         or ""
     ).strip()
@@ -489,6 +494,7 @@ async def sync_external_ticket(
     兼容 JSON 和 `multipart/form-data` / `application/x-www-form-urlencoded` 提交。
     表单模式下支持扁平字段，会自动归一化为 `TicketExternalSyncUpsertModel`。
     必填字段：`ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`。
+    可选门店字段：`ticketStore` / `storeInfo` / `storeId`（用于匹配门店配置并支持消息模板变量）。
     可选链接字段：`url` / `ticketUrl` / `detailUrl`（将写入 `ticket_url` 供页面跳转和消息模板使用）。
     `title` 可选，缺省时由服务层按“轻量AI总结 -> 描述前100字符”规则补齐。
     为避免长时间阻塞主请求，AI翻译、AI标题总结、自动化和群推送改为入库成功后后台异步执行。

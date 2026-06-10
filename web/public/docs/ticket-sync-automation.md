@@ -102,13 +102,20 @@
   - `appChatIds`：飞书应用身份发群的 `chat_id` 列表。
   - `priorityRoutes`：按优先级分流路由（例如 P1 -> P1 群，P2 -> P2 群，P3/P4 -> P3/P4 群）。
   - `sendAfterExternalSync` / `sendAfterRemotePull`：自动触发场景开关。
+  - 自动推送幂等：同一工单自动推送成功一次后会写入 `group_push_sent_once=true`，后续自动触发会跳过并记录日志；手动触发不受该限制。
   - `template` / `manualTemplate`：模板变量渲染，手动模板留空时回退自动模板。
-  - 常用模板变量：`${ticket_no}` `${ticket_title}` `${ticket_status}` `${assignee_name}` `${ticket_url}` `${sync_source_record_url}`。
+  - 常用模板变量：`${ticket_no}` `${ticket_title}` `${ticket_status}` `${assignee_name}` `${reporter_name}` `${reporterName}` `${store_info}` `${storeInfo}` `${ticket_url}` `${sync_source_record_url}`。
 - `personReminder`
   - `enabled`：是否启用按人催办。
   - `sendMode`：发送模式（`push_config` / `feishu_app` / `hybrid`）。
-  - `appToken` / `tableId` / `viewId` / `filterFormula`：飞书多维表格数据源。
-  - `personField` / `timeField` / `thresholdMinutes`：按人聚合与超时判定配置。
+  - `dataSource`：统计数据源（`bitable` / `local`）。
+  - `bitable` 模式：
+    - `appToken` / `tableId` / `viewId` / `filterFormula`：飞书多维表格数据源。
+    - `personField` / `timeField` / `thresholdMinutes`：按人聚合与超时判定配置。
+  - `local` 模式：
+    - 统计来源为本地 `ticket` 表，按“当前处理人”聚合；
+    - `timeField` 使用工单时间字段（`update_time/create_time/started_at/resolved_at/closed_at`）；
+    - `thresholdMinutes` 仍用于超时阈值判定。
   - `messageTemplate`：催办模板，支持变量渲染。
   - 催办链路：按字段聚合超时记录 -> 关联系统用户邮箱 -> 按模式发送（机器人推送或应用私信邮箱）。
 - `summaryReport`
@@ -127,9 +134,10 @@
 1. 外部系统调用 `/ticket/sync/external`
 2. 服务端按同步来源和映射规则写入工单
 3. 如果推送体包含 `url/ticketUrl/detailUrl`，会写入工单详情链接 `ticket_url`
-4. 如开启 `autoTranslateOnSync`，会自动翻译描述
-5. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
-6. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
+4. 门店字段兼容 `ticketStore/storeInfo/storeId`，会优先按“商家ID + 门店配置（sap_org_no）”匹配；命中则保存配置门店，未命中保留原始值
+5. 如开启 `autoTranslateOnSync`，会自动翻译描述
+6. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
+7. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
 
 ### 内网拉取外网工单
 
@@ -149,7 +157,10 @@
 1. 页面可通过用户ID或邮箱预览“本人名下超时记录统计”。
 2. 页面可直接手动触发催办发送。
 3. 可通过调度任务 `module_task.scheduler_maintenance.ticket_person_overdue_reminder` 定时执行。
-4. 触发后会记录关键日志：配置是否启用、飞书数据读取结果、人员匹配结果、发送结果与失败原因。
+4. 统计数据源可选：
+   - `bitable`：从飞书多维表格读取后按人聚合；
+   - `local`：从本地工单表按当前处理人聚合。
+5. 触发后会记录关键日志：配置是否启用、数据源、数据读取结果、人员匹配结果、发送结果与失败原因。
 
 ### 汇总统计通知（手动与定时）
 

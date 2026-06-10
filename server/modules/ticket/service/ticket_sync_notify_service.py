@@ -61,6 +61,8 @@ class TicketSyncNotifyService:
     SEND_MODE_PUSH_CONFIG = "push_config"
     SEND_MODE_FEISHU_APP = "feishu_app"
     SEND_MODE_HYBRID = "hybrid"
+    PERSON_DATA_SOURCE_BITABLE = "bitable"
+    PERSON_DATA_SOURCE_LOCAL = "local"
 
     @classmethod
     def _safe_int(cls, value: Any) -> int | None:
@@ -746,6 +748,32 @@ class TicketSyncNotifyService:
         return "create_time"
 
     @classmethod
+    def _normalize_person_data_source(cls, value: Any) -> str:
+        """
+        归一化按人催办统计数据源。
+
+        :param value: 原始数据源文本。
+        :return: 归一化后的数据源（bitable/local）。
+        """
+        source = str(value or "").strip().lower()
+        if source in {cls.PERSON_DATA_SOURCE_BITABLE, cls.PERSON_DATA_SOURCE_LOCAL}:
+            return source
+        return cls.PERSON_DATA_SOURCE_BITABLE
+
+    @classmethod
+    def _resolve_local_person_time_field(cls, value: Any) -> str:
+        """
+        归一化本地工单统计使用的时间字段。
+
+        :param value: 原始时间字段。
+        :return: 可用的工单时间字段名。
+        """
+        field = str(value or "").strip()
+        if field in {"create_time", "update_time", "closed_at", "resolved_at", "started_at"}:
+            return field
+        return "update_time"
+
+    @classmethod
     def _validate_person_reminder_config(cls, config: dict[str, Any]) -> list[str]:
         """
         校验人员催办统计的关键配置是否完整。
@@ -754,6 +782,9 @@ class TicketSyncNotifyService:
         :return: 缺失配置项对应的错误信息列表。
         """
         errors: list[str] = []
+        data_source = cls._normalize_person_data_source(config.get("dataSource"))
+        if data_source == cls.PERSON_DATA_SOURCE_LOCAL:
+            return errors
         app_id, app_secret = cls._resolve_feishu_auth(config)
         app_token = str(config.get("appToken") or "").strip()
         table_id = str(config.get("tableId") or "").strip()
@@ -791,6 +822,7 @@ class TicketSyncNotifyService:
             "skipped": True,
             "skipReason": skip_reason,
             "configErrors": config_errors or [],
+            "dataSource": cls._normalize_person_data_source(config.get("dataSource")),
             "thresholdMinutes": max(int(config.get("thresholdMinutes") or 30), 1),
             "totalRecordCount": 0,
             "overdueRecordCount": 0,
@@ -822,6 +854,10 @@ class TicketSyncNotifyService:
         :param email: 可选邮箱过滤。
         :return: 统计结果。
         """
+        data_source = cls._normalize_person_data_source(config.get("dataSource"))
+        if data_source == cls.PERSON_DATA_SOURCE_LOCAL:
+            return cls._collect_person_overdue_data_from_local(db, config=config, user_id=user_id, email=email)
+
         person_field = str(config.get("personField") or "").strip()
         time_field = str(config.get("timeField") or "").strip()
         threshold_minutes = max(int(config.get("thresholdMinutes") or 30), 1)
@@ -908,8 +944,166 @@ class TicketSyncNotifyService:
 
         people.sort(key=lambda item: item.get("overdueCount") or 0, reverse=True)
         return {
+            "dataSource": data_source,
             "thresholdMinutes": threshold_minutes,
             "totalRecordCount": len(records),
+            "overdueRecordCount": overdue_rows,
+            "skippedNoPersonCount": skipped_no_person,
+            "skippedNoTimeCount": skipped_no_time,
+            "skippedNotOverdueCount": skipped_not_overdue,
+            "personCount": len(people),
+            "people": people,
+        }
+
+    @classmethod
+    def _collect_person_overdue_data_from_local(
+        cls,
+        db: Session,
+        *,
+        config: dict[str, Any],
+        user_id: int | None = None,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        基于本地工单数据统计按人聚合的超时记录。
+
+        :param db: 数据库会话。
+        :param config: 人员催办配置。
+        :param user_id: 可选用户ID过滤。
+        :param email: 可选邮箱过滤。
+        :return: 统计结果。
+        """
+        threshold_minutes = max(int(config.get("thresholdMinutes") or 30), 1)
+        time_field = cls._resolve_local_person_time_field(config.get("timeField"))
+        include_closed = bool(config.get("includeClosed", False))
+        closed_status_values = {"closed", "已关闭", "done", "已完成", "resolved", "已解决"}
+        target_user = cls._resolve_target_user(db, user_id=user_id, email=email)
+        target_email = cls._normalize_email(email or getattr(target_user, "email", ""))
+        target_user_id = int(target_user.user_id) if target_user else (user_id or None)
+        now = datetime.now()
+
+        rows = db.query(Ticket).filter(Ticket.del_flag == "0").all()
+        grouped: dict[str, dict[str, Any]] = {}
+        skipped_no_person = 0
+        skipped_no_time = 0
+        skipped_not_overdue = 0
+        overdue_rows = 0
+
+        user_by_id_cache: dict[int, Any] = {}
+        feishu_user_cache: dict[str, dict[str, Any] | None] = {}
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+
+        for row in rows:
+            row_status = str(getattr(row, "status", "") or "").strip()
+            if not include_closed and row_status.lower() in closed_status_values:
+                continue
+            row_user_id = cls._safe_int(getattr(row, "current_assignee_id", None))
+            row_person_name = str(getattr(row, "current_assignee_name", "") or "").strip()
+            resolved_user = None
+            if row_user_id:
+                if row_user_id not in user_by_id_cache:
+                    user_by_id_cache[row_user_id] = (
+                        db.query(SysUser)
+                        .filter(SysUser.user_id == row_user_id, SysUser.del_flag == "0", SysUser.status == "0")
+                        .first()
+                    )
+                resolved_user = user_by_id_cache.get(row_user_id)
+            if not row_person_name and resolved_user:
+                row_person_name = str(getattr(resolved_user, "nick_name", "") or getattr(resolved_user, "user_name", "") or "").strip()
+            if not row_person_name:
+                skipped_no_person += 1
+                continue
+
+            row_time = cls._parse_datetime_value(getattr(row, time_field, None))
+            if not row_time:
+                skipped_no_time += 1
+                continue
+            overdue_minutes = int((now - row_time).total_seconds() // 60)
+            if overdue_minutes < threshold_minutes:
+                skipped_not_overdue += 1
+                continue
+
+            group_key = f"id:{row_user_id}" if row_user_id else f"name:{row_person_name}"
+            if group_key not in grouped:
+                grouped[group_key] = {
+                    "personName": row_person_name,
+                    "userId": row_user_id,
+                    "userName": getattr(resolved_user, "user_name", None) if resolved_user else None,
+                    "nickName": getattr(resolved_user, "nick_name", None) if resolved_user else None,
+                    "email": cls._normalize_email(getattr(resolved_user, "email", "")) or None if resolved_user else None,
+                    "rows": [],
+                }
+            grouped[group_key]["rows"].append(
+                {
+                    "recordId": str(getattr(row, "ticket_no", "") or getattr(row, "ticket_id", "") or "").strip(),
+                    "title": str(getattr(row, "title", "") or "-").strip(),
+                    "createdAt": row_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "overdueMinutes": overdue_minutes,
+                    "fields": {
+                        "ticketNo": getattr(row, "ticket_no", None),
+                        "status": getattr(row, "status", None),
+                        "assigneeName": row_person_name,
+                    },
+                }
+            )
+            overdue_rows += 1
+
+        people: list[dict[str, Any]] = []
+        active_row_count = sum(len(item.get("rows") or []) for item in grouped.values()) + skipped_not_overdue + skipped_no_person + skipped_no_time
+        for item in grouped.values():
+            person_name = str(item.get("personName") or "").strip()
+            user_id_value = cls._safe_int(item.get("userId"))
+            user = None
+            if user_id_value:
+                if user_id_value not in user_by_id_cache:
+                    user_by_id_cache[user_id_value] = (
+                        db.query(SysUser)
+                        .filter(SysUser.user_id == user_id_value, SysUser.del_flag == "0", SysUser.status == "0")
+                        .first()
+                    )
+                user = user_by_id_cache.get(user_id_value)
+            if not user and person_name:
+                user = cls._resolve_sys_user_by_name(db, person_name)
+            user_id_value = int(user.user_id) if user else user_id_value
+            if target_user_id and user_id_value != target_user_id:
+                continue
+
+            user_email = cls._normalize_email(
+                getattr(user, "email", "") if user else item.get("email")
+            )
+            if target_email and user_email != target_email:
+                continue
+
+            feishu_user = None
+            if user_email and app_id and app_secret:
+                if user_email not in feishu_user_cache:
+                    feishu_user_cache[user_email] = cls.query_feishu_user_by_email(
+                        app_id=app_id,
+                        app_secret=app_secret,
+                        email=user_email,
+                    )
+                feishu_user = feishu_user_cache.get(user_email)
+
+            person_rows = item.get("rows") if isinstance(item.get("rows"), list) else []
+            people.append(
+                {
+                    "personName": person_name or "-",
+                    "userId": user_id_value,
+                    "userName": getattr(user, "user_name", None) if user else item.get("userName"),
+                    "nickName": getattr(user, "nick_name", None) if user else item.get("nickName"),
+                    "email": user_email or None,
+                    "feishuUser": feishu_user,
+                    "overdueCount": len(person_rows),
+                    "rows": sorted(person_rows, key=lambda row_item: row_item.get("overdueMinutes", 0), reverse=True),
+                }
+            )
+
+        people.sort(key=lambda item: item.get("overdueCount") or 0, reverse=True)
+        return {
+            "dataSource": cls.PERSON_DATA_SOURCE_LOCAL,
+            "timeField": time_field,
+            "thresholdMinutes": threshold_minutes,
+            "totalRecordCount": active_row_count if not include_closed else len(rows),
             "overdueRecordCount": overdue_rows,
             "skippedNoPersonCount": skipped_no_person,
             "skippedNoTimeCount": skipped_no_time,
@@ -938,7 +1132,8 @@ class TicketSyncNotifyService:
         """
         logger.info(
             f"开始预览人员催办统计: user_id={user_id or '-'}, email={email or '-'}, "
-            f"enabled={bool(config.get('enabled'))}"
+            f"enabled={bool(config.get('enabled'))}, "
+            f"data_source={cls._normalize_person_data_source(config.get('dataSource'))}"
         )
         config_errors = cls._validate_person_reminder_config(config)
         if config_errors:
@@ -981,6 +1176,10 @@ class TicketSyncNotifyService:
         if not bool(config.get("enabled")):
             logger.info(f"人员催办通知跳过: enabled=false, trigger={trigger_source}")
             return {"triggerSource": trigger_source, "skipped": True, "skipReason": "人员催办开关未启用"}
+        logger.info(
+            f"人员催办通知开始执行: trigger={trigger_source}, data_source={cls._normalize_person_data_source(config.get('dataSource'))}, "
+            f"user_id={user_id or '-'}, email={email or '-'}"
+        )
 
         send_mode = cls._normalize_send_mode(config.get("sendMode"))
         push_ids = cls._normalize_push_ids(config.get("pushIds"))
@@ -1143,6 +1342,22 @@ class TicketSyncNotifyService:
         :return: 模板变量字典。
         """
         sync_data = sync_summary if isinstance(sync_summary, dict) else {}
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        external_sync = (
+            extra_data.get("external_sync")
+            if isinstance(extra_data.get("external_sync"), dict)
+            else {}
+        )
+        source_snapshot = (
+            external_sync.get("source")
+            if isinstance(external_sync.get("source"), dict)
+            else {}
+        )
+        external_field_mapping = (
+            extra_data.get("external_field_mapping")
+            if isinstance(extra_data.get("external_field_mapping"), dict)
+            else {}
+        )
         description = str(ticket.description or "").strip()
         if len(description) > 200:
             description = f"{description[:200]}..."
@@ -1150,6 +1365,18 @@ class TicketSyncNotifyService:
             str(getattr(ticket, "ticket_url", "") or "").strip()
             or str(sync_data.get("ticketUrl") or sync_data.get("sourceRecordUrl") or "").strip()
         )
+        store_id = str(source_snapshot.get("storeId") or "").strip()
+        store_name = str(source_snapshot.get("storeName") or "").strip()
+        raw_store_info = str(external_field_mapping.get("ticketStore") or "").strip()
+        if store_name and store_id:
+            store_info = f"{store_name}({store_id})"
+        elif store_name:
+            store_info = store_name
+        elif store_id:
+            store_info = store_id
+        else:
+            store_info = raw_store_info
+        reporter_name = str(ticket.reporter_name or "").strip()
         return {
             "ticket_id": ticket.ticket_id,
             "ticket_no": ticket.ticket_no or "-",
@@ -1157,10 +1384,16 @@ class TicketSyncNotifyService:
             "project_name": ticket.merchant_name or "-",
             "module_name": ticket.module_name or "-",
             "ticket_status": ticket.status or "-",
+            "reporter_name": reporter_name or "-",
+            "reporterName": reporter_name or "-",
             "assignee_name": ticket.current_assignee_name or "-",
             "customer_priority": ticket.customer_priority or "-",
             "internal_priority": ticket.internal_priority or "-",
             "source": ticket.source or "-",
+            "store_info": store_info or "-",
+            "storeInfo": store_info or "-",
+            "store_id": store_id or "-",
+            "store_name": store_name or "-",
             "description": description or "-",
             "ticket_url": ticket_url or "-",
             "sync_revision": sync_data.get("revision") or "-",

@@ -394,6 +394,18 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
+            <el-form-item label="统计数据源">
+              <el-select v-model="form.personReminder.dataSource" style="width: 100%">
+                <el-option
+                  v-for="item in personDataSourceOptions"
+                  :key="`person-source-${item.value}`"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
             <el-form-item label="催办推送渠道">
               <el-select
                 v-model="form.personReminder.pushIds"
@@ -423,17 +435,17 @@
               <el-input v-model="form.personReminder.appSecret" show-password placeholder="覆盖统一凭证（可选）" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="12">
+          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
             <el-form-item label="多维表格 appToken">
               <el-input v-model="form.personReminder.appToken" placeholder="飞书多维表格应用 Token" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="12">
+          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
             <el-form-item label="多维表格 tableId">
               <el-input v-model="form.personReminder.tableId" placeholder="飞书多维表格表ID" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="12">
+          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
             <el-form-item label="视图 viewId">
               <el-input v-model="form.personReminder.viewId" placeholder="可选，不填默认表视图" />
             </el-form-item>
@@ -443,14 +455,26 @@
               <el-input-number v-model="form.personReminder.thresholdMinutes" :min="1" :max="10080" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="12">
+          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
             <el-form-item label="人员字段名">
               <el-input v-model="form.personReminder.personField" placeholder="多维表格中的人员字段名" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="12">
+          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
             <el-form-item label="时间字段名">
               <el-input v-model="form.personReminder.timeField" placeholder="多维表格中的时间字段名" />
+            </el-form-item>
+          </el-col>
+          <el-col v-else :xs="24" :md="12">
+            <el-form-item label="本地时间字段">
+              <el-select v-model="form.personReminder.timeField" style="width: 100%">
+                <el-option
+                  v-for="item in personLocalTimeFieldOptions"
+                  :key="`person-local-time-${item.value}`"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
@@ -458,12 +482,12 @@
               <el-input-number v-model="form.personReminder.maxRowsPerPerson" :min="1" :max="200" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="12">
+          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
             <el-form-item label="分页大小">
               <el-input-number v-model="form.personReminder.pageSize" :min="1" :max="500" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="24">
+          <el-col v-if="form.personReminder.dataSource === 'bitable'" :span="24">
             <el-form-item label="过滤公式">
               <el-input
                 v-model="form.personReminder.filterFormula"
@@ -742,6 +766,19 @@ const notifySendModes = [
   { label: '两种都发', value: 'hybrid' }
 ]
 
+const personDataSourceOptions = [
+  { label: '飞书多维表格统计', value: 'bitable' },
+  { label: '本地工单数据统计', value: 'local' }
+]
+
+const personLocalTimeFieldOptions = [
+  { label: '更新时间(update_time)', value: 'update_time' },
+  { label: '创建时间(create_time)', value: 'create_time' },
+  { label: '开始时间(started_at)', value: 'started_at' },
+  { label: '解决时间(resolved_at)', value: 'resolved_at' },
+  { label: '关闭时间(closed_at)', value: 'closed_at' }
+]
+
 const summaryTimeFieldOptions = [
   { label: '创建时间', value: 'create_time' },
   { label: '更新时间', value: 'update_time' },
@@ -824,6 +861,7 @@ function createDefaultForm() {
     personReminder: {
       enabled: false,
       sendMode: 'push_config',
+      dataSource: 'bitable',
       pushIds: [],
       appId: '',
       appSecret: '',
@@ -954,6 +992,9 @@ function applyConfig(payload) {
   form.personReminder = {
     enabled: Boolean(personReminder.enabled),
     sendMode: personReminder.sendMode || 'push_config',
+    dataSource: ['bitable', 'local'].includes(String(personReminder.dataSource || '').trim().toLowerCase())
+      ? String(personReminder.dataSource || '').trim().toLowerCase()
+      : 'bitable',
     pushIds: Array.isArray(personReminder.pushIds) ? personReminder.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
     appId: personReminder.appId || '',
     appSecret: personReminder.appSecret || '',
@@ -1117,6 +1158,9 @@ async function handleSave() {
       : []
     payload.personReminder.appId = String(payload.personReminder?.appId || '').trim()
     payload.personReminder.appSecret = String(payload.personReminder?.appSecret || '').trim()
+    payload.personReminder.dataSource = ['bitable', 'local'].includes(String(payload.personReminder?.dataSource || '').trim().toLowerCase())
+      ? String(payload.personReminder?.dataSource || '').trim().toLowerCase()
+      : 'bitable'
     payload.personReminder.feishuAppId = payload.personReminder.appId
     payload.personReminder.feishuAppSecret = payload.personReminder.appSecret
     payload.summaryReport.appChatIds = Array.isArray(payload.summaryReport?.appChatIds)

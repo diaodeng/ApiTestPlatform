@@ -1,6 +1,9 @@
 ## 更新历史
 
 ### latest
+1. 按人催办新增统计数据源开关：`personReminder.dataSource` 支持 `bitable/local`；可按配置选择“飞书多维表格统计”或“本地工单表按当前处理人统计”。`local` 模式下支持本地时间字段选择（`update_time/create_time/started_at/resolved_at/closed_at`），并在预览/执行日志中输出数据源信息。
+1. 群消息推送幂等逻辑补强：自动推送仍保留“已推送不重复”判断，并补充明确日志；去重标记条件从仅 `pushSuccessCount>0` 扩展为“机器人或飞书应用任一成功即标记”，避免 `feishu_app` 模式重复自动推送；手动推送新增日志说明“manual_trigger=true，不受自动去重限制”。
+1. 外部推单字段补强：新增 `storeInfo/store_info` 门店字段兼容，门店匹配逻辑仍为“优先按配置门店映射，未命中保留原始值”；群消息模板新增 `reporter_name/reporterName` 与 `store_info/storeInfo` 变量，支持直接在通知模板中引用。
 1. 修复外部推单后的群消息优先级分流：外部同步入参现在会显式回填 `customerPriority/customer_priority`（默认跟随 `internalPriority`），避免被模型默认值 `P3` 覆盖导致路由失效；群推送路由新增 `appChatIds` 兼容，并补充“优先级未命中 priorityRoutes 时回退默认目标”的告警日志。
 1. AI 配置中心补齐默认提示词初始化：新增 `ticket_category_classify_default`、`ticket_log_extract_default` 两条 `common` 分类模板（内容允许为空），解决“自动分类提示词/日志参数提取提示词下拉无可选项”的问题。
 1. 调整 `ticket.ai.log_extract.prompt.code` 默认值为 `ticket_log_extract_default`，并在 AI 配置汇总读取时对“空字符串配置”做默认编码回退，兼容老数据。

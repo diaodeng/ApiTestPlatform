@@ -245,12 +245,20 @@ class TicketSyncService:
         :return: (推送结果, 刷新后的工单, 最新元数据)
         """
         if not cls._is_publish_ready(meta):
+            logger.info(
+                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
+                f"reason=同步数据未发布就绪"
+            )
             return (
                 {"skipped": True, "skipReason": "同步数据未发布就绪", "scene": scene},
                 ticket,
                 meta,
             )
         if cls._is_group_push_sent_once(meta):
+            logger.info(
+                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
+                f"reason=工单已发送过群推送"
+            )
             return (
                 {"skipped": True, "skipReason": "工单已发送过群推送", "scene": scene},
                 ticket,
@@ -268,7 +276,9 @@ class TicketSyncService:
             manual_trigger=False,
             sync_summary=sync_summary,
         )
-        if not bool(result.get("skipped")) and int(result.get("pushSuccessCount") or 0) > 0:
+        push_success_count = int(result.get("pushSuccessCount") or 0)
+        app_success_count = int(result.get("chatSuccessCount") or 0)
+        if not bool(result.get("skipped")) and (push_success_count > 0 or app_success_count > 0):
             meta = cls._mark_group_push_sent_once(
                 meta,
                 scene=scene,
@@ -279,6 +289,15 @@ class TicketSyncService:
                 ticket=ticket,
                 meta=meta,
                 update_by=update_by,
+            )
+            logger.info(
+                f"自动群推送已标记去重: ticket_no={ticket.ticket_no}, scene={scene}, "
+                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
+            )
+        elif not bool(result.get("skipped")):
+            logger.warning(
+                f"自动群推送未产生成功发送，保持未去重状态: ticket_no={ticket.ticket_no}, scene={scene}, "
+                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
             )
         return result, ticket, meta
 
@@ -638,6 +657,7 @@ class TicketSyncService:
         return {
             "enabled": False,
             "sendMode": "push_config",
+            "dataSource": "bitable",
             "pushIds": [],
             "appId": "",
             "appSecret": "",
@@ -781,6 +801,9 @@ class TicketSyncService:
         default_person_reminder = cls._default_person_reminder_config()
         person_reminder = {**default_person_reminder, **person_reminder}
         person_reminder["sendMode"] = TicketSyncNotifyService._normalize_send_mode(person_reminder.get("sendMode"))
+        person_reminder["dataSource"] = TicketSyncNotifyService._normalize_person_data_source(
+            person_reminder.get("dataSource")
+        )
         person_reminder["enabled"] = bool(person_reminder.get("enabled"))
         person_reminder["pushIds"] = TicketSyncNotifyService._normalize_push_ids(person_reminder.get("pushIds"))
         person_reminder["appId"] = str(person_reminder.get("appId") or "").strip()
@@ -1038,6 +1061,10 @@ class TicketSyncService:
         config = cls._load_sync_config(db)
         group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
         sync_summary = cls.extract_sync_summary(ticket.extra_data) or {}
+        logger.info(
+            f"手动群推送触发: ticket_no={ticket.ticket_no}, scene=manual, "
+            f"manual_trigger=true, 去重策略=不受自动去重限制"
+        )
         return TicketSyncNotifyService.send_group_message_for_ticket(
             db,
             ticket=ticket,
@@ -1228,7 +1255,17 @@ class TicketSyncService:
                 raw_payload,
                 "ticketStore",
                 "ticket_store",
-                default=cls._payload_field_value(raw_payload, "storeId", "store_id", default=""),
+                default=cls._payload_field_value(
+                    raw_payload,
+                    "storeInfo",
+                    "store_info",
+                    default=cls._payload_field_value(
+                        raw_payload,
+                        "storeId",
+                        "store_id",
+                        default=cls._payload_field_value(mapping_payload, "ticketStore", "ticket_store", default=""),
+                    ),
+                ),
             )
             or ""
         ).strip()
