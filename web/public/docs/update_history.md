@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 修复“内网拉取公网工单”链路群推送重复问题：远端 `extraData` 合并入本地工单时，不再允许覆盖本地 `external_sync` 元数据，避免 `group_push_sent_once` 被重置导致每次拉取都重复自动发群。
 1. 自动群推送新增“起始提交时间”配置 `groupPush.autoSendAfterTime`：配置后仅当工单提交时间晚于该时间且未推送过才会自动发群；提交时间规则统一为“优先外部推单 `createTime`，缺失或手动创建时回退本地 `create_time`”。工单列表同步新增“工单提交时间”列与时间范围筛选（`submitBeginTime/submitEndTime`）。
 1. 工单手动群推送与自动推送去重语义已对齐：手动发送默认也依赖 `group_push_sent_once`，已推送且未开启强制时直接跳过；手动发送成功后同样回写“已推送”状态。手动发送接口新增 `forcePush` 参数用于“仅手动强制推送”，自动推送仍严格依赖去重状态。
 1. 修复外部推单翻译“误判已翻译”问题：翻译跳过条件从“`ai_translation` 非空即跳过”改为“当前描述与历史翻译源一致才跳过”；翻译成功后新增保存 `ai_translation_source_hash`，用于后续按源文本精确判断，避免 Celery 延后后处理场景下描述已变化却被错误跳过。

@@ -2641,7 +2641,11 @@ class TicketSyncService:
         source_extra = dict(ticket.extra_data or {}) if ticket and isinstance(ticket.extra_data, dict) else {}
         extra_data = dict(source_extra)
         if isinstance(sync_object.extra_data, dict):
-            extra_data.update(sync_object.extra_data)
+            # 防止远端拉取携带的 external_sync 覆盖本地同步状态（尤其是 group_push_sent_once）。
+            incoming_extra_data = dict(sync_object.extra_data)
+            incoming_extra_data.pop(cls.META_KEY, None)
+            incoming_extra_data.pop("externalSync", None)
+            extra_data.update(incoming_extra_data)
         if isinstance(sync_object.raw_payload, dict):
             extra_data["raw_payload"] = sync_object.raw_payload
         meta = cls._build_meta(extra_data)
