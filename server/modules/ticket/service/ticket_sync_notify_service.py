@@ -246,22 +246,25 @@ class TicketSyncNotifyService:
         :param timeout_sec: 超时时间（秒）。
         :return: 响应 JSON 字典。
         """
-        headers = {"Content-Type": "application/json; charset=utf-8"}
-        if tenant_access_token:
-            headers["Authorization"] = f"Bearer {tenant_access_token}"
-        response = requests.request(
-            method=method.upper(),
-            url=url,
-            params=params,
-            json=json_body,
-            headers=headers,
-            timeout=(10, timeout_sec),
-        )
-        response.raise_for_status()
-        data = response.json()
-        if int(data.get("code") or 0) != 0:
-            raise RuntimeError(f"飞书接口调用失败: {data.get('msg') or data}")
-        return data
+        try:
+            headers = {"Content-Type": "application/json; charset=utf-8"}
+            if tenant_access_token:
+                headers["Authorization"] = f"Bearer {tenant_access_token}"
+            response = requests.request(
+                method=method.upper(),
+                url=url,
+                params=params,
+                json=json_body,
+                headers=headers,
+                timeout=(10, timeout_sec),
+            )
+            response.raise_for_status()
+            data = response.json()
+            if int(data.get("code") or 0) != 0:
+                raise RuntimeError(f"飞书接口调用失败: {data.get('msg') or data}")
+            return data
+        except Exception as e:
+            raise RuntimeError(f"飞书接口调用失败:{e}  {url}") from e
 
     @classmethod
     def _get_tenant_access_token(cls, app_id: str, app_secret: str) -> str:
@@ -467,7 +470,7 @@ class TicketSyncNotifyService:
             if isinstance(item, str):
                 name = item.strip()
             elif isinstance(item, dict):
-                name = str(item.get("name") or item.get("text") or item.get("value") or "").strip()
+                name = str(item.get("email") or item.get("text") or item.get("value") or "").strip()
             else:
                 name = str(item or "").strip()
             if name and name not in names:
@@ -606,6 +609,14 @@ class TicketSyncNotifyService:
             return None
 
     @classmethod
+    def get_bitable_record_url(cls, config: dict[str, Any], record_id:str) -> str:
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        app_token = str(config.get("appToken") or "").strip()
+        table_id = str(config.get("tableId") or "").strip()
+        view_id = str(config.get("viewId") or "").strip()
+        return f"https://feishu.cn/base/{app_token}?table={table_id}&view={view_id}&record={record_id}"
+
+    @classmethod
     def query_bitable_records(cls, config: dict[str, Any]) -> list[dict[str, Any]]:
         """
         拉取飞书多维表格记录。
@@ -638,7 +649,9 @@ class TicketSyncNotifyService:
             if view_id:
                 params["view_id"] = view_id
             if filter_formula:
+                filter_formula = json.dumps(json.loads(filter_formula),ensure_ascii=False)
                 params["filter"] = filter_formula
+            logger.info(params)
             response_data = cls._request_feishu_json(
                 method="GET",
                 url=url,
@@ -646,6 +659,7 @@ class TicketSyncNotifyService:
                 params=params,
             ).get("data") or {}
             page_records = response_data.get("items")
+            # logger.info(f"多维表格数据结构：{json.dumps(page_records[0] if page_records else {}, ensure_ascii=False)}")
             if not isinstance(page_records, list):
                 page_records = []
             all_records.extend([item for item in page_records if isinstance(item, dict)])
@@ -719,12 +733,14 @@ class TicketSyncNotifyService:
         """
         lines: list[str] = []
         for index, row in enumerate(rows[: max(max_rows, 1)], start=1):
+            logger.info(f"index={index}, row={row}")
             created_at = cls._parse_datetime_value(row.get("createdAt"))
             created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
-            title = str(row.get("title") or "-").strip()
-            record_id = str(row.get("recordId") or "-").strip()
-            overdue_minutes = cls._safe_int(row.get("overdueMinutes")) or 0
-            lines.append(f"{index}. [{created_text}] {title}（记录ID: {record_id}，超时: {overdue_minutes}分钟）")
+            # title = str(row.get("title") or "-").strip()
+            # record_id = str(row.get("recordId") or "-").strip()
+            ticket_no = row.get("fields", {}).get("(IT)SNow工单号_TICKET_NO") or "-"
+            # overdue_minutes = cls._safe_int(row.get("overdueMinutes")) or 0
+            lines.append(f"{index}. [{created_text}]（工单ID: {ticket_no}）[详情]({row.get('detailUrl', '')})")
         return "\n".join(lines) if lines else "暂无明细"
 
     @classmethod
@@ -966,11 +982,13 @@ class TicketSyncNotifyService:
         if not time_field:
             raise ValueError("时间字段(timeField)未配置")
 
+        target_user = cls._resolve_target_user(db, user_id=user_id, email=email)
+        if not target_user:
+            raise ValueError(f"用户不存在: {email}, {user_id}")
+
         records = cls.query_bitable_records(config)
         now = datetime.now()
-        target_user = cls._resolve_target_user(db, user_id=user_id, email=email)
-        target_email = cls._normalize_email(email or getattr(target_user, "email", ""))
-        target_user_id = int(target_user.user_id) if target_user else (user_id or None)
+
 
         grouped: dict[str, list[dict[str, Any]]] = {}
         skipped_no_person = 0
@@ -980,8 +998,8 @@ class TicketSyncNotifyService:
 
         for record in records:
             fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
-            person_names = cls._extract_person_names(fields.get(person_field))
-            if not person_names:
+            person_emails = cls._extract_person_names(fields.get(person_field))
+            if not person_emails:
                 skipped_no_person += 1
                 continue
             created_at = cls._extract_record_time(record, time_field)
@@ -992,8 +1010,10 @@ class TicketSyncNotifyService:
             if overdue_minutes < threshold_minutes:
                 skipped_not_overdue += 1
                 continue
+            record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
             row_payload = {
-                "recordId": str(record.get("record_id") or record.get("recordId") or "").strip(),
+                "detailUrl": cls.get_bitable_record_url(config, record_id),
+                "recordId": record_id,
                 "title": str(
                     fields.get("title")
                     or fields.get("标题")
@@ -1005,37 +1025,30 @@ class TicketSyncNotifyService:
                 "overdueMinutes": overdue_minutes,
                 "fields": fields,
             }
-            for person_name in person_names:
-                grouped.setdefault(person_name, []).append(row_payload)
+            for person_email in person_emails:
+                grouped.setdefault(person_email, []).append(row_payload)
                 overdue_rows += 1
 
         feishu_user_cache: dict[str, dict[str, Any] | None] = {}
         app_id, app_secret = cls._resolve_feishu_auth(config)
         people: list[dict[str, Any]] = []
-        for person_name, person_rows in grouped.items():
-            user = cls._resolve_sys_user_by_name(db, person_name)
-            user_email = cls._normalize_email(getattr(user, "email", ""))
-            user_id_value = int(user.user_id) if user else None
-            if target_user_id and user_id_value != target_user_id:
-                continue
-            if target_email and user_email != target_email:
-                continue
+        for person_email, person_rows in grouped.items():
             feishu_user = None
-            if user_email and app_id and app_secret:
-                if user_email not in feishu_user_cache:
-                    feishu_user_cache[user_email] = cls.query_feishu_user_by_email(
+            if app_id and app_secret:
+                if person_email not in feishu_user_cache:
+                    feishu_user_cache[person_email] = cls.query_feishu_user_by_email(
                         app_id=app_id,
                         app_secret=app_secret,
-                        email=user_email,
+                        email=person_email,
                     )
-                feishu_user = feishu_user_cache.get(user_email)
+                feishu_user = feishu_user_cache.get(person_email)
             people.append(
                 {
-                    "personName": person_name,
-                    "userId": user_id_value,
-                    "userName": getattr(user, "user_name", None),
-                    "nickName": getattr(user, "nick_name", None),
-                    "email": user_email or None,
+                    "personName": target_user.user_name,
+                    "userId": target_user.user_id,
+                    "userName": target_user.user_name,
+                    "nickName": target_user.nick_name,
+                    "email": person_email,
                     "feishuUser": feishu_user,
                     "overdueCount": len(person_rows),
                     "rows": sorted(person_rows, key=lambda item: item.get("overdueMinutes", 0), reverse=True),
