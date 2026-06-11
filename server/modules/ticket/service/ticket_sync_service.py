@@ -1137,6 +1137,7 @@ class TicketSyncService:
         trigger_source: str,
         user_id: int | None = None,
         email: str | None = None,
+        is_all: bool = False,
     ) -> dict[str, Any]:
         """
         执行人维度催办通知。
@@ -1145,6 +1146,7 @@ class TicketSyncService:
         :param trigger_source: 触发来源。
         :param user_id: 可选用户ID。
         :param email: 可选邮箱。
+        :param is_all: 是否直接统计所有。
         :return: 执行结果摘要。
         """
         config = cls._load_sync_config(db)
@@ -1155,6 +1157,7 @@ class TicketSyncService:
             trigger_source=trigger_source,
             user_id=user_id,
             email=email,
+            is_all=is_all,
         )
 
     @classmethod

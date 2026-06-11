@@ -33,7 +33,7 @@ class TicketSyncNotifyService:
 
     DEFAULT_PERSON_TEMPLATE = (
         "【工单催办提醒】\n"
-        "负责人：${person_name}\n"
+        # "负责人：${person_name}\n"
         "阈值：${threshold_minutes} 分钟\n"
         "超时条数：${overdue_count}\n"
         "统计时间：${now_time}\n\n"
@@ -1253,6 +1253,7 @@ class TicketSyncNotifyService:
         config: dict[str, Any],
         user_id: int | None = None,
         email: str | None = None,
+        all:bool = False,
     ) -> dict[str, Any]:
         """
         统计按人聚合的超时记录。
@@ -1276,8 +1277,8 @@ class TicketSyncNotifyService:
             raise ValueError("时间字段(timeField)未配置")
 
         target_user = cls._resolve_target_user(db, user_id=user_id, email=email)
-        if not target_user:
-            raise ValueError(f"用户不存在: {email}, {user_id}")
+        if not all and not target_user:
+            raise ValueError("未指定用户")
 
         records = cls.query_bitable_records(config)
         now = datetime.now()
@@ -1298,7 +1299,7 @@ class TicketSyncNotifyService:
                 skipped_no_person += 1
                 continue
 
-            if target_user.email not in person_emails:
+            if not all and target_user and target_user.email not in person_emails:
                 skipped_no_person += 1
                 continue
             created_at = cls._extract_record_time(record, time_field)
@@ -1347,7 +1348,7 @@ class TicketSyncNotifyService:
         app_id, app_secret = cls._resolve_feishu_auth(config)
         people: list[dict[str, Any]] = []
         for person_email, person_rows in grouped.items():
-            if person_email != target_user.email:
+            if not all and target_user and person_email != target_user.email:
                 continue
             feishu_user = None
             if app_id and app_secret:
@@ -1360,10 +1361,10 @@ class TicketSyncNotifyService:
                 feishu_user = feishu_user_cache.get(person_email)
             people.append(
                 {
-                    "personName": target_user.user_name,
-                    "userId": target_user.user_id,
-                    "userName": target_user.user_name,
-                    "nickName": target_user.nick_name,
+                    # "personName": target_user.user_name,
+                    # "userId": target_user.user_id,
+                    # "userName": target_user.user_name,
+                    # "nickName": target_user.nick_name,
                     "email": person_email,
                     "feishuUser": feishu_user,
                     "overdueCount": len(person_rows),
@@ -1593,6 +1594,7 @@ class TicketSyncNotifyService:
         trigger_source: str,
         user_id: int | None = None,
         email: str | None = None,
+        is_all: bool = False,
     ) -> dict[str, Any]:
         """
         执行按人催办通知。
@@ -1602,6 +1604,7 @@ class TicketSyncNotifyService:
         :param trigger_source: 触发来源，如 scheduler/manual。
         :param user_id: 可选用户ID过滤。
         :param email: 可选邮箱过滤。
+        :param is_all: 是否通知所有人
         :return: 执行结果摘要。
         """
         if not bool(config.get("enabled")):
@@ -1651,7 +1654,7 @@ class TicketSyncNotifyService:
                 trigger_source=trigger_source,
             )
 
-        summary = cls._collect_person_overdue_data(db, config=config, user_id=user_id, email=email)
+        summary = cls._collect_person_overdue_data(db, config=config, user_id=user_id, email=email, all=is_all)
         message_template = str(config.get("messageTemplate") or "").strip() or cls.DEFAULT_PERSON_TEMPLATE
         max_rows_per_person = max(int(config.get("maxRowsPerPerson") or 20), 1)
 

@@ -170,9 +170,20 @@ def ticket_person_overdue_reminder(
         raise TaskStopRequestedError("任务已手动终止")
 
     resolved_user_id = user_id if user_id is not None else kwargs.pop("userId", None)
-    resolved_emails = email if email is not None else kwargs.pop("email", None)
+    resolved_emails = email if email is not None else kwargs.pop("email", [])
+    is_all = user_id if user_id is not None else kwargs.pop("isAll", False)
+    if is_all:
+        with SessionLocal() as db:
+            result = TicketSyncService.run_person_reminder_services(
+                db,
+                trigger_source="scheduler",
+                is_all=is_all
+            )
+        return
+
+
     try:
-        if isinstance(resolved_emails, str):
+        if resolved_emails and isinstance(resolved_emails, str):
             resolved_emails = json.loads(resolved_emails)
     except Exception as e:
         logger.error(f"参数错误：{e}")
