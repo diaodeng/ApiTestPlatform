@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -74,6 +75,19 @@ class TicketSyncService:
     @classmethod
     def _now_iso(cls) -> str:
         return datetime.now().isoformat()
+
+    @classmethod
+    def _text_sha256(cls, value: Any) -> str:
+        """
+        计算文本的 SHA256 摘要，用于判断翻译源是否变化。
+
+        :param value: 原始文本。
+        :return: 文本摘要，空值返回空字符串。
+        """
+        normalized = str(value or "").strip()
+        if not normalized:
+            return ""
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     @classmethod
     def _set_publish_state(
@@ -527,16 +541,34 @@ class TicketSyncService:
         return parsed_candidate.isoformat()
 
     @classmethod
-    def _has_successful_ai_translation(cls, ticket: Ticket | None) -> bool:
+    def _has_successful_ai_translation(cls, ticket: Ticket | None, source_description: str | None = None) -> bool:
         """
         判断工单是否已有成功的 AI 翻译结果。
+
         :param ticket: 工单对象
+        :param source_description: 本次待翻译原文；传入后会校验是否与历史翻译源一致。
         :return: 是否已存在翻译结果
         """
         if not ticket or not isinstance(ticket.extra_data, dict):
             return False
-        translated_text = str(ticket.extra_data.get("ai_translation") or "").strip()
-        return bool(translated_text)
+        extra_data = ticket.extra_data
+        translated_text = str(extra_data.get("ai_translation") or "").strip()
+        if not translated_text:
+            return False
+        normalized_source = str(source_description or "").strip()
+        if not normalized_source:
+            return True
+        source_hash = cls._text_sha256(normalized_source)
+        stored_source_hash = str(extra_data.get("ai_translation_source_hash") or "").strip()
+        if stored_source_hash:
+            return stored_source_hash == source_hash
+        origin_description = str(extra_data.get("origin_description") or "").strip()
+        if origin_description:
+            return cls._text_sha256(origin_description) == source_hash
+        legacy_source_description = str(extra_data.get("ai_translation_source_description") or "").strip()
+        if legacy_source_description:
+            return cls._text_sha256(legacy_source_description) == source_hash
+        return False
 
     @classmethod
     def _should_apply_remote_sync_item(
@@ -2717,7 +2749,10 @@ class TicketSyncService:
         origin_description = str(sync_object.description or "").strip()
         if not defer_post_process:
             translation_enabled = TicketLightAiService.is_translation_enabled(db)
-            translation_already_succeeded = cls._has_successful_ai_translation(ticket)
+            translation_already_succeeded = cls._has_successful_ai_translation(
+                ticket,
+                source_description=sync_object.description,
+            )
             if sync_scene == "remote_pull":
                 sync_translate_enabled = bool(
                     automation.auto_translate
@@ -2771,6 +2806,7 @@ class TicketSyncService:
             extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
             extra_data["origin_description"] = origin_description
             extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+            extra_data["ai_translation_source_hash"] = cls._text_sha256(origin_description)
             if translation_meta.get("provider_code"):
                 extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
             if translation_meta.get("prompt_code"):
@@ -3120,7 +3156,10 @@ class TicketSyncService:
                 )
             else:
                 sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
-            translation_already_succeeded = cls._has_successful_ai_translation(ticket)
+            translation_already_succeeded = cls._has_successful_ai_translation(
+                ticket,
+                source_description=sync_object.description,
+            )
             should_translate = translation_enabled and sync_translate_enabled and not translation_already_succeeded
             if translation_already_succeeded:
                 logger.info(f"外部工单同步延后翻译跳过：已有历史翻译结果, ticket_no={sync_object.ticket_no}")
@@ -3138,6 +3177,7 @@ class TicketSyncService:
             if should_translate and origin_description and str(translation_meta.get("translated_text") or "").strip():
                 extra_data["origin_description"] = origin_description
                 extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                extra_data["ai_translation_source_hash"] = cls._text_sha256(origin_description)
                 if translation_meta.get("provider_code"):
                     extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
                 if translation_meta.get("prompt_code"):

@@ -1,6 +1,8 @@
 ## 更新历史
 
 ### latest
+1. 修复外部推单翻译“误判已翻译”问题：翻译跳过条件从“`ai_translation` 非空即跳过”改为“当前描述与历史翻译源一致才跳过”；翻译成功后新增保存 `ai_translation_source_hash`，用于后续按源文本精确判断，避免 Celery 延后后处理场景下描述已变化却被错误跳过。
+1. 人员催办消息明细 `detailUrl` 已从“多维表格记录地址拼接”改为“工单详情 URL（`ticket.ticket_url`）”：`bitable` 数据源按工单号回查本地工单链接，`local` 数据源直接使用工单链接；未存链接时保持空字符串，不再回退不可访问地址。
 1. 外部推单群消息新增动态 @人能力：当群模板包含 `${reporterName}/${reporter_name}` 或“当前处理人”变量（`${assignee_name}/${currentAssigneeName}/${current_assignee_name}`）时，通知链路会优先使用工单数据中的邮箱（`raw_payload/external_field_mapping`），缺失时按姓名匹配系统用户邮箱，再通过飞书通讯录换取 `open_id` 并在群消息中 @ 对应人员；机器人推送与飞书应用发群均已接入该能力，解析失败自动降级为仅发送文本。
 1. 外部推单接口 `/ticket/sync/external` 的延后后处理改为“优先投递 Celery，失败回退本地后台任务”：入库仍立即返回，返回体新增 `deferredDispatch`（包含 `mode/taskId/reason`），用于明确当前是 Celery 执行还是本地兜底执行。
 1. 工单汇总通知新增统计数据源与 AI 解读配置：`summaryReport.dataSource` 支持 `local/bitable`，`bitable` 模式可配置 `appToken/tableId/viewId/filterFormula/statusField/categoryField/priorityField/bitableTimeField/pageSize`；同时新增 `aiEnabled/aiProviderCode/aiPromptCode`，汇总模板支持 `${data_source}` 与 `${ai_summary}` 变量。

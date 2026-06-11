@@ -947,12 +947,63 @@ class TicketSyncNotifyService:
             logger.info(f"index={index}, row={row}")
             created_at = cls._parse_datetime_value(row.get("createdAt"))
             created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
-            # title = str(row.get("title") or "-").strip()
-            # record_id = str(row.get("recordId") or "-").strip()
-            ticket_no = row.get("fields", {}).get("(IT)SNow工单号_TICKET_NO") or "-"
-            # overdue_minutes = cls._safe_int(row.get("overdueMinutes")) or 0
+            ticket_no = cls._extract_ticket_no_from_row_payload(row) or "-"
             lines.append(f"{index}. [{created_text}]（工单ID: {ticket_no}）[详情]({row.get('detailUrl', '')})")
         return "\n".join(lines) if lines else "暂无明细"
+
+    @classmethod
+    def _extract_ticket_no_from_row_payload(cls, row: dict[str, Any]) -> str:
+        """
+        从催办明细行中提取工单号。
+
+        :param row: 催办明细行。
+        :return: 工单号文本，未命中返回空字符串。
+        """
+        if not isinstance(row, dict):
+            return ""
+        fields = row.get("fields") if isinstance(row.get("fields"), dict) else {}
+        for key in (
+            "ticketNo",
+            "ticket_no",
+            "(IT)SNow工单号_TICKET_NO",
+            "工单号",
+            "ticketId",
+            "ticket_id",
+        ):
+            value = str(fields.get(key) or row.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @classmethod
+    def _resolve_ticket_detail_url_by_ticket_no(
+        cls,
+        db: Session,
+        *,
+        ticket_no: str,
+        ticket_url_cache: dict[str, str],
+    ) -> str:
+        """
+        根据工单号解析工单详情 URL，并缓存结果。
+
+        :param db: 数据库会话。
+        :param ticket_no: 工单号。
+        :param ticket_url_cache: 工单URL缓存。
+        :return: 工单详情 URL，未命中返回空字符串。
+        """
+        normalized_ticket_no = str(ticket_no or "").strip()
+        if not normalized_ticket_no:
+            return ""
+        if normalized_ticket_no in ticket_url_cache:
+            return ticket_url_cache[normalized_ticket_no]
+        ticket_row = (
+            db.query(Ticket)
+            .filter(Ticket.ticket_no == normalized_ticket_no, Ticket.del_flag == "0")
+            .first()
+        )
+        detail_url = str(getattr(ticket_row, "ticket_url", "") or "").strip() if ticket_row else ""
+        ticket_url_cache[normalized_ticket_no] = detail_url
+        return detail_url
 
     @classmethod
     def _build_counter_markdown(cls, counter: dict[str, int]) -> str:
@@ -1206,6 +1257,7 @@ class TicketSyncNotifyService:
         skipped_no_time = 0
         skipped_not_overdue = 0
         overdue_rows = 0
+        ticket_url_cache: dict[str, str] = {}
 
         for record in records:
             fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
@@ -1222,9 +1274,24 @@ class TicketSyncNotifyService:
                 skipped_not_overdue += 1
                 continue
             record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
+            ticket_no = str(
+                fields.get("ticketNo")
+                or fields.get("ticket_no")
+                or fields.get("(IT)SNow工单号_TICKET_NO")
+                or fields.get("工单号")
+                or fields.get("ticketId")
+                or fields.get("ticket_id")
+                or ""
+            ).strip()
+            detail_url = cls._resolve_ticket_detail_url_by_ticket_no(
+                db,
+                ticket_no=ticket_no,
+                ticket_url_cache=ticket_url_cache,
+            )
             row_payload = {
-                "detailUrl": cls.get_bitable_record_url(config, record_id),
+                "detailUrl": detail_url,
                 "recordId": record_id,
+                "ticketNo": ticket_no,
                 "title": str(
                     fields.get("title")
                     or fields.get("标题")
@@ -1244,6 +1311,8 @@ class TicketSyncNotifyService:
         app_id, app_secret = cls._resolve_feishu_auth(config)
         people: list[dict[str, Any]] = []
         for person_email, person_rows in grouped.items():
+            if person_email != target_user.email:
+                continue
             feishu_user = None
             if app_id and app_secret:
                 if person_email not in feishu_user_cache:
@@ -1360,6 +1429,8 @@ class TicketSyncNotifyService:
             grouped[group_key]["rows"].append(
                 {
                     "recordId": str(getattr(row, "ticket_no", "") or getattr(row, "ticket_id", "") or "").strip(),
+                    "ticketNo": str(getattr(row, "ticket_no", "") or "").strip(),
+                    "detailUrl": str(getattr(row, "ticket_url", "") or "").strip(),
                     "title": str(getattr(row, "title", "") or "-").strip(),
                     "createdAt": row_time.strftime("%Y-%m-%d %H:%M:%S"),
                     "overdueMinutes": overdue_minutes,
