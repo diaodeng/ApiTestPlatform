@@ -272,7 +272,9 @@ class TicketSyncNotifyService:
                 headers=headers,
                 timeout=(10, timeout_sec),
             )
-            response.raise_for_status()
+            if response.status_code != 200:
+                logger.info(f"Request failed with status code: {response.status_code}, {url} - {json.dumps(response.json(), ensure_ascii=False)}")
+                response.raise_for_status()
             data = response.json()
             if int(data.get("code") or 0) != 0:
                 raise RuntimeError(f"飞书接口调用失败: {data.get('msg') or data}")
@@ -828,6 +830,27 @@ class TicketSyncNotifyService:
         return f"https://feishu.cn/base/{app_token}?table={table_id}&view={view_id}&record={record_id}"
 
     @classmethod
+    def _normalize_bitable_filter_formula(cls, value: Any) -> str:
+        """
+        归一化飞书多维表格过滤公式。
+
+        :param value: 原始过滤公式，支持普通公式文本或 JSON 字符串包裹的公式文本。
+        :return: 可直接传给飞书 records 接口 filter 参数的公式文本。
+        """
+        filter_formula = str(value or "").strip()
+        if not filter_formula:
+            return ""
+        try:
+            parsed = json.loads(filter_formula)
+        except Exception:
+            return filter_formula
+        if isinstance(parsed, str):
+            return parsed.strip()
+        if isinstance(parsed, (dict, list)):
+            raise ValueError('过滤公式格式错误，请直接填写飞书公式文本，例如：CurrentValue.[状态] != "已关闭"')
+        return filter_formula
+
+    @classmethod
     def query_bitable_records(cls, config: dict[str, Any]) -> list[dict[str, Any]]:
         """
         拉取飞书多维表格记录。
@@ -839,6 +862,7 @@ class TicketSyncNotifyService:
         app_token = str(config.get("appToken") or "").strip()
         table_id = str(config.get("tableId") or "").strip()
         view_id = str(config.get("viewId") or "").strip()
+        # filter_formula = cls._normalize_bitable_filter_formula(config.get("filterFormula"))
         filter_formula = str(config.get("filterFormula") or "").strip()
         page_size = min(max(int(config.get("pageSize") or 500), 1), 500)
 
@@ -848,7 +872,7 @@ class TicketSyncNotifyService:
             raise ValueError("多维表格 appToken/tableId 未配置")
 
         token = cls._get_tenant_access_token(app_id, app_secret)
-        url = f"{cls.FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/records"
+        url = f"{cls.FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/records/search"
         page_token = ""
         all_records: list[dict[str, Any]] = []
         max_pages = 200
@@ -860,14 +884,13 @@ class TicketSyncNotifyService:
             if view_id:
                 params["view_id"] = view_id
             if filter_formula:
-                filter_formula = json.dumps(json.loads(filter_formula),ensure_ascii=False)
-                params["filter"] = filter_formula
+                params["filter"] = json.loads(filter_formula)
             logger.info(params)
             response_data = cls._request_feishu_json(
-                method="GET",
+                method="POST",
                 url=url,
                 tenant_access_token=token,
-                params=params,
+                json_body=params,
             ).get("data") or {}
             page_records = response_data.get("items")
             # logger.info(f"多维表格数据结构：{json.dumps(page_records[0] if page_records else {}, ensure_ascii=False)}")
@@ -948,7 +971,11 @@ class TicketSyncNotifyService:
             created_at = cls._parse_datetime_value(row.get("createdAt"))
             created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
             ticket_no = cls._extract_ticket_no_from_row_payload(row) or "-"
-            lines.append(f"{index}. [{created_text}]（工单ID: {ticket_no}）[详情]({row.get('detailUrl', '')})")
+            detail_url = row.get('detailUrl', '')
+            line_data = f"{index}. [{created_text}]（工单ID: {ticket_no}"
+            if detail_url:
+                line_data = f"{line_data} [详情]({row.get('detailUrl', '')})"
+            lines.append(line_data)
         return "\n".join(lines) if lines else "暂无明细"
 
     @classmethod
@@ -970,9 +997,13 @@ class TicketSyncNotifyService:
             "ticketId",
             "ticket_id",
         ):
-            value = str(fields.get(key) or row.get(key) or "").strip()
+            value = fields.get(key)
             if value:
-                return value
+                if isinstance(value, str):
+                    return value
+                else:
+                    if isinstance(value, list) and len(value) > 0:
+                        return value[0].get("text", "")
         return ""
 
     @classmethod
@@ -1262,7 +1293,12 @@ class TicketSyncNotifyService:
         for record in records:
             fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
             person_emails = cls._extract_person_names(fields.get(person_field))
+
             if not person_emails:
+                skipped_no_person += 1
+                continue
+
+            if target_user.email not in person_emails:
                 skipped_no_person += 1
                 continue
             created_at = cls._extract_record_time(record, time_field)

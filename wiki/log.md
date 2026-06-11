@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-11] INGEST-CODE | 修复按人催办过滤公式导致飞书参数异常
+- 触发：用户反馈“按人催办通知”一旦填写过滤公式，调用飞书接口即报参数异常。
+- 架构层：工单域 / 飞书通知 / 多维表格查询
+- 创建的页面：`web/public/docs/2026-06-11-person-reminder-filter-formula-fix.md`
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_sync_notify_service.py` -> 工单通知链路文档
+- 总共涉及页面：3
+
 ## [2026-06-10] INGEST-CODE | AI配置中心默认提示词补齐（自动分类/日志参数提取）
 - 触发：用户反馈 AI 配置中心“自动分类提示词、日志参数提取提示词”默认无法选择，要求系统默认插入可选模板，内容可为空以便后续填写。
 - 架构层：系统管理 / AI配置中心 / 提示词模板
