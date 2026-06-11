@@ -575,6 +575,7 @@ class TicketSyncGroupPushSendModel(BaseModel):
     ticket_no: str = Field(description="工单号")
     push_ids: list[int] | None = Field(default=None, description="覆盖推送配置ID列表")
     message_template: str | None = Field(default=None, description="覆盖消息模板")
+    force_push: bool = Field(default=False, description="是否强制推送（忽略已推送状态）")
 
     @model_validator(mode="after")
     def validate_group_push_request(self):
@@ -598,6 +599,7 @@ class TicketSyncGroupPushSendModel(BaseModel):
         else:
             self.push_ids = None
         self.message_template = str(self.message_template or "").strip() or None
+        self.force_push = bool(self.force_push)
         return self
 
 

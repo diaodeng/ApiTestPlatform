@@ -602,6 +602,13 @@
             <el-form-item label="工单号">
               <el-input v-model="groupSendForm.ticketNo" placeholder="输入工单号后发送群消息" />
             </el-form-item>
+            <el-form-item label="强制推送">
+              <el-switch
+                v-model="groupSendForm.forcePush"
+                active-text="是（忽略已推送状态）"
+                inactive-text="否（遵循已推送状态）"
+              />
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="groupSendLoading" @click="handleSendGroupPushByTicket">
                 发送工单群消息
@@ -884,7 +891,8 @@ const personPreviewResult = ref(null)
 const autoCategoryStats = ref(null)
 const autoCategoryRegexText = ref('[]')
 const groupSendForm = reactive({
-  ticketNo: ''
+  ticketNo: '',
+  forcePush: false
 })
 const personQueryForm = reactive({
   userId: '',
@@ -1584,11 +1592,17 @@ function handleSendGroupPushByTicket() {
   }
   groupSendLoading.value = true
   sendTicketSyncGroupPushByTicket({
-    ticketNo
+    ticketNo,
+    forcePush: Boolean(groupSendForm.forcePush)
   })
     .then(response => {
+      if (response.data?.skipped) {
+        proxy.$modal.msgWarning(response.data?.skipReason || '发送已跳过')
+        return
+      }
       const successCount = response.data?.pushSuccessCount || 0
-      proxy.$modal.msgSuccess(`发送完成，成功渠道数：${successCount}`)
+      const stateUpdated = response.data?.groupPushSentOnceUpdated ? '，已更新去重状态' : ''
+      proxy.$modal.msgSuccess(`发送完成，成功渠道数：${successCount}${stateUpdated}`)
     })
     .catch(error => {
       proxy.$modal.msgError(error?.message || '发送失败')

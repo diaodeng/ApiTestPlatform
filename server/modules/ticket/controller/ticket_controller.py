@@ -750,12 +750,14 @@ async def send_sync_group_push_by_ticket(
     request: Request,
     query_object: TicketSyncGroupPushSendModel,
     query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     """
     按工单号手动发送群消息通知。
     :param request: 请求对象。
-    :param query_object: 发送参数，包含工单号、可选推送渠道和模板。
+    :param query_object: 发送参数，包含工单号、可选推送渠道和模板、是否强制推送。
     :param query_db: 数据库会话。
+    :param current_user: 当前登录用户，用于写入推送状态更新人。
     :return: 推送执行结果。
     """
     try:
@@ -764,6 +766,8 @@ async def send_sync_group_push_by_ticket(
             ticket_no=query_object.ticket_no,
             push_ids=query_object.push_ids,
             message_template=query_object.message_template,
+            force_push=query_object.force_push,
+            update_by=str(current_user.user.user_name or "system"),
         )
         return ResponseUtil.success(data=result)
     except Exception as e:

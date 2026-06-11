@@ -1107,6 +1107,8 @@ class TicketSyncService:
         ticket_no: str,
         push_ids: list[int] | None = None,
         message_template: str | None = None,
+        force_push: bool = False,
+        update_by: str = "system",
     ) -> dict[str, Any]:
         """
         手动按工单号发送群消息。
@@ -1115,6 +1117,8 @@ class TicketSyncService:
         :param ticket_no: 工单号。
         :param push_ids: 覆盖推送渠道ID列表。
         :param message_template: 覆盖消息模板。
+        :param force_push: 是否强制推送（忽略已推送状态）。
+        :param update_by: 推送状态更新人。
         :return: 发送结果。
         """
         ticket = TicketDao.get_ticket_by_no(db, ticket_no)
@@ -1122,21 +1126,72 @@ class TicketSyncService:
             raise ValueError(f"工单不存在: {ticket_no}")
         config = cls._load_sync_config(db)
         group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        meta = cls._build_meta(extra_data)
+        already_sent = cls._is_group_push_sent_once(meta)
+        force_push_enabled = bool(force_push)
+        manual_scene = "manual_force" if force_push_enabled else "manual"
+        if already_sent and not force_push_enabled:
+            logger.info(
+                f"手动群推送跳过: ticket_no={ticket.ticket_no}, scene={manual_scene}, "
+                f"reason=工单已发送过群推送且未开启强制推送"
+            )
+            return {
+                "skipped": True,
+                "skipReason": "工单已发送过群推送，未开启强制推送",
+                "scene": manual_scene,
+                "ticketNo": ticket.ticket_no,
+                "alreadySent": True,
+                "forcePush": False,
+                "groupPushSentOnceUpdated": False,
+            }
         sync_summary = cls.extract_sync_summary(ticket.extra_data) or {}
         logger.info(
-            f"手动群推送触发: ticket_no={ticket.ticket_no}, scene=manual, "
-            f"manual_trigger=true, 去重策略=不受自动去重限制"
+            f"手动群推送触发: ticket_no={ticket.ticket_no}, scene={manual_scene}, "
+            f"force_push={force_push_enabled}, already_sent={already_sent}"
         )
-        return TicketSyncNotifyService.send_group_message_for_ticket(
+        result = TicketSyncNotifyService.send_group_message_for_ticket(
             db,
             ticket=ticket,
             group_config=group_config,
-            scene="manual",
+            scene=manual_scene,
             manual_trigger=True,
             override_push_ids=push_ids,
             override_template=message_template,
             sync_summary=sync_summary,
         )
+        push_success_count = int(result.get("pushSuccessCount") or 0)
+        app_success_count = int(result.get("chatSuccessCount") or 0)
+        group_push_state_updated = False
+        if not bool(result.get("skipped")) and (push_success_count > 0 or app_success_count > 0):
+            meta = cls._mark_group_push_sent_once(
+                meta,
+                scene=manual_scene,
+                revision=int(meta.get("revision") or 0),
+            )
+            ticket = cls._persist_sync_meta(
+                db,
+                ticket=ticket,
+                meta=meta,
+                update_by=str(update_by or "system"),
+            )
+            group_push_state_updated = True
+            logger.info(
+                f"手动群推送已更新去重状态: ticket_no={ticket.ticket_no}, scene={manual_scene}, "
+                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
+            )
+        elif not bool(result.get("skipped")):
+            logger.warning(
+                f"手动群推送未产生成功发送，不更新去重状态: ticket_no={ticket.ticket_no}, scene={manual_scene}, "
+                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
+            )
+        return {
+            **result,
+            "ticketNo": ticket.ticket_no,
+            "alreadySent": already_sent,
+            "forcePush": force_push_enabled,
+            "groupPushSentOnceUpdated": group_push_state_updated,
+        }
 
     @classmethod
     def _build_remote_sync_request_headers(cls, remote_sync: dict[str, Any]) -> dict[str, str]:
