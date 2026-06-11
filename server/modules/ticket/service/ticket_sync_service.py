@@ -394,6 +394,14 @@ class TicketSyncService:
         :param update_by: 更新人
         :return: (推送结果, 刷新后的工单, 最新元数据)
         """
+        if ticket.status not in ["2. 1.5线处理", "3. 待产研处理", "4. 产研处理中"]:
+            logger.info(f"ticket_no={ticket.ticket_no}, 当前状态：{ticket.status}, 不发群消息")
+            return (
+                {"skipped": True, "skipReason": "同步数据未发布就绪", "scene": scene},
+                ticket,
+                meta,
+            )
+
         if not cls._is_publish_ready(meta):
             logger.info(
                 f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
