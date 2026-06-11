@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Any
 
 from config.database import SessionLocal
@@ -169,7 +170,13 @@ def ticket_person_overdue_reminder(
         raise TaskStopRequestedError("任务已手动终止")
 
     resolved_user_id = user_id if user_id is not None else kwargs.pop("userId", None)
-    resolved_email = email if email is not None else kwargs.pop("email", None)
+    resolved_emails = email if email is not None else kwargs.pop("email", None)
+    try:
+        if isinstance(resolved_emails, str):
+            resolved_emails = json.loads(resolved_emails)
+    except Exception as e:
+        logger.error(f"参数错误：{e}")
+        return
 
     normalized_user_id = None
     try:
@@ -177,22 +184,22 @@ def ticket_person_overdue_reminder(
             normalized_user_id = int(resolved_user_id)
     except Exception:
         normalized_user_id = None
-
-    with SessionLocal() as db:
-        result = TicketSyncService.run_person_reminder_services(
-            db,
-            trigger_source="scheduler",
-            user_id=normalized_user_id,
-            email=str(resolved_email or "").strip() or None,
+    for resolved_email in resolved_emails:
+        with SessionLocal() as db:
+            result = TicketSyncService.run_person_reminder_services(
+                db,
+                trigger_source="scheduler",
+                user_id=normalized_user_id,
+                email=str(resolved_email or "").strip() or None,
+            )
+        logger.info(
+            "工单人维度催办任务执行完成 | user_id={} email={} sent_people={} sent_push_count={} skipped={}",
+            resolved_user_id or "-",
+            resolved_email or "-",
+            result.get("sentPeople"),
+            result.get("sentPushCount"),
+            result.get("skipped"),
         )
-    logger.info(
-        "工单人维度催办任务执行完成 | user_id={} email={} sent_people={} sent_push_count={} skipped={}",
-        resolved_user_id or "-",
-        resolved_email or "-",
-        result.get("sentPeople"),
-        result.get("sentPushCount"),
-        result.get("skipped"),
-    )
     return result
 
 
