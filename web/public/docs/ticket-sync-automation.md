@@ -121,23 +121,45 @@
 - `summaryReport`
   - `enabled`：是否启用工单汇总统计通知。
   - `sendMode`：发送模式（`push_config` / `feishu_app` / `hybrid`）。
-  - `timeField`：统计时间字段（`create_time/update_time/closed_at/resolved_at`）。
+  - `dataSource`：统计数据源（`local` / `bitable`）。
+  - `local` 模式：
+    - `timeField`：本地工单时间字段（`create_time/update_time/closed_at/resolved_at/started_at`）。
+  - `bitable` 模式：
+    - `appToken` / `tableId` / `viewId` / `filterFormula`：飞书多维表格数据源。
+    - `statusField` / `categoryField` / `priorityField`：统计字段名映射。
+    - `bitableTimeField`：多维记录时间字段（为空时回退记录创建时间）。
+    - `pageSize`：分页拉取大小，最大500。
   - `windowMinutes` / `endDelayMinutes`：滚动窗口与延迟窗口。
   - `startTime` / `endTime`：固定统计窗口（配置后优先于滚动窗口）。
   - `includeClosed`：是否包含已关闭工单。
-  - `messageTemplate`：汇总模板，支持状态/分类/优先级统计变量。
+  - `aiEnabled` / `aiProviderCode` / `aiPromptCode`：启用 AI 汇总解读与自定义提示词。
+  - `messageTemplate`：汇总模板，支持状态/分类/优先级统计变量，以及 `${data_source}` `${ai_summary}`。
+
+### 6.1 自动分类管理（同步配置页内置工具）
+
+- 一键统计未归类：`GET /ticket/sync/auto-category/stats`
+  - 返回总工单数、已归类数、未归类数、未归类占比。
+- 批量重归类：`POST /ticket/sync/auto-category/reclassify`
+  - `strategy`：`ai` / `regex`
+  - `aiPromptCode`：AI 归类提示词编码（可选，空则走系统默认）
+  - `regexRules`：正则规则数组（元素含 `pattern/category/flags`）
+  - `onlyUncategorized`：仅处理未归类
+  - `allTickets`：全量扫描（否则按分页）
+  - `forceReclassify`：强制覆盖已有分类
 
 ## 逻辑梳理
 
 ### 第三方直推
 
 1. 外部系统调用 `/ticket/sync/external`
-2. 服务端按同步来源和映射规则写入工单
+2. 服务端按同步来源和映射规则写入工单，并立即返回入库结果（不等待 AI/自动化完成）
 3. 如果推送体包含 `url/ticketUrl/detailUrl`，会写入工单详情链接 `ticket_url`
 4. 门店字段兼容 `ticketStore/storeInfo/storeId`，会优先按“商家ID + 门店配置（sap_org_no）”匹配；命中则保存配置门店，未命中保留原始值
-5. 如开启 `autoTranslateOnSync`，会自动翻译描述
-6. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
-7. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
+5. 入库后的延后后处理任务（翻译、标题AI、自动化、群推送）优先投递 Celery；当 Celery Worker 不可用时回退 FastAPI 本地后台任务
+6. 接口返回体会附带 `deferredDispatch`，可用于判断本次由 `celery` 还是 `background` 执行
+7. 如开启 `autoTranslateOnSync`，会自动翻译描述
+8. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
+9. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
 
 ### 内网拉取外网工单
 
@@ -166,8 +188,13 @@
 
 1. 页面支持手动触发 `POST /ticket/sync/notify/summary/run`，可选传开始/结束时间。
 2. 定时任务可执行 `module_task.scheduler_maintenance.ticket_summary_report`。
-3. 统计结果按状态/分类/优先级聚合后发送到指定渠道（机器人或飞书应用）。
-4. `hybrid` 模式会自动降级：一路配置缺失时仍发送另一路，避免整体通知丢失。
+3. 统计数据源可选：
+   - `local`：本地工单表统计；
+   - `bitable`：飞书多维表格统计。
+4. 统计结果按状态/分类/优先级聚合后发送到指定渠道（机器人或飞书应用）。
+5. 可选开启 AI 解读，按自定义 Provider/Prompt 生成 `${ai_summary}` 并注入消息模板。
+6. 配置缺失时会返回 `skipped + skipReason`，并写日志，不会抛异常导致接口失败。
+7. `hybrid` 模式会自动降级：一路配置缺失时仍发送另一路，避免整体通知丢失。
 
 ## 说明
 

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import requests
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
@@ -46,6 +46,8 @@ class TicketSyncService:
     CONFIG_KEY = "ticket.sync.automation"
     SOURCE_CODE = "external_sync"
     META_KEY = "external_sync"
+    CELERY_DISPATCH_MODE = "celery"
+    BACKGROUND_DISPATCH_MODE = "background"
     PUBLISH_STATUS_READY = "ready"
     PUBLISH_STATUS_PROCESSING_AI = "processing_ai"
     AI_PENDING_AUTOMATION_STATUSES = {"queued", "submitted", "running"}
@@ -685,11 +687,24 @@ class TicketSyncService:
         return {
             "enabled": False,
             "sendMode": "push_config",
+            "dataSource": "local",
             "pushIds": [],
             "appChatIds": [],
             "appId": "",
             "appSecret": "",
             "timeField": "create_time",
+            "appToken": "",
+            "tableId": "",
+            "viewId": "",
+            "filterFormula": "",
+            "statusField": "状态",
+            "categoryField": "分类",
+            "priorityField": "优先级",
+            "bitableTimeField": "",
+            "pageSize": 500,
+            "aiEnabled": False,
+            "aiProviderCode": "",
+            "aiPromptCode": "",
             "windowMinutes": 60,
             "endDelayMinutes": 0,
             "startTime": "",
@@ -833,6 +848,9 @@ class TicketSyncService:
         summary_report = {**default_summary_report, **summary_report}
         summary_report["enabled"] = bool(summary_report.get("enabled"))
         summary_report["sendMode"] = TicketSyncNotifyService._normalize_send_mode(summary_report.get("sendMode"))
+        summary_report["dataSource"] = TicketSyncNotifyService._normalize_summary_data_source(
+            summary_report.get("dataSource")
+        )
         summary_report["pushIds"] = TicketSyncNotifyService._normalize_push_ids(summary_report.get("pushIds"))
         summary_report["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(summary_report.get("appChatIds"))
         summary_report["appId"] = str(summary_report.get("appId") or "").strip() or feishu_auth["appId"]
@@ -840,6 +858,18 @@ class TicketSyncService:
         summary_report["timeField"] = TicketSyncNotifyService._resolve_summary_time_field(
             summary_report.get("timeField")
         )
+        summary_report["appToken"] = str(summary_report.get("appToken") or "").strip()
+        summary_report["tableId"] = str(summary_report.get("tableId") or "").strip()
+        summary_report["viewId"] = str(summary_report.get("viewId") or "").strip()
+        summary_report["filterFormula"] = str(summary_report.get("filterFormula") or "").strip()
+        summary_report["statusField"] = str(summary_report.get("statusField") or "状态").strip() or "状态"
+        summary_report["categoryField"] = str(summary_report.get("categoryField") or "分类").strip() or "分类"
+        summary_report["priorityField"] = str(summary_report.get("priorityField") or "优先级").strip() or "优先级"
+        summary_report["bitableTimeField"] = str(summary_report.get("bitableTimeField") or "").strip()
+        summary_report["pageSize"] = min(max(cls._safe_int(summary_report.get("pageSize")) or 500, 1), 500)
+        summary_report["aiEnabled"] = bool(summary_report.get("aiEnabled"))
+        summary_report["aiProviderCode"] = str(summary_report.get("aiProviderCode") or "").strip()
+        summary_report["aiPromptCode"] = str(summary_report.get("aiPromptCode") or "").strip()
         summary_report["windowMinutes"] = max(cls._safe_int(summary_report.get("windowMinutes")) or 60, 1)
         summary_report["endDelayMinutes"] = max(cls._safe_int(summary_report.get("endDelayMinutes")) or 0, 0)
         summary_report["startTime"] = str(summary_report.get("startTime") or "").strip()
@@ -2040,6 +2070,9 @@ class TicketSyncService:
         source_type: str,
         source_ref: str,
         force_reclassify: bool = False,
+        classification_strategy: str = "ai",
+        regex_rules: list[dict[str, Any]] | None = None,
+        ai_prompt_code: str | None = None,
         pre_classified_category: str | None = None,
         pre_classified_meta: dict[str, Any] | None = None,
         prefer_no_ai_fallback: bool = False,
@@ -2054,6 +2087,9 @@ class TicketSyncService:
         :param source_type: 分类来源类型
         :param source_ref: 分类来源引用
         :param force_reclassify: 是否强制覆盖已有分类
+        :param classification_strategy: 分类策略（ai/regex）
+        :param regex_rules: 正则归类规则列表
+        :param ai_prompt_code: AI归类提示词编码，留空走系统配置
         :param pre_classified_category: 预提取分类结果，非空时优先使用
         :param pre_classified_meta: 预提取分类元信息
         :param prefer_no_ai_fallback: 预提取场景下，分类缺失时是否不再追加第二次 AI 分类调用
@@ -2069,6 +2105,16 @@ class TicketSyncService:
 
         normalized_category = str(pre_classified_category or "").strip()
         category_meta = dict(pre_classified_meta or {})
+        normalized_strategy = str(classification_strategy or "ai").strip().lower()
+        if normalized_strategy not in {"ai", "regex"}:
+            normalized_strategy = "ai"
+        if normalized_strategy == "regex" and not normalized_category:
+            normalized_category, regex_meta = cls._classify_ticket_category_by_regex(
+                title=title,
+                description=description,
+                regex_rules=regex_rules,
+            )
+            category_meta = {**category_meta, **regex_meta}
         if not normalized_category:
             if prefer_no_ai_fallback:
                 return ticket, {
@@ -2081,6 +2127,7 @@ class TicketSyncService:
                 db,
                 title=title,
                 description=description,
+                override_prompt_code=ai_prompt_code,
                 source_type=source_type,
                 source_id=ticket.ticket_id,
                 source_ref=source_ref,
@@ -2090,7 +2137,7 @@ class TicketSyncService:
         if not normalized_category:
             return ticket, {
                 "skipped": True,
-                "skipReason": str(category_meta.get("error") or "AI未返回可识别分类").strip(),
+                "skipReason": str(category_meta.get("error") or "未返回可识别分类").strip(),
                 "categoryName": existing_category,
                 "meta": category_meta,
             }
@@ -2101,6 +2148,8 @@ class TicketSyncService:
             "providerCode": category_meta.get("provider_code"),
             "promptCode": category_meta.get("prompt_code"),
             "rawCategory": category_meta.get("raw_category"),
+            "strategy": category_meta.get("strategy") or normalized_strategy,
+            "matchedPattern": category_meta.get("matchedPattern"),
             "classifiedAt": cls._now_iso(),
             "forceReclassify": bool(force_reclassify),
         }
@@ -2145,6 +2194,60 @@ class TicketSyncService:
                 return str(matched.group(1)).strip()
             return str(matched.group(0)).strip()
         return None
+
+    @classmethod
+    def _classify_ticket_category_by_regex(
+        cls,
+        *,
+        title: str,
+        description: str,
+        regex_rules: list[dict[str, Any]] | None,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        使用正则规则匹配工单分类。
+
+        :param title: 工单标题。
+        :param description: 工单描述。
+        :param regex_rules: 规则列表，元素包含 pattern/category/flags。
+        :return: (分类名称, 元信息)。
+        """
+        text = "\n".join(
+            [
+                str(title or "").strip(),
+                str(description or "").strip(),
+            ]
+        ).strip()
+        if not text:
+            return "", {"strategy": "regex", "error": "工单标题和描述都为空"}
+        rules = regex_rules if isinstance(regex_rules, list) else []
+        if not rules:
+            return "", {"strategy": "regex", "error": "未配置正则归类规则"}
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            pattern = str(rule.get("pattern") or "").strip()
+            category_name = str(rule.get("category") or "").strip()
+            if not pattern or not category_name:
+                continue
+            flags_text = str(rule.get("flags") or "").strip().lower()
+            regex_flags = 0
+            if "i" in flags_text:
+                regex_flags |= re.IGNORECASE
+            if "m" in flags_text:
+                regex_flags |= re.MULTILINE
+            if "s" in flags_text:
+                regex_flags |= re.DOTALL
+            try:
+                if re.search(pattern, text, flags=regex_flags):
+                    return category_name, {
+                        "strategy": "regex",
+                        "matchedPattern": pattern,
+                        "raw_category": category_name,
+                    }
+            except re.error as exc:
+                logger.warning(f"正则归类规则无效，已跳过: pattern={pattern}, error={exc}")
+                continue
+        return "", {"strategy": "regex", "error": "未命中正则归类规则"}
 
     @classmethod
     def _detect_fields(
@@ -2828,6 +2931,80 @@ class TicketSyncService:
         )
 
     @classmethod
+    def _is_celery_worker_available(cls) -> bool:
+        """
+        判断 Celery Worker 当前是否可用（基于 inspect.ping）。
+
+        :return: Worker 可用返回 True，否则返回 False。
+        """
+        try:
+            from config.celery_app import celery_app
+
+            inspector = celery_app.control.inspect(timeout=1.0)
+            ping_result = inspector.ping() if inspector else {}
+            return bool(ping_result)
+        except Exception as exc:
+            logger.warning(f"检测Celery可用性失败，降级本地后台任务: error={exc}")
+            return False
+
+    @classmethod
+    def dispatch_deferred_sync_post_process_task(
+        cls,
+        sync_payload: dict[str, Any],
+        current_user_payload: dict[str, Any],
+        sync_scene: str = "external_sync",
+    ) -> dict[str, Any]:
+        """
+        分发外部工单延后后处理任务。
+
+        优先在 Celery Worker 可用时投递 Celery 任务；不可用或投递失败时由调用方回退本地后台任务。
+
+        :param sync_payload: 外部同步入参字典。
+        :param current_user_payload: 当前用户字典。
+        :param sync_scene: 同步触发场景。
+        :return: 分发结果摘要。
+        """
+        ticket_no = str(sync_payload.get("ticketNo") or sync_payload.get("ticket_no") or "").strip()
+        if not cls._is_celery_worker_available():
+            return {
+                "mode": cls.BACKGROUND_DISPATCH_MODE,
+                "celeryAvailable": False,
+                "reason": "celery_worker_unavailable",
+                "ticketNo": ticket_no or None,
+            }
+        try:
+            from config.celery_app import celery_app
+            from module_task.celery_contract import CELERY_TICKET_SYNC_DEFERRED_POST_PROCESS_TASK
+
+            async_result = celery_app.send_task(
+                CELERY_TICKET_SYNC_DEFERRED_POST_PROCESS_TASK,
+                args=[sync_payload, current_user_payload, sync_scene],
+            )
+            task_id = str(getattr(async_result, "id", "") or "").strip()
+            logger.info(
+                f"外部工单延后后处理已投递Celery: ticket_no={ticket_no or '-'}, "
+                f"sync_scene={sync_scene}, celery_task_id={task_id or '-'}"
+            )
+            return {
+                "mode": cls.CELERY_DISPATCH_MODE,
+                "celeryAvailable": True,
+                "taskName": CELERY_TICKET_SYNC_DEFERRED_POST_PROCESS_TASK,
+                "taskId": task_id or None,
+                "ticketNo": ticket_no or None,
+            }
+        except Exception as exc:
+            logger.warning(
+                f"外部工单延后后处理投递Celery失败，降级本地后台任务: "
+                f"ticket_no={ticket_no or '-'}, sync_scene={sync_scene}, error={exc}"
+            )
+            return {
+                "mode": cls.BACKGROUND_DISPATCH_MODE,
+                "celeryAvailable": False,
+                "reason": f"celery_dispatch_failed:{exc}",
+                "ticketNo": ticket_no or None,
+            }
+
+    @classmethod
     def run_deferred_sync_post_process(
         cls,
         sync_payload: dict[str, Any],
@@ -3340,20 +3517,36 @@ class TicketSyncService:
         :return: 执行结果摘要
         """
         current_user_name = _user_name(current_user) or "system"
-        if getattr(request, "ticket_ids", None):
-            query = (
-                db.query(Ticket)
-                .filter(Ticket.del_flag == "0", Ticket.ticket_id.in_(request.ticket_ids))
-                .order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc())
+        strategy = str(getattr(request, "strategy", "ai") or "ai").strip().lower()
+        if strategy not in {"ai", "regex"}:
+            strategy = "ai"
+        ai_prompt_code = str(getattr(request, "ai_prompt_code", "") or "").strip() or None
+        regex_rules = getattr(request, "regex_rules", None)
+        only_uncategorized = bool(getattr(request, "only_uncategorized", False))
+        all_tickets = bool(getattr(request, "all_tickets", False))
+
+        base_query = db.query(Ticket).filter(Ticket.del_flag == "0")
+        if only_uncategorized:
+            base_query = base_query.filter(
+                or_(
+                    Ticket.category_name.is_(None),
+                    Ticket.category_name == "",
+                )
             )
+        base_query = base_query.order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc())
+
+        if getattr(request, "ticket_ids", None):
+            query = base_query.filter(Ticket.ticket_id.in_(request.ticket_ids))
             total = query.count()
             tickets = query.all()
         else:
-            page_num = max(int(getattr(request, "page_num", 1) or 1), 1)
-            page_size = min(max(int(getattr(request, "page_size", 100) or 100), 1), 500)
-            query = db.query(Ticket).filter(Ticket.del_flag == "0").order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc())
-            total = query.count()
-            tickets = query.offset((page_num - 1) * page_size).limit(page_size).all()
+            total = base_query.count()
+            if all_tickets:
+                tickets = base_query.all()
+            else:
+                page_num = max(int(getattr(request, "page_num", 1) or 1), 1)
+                page_size = min(max(int(getattr(request, "page_size", 100) or 100), 1), 500)
+                tickets = base_query.offset((page_num - 1) * page_size).limit(page_size).all()
 
         summary = {
             "total": total,
@@ -3361,8 +3554,24 @@ class TicketSyncService:
             "successCount": 0,
             "skippedCount": 0,
             "failedCount": 0,
+            "strategy": strategy,
+            "onlyUncategorized": only_uncategorized,
+            "allTickets": all_tickets,
             "details": [],
         }
+        if strategy == "regex" and not regex_rules:
+            summary["skippedCount"] = len(tickets)
+            summary["details"] = [
+                {
+                    "ticketId": ticket.ticket_id,
+                    "ticketNo": ticket.ticket_no,
+                    "skipped": True,
+                    "skipReason": "未配置正则归类规则",
+                }
+                for ticket in tickets
+            ]
+            return summary
+
         for ticket in tickets:
             try:
                 _, category_result = cls._run_auto_ticket_category_classification(
@@ -3374,6 +3583,9 @@ class TicketSyncService:
                     source_type="ticket_batch_reclassify",
                     source_ref=str(ticket.ticket_no or ticket.ticket_id),
                     force_reclassify=bool(getattr(request, "force_reclassify", False)),
+                    classification_strategy=strategy,
+                    regex_rules=regex_rules,
+                    ai_prompt_code=ai_prompt_code,
                 )
                 detail = {
                     "ticketId": ticket.ticket_id,
@@ -3400,6 +3612,35 @@ class TicketSyncService:
                     }
                 )
         return summary
+
+    @classmethod
+    def get_uncategorized_ticket_statistics_services(cls, db: Session) -> dict[str, Any]:
+        """
+        统计当前工单中未归类数量。
+
+        :param db: 数据库会话。
+        :return: 未归类统计结果。
+        """
+        total_count = db.query(Ticket).filter(Ticket.del_flag == "0").count()
+        uncategorized_count = (
+            db.query(Ticket)
+            .filter(
+                Ticket.del_flag == "0",
+                or_(
+                    Ticket.category_name.is_(None),
+                    Ticket.category_name == "",
+                ),
+            )
+            .count()
+        )
+        categorized_count = max(total_count - uncategorized_count, 0)
+        uncategorized_ratio = round((uncategorized_count / total_count) * 100, 2) if total_count else 0
+        return {
+            "totalCount": total_count,
+            "categorizedCount": categorized_count,
+            "uncategorizedCount": uncategorized_count,
+            "uncategorizedRatio": uncategorized_ratio,
+        }
 
     @classmethod
     def _build_remote_sync_upsert_model(

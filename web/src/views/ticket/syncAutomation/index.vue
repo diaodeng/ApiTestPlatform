@@ -119,6 +119,18 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
+            <el-form-item label="统计数据源">
+              <el-select v-model="form.summaryReport.dataSource" style="width: 100%">
+                <el-option
+                  v-for="item in summaryDataSourceOptions"
+                  :key="`summary-source-${item.value}`"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
             <el-form-item label="推送渠道">
               <el-select
                 v-model="form.summaryReport.pushIds"
@@ -151,8 +163,8 @@
               />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="时间字段">
+          <el-col v-if="form.summaryReport.dataSource === 'local'" :xs="24" :md="12">
+            <el-form-item label="本地时间字段">
               <el-select v-model="form.summaryReport.timeField" style="width: 100%">
                 <el-option
                   v-for="item in summaryTimeFieldOptions"
@@ -161,6 +173,56 @@
                   :value="item.value"
                 />
               </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+            <el-form-item label="多维表格 appToken">
+              <el-input v-model="form.summaryReport.appToken" placeholder="飞书多维表格应用 Token" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+            <el-form-item label="多维表格 tableId">
+              <el-input v-model="form.summaryReport.tableId" placeholder="飞书多维表格表ID" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+            <el-form-item label="视图 viewId">
+              <el-input v-model="form.summaryReport.viewId" placeholder="可选，不填默认表视图" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+            <el-form-item label="多维时间字段">
+              <el-input v-model="form.summaryReport.bitableTimeField" placeholder="可选，不填回退记录创建时间" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
+            <el-form-item label="状态字段">
+              <el-input v-model="form.summaryReport.statusField" placeholder="默认：状态" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
+            <el-form-item label="分类字段">
+              <el-input v-model="form.summaryReport.categoryField" placeholder="默认：分类" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
+            <el-form-item label="优先级字段">
+              <el-input v-model="form.summaryReport.priorityField" placeholder="默认：优先级" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+            <el-form-item label="分页大小">
+              <el-input-number v-model="form.summaryReport.pageSize" :min="1" :max="500" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :span="24">
+            <el-form-item label="过滤公式">
+              <el-input
+                v-model="form.summaryReport.filterFormula"
+                type="textarea"
+                :rows="3"
+                placeholder='可选，飞书 filter 公式，例如 CurrentValue.[状态] != "已关闭"'
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
@@ -188,6 +250,21 @@
               <el-input v-model="form.summaryReport.appSecret" show-password placeholder="覆盖统一凭证（可选）" />
             </el-form-item>
           </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="启用AI解读">
+              <el-switch v-model="form.summaryReport.aiEnabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="AI Provider编码">
+              <el-input v-model="form.summaryReport.aiProviderCode" placeholder="示例：openai_default" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="AI提示词编码">
+              <el-input v-model="form.summaryReport.aiPromptCode" placeholder="示例：ticket_summary_report_default" />
+            </el-form-item>
+          </el-col>
           <el-col :span="24">
             <el-form-item label="固定开始时间">
               <el-input v-model="form.summaryReport.startTime" placeholder="可选，格式如 2026-06-10 09:00:00" />
@@ -204,7 +281,7 @@
                 v-model="form.summaryReport.messageTemplate"
                 type="textarea"
                 :rows="6"
-                placeholder="可用变量：${start_time} ${end_time} ${time_field} ${total_count} ${status_summary} ${category_summary} ${priority_summary} ${now_time}"
+                placeholder="可用变量：${data_source} ${start_time} ${end_time} ${time_field} ${total_count} ${status_summary} ${category_summary} ${priority_summary} ${ai_summary} ${now_time}"
               />
             </el-form-item>
           </el-col>
@@ -574,6 +651,80 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
+          <span>自动分类管理</span>
+          <el-tag effect="plain">支持未归类统计与批量重归类</el-tag>
+        </div>
+      </template>
+      <el-form :model="autoCategoryForm" label-width="150px">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="归类策略">
+              <el-select v-model="autoCategoryForm.strategy" style="width: 100%">
+                <el-option label="AI归类" value="ai" />
+                <el-option label="正则归类" value="regex" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col v-if="autoCategoryForm.strategy === 'ai'" :xs="24" :md="12">
+            <el-form-item label="AI提示词编码">
+              <el-input v-model="autoCategoryForm.aiPromptCode" placeholder="可选，留空走系统默认提示词" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="8">
+            <el-form-item label="仅未归类">
+              <el-switch v-model="autoCategoryForm.onlyUncategorized" inline-prompt active-text="是" inactive-text="否" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="8">
+            <el-form-item label="全量扫描">
+              <el-switch v-model="autoCategoryForm.allTickets" inline-prompt active-text="是" inactive-text="否" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="8">
+            <el-form-item label="强制覆盖已有分类">
+              <el-switch v-model="autoCategoryForm.forceReclassify" inline-prompt active-text="是" inactive-text="否" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="!autoCategoryForm.allTickets" :xs="24" :md="12">
+            <el-form-item label="分页页码">
+              <el-input-number v-model="autoCategoryForm.pageNum" :min="1" :max="999999" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="!autoCategoryForm.allTickets" :xs="24" :md="12">
+            <el-form-item label="分页大小">
+              <el-input-number v-model="autoCategoryForm.pageSize" :min="1" :max="500" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="autoCategoryForm.strategy === 'regex'" :span="24">
+            <el-form-item label="正则规则(JSON数组)">
+              <el-input
+                v-model="autoCategoryRegexText"
+                type="textarea"
+                :rows="6"
+                placeholder='示例：[{"pattern":"支付|扣款","category":"支付问题","flags":"i"}]'
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <el-space wrap>
+        <el-button :loading="autoCategoryStatsLoading" @click="handleLoadAutoCategoryStats">一键统计未归类工单</el-button>
+        <el-button type="primary" :loading="autoCategoryRunLoading" @click="handleBatchReclassifyByConfig">按当前配置重归类</el-button>
+        <el-button type="danger" plain :loading="autoCategoryRunLoading" @click="handleForceReclassifyAll">强制重归类全部</el-button>
+      </el-space>
+      <el-alert
+        v-if="autoCategoryStats"
+        class="mt16"
+        type="info"
+        show-icon
+        :closable="false"
+        :title="`工单总数 ${autoCategoryStats.totalCount || 0}，已归类 ${autoCategoryStats.categorizedCount || 0}，未归类 ${autoCategoryStats.uncategorizedCount || 0}（${autoCategoryStats.uncategorizedRatio || 0}%）`"
+      />
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
           <span>识别规则</span>
           <el-tag effect="plain">按文本匹配，找不到则保留原值</el-tag>
         </div>
@@ -706,6 +857,8 @@
 
 <script setup name="TicketSyncAutomation">
 import {
+  batchReclassifyTicketSync,
+  getTicketSyncAutoCategoryStats,
   getTicketSyncAutomationConfig,
   listTicketSyncNotifyPushOptions,
   previewTicketSyncPersonReminder,
@@ -725,7 +878,11 @@ const groupSendLoading = ref(false)
 const personPreviewLoading = ref(false)
 const personRunLoading = ref(false)
 const summaryRunLoading = ref(false)
+const autoCategoryStatsLoading = ref(false)
+const autoCategoryRunLoading = ref(false)
 const personPreviewResult = ref(null)
+const autoCategoryStats = ref(null)
+const autoCategoryRegexText = ref('[]')
 const groupSendForm = reactive({
   ticketNo: ''
 })
@@ -736,6 +893,15 @@ const personQueryForm = reactive({
 const summaryRunForm = reactive({
   startTime: '',
   endTime: ''
+})
+const autoCategoryForm = reactive({
+  strategy: 'ai',
+  aiPromptCode: '',
+  onlyUncategorized: true,
+  allTickets: true,
+  forceReclassify: true,
+  pageNum: 1,
+  pageSize: 100
 })
 
 const form = reactive(createDefaultForm())
@@ -769,6 +935,11 @@ const notifySendModes = [
 const personDataSourceOptions = [
   { label: '飞书多维表格统计', value: 'bitable' },
   { label: '本地工单数据统计', value: 'local' }
+]
+
+const summaryDataSourceOptions = [
+  { label: '本地工单数据统计', value: 'local' },
+  { label: '飞书多维表格统计', value: 'bitable' }
 ]
 
 const personLocalTimeFieldOptions = [
@@ -881,11 +1052,24 @@ function createDefaultForm() {
     summaryReport: {
       enabled: false,
       sendMode: 'push_config',
+      dataSource: 'local',
       pushIds: [],
       appChatIds: [],
       appId: '',
       appSecret: '',
       timeField: 'create_time',
+      appToken: '',
+      tableId: '',
+      viewId: '',
+      filterFormula: '',
+      statusField: '状态',
+      categoryField: '分类',
+      priorityField: '优先级',
+      bitableTimeField: '',
+      pageSize: 500,
+      aiEnabled: false,
+      aiProviderCode: '',
+      aiPromptCode: '',
       windowMinutes: 60,
       endDelayMinutes: 0,
       startTime: '',
@@ -1015,11 +1199,26 @@ function applyConfig(payload) {
   form.summaryReport = {
     enabled: Boolean(summaryReport.enabled),
     sendMode: summaryReport.sendMode || 'push_config',
+    dataSource: ['bitable', 'local'].includes(String(summaryReport.dataSource || '').trim().toLowerCase())
+      ? String(summaryReport.dataSource || '').trim().toLowerCase()
+      : 'local',
     pushIds: Array.isArray(summaryReport.pushIds) ? summaryReport.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
     appChatIds: Array.isArray(summaryReport.appChatIds) ? summaryReport.appChatIds.map(item => String(item).trim()).filter(Boolean) : [],
     appId: summaryReport.appId || '',
     appSecret: summaryReport.appSecret || '',
     timeField: summaryReport.timeField || 'create_time',
+    appToken: summaryReport.appToken || '',
+    tableId: summaryReport.tableId || '',
+    viewId: summaryReport.viewId || '',
+    filterFormula: summaryReport.filterFormula || '',
+    statusField: summaryReport.statusField || '状态',
+    categoryField: summaryReport.categoryField || '分类',
+    priorityField: summaryReport.priorityField || '优先级',
+    bitableTimeField: summaryReport.bitableTimeField || '',
+    pageSize: Number(summaryReport.pageSize || 500),
+    aiEnabled: Boolean(summaryReport.aiEnabled),
+    aiProviderCode: summaryReport.aiProviderCode || '',
+    aiPromptCode: summaryReport.aiPromptCode || '',
     windowMinutes: Number(summaryReport.windowMinutes || 60),
     endDelayMinutes: Number(summaryReport.endDelayMinutes || 0),
     startTime: summaryReport.startTime || '',
@@ -1166,8 +1365,23 @@ async function handleSave() {
     payload.summaryReport.appChatIds = Array.isArray(payload.summaryReport?.appChatIds)
       ? payload.summaryReport.appChatIds.map(item => String(item || '').trim()).filter(Boolean)
       : []
+    payload.summaryReport.dataSource = ['bitable', 'local'].includes(String(payload.summaryReport?.dataSource || '').trim().toLowerCase())
+      ? String(payload.summaryReport?.dataSource || '').trim().toLowerCase()
+      : 'local'
     payload.summaryReport.appId = String(payload.summaryReport?.appId || '').trim()
     payload.summaryReport.appSecret = String(payload.summaryReport?.appSecret || '').trim()
+    payload.summaryReport.appToken = String(payload.summaryReport?.appToken || '').trim()
+    payload.summaryReport.tableId = String(payload.summaryReport?.tableId || '').trim()
+    payload.summaryReport.viewId = String(payload.summaryReport?.viewId || '').trim()
+    payload.summaryReport.filterFormula = String(payload.summaryReport?.filterFormula || '').trim()
+    payload.summaryReport.statusField = String(payload.summaryReport?.statusField || '状态').trim() || '状态'
+    payload.summaryReport.categoryField = String(payload.summaryReport?.categoryField || '分类').trim() || '分类'
+    payload.summaryReport.priorityField = String(payload.summaryReport?.priorityField || '优先级').trim() || '优先级'
+    payload.summaryReport.bitableTimeField = String(payload.summaryReport?.bitableTimeField || '').trim()
+    payload.summaryReport.pageSize = Math.min(Math.max(Number(payload.summaryReport?.pageSize || 500), 1), 500)
+    payload.summaryReport.aiEnabled = Boolean(payload.summaryReport?.aiEnabled)
+    payload.summaryReport.aiProviderCode = String(payload.summaryReport?.aiProviderCode || '').trim()
+    payload.summaryReport.aiPromptCode = String(payload.summaryReport?.aiPromptCode || '').trim()
     await saveTicketSyncAutomationConfig(payload)
     proxy.$modal.msgSuccess('保存成功')
     loadConfig()
@@ -1272,6 +1486,96 @@ function handleRunSummaryReport() {
     })
 }
 
+function parseAutoCategoryRegexRules() {
+  if (autoCategoryForm.strategy !== 'regex') {
+    return null
+  }
+  const text = String(autoCategoryRegexText.value || '').trim()
+  if (!text) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(text)
+    if (!Array.isArray(parsed)) {
+      throw new Error('正则规则必须是 JSON 数组')
+    }
+    return parsed
+  } catch (error) {
+    throw new Error(error?.message || '正则规则JSON格式错误')
+  }
+}
+
+function buildAutoCategoryPayload(overrides = {}) {
+  const payload = {
+    strategy: autoCategoryForm.strategy,
+    aiPromptCode: String(autoCategoryForm.aiPromptCode || '').trim() || null,
+    onlyUncategorized: Boolean(autoCategoryForm.onlyUncategorized),
+    allTickets: Boolean(autoCategoryForm.allTickets),
+    forceReclassify: Boolean(autoCategoryForm.forceReclassify),
+    pageNum: Math.max(Number(autoCategoryForm.pageNum || 1), 1),
+    pageSize: Math.min(Math.max(Number(autoCategoryForm.pageSize || 100), 1), 500),
+    regexRules: parseAutoCategoryRegexRules()
+  }
+  return { ...payload, ...overrides }
+}
+
+function executeBatchReclassify(payload, successPrefix = '重归类执行完成') {
+  autoCategoryRunLoading.value = true
+  batchReclassifyTicketSync(payload)
+    .then(response => {
+      const data = response.data || {}
+      const successCount = Number(data.successCount || 0)
+      const skippedCount = Number(data.skippedCount || 0)
+      const failedCount = Number(data.failedCount || 0)
+      proxy.$modal.msgSuccess(`${successPrefix}：成功 ${successCount}，跳过 ${skippedCount}，失败 ${failedCount}`)
+      handleLoadAutoCategoryStats()
+    })
+    .catch(error => {
+      proxy.$modal.msgError(error?.message || '批量重归类失败')
+    })
+    .finally(() => {
+      autoCategoryRunLoading.value = false
+    })
+}
+
+function handleLoadAutoCategoryStats() {
+  autoCategoryStatsLoading.value = true
+  getTicketSyncAutoCategoryStats()
+    .then(response => {
+      autoCategoryStats.value = response.data || null
+      proxy.$modal.msgSuccess('未归类统计完成')
+    })
+    .catch(error => {
+      autoCategoryStats.value = null
+      proxy.$modal.msgError(error?.message || '未归类统计失败')
+    })
+    .finally(() => {
+      autoCategoryStatsLoading.value = false
+    })
+}
+
+function handleBatchReclassifyByConfig() {
+  try {
+    const payload = buildAutoCategoryPayload()
+    executeBatchReclassify(payload)
+  } catch (error) {
+    proxy.$modal.msgError(error?.message || '批量重归类参数错误')
+  }
+}
+
+function handleForceReclassifyAll() {
+  try {
+    const payload = buildAutoCategoryPayload({
+      allTickets: true,
+      onlyUncategorized: false,
+      forceReclassify: true
+    })
+    executeBatchReclassify(payload, '强制全量重归类完成')
+  } catch (error) {
+    proxy.$modal.msgError(error?.message || '强制全量重归类参数错误')
+  }
+}
+
 function handleSendGroupPushByTicket() {
   const ticketNo = String(groupSendForm.ticketNo || '').trim()
   if (!ticketNo) {
@@ -1297,6 +1601,7 @@ function handleSendGroupPushByTicket() {
 onMounted(() => {
   loadConfig()
   loadPushOptions()
+  handleLoadAutoCategoryStats()
 })
 </script>
 

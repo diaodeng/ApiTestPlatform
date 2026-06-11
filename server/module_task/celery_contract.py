@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 CELERY_EXECUTE_JOB_TASK = "module_task.execute_registered_job"
+CELERY_TICKET_SYNC_DEFERRED_POST_PROCESS_TASK = "module_ticket.sync_deferred_post_process"
 
 
 def normalize_args_json(value: Any) -> str:

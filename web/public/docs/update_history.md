@@ -1,6 +1,10 @@
 ## 更新历史
 
 ### latest
+1. 外部推单接口 `/ticket/sync/external` 的延后后处理改为“优先投递 Celery，失败回退本地后台任务”：入库仍立即返回，返回体新增 `deferredDispatch`（包含 `mode/taskId/reason`），用于明确当前是 Celery 执行还是本地兜底执行。
+1. 工单汇总通知新增统计数据源与 AI 解读配置：`summaryReport.dataSource` 支持 `local/bitable`，`bitable` 模式可配置 `appToken/tableId/viewId/filterFormula/statusField/categoryField/priorityField/bitableTimeField/pageSize`；同时新增 `aiEnabled/aiProviderCode/aiPromptCode`，汇总模板支持 `${data_source}` 与 `${ai_summary}` 变量。
+1. 汇总统计后端执行链路补齐：按数据源分流到本地工单或飞书多维表格统计，并在配置启用时调用轻量 AI 输出解读文本；配置缺失时改为“跳过并返回原因”，不再直接抛异常中断发送流程。
+1. 工单同步配置页新增“自动分类管理”工具区：支持一键统计未归类工单（`GET /ticket/sync/auto-category/stats`）、按当前策略批量重归类、以及“强制重归类全部”；归类策略支持 AI/正则，AI 可指定提示词编码，正则支持 JSON 规则数组。
 1. 按人催办新增统计数据源开关：`personReminder.dataSource` 支持 `bitable/local`；可按配置选择“飞书多维表格统计”或“本地工单表按当前处理人统计”。`local` 模式下支持本地时间字段选择（`update_time/create_time/started_at/resolved_at/closed_at`），并在预览/执行日志中输出数据源信息。
 1. 群消息推送幂等逻辑补强：自动推送仍保留“已推送不重复”判断，并补充明确日志；去重标记条件从仅 `pushSuccessCount>0` 扩展为“机器人或飞书应用任一成功即标记”，避免 `feishu_app` 模式重复自动推送；手动推送新增日志说明“manual_trigger=true，不受自动去重限制”。
 1. 外部推单字段补强：新增 `storeInfo/store_info` 门店字段兼容，门店匹配逻辑仍为“优先按配置门店映射，未命中保留原始值”；群消息模板新增 `reporter_name/reporterName` 与 `store_info/storeInfo` 变量，支持直接在通知模板中引用。

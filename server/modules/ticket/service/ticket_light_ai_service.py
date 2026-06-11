@@ -1246,6 +1246,8 @@ class TicketLightAiService:
         *,
         title: str,
         description: str,
+        override_provider_code: str | None = None,
+        override_prompt_code: str | None = None,
         source_type: str = "ticket",
         source_id: int | None = None,
         source_ref: str | None = None,
@@ -1256,6 +1258,8 @@ class TicketLightAiService:
         :param db: 数据库会话
         :param title: 工单标题
         :param description: 工单描述
+        :param override_provider_code: 可选覆盖 Provider 编码，留空走系统配置。
+        :param override_prompt_code: 可选覆盖提示词编码，留空走系统配置。
         :param source_type: 来源类型
         :param source_id: 来源ID
         :param source_ref: 来源引用
@@ -1273,13 +1277,17 @@ class TicketLightAiService:
             )
             return "", {"provider_code": "", "prompt_code": "", "category_name": "", "skipped": True}
 
-        provider_code, prompt_code = cls._resolve_task_settings(
+        default_provider_code, default_prompt_code = cls._resolve_task_settings(
             db, cls.CONFIG_CATEGORY_CLASSIFY_PROVIDER, cls.CONFIG_CATEGORY_CLASSIFY_PROMPT
         )
+        provider_code = str(override_provider_code or "").strip() or default_provider_code
+        prompt_code = str(override_prompt_code or "").strip() or default_prompt_code
         request_payload = {
             "title": title_text,
             "description": content,
             "categories": list(cls.TICKET_CATEGORY_CANDIDATES),
+            "overrideProviderCode": str(override_provider_code or "").strip() or None,
+            "overridePromptCode": str(override_prompt_code or "").strip() or None,
         }
         if not provider_code or not prompt_code:
             execution_id = cls._write_execution_record(

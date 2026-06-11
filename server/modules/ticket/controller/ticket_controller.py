@@ -498,6 +498,7 @@ async def sync_external_ticket(
     可选链接字段：`url` / `ticketUrl` / `detailUrl`（将写入 `ticket_url` 供页面跳转和消息模板使用）。
     `title` 可选，缺省时由服务层按“轻量AI总结 -> 描述前100字符”规则补齐。
     为避免长时间阻塞主请求，AI翻译、AI标题总结、自动化和群推送改为入库成功后后台异步执行。
+    若 Celery Worker 可用，优先投递 Celery 任务；否则回退 FastAPI 本地后台任务。
     """
     try:
         payload = await _load_external_sync_payload(request)
@@ -519,13 +520,22 @@ async def sync_external_ticket(
             defer_post_process=True,
         )
         if result.is_success:
-            background_tasks.add_task(
-                TicketSyncService.run_deferred_sync_post_process,
+            deferred_dispatch = TicketSyncService.dispatch_deferred_sync_post_process_task(
                 sync_object.model_dump(),
                 current_user.model_dump(),
                 "external_sync",
             )
-            return ResponseUtil.success(data=result.result, msg=result.message)
+            if deferred_dispatch.get("mode") != TicketSyncService.CELERY_DISPATCH_MODE:
+                background_tasks.add_task(
+                    TicketSyncService.run_deferred_sync_post_process,
+                    sync_object.model_dump(),
+                    current_user.model_dump(),
+                    "external_sync",
+                )
+
+            result_data = dict(result.result or {}) if isinstance(result.result, dict) else {"rawResult": result.result}
+            result_data["deferredDispatch"] = deferred_dispatch
+            return ResponseUtil.success(data=result_data, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -764,6 +774,28 @@ async def batch_reclassify_sync_tickets(
     """
     try:
         result = TicketSyncService.batch_reclassify_ticket_categories_services(query_db, query_object, current_user)
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/sync/auto-category/stats",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:list"))],
+)
+async def get_sync_auto_category_stats(
+    request: Request,
+    query_db: Session = Depends(get_db),
+):
+    """
+    获取工单自动归类统计摘要。
+    :param request: 请求对象。
+    :param query_db: 数据库会话。
+    :return: 未归类统计结果。
+    """
+    try:
+        result = TicketSyncService.get_uncategorized_ticket_statistics_services(query_db)
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)

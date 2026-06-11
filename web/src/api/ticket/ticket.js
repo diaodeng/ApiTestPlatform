@@ -143,6 +143,14 @@ export function batchReclassifyTicketSync(data) {
   });
 }
 
+// 获取自动分类统计（未归类数量）
+export function getTicketSyncAutoCategoryStats() {
+  return request({
+    url: '/ticket/sync/auto-category/stats',
+    method: 'get',
+  });
+}
+
 // 新增工单
 export function addTicket(data) {
   return request({

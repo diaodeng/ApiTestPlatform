@@ -630,8 +630,16 @@ class TicketBatchReclassifyRequestModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     ticket_ids: list[int] | None = Field(default=None, description="指定重归类的工单ID列表，留空时按分页扫描")
+    all_tickets: bool = Field(default=False, description="是否忽略分页直接扫描全部工单")
+    only_uncategorized: bool = Field(default=False, description="是否仅处理未归类工单")
     page_num: int = Field(default=1, description="分页页码，ticketIds 为空时生效")
     page_size: int = Field(default=100, description="分页大小，ticketIds 为空时生效")
+    strategy: str = Field(default="ai", description="归类策略：ai/regex")
+    ai_prompt_code: str | None = Field(default=None, description="AI归类提示词编码，留空走系统配置")
+    regex_rules: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="正则归类规则列表，元素示例：{\"pattern\":\"支付|扣款\",\"category\":\"支付问题\"}",
+    )
     force_reclassify: bool = Field(default=False, description="是否覆盖已归类工单")
 
     @model_validator(mode="after")
@@ -649,8 +657,29 @@ class TicketBatchReclassifyRequestModel(BaseModel):
             if ticket_id > 0 and ticket_id not in normalized_ids:
                 normalized_ids.append(ticket_id)
         self.ticket_ids = normalized_ids or None
+        self.all_tickets = bool(self.all_tickets)
+        self.only_uncategorized = bool(self.only_uncategorized)
         self.page_num = max(int(self.page_num or 1), 1)
         self.page_size = min(max(int(self.page_size or 100), 1), 500)
+        strategy_value = str(self.strategy or "ai").strip().lower()
+        self.strategy = strategy_value if strategy_value in {"ai", "regex"} else "ai"
+        self.ai_prompt_code = str(self.ai_prompt_code or "").strip() or None
+        normalized_rules: list[dict[str, Any]] = []
+        for item in self.regex_rules or []:
+            if not isinstance(item, dict):
+                continue
+            pattern = str(item.get("pattern") or "").strip()
+            category = str(item.get("category") or item.get("categoryName") or "").strip()
+            if not pattern or not category:
+                continue
+            normalized_rules.append(
+                {
+                    "pattern": pattern,
+                    "category": category,
+                    "flags": str(item.get("flags") or "").strip(),
+                }
+            )
+        self.regex_rules = normalized_rules or None
         self.force_reclassify = bool(self.force_reclassify)
         return self
 

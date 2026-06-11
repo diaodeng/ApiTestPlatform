@@ -5,6 +5,7 @@ import threading
 import traceback
 import uuid
 from datetime import datetime
+from typing import Any
 from urllib.parse import quote
 
 from celery.signals import worker_ready
@@ -17,6 +18,7 @@ from config.env import RedisConfig
 from module_task import scheduler_maintenance, scheduler_promo, scheduler_qtr, scheduler_test  # noqa: F401
 from module_task.celery_contract import (
     CELERY_EXECUTE_JOB_TASK,
+    CELERY_TICKET_SYNC_DEFERRED_POST_PROCESS_TASK,
     parse_payload_args,
     parse_payload_kwargs,
 )
@@ -669,6 +671,40 @@ def execute_registered_job(self, payload: dict):
                 runtime_client.delete(state_key, stop_key)
         except Exception as exc:
             logger.warning(f"释放任务锁失败[{task_id}]：{exc}")
+
+
+@celery_app.task(name=CELERY_TICKET_SYNC_DEFERRED_POST_PROCESS_TASK, bind=True, ignore_result=True)
+def run_ticket_sync_deferred_post_process_task(
+    self,
+    sync_payload: dict[str, Any],
+    current_user_payload: dict[str, Any],
+    sync_scene: str = "external_sync",
+):
+    """
+    执行工单外部同步延后后处理任务（AI、自动化、群推送）。
+
+    :param self: Celery task 实例（bind=True 自动注入）。
+    :param sync_payload: 外部同步请求载荷字典。
+    :param current_user_payload: 当前用户字典。
+    :param sync_scene: 同步触发场景，支持 external_sync/remote_pull。
+    :return: 执行摘要。
+    """
+    ticket_no = str(sync_payload.get("ticketNo") or sync_payload.get("ticket_no") or "").strip()
+    try:
+        from modules.ticket.service.ticket_sync_service import TicketSyncService
+
+        logger.info(
+            f"Celery接收外部工单延后后处理任务: ticket_no={ticket_no or '-'}, "
+            f"sync_scene={sync_scene}, task_id={self.request.id}"
+        )
+        TicketSyncService.run_deferred_sync_post_process(sync_payload, current_user_payload, sync_scene)
+        return {"status": "success", "ticketNo": ticket_no or None}
+    except Exception as exc:
+        logger.exception(
+            f"Celery执行外部工单延后后处理失败: "
+            f"ticket_no={ticket_no or '-'}, sync_scene={sync_scene}, error={exc}"
+        )
+        return {"status": "failed", "ticketNo": ticket_no or None, "error": str(exc)}
 
 
 @worker_ready.connect

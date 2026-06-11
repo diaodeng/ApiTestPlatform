@@ -9,12 +9,15 @@ import requests
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from module_admin.dao.ai_provider_dao import AiProviderDao
+from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_admin.entity.do.user_do import SysUser
 from module_hrm.dao.push_dao import PushDao
 from module_hrm.entity.do.push_do import PushTarget
 from module_hrm.entity.vo.push_vo import PushModel
 from module_hrm.utils.parser import parse_string
 from modules.ticket.entity.do.ticket_do import Ticket
+from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from utils.log_util import logger
 from utils.message_util import MessageHandler
 
@@ -56,6 +59,7 @@ class TicketSyncNotifyService:
         "状态统计：\n${status_summary}\n\n"
         "分类统计：\n${category_summary}\n\n"
         "优先级统计：\n${priority_summary}\n\n"
+        "AI解读：\n${ai_summary}\n\n"
         "生成时间：${now_time}"
     )
     SEND_MODE_PUSH_CONFIG = "push_config"
@@ -63,6 +67,8 @@ class TicketSyncNotifyService:
     SEND_MODE_HYBRID = "hybrid"
     PERSON_DATA_SOURCE_BITABLE = "bitable"
     PERSON_DATA_SOURCE_LOCAL = "local"
+    SUMMARY_DATA_SOURCE_BITABLE = "bitable"
+    SUMMARY_DATA_SOURCE_LOCAL = "local"
 
     @classmethod
     def _safe_int(cls, value: Any) -> int | None:
@@ -761,6 +767,19 @@ class TicketSyncNotifyService:
         return cls.PERSON_DATA_SOURCE_BITABLE
 
     @classmethod
+    def _normalize_summary_data_source(cls, value: Any) -> str:
+        """
+        归一化汇总统计数据源。
+
+        :param value: 原始数据源文本。
+        :return: 归一化后的数据源（bitable/local）。
+        """
+        source = str(value or "").strip().lower()
+        if source in {cls.SUMMARY_DATA_SOURCE_BITABLE, cls.SUMMARY_DATA_SOURCE_LOCAL}:
+            return source
+        return cls.SUMMARY_DATA_SOURCE_LOCAL
+
+    @classmethod
     def _resolve_local_person_time_field(cls, value: Any) -> str:
         """
         归一化本地工单统计使用的时间字段。
@@ -772,6 +791,66 @@ class TicketSyncNotifyService:
         if field in {"create_time", "update_time", "closed_at", "resolved_at", "started_at"}:
             return field
         return "update_time"
+
+    @classmethod
+    def _resolve_bitable_summary_time_field(cls, value: Any) -> str:
+        """
+        归一化飞书多维表格汇总统计时间字段。
+
+        :param value: 原始时间字段名。
+        :return: 时间字段名，未配置返回空字符串。
+        """
+        return str(value or "").strip()
+
+    @classmethod
+    def _normalize_summary_counter_label(cls, value: Any) -> str:
+        """
+        归一化汇总统计字段值，便于计数聚合。
+
+        :param value: 原始字段值。
+        :return: 归一化后的文本。
+        """
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            merged: list[str] = []
+            for item in value:
+                item_text = cls._normalize_summary_counter_label(item)
+                if item_text and item_text not in merged:
+                    merged.append(item_text)
+            return "、".join(merged)
+        if isinstance(value, dict):
+            for key in ("text", "name", "value", "label"):
+                item_text = str(value.get(key) or "").strip()
+                if item_text:
+                    return item_text
+            return ""
+        return str(value).strip()
+
+    @classmethod
+    def _is_closed_status_value(cls, value: Any) -> bool:
+        """
+        判断状态是否可视为已关闭/已完成。
+
+        :param value: 状态文本。
+        :return: 是否为关闭态。
+        """
+        status_text = str(value or "").strip().lower()
+        if not status_text:
+            return False
+        closed_values = {
+            "closed",
+            "已关闭",
+            "done",
+            "已完成",
+            "resolved",
+            "已解决",
+            "close",
+            "完成",
+        }
+        if status_text in closed_values:
+            return True
+        return any(keyword in status_text for keyword in ["关闭", "完成", "解决"])
 
     @classmethod
     def _validate_person_reminder_config(cls, config: dict[str, Any]) -> list[str]:
@@ -798,6 +877,27 @@ class TicketSyncNotifyService:
             errors.append("人员字段(personField)未配置")
         if not time_field:
             errors.append("时间字段(timeField)未配置")
+        return errors
+
+    @classmethod
+    def _validate_summary_report_config(cls, config: dict[str, Any]) -> list[str]:
+        """
+        校验汇总统计关键配置是否完整。
+
+        :param config: 汇总统计配置。
+        :return: 配置错误列表。
+        """
+        errors: list[str] = []
+        data_source = cls._normalize_summary_data_source(config.get("dataSource"))
+        if data_source == cls.SUMMARY_DATA_SOURCE_LOCAL:
+            return errors
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        app_token = str(config.get("appToken") or "").strip()
+        table_id = str(config.get("tableId") or "").strip()
+        if not app_id or not app_secret:
+            errors.append("飞书应用 appId/appSecret 未配置")
+        if not app_token or not table_id:
+            errors.append("多维表格 appToken/tableId 未配置")
         return errors
 
     @classmethod
@@ -1543,22 +1643,61 @@ class TicketSyncNotifyService:
         cls,
         db: Session,
         *,
+        config: dict[str, Any],
         start_time: datetime,
         end_time: datetime,
         time_field: str,
         include_closed: bool,
     ) -> dict[str, Any]:
         """
-        在指定时间窗口内统计工单状态/分类/优先级数量。
+        在指定时间窗口内统计工单状态/分类/优先级数量（支持本地与多维表格）。
 
         :param db: 数据库会话。
+        :param config: 汇总统计配置。
         :param start_time: 统计开始时间。
         :param end_time: 统计结束时间。
         :param time_field: 时间字段。
         :param include_closed: 是否包含已关闭工单。
         :return: 统计结果摘要。
         """
-        time_column = getattr(Ticket, time_field, Ticket.create_time)
+        data_source = cls._normalize_summary_data_source(config.get("dataSource"))
+        if data_source == cls.SUMMARY_DATA_SOURCE_BITABLE:
+            return cls._collect_ticket_summary_from_bitable(
+                config=config,
+                start_time=start_time,
+                end_time=end_time,
+                include_closed=include_closed,
+            )
+        return cls._collect_ticket_summary_from_local(
+            db,
+            start_time=start_time,
+            end_time=end_time,
+            time_field=time_field,
+            include_closed=include_closed,
+        )
+
+    @classmethod
+    def _collect_ticket_summary_from_local(
+        cls,
+        db: Session,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+        time_field: str,
+        include_closed: bool,
+    ) -> dict[str, Any]:
+        """
+        使用本地工单数据统计状态/分类/优先级。
+
+        :param db: 数据库会话。
+        :param start_time: 统计开始时间。
+        :param end_time: 统计结束时间。
+        :param time_field: 本地工单时间字段。
+        :param include_closed: 是否包含关闭态。
+        :return: 统计结果摘要。
+        """
+        normalized_time_field = cls._resolve_summary_time_field(time_field)
+        time_column = getattr(Ticket, normalized_time_field, Ticket.create_time)
         query = db.query(Ticket).filter(Ticket.del_flag == "0", time_column >= start_time, time_column <= end_time)
         if not include_closed:
             query = query.filter(~Ticket.status.in_(["CLOSED", "closed", "已关闭"]))
@@ -1576,14 +1715,185 @@ class TicketSyncNotifyService:
             priority_counter[priority_value] = priority_counter.get(priority_value, 0) + 1
 
         return {
-            "timeField": time_field,
+            "dataSource": cls.SUMMARY_DATA_SOURCE_LOCAL,
+            "timeField": normalized_time_field,
             "startTime": start_time.strftime("%Y-%m-%d %H:%M:%S"),
             "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
             "totalCount": len(rows),
+            "sourceRecordCount": len(rows),
+            "skippedNoTimeCount": 0,
+            "skippedOutOfRangeCount": 0,
+            "skippedClosedCount": 0,
             "statusCounter": status_counter,
             "categoryCounter": category_counter,
             "priorityCounter": priority_counter,
         }
+
+    @classmethod
+    def _collect_ticket_summary_from_bitable(
+        cls,
+        *,
+        config: dict[str, Any],
+        start_time: datetime,
+        end_time: datetime,
+        include_closed: bool,
+    ) -> dict[str, Any]:
+        """
+        使用飞书多维表格数据统计状态/分类/优先级。
+
+        :param config: 汇总统计配置。
+        :param start_time: 统计开始时间。
+        :param end_time: 统计结束时间。
+        :param include_closed: 是否包含关闭态。
+        :return: 统计结果摘要。
+        """
+        status_field = str(config.get("statusField") or "状态").strip() or "状态"
+        category_field = str(config.get("categoryField") or "分类").strip() or "分类"
+        priority_field = str(config.get("priorityField") or "优先级").strip() or "优先级"
+        time_field = cls._resolve_bitable_summary_time_field(config.get("bitableTimeField"))
+        records = cls.query_bitable_records(config)
+
+        status_counter: dict[str, int] = {}
+        category_counter: dict[str, int] = {}
+        priority_counter: dict[str, int] = {}
+        skipped_no_time = 0
+        skipped_out_of_range = 0
+        skipped_closed = 0
+        included_count = 0
+
+        for record in records:
+            fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+            record_time = cls._extract_record_time(record, time_field)
+            if not record_time:
+                skipped_no_time += 1
+                continue
+            if record_time < start_time or record_time > end_time:
+                skipped_out_of_range += 1
+                continue
+
+            status_value = cls._normalize_summary_counter_label(fields.get(status_field)) or "未知状态"
+            if not include_closed and cls._is_closed_status_value(status_value):
+                skipped_closed += 1
+                continue
+            category_value = cls._normalize_summary_counter_label(fields.get(category_field)) or "未分类"
+            priority_value = (
+                cls._normalize_priority(cls._normalize_summary_counter_label(fields.get(priority_field))) or "未知优先级"
+            )
+            status_counter[status_value] = status_counter.get(status_value, 0) + 1
+            category_counter[category_value] = category_counter.get(category_value, 0) + 1
+            priority_counter[priority_value] = priority_counter.get(priority_value, 0) + 1
+            included_count += 1
+
+        return {
+            "dataSource": cls.SUMMARY_DATA_SOURCE_BITABLE,
+            "timeField": time_field or "created_time",
+            "startTime": start_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "totalCount": included_count,
+            "sourceRecordCount": len(records),
+            "skippedNoTimeCount": skipped_no_time,
+            "skippedOutOfRangeCount": skipped_out_of_range,
+            "skippedClosedCount": skipped_closed,
+            "statusCounter": status_counter,
+            "categoryCounter": category_counter,
+            "priorityCounter": priority_counter,
+        }
+
+    @classmethod
+    def _build_summary_ai_user_prompt(cls, summary: dict[str, Any]) -> str:
+        """
+        构建汇总统计 AI 解读的用户提示词。
+
+        :param summary: 汇总统计结果。
+        :return: 用户提示词文本。
+        """
+        summary_json = json.dumps(summary or {}, ensure_ascii=False, separators=(",", ":"), default=str)
+        return (
+            "请基于以下工单汇总统计结果给出简洁解读。\n"
+            "要求：\n"
+            "1) 总结核心问题和变化趋势；\n"
+            "2) 给出1-3条可执行建议；\n"
+            "3) 输出纯文本，不要Markdown列表编号。\n\n"
+            f"统计数据：{summary_json}"
+        )
+
+    @classmethod
+    def _build_summary_ai_text(
+        cls,
+        db: Session,
+        *,
+        config: dict[str, Any],
+        summary: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        调用轻量 AI 生成汇总统计解读。
+
+        :param db: 数据库会话。
+        :param config: 汇总统计配置。
+        :param summary: 汇总统计结果。
+        :return: (AI解读文本, 元信息)。
+        """
+        if not bool(config.get("aiEnabled")):
+            return "", {"skipped": True, "skipReason": "aiEnabled=false"}
+        provider_code = str(config.get("aiProviderCode") or "").strip()
+        prompt_code = str(config.get("aiPromptCode") or "").strip()
+        if not provider_code or not prompt_code:
+            return "", {
+                "skipped": True,
+                "skipReason": "未配置 aiProviderCode 或 aiPromptCode",
+                "providerCode": provider_code,
+                "promptCode": prompt_code,
+            }
+
+        provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
+        if not provider or not bool(getattr(provider, "enabled", True)):
+            return "", {
+                "skipped": True,
+                "skipReason": "Provider不存在或已停用",
+                "providerCode": provider_code,
+                "promptCode": prompt_code,
+            }
+
+        prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
+        if not prompt_templates:
+            return "", {
+                "skipped": True,
+                "skipReason": "提示词模板不存在或未启用",
+                "providerCode": provider_code,
+                "promptCode": prompt_code,
+            }
+        prompt_template = prompt_templates[0]
+        system_prompt = AiPromptTemplateService.render_prompt_text(
+            prompt_template.get("promptContent") or "",
+            {
+                "start_time": summary.get("startTime"),
+                "end_time": summary.get("endTime"),
+                "total_count": summary.get("totalCount"),
+                "data_source": summary.get("dataSource"),
+                "summary_json": json.dumps(summary or {}, ensure_ascii=False, default=str),
+            },
+        )
+        user_prompt = cls._build_summary_ai_user_prompt(summary)
+        try:
+            ai_text = TicketLightAiService._call_model_api(
+                provider=provider,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.2,
+            )
+            return str(ai_text or "").strip(), {
+                "skipped": False,
+                "providerCode": provider_code,
+                "promptCode": prompt_code,
+            }
+        except Exception as exc:
+            logger.warning(f"工单汇总AI解读失败: provider={provider_code}, prompt={prompt_code}, error={exc}")
+            return "", {
+                "skipped": True,
+                "providerCode": provider_code,
+                "promptCode": prompt_code,
+                "error": str(exc),
+            }
 
     @classmethod
     def run_ticket_summary_report(
@@ -1609,6 +1919,19 @@ class TicketSyncNotifyService:
             logger.info(f"工单汇总通知跳过: enabled=false, trigger={trigger_source}")
             return {"triggerSource": trigger_source, "skipped": True, "skipReason": "汇总通知开关未启用"}
 
+        data_source = cls._normalize_summary_data_source(config.get("dataSource"))
+        config_errors = cls._validate_summary_report_config(config)
+        if config_errors:
+            skip_reason = "；".join(config_errors)
+            logger.warning(f"工单汇总通知跳过: trigger={trigger_source}, data_source={data_source}, reason={skip_reason}")
+            return {
+                "triggerSource": trigger_source,
+                "skipped": True,
+                "skipReason": skip_reason,
+                "configErrors": config_errors,
+                "dataSource": data_source,
+            }
+
         time_field = cls._resolve_summary_time_field(config.get("timeField"))
         include_closed = bool(config.get("includeClosed", True))
         now = datetime.now()
@@ -1631,13 +1954,25 @@ class TicketSyncNotifyService:
 
         summary = cls._collect_ticket_summary(
             db,
+            config=config,
             start_time=resolved_start_time,
             end_time=resolved_end_time,
             time_field=time_field,
             include_closed=include_closed,
         )
+        ai_summary_text, ai_summary_meta = cls._build_summary_ai_text(db, config=config, summary=summary)
+        if ai_summary_text:
+            ai_summary = ai_summary_text
+        elif str(ai_summary_meta.get("error") or "").strip():
+            ai_summary = f"AI处理失败：{ai_summary_meta.get('error')}"
+        elif str(ai_summary_meta.get("skipReason") or "").strip():
+            ai_summary = f"未启用AI处理：{ai_summary_meta.get('skipReason')}"
+        else:
+            ai_summary = "未启用AI处理"
+
         message_template = str(config.get("messageTemplate") or "").strip() or cls.DEFAULT_SUMMARY_TEMPLATE
         variables = {
+            "data_source": summary.get("dataSource"),
             "start_time": summary.get("startTime"),
             "end_time": summary.get("endTime"),
             "time_field": summary.get("timeField"),
@@ -1645,6 +1980,7 @@ class TicketSyncNotifyService:
             "status_summary": cls._build_counter_markdown(summary.get("statusCounter") or {}),
             "category_summary": cls._build_counter_markdown(summary.get("categoryCounter") or {}),
             "priority_summary": cls._build_counter_markdown(summary.get("priorityCounter") or {}),
+            "ai_summary": ai_summary,
             "now_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         content = cls._render_template(message_template, variables, cls.DEFAULT_SUMMARY_TEMPLATE)
@@ -1689,8 +2025,9 @@ class TicketSyncNotifyService:
 
         logger.info(
             f"工单汇总通知发送完成: trigger={trigger_source}, send_mode={send_mode}, "
-            f"push_success_count={push_success_count}, chat_success_count={chat_success_count}, "
-            f"total_count={summary.get('totalCount')}, time_field={summary.get('timeField')}"
+            f"data_source={summary.get('dataSource')}, push_success_count={push_success_count}, "
+            f"chat_success_count={chat_success_count}, total_count={summary.get('totalCount')}, "
+            f"time_field={summary.get('timeField')}, ai_enabled={bool(config.get('aiEnabled'))}"
         )
         return {
             "triggerSource": trigger_source,
@@ -1702,4 +2039,5 @@ class TicketSyncNotifyService:
             "chatSuccessCount": chat_success_count,
             "statSummary": summary,
             "messageVariables": variables,
+            "aiSummaryMeta": ai_summary_meta,
         }
