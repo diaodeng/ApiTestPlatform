@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-12] INGEST-CODE | 自动群推送状态条件改为可视化配置
+- 触发：用户要求将自动群推送的状态判断从后端写死逻辑改为可视化配置，并确认外部推单/远端拉取都生效且不影响手动推送。
+- 架构层：工单域 / 同步自动化配置 / 群消息通知
+- 创建的页面：`web/public/docs/2026-06-12-ticket-group-auto-push-status-condition-config.md`
+- 更新的页面：`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_sync_service.py` / `web/src/views/ticket/syncAutomation/index.vue` -> 工单同步配置文档
+- 总共涉及页面：4
+
 ## [2026-06-11] INGEST-CODE | 修复外部推单秒级重复导致群消息重复发送
 - 触发：用户反馈外部同工单短时间重复推送时，群消息仍会重复发送，要求“收到后立即判重”。
 - 架构层：工单域 / 外部同步链路 / 群消息通知

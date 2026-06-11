@@ -377,6 +377,27 @@
               <el-switch v-model="form.groupPush.sendAfterRemotePull" inline-prompt active-text="开" inactive-text="关" />
             </el-form-item>
           </el-col>
+          <el-col :span="24">
+            <el-form-item label="自动推送状态条件">
+              <el-select
+                v-model="form.groupPush.autoPushStatuses"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                collapse-tags
+                placeholder="留空表示不按状态限制；默认保留原有三种状态"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in groupPushAutoStatusOptions"
+                  :key="`group-auto-status-${item}`"
+                  :label="item"
+                  :value="item"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
           <el-col :xs="24" :md="12">
             <el-form-item label="自动推送起始时间">
               <el-date-picker
@@ -951,6 +972,12 @@ const notifySendModes = [
   { label: '两种都发', value: 'hybrid' }
 ]
 
+const groupPushAutoStatusOptions = [
+  '2. 1.5线处理',
+  '3. 待产研处理',
+  '4. 产研处理中'
+]
+
 const personDataSourceOptions = [
   { label: '飞书多维表格统计', value: 'bitable' },
   { label: '本地工单数据统计', value: 'local' }
@@ -1038,6 +1065,7 @@ function createDefaultForm() {
       sendMode: 'push_config',
       pushIds: [],
       appChatIds: [],
+      autoPushStatuses: ['2. 1.5线处理', '3. 待产研处理', '4. 产研处理中'],
       priorityRoutes: [
         { priorities: ['P1'], pushIds: [], chatIds: [] },
         { priorities: ['P2'], pushIds: [], chatIds: [] },
@@ -1194,6 +1222,9 @@ function applyConfig(payload) {
     sendMode: groupPush.sendMode || 'push_config',
     pushIds: Array.isArray(groupPush.pushIds) ? groupPush.pushIds.map(item => Number(item)).filter(item => Number.isFinite(item)) : [],
     appChatIds: Array.isArray(groupPush.appChatIds) ? groupPush.appChatIds.map(item => String(item).trim()).filter(Boolean) : [],
+    autoPushStatuses: Array.isArray(groupPush.autoPushStatuses)
+      ? groupPush.autoPushStatuses.map(item => String(item || '').trim()).filter(Boolean)
+      : ['2. 1.5线处理', '3. 待产研处理', '4. 产研处理中'],
     priorityRoutes: Array.isArray(groupPush.priorityRoutes)
       ? groupPush.priorityRoutes.map(route => ({
           priorities: Array.isArray(route?.priorities) ? route.priorities.map(item => String(item).trim()).filter(Boolean) : [],
@@ -1388,6 +1419,9 @@ async function handleSave() {
     }
     payload.groupPush.appChatIds = Array.isArray(payload.groupPush?.appChatIds)
       ? payload.groupPush.appChatIds.map(item => String(item || '').trim()).filter(Boolean)
+      : []
+    payload.groupPush.autoPushStatuses = Array.isArray(payload.groupPush?.autoPushStatuses)
+      ? Array.from(new Set(payload.groupPush.autoPushStatuses.map(item => String(item || '').trim()).filter(Boolean)))
       : []
     payload.groupPush.autoSendAfterTime = normalizeDateTimeText(payload.groupPush?.autoSendAfterTime)
     payload.groupPush.priorityRoutes = Array.isArray(payload.groupPush?.priorityRoutes)

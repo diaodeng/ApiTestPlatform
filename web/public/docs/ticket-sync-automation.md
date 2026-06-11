@@ -100,6 +100,7 @@
   - `sendMode`：发送模式（`push_config` / `feishu_app` / `hybrid`）。
   - `pushIds`：机器人推送渠道，候选项来自“推送配置管理”（`qtr_push_target`）。
   - `appChatIds`：飞书应用身份发群的 `chat_id` 列表。
+  - `autoPushStatuses`：自动推送状态条件，只有工单 `status` 命中该列表才会自动推送；留空表示不按状态限制。
   - `priorityRoutes`：按优先级分流路由（例如 P1 -> P1 群，P2 -> P2 群，P3/P4 -> P3/P4 群）。
   - `sendAfterExternalSync` / `sendAfterRemotePull`：自动触发场景开关。
   - 自动推送幂等：同一工单自动推送成功一次后会写入 `group_push_sent_once=true`，后续自动触发会跳过并记录日志；手动触发不受该限制。

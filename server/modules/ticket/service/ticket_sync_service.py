@@ -56,6 +56,11 @@ class TicketSyncService:
         TicketAiAnalysisStatus.CREATED.value,
         TicketAiAnalysisStatus.RUNNING.value,
     }
+    DEFAULT_GROUP_PUSH_AUTO_STATUSES = [
+        "2. 1.5线处理",
+        "3. 待产研处理",
+        "4. 产研处理中",
+    ]
     GROUP_PUSH_LOCK_TIMEOUT_SECONDS = 300
 
     @classmethod
@@ -394,10 +399,21 @@ class TicketSyncService:
         :param update_by: 更新人
         :return: (推送结果, 刷新后的工单, 最新元数据)
         """
-        if ticket.status not in ["2. 1.5线处理", "3. 待产研处理", "4. 产研处理中"]:
-            logger.info(f"ticket_no={ticket.ticket_no}, 当前状态：{ticket.status}, 不发群消息")
+        skip_by_status, status_skip_reason = cls._should_skip_auto_group_push_by_status(
+            ticket=ticket,
+            group_config=group_config,
+        )
+        if skip_by_status:
+            logger.info(
+                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
+                f"reason={status_skip_reason or '工单状态不满足自动推送条件'}"
+            )
             return (
-                {"skipped": True, "skipReason": "同步数据未发布就绪", "scene": scene},
+                {
+                    "skipped": True,
+                    "skipReason": status_skip_reason or "工单状态不满足自动推送条件",
+                    "scene": scene,
+                },
                 ticket,
                 meta,
             )
@@ -775,6 +791,61 @@ class TicketSyncService:
         )
 
     @classmethod
+    def _normalize_group_push_auto_statuses(
+        cls,
+        value: Any,
+        *,
+        fallback: Any = None,
+    ) -> list[str]:
+        """
+        归一化自动群推送状态条件配置。
+
+        :param value: 原始状态条件，支持列表或逗号分隔字符串。
+        :param fallback: 回退配置值。
+        :return: 去重后的状态文本列表。
+        """
+        source_value = value
+        if source_value is None:
+            source_value = fallback
+        if isinstance(source_value, str):
+            source_list = [item.strip() for item in source_value.split(",")]
+        elif isinstance(source_value, list):
+            source_list = source_value
+        else:
+            source_list = []
+        normalized: list[str] = []
+        for item in source_list:
+            status_text = str(item or "").strip()
+            if status_text and status_text not in normalized:
+                normalized.append(status_text)
+        return normalized
+
+    @classmethod
+    def _should_skip_auto_group_push_by_status(
+        cls,
+        *,
+        ticket: Ticket,
+        group_config: dict[str, Any] | None,
+    ) -> tuple[bool, str | None]:
+        """
+        判断自动群推送是否因状态条件不满足而跳过。
+
+        :param ticket: 工单对象。
+        :param group_config: 群推送配置。
+        :return: (是否跳过, 跳过原因)。
+        """
+        config = group_config if isinstance(group_config, dict) else {}
+        auto_push_statuses = cls._normalize_group_push_auto_statuses(
+            config.get("autoPushStatuses", config.get("auto_push_statuses")),
+        )
+        if not auto_push_statuses:
+            return False, None
+        ticket_status = str(getattr(ticket, "status", "") or "").strip()
+        if ticket_status in auto_push_statuses:
+            return False, None
+        return True, f"工单状态({ticket_status or '-'})未命中自动推送状态条件"
+
+    @classmethod
     def _should_skip_auto_group_push_by_submit_time(
         cls,
         *,
@@ -937,6 +1008,7 @@ class TicketSyncService:
             "sendMode": "push_config",
             "pushIds": [],
             "appChatIds": [],
+            "autoPushStatuses": list(cls.DEFAULT_GROUP_PUSH_AUTO_STATUSES),
             "priorityRoutes": [],
             "sendAfterExternalSync": False,
             "sendAfterRemotePull": False,
@@ -1073,6 +1145,10 @@ class TicketSyncService:
         group_push["sendAfterRemotePull"] = bool(group_push.get("sendAfterRemotePull"))
         group_push["pushIds"] = TicketSyncNotifyService._normalize_push_ids(group_push.get("pushIds"))
         group_push["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(group_push.get("appChatIds"))
+        group_push["autoPushStatuses"] = cls._normalize_group_push_auto_statuses(
+            group_push.get("autoPushStatuses", group_push.get("auto_push_statuses")),
+            fallback=default_group_push.get("autoPushStatuses"),
+        )
         parsed_group_push_auto_send_after = cls._parse_datetime_value(
             group_push.get("autoSendAfterTime")
             or group_push.get("auto_send_after_time")
