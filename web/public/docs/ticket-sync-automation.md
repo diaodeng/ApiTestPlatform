@@ -103,6 +103,7 @@
   - `priorityRoutes`：按优先级分流路由（例如 P1 -> P1 群，P2 -> P2 群，P3/P4 -> P3/P4 群）。
   - `sendAfterExternalSync` / `sendAfterRemotePull`：自动触发场景开关。
   - 自动推送幂等：同一工单自动推送成功一次后会写入 `group_push_sent_once=true`，后续自动触发会跳过并记录日志；手动触发不受该限制。
+  - 并发防重：自动推送发送前会先抢占数据库处理锁（`group_push_processing`），同工单并发任务会在发送前直接跳过，避免秒级重复推送造成重复发群。
   - `template` / `manualTemplate`：模板变量渲染，手动模板留空时回退自动模板。
   - 常用模板变量：`${ticket_no}` `${ticket_title}` `${ticket_status}` `${assignee_name}` `${reporter_name}` `${reporterName}` `${store_info}` `${storeInfo}` `${ticket_url}` `${sync_source_record_url}`。
 - `personReminder`

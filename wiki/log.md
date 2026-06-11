@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-11] INGEST-CODE | 修复外部推单秒级重复导致群消息重复发送
+- 触发：用户反馈外部同工单短时间重复推送时，群消息仍会重复发送，要求“收到后立即判重”。
+- 架构层：工单域 / 外部同步链路 / 群消息通知
+- 创建的页面：`web/public/docs/2026-06-11-ticket-external-rapid-duplicate-dedup-lock.md`
+- 更新的页面：`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_sync_service.py` -> 工单同步与群推送幂等文档
+- 总共涉及页面：4
+
 ## [2026-06-11] INGEST-CODE | 修复按人催办过滤公式导致飞书参数异常
 - 触发：用户反馈“按人催办通知”一旦填写过滤公式，调用飞书接口即报参数异常。
 - 架构层：工单域 / 飞书通知 / 多维表格查询

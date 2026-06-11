@@ -56,6 +56,7 @@ class TicketSyncService:
         TicketAiAnalysisStatus.CREATED.value,
         TicketAiAnalysisStatus.RUNNING.value,
     }
+    GROUP_PUSH_LOCK_TIMEOUT_SECONDS = 300
 
     @classmethod
     def _json_dumps(cls, value: Any) -> str:
@@ -162,6 +163,139 @@ class TicketSyncService:
         sync_state["group_push_revision"] = int(revision or 0)
         meta["sync_state"] = sync_state
         return meta
+
+    @classmethod
+    def _mark_group_push_processing(
+        cls,
+        meta: dict[str, Any],
+        *,
+        scene: str,
+        revision: int,
+    ) -> dict[str, Any]:
+        """
+        标记工单群推送正在处理中，作为并发互斥锁。
+        :param meta: 同步元数据
+        :param scene: 触发场景
+        :param revision: 同步修订号
+        :return: 更新后的同步元数据
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        sync_state["group_push_processing"] = True
+        sync_state["group_push_processing_at"] = cls._now_iso()
+        sync_state["group_push_processing_scene"] = str(scene or "").strip() or "external_sync"
+        sync_state["group_push_processing_revision"] = int(revision or 0)
+        meta["sync_state"] = sync_state
+        return meta
+
+    @classmethod
+    def _clear_group_push_processing(cls, meta: dict[str, Any]) -> dict[str, Any]:
+        """
+        清理工单群推送处理中锁。
+        :param meta: 同步元数据
+        :return: 更新后的同步元数据
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        sync_state["group_push_processing"] = False
+        sync_state["group_push_processing_at"] = None
+        sync_state["group_push_processing_scene"] = None
+        sync_state["group_push_processing_revision"] = None
+        meta["sync_state"] = sync_state
+        return meta
+
+    @classmethod
+    def _is_group_push_processing_locked(cls, meta: dict[str, Any]) -> tuple[bool, str]:
+        """
+        判断群推送处理锁是否生效。
+        :param meta: 同步元数据
+        :return: (是否锁定, 锁定原因)
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        if not bool(sync_state.get("group_push_processing")):
+            return False, ""
+        lock_time = cls._parse_datetime_value(sync_state.get("group_push_processing_at"))
+        if lock_time is None:
+            return True, "群推送处理中（锁时间缺失）"
+        elapsed_seconds = (datetime.now() - lock_time).total_seconds()
+        if elapsed_seconds > cls.GROUP_PUSH_LOCK_TIMEOUT_SECONDS:
+            return False, ""
+        return True, "群推送处理中"
+
+    @classmethod
+    def _persist_group_push_meta_state(
+        cls,
+        db: Session,
+        *,
+        ticket_id: int,
+        update_by: str,
+        scene: str,
+        acquire_lock: bool = False,
+        clear_lock: bool = False,
+        mark_sent_once: bool = False,
+    ) -> tuple[bool, Ticket | None, dict[str, Any], str]:
+        """
+        在数据库行级锁内更新群推送状态，保障并发下的去重一致性。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param update_by: 更新人
+        :param scene: 触发场景
+        :param acquire_lock: 是否抢占群推送处理锁
+        :param clear_lock: 是否清理群推送处理锁
+        :param mark_sent_once: 是否标记已发送过
+        :return: (是否更新成功, 工单对象, 最新元数据, 结果原因)
+        """
+        try:
+            ticket = (
+                db.query(Ticket)
+                .filter(Ticket.ticket_id == ticket_id, Ticket.del_flag == "0")
+                .with_for_update()
+                .first()
+            )
+            if not ticket:
+                db.rollback()
+                return False, None, {}, "ticket_not_found"
+
+            extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+            meta = cls._build_meta(extra_data)
+            if acquire_lock:
+                if cls._is_group_push_sent_once(meta):
+                    db.rollback()
+                    return False, ticket, meta, "already_sent"
+                locked, lock_reason = cls._is_group_push_processing_locked(meta)
+                if locked:
+                    db.rollback()
+                    return False, ticket, meta, lock_reason or "group_push_processing"
+                meta = cls._mark_group_push_processing(
+                    meta,
+                    scene=scene,
+                    revision=int(meta.get("revision") or 0),
+                )
+            if clear_lock:
+                meta = cls._clear_group_push_processing(meta)
+            if mark_sent_once:
+                meta = cls._mark_group_push_sent_once(
+                    meta,
+                    scene=scene,
+                    revision=int(meta.get("revision") or 0),
+                )
+            if acquire_lock or clear_lock or mark_sent_once:
+                refreshed_extra_data = cls._attach_meta(extra_data, meta)
+                TicketDao.update_ticket(
+                    db,
+                    ticket.ticket_id,
+                    {
+                        "extra_data": refreshed_extra_data,
+                        "update_by": update_by,
+                        "update_time": datetime.now(),
+                    },
+                )
+                db.commit()
+                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            else:
+                db.rollback()
+            return True, ticket, meta, "updated"
+        except Exception:
+            db.rollback()
+            raise
 
     @classmethod
     def _resolve_ai_pending_state(
@@ -300,40 +434,79 @@ class TicketSyncService:
                 meta,
             )
 
+        lock_acquired, locked_ticket, locked_meta, lock_reason = cls._persist_group_push_meta_state(
+            db,
+            ticket_id=ticket.ticket_id,
+            update_by=update_by,
+            scene=scene,
+            acquire_lock=True,
+        )
+        if not lock_acquired:
+            if lock_reason == "already_sent":
+                logger.info(
+                    f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
+                    f"reason=工单已发送过群推送"
+                )
+                return (
+                    {"skipped": True, "skipReason": "工单已发送过群推送", "scene": scene},
+                    ticket,
+                    meta,
+                )
+            logger.info(
+                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
+                f"reason={lock_reason or '群推送处理中'}"
+            )
+            return (
+                {"skipped": True, "skipReason": lock_reason or "群推送处理中", "scene": scene},
+                ticket,
+                meta,
+            )
+        if locked_ticket:
+            ticket = locked_ticket
+        if locked_meta:
+            meta = locked_meta
+
         sync_summary = cls.extract_sync_summary(
             cls._attach_meta(dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}, meta)
         ) or {}
-        result = TicketSyncNotifyService.send_group_message_for_ticket(
-            db,
-            ticket=ticket,
-            group_config=group_config,
-            scene=scene,
-            manual_trigger=False,
-            sync_summary=sync_summary,
-        )
-        push_success_count = int(result.get("pushSuccessCount") or 0)
-        app_success_count = int(result.get("chatSuccessCount") or 0)
-        if not bool(result.get("skipped")) and (push_success_count > 0 or app_success_count > 0):
-            meta = cls._mark_group_push_sent_once(
-                meta,
-                scene=scene,
-                revision=int(meta.get("revision") or 0),
-            )
-            ticket = cls._persist_sync_meta(
+        result: dict[str, Any] = {}
+        mark_sent_once = False
+        try:
+            result = TicketSyncNotifyService.send_group_message_for_ticket(
                 db,
                 ticket=ticket,
-                meta=meta,
+                group_config=group_config,
+                scene=scene,
+                manual_trigger=False,
+                sync_summary=sync_summary,
+            )
+            push_success_count = int(result.get("pushSuccessCount") or 0)
+            app_success_count = int(result.get("chatSuccessCount") or 0)
+            mark_sent_once = not bool(result.get("skipped")) and (push_success_count > 0 or app_success_count > 0)
+            if mark_sent_once:
+                logger.info(
+                    f"自动群推送已标记去重: ticket_no={ticket.ticket_no}, scene={scene}, "
+                    f"push_success_count={push_success_count}, app_success_count={app_success_count}"
+                )
+            elif not bool(result.get("skipped")):
+                logger.warning(
+                    f"自动群推送未产生成功发送，保持未去重状态: ticket_no={ticket.ticket_no}, scene={scene}, "
+                    f"push_success_count={push_success_count}, app_success_count={app_success_count}"
+                )
+        finally:
+            state_updated, refreshed_ticket, refreshed_meta, _ = cls._persist_group_push_meta_state(
+                db,
+                ticket_id=ticket.ticket_id,
                 update_by=update_by,
+                scene=scene,
+                clear_lock=True,
+                mark_sent_once=mark_sent_once,
             )
-            logger.info(
-                f"自动群推送已标记去重: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
-            )
-        elif not bool(result.get("skipped")):
-            logger.warning(
-                f"自动群推送未产生成功发送，保持未去重状态: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
-            )
+            if state_updated:
+                if refreshed_ticket:
+                    ticket = refreshed_ticket
+                if refreshed_meta:
+                    meta = refreshed_meta
         return result, ticket, meta
 
     @classmethod
@@ -1326,6 +1499,10 @@ class TicketSyncService:
             "group_push_sent_at": sync_state.get("group_push_sent_at"),
             "group_push_scene": sync_state.get("group_push_scene"),
             "group_push_revision": sync_state.get("group_push_revision"),
+            "group_push_processing": bool(sync_state.get("group_push_processing", False)),
+            "group_push_processing_at": sync_state.get("group_push_processing_at"),
+            "group_push_processing_scene": sync_state.get("group_push_processing_scene"),
+            "group_push_processing_revision": sync_state.get("group_push_processing_revision"),
         }
         return meta
 
