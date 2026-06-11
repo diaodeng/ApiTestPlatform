@@ -38,6 +38,18 @@
           <el-option v-for="item in ticketProcessStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
+      <el-form-item label="提交时间">
+        <el-date-picker
+          v-model="submitTimeRange"
+          type="datetimerange"
+          value-format="YYYY-MM-DD HH:mm:ss"
+          format="YYYY-MM-DD HH:mm:ss"
+          range-separator="至"
+          start-placeholder="开始时间"
+          end-placeholder="结束时间"
+          style="width: 360px"
+        />
+      </el-form-item>
       <el-form-item label="项目" prop="projectId">
         <el-select v-model="queryParams.projectId" placeholder="所属项目" clearable filterable style="width: 180px">
           <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
@@ -132,6 +144,9 @@
       <el-table-column label="1线人员" prop="firstLineAssigneeName" width="130" show-overflow-tooltip />
       <el-table-column label="内部负责人" prop="internalOwnerName" width="130" show-overflow-tooltip />
       <el-table-column label="当前处理人" prop="currentAssigneeName" width="130" show-overflow-tooltip />
+      <el-table-column label="工单提交时间" prop="submitTime" width="170">
+        <template #default="scope">{{ parseTime(scope.row.submitTime || scope.row.externalCreateTime || scope.row.createTime) }}</template>
+      </el-table-column>
       <el-table-column label="创建时间" prop="createTime" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
@@ -1779,6 +1794,7 @@ const tagText = ref('')
 const eventDataText = ref('')
 const messageDataText = ref('')
 const naturalKeyword = ref('')
+const submitTimeRange = ref([])
 const importResult = ref(null)
 const logPullLoading = ref(false)
 const logPullSubmitting = ref(false)
@@ -2170,7 +2186,9 @@ const data = reactive({
     internalPriority: undefined,
     currentAssigneeId: undefined,
     firstLineAssigneeId: undefined,
-    internalOwnerId: undefined
+    internalOwnerId: undefined,
+    submitBeginTime: undefined,
+    submitEndTime: undefined
   },
   form: createDefaultTicketForm(),
   assignForm: {},
@@ -2366,6 +2384,10 @@ const messageItems = computed(() => {
 })
 
 function getList() {
+  const rangeValues = Array.isArray(submitTimeRange.value) ? submitTimeRange.value : []
+  const [submitBeginTime, submitEndTime] = rangeValues
+  queryParams.value.submitBeginTime = submitBeginTime || undefined
+  queryParams.value.submitEndTime = submitEndTime || undefined
   loading.value = true
   listTicket(queryParams.value).then(response => {
     ticketList.value = response.rows || []
@@ -2454,6 +2476,9 @@ function handleSearch() {
 function resetQuery() {
   proxy.resetForm('queryRef')
   naturalKeyword.value = ''
+  submitTimeRange.value = []
+  queryParams.value.submitBeginTime = undefined
+  queryParams.value.submitEndTime = undefined
   queryCurrentAssigneeOption.value = null
   queryFirstLineAssigneeOption.value = null
   queryInternalOwnerOption.value = null

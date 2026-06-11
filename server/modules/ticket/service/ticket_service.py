@@ -43,8 +43,8 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
-from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
+from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_prompt_service import TicketPromptService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -138,14 +138,26 @@ def _extract_ticket_sync_summary(extra_data: Any) -> dict[str, Any] | None:
         return None
     sync_meta = extra_data.get("external_sync")
     if not isinstance(sync_meta, dict):
+        sync_meta = extra_data.get("externalSync")
+    if not isinstance(sync_meta, dict):
         return None
     sync_state = sync_meta.get("sync_state") if isinstance(sync_meta.get("sync_state"), dict) else {}
+    if not isinstance(sync_state, dict):
+        sync_state = sync_meta.get("syncState") if isinstance(sync_meta.get("syncState"), dict) else {}
     automation = sync_state.get("automation") if isinstance(sync_state.get("automation"), dict) else {}
+    source_payload = sync_meta.get("source") if isinstance(sync_meta.get("source"), dict) else {}
+    external_create_time = (
+        sync_meta.get("externalCreateTime")
+        or sync_meta.get("external_create_time")
+        or source_payload.get("externalCreateTime")
+        or source_payload.get("external_create_time")
+    )
     return {
         "revision": int(sync_meta.get("revision") or 0),
-        "sourceSystem": sync_meta.get("sourceSystem") or (sync_meta.get("source") or {}).get("system"),
-        "sourceRecordId": sync_meta.get("sourceRecordId") or (sync_meta.get("source") or {}).get("recordId"),
-        "sourceRecordUrl": sync_meta.get("sourceRecordUrl") or (sync_meta.get("source") or {}).get("recordUrl"),
+        "sourceSystem": sync_meta.get("sourceSystem") or source_payload.get("system"),
+        "sourceRecordId": sync_meta.get("sourceRecordId") or source_payload.get("recordId") or source_payload.get("record_id"),
+        "sourceRecordUrl": sync_meta.get("sourceRecordUrl") or source_payload.get("recordUrl") or source_payload.get("record_url"),
+        "externalCreateTime": external_create_time,
         "status": sync_state.get("status") or "pending",
         "lastPulledAt": sync_state.get("last_pulled_at"),
         "lastConsumer": sync_state.get("last_consumer"),
@@ -154,6 +166,21 @@ def _extract_ticket_sync_summary(extra_data: Any) -> dict[str, Any] | None:
         "automationStep": automation.get("current_step"),
         "automationError": automation.get("last_error"),
     }
+
+
+def _resolve_ticket_submit_time(extra_data: Any, create_time: Any) -> Any:
+    """
+    解析工单提交时间：优先外部 createTime，缺失时回退本地创建时间。
+
+    :param extra_data: 工单扩展字段。
+    :param create_time: 本地创建时间。
+    :return: 提交时间值。
+    """
+    sync_summary = _extract_ticket_sync_summary(extra_data) or {}
+    external_create_time = str(sync_summary.get("externalCreateTime") or "").strip()
+    if external_create_time:
+        return external_create_time
+    return create_time
 
 
 def _extract_ticket_automation_config(data: dict[str, Any]) -> tuple[bool, dict[str, Any] | None]:
@@ -446,6 +473,9 @@ class TicketService:
         item["versionKey"] = item.get("versionKey") or _extract_ticket_version_key(extra_data)
         if not str(item.get("ticketUrl") or "").strip() and isinstance(sync_summary, dict):
             item["ticketUrl"] = sync_summary.get("ticketUrl") or sync_summary.get("sourceRecordUrl")
+        if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):
+            item["externalCreateTime"] = sync_summary.get("externalCreateTime")
+        item["submitTime"] = _resolve_ticket_submit_time(extra_data, item.get("createTime") or item.get("create_time"))
         item["originalDescription"] = (
             (extra_data or {}).get("origin_description")
             or (extra_data or {}).get("original_description")

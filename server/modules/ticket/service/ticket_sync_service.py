@@ -280,6 +280,25 @@ class TicketSyncService:
                 ticket,
                 meta,
             )
+        skip_by_submit_time, submit_time_skip_reason = cls._should_skip_auto_group_push_by_submit_time(
+            ticket=ticket,
+            meta=meta,
+            group_config=group_config,
+        )
+        if skip_by_submit_time:
+            logger.info(
+                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
+                f"reason={submit_time_skip_reason or '工单提交时间不满足自动推送起始时间'}"
+            )
+            return (
+                {
+                    "skipped": True,
+                    "skipReason": submit_time_skip_reason or "工单提交时间不满足自动推送起始时间",
+                    "scene": scene,
+                },
+                ticket,
+                meta,
+            )
 
         sync_summary = cls.extract_sync_summary(
             cls._attach_meta(dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}, meta)
@@ -541,6 +560,69 @@ class TicketSyncService:
         return parsed_candidate.isoformat()
 
     @classmethod
+    def _resolve_ticket_submit_time(cls, *, ticket: Ticket, meta: dict[str, Any] | None) -> datetime | None:
+        """
+        解析工单提交时间：优先外部 createTime，缺失时回退本地创建时间。
+
+        :param ticket: 工单对象。
+        :param meta: 同步元数据。
+        :return: 可比较的提交时间，无法解析时返回 None。
+        """
+        sync_meta = meta if isinstance(meta, dict) else {}
+        source_snapshot = sync_meta.get("source") if isinstance(sync_meta.get("source"), dict) else {}
+        external_create_time = (
+            sync_meta.get("externalCreateTime")
+            or source_snapshot.get("externalCreateTime")
+        )
+        parsed_external_time = cls._parse_datetime_value(external_create_time)
+        if parsed_external_time:
+            return parsed_external_time
+        return cls._parse_datetime_value(getattr(ticket, "create_time", None))
+
+    @classmethod
+    def _resolve_group_push_auto_send_after_time(cls, group_config: dict[str, Any] | None) -> datetime | None:
+        """
+        解析自动群推送起始时间配置。
+
+        :param group_config: 群推送配置。
+        :return: 起始时间，未配置或解析失败时返回 None。
+        """
+        config = group_config if isinstance(group_config, dict) else {}
+        return cls._parse_datetime_value(
+            config.get("autoSendAfterTime")
+            or config.get("auto_send_after_time")
+        )
+
+    @classmethod
+    def _should_skip_auto_group_push_by_submit_time(
+        cls,
+        *,
+        ticket: Ticket,
+        meta: dict[str, Any] | None,
+        group_config: dict[str, Any] | None,
+    ) -> tuple[bool, str | None]:
+        """
+        判断自动群推送是否因“起始提交时间”配置而跳过。
+
+        :param ticket: 工单对象。
+        :param meta: 同步元数据。
+        :param group_config: 群推送配置。
+        :return: (是否跳过, 跳过原因)。
+        """
+        auto_send_after_time = cls._resolve_group_push_auto_send_after_time(group_config)
+        if not auto_send_after_time:
+            return False, None
+        submit_time = cls._resolve_ticket_submit_time(ticket=ticket, meta=meta)
+        if submit_time is None:
+            return False, None
+        if submit_time <= auto_send_after_time:
+            return (
+                True,
+                f"工单提交时间({submit_time.isoformat()})未晚于自动推送起始时间({auto_send_after_time.isoformat()})",
+            )
+        return False, None
+
+    @classmethod
     def _has_successful_ai_translation(cls, ticket: Ticket | None, source_description: str | None = None) -> bool:
         """
         判断工单是否已有成功的 AI 翻译结果。
@@ -677,6 +759,7 @@ class TicketSyncService:
             "priorityRoutes": [],
             "sendAfterExternalSync": False,
             "sendAfterRemotePull": False,
+            "autoSendAfterTime": "",
             "template": "",
             "manualTemplate": "",
         }
@@ -809,6 +892,11 @@ class TicketSyncService:
         group_push["sendAfterRemotePull"] = bool(group_push.get("sendAfterRemotePull"))
         group_push["pushIds"] = TicketSyncNotifyService._normalize_push_ids(group_push.get("pushIds"))
         group_push["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(group_push.get("appChatIds"))
+        parsed_group_push_auto_send_after = cls._parse_datetime_value(
+            group_push.get("autoSendAfterTime")
+            or group_push.get("auto_send_after_time")
+        )
+        group_push["autoSendAfterTime"] = parsed_group_push_auto_send_after.isoformat() if parsed_group_push_auto_send_after else ""
         group_push["appId"] = str(group_push.get("appId") or "").strip()
         group_push["appSecret"] = str(group_push.get("appSecret") or "").strip()
         priority_routes = group_push.get("priorityRoutes") if isinstance(group_push.get("priorityRoutes"), list) else []

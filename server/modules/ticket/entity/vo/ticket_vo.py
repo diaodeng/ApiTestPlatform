@@ -105,6 +105,8 @@ class TicketQueryModel(QueryModel):
     internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     reporter_id: int | None = Field(default=None, description="提单人ID")
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
+    submit_begin_time: datetime | None = Field(default=None, description="提交时间筛选开始，优先使用外部createTime")
+    submit_end_time: datetime | None = Field(default=None, description="提交时间筛选结束，优先使用外部createTime")
 
     sync_consumer: str | None = Field(default=None, description="同步消费者标识，用于筛选未同步数据")
 

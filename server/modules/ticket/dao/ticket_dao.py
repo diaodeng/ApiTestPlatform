@@ -1,7 +1,8 @@
 from datetime import date, datetime, time
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import DateTime as SqlDateTime
+from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from module_admin.entity.do.user_do import SysUser
@@ -116,6 +117,20 @@ def _latest_ai_status_expr(ticket_id_column):
     )
 
 
+def _ticket_submit_time_expr():
+    """
+    构造工单提交时间表达式（外部 createTime 优先，缺失时回退本地 create_time）。
+    :return: 可用于 SQL 查询过滤的提交时间表达式
+    """
+    external_create_time_expr = Ticket.extra_data["external_sync"]["externalCreateTime"].as_string()
+    source_external_create_time_expr = Ticket.extra_data["external_sync"]["source"]["externalCreateTime"].as_string()
+    resolved_external_create_time_expr = func.coalesce(
+        func.nullif(external_create_time_expr, ""),
+        func.nullif(source_external_create_time_expr, ""),
+    )
+    return func.coalesce(cast(resolved_external_create_time_expr, SqlDateTime), Ticket.create_time)
+
+
 def _build_ticket_process_status_filter(latest_log_status, latest_ai_status, process_status: str):
     """
     根据工单处理状态构造过滤条件。
@@ -193,10 +208,13 @@ class TicketDao:
         """
         begin_time = _date_start(query.begin_time)
         end_time = _date_end(query.end_time)
+        submit_begin_time = _date_start(query.submit_begin_time)
+        submit_end_time = _date_end(query.submit_end_time)
         ticket_no = str(query.ticket_no or "").strip()
         process_status = str(query.process_status or "").strip()
         latest_log_status = _latest_log_pull_status_expr(Ticket.ticket_id)
         latest_ai_status = _latest_ai_status_expr(Ticket.ticket_id)
+        submit_time_expr = _ticket_submit_time_expr()
         ticket_query = (
             db.query(Ticket)
             .filter(
@@ -227,6 +245,8 @@ class TicketDao:
                 Ticket.reporter_id == query.reporter_id if query.reporter_id else True,
                 Ticket.create_time >= begin_time if begin_time else True,
                 Ticket.create_time <= end_time if end_time else True,
+                submit_time_expr >= submit_begin_time if submit_begin_time else True,
+                submit_time_expr <= submit_end_time if submit_end_time else True,
             )
             .filter(_build_ticket_process_status_filter(latest_log_status, latest_ai_status, process_status))
             .filter(

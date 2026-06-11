@@ -377,6 +377,17 @@
               <el-switch v-model="form.groupPush.sendAfterRemotePull" inline-prompt active-text="开" inactive-text="关" />
             </el-form-item>
           </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="自动推送起始时间">
+              <el-date-picker
+                v-model="form.groupPush.autoSendAfterTime"
+                type="datetime"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                format="YYYY-MM-DD HH:mm:ss"
+                placeholder="不填表示不限制提交时间"
+              />
+            </el-form-item>
+          </el-col>
           <el-col :span="24">
             <el-form-item label="优先级路由">
               <div class="priority-route-list">
@@ -1034,6 +1045,7 @@ function createDefaultForm() {
       ],
       sendAfterExternalSync: false,
       sendAfterRemotePull: false,
+      autoSendAfterTime: '',
       template: '',
       manualTemplate: ''
     },
@@ -1126,6 +1138,28 @@ function normalizeArray(value, fallback = []) {
   return fallback
 }
 
+/**
+ * 归一化日期时间字符串，统一为 `YYYY-MM-DD HH:mm:ss`，不做时区换算。
+ * @param {any} value 原始值。
+ * @returns {string} 归一化后的时间文本。
+ */
+function normalizeDateTimeText(value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return ''
+  }
+  const normalized = text.replace('T', ' ')
+  const fullMatch = normalized.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)
+  if (fullMatch?.[0]) {
+    return fullMatch[0]
+  }
+  const minuteMatch = normalized.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+  if (minuteMatch?.[0]) {
+    return `${minuteMatch[0]}:00`
+  }
+  return text
+}
+
 function applyConfig(payload) {
   form.autoRunOnSync = Boolean(payload.autoRunOnSync)
   form.autoTranslateOnSync = payload.autoTranslateOnSync !== false
@@ -1169,6 +1203,7 @@ function applyConfig(payload) {
       : [],
     sendAfterExternalSync: Boolean(groupPush.sendAfterExternalSync),
     sendAfterRemotePull: Boolean(groupPush.sendAfterRemotePull),
+    autoSendAfterTime: normalizeDateTimeText(groupPush.autoSendAfterTime || groupPush.auto_send_after_time),
     template: groupPush.template || '',
     manualTemplate: groupPush.manualTemplate || ''
   }
@@ -1354,6 +1389,7 @@ async function handleSave() {
     payload.groupPush.appChatIds = Array.isArray(payload.groupPush?.appChatIds)
       ? payload.groupPush.appChatIds.map(item => String(item || '').trim()).filter(Boolean)
       : []
+    payload.groupPush.autoSendAfterTime = normalizeDateTimeText(payload.groupPush?.autoSendAfterTime)
     payload.groupPush.priorityRoutes = Array.isArray(payload.groupPush?.priorityRoutes)
       ? payload.groupPush.priorityRoutes
           .map(route => ({
