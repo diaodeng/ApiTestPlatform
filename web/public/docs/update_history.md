@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 外部推单群消息新增动态 @人能力：当群模板包含 `${reporterName}/${reporter_name}` 或“当前处理人”变量（`${assignee_name}/${currentAssigneeName}/${current_assignee_name}`）时，通知链路会优先使用工单数据中的邮箱（`raw_payload/external_field_mapping`），缺失时按姓名匹配系统用户邮箱，再通过飞书通讯录换取 `open_id` 并在群消息中 @ 对应人员；机器人推送与飞书应用发群均已接入该能力，解析失败自动降级为仅发送文本。
 1. 外部推单接口 `/ticket/sync/external` 的延后后处理改为“优先投递 Celery，失败回退本地后台任务”：入库仍立即返回，返回体新增 `deferredDispatch`（包含 `mode/taskId/reason`），用于明确当前是 Celery 执行还是本地兜底执行。
 1. 工单汇总通知新增统计数据源与 AI 解读配置：`summaryReport.dataSource` 支持 `local/bitable`，`bitable` 模式可配置 `appToken/tableId/viewId/filterFormula/statusField/categoryField/priorityField/bitableTimeField/pageSize`；同时新增 `aiEnabled/aiProviderCode/aiPromptCode`，汇总模板支持 `${data_source}` 与 `${ai_summary}` 变量。
 1. 汇总统计后端执行链路补齐：按数据源分流到本地工单或飞书多维表格统计，并在配置启用时调用轻量 AI 输出解读文本；配置缺失时改为“跳过并返回原因”，不再直接抛异常中断发送流程。

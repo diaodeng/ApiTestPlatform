@@ -113,6 +113,7 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
     ticket_modle = str(_compatible_field_value(data, "ticketModle", "ticket_modle", default="") or "").strip()
     create_time = _compatible_field_value(data, "createTime", "create_time")
     reporter_name = str(_compatible_field_value(data, "reporterName", "reporter_name", default="") or "").strip()
+    reporter_email = str(_compatible_field_value(data, "reporterEmail", "reporter_email", default="") or "").strip()
 
     required_items = {
         "ticketNo": ticket_no,
@@ -179,6 +180,20 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
             "ticketAssignee",
             "ticket_assignee",
             default=_compatible_field_value(data, "currentAssigneeName", "current_assignee_name", default=""),
+        )
+        or ""
+    ).strip()
+    assignee_email = str(
+        _compatible_field_value(
+            data,
+            "currentAssigneeEmail",
+            "current_assignee_email",
+            default=_compatible_field_value(
+                data,
+                "ticketAssigneeEmail",
+                "ticket_assignee_email",
+                default=_compatible_field_value(data, "assigneeEmail", "assignee_email", default=""),
+            ),
         )
         or ""
     ).strip()
@@ -251,8 +266,10 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         "ticketVender": ticket_vender,
         "ticketModle": ticket_modle,
         "ticketStatus": status_value,
+        "reporterEmail": reporter_email,
         "ticketStore": store_value,
         "ticketAssignee": assignee_value,
+        "ticketAssigneeEmail": assignee_email,
         "ticketPos": pos_value,
         "ticketSco": sco_value,
     }

@@ -10,8 +10,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from module_admin.dao.ai_provider_dao import AiProviderDao
-from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_admin.entity.do.user_do import SysUser
+from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_hrm.dao.push_dao import PushDao
 from module_hrm.entity.do.push_do import PushTarget
 from module_hrm.entity.vo.push_vo import PushModel
@@ -29,6 +29,7 @@ class TicketSyncNotifyService:
 
     FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
     _tenant_token_cache: dict[str, dict[str, Any]] = {}
+    _email_pattern = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
     DEFAULT_PERSON_TEMPLATE = (
         "【工单催办提醒】\n"
@@ -115,6 +116,19 @@ class TicketSyncNotifyService:
         :return: 小写邮箱字符串。
         """
         return str(value or "").strip().lower()
+
+    @classmethod
+    def _is_valid_email(cls, value: Any) -> bool:
+        """
+        判断文本是否是合法邮箱格式。
+
+        :param value: 原始文本。
+        :return: 是否满足邮箱格式。
+        """
+        normalized = cls._normalize_email(value)
+        if not normalized:
+            return False
+        return bool(cls._email_pattern.match(normalized))
 
     @classmethod
     def _normalize_send_mode(cls, value: Any) -> str:
@@ -316,6 +330,7 @@ class TicketSyncNotifyService:
         receive_id_type: str,
         receive_ids: list[str],
         content: str,
+        mention_open_ids: list[str] | None = None,
     ) -> int:
         """
         通过飞书应用身份发送文本消息。
@@ -325,11 +340,18 @@ class TicketSyncNotifyService:
         :param receive_id_type: 接收ID类型（chat_id/email）。
         :param receive_ids: 接收ID列表。
         :param content: 消息正文。
+        :param mention_open_ids: 需要在消息中 @ 的 open_id 列表，仅 chat_id 场景生效。
         :return: 发送成功条数。
         """
         normalized_ids = [str(item or "").strip() for item in receive_ids if str(item or "").strip()]
         if not normalized_ids:
             return 0
+        mention_text = ""
+        if receive_id_type == "chat_id" and isinstance(mention_open_ids, list):
+            mention_text = cls._build_feishu_at_tags(mention_open_ids)
+        message_text = str(content or "").strip()
+        if mention_text:
+            message_text = f"{mention_text}\n{message_text}" if message_text else mention_text
         token = cls._get_tenant_access_token(app_id, app_secret)
         sent_count = 0
         for receive_id in normalized_ids:
@@ -343,7 +365,7 @@ class TicketSyncNotifyService:
                     json_body={
                         "receive_id": receive_id,
                         "msg_type": "text",
-                        "content": json.dumps({"text": content}, ensure_ascii=False),
+                        "content": json.dumps({"text": message_text}, ensure_ascii=False),
                     },
                 )
                 sent_count += 1
@@ -560,6 +582,195 @@ class TicketSyncNotifyService:
                 .first()
             )
         return None
+
+    @classmethod
+    def _extract_email_from_payload(cls, payload: Any, candidate_keys: list[str]) -> str:
+        """
+        从载荷中按候选键提取邮箱。
+
+        :param payload: 载荷对象，支持字典。
+        :param candidate_keys: 候选字段名列表。
+        :return: 命中的邮箱；未命中返回空字符串。
+        """
+        if not isinstance(payload, dict):
+            return ""
+        for key in candidate_keys:
+            if key not in payload:
+                continue
+            value = payload.get(key)
+            if isinstance(value, dict):
+                value = value.get("email") or value.get("mail") or value.get("value")
+            elif isinstance(value, list):
+                value = value[0] if value else ""
+                if isinstance(value, dict):
+                    value = value.get("email") or value.get("mail") or value.get("value")
+            normalized_email = cls._normalize_email(value)
+            if cls._is_valid_email(normalized_email):
+                return normalized_email
+        return ""
+
+    @classmethod
+    def _resolve_ticket_person_email(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        person_role: str,
+        person_name: str,
+    ) -> str:
+        """
+        解析工单人员邮箱，优先使用工单原始载荷邮箱，其次按姓名查系统用户邮箱。
+
+        :param db: 数据库会话。
+        :param ticket: 工单对象。
+        :param person_role: 人员角色，支持 reporter/assignee。
+        :param person_name: 人员名称。
+        :return: 归一化邮箱，未命中返回空字符串。
+        """
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        raw_payload = extra_data.get("raw_payload") if isinstance(extra_data.get("raw_payload"), dict) else {}
+        external_mapping = (
+            extra_data.get("external_field_mapping")
+            if isinstance(extra_data.get("external_field_mapping"), dict)
+            else {}
+        )
+        role = str(person_role or "").strip().lower()
+        candidate_keys: list[str]
+        if role == "reporter":
+            candidate_keys = [
+                "reporterEmail",
+                "reporter_email",
+                "reporterMail",
+                "reporter_mail",
+                "reporter",
+            ]
+        else:
+            candidate_keys = [
+                "currentAssigneeEmail",
+                "current_assignee_email",
+                "ticketAssigneeEmail",
+                "ticket_assignee_email",
+                "assigneeEmail",
+                "assignee_email",
+                "ticketAssignee",
+                "ticket_assignee",
+                "currentAssignee",
+                "current_assignee",
+            ]
+        direct_email = cls._extract_email_from_payload(raw_payload, candidate_keys)
+        if not direct_email:
+            direct_email = cls._extract_email_from_payload(external_mapping, candidate_keys)
+        if direct_email:
+            return direct_email
+        user = cls._resolve_sys_user_by_name(db, person_name)
+        return cls._normalize_email(getattr(user, "email", "")) if user else ""
+
+    @classmethod
+    def _template_contains_variable(cls, template_text: str, variable_names: list[str]) -> bool:
+        """
+        判断模板中是否包含指定变量占位符。
+
+        :param template_text: 模板文本。
+        :param variable_names: 变量名列表。
+        :return: 是否命中至少一个占位符。
+        """
+        normalized_template = str(template_text or "")
+        for variable_name in variable_names:
+            normalized_name = str(variable_name or "").strip()
+            if not normalized_name:
+                continue
+            if f"${{{normalized_name}}}" in normalized_template:
+                return True
+        return False
+
+    @classmethod
+    def _resolve_group_mention_open_ids(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        template_text: str,
+        app_id: str,
+        app_secret: str,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        """
+        根据模板变量与工单人员信息解析需要 @ 的 open_id 列表。
+
+        :param db: 数据库会话。
+        :param ticket: 工单对象。
+        :param template_text: 消息模板文本（用于判断是否启用 reporter/assignee @）。
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :return: (open_id 列表, 解析明细列表)。
+        """
+        if not app_id or not app_secret:
+            return [], []
+        mention_candidates: list[dict[str, Any]] = []
+        if cls._template_contains_variable(template_text, ["reporterName", "reporter_name"]):
+            reporter_name = str(ticket.reporter_name or "").strip()
+            if reporter_name:
+                mention_candidates.append({"role": "reporter", "name": reporter_name})
+        if cls._template_contains_variable(
+            template_text,
+            ["assignee_name", "currentAssigneeName", "current_assignee_name"],
+        ):
+            assignee_name = str(ticket.current_assignee_name or "").strip()
+            if assignee_name:
+                mention_candidates.append({"role": "assignee", "name": assignee_name})
+        if not mention_candidates:
+            return [], []
+
+        open_ids: list[str] = []
+        detail_rows: list[dict[str, Any]] = []
+        feishu_user_cache: dict[str, dict[str, Any] | None] = {}
+        for candidate in mention_candidates:
+            role = str(candidate.get("role") or "").strip()
+            name = str(candidate.get("name") or "").strip()
+            email = cls._resolve_ticket_person_email(
+                db,
+                ticket=ticket,
+                person_role=role,
+                person_name=name,
+            )
+            open_id = ""
+            feishu_user = None
+            if email:
+                if email not in feishu_user_cache:
+                    feishu_user_cache[email] = cls.query_feishu_user_by_email(
+                        app_id=app_id,
+                        app_secret=app_secret,
+                        email=email,
+                    )
+                feishu_user = feishu_user_cache.get(email) if isinstance(feishu_user_cache.get(email), dict) else None
+                open_id = str((feishu_user or {}).get("openId") or "").strip()
+                if open_id and open_id not in open_ids:
+                    open_ids.append(open_id)
+            detail_rows.append(
+                {
+                    "role": role,
+                    "name": name or None,
+                    "email": email or None,
+                    "openId": open_id or None,
+                }
+            )
+        return open_ids, detail_rows
+
+    @classmethod
+    def _build_feishu_at_tags(cls, open_ids: list[str]) -> str:
+        """
+        构建飞书文本消息中的 @ 标签文本。
+
+        :param open_ids: 飞书 open_id 列表。
+        :return: `<at user_id=\"...\"></at>` 拼接文本。
+        """
+        unique_ids: list[str] = []
+        for open_id in open_ids:
+            normalized_open_id = str(open_id or "").strip()
+            if normalized_open_id and normalized_open_id not in unique_ids:
+                unique_ids.append(normalized_open_id)
+        if not unique_ids:
+            return ""
+        return " ".join([f"<at user_id=\"{open_id}\"></at>" for open_id in unique_ids])
 
     @classmethod
     def query_feishu_user_by_email(cls, *, app_id: str, app_secret: str, email: str) -> dict[str, Any] | None:
@@ -1619,10 +1830,23 @@ class TicketSyncNotifyService:
             message_template = manual_template if manual_trigger and manual_template else default_template
 
         template_variables = cls._build_group_ticket_variables(ticket, sync_summary=sync_summary)
+        template_text = str(message_template or "").strip() or cls.DEFAULT_GROUP_TEMPLATE
+        mention_open_ids, mention_targets = cls._resolve_group_mention_open_ids(
+            db,
+            ticket=ticket,
+            template_text=template_text,
+            app_id=app_id,
+            app_secret=app_secret,
+        )
         content = cls._render_template(message_template, template_variables, cls.DEFAULT_GROUP_TEMPLATE)
         push_success_count = 0
         if enable_push_channel:
-            push_success_count = cls._send_push_messages(db, push_ids=push_ids, content=content, at_user_ids=None)
+            push_success_count = cls._send_push_messages(
+                db,
+                push_ids=push_ids,
+                content=content,
+                at_user_ids=mention_open_ids or None,
+            )
         app_success_count = 0
         if enable_feishu_app:
             app_success_count = cls._send_feishu_text_messages(
@@ -1631,11 +1855,13 @@ class TicketSyncNotifyService:
                 receive_id_type="chat_id",
                 receive_ids=chat_ids,
                 content=content,
+                mention_open_ids=mention_open_ids,
             )
         logger.info(
             f"群推送发送完成: ticket_no={ticket.ticket_no}, scene={scene}, "
             f"ticket_priority={ticket_priority or '-'}, push_success_count={push_success_count}, "
-            f"app_success_count={app_success_count}, send_mode={send_mode}"
+            f"app_success_count={app_success_count}, send_mode={send_mode}, "
+            f"mention_count={len(mention_open_ids)}"
         )
         return {
             "skipped": False,
@@ -1648,6 +1874,8 @@ class TicketSyncNotifyService:
             "pushSuccessCount": push_success_count,
             "chatCount": len(chat_ids),
             "chatSuccessCount": app_success_count,
+            "mentionOpenIds": mention_open_ids,
+            "mentionTargets": mention_targets,
             "templateVariables": template_variables,
         }
 
