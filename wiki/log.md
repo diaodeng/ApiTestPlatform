@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-12] INGEST-CODE | 工单群消息@人补强（模板别名 + 人员对象邮箱解析）
+- 触发：用户要求外部推单/远端拉取发群时，按模板决定是否 @ 报告人与当前责任人，并通过邮箱查询飞书 `open_id` 稳定 @ 人。
+- 架构层：工单域 / 外部同步链路 / 飞书通知
+- 创建的页面：`web/public/docs/2026-06-12-ticket-group-mention-template-and-person-email-compat.md`
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/controller/ticket_controller.py` / `server/modules/ticket/service/ticket_sync_notify_service.py` -> 工单通知链路文档
+- 总共涉及页面：3
+
 ## [2026-06-12] INGEST-CODE | 自动群推送状态条件改为可视化配置
 - 触发：用户要求将自动群推送的状态判断从后端写死逻辑改为可视化配置，并确认外部推单/远端拉取都生效且不影响手动推送。
 - 架构层：工单域 / 同步自动化配置 / 群消息通知

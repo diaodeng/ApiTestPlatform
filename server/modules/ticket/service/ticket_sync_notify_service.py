@@ -644,6 +644,8 @@ class TicketSyncNotifyService:
                 "reporter_email",
                 "reporterMail",
                 "reporter_mail",
+                "reporterName",
+                "reporter_name",
                 "reporter",
             ]
         else:
@@ -654,6 +656,8 @@ class TicketSyncNotifyService:
                 "ticket_assignee_email",
                 "assigneeEmail",
                 "assignee_email",
+                "currentAssigneeName",
+                "current_assignee_name",
                 "ticketAssignee",
                 "ticket_assignee",
                 "currentAssignee",
@@ -681,7 +685,7 @@ class TicketSyncNotifyService:
             normalized_name = str(variable_name or "").strip()
             if not normalized_name:
                 continue
-            if f"${{{normalized_name}}}" in normalized_template:
+            if re.search(rf"\$\{{\s*{re.escape(normalized_name)}\s*\}}", normalized_template):
                 return True
         return False
 
@@ -708,13 +712,24 @@ class TicketSyncNotifyService:
         if not app_id or not app_secret:
             return [], []
         mention_candidates: list[dict[str, Any]] = []
-        if cls._template_contains_variable(template_text, ["reporterName", "reporter_name"]):
+        if cls._template_contains_variable(
+            template_text,
+            ["reporterName", "reporter_name", "reporter"],
+        ):
             reporter_name = str(ticket.reporter_name or "").strip()
             if reporter_name:
                 mention_candidates.append({"role": "reporter", "name": reporter_name})
         if cls._template_contains_variable(
             template_text,
-            ["assignee_name", "currentAssigneeName", "current_assignee_name"],
+            [
+                "assignee_name",
+                "currentAssigneeName",
+                "current_assignee_name",
+                "ticketAssignee",
+                "ticket_assignee",
+                "currentAssignee",
+                "current_assignee",
+            ],
         ):
             assignee_name = str(ticket.current_assignee_name or "").strip()
             if assignee_name:

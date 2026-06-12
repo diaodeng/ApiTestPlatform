@@ -1,6 +1,7 @@
 ## 更新历史
 
 ### latest
+1. 工单群消息 `@` 人员链路补强：外部同步入参现在支持从 `reporterName/currentAssigneeName/ticketAssignee` 的对象值中提取姓名与邮箱（兼容 `email/mail/userEmail/workEmail`），并继续沉淀到 `external_field_mapping`；通知链路新增从 `reporterName/currentAssigneeName` 对象键提取邮箱，模板变量识别新增别名（`reporter`、`ticketAssignee`、`currentAssignee` 等）并兼容 `${ variable }` 空格写法，提升外部推单与远端拉取场景的 `@` 命中率。
 1. 工单群消息自动推送状态条件改为可视化配置：新增 `groupPush.autoPushStatuses`，自动推送链路不再写死状态判断；默认保留历史三种状态（`2. 1.5线处理`、`3. 待产研处理`、`4. 产研处理中`），支持页面自定义，清空表示不按状态限制。该规则同时作用于外部推单、远端拉取和 AI 后补发三类自动推送；手动推送不受影响。
 1. 修复外部同工单“秒级重复推送”导致群消息重复问题：自动群推送新增数据库行级互斥锁（`group_push_processing*`），发送前先抢占锁并二次校验 `group_push_sent_once`，并发任务会立即跳过；发送结束后统一释放锁，成功时再写入一次性去重标记，避免短时间重复入站造成重复发群。
 1. 修复按人催办/汇总统计的多维表格过滤公式传参：`filterFormula` 改为按飞书公式文本直传 `filter` 参数，不再把公式按 JSON 对象序列化；同时兼容“JSON 字符串包裹公式”的历史写法，并在输入 JSON 对象/数组时给出明确错误提示，避免调用飞书时报参数异常。

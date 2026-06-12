@@ -84,6 +84,60 @@ def _compatible_field_value(payload: dict, camel_key: str, snake_key: str | None
     return default
 
 
+def _normalize_email_text(value: object) -> str:
+    """
+    归一化邮箱文本。
+
+    :param value: 原始邮箱值。
+    :return: 去空格并小写后的邮箱；为空返回空字符串。
+    """
+    text = str(value or "").strip().lower()
+    if "@" not in text:
+        return ""
+    return text
+
+
+def _extract_person_name_email(value: object) -> tuple[str, str]:
+    """
+    从人员字段中提取姓名与邮箱，兼容字符串/对象/数组。
+
+    :param value: 人员字段值。
+    :return: (姓名, 邮箱)。
+    """
+    if isinstance(value, list):
+        for item in value:
+            name, email = _extract_person_name_email(item)
+            if name or email:
+                return name, email
+        return "", ""
+    if isinstance(value, dict):
+        name = str(
+            value.get("name")
+            or value.get("displayName")
+            or value.get("nickName")
+            or value.get("nickname")
+            or value.get("userName")
+            or value.get("realName")
+            or value.get("value")
+            or ""
+        ).strip()
+        email = _normalize_email_text(
+            value.get("email")
+            or value.get("mail")
+            or value.get("userEmail")
+            or value.get("workEmail")
+            or ""
+        )
+        return name, email
+    raw_text = str(value or "").strip()
+    if not raw_text:
+        return "", ""
+    email_text = _normalize_email_text(raw_text)
+    if email_text:
+        return "", email_text
+    return raw_text, ""
+
+
 def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
     """
     将外部工单同步请求归一化为统一结构。
@@ -112,8 +166,11 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
     ticket_vender = str(_compatible_field_value(data, "ticketVender", "ticket_vender", default="") or "").strip()
     ticket_modle = str(_compatible_field_value(data, "ticketModle", "ticket_modle", default="") or "").strip()
     create_time = _compatible_field_value(data, "createTime", "create_time")
-    reporter_name = str(_compatible_field_value(data, "reporterName", "reporter_name", default="") or "").strip()
-    reporter_email = str(_compatible_field_value(data, "reporterEmail", "reporter_email", default="") or "").strip()
+    reporter_raw = _compatible_field_value(data, "reporterName", "reporter_name", default="")
+    reporter_name, reporter_email_from_name = _extract_person_name_email(reporter_raw)
+    reporter_email = _normalize_email_text(
+        _compatible_field_value(data, "reporterEmail", "reporter_email", default="")
+    ) or reporter_email_from_name
 
     required_items = {
         "ticketNo": ticket_no,
@@ -174,16 +231,16 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         )
         or ""
     ).strip()
-    assignee_value = str(
-        _compatible_field_value(
-            data,
-            "ticketAssignee",
-            "ticket_assignee",
-            default=_compatible_field_value(data, "currentAssigneeName", "current_assignee_name", default=""),
-        )
-        or ""
-    ).strip()
-    assignee_email = str(
+    current_assignee_raw = _compatible_field_value(data, "currentAssigneeName", "current_assignee_name", default="")
+    current_assignee_name, current_assignee_email = _extract_person_name_email(current_assignee_raw)
+    assignee_raw = _compatible_field_value(
+        data,
+        "ticketAssignee",
+        "ticket_assignee",
+        default=current_assignee_raw,
+    )
+    assignee_value, assignee_email_from_name = _extract_person_name_email(assignee_raw)
+    assignee_email = _normalize_email_text(
         _compatible_field_value(
             data,
             "currentAssigneeEmail",
@@ -195,8 +252,7 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
                 default=_compatible_field_value(data, "assigneeEmail", "assignee_email", default=""),
             ),
         )
-        or ""
-    ).strip()
+    ) or assignee_email_from_name or current_assignee_email
     store_value = str(
         _compatible_field_value(
             data,
@@ -258,8 +314,9 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         data["root_cause"] = reason
     if status_value:
         data["status"] = status_value
-    if assignee_value:
-        data["current_assignee_name"] = assignee_value
+    resolved_assignee_name = assignee_value or current_assignee_name
+    if resolved_assignee_name:
+        data["current_assignee_name"] = resolved_assignee_name
     raw_extra_data = _compatible_field_value(data, "extraData", "extra_data", default={})
     extra_data = dict(raw_extra_data) if isinstance(raw_extra_data, dict) else {}
     extra_data["external_field_mapping"] = {
@@ -268,7 +325,7 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         "ticketStatus": status_value,
         "reporterEmail": reporter_email,
         "ticketStore": store_value,
-        "ticketAssignee": assignee_value,
+        "ticketAssignee": resolved_assignee_name,
         "ticketAssigneeEmail": assignee_email,
         "ticketPos": pos_value,
         "ticketSco": sco_value,
