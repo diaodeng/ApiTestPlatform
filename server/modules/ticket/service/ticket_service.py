@@ -1136,6 +1136,7 @@ class TicketService:
         try:
             data = _dump_model(ticket_object)
             data.pop("ticket_id", None)
+            data.pop("project_code", None)
             data.pop("project_name", None)
             auto_translate = _extract_ticket_manual_automation_config(data)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
