@@ -138,11 +138,12 @@ def _extract_person_name_email(value: object) -> tuple[str, str]:
     return raw_text, ""
 
 
-def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
+def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list[str] | None = None) -> dict:
     """
-    将外部工单同步请求归一化为统一结构。
-    :param payload: 原始请求体。
-    :return: 可用于 TicketExternalSyncUpsertModel 的数据。
+    ??????????????????
+    :param payload: ??????
+    :param required_fields: ?????????????????
+    :return: ??? TicketExternalSyncUpsertModel ????
     """
     data = dict(payload or {})
     raw_payload = dict(data)
@@ -171,28 +172,8 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
     reporter_email = _normalize_email_text(
         _compatible_field_value(data, "reporterEmail", "reporter_email", default="")
     ) or reporter_email_from_name
-
-    required_items = {
-        "ticketNo": ticket_no,
-        "description": description,
-        "internalPriority": internal_priority,
-        "ticketVender": ticket_vender,
-        "ticketModle": ticket_modle,
-        "createTime": create_time,
-        "reporterName": reporter_name,
-    }
-    missing_fields = [field for field, value in required_items.items() if value in (None, "", [])]
-    if missing_fields:
-        raise ValueError(f"外部工单同步缺少必填字段: {', '.join(missing_fields)}")
-
     title = str(_compatible_field_value(data, "title", "title", default="") or "").strip()
     reason = str(_compatible_field_value(data, "reason", "reason", default="") or "").strip()
-
-    record_id = str(
-        _compatible_field_value(data, "sourceRecordId", "source_record_id", default=ticket_no) or ""
-    ).strip()
-    if not record_id:
-        record_id = ticket_no
     ticket_url = str(
         _compatible_field_value(
             data,
@@ -207,130 +188,78 @@ def _normalize_ticket_external_sync_payload(payload: dict) -> dict:
         )
         or ""
     ).strip() or None
+
+    field_value_map = {
+        "ticketNo": ticket_no,
+        "description": description,
+        "internalPriority": internal_priority,
+        "ticketVender": ticket_vender,
+        "ticketModle": ticket_modle,
+        "createTime": create_time,
+        "reporterName": reporter_name,
+        "title": title,
+        "reason": reason,
+        "ticketUrl": ticket_url,
+        "ticketStore": _compatible_field_value(data, "ticketStore", "ticket_store", default=""),
+        "storeInfo": _compatible_field_value(data, "storeInfo", "store_info", default=""),
+        "storeId": _compatible_field_value(data, "storeId", "store_id", default=""),
+    }
+    default_required_fields = [
+        "ticketNo",
+        "description",
+        "internalPriority",
+        "ticketVender",
+        "ticketModle",
+        "createTime",
+        "reporterName",
+    ]
+    normalized_required_fields: list[str] = []
+    for item in required_fields or default_required_fields:
+        field_name = str(item or "").strip()
+        if field_name and field_name not in normalized_required_fields:
+            normalized_required_fields.append(field_name)
+    missing_fields = [field for field in normalized_required_fields if field_value_map.get(field) in (None, "", [])]
+    if missing_fields:
+        raise ValueError(f"外部同步缺少必填字段: {', '.join(missing_fields)}")
+
+    record_id = str(
+        _compatible_field_value(data, "sourceRecordId", "source_record_id", default=ticket_no) or ""
+    ).strip()
+    if not record_id:
+        record_id = ticket_no
     record_url = str(
         _compatible_field_value(
             data,
-            "sourceRecordUrl",
-            "source_record_url",
+            "ticketUrl",
+            "ticket_url",
             default=_compatible_field_value(
                 data,
-                "recordUrl",
-                "record_url",
-                default=ticket_url
-                or str(source.get("record_url") or source.get("recordUrl") or source.get("url") or "").strip(),
+                "url",
+                "url",
+                default=_compatible_field_value(data, "detailUrl", "detail_url", default=""),
             ),
         )
         or ""
     ).strip() or None
-    status_value = str(
-        _compatible_field_value(
-            data,
-            "ticketStatus",
-            "ticket_status",
-            default=_compatible_field_value(data, "status", "status", default=""),
-        )
-        or ""
-    ).strip()
-    current_assignee_raw = _compatible_field_value(data, "currentAssigneeName", "current_assignee_name", default="")
-    current_assignee_name, current_assignee_email = _extract_person_name_email(current_assignee_raw)
-    assignee_raw = _compatible_field_value(
-        data,
-        "ticketAssignee",
-        "ticket_assignee",
-        default=current_assignee_raw,
-    )
-    assignee_value, assignee_email_from_name = _extract_person_name_email(assignee_raw)
-    assignee_email = _normalize_email_text(
-        _compatible_field_value(
-            data,
-            "currentAssigneeEmail",
-            "current_assignee_email",
-            default=_compatible_field_value(
-                data,
-                "ticketAssigneeEmail",
-                "ticket_assignee_email",
-                default=_compatible_field_value(data, "assigneeEmail", "assignee_email", default=""),
-            ),
-        )
-    ) or assignee_email_from_name or current_assignee_email
-    store_value = str(
-        _compatible_field_value(
-            data,
-            "ticketStore",
-            "ticket_store",
-            default=_compatible_field_value(
-                data,
-                "storeInfo",
-                "store_info",
-                default=_compatible_field_value(data, "storeId", "store_id", default=""),
-            ),
-        )
-        or ""
-    ).strip()
-    pos_value = str(
-        _compatible_field_value(
-            data,
-            "ticketPos",
-            "ticket_pos",
-            default=_compatible_field_value(
-                data,
-                "posNo",
-                "pos_no",
-                default=_compatible_field_value(data, "posId", "pos_id", default=""),
-            ),
-        )
-        or ""
-    ).strip()
-    sco_value = str(
-        _compatible_field_value(
-            data,
-            "ticketSco",
-            "ticket_sco",
-            default=_compatible_field_value(
-                data,
-                "scoNo",
-                "sco_no",
-                default=_compatible_field_value(data, "scoId", "sco_id", default=""),
-            ),
-        )
-        or ""
-    ).strip()
 
     data["source"] = {
-        "system": str((source.get("system") or ticket_vender) or "").strip(),
-        "record_id": str(source.get("record_id") or record_id or "").strip() or None,
-        "record_url": str(source.get("record_url") or record_url or "").strip() or None,
-        "pushed_at": source.get("pushed_at") or create_time,
+        "system": str(_compatible_field_value(source, "system", "system", default="") or "").strip(),
+        "recordId": record_id,
+        "recordUrl": record_url,
+        "pushedAt": _compatible_field_value(source, "pushedAt", "pushed_at", default=None),
     }
-    data["ticket_url"] = ticket_url or record_url
-    data["ticket_no"] = ticket_no
-    data["title"] = title
+    data["ticketNo"] = ticket_no
     data["description"] = description
-    data["customer_priority"] = customer_priority or internal_priority
-    data["internal_priority"] = internal_priority
-    data["reporter_name"] = reporter_name
-    data["module_name"] = ticket_modle
-    if reason:
-        data["root_cause"] = reason
-    if status_value:
-        data["status"] = status_value
-    resolved_assignee_name = assignee_value or current_assignee_name
-    if resolved_assignee_name:
-        data["current_assignee_name"] = resolved_assignee_name
-    raw_extra_data = _compatible_field_value(data, "extraData", "extra_data", default={})
-    extra_data = dict(raw_extra_data) if isinstance(raw_extra_data, dict) else {}
-    extra_data["external_field_mapping"] = {
-        "ticketVender": ticket_vender,
-        "ticketModle": ticket_modle,
-        "ticketStatus": status_value,
-        "reporterEmail": reporter_email,
-        "ticketStore": store_value,
-        "ticketAssignee": resolved_assignee_name,
-        "ticketAssigneeEmail": assignee_email,
-        "ticketPos": pos_value,
-        "ticketSco": sco_value,
-    }
-    data["extra_data"] = extra_data
+    data["internalPriority"] = internal_priority
+    data["customerPriority"] = customer_priority or internal_priority
+    data["ticketVender"] = ticket_vender
+    data["ticketModle"] = ticket_modle
+    data["createTime"] = create_time
+    data["reporterName"] = reporter_name
+    data["reporterEmail"] = reporter_email
+    data["title"] = title
+    data["reason"] = reason
+    data["ticketUrl"] = ticket_url
     if raw_payload:
         data["raw_payload"] = raw_payload
     return data
@@ -576,6 +505,9 @@ async def sync_external_ticket(
     """
     try:
         payload = await _load_external_sync_payload(request)
+        sync_config = TicketSyncService._load_sync_config(query_db)
+        external_sync_required_fields = sync_config.get("externalSyncRequiredFields") if isinstance(sync_config, dict) else None
+        payload = _normalize_ticket_external_sync_payload(payload, external_sync_required_fields)
         sync_object = TicketExternalSyncUpsertModel.model_validate(payload)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc

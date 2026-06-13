@@ -61,6 +61,15 @@ class TicketSyncService:
         "3. 待产研处理",
         "4. 产研处理中",
     ]
+    DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS = [
+        "ticketNo",
+        "description",
+        "internalPriority",
+        "ticketVender",
+        "ticketModle",
+        "createTime",
+        "reporterName",
+    ]
     GROUP_PUSH_LOCK_TIMEOUT_SECONDS = 300
 
     @classmethod
@@ -957,6 +966,7 @@ class TicketSyncService:
             "groupPush": cls._default_group_push_config(),
             "personReminder": cls._default_person_reminder_config(),
             "summaryReport": cls._default_summary_report_config(),
+            "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
             "projectMappings": [],
             "moduleMappings": [],
             "vendorMappings": [],
@@ -1120,6 +1130,18 @@ class TicketSyncService:
             merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
         if not isinstance(merged.get("promptTemplates"), dict):
             merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
+        external_sync_required_fields = merged.get("externalSyncRequiredFields")
+        if isinstance(external_sync_required_fields, list):
+            normalized_required_fields: list[str] = []
+            for item in external_sync_required_fields:
+                field_name = str(item or "").strip()
+                if field_name and field_name not in normalized_required_fields:
+                    normalized_required_fields.append(field_name)
+            merged["externalSyncRequiredFields"] = normalized_required_fields or list(
+                cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS
+            )
+        else:
+            merged["externalSyncRequiredFields"] = list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
         if not isinstance(merged.get("remoteSync"), dict):
             merged["remoteSync"] = cls._default_remote_sync_config()
         else:

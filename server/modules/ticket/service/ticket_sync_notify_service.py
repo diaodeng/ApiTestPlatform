@@ -352,9 +352,9 @@ class TicketSyncNotifyService:
         if not normalized_ids:
             return 0
         mention_text = ""
-        if receive_id_type == "chat_id" and isinstance(mention_open_ids, list):
-            mention_text = cls._build_feishu_at_tags(mention_open_ids)
         message_text = str(content or "").strip()
+        if receive_id_type == "chat_id" and isinstance(mention_open_ids, list) and "<at user_id=" not in message_text:
+            mention_text = cls._build_feishu_at_tags(mention_open_ids)
         if mention_text:
             message_text = f"{mention_text}\n{message_text}" if message_text else mention_text
         token = cls._get_tenant_access_token(app_id, app_secret)
@@ -675,68 +675,32 @@ class TicketSyncNotifyService:
         return cls._normalize_email(getattr(user, "email", "")) if user else ""
 
     @classmethod
-    def _template_contains_variable(cls, template_text: str, variable_names: list[str]) -> bool:
-        """
-        判断模板中是否包含指定变量占位符。
-
-        :param template_text: 模板文本。
-        :param variable_names: 变量名列表。
-        :return: 是否命中至少一个占位符。
-        """
-        normalized_template = str(template_text or "")
-        for variable_name in variable_names:
-            normalized_name = str(variable_name or "").strip()
-            if not normalized_name:
-                continue
-            if re.search(rf"\$\{{\s*{re.escape(normalized_name)}\s*\}}", normalized_template):
-                return True
-        return False
-
-    @classmethod
     def _resolve_group_mention_open_ids(
         cls,
         db: Session,
         *,
         ticket: Ticket,
-        template_text: str,
         app_id: str,
         app_secret: str,
     ) -> tuple[list[str], list[dict[str, Any]]]:
         """
-        根据模板变量与工单人员信息解析需要 @ 的 open_id 列表。
+        ???????????? @ ? open_id ???
 
-        :param db: 数据库会话。
-        :param ticket: 工单对象。
-        :param template_text: 消息模板文本（用于判断是否启用 reporter/assignee @）。
-        :param app_id: 飞书应用 app_id。
-        :param app_secret: 飞书应用 app_secret。
-        :return: (open_id 列表, 解析明细列表)。
+        :param db: ??????
+        :param ticket: ?????
+        :param app_id: ???? app_id?
+        :param app_secret: ???? app_secret?
+        :return: (open_id ??, ??????)?
         """
         if not app_id or not app_secret:
             return [], []
         mention_candidates: list[dict[str, Any]] = []
-        if cls._template_contains_variable(
-            template_text,
-            ["reporterName", "reporter_name", "reporter"],
-        ):
-            reporter_name = str(ticket.reporter_name or "").strip()
-            if reporter_name:
-                mention_candidates.append({"role": "reporter", "name": reporter_name})
-        if cls._template_contains_variable(
-            template_text,
-            [
-                "assignee_name",
-                "currentAssigneeName",
-                "current_assignee_name",
-                "ticketAssignee",
-                "ticket_assignee",
-                "currentAssignee",
-                "current_assignee",
-            ],
-        ):
-            assignee_name = str(ticket.current_assignee_name or "").strip()
-            if assignee_name:
-                mention_candidates.append({"role": "assignee", "name": assignee_name})
+        reporter_name = str(ticket.reporter_name or '').strip()
+        if reporter_name:
+            mention_candidates.append({'role': 'reporter', 'name': reporter_name})
+        assignee_name = str(ticket.current_assignee_name or '').strip()
+        if assignee_name:
+            mention_candidates.append({'role': 'assignee', 'name': assignee_name})
         if not mention_candidates:
             return [], []
 
@@ -744,15 +708,15 @@ class TicketSyncNotifyService:
         detail_rows: list[dict[str, Any]] = []
         feishu_user_cache: dict[str, dict[str, Any] | None] = {}
         for candidate in mention_candidates:
-            role = str(candidate.get("role") or "").strip()
-            name = str(candidate.get("name") or "").strip()
+            role = str(candidate.get('role') or '').strip()
+            name = str(candidate.get('name') or '').strip()
             email = cls._resolve_ticket_person_email(
                 db,
                 ticket=ticket,
                 person_role=role,
                 person_name=name,
             )
-            open_id = ""
+            open_id = ''
             feishu_user = None
             if email:
                 if email not in feishu_user_cache:
@@ -762,19 +726,72 @@ class TicketSyncNotifyService:
                         email=email,
                     )
                 feishu_user = feishu_user_cache.get(email) if isinstance(feishu_user_cache.get(email), dict) else None
-                open_id = str((feishu_user or {}).get("openId") or "").strip()
+                open_id = str((feishu_user or {}).get('openId') or '').strip()
                 if open_id and open_id not in open_ids:
                     open_ids.append(open_id)
             detail_rows.append(
                 {
-                    "role": role,
-                    "name": name or None,
-                    "email": email or None,
-                    "openId": open_id or None,
+                    'role': role,
+                    'name': name or None,
+                    'email': email or None,
+                    'openId': open_id or None,
                 }
             )
         return open_ids, detail_rows
 
+    @classmethod
+    def _build_feishu_at_tags(cls, open_ids: list[str]) -> str:
+        """
+        ?????????? @ ?????
+
+        :param open_ids: ?? open_id ???
+        :return: `<at user_id="..."></at>` ?????
+        """
+        unique_ids: list[str] = []
+        for open_id in open_ids:
+            normalized_open_id = str(open_id or '').strip()
+            if normalized_open_id and normalized_open_id not in unique_ids:
+                unique_ids.append(normalized_open_id)
+        if not unique_ids:
+            return ''
+        return ' '.join([f'<at user_id="{open_id}"></at>' for open_id in unique_ids])
+
+    @classmethod
+    def _build_group_mention_template_variables(cls, mention_targets: list[dict[str, Any]]) -> dict[str, Any]:
+        """
+        ????????????? @ ???
+
+        :param mention_targets: ???? @ ???
+        :return: mention ???????
+        """
+        mention_open_ids: list[str] = []
+        reporter_open_id = ''
+        assignee_open_id = ''
+        for item in mention_targets or []:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get('role') or '').strip().lower()
+            open_id = str(item.get('openId') or '').strip()
+            if not open_id:
+                continue
+            if open_id not in mention_open_ids:
+                mention_open_ids.append(open_id)
+            if role == 'reporter' and not reporter_open_id:
+                reporter_open_id = open_id
+            elif role == 'assignee' and not assignee_open_id:
+                assignee_open_id = open_id
+        reporter_at = cls._build_feishu_at_tags([reporter_open_id]) if reporter_open_id else ''
+        assignee_at = cls._build_feishu_at_tags([assignee_open_id]) if assignee_open_id else ''
+        mention_at = cls._build_feishu_at_tags(mention_open_ids)
+        return {
+            'report_at': reporter_at,
+            'reporter_at': reporter_at,
+            'assignee_at': assignee_at,
+            'mention_at': mention_at,
+            'mention_all_at': mention_at,
+            'mention_open_ids': mention_open_ids,
+            'mention_targets': mention_targets,
+        }
     @classmethod
     def _build_feishu_at_tags(cls, open_ids: list[str]) -> str:
         """
@@ -2002,22 +2019,22 @@ class TicketSyncNotifyService:
             message_template = manual_template if manual_trigger and manual_template else default_template
 
         template_variables = cls._build_group_ticket_variables(ticket, sync_summary=sync_summary)
-        template_text = str(message_template or "").strip() or cls.DEFAULT_GROUP_TEMPLATE
         mention_open_ids, mention_targets = cls._resolve_group_mention_open_ids(
             db,
             ticket=ticket,
-            template_text=template_text,
             app_id=app_id,
             app_secret=app_secret,
         )
+        template_variables.update(cls._build_group_mention_template_variables(mention_targets))
         content = cls._render_template(message_template, template_variables, cls.DEFAULT_GROUP_TEMPLATE)
+        content_has_explicit_mentions = "<at user_id=" in content
         push_success_count = 0
         if enable_push_channel:
             push_success_count = cls._send_push_messages(
                 db,
                 push_ids=push_ids,
                 content=content,
-                at_user_ids=mention_open_ids or None,
+                at_user_ids=None if content_has_explicit_mentions else mention_open_ids or None,
             )
         app_success_count = 0
         if enable_feishu_app:
@@ -2027,7 +2044,7 @@ class TicketSyncNotifyService:
                 receive_id_type="chat_id",
                 receive_ids=chat_ids,
                 content=content,
-                mention_open_ids=mention_open_ids,
+                mention_open_ids=None if content_has_explicit_mentions else mention_open_ids,
             )
         logger.info(
             f"群推送发送完成: ticket_no={ticket.ticket_no}, scene={scene}, "

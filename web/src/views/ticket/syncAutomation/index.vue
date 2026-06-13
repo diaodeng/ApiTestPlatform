@@ -45,54 +45,24 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
-          <span>远端同步链接</span>
-          <el-tag type="warning" effect="plain">这里只配置拉取地址，不会自动启动任务</el-tag>
+          <span>????????</span>
+          <el-tag effect="plain">???????????</el-tag>
         </div>
       </template>
 
-      <el-form ref="remoteFormRef" :model="form.remoteSync" :rules="remoteRules" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用远端同步" prop="enabled">
-              <el-switch v-model="form.remoteSync.enabled" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="抓取超时(秒)" prop="timeoutSec">
-              <el-input-number v-model="form.remoteSync.timeoutSec" :min="10" :max="300" :step="5" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="拉取地址" prop="pullUrl">
-              <el-input v-model="form.remoteSync.pullUrl" placeholder="https://example.com/api/tickets/pending" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="回写地址" prop="ackUrl">
-              <el-input v-model="form.remoteSync.ackUrl" placeholder="https://example.com/api/tickets/ack" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="消费者标识" prop="consumer">
-              <el-input v-model="form.remoteSync.consumer" placeholder="例如 public-ticket-sync" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="每次拉取数量" prop="limit">
-              <el-input-number v-model="form.remoteSync.limit" :min="1" :max="200" :step="1" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="包含已关闭" prop="includeClosed">
-              <el-switch v-model="form.remoteSync.includeClosed" inline-prompt active-text="是" inactive-text="否" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="拉取后自动翻译" prop="autoTranslateOnPull">
-              <el-switch v-model="form.remoteSync.autoTranslateOnPull" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+      <el-form :model="form" label-width="150px">
+        <el-form-item label="??????">
+          <el-select
+            v-model="form.externalSyncRequiredFields"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            collapse-tags
+            placeholder="ticketNo, description, internalPriority, ticketVender, ticketModle, createTime, reporterName"
+            style="width: 100%"
+          />
+        </el-form-item>
       </el-form>
     </el-card>
 
@@ -266,213 +236,22 @@
             </el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item label="固定开始时间">
-              <el-input v-model="form.summaryReport.startTime" placeholder="可选，格式如 2026-06-10 09:00:00" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="固定结束时间">
-              <el-input v-model="form.summaryReport.endTime" placeholder="可选，格式如 2026-06-10 18:00:00" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="汇总模板">
-              <el-input
-                v-model="form.summaryReport.messageTemplate"
-                type="textarea"
-                :rows="6"
-                placeholder="可用变量：${data_source} ${start_time} ${end_time} ${time_field} ${total_count} ${status_summary} ${category_summary} ${priority_summary} ${ai_summary} ${now_time}"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>飞书统一凭证</span>
-          <el-tag type="info" effect="plain">群推送/按人催办/汇总通知共用，子配置可覆盖</el-tag>
-        </div>
-      </template>
-      <el-form :model="form.feishuAuth" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appId">
-              <el-input v-model="form.feishuAuth.appId" placeholder="开放平台应用 app_id" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appSecret">
-              <el-input v-model="form.feishuAuth.appSecret" show-password placeholder="开放平台应用 app_secret" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>工单群消息推送</span>
-          <el-tag type="success" effect="plain">推送项来自推送配置管理</el-tag>
-        </div>
-      </template>
-
-      <el-form :model="form.groupPush" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用群推送">
-              <el-switch v-model="form.groupPush.enabled" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="发送模式">
-              <el-select v-model="form.groupPush.sendMode" style="width: 100%">
-                <el-option v-for="item in notifySendModes" :key="`group-mode-${item.value}`" :label="item.label" :value="item.value" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="推送渠道">
-              <el-select
-                v-model="form.groupPush.pushIds"
-                multiple
-                filterable
-                collapse-tags
-                :loading="pushOptionsLoading"
-                placeholder="请选择推送配置"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in pushOptions"
-                  :key="item.pushId"
-                  :label="item.label"
-                  :value="item.pushId"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="应用群 chat_id">
-              <el-select
-                v-model="form.groupPush.appChatIds"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                placeholder="feishu_app/hybrid 模式必填"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="外部推送后发送">
-              <el-switch v-model="form.groupPush.sendAfterExternalSync" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="远端拉取后发送">
-              <el-switch v-model="form.groupPush.sendAfterRemotePull" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="自动推送状态条件">
-              <el-select
-                v-model="form.groupPush.autoPushStatuses"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                collapse-tags
-                placeholder="留空表示不按状态限制；默认保留原有三种状态"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in groupPushAutoStatusOptions"
-                  :key="`group-auto-status-${item}`"
-                  :label="item"
-                  :value="item"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="自动推送起始时间">
-              <el-date-picker
-                v-model="form.groupPush.autoSendAfterTime"
-                type="datetime"
-                value-format="YYYY-MM-DD HH:mm:ss"
-                format="YYYY-MM-DD HH:mm:ss"
-                placeholder="不填表示不限制提交时间"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="优先级路由">
-              <div class="priority-route-list">
-                <div v-for="(route, idx) in form.groupPush.priorityRoutes" :key="`route-${idx}`" class="priority-route-item">
-                  <el-row :gutter="12">
-                    <el-col :xs="24" :md="6">
-                      <el-select v-model="route.priorities" multiple placeholder="优先级" style="width: 100%">
-                        <el-option label="P1" value="P1" />
-                        <el-option label="P2" value="P2" />
-                        <el-option label="P3" value="P3" />
-                        <el-option label="P4" value="P4" />
-                      </el-select>
-                    </el-col>
-                    <el-col :xs="24" :md="9">
-                      <el-select
-                        v-model="route.pushIds"
-                        multiple
-                        filterable
-                        collapse-tags
-                        :loading="pushOptionsLoading"
-                        placeholder="路由推送渠道（机器人）"
-                        style="width: 100%"
-                      >
-                        <el-option
-                          v-for="item in pushOptions"
-                          :key="`route-push-${idx}-${item.pushId}`"
-                          :label="item.label"
-                          :value="item.pushId"
-                        />
-                      </el-select>
-                    </el-col>
-                    <el-col :xs="24" :md="9">
-                      <el-select
-                        v-model="route.chatIds"
-                        multiple
-                        filterable
-                        allow-create
-                        default-first-option
-                        placeholder="路由群 chat_id（应用身份）"
-                        style="width: 100%"
-                      />
-                    </el-col>
-                  </el-row>
-                </div>
-              </div>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="自动推送模板">
+            <el-form-item label="??????">
               <el-input
                 v-model="form.groupPush.template"
                 type="textarea"
                 :rows="5"
-                placeholder="可用变量：${ticket_no} ${ticket_title} ${project_name} ${module_name} ${ticket_status} ${assignee_name} ${ticket_url} ${sync_source_record_url} ${description}"
+                placeholder="?????${ticket_no} ${ticket_title} ${project_name} ${module_name} ${ticket_status} ${assignee_name} ${reporter_name} ${ticket_url} ${sync_source_record_url} ${description} ${report_at} ${assignee_at} ${mention_at}"
               />
             </el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item label="手动发送模板">
+            <el-form-item label="??????">
               <el-input
                 v-model="form.groupPush.manualTemplate"
                 type="textarea"
                 :rows="4"
-                placeholder="留空时复用自动推送模板"
+                placeholder="???????????"
               />
             </el-form-item>
           </el-col>
@@ -1158,7 +937,16 @@ function createDefaultForm() {
     },
     promptTemplates: {
       classificationHint: ''
-    }
+    },
+    externalSyncRequiredFields: [
+      'ticketNo',
+      'description',
+      'internalPriority',
+      'ticketVender',
+      'ticketModle',
+      'createTime',
+      'reporterName'
+    ]
   }
 }
 
@@ -1346,6 +1134,17 @@ function applyConfig(payload) {
   form.promptTemplates = {
     classificationHint: payload.promptTemplates?.classificationHint || ''
   }
+  form.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
+    ? payload.externalSyncRequiredFields.map(item => String(item || '').trim()).filter(Boolean)
+    : [
+        'ticketNo',
+        'description',
+        'internalPriority',
+        'ticketVender',
+        'ticketModle',
+        'createTime',
+        'reporterName'
+      ]
 }
 
 function parseJsonArray(text, fallback = []) {
@@ -1473,6 +1272,9 @@ async function handleSave() {
     payload.summaryReport.aiEnabled = Boolean(payload.summaryReport?.aiEnabled)
     payload.summaryReport.aiProviderCode = String(payload.summaryReport?.aiProviderCode || '').trim()
     payload.summaryReport.aiPromptCode = String(payload.summaryReport?.aiPromptCode || '').trim()
+    payload.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
+      ? Array.from(new Set(payload.externalSyncRequiredFields.map(item => String(item || '').trim()).filter(Boolean)))
+      : []
     await saveTicketSyncAutomationConfig(payload)
     proxy.$modal.msgSuccess('保存成功')
     loadConfig()
