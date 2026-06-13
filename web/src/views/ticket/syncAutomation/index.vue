@@ -591,6 +591,16 @@
               <el-input-number v-model="form.personReminder.maxRowsPerPerson" :min="1" :max="200" style="width: 100%" />
             </el-form-item>
           </el-col>
+          <el-col :span="24">
+            <el-form-item label="明细行模板">
+              <el-input
+                v-model="form.personReminder.rowsMarkdownTemplate"
+                type="textarea"
+                :rows="5"
+                placeholder="可用变量：${index} ${created_at} ${ticket_no} ${detail_url} ${detail_link}"
+              />
+            </el-form-item>
+          </el-col>
           <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
             <el-form-item label="分页大小">
               <el-input-number v-model="form.personReminder.pageSize" :min="1" :max="500" style="width: 100%" />
@@ -1095,6 +1105,7 @@ function createDefaultForm() {
       thresholdMinutes: 30,
       messageTemplate: '',
       maxRowsPerPerson: 20,
+      rowsMarkdownTemplate: '',
       pageSize: 500
     },
     summaryReport: {
@@ -1266,6 +1277,7 @@ function applyConfig(payload) {
     timeField: personReminder.timeField || '',
     thresholdMinutes: Number(personReminder.thresholdMinutes || 30),
     messageTemplate: personReminder.messageTemplate || '',
+    rowsMarkdownTemplate: personReminder.rowsMarkdownTemplate || '',
     maxRowsPerPerson: Number(personReminder.maxRowsPerPerson || 20),
     pageSize: Number(personReminder.pageSize || 500)
   }
@@ -1435,6 +1447,7 @@ async function handleSave() {
       : []
     payload.personReminder.appId = String(payload.personReminder?.appId || '').trim()
     payload.personReminder.appSecret = String(payload.personReminder?.appSecret || '').trim()
+    payload.personReminder.rowsMarkdownTemplate = String(payload.personReminder?.rowsMarkdownTemplate || '').trim()
     payload.personReminder.dataSource = ['bitable', 'local'].includes(String(payload.personReminder?.dataSource || '').trim().toLowerCase())
       ? String(payload.personReminder?.dataSource || '').trim().toLowerCase()
       : 'bitable'

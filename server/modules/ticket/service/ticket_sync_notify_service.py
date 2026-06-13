@@ -39,6 +39,9 @@ class TicketSyncNotifyService:
         "统计时间：${now_time}\n\n"
         "${rows_markdown}"
     )
+    DEFAULT_PERSON_ROWS_MARKDOWN_TEMPLATE = (
+        "${index}. [${created_at}] 工单号: ${ticket_no} (详情)[${detail_link}]"
+    )
     DEFAULT_GROUP_TEMPLATE = (
         "【工单同步通知】\n"
         "工单：${ticket_no}\n"
@@ -987,11 +990,50 @@ class TicketSyncNotifyService:
             created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
             ticket_no = cls._extract_ticket_no_from_row_payload(row) or "-"
             detail_url = row.get('detailUrl', '')
-            line_data = f"{index}. [{created_text}]（工单ID: {ticket_no}"
+            line_data = f"{index}. [{created_text}]（工单ID: {ticket_no}）"
             if detail_url:
                 line_data = f"{line_data} [详情]({row.get('detailUrl', '')})"
             lines.append(line_data)
         return "\n".join(lines) if lines else "暂无明细"
+
+    @classmethod
+    def _build_rows_markdown_with_template(
+        cls,
+        rows: list[dict[str, Any]],
+        max_rows: int,
+        rows_markdown_template: str | None,
+    ) -> str:
+        """
+        Build person reminder row markdown with a configurable row template.
+        """
+        lines: list[str] = []
+        row_template = str(rows_markdown_template or "").strip() or cls.DEFAULT_PERSON_ROWS_MARKDOWN_TEMPLATE
+        for index, row in enumerate(rows[: max(max_rows, 1)], start=1):
+            logger.info(f"index={index}, row={row}")
+            created_at = cls._parse_datetime_value(row.get("createdAt"))
+            created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
+            ticket_no = cls._extract_ticket_no_from_row_payload(row) or "-"
+            detail_url = str(row.get("detailUrl") or "").strip()
+            detail_link = f" [??]({detail_url})" if detail_url else ""
+            variables = {
+                "index": index,
+                "row_index": index,
+                "created_at": created_text,
+                "createdAt": created_text,
+                "ticket_no": ticket_no,
+                "ticketNo": ticket_no,
+                "detail_url": detail_url,
+                "detailUrl": detail_url,
+                "detail_link": detail_link,
+                "detailLink": detail_link,
+            }
+            try:
+                line_data = str(parse_string(row_template, variables, {}, False))
+            except Exception as exc:
+                logger.warning(f"person reminder row template render failed, fallback to default: error={exc}")
+                line_data = f"{index}. [{created_text}] (???: {ticket_no}){detail_link}"
+            lines.append(line_data)
+        return "\n".join(lines) if lines else "????"
 
     @classmethod
     def _extract_ticket_no_from_row_payload(cls, row: dict[str, Any]) -> str:
@@ -1671,6 +1713,7 @@ class TicketSyncNotifyService:
 
         summary = cls._collect_person_overdue_data(db, config=config, user_id=user_id, email=email, all=is_all)
         message_template = str(config.get("messageTemplate") or "").strip() or cls.DEFAULT_PERSON_TEMPLATE
+        rows_markdown_template = str(config.get("rowsMarkdownTemplate") or "").strip()
         max_rows_per_person = max(int(config.get("maxRowsPerPerson") or 20), 1)
 
         sent_people = 0
@@ -1685,7 +1728,11 @@ class TicketSyncNotifyService:
                 skipped_people += 1
                 continue
             rows = person.get("rows") if isinstance(person.get("rows"), list) else []
-            rows_markdown = cls._build_rows_markdown(rows, max_rows_per_person)
+            rows_markdown = cls._build_rows_markdown_with_template(
+                rows,
+                max_rows_per_person,
+                rows_markdown_template,
+            )
             variables = {
                 "person_name": person.get("personName") or "-",
                 "threshold_minutes": summary.get("thresholdMinutes") or 0,

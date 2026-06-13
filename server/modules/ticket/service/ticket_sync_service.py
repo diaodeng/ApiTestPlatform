@@ -1041,6 +1041,7 @@ class TicketSyncService:
             "timeField": "",
             "thresholdMinutes": 30,
             "messageTemplate": "",
+            "rowsMarkdownTemplate": "",
             "maxRowsPerPerson": 20,
             "pageSize": 500,
         }
@@ -1210,6 +1211,7 @@ class TicketSyncService:
         person_reminder["timeField"] = str(person_reminder.get("timeField") or "").strip()
         person_reminder["thresholdMinutes"] = max(cls._safe_int(person_reminder.get("thresholdMinutes")) or 30, 1)
         person_reminder["messageTemplate"] = str(person_reminder.get("messageTemplate") or "").strip()
+        person_reminder["rowsMarkdownTemplate"] = str(person_reminder.get("rowsMarkdownTemplate") or "").strip()
         person_reminder["maxRowsPerPerson"] = max(cls._safe_int(person_reminder.get("maxRowsPerPerson")) or 20, 1)
         person_reminder["pageSize"] = min(max(cls._safe_int(person_reminder.get("pageSize")) or 500, 1), 500)
         if not person_reminder["appId"]:
