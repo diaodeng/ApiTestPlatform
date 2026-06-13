@@ -7,6 +7,7 @@
 ## 本次修复
 
 - 恢复 `web/src/views/ticket/syncAutomation/index.vue` 中远端同步、外部同步必填字段、汇总统计通知等区域的中文文案。
+- 恢复同页中被今天提交误删的“飞书统一凭证”“工单群消息推送”两个配置卡片。
 - 恢复工单汇总统计通知的 `startTime/endTime/messageTemplate` 绑定，避免误写到 `groupPush` 配置。
 - 为“外部同步必填字段”补充可见候选字段下拉，同时保留 `allow-create`，支持直接录入自定义字段名。
 - 修复 `ticket_sync_notify_service.py` 中新增催办明细模板与群消息 @ 变量相关注释、默认模板文案的乱码。
