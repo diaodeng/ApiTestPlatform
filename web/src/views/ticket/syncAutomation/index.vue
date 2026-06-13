@@ -45,13 +45,72 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
-          <span>????????</span>
-          <el-tag effect="plain">???????????</el-tag>
+          <span>远端同步链接</span>
+          <el-tag type="warning" effect="plain">这里只配置拉取地址，不会自动启动任务</el-tag>
+        </div>
+      </template>
+
+      <el-form ref="remoteFormRef" :model="form.remoteSync" :rules="remoteRules" label-width="150px">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="启用远端同步" prop="enabled">
+              <el-switch v-model="form.remoteSync.enabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="抓取超时(秒)" prop="timeoutSec">
+              <el-input-number v-model="form.remoteSync.timeoutSec" :min="10" :max="300" :step="5" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="拉取地址" prop="pullUrl">
+              <el-input v-model="form.remoteSync.pullUrl" placeholder="https://example.com/api/tickets/pending" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="回写地址" prop="ackUrl">
+              <el-input v-model="form.remoteSync.ackUrl" placeholder="https://example.com/api/tickets/ack" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="消费者标识" prop="consumer">
+              <el-input v-model="form.remoteSync.consumer" placeholder="例如 public-ticket-sync" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="每次拉取数量" prop="limit">
+              <el-input-number v-model="form.remoteSync.limit" :min="1" :max="200" :step="1" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="包含已关闭" prop="includeClosed">
+              <el-switch v-model="form.remoteSync.includeClosed" inline-prompt active-text="是" inactive-text="否" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="拉取后自动翻译" prop="autoTranslateOnPull">
+              <el-switch v-model="form.remoteSync.autoTranslateOnPull" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
+          <span>外部同步必填字段</span>
+          <el-tag type="info" effect="plain">支持选择已有字段，也支持直接输入自定义字段名</el-tag>
         </div>
       </template>
 
       <el-form :model="form" label-width="150px">
-        <el-form-item label="??????">
+        <el-form-item label="支持字段说明">
+          <div class="mapping-desc">
+            目前支持的字段：{{ externalSyncRequiredFieldOptions.map(item => item.value).join('、') }}。可直接下拉选择，也可手动输入新增字段名。
+          </div>
+        </el-form-item>
+        <el-form-item label="必填字段列表">
           <el-select
             v-model="form.externalSyncRequiredFields"
             multiple
@@ -61,7 +120,14 @@
             collapse-tags
             placeholder="ticketNo, description, internalPriority, ticketVender, ticketModle, createTime, reporterName"
             style="width: 100%"
-          />
+          >
+            <el-option
+              v-for="item in externalSyncRequiredFieldOptions"
+              :key="`external-required-${item.value}`"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
     </el-card>
@@ -236,22 +302,22 @@
             </el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item label="??????">
-              <el-input
-                v-model="form.groupPush.template"
-                type="textarea"
-                :rows="5"
-                placeholder="?????${ticket_no} ${ticket_title} ${project_name} ${module_name} ${ticket_status} ${assignee_name} ${reporter_name} ${ticket_url} ${sync_source_record_url} ${description} ${report_at} ${assignee_at} ${mention_at}"
-              />
+            <el-form-item label="固定开始时间">
+              <el-input v-model="form.summaryReport.startTime" placeholder="可选，格式如 2026-06-10 09:00:00" />
             </el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item label="??????">
+            <el-form-item label="固定结束时间">
+              <el-input v-model="form.summaryReport.endTime" placeholder="可选，格式如 2026-06-10 18:00:00" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="汇总模板">
               <el-input
-                v-model="form.groupPush.manualTemplate"
+                v-model="form.summaryReport.messageTemplate"
                 type="textarea"
-                :rows="4"
-                placeholder="???????????"
+                :rows="6"
+                placeholder="可用变量：${data_source} ${start_time} ${end_time} ${time_field} ${total_count} ${status_summary} ${category_summary} ${priority_summary} ${ai_summary} ${now_time}"
               />
             </el-form-item>
           </el-col>
@@ -765,6 +831,16 @@ const groupPushAutoStatusOptions = [
   '2. 1.5线处理',
   '3. 待产研处理',
   '4. 产研处理中'
+]
+
+const externalSyncRequiredFieldOptions = [
+  { label: 'ticketNo - 工单号', value: 'ticketNo' },
+  { label: 'description - 问题描述', value: 'description' },
+  { label: 'internalPriority - 内部优先级', value: 'internalPriority' },
+  { label: 'ticketVender - 商家/供应商', value: 'ticketVender' },
+  { label: 'ticketModle - 模块', value: 'ticketModle' },
+  { label: 'createTime - 创建时间', value: 'createTime' },
+  { label: 'reporterName - 提单人', value: 'reporterName' }
 ]
 
 const personDataSourceOptions = [

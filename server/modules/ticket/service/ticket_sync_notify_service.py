@@ -40,7 +40,7 @@ class TicketSyncNotifyService:
         "${rows_markdown}"
     )
     DEFAULT_PERSON_ROWS_MARKDOWN_TEMPLATE = (
-        "${index}. [${created_at}] 工单号: ${ticket_no} (详情)[${detail_link}]"
+        "${index}. [${created_at}] 工单号：${ticket_no}${detail_link}"
     )
     DEFAULT_GROUP_TEMPLATE = (
         "【工单同步通知】\n"
@@ -684,13 +684,13 @@ class TicketSyncNotifyService:
         app_secret: str,
     ) -> tuple[list[str], list[dict[str, Any]]]:
         """
-        ???????????? @ ? open_id ???
+        解析工单提单人与当前处理人的飞书 open_id 列表。
 
-        :param db: ??????
-        :param ticket: ?????
-        :param app_id: ???? app_id?
-        :param app_secret: ???? app_secret?
-        :return: (open_id ??, ??????)?
+        :param db: 数据库会话。
+        :param ticket: 工单对象。
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :return: (open_id 列表, 解析明细列表)。
         """
         if not app_id or not app_secret:
             return [], []
@@ -740,29 +740,12 @@ class TicketSyncNotifyService:
         return open_ids, detail_rows
 
     @classmethod
-    def _build_feishu_at_tags(cls, open_ids: list[str]) -> str:
-        """
-        ?????????? @ ?????
-
-        :param open_ids: ?? open_id ???
-        :return: `<at user_id="..."></at>` ?????
-        """
-        unique_ids: list[str] = []
-        for open_id in open_ids:
-            normalized_open_id = str(open_id or '').strip()
-            if normalized_open_id and normalized_open_id not in unique_ids:
-                unique_ids.append(normalized_open_id)
-        if not unique_ids:
-            return ''
-        return ' '.join([f'<at user_id="{open_id}"></at>' for open_id in unique_ids])
-
-    @classmethod
     def _build_group_mention_template_variables(cls, mention_targets: list[dict[str, Any]]) -> dict[str, Any]:
         """
-        ????????????? @ ???
+        构建模板可直接引用的飞书 @ 变量。
 
-        :param mention_targets: ???? @ ???
-        :return: mention ???????
+        :param mention_targets: 已解析出的 @ 人员信息。
+        :return: mention 相关模板变量。
         """
         mention_open_ids: list[str] = []
         reporter_open_id = ''
@@ -1021,17 +1004,21 @@ class TicketSyncNotifyService:
         rows_markdown_template: str | None,
     ) -> str:
         """
-        Build person reminder row markdown with a configurable row template.
+        使用可配置模板构建催办明细 Markdown。
+
+        :param rows: 催办明细列表。
+        :param max_rows: 最多输出的明细条数。
+        :param rows_markdown_template: 明细行模板文本。
+        :return: Markdown 文本。
         """
         lines: list[str] = []
         row_template = str(rows_markdown_template or "").strip() or cls.DEFAULT_PERSON_ROWS_MARKDOWN_TEMPLATE
         for index, row in enumerate(rows[: max(max_rows, 1)], start=1):
-            logger.info(f"index={index}, row={row}")
             created_at = cls._parse_datetime_value(row.get("createdAt"))
             created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
             ticket_no = cls._extract_ticket_no_from_row_payload(row) or "-"
             detail_url = str(row.get("detailUrl") or "").strip()
-            detail_link = f" [??]({detail_url})" if detail_url else ""
+            detail_link = f" [详情]({detail_url})" if detail_url else ""
             variables = {
                 "index": index,
                 "row_index": index,
@@ -1048,9 +1035,9 @@ class TicketSyncNotifyService:
                 line_data = str(parse_string(row_template, variables, {}, False))
             except Exception as exc:
                 logger.warning(f"person reminder row template render failed, fallback to default: error={exc}")
-                line_data = f"{index}. [{created_text}] (???: {ticket_no}){detail_link}"
+                line_data = f"{index}. [{created_text}] 工单号：{ticket_no}{detail_link}"
             lines.append(line_data)
-        return "\n".join(lines) if lines else "????"
+        return "\n".join(lines) if lines else "暂无明细"
 
     @classmethod
     def _extract_ticket_no_from_row_payload(cls, row: dict[str, Any]) -> str:
