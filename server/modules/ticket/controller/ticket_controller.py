@@ -242,8 +242,12 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
         or ""
     ).strip() or None
 
+    source_system = _compatible_field_value(source, "system", "system", default="")
+    if not source_system:
+        source_system = ticket_vender or "external"
+
     data["source"] = {
-        "system": str(_compatible_field_value(source, "system", "system", default="") or "").strip(),
+        "system": str(source_system or "").strip() or "external",
         "recordId": record_id,
         "recordUrl": record_url,
         "pushedAt": _compatible_field_value(source, "pushedAt", "pushed_at", default=None),
@@ -293,7 +297,7 @@ async def _load_external_sync_payload(request: Request) -> dict:
 
     if not isinstance(raw_payload, dict):
         raise HTTPException(status_code=422, detail="请求体必须是 JSON 或表单数据")
-    logger.info(f"请求参数:{json.dumps(raw_payload)}")
+    logger.info(f"请求参数:{json.dumps(raw_payload, ensure_ascii=False)}")
 
     try:
         return _normalize_ticket_external_sync_payload(raw_payload)
@@ -510,7 +514,17 @@ async def sync_external_ticket(
         payload = _normalize_ticket_external_sync_payload(payload, external_sync_required_fields)
         sync_object = TicketExternalSyncUpsertModel.model_validate(payload)
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+        logger.warning(
+            f"外部工单同步模型校验失败: {exc.errors()}; payload="
+            f"{json.dumps(payload, ensure_ascii=False) if 'payload' in locals() else ''}"
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "外部工单同步模型校验失败",
+                "errors": exc.errors(),
+            },
+        ) from exc
     except HTTPException as exc:
         raise exc
     except Exception as exc:

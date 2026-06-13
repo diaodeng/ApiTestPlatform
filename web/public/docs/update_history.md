@@ -270,3 +270,6 @@
 8. 同步流程优化为“翻译独立、提取合并复用”：标题优先复用统一提取结果，自动分类优先使用统一提取分类，日志自动拉取参数优先使用统一提取的 `posNo/scoNo/modifyTime`。
 9. 新增“更新且带标题跳过 AI 分析类步骤”规则：更新场景入参若已提供标题，将跳过统一提取与自动分类，避免不必要的 AI 调用；翻译仍按“历史已成功则跳过”规则执行。
 10. 修复工单日志拉取列表接口异常：`TicketLogPullRecord` 模型不存在 `modify_time` 字段时，摘要转换改为安全读取并回退到 `command_content.modifyTime`，避免列表页报错 `'TicketLogPullRecord' object has no attribute 'modify_time'`。
+## 2026-06-13
+1. 修复外部工单同步 `/ticket/sync/external` 的来源系统兜底：当外部只传单层 JSON 时，后端现在会优先使用顶层 `ticketVender` 回填 `source.system`，再回退到 `external`，避免 `source.system` 为空导致直接 422。
+2. 外部工单同步的模型校验失败现在会返回结构化 422 响应，包含 `message` 和 `errors`，同时在日志中记录完整校验失败详情，便于定位被拦截的具体字段。
