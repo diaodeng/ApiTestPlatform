@@ -2831,6 +2831,7 @@ class TicketSyncService:
         first_line_assignee_name = str(detected.get("firstLineAssigneeName") or "").strip()
         internal_owner_id = cls._safe_int(detected.get("internalOwnerId"))
         internal_owner_name = str(detected.get("internalOwnerName") or "").strip()
+        detected_module_name = str(detected.get("moduleName") or "").strip()
         if status_value:
             merged["status"] = status_value
         if assignee_id:
@@ -2862,7 +2863,9 @@ class TicketSyncService:
                 "internalOwnerName": internal_owner_name or source_snapshot.get("internalOwnerName"),
                 "ticketUrl": str(sync_object.ticket_url or "").strip() or source_snapshot.get("ticketUrl"),
                 "projectName": str(sync_object.project_name or "").strip() or source_snapshot.get("projectName"),
-                "moduleName": str(sync_object.module_name or "").strip() or source_snapshot.get("moduleName"),
+                "moduleName": str(sync_object.module_name or "").strip()
+                or detected_module_name
+                or source_snapshot.get("moduleName"),
                 "vendorId": cls._safe_int(detected.get("vendorId")) or source_snapshot.get("vendorId"),
                 "vendorName": str(detected.get("vendorName") or "").strip() or source_snapshot.get("vendorName"),
                 "storeId": str(detected.get("storeId") or "").strip() or source_snapshot.get("storeId"),
@@ -3651,6 +3654,17 @@ class TicketSyncService:
                 or str((detected or {}).get("moduleName") or "").strip()
                 or ""
             )
+        module_name_fallback = (
+            str((detected or {}).get("moduleName") or "").strip()
+            or str(sync_object.module_name or "").strip()
+            or (str(ticket.module_name or "").strip() if ticket else "")
+        )
+        if module_name_fallback and not str(payload.get("module_name") or "").strip():
+            payload["module_name"] = module_name_fallback
+        if module_name_fallback:
+            meta_source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+            meta_source["moduleName"] = module_name_fallback
+            meta["source"] = meta_source
         payload = cls._merge_external_text_fields(payload, detected or {}, sync_object)
         if is_remote_pull and resolved_assignee_name and not resolved_assignee_id:
             payload["current_assignee_id"] = None

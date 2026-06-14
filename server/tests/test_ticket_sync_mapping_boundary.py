@@ -137,6 +137,79 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertIsNone(detected["moduleId"])
         self.assertEqual(detected["moduleName"], "外部模块文本")
 
+    def test_external_upsert_fills_empty_module_name_from_detected_text(self):
+        """已有工单模块为空时，外部推送映射失败也应保留 ticketModle 文本。"""
+        sync_object = SimpleNamespace(
+            source=SimpleNamespace(system="external", record_id="EXT-MODULE", record_url="", pushed_at=None),
+            extra_data={},
+            raw_payload={"ticketModle": "POS - 客户端"},
+            ticket_no="EXT-MODULE",
+            ticket_url=None,
+            title="外部工单",
+            description="外部描述",
+            customer_priority="P3",
+            internal_priority="P2",
+            severity="",
+            reporter_id=None,
+            reporter_name="外部报告人",
+            current_assignee_id=None,
+            current_assignee_name="",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            status="processing",
+            root_cause=None,
+            solution=None,
+            tags=None,
+            project_id=None,
+            project_name="",
+            merchant_name="",
+            module_id=999,
+            module_name="",
+            version_key="",
+            log_pull_config={},
+            create_time=None,
+        )
+        ticket = SimpleNamespace(
+            extra_data={},
+            customer_priority="P3",
+            internal_priority="P2",
+            severity="",
+            reporter_id=1,
+            reporter_name="tester",
+            current_assignee_id=None,
+            current_assignee_name="",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            status="pending",
+            root_cause=None,
+            solution=None,
+            tags=None,
+            ticket_url=None,
+            project_id=None,
+            merchant_name="",
+            module_id=999,
+            module_name="",
+        )
+        current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
+
+        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+            db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
+            ticket=ticket,
+            sync_object=sync_object,
+            detected={"moduleId": 999, "moduleName": "POS - 客户端"},
+            current_user=current_user,
+            sync_scene="external_sync",
+        )
+
+        self.assertNotIn("module_id", payload)
+        self.assertEqual(payload["module_name"], "POS - 客户端")
+        source_snapshot = payload["extra_data"][TicketSyncService.META_KEY]["source"]
+        self.assertEqual(source_snapshot["moduleName"], "POS - 客户端")
+
     def test_external_detection_maps_three_person_roles(self):
         """外部推送应分别解析报告人、当前处理人和内部负责人。"""
         sync_object = SimpleNamespace(
