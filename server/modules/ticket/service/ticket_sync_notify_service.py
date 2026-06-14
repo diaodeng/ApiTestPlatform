@@ -276,7 +276,10 @@ class TicketSyncNotifyService:
                 timeout=(10, timeout_sec),
             )
             if response.status_code != 200:
-                logger.info(f"Request failed with status code: {response.status_code}, {url} - {json.dumps(response.json(), ensure_ascii=False)}")
+                logger.info(
+                    "Request failed with status code: "
+                    f"{response.status_code}, {url} - {json.dumps(response.json(), ensure_ascii=False)}"
+                )
                 response.raise_for_status()
             data = response.json()
             if int(data.get("code") or 0) != 0:
@@ -628,7 +631,7 @@ class TicketSyncNotifyService:
 
         :param db: 数据库会话。
         :param ticket: 工单对象。
-        :param person_role: 人员角色，支持 reporter/assignee。
+        :param person_role: 人员角色，支持 reporter/first_line/assignee/internal_owner。
         :param person_name: 人员名称。
         :return: 归一化邮箱，未命中返回空字符串。
         """
@@ -641,15 +644,28 @@ class TicketSyncNotifyService:
         )
         role = str(person_role or "").strip().lower()
         candidate_keys: list[str]
-        if role == "reporter":
+        if role in {"reporter", "first_line", "first_line_assignee"}:
             candidate_keys = [
                 "reporterEmail",
                 "reporter_email",
+                "firstLineAssigneeEmail",
+                "first_line_assignee_email",
                 "reporterMail",
                 "reporter_mail",
                 "reporterName",
                 "reporter_name",
+                "firstLineAssigneeName",
+                "first_line_assignee_name",
                 "reporter",
+            ]
+        elif role in {"internal_owner", "internalOwner"}:
+            candidate_keys = [
+                "internalOwnerEmail",
+                "internal_owner_email",
+                "internalOwnerName",
+                "internal_owner_name",
+                "internalOwner",
+                "internal_owner",
             ]
         else:
             candidate_keys = [
@@ -698,9 +714,15 @@ class TicketSyncNotifyService:
         reporter_name = str(ticket.reporter_name or '').strip()
         if reporter_name:
             mention_candidates.append({'role': 'reporter', 'name': reporter_name})
+        first_line_name = str(getattr(ticket, "first_line_assignee_name", "") or "").strip()
+        if first_line_name and first_line_name != reporter_name:
+            mention_candidates.append({'role': 'first_line', 'name': first_line_name})
         assignee_name = str(ticket.current_assignee_name or '').strip()
         if assignee_name:
             mention_candidates.append({'role': 'assignee', 'name': assignee_name})
+        internal_owner_name = str(getattr(ticket, "internal_owner_name", "") or "").strip()
+        if internal_owner_name:
+            mention_candidates.append({'role': 'internal_owner', 'name': internal_owner_name})
         if not mention_candidates:
             return [], []
 
@@ -749,7 +771,9 @@ class TicketSyncNotifyService:
         """
         mention_open_ids: list[str] = []
         reporter_open_id = ''
+        first_line_open_id = ''
         assignee_open_id = ''
+        internal_owner_open_id = ''
         for item in mention_targets or []:
             if not isinstance(item, dict):
                 continue
@@ -761,15 +785,26 @@ class TicketSyncNotifyService:
                 mention_open_ids.append(open_id)
             if role == 'reporter' and not reporter_open_id:
                 reporter_open_id = open_id
+            elif role == 'first_line' and not first_line_open_id:
+                first_line_open_id = open_id
             elif role == 'assignee' and not assignee_open_id:
                 assignee_open_id = open_id
+            elif role == 'internal_owner' and not internal_owner_open_id:
+                internal_owner_open_id = open_id
+        if not first_line_open_id:
+            first_line_open_id = reporter_open_id
         reporter_at = cls._build_feishu_at_tags([reporter_open_id]) if reporter_open_id else ''
+        first_line_at = cls._build_feishu_at_tags([first_line_open_id]) if first_line_open_id else ''
         assignee_at = cls._build_feishu_at_tags([assignee_open_id]) if assignee_open_id else ''
+        internal_owner_at = cls._build_feishu_at_tags([internal_owner_open_id]) if internal_owner_open_id else ''
         mention_at = cls._build_feishu_at_tags(mention_open_ids)
         return {
             'report_at': reporter_at,
             'reporter_at': reporter_at,
+            'first_line_at': first_line_at,
+            'first_line_assignee_at': first_line_at,
             'assignee_at': assignee_at,
+            'internal_owner_at': internal_owner_at,
             'mention_at': mention_at,
             'mention_all_at': mention_at,
             'mention_open_ids': mention_open_ids,
@@ -911,7 +946,9 @@ class TicketSyncNotifyService:
                 json_body=params,
             ).get("data") or {}
             page_records = response_data.get("items")
-            # logger.info(f"多维表格数据结构：{json.dumps(page_records[0] if page_records else {}, ensure_ascii=False)}")
+            # logger.info(
+            #     f"多维表格数据结构：{json.dumps(page_records[0] if page_records else {}, ensure_ascii=False)}"
+            # )
             if not isinstance(page_records, list):
                 page_records = []
             all_records.extend([item for item in page_records if isinstance(item, dict)])
@@ -1500,7 +1537,11 @@ class TicketSyncNotifyService:
                     )
                 resolved_user = user_by_id_cache.get(row_user_id)
             if not row_person_name and resolved_user:
-                row_person_name = str(getattr(resolved_user, "nick_name", "") or getattr(resolved_user, "user_name", "") or "").strip()
+                row_person_name = str(
+                    getattr(resolved_user, "nick_name", "")
+                    or getattr(resolved_user, "user_name", "")
+                    or ""
+                ).strip()
             if not row_person_name:
                 skipped_no_person += 1
                 continue
@@ -1521,7 +1562,11 @@ class TicketSyncNotifyService:
                     "userId": row_user_id,
                     "userName": getattr(resolved_user, "user_name", None) if resolved_user else None,
                     "nickName": getattr(resolved_user, "nick_name", None) if resolved_user else None,
-                    "email": cls._normalize_email(getattr(resolved_user, "email", "")) or None if resolved_user else None,
+                    "email": (
+                        cls._normalize_email(getattr(resolved_user, "email", "")) or None
+                        if resolved_user
+                        else None
+                    ),
                     "rows": [],
                 }
             grouped[group_key]["rows"].append(
@@ -1542,7 +1587,12 @@ class TicketSyncNotifyService:
             overdue_rows += 1
 
         people: list[dict[str, Any]] = []
-        active_row_count = sum(len(item.get("rows") or []) for item in grouped.values()) + skipped_not_overdue + skipped_no_person + skipped_no_time
+        active_row_count = (
+            sum(len(item.get("rows") or []) for item in grouped.values())
+            + skipped_not_overdue
+            + skipped_no_person
+            + skipped_no_time
+        )
         for item in grouped.values():
             person_name = str(item.get("personName") or "").strip()
             user_id_value = cls._safe_int(item.get("userId"))
@@ -1672,7 +1722,8 @@ class TicketSyncNotifyService:
             logger.info(f"人员催办通知跳过: enabled=false, trigger={trigger_source}")
             return {"triggerSource": trigger_source, "skipped": True, "skipReason": "人员催办开关未启用"}
         logger.info(
-            f"人员催办通知开始执行: trigger={trigger_source}, data_source={cls._normalize_person_data_source(config.get('dataSource'))}, "
+            "人员催办通知开始执行: "
+            f"trigger={trigger_source}, data_source={cls._normalize_person_data_source(config.get('dataSource'))}, "
             f"user_id={user_id or '-'}, email={email or '-'}"
         )
 
@@ -1877,6 +1928,8 @@ class TicketSyncNotifyService:
         else:
             store_info = raw_store_info
         reporter_name = str(ticket.reporter_name or "").strip()
+        first_line_assignee_name = str(getattr(ticket, "first_line_assignee_name", "") or "").strip()
+        internal_owner_name = str(getattr(ticket, "internal_owner_name", "") or "").strip()
         return {
             "ticket_id": ticket.ticket_id,
             "ticket_no": ticket.ticket_no or "-",
@@ -1886,7 +1939,12 @@ class TicketSyncNotifyService:
             "ticket_status": ticket.status or "-",
             "reporter_name": reporter_name or "-",
             "reporterName": reporter_name or "-",
+            "first_line_assignee_name": first_line_assignee_name or "-",
+            "firstLineAssigneeName": first_line_assignee_name or "-",
             "assignee_name": ticket.current_assignee_name or "-",
+            "currentAssigneeName": ticket.current_assignee_name or "-",
+            "internal_owner_name": internal_owner_name or "-",
+            "internalOwnerName": internal_owner_name or "-",
             "customer_priority": ticket.customer_priority or "-",
             "internal_priority": ticket.internal_priority or "-",
             "source": ticket.source or "-",
@@ -2194,7 +2252,10 @@ class TicketSyncNotifyService:
                 continue
             category_value = cls._normalize_summary_counter_label(fields.get(category_field)) or "未分类"
             priority_value = (
-                cls._normalize_priority(cls._normalize_summary_counter_label(fields.get(priority_field))) or "未知优先级"
+                cls._normalize_priority(
+                    cls._normalize_summary_counter_label(fields.get(priority_field))
+                )
+                or "未知优先级"
             )
             status_counter[status_value] = status_counter.get(status_value, 0) + 1
             category_counter[category_value] = category_counter.get(category_value, 0) + 1
@@ -2340,7 +2401,10 @@ class TicketSyncNotifyService:
         config_errors = cls._validate_summary_report_config(config)
         if config_errors:
             skip_reason = "；".join(config_errors)
-            logger.warning(f"工单汇总通知跳过: trigger={trigger_source}, data_source={data_source}, reason={skip_reason}")
+            logger.warning(
+                f"工单汇总通知跳过: trigger={trigger_source}, "
+                f"data_source={data_source}, reason={skip_reason}"
+            )
             return {
                 "triggerSource": trigger_source,
                 "skipped": True,

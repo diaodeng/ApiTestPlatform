@@ -45,6 +45,56 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
+          <span>外部推送多维表格邮箱补全</span>
+          <el-tag type="warning" effect="plain">按 recordId 查询人员邮箱</el-tag>
+        </div>
+      </template>
+
+      <el-form :model="form.externalSyncBitable" label-width="150px">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="启用邮箱补全">
+              <el-switch v-model="form.externalSyncBitable.enabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="多维 appToken">
+              <el-input v-model="form.externalSyncBitable.appToken" placeholder="飞书多维表格应用 Token" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="多维 tableId">
+              <el-input v-model="form.externalSyncBitable.tableId" placeholder="飞书多维表格表ID" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="多维 viewId">
+              <el-input v-model="form.externalSyncBitable.viewId" placeholder="可选，不填默认表视图" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="飞书 appId">
+              <el-input v-model="form.externalSyncBitable.appId" placeholder="覆盖统一凭证（可选）" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="飞书 appSecret">
+              <el-input v-model="form.externalSyncBitable.appSecret" show-password placeholder="覆盖统一凭证（可选）" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <div class="mapping-desc">
+              外部推送传入的 <code>recordId</code> 会作为飞书多维表格记录ID查询固定字段：
+              <code>(IT) L1 PIC</code>、<code>1.5 当前负责人</code>、<code>当前负责人</code>。
+            </div>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
           <span>远端同步链接</span>
           <el-tag type="warning" effect="plain">这里只配置拉取地址，不会自动启动任务</el-tag>
         </div>
@@ -1031,7 +1081,10 @@ const externalSyncRequiredFieldOptions = [
   { label: 'ticketVender - 商家/供应商', value: 'ticketVender' },
   { label: 'ticketModle - 模块', value: 'ticketModle' },
   { label: 'createTime - 创建时间', value: 'createTime' },
-  { label: 'reporterName - 提单人', value: 'reporterName' }
+  { label: 'reporterName - 1线处理人/报告人', value: 'reporterName' },
+  { label: 'currentAssigneeName - 当前处理人', value: 'currentAssigneeName' },
+  { label: 'internalOwner - 内部负责人', value: 'internalOwner' },
+  { label: 'recordId - 飞书多维记录ID', value: 'recordId' }
 ]
 
 const personDataSourceOptions = [
@@ -1132,6 +1185,14 @@ function createDefaultForm() {
       autoSendAfterTime: '',
       template: '',
       manualTemplate: ''
+    },
+    externalSyncBitable: {
+      enabled: false,
+      appId: '',
+      appSecret: '',
+      appToken: '',
+      tableId: '',
+      viewId: ''
     },
     personReminder: {
       enabled: false,
@@ -1280,6 +1341,16 @@ function applyConfig(payload) {
       authorization: remoteSync.headers && remoteSync.headers.authorization ? remoteSync.headers.authorization : '',
       origin: remoteSync.headers && remoteSync.headers.origin ? remoteSync.headers.origin : ''
     }
+  }
+
+  const externalSyncBitable = payload.externalSyncBitable || {}
+  form.externalSyncBitable = {
+    enabled: Boolean(externalSyncBitable.enabled),
+    appId: externalSyncBitable.appId || '',
+    appSecret: externalSyncBitable.appSecret || '',
+    appToken: externalSyncBitable.appToken || '',
+    tableId: externalSyncBitable.tableId || '',
+    viewId: externalSyncBitable.viewId || ''
   }
 
   const groupPush = payload.groupPush || {}
@@ -1511,6 +1582,14 @@ async function handleSave() {
           }))
           .filter(route => route.priorities.length > 0)
       : []
+    payload.externalSyncBitable = {
+      enabled: Boolean(payload.externalSyncBitable?.enabled),
+      appId: String(payload.externalSyncBitable?.appId || '').trim(),
+      appSecret: String(payload.externalSyncBitable?.appSecret || '').trim(),
+      appToken: String(payload.externalSyncBitable?.appToken || '').trim(),
+      tableId: String(payload.externalSyncBitable?.tableId || '').trim(),
+      viewId: String(payload.externalSyncBitable?.viewId || '').trim()
+    }
     payload.personReminder.appId = String(payload.personReminder?.appId || '').trim()
     payload.personReminder.appSecret = String(payload.personReminder?.appSecret || '').trim()
     payload.personReminder.rowsMarkdownTemplate = String(payload.personReminder?.rowsMarkdownTemplate || '').trim()

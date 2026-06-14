@@ -65,6 +65,10 @@
 - `posPatterns`
 - `scoPatterns`
 - `versionPatterns`
+- `externalSyncBitable`
+  - 外部推送按 `recordId` 查询飞书多维表格记录并补齐人员邮箱。
+  - 需要配置 `enabled/appToken/tableId`，可选 `viewId/appId/appSecret`。
+  - 固定读取字段：`(IT) L1 PIC` -> `reporterName`，`当前负责人` -> `currentAssigneeName`，`1.5 当前负责人` -> `internalOwner`。
 
 ### 4. 日志拉取默认值
 
@@ -156,17 +160,19 @@
 1. 外部系统调用 `/ticket/sync/external`
 2. 服务端只接受约定字段的驼峰/下划线写法，不再猜测第三方自定义字段名；字段不符合契约时直接返回 422，不入库
 3. 必填字段默认是 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`，可通过 `externalSyncRequiredFields` 调整
-4. 可选字段包括 `title`、`customerPriority`、`reason`、`ticketStatus`、`ticketAssignee`、`ticketAssigneeEmail`、`reporterEmail`、`ticketStore`、`ticketPos`、`ticketSco`、`ticketUrl`
+4. 可选字段包括 `title`、`customerPriority`、`reason`、`ticketStatus`、`currentAssigneeName`、`internalOwner`、`ticketAssignee`、`ticketAssigneeEmail`、`reporterEmail`、`ticketStore`、`ticketPos`、`ticketSco`、`ticketUrl`、`recordId`
 5. 原始请求体会完整保存到 `extraData.raw_payload`，外部字段快照会保存到 `extraData.external_field_mapping`，供通知和排查复用
-6. 服务端只在第三方直推边界执行外部映射：`ticketVender` 映射项目/商家，`ticketModle` 映射模块，`ticketStatus` 映射内部状态，`ticketAssignee` 映射当前处理人
+6. 服务端只在第三方直推边界执行外部映射：`ticketVender` 映射项目/商家，`ticketModle` 映射模块，`ticketStatus` 映射内部状态，`reporterName/currentAssigneeName/internalOwner` 按人员映射表和多维邮箱映射到本地用户
 7. 映射失败时不阻断入库；项目、模块、处理人等字段允许只保留原始名称或文本，后续由人工补充或配置修正
-8. 如果推送体包含 `ticketUrl`，会写入工单详情链接 `ticket_url`
-9. 门店字段 `ticketStore` 会优先按“商家ID + 门店配置（sap_org_no）”匹配；命中则保存配置门店，未命中保留原始值
-10. 入库后的延后后处理任务（翻译、标题AI、自动化、群推送）优先投递 Celery；当 Celery Worker 不可用时回退 FastAPI 本地后台任务
-11. 接口返回体会附带 `deferredDispatch`，可用于判断本次由 `celery` 还是 `background` 执行
-12. 如开启 `autoTranslateOnSync`，会自动翻译描述
-13. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
-14. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
+8. `reporterName` 会写入报告人/1线处理人，`currentAssigneeName` 写入当前处理人，`internalOwner` 写入内部负责人
+9. 如果推送体包含 `recordId` 且启用 `externalSyncBitable`，会查询飞书多维表格记录邮箱并写入 `extraData.external_field_mapping`，供内部用户匹配和群消息 @ 人复用
+10. 如果推送体包含 `ticketUrl`，会写入工单详情链接 `ticket_url`
+11. 门店字段 `ticketStore` 会优先按“商家ID + 门店配置（sap_org_no）”匹配；命中则保存配置门店，未命中保留原始值
+12. 入库后的延后后处理任务（翻译、标题AI、自动化、群推送）优先投递 Celery；当 Celery Worker 不可用时回退 FastAPI 本地后台任务
+13. 接口返回体会附带 `deferredDispatch`，可用于判断本次由 `celery` 还是 `background` 执行
+14. 如开启 `autoTranslateOnSync`，会自动翻译描述
+15. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
+16. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
 
 ### 内网拉取外网工单
 

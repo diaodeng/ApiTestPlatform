@@ -172,6 +172,31 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     reporter_email = _normalize_email_text(
         _compatible_field_value(data, "reporterEmail", "reporter_email", default="")
     ) or reporter_email_from_name
+    current_assignee_raw = _compatible_field_value(
+        data,
+        "currentAssigneeName",
+        "current_assignee_name",
+        default=_compatible_field_value(data, "ticketAssignee", "ticket_assignee", default=""),
+    )
+    current_assignee_name, current_assignee_email_from_name = _extract_person_name_email(current_assignee_raw)
+    current_assignee_email = _normalize_email_text(
+        _compatible_field_value(
+            data,
+            "currentAssigneeEmail",
+            "current_assignee_email",
+            default=_compatible_field_value(data, "ticketAssigneeEmail", "ticket_assignee_email", default=""),
+        )
+    ) or current_assignee_email_from_name
+    internal_owner_raw = _compatible_field_value(
+        data,
+        "internalOwner",
+        "internal_owner",
+        default=_compatible_field_value(data, "internalOwnerName", "internal_owner_name", default=""),
+    )
+    internal_owner_name, internal_owner_email_from_name = _extract_person_name_email(internal_owner_raw)
+    internal_owner_email = _normalize_email_text(
+        _compatible_field_value(data, "internalOwnerEmail", "internal_owner_email", default="")
+    ) or internal_owner_email_from_name
     title = str(_compatible_field_value(data, "title", "title", default="") or "").strip()
     reason = str(_compatible_field_value(data, "reason", "reason", default="") or "").strip()
     ticket_url = str(
@@ -232,11 +257,9 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     if not source_system:
         source_system = ticket_vender or "external"
 
-    assignee_raw = _compatible_field_value(data, "ticketAssignee", "ticket_assignee", default="")
+    assignee_raw = current_assignee_raw
     assignee_name, assignee_email_from_name = _extract_person_name_email(assignee_raw)
-    assignee_email = _normalize_email_text(
-        _compatible_field_value(data, "ticketAssigneeEmail", "ticket_assignee_email", default="")
-    ) or assignee_email_from_name
+    assignee_email = current_assignee_email or assignee_email_from_name
 
     external_field_mapping = {
         "ticketVender": ticket_vender,
@@ -245,6 +268,10 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
         "ticketStore": str(_compatible_field_value(data, "ticketStore", "ticket_store", default="") or "").strip(),
         "ticketAssignee": assignee_name,
         "ticketAssigneeEmail": assignee_email,
+        "currentAssigneeName": current_assignee_name,
+        "currentAssigneeEmail": current_assignee_email,
+        "internalOwner": internal_owner_name,
+        "internalOwnerEmail": internal_owner_email,
         "reporterName": reporter_name,
         "reporterEmail": reporter_email,
         "ticketPos": str(_compatible_field_value(data, "ticketPos", "ticket_pos", default="") or "").strip(),
@@ -279,6 +306,9 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     data["createTime"] = create_time
     data["reporterName"] = reporter_name
     data["reporterEmail"] = reporter_email
+    data["firstLineAssigneeName"] = reporter_name
+    data["currentAssigneeName"] = current_assignee_name
+    data["internalOwnerName"] = internal_owner_name
     data["title"] = title
     data["reason"] = reason
     data["ticketUrl"] = ticket_url

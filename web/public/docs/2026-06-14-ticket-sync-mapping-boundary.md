@@ -13,6 +13,9 @@
 5. 远端拉取入库不再执行外部字段映射，改为使用远端返回的内部字段、业务码、版本号和日志拉取提示字段。
 6. 映射失败时允许只保留文本，不强制写入内部 ID，避免因为第三方数据暂未维护映射而阻断入库。
 7. 翻译、分类、自动日志拉取、自动 AI 分析、群推送和发布就绪状态保持原有功能。
+8. 外部推送人员字段语义固定为：`reporterName` -> 报告人/1线处理人，`currentAssigneeName` -> 当前处理人，`internalOwner` -> 内部负责人。
+9. 外部推送人员会先按 `assigneeMappings` 显式映射到本地用户；映射失败时，如已通过飞书多维表格查到邮箱，则按邮箱匹配本地用户；仍失败时只保留名称。
+10. 外部推送如传入飞书多维记录 `recordId`，且启用 `externalSyncBitable`，会读取固定字段邮箱并写入 `extraData.external_field_mapping`：`(IT) L1 PIC`、`当前负责人`、`1.5 当前负责人`。
 
 ## 远端拉取 ID 关联边界
 
@@ -40,6 +43,8 @@
 - `customerPriority`
 - `reason`
 - `ticketStatus`
+- `currentAssigneeName`
+- `internalOwner`
 - `ticketAssignee`
 - `ticketAssigneeEmail`
 - `reporterEmail`
@@ -47,6 +52,7 @@
 - `ticketPos`
 - `ticketSco`
 - `ticketUrl`
+- `recordId`
 
 字段只兼容驼峰和下划线两种写法，例如 `ticketNo/ticket_no`。字段名不符合契约时不会猜测，缺少必填字段会返回 422。
 
@@ -54,5 +60,6 @@
 
 1. 工单催办：继续优先使用 `raw_payload` 和 `external_field_mapping` 中的邮箱，再按姓名匹配系统用户。
 2. 群消息：继续使用内部工单字段和同步元数据渲染模板，门店信息优先来自同步快照。
+   外部推送查到的人员邮箱会保存在 `external_field_mapping`，群消息 @ 人时可继续用邮箱换取飞书 `open_id`。
 3. 汇总统计：仍基于本地工单表或飞书多维表格统计，不依赖外部字段映射。
 4. 远端拉取：不再按本地外部映射规则二次解释远端数据，避免公网/内网映射配置不一致导致字段被重写。

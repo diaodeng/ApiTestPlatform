@@ -137,6 +137,83 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertIsNone(detected["moduleId"])
         self.assertEqual(detected["moduleName"], "外部模块文本")
 
+    def test_external_detection_maps_three_person_roles(self):
+        """外部推送应分别解析报告人、当前处理人和内部负责人。"""
+        sync_object = SimpleNamespace(
+            raw_payload={
+                "reporterName": "外部一线",
+                "currentAssigneeName": "外部当前处理人",
+                "internalOwner": "外部内部负责人",
+            },
+            extra_data={
+                "external_field_mapping": {
+                    "reporterName": "外部一线",
+                    "reporterEmail": "l1@example.com",
+                    "currentAssigneeName": "外部当前处理人",
+                    "currentAssigneeEmail": "assignee@example.com",
+                    "internalOwner": "外部内部负责人",
+                    "internalOwnerEmail": "owner@example.com",
+                }
+            },
+            project_code="",
+            project_id=None,
+            project_name="",
+            merchant_name="",
+            module_code="",
+            module_name="",
+            module_id=None,
+            log_pull_config={},
+            status="",
+            current_assignee_id=None,
+            current_assignee_name="",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            version_key="",
+            ticket_no="EXT-ROLE",
+            title="外部工单",
+            description="外部描述",
+            root_cause=None,
+            solution=None,
+        )
+
+        with (
+            patch.object(TicketSyncService, "_extract_pattern", return_value=None),
+            patch.object(
+                TicketSyncService,
+                "_resolve_external_person_by_mapping_or_email",
+                side_effect=[
+                    (22, "内部当前处理人"),
+                    (11, "内部一线"),
+                    (33, "内部负责人"),
+                ],
+            ) as resolve_person,
+        ):
+            detected = TicketSyncService._detect_fields(
+                db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
+                sync_object=sync_object,
+                config={
+                    "projectMappings": [],
+                    "moduleMappings": [],
+                    "vendorMappings": [],
+                    "statusMappings": [],
+                    "assigneeMappings": [],
+                    "posPatterns": [],
+                    "scoPatterns": [],
+                    "versionPatterns": [],
+                },
+                apply_external_mappings=True,
+            )
+
+        self.assertEqual(resolve_person.call_count, 3)
+        self.assertEqual(detected["assigneeId"], 22)
+        self.assertEqual(detected["assigneeName"], "内部当前处理人")
+        self.assertEqual(detected["firstLineAssigneeId"], 11)
+        self.assertEqual(detected["firstLineAssigneeName"], "内部一线")
+        self.assertEqual(detected["internalOwnerId"], 33)
+        self.assertEqual(detected["internalOwnerName"], "内部负责人")
+
     def test_remote_pull_upsert_does_not_fallback_to_remote_ids(self):
         """远端拉取落库时不使用远端项目、模块、人员ID，只保留可识别文本。"""
         sync_object = SimpleNamespace(

@@ -965,6 +965,7 @@ class TicketSyncService:
             "autoTranslateOnSync": True,
             "defaultPullLimit": 50,
             "feishuAuth": cls._default_feishu_auth_config(),
+            "externalSyncBitable": cls._default_external_sync_bitable_config(),
             "remoteSync": cls._default_remote_sync_config(),
             "groupPush": cls._default_group_push_config(),
             "personReminder": cls._default_person_reminder_config(),
@@ -1007,6 +1008,22 @@ class TicketSyncService:
         return {
             "appId": "",
             "appSecret": "",
+        }
+
+    @classmethod
+    def _default_external_sync_bitable_config(cls) -> dict[str, Any]:
+        """
+        构建外部同步多维表格补充查询默认配置。
+
+        :return: 外部同步多维表格配置默认值。
+        """
+        return {
+            "enabled": False,
+            "appId": "",
+            "appSecret": "",
+            "appToken": "",
+            "tableId": "",
+            "viewId": "",
         }
 
     @classmethod
@@ -1133,6 +1150,26 @@ class TicketSyncService:
             merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
         if not isinstance(merged.get("promptTemplates"), dict):
             merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
+        external_sync_bitable = (
+            merged.get("externalSyncBitable")
+            if isinstance(merged.get("externalSyncBitable"), dict)
+            else {}
+        )
+        external_sync_bitable = {
+            **cls._default_external_sync_bitable_config(),
+            **external_sync_bitable,
+        }
+        external_sync_bitable["enabled"] = bool(external_sync_bitable.get("enabled"))
+        external_sync_bitable["appId"] = str(external_sync_bitable.get("appId") or "").strip()
+        external_sync_bitable["appSecret"] = str(external_sync_bitable.get("appSecret") or "").strip()
+        external_sync_bitable["appToken"] = str(external_sync_bitable.get("appToken") or "").strip()
+        external_sync_bitable["tableId"] = str(external_sync_bitable.get("tableId") or "").strip()
+        external_sync_bitable["viewId"] = str(external_sync_bitable.get("viewId") or "").strip()
+        if not external_sync_bitable["appId"]:
+            external_sync_bitable["appId"] = feishu_auth["appId"]
+        if not external_sync_bitable["appSecret"]:
+            external_sync_bitable["appSecret"] = feishu_auth["appSecret"]
+        merged["externalSyncBitable"] = external_sync_bitable
         external_sync_required_fields = merged.get("externalSyncRequiredFields")
         if isinstance(external_sync_required_fields, list):
             normalized_required_fields: list[str] = []
@@ -1783,6 +1820,20 @@ class TicketSyncService:
             )
             or ""
         ).strip()
+        current_assignee = str(
+            cls._payload_field_value(
+                raw_payload,
+                "currentAssigneeName",
+                "current_assignee_name",
+                default=cls._payload_field_value(
+                    mapping_payload,
+                    "currentAssigneeName",
+                    "current_assignee_name",
+                    default=ticket_assignee,
+                ),
+            )
+            or ""
+        ).strip()
         ticket_assignee_email = str(
             cls._payload_field_value(
                 raw_payload,
@@ -1803,6 +1854,72 @@ class TicketSyncService:
                             default="",
                         ),
                     ),
+                ),
+            )
+            or ""
+        ).strip()
+        current_assignee_email = str(
+            cls._payload_field_value(
+                raw_payload,
+                "currentAssigneeEmail",
+                "current_assignee_email",
+                default=cls._payload_field_value(
+                    mapping_payload,
+                    "currentAssigneeEmail",
+                    "current_assignee_email",
+                    default=ticket_assignee_email,
+                ),
+            )
+            or ""
+        ).strip()
+        reporter_email = str(
+            cls._payload_field_value(
+                raw_payload,
+                "reporterEmail",
+                "reporter_email",
+                default=cls._payload_field_value(
+                    mapping_payload,
+                    "reporterEmail",
+                    "reporter_email",
+                    default="",
+                ),
+            )
+            or ""
+        ).strip()
+        internal_owner = str(
+            cls._payload_field_value(
+                raw_payload,
+                "internalOwner",
+                "internal_owner",
+                default=cls._payload_field_value(
+                    raw_payload,
+                    "internalOwnerName",
+                    "internal_owner_name",
+                    default=cls._payload_field_value(
+                        mapping_payload,
+                        "internalOwner",
+                        "internal_owner",
+                        default=cls._payload_field_value(
+                            mapping_payload,
+                            "internalOwnerName",
+                            "internal_owner_name",
+                            default="",
+                        ),
+                    ),
+                ),
+            )
+            or ""
+        ).strip()
+        internal_owner_email = str(
+            cls._payload_field_value(
+                raw_payload,
+                "internalOwnerEmail",
+                "internal_owner_email",
+                default=cls._payload_field_value(
+                    mapping_payload,
+                    "internalOwnerEmail",
+                    "internal_owner_email",
+                    default="",
                 ),
             )
             or ""
@@ -1852,6 +1969,11 @@ class TicketSyncService:
             "ticketStore": ticket_store,
             "ticketAssignee": ticket_assignee,
             "ticketAssigneeEmail": ticket_assignee_email,
+            "currentAssigneeName": current_assignee,
+            "currentAssigneeEmail": current_assignee_email,
+            "reporterEmail": reporter_email,
+            "internalOwner": internal_owner,
+            "internalOwnerEmail": internal_owner_email,
             "ticketPos": ticket_pos,
             "ticketSco": ticket_sco,
         }
@@ -2256,6 +2378,97 @@ class TicketSyncService:
         return None, mapped_user_name or source_text
 
     @classmethod
+    def _resolve_sys_user_by_email(cls, db: Session, email: str):
+        """
+        根据邮箱匹配本地系统用户。
+        :param db: 数据库会话
+        :param email: 邮箱地址
+        :return: 系统用户对象或 None
+        """
+        from module_admin.entity.do.user_do import SysUser
+
+        normalized_email = str(email or "").strip().lower()
+        if not normalized_email:
+            return None
+        return (
+            db.query(SysUser)
+            .filter(
+                SysUser.status == "0",
+                SysUser.del_flag == "0",
+                func.lower(SysUser.email) == normalized_email,
+            )
+            .first()
+        )
+
+    @classmethod
+    def _resolve_external_person_by_mapping_or_email(
+        cls,
+        db: Session,
+        *,
+        person_text: str,
+        person_email: str,
+        assignee_mappings: list[dict[str, Any]],
+    ) -> tuple[int | None, str]:
+        """
+        外部推送人员先按显式映射表解析，再用多维表格邮箱匹配本地用户；失败时只保留名称。
+        :param db: 数据库会话
+        :param person_text: 外部人员名称
+        :param person_email: 多维表格或入参补充邮箱
+        :param assignee_mappings: 人员映射配置
+        :return: (本地用户ID, 人员名称)
+        """
+        from module_admin.entity.do.user_do import SysUser
+
+        source_text = str(person_text or "").strip()
+        matched_mapping = cls._match_assignee_mapping_exact(source_text, assignee_mappings)
+        mapped_user_id = cls._safe_int(
+            (matched_mapping or {}).get("userId")
+            or (matched_mapping or {}).get("user_id")
+            or (matched_mapping or {}).get("assigneeId")
+        )
+        mapped_email = str((matched_mapping or {}).get("email") or "").strip()
+        mapped_user_name = str(
+            (matched_mapping or {}).get("userName")
+            or (matched_mapping or {}).get("user_name")
+            or (matched_mapping or {}).get("name")
+            or source_text
+        ).strip()
+
+        if mapped_user_id:
+            user = (
+                db.query(SysUser)
+                .filter(
+                    SysUser.user_id == mapped_user_id,
+                    SysUser.status == "0",
+                    SysUser.del_flag == "0",
+                )
+                .first()
+            )
+            if user:
+                return user.user_id, user.user_name or user.nick_name or mapped_user_name
+
+        lookup_email = mapped_email or str(person_email or "").strip()
+        if lookup_email:
+            user = cls._resolve_sys_user_by_email(db, lookup_email)
+            if user:
+                return user.user_id, user.user_name or user.nick_name or mapped_user_name
+
+        if matched_mapping and mapped_user_name:
+            user = (
+                db.query(SysUser)
+                .filter(
+                    SysUser.status == "0",
+                    SysUser.del_flag == "0",
+                    (SysUser.user_name == mapped_user_name) | (SysUser.nick_name == mapped_user_name),
+                )
+                .first()
+            )
+            if user:
+                return user.user_id, user.user_name or user.nick_name or mapped_user_name
+
+        return None, mapped_user_name or source_text
+
+    @classmethod
     def _resolve_remote_assignee_by_email_or_name(
         cls,
         db: Session,
@@ -2303,6 +2516,128 @@ class TicketSyncService:
             if user:
                 return user.user_id, user.user_name or user.nick_name or normalized_name
         return None, normalized_name or normalized_email
+
+    @classmethod
+    def _extract_email_from_bitable_value(cls, value: Any) -> str:
+        """
+        从飞书多维表格字段值中提取邮箱，兼容人员字段、文本字段和数组字段。
+        :param value: 多维表格字段值
+        :return: 邮箱，未命中返回空字符串
+        """
+        if isinstance(value, list):
+            for item in value:
+                email = cls._extract_email_from_bitable_value(item)
+                if email:
+                    return email
+            return ""
+        if isinstance(value, dict):
+            for key in (
+                "email",
+                "mail",
+                "userEmail",
+                "user_email",
+                "workEmail",
+                "work_email",
+                "text",
+                "value",
+            ):
+                email = cls._extract_email_from_bitable_value(value.get(key))
+                if email:
+                    return email
+            return ""
+        text = str(value or "").strip().lower()
+        if "@" not in text:
+            return ""
+        matched = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text)
+        return matched.group(0).lower() if matched else ""
+
+    @classmethod
+    def _query_external_sync_bitable_record_fields(
+        cls,
+        config: dict[str, Any],
+        *,
+        record_id: str,
+    ) -> dict[str, Any]:
+        """
+        根据外部推送 recordId 查询飞书多维表格记录字段。
+        :param config: 同步配置
+        :param record_id: 飞书多维表格记录 ID
+        :return: 记录 fields 字典，查询失败返回空字典
+        """
+        bitable_config = (
+            config.get("externalSyncBitable")
+            if isinstance(config.get("externalSyncBitable"), dict)
+            else {}
+        )
+        if not bool(bitable_config.get("enabled")):
+            return {}
+        app_id, app_secret = TicketSyncNotifyService._resolve_feishu_auth(bitable_config)
+        app_token = str(bitable_config.get("appToken") or "").strip()
+        table_id = str(bitable_config.get("tableId") or "").strip()
+        normalized_record_id = str(record_id or "").strip()
+        if not (app_id and app_secret and app_token and table_id and normalized_record_id):
+            return {}
+        try:
+            token = TicketSyncNotifyService._get_tenant_access_token(app_id, app_secret)
+            url = (
+                f"{TicketSyncNotifyService.FEISHU_BASE_URL}/bitable/v1/apps/"
+                f"{app_token}/tables/{table_id}/records/{normalized_record_id}"
+            )
+            response_data = TicketSyncNotifyService._request_feishu_json(
+                method="GET",
+                url=url,
+                tenant_access_token=token,
+            ).get("data") or {}
+            record = response_data.get("record") if isinstance(response_data.get("record"), dict) else {}
+            fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+            return fields
+        except Exception as exc:
+            logger.warning(f"外部同步多维表格记录查询失败: record_id={normalized_record_id}, error={exc}")
+            return {}
+
+    @classmethod
+    def _enrich_external_person_emails_from_bitable(
+        cls,
+        config: dict[str, Any],
+        sync_object: TicketExternalSyncUpsertModel,
+    ) -> TicketExternalSyncUpsertModel:
+        """
+        外部推送时按 recordId 查询多维表格人员邮箱，并写入 external_field_mapping 快照供落库和群 @ 复用。
+        :param config: 同步配置
+        :param sync_object: 外部同步入库模型
+        :return: 补齐邮箱快照后的同步模型
+        """
+        record_id = str(getattr(sync_object.source, "record_id", "") or "").strip()
+        if not record_id:
+            return sync_object
+        fields = cls._query_external_sync_bitable_record_fields(config, record_id=record_id)
+        if not fields:
+            return sync_object
+
+        email_map = {
+            "reporterEmail": cls._extract_email_from_bitable_value(fields.get("(IT) L1 PIC")),
+            "internalOwnerEmail": cls._extract_email_from_bitable_value(fields.get("1.5 当前负责人")),
+            "currentAssigneeEmail": cls._extract_email_from_bitable_value(fields.get("当前负责人")),
+        }
+        email_map = {key: value for key, value in email_map.items() if value}
+        if not email_map:
+            return sync_object
+
+        extra_data = dict(sync_object.extra_data or {}) if isinstance(sync_object.extra_data, dict) else {}
+        external_mapping = (
+            dict(extra_data.get("external_field_mapping"))
+            if isinstance(extra_data.get("external_field_mapping"), dict)
+            else {}
+        )
+        external_mapping.update(email_map)
+        external_mapping["bitableRecordId"] = record_id
+        external_mapping["bitableEmailFields"] = {
+            "reporterEmail": "(IT) L1 PIC",
+            "internalOwnerEmail": "1.5 当前负责人",
+            "currentAssigneeEmail": "当前负责人",
+        }
+        extra_data["external_field_mapping"] = external_mapping
+        return sync_object.model_copy(update={"extra_data": extra_data})
 
     @classmethod
     def _resolve_sync_title(
@@ -2492,12 +2827,26 @@ class TicketSyncService:
         status_value = str(detected.get("status") or "").strip()
         assignee_id = cls._safe_int(detected.get("assigneeId"))
         assignee_name = str(detected.get("assigneeName") or "").strip()
+        first_line_assignee_id = cls._safe_int(detected.get("firstLineAssigneeId"))
+        first_line_assignee_name = str(detected.get("firstLineAssigneeName") or "").strip()
+        internal_owner_id = cls._safe_int(detected.get("internalOwnerId"))
+        internal_owner_name = str(detected.get("internalOwnerName") or "").strip()
         if status_value:
             merged["status"] = status_value
         if assignee_id:
             merged["current_assignee_id"] = assignee_id
         if assignee_name:
             merged["current_assignee_name"] = assignee_name
+        if first_line_assignee_id:
+            merged["first_line_assignee_id"] = first_line_assignee_id
+            merged["reporter_id"] = first_line_assignee_id
+        if first_line_assignee_name:
+            merged["first_line_assignee_name"] = first_line_assignee_name
+            merged["reporter_name"] = first_line_assignee_name
+        if internal_owner_id:
+            merged["internal_owner_id"] = internal_owner_id
+        if internal_owner_name:
+            merged["internal_owner_name"] = internal_owner_name
 
         extra_data = dict(merged.get("extra_data") or {}) if isinstance(merged.get("extra_data"), dict) else {}
         external_sync = extra_data.get(cls.META_KEY) if isinstance(extra_data.get(cls.META_KEY), dict) else {}
@@ -2507,6 +2856,10 @@ class TicketSyncService:
                 "status": status_value or source_snapshot.get("status"),
                 "assigneeId": assignee_id or source_snapshot.get("assigneeId"),
                 "assigneeName": assignee_name or source_snapshot.get("assigneeName"),
+                "firstLineAssigneeId": first_line_assignee_id or source_snapshot.get("firstLineAssigneeId"),
+                "firstLineAssigneeName": first_line_assignee_name or source_snapshot.get("firstLineAssigneeName"),
+                "internalOwnerId": internal_owner_id or source_snapshot.get("internalOwnerId"),
+                "internalOwnerName": internal_owner_name or source_snapshot.get("internalOwnerName"),
                 "ticketUrl": str(sync_object.ticket_url or "").strip() or source_snapshot.get("ticketUrl"),
                 "projectName": str(sync_object.project_name or "").strip() or source_snapshot.get("projectName"),
                 "moduleName": str(sync_object.module_name or "").strip() or source_snapshot.get("moduleName"),
@@ -2825,6 +3178,22 @@ class TicketSyncService:
         ticket_status = external_fields.get("ticketStatus") or ""
         ticket_store = external_fields.get("ticketStore") or ""
         ticket_assignee = external_fields.get("ticketAssignee") or ""
+        current_assignee = external_fields.get("currentAssigneeName") or ticket_assignee
+        current_assignee_email = (
+            external_fields.get("currentAssigneeEmail")
+            or external_fields.get("ticketAssigneeEmail")
+            or ""
+        )
+        reporter_person = (
+            external_fields.get("reporterName")
+            or str(getattr(sync_object, "reporter_name", "") or "").strip()
+        )
+        reporter_email = external_fields.get("reporterEmail") or ""
+        internal_owner = (
+            external_fields.get("internalOwner")
+            or str(getattr(sync_object, "internal_owner_name", "") or "").strip()
+        )
+        internal_owner_email = external_fields.get("internalOwnerEmail") or ""
         ticket_pos = external_fields.get("ticketPos") or ""
         ticket_sco = external_fields.get("ticketSco") or ""
         extra_data = sync_object.extra_data if isinstance(sync_object.extra_data, dict) else {}
@@ -2937,9 +3306,22 @@ class TicketSyncService:
                 status_text=ticket_status or str(sync_object.status or "").strip(),
                 status_mappings=config.get("statusMappings") or [],
             )
-            assignee_id, assignee_name = cls._resolve_assignee_by_external_value(
+            assignee_id, assignee_name = cls._resolve_external_person_by_mapping_or_email(
                 db,
-                assignee_text=ticket_assignee or str(sync_object.current_assignee_name or "").strip(),
+                person_text=current_assignee or str(sync_object.current_assignee_name or "").strip(),
+                person_email=current_assignee_email,
+                assignee_mappings=config.get("assigneeMappings") or [],
+            )
+            first_line_assignee_id, first_line_assignee_name = cls._resolve_external_person_by_mapping_or_email(
+                db,
+                person_text=reporter_person,
+                person_email=reporter_email,
+                assignee_mappings=config.get("assigneeMappings") or [],
+            )
+            internal_owner_id, internal_owner_name = cls._resolve_external_person_by_mapping_or_email(
+                db,
+                person_text=internal_owner,
+                person_email=internal_owner_email,
                 assignee_mappings=config.get("assigneeMappings") or [],
             )
         else:
@@ -2974,10 +3356,26 @@ class TicketSyncService:
                 assignee_email=assignee_email,
                 assignee_name=assignee_name,
             )
+            first_line_assignee_id = cls._safe_int(getattr(sync_object, "first_line_assignee_id", None))
+            first_line_assignee_name = str(getattr(sync_object, "first_line_assignee_name", "") or "").strip()
+            internal_owner_id = cls._safe_int(getattr(sync_object, "internal_owner_id", None))
+            internal_owner_name = str(getattr(sync_object, "internal_owner_name", "") or "").strip()
         if apply_external_mappings and not assignee_id:
             assignee_id = cls._safe_int(sync_object.current_assignee_id)
         if not assignee_name:
             assignee_name = str(sync_object.current_assignee_name or "").strip()
+        if apply_external_mappings and not first_line_assignee_id:
+            first_line_assignee_id = cls._safe_int(getattr(sync_object, "first_line_assignee_id", None))
+        if not first_line_assignee_name:
+            first_line_assignee_name = str(
+                getattr(sync_object, "first_line_assignee_name", "")
+                or getattr(sync_object, "reporter_name", "")
+                or ""
+            ).strip()
+        if apply_external_mappings and not internal_owner_id:
+            internal_owner_id = cls._safe_int(getattr(sync_object, "internal_owner_id", None))
+        if not internal_owner_name:
+            internal_owner_name = str(getattr(sync_object, "internal_owner_name", "") or "").strip()
         version_key = (
             str(sync_object.version_key or "").strip()
             or _extract_ticket_version_key(sync_object.extra_data)
@@ -3010,6 +3408,10 @@ class TicketSyncService:
             "status": status_code or str(sync_object.status or "").strip(),
             "assigneeId": assignee_id,
             "assigneeName": assignee_name,
+            "firstLineAssigneeId": first_line_assignee_id,
+            "firstLineAssigneeName": first_line_assignee_name,
+            "internalOwnerId": internal_owner_id,
+            "internalOwnerName": internal_owner_name,
             "posNo": cls._safe_int(ticket_pos)
             or cls._safe_int(log_pull_hints.get("posNo"))
             or cls._safe_int(log_pull_hints.get("pos_no"))
@@ -3184,6 +3586,14 @@ class TicketSyncService:
                 if is_remote_pull and resolved_assignee_name
                 else sync_object.current_assignee_name or (ticket.current_assignee_name if ticket else "")
             ),
+            "first_line_assignee_id": getattr(sync_object, "first_line_assignee_id", None)
+            or (ticket.first_line_assignee_id if ticket else None),
+            "first_line_assignee_name": getattr(sync_object, "first_line_assignee_name", None)
+            or (ticket.first_line_assignee_name if ticket else ""),
+            "internal_owner_id": getattr(sync_object, "internal_owner_id", None)
+            or (ticket.internal_owner_id if ticket else None),
+            "internal_owner_name": getattr(sync_object, "internal_owner_name", None)
+            or (ticket.internal_owner_name if ticket else ""),
             "status": sync_object.status or (ticket.status if ticket else TicketStatus.PENDING.value),
             "root_cause": sync_object.root_cause or (ticket.root_cause if ticket else None),
             "solution": sync_object.solution or (ticket.solution if ticket else None),
@@ -3303,6 +3713,8 @@ class TicketSyncService:
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
         config = cls._load_sync_config(db)
         automation = sync_object.automation
+        if sync_scene == "external_sync":
+            sync_object = cls._enrich_external_person_emails_from_bitable(config, sync_object)
         raw_title = str(sync_object.title or "").strip()
         existing_title = str(ticket.title or "").strip() if ticket else ""
         skip_ai_analysis_due_to_update_title = cls._should_skip_ai_analysis_for_update_with_title(
