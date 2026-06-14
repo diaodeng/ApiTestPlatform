@@ -154,22 +154,31 @@
 ### 第三方直推
 
 1. 外部系统调用 `/ticket/sync/external`
-2. 服务端按同步来源和映射规则写入工单，并立即返回入库结果（不等待 AI/自动化完成）
-3. 如果推送体包含 `url/ticketUrl/detailUrl`，会写入工单详情链接 `ticket_url`
-4. 门店字段兼容 `ticketStore/storeInfo/storeId`，会优先按“商家ID + 门店配置（sap_org_no）”匹配；命中则保存配置门店，未命中保留原始值
-5. 入库后的延后后处理任务（翻译、标题AI、自动化、群推送）优先投递 Celery；当 Celery Worker 不可用时回退 FastAPI 本地后台任务
-6. 接口返回体会附带 `deferredDispatch`，可用于判断本次由 `celery` 还是 `background` 执行
-7. 如开启 `autoTranslateOnSync`，会自动翻译描述
-8. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
-9. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
+2. 服务端只接受约定字段的驼峰/下划线写法，不再猜测第三方自定义字段名；字段不符合契约时直接返回 422，不入库
+3. 必填字段默认是 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`，可通过 `externalSyncRequiredFields` 调整
+4. 可选字段包括 `title`、`customerPriority`、`reason`、`ticketStatus`、`ticketAssignee`、`ticketAssigneeEmail`、`reporterEmail`、`ticketStore`、`ticketPos`、`ticketSco`、`ticketUrl`
+5. 原始请求体会完整保存到 `extraData.raw_payload`，外部字段快照会保存到 `extraData.external_field_mapping`，供通知和排查复用
+6. 服务端只在第三方直推边界执行外部映射：`ticketVender` 映射项目/商家，`ticketModle` 映射模块，`ticketStatus` 映射内部状态，`ticketAssignee` 映射当前处理人
+7. 映射失败时不阻断入库；项目、模块、处理人等字段允许只保留原始名称或文本，后续由人工补充或配置修正
+8. 如果推送体包含 `ticketUrl`，会写入工单详情链接 `ticket_url`
+9. 门店字段 `ticketStore` 会优先按“商家ID + 门店配置（sap_org_no）”匹配；命中则保存配置门店，未命中保留原始值
+10. 入库后的延后后处理任务（翻译、标题AI、自动化、群推送）优先投递 Celery；当 Celery Worker 不可用时回退 FastAPI 本地后台任务
+11. 接口返回体会附带 `deferredDispatch`，可用于判断本次由 `celery` 还是 `background` 执行
+12. 如开启 `autoTranslateOnSync`，会自动翻译描述
+13. 如开启 `autoRunOnSync` 或请求里携带自动化配置，会继续走识别、拉日志、AI 分析
+14. 自动拉日志新增参数门槛：仅当可确定 `vendorId + storeId + posNo/SCO + modifyTime(日期)` 才会提交拉取；参数不齐全时自动跳过并记录步骤原因
 
 ### 内网拉取外网工单
 
 1. 定时任务调用 `/ticket/sync/pending`
 2. 只有 `remoteSync.enabled=true` 才会真正执行拉取
-3. 每次拉取完成后，服务端会再走一次外部同步入库
+3. 每次拉取完成后，服务端会按远端返回的内部字段入库，不再执行 `ticketVender/ticketModle/statusMappings/assigneeMappings` 等外部映射
 4. 是否自动翻译由 `remoteSync.autoTranslateOnPull` 单独控制
-5. 如命中 `groupPush.triggerScenes` 且 `groupPush.enabled=true`，会按模板推送到配置群
+5. 项目和模块只通过 `projectCode/moduleCode` 绑定本地 ID；业务码未命中时只保留远端名称，不使用远端 `projectId/moduleId`
+6. 当前处理人只通过邮箱优先、名称兜底匹配本地用户；未命中时只保留处理人名称，不使用远端 `currentAssigneeId`
+7. 远端携带的 `extraData.raw_payload`、`extraData.log_pull_hints`、`versionKey`、项目/模块业务码等内部字段会继续保留和复用
+8. 远端拉取仍保留现有后处理能力：翻译、标题/分类、自动日志拉取、自动 AI 分析、群推送和发布就绪状态
+9. 如命中 `groupPush.sendAfterRemotePull` 且 `groupPush.enabled=true`，会按模板推送到配置群
 
 ### 回写交付状态
 

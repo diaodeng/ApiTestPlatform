@@ -140,10 +140,10 @@ def _extract_person_name_email(value: object) -> tuple[str, str]:
 
 def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list[str] | None = None) -> dict:
     """
-    ??????????????????
-    :param payload: ??????
-    :param required_fields: ?????????????????
-    :return: ??? TicketExternalSyncUpsertModel ????
+    将外部同步请求体归一化为内部同步模型入参。
+    :param payload: 外部请求体，仅支持约定字段的驼峰/下划线写法
+    :param required_fields: 必填字段列表，未传时使用默认外部同步契约
+    :return: 可用于 TicketExternalSyncUpsertModel 校验的字典
     """
     data = dict(payload or {})
     raw_payload = dict(data)
@@ -160,7 +160,7 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
             data,
             "customerPriority",
             "customer_priority",
-            default=_compatible_field_value(data, "ticketPriority", "ticket_priority", default=internal_priority),
+            default=internal_priority,
         )
         or ""
     ).strip()
@@ -179,12 +179,6 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
             data,
             "ticketUrl",
             "ticket_url",
-            default=_compatible_field_value(
-                data,
-                "url",
-                "url",
-                default=_compatible_field_value(data, "detailUrl", "detail_url", default=""),
-            ),
         )
         or ""
     ).strip() or None
@@ -201,8 +195,6 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
         "reason": reason,
         "ticketUrl": ticket_url,
         "ticketStore": _compatible_field_value(data, "ticketStore", "ticket_store", default=""),
-        "storeInfo": _compatible_field_value(data, "storeInfo", "store_info", default=""),
-        "storeId": _compatible_field_value(data, "storeId", "store_id", default=""),
     }
     default_required_fields = [
         "ticketNo",
@@ -223,7 +215,7 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
         raise ValueError(f"外部同步缺少必填字段: {', '.join(missing_fields)}")
 
     record_id = str(
-        _compatible_field_value(data, "sourceRecordId", "source_record_id", default=ticket_no) or ""
+        _compatible_field_value(data, "recordId", "record_id", default=ticket_no) or ""
     ).strip()
     if not record_id:
         record_id = ticket_no
@@ -232,12 +224,6 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
             data,
             "ticketUrl",
             "ticket_url",
-            default=_compatible_field_value(
-                data,
-                "url",
-                "url",
-                default=_compatible_field_value(data, "detailUrl", "detail_url", default=""),
-            ),
         )
         or ""
     ).strip() or None
@@ -245,6 +231,38 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     source_system = _compatible_field_value(source, "system", "system", default="")
     if not source_system:
         source_system = ticket_vender or "external"
+
+    assignee_raw = _compatible_field_value(data, "ticketAssignee", "ticket_assignee", default="")
+    assignee_name, assignee_email_from_name = _extract_person_name_email(assignee_raw)
+    assignee_email = _normalize_email_text(
+        _compatible_field_value(data, "ticketAssigneeEmail", "ticket_assignee_email", default="")
+    ) or assignee_email_from_name
+
+    external_field_mapping = {
+        "ticketVender": ticket_vender,
+        "ticketModle": ticket_modle,
+        "ticketStatus": str(_compatible_field_value(data, "ticketStatus", "ticket_status", default="") or "").strip(),
+        "ticketStore": str(_compatible_field_value(data, "ticketStore", "ticket_store", default="") or "").strip(),
+        "ticketAssignee": assignee_name,
+        "ticketAssigneeEmail": assignee_email,
+        "reporterName": reporter_name,
+        "reporterEmail": reporter_email,
+        "ticketPos": str(_compatible_field_value(data, "ticketPos", "ticket_pos", default="") or "").strip(),
+        "ticketSco": str(_compatible_field_value(data, "ticketSco", "ticket_sco", default="") or "").strip(),
+    }
+    external_field_mapping = {
+        key: value
+        for key, value in external_field_mapping.items()
+        if value not in (None, "", [])
+    }
+
+    extra_data = data.get("extraData") if isinstance(data.get("extraData"), dict) else {}
+    if not extra_data and isinstance(data.get("extra_data"), dict):
+        extra_data = data.get("extra_data")
+    extra_data = dict(extra_data or {})
+    if external_field_mapping:
+        # 外部字段上下文只在外部推送边界生成，后续通知链路只复用该快照，不再重新猜字段。
+        extra_data["external_field_mapping"] = external_field_mapping
 
     data["source"] = {
         "system": str(source_system or "").strip() or "external",
@@ -264,6 +282,7 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     data["title"] = title
     data["reason"] = reason
     data["ticketUrl"] = ticket_url
+    data["extraData"] = extra_data
     if raw_payload:
         data["raw_payload"] = raw_payload
     return data
@@ -271,9 +290,9 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
 
 async def _load_external_sync_payload(request: Request) -> dict:
     """
-    读取并归一化外部工单同步请求体，兼容 JSON 和表单提交。
+    读取外部工单同步请求体，兼容 JSON 和表单提交。
     :param request: 当前请求对象。
-    :return: 归一化后的请求数据。
+    :return: 原始请求数据字典。
     """
     content_type = (request.headers.get("content-type") or "").lower()
     raw_payload: dict | None = None
@@ -298,12 +317,7 @@ async def _load_external_sync_payload(request: Request) -> dict:
     if not isinstance(raw_payload, dict):
         raise HTTPException(status_code=422, detail="请求体必须是 JSON 或表单数据")
     logger.info(f"请求参数:{json.dumps(raw_payload, ensure_ascii=False)}")
-
-    try:
-        return _normalize_ticket_external_sync_payload(raw_payload)
-    except ValueError as exc:
-        logger.warning(f"外部工单同步入参校验失败: {exc}; payload={json.dumps(raw_payload, ensure_ascii=False)}")
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return raw_payload
 
 
 @ticketController.get("/list", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
@@ -510,7 +524,11 @@ async def sync_external_ticket(
     try:
         payload = await _load_external_sync_payload(request)
         sync_config = TicketSyncService._load_sync_config(query_db)
-        external_sync_required_fields = sync_config.get("externalSyncRequiredFields") if isinstance(sync_config, dict) else None
+        external_sync_required_fields = (
+            sync_config.get("externalSyncRequiredFields")
+            if isinstance(sync_config, dict)
+            else None
+        )
         payload = _normalize_ticket_external_sync_payload(payload, external_sync_required_fields)
         sync_object = TicketExternalSyncUpsertModel.model_validate(payload)
     except ValidationError as exc:
@@ -605,7 +623,7 @@ async def ack_sync_tickets(
 )
 async def get_sync_automation_config(request: Request, query_db: Session = Depends(get_db)):
     """
-    鑾峰彇宸ュ崟鍚屾鑷姩鍖栭厤缃€?
+    获取工单同步自动化配置。
     """
     try:
         return ResponseUtil.success(data=TicketSyncService.get_sync_automation_config_services(query_db))
@@ -625,7 +643,7 @@ async def update_sync_automation_config(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     """
-    淇濆瓨宸ュ崟鍚屾鑷姩鍖栭厤缃€?
+    保存工单同步自动化配置。
     """
     try:
         result = TicketSyncService.update_sync_automation_config_services(
@@ -763,6 +781,7 @@ async def send_sync_group_push_by_ticket(
     :param current_user: 当前登录用户，用于写入推送状态更新人。
     :return: 推送执行结果。
     """
+    logger.info(f"/sync/notify/group/send-by-ticket 请求参数： {query_object.model_dump_json()}")
     try:
         result = TicketSyncService.send_group_push_by_ticket_no_services(
             query_db,

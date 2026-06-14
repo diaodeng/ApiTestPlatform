@@ -951,7 +951,10 @@ class TicketSyncService:
         if parsed_remote_time and parsed_local_time and parsed_remote_time <= parsed_local_time:
             return (
                 False,
-                f"remote_time_not_newer(remote={parsed_remote_time.isoformat()}, local={parsed_local_time.isoformat()})",
+                (
+                    f"remote_time_not_newer(remote={parsed_remote_time.isoformat()}, "
+                    f"local={parsed_local_time.isoformat()})"
+                ),
             )
         return True, "remote_time_newer_or_unknown"
 
@@ -1176,7 +1179,11 @@ class TicketSyncService:
             group_push.get("autoSendAfterTime")
             or group_push.get("auto_send_after_time")
         )
-        group_push["autoSendAfterTime"] = parsed_group_push_auto_send_after.isoformat() if parsed_group_push_auto_send_after else ""
+        group_push["autoSendAfterTime"] = (
+            parsed_group_push_auto_send_after.isoformat()
+            if parsed_group_push_auto_send_after
+            else ""
+        )
         group_push["appId"] = str(group_push.get("appId") or "").strip()
         group_push["appSecret"] = str(group_push.get("appSecret") or "").strip()
         priority_routes = group_push.get("priorityRoutes") if isinstance(group_push.get("priorityRoutes"), list) else []
@@ -1767,7 +1774,36 @@ class TicketSyncService:
                 raw_payload,
                 "ticketAssignee",
                 "ticket_assignee",
-                default=cls._payload_field_value(raw_payload, "currentAssigneeName", "current_assignee_name", default=""),
+                default=cls._payload_field_value(
+                    raw_payload,
+                    "currentAssigneeName",
+                    "current_assignee_name",
+                    default="",
+                ),
+            )
+            or ""
+        ).strip()
+        ticket_assignee_email = str(
+            cls._payload_field_value(
+                raw_payload,
+                "ticketAssigneeEmail",
+                "ticket_assignee_email",
+                default=cls._payload_field_value(
+                    raw_payload,
+                    "currentAssigneeEmail",
+                    "current_assignee_email",
+                    default=cls._payload_field_value(
+                        raw_payload,
+                        "assigneeEmail",
+                        "assignee_email",
+                        default=cls._payload_field_value(
+                            mapping_payload,
+                            "ticketAssigneeEmail",
+                            "ticket_assignee_email",
+                            default="",
+                        ),
+                    ),
+                ),
             )
             or ""
         ).strip()
@@ -1815,6 +1851,7 @@ class TicketSyncService:
             "ticketStatus": ticket_status,
             "ticketStore": ticket_store,
             "ticketAssignee": ticket_assignee,
+            "ticketAssigneeEmail": ticket_assignee_email,
             "ticketPos": ticket_pos,
             "ticketSco": ticket_sco,
         }
@@ -2219,6 +2256,55 @@ class TicketSyncService:
         return None, mapped_user_name or source_text
 
     @classmethod
+    def _resolve_remote_assignee_by_email_or_name(
+        cls,
+        db: Session,
+        *,
+        assignee_email: str,
+        assignee_name: str,
+    ) -> tuple[int | None, str]:
+        """
+        远端拉取人员只按邮箱或名称关联本地用户，禁止使用跨环境用户 ID。
+        :param db: 数据库会话
+        :param assignee_email: 远端处理人邮箱
+        :param assignee_name: 远端处理人名称
+        :return: (本地用户ID, 处理人名称)，未命中时只返回名称不返回ID
+        """
+        from module_admin.entity.do.user_do import SysUser
+
+        normalized_email = str(assignee_email or "").strip().lower()
+        normalized_name = str(assignee_name or "").strip()
+        if normalized_email:
+            user = (
+                db.query(SysUser)
+                .filter(
+                    SysUser.status == "0",
+                    SysUser.del_flag == "0",
+                    func.lower(SysUser.email) == normalized_email,
+                )
+                .first()
+            )
+            if user:
+                return user.user_id, user.user_name or user.nick_name or normalized_name
+        if normalized_name:
+            user = (
+                db.query(SysUser)
+                .filter(
+                    SysUser.status == "0",
+                    SysUser.del_flag == "0",
+                    (
+                        (SysUser.user_name == normalized_name)
+                        | (SysUser.nick_name == normalized_name)
+                        | (func.lower(SysUser.email) == normalized_name.lower())
+                    ),
+                )
+                .first()
+            )
+            if user:
+                return user.user_id, user.user_name or user.nick_name or normalized_name
+        return None, normalized_name or normalized_email
+
+    @classmethod
     def _resolve_sync_title(
         cls,
         db: Session,
@@ -2296,7 +2382,11 @@ class TicketSyncService:
         sco_no = cls._safe_int(result.get("scoNo"))
         log_date = cls._normalize_auto_log_pull_date_text(result.get("logDate"))
 
-        log_pull_payload = dict(sync_object.log_pull_config or {}) if isinstance(sync_object.log_pull_config, dict) else {}
+        log_pull_payload = (
+            dict(sync_object.log_pull_config or {})
+            if isinstance(sync_object.log_pull_config, dict)
+            else {}
+        )
         changed = False
         if pos_no:
             if cls._safe_int(log_pull_payload.get("posNo")) != pos_no:
@@ -2718,7 +2808,16 @@ class TicketSyncService:
         db: Session,
         sync_object: TicketExternalSyncUpsertModel,
         config: dict[str, Any],
+        apply_external_mappings: bool = True,
     ) -> dict[str, Any]:
+        """
+        解析同步入库所需的内部字段。
+        :param db: 数据库会话
+        :param sync_object: 同步入库模型
+        :param config: 同步配置
+        :param apply_external_mappings: 是否应用外部字段映射；仅第三方直推允许，远端拉取使用远端内部字段
+        :return: 标准化后的内部字段候选值
+        """
         text = cls._collect_text(sync_object).lower()
         external_fields = cls._extract_external_mapping_fields(sync_object)
         ticket_vender = external_fields.get("ticketVender") or ""
@@ -2728,10 +2827,20 @@ class TicketSyncService:
         ticket_assignee = external_fields.get("ticketAssignee") or ""
         ticket_pos = external_fields.get("ticketPos") or ""
         ticket_sco = external_fields.get("ticketSco") or ""
+        extra_data = sync_object.extra_data if isinstance(sync_object.extra_data, dict) else {}
+        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
+        mapping_payload = (
+            extra_data.get("external_field_mapping")
+            if isinstance(extra_data.get("external_field_mapping"), dict)
+            else {}
+        )
+        log_pull_hints = extra_data.get("log_pull_hints") if isinstance(extra_data.get("log_pull_hints"), dict) else {}
+        if not isinstance(log_pull_hints, dict):
+            log_pull_hints = {}
 
         project = None
         project_name_by_vendor = ""
-        if ticket_vender:
+        if apply_external_mappings and ticket_vender:
             project, project_name_by_vendor = cls._resolve_project_by_ticket_vender(
                 db,
                 ticket_vender=ticket_vender,
@@ -2747,7 +2856,7 @@ class TicketSyncService:
                 )
                 .first()
             )
-        if not project and sync_object.project_id:
+        if apply_external_mappings and not project and sync_object.project_id:
             project = (
                 db.query(HrmProject)
                 .filter(
@@ -2758,13 +2867,30 @@ class TicketSyncService:
                 .first()
             )
 
-        module = cls._resolve_module_by_ticket_modle(
-            db,
-            ticket_modle=ticket_modle or str(sync_object.module_code or sync_object.module_name or "").strip(),
-            project_id=getattr(project, "project_id", None),
-            module_mappings=config.get("moduleMappings") or [],
-        )
-        if not module and sync_object.module_id:
+        module = None
+        if apply_external_mappings:
+            module = cls._resolve_module_by_ticket_modle(
+                db,
+                ticket_modle=ticket_modle,
+                project_id=getattr(project, "project_id", None),
+                module_mappings=config.get("moduleMappings") or [],
+            )
+        if not module and str(sync_object.module_code or "").strip():
+            module_query = db.query(HrmModule).filter(
+                func.lower(HrmModule.module_code) == str(sync_object.module_code).strip().lower(),
+                HrmModule.status == QtrDataStatusEnum.normal.value,
+            )
+            if getattr(project, "project_id", None):
+                module_query = module_query.filter(HrmModule.project_id == getattr(project, "project_id", None))
+            module = module_query.first()
+        if not module and apply_external_mappings and str(sync_object.module_name or "").strip():
+            module = cls._resolve_module_by_ticket_modle(
+                db,
+                ticket_modle=str(sync_object.module_name or "").strip(),
+                project_id=getattr(project, "project_id", None),
+                module_mappings=config.get("moduleMappings") or [],
+            )
+        if apply_external_mappings and not module and sync_object.module_id:
             module_query = db.query(HrmModule).filter(
                 HrmModule.module_id == sync_object.module_id,
                 HrmModule.status == QtrDataStatusEnum.normal.value,
@@ -2773,12 +2899,17 @@ class TicketSyncService:
                 module_query = module_query.filter(HrmModule.project_id == getattr(project, "project_id", None))
             module = module_query.first()
 
-        vendor_id, vendor_name = cls._resolve_vendor_by_ticket_vender(
-            ticket_vender=ticket_vender,
-            vendor_mappings=config.get("vendorMappings") or [],
-        )
-        if not vendor_id:
+        if apply_external_mappings:
+            vendor_id, vendor_name = cls._resolve_vendor_by_ticket_vender(
+                ticket_vender=ticket_vender,
+                vendor_mappings=config.get("vendorMappings") or [],
+            )
+        else:
+            vendor_id, vendor_name = None, ""
+        if apply_external_mappings and not vendor_id:
             vendor_id = cls._resolve_vendor_by_project(db, project_id=getattr(project, "project_id", None))
+        if not vendor_id:
+            vendor_id = cls._safe_int(log_pull_hints.get("vendorId") or log_pull_hints.get("vendor_id"))
         if not vendor_id:
             vendor_id = cls._safe_int((sync_object.log_pull_config or {}).get("vendorId"))
         if vendor_id and not vendor_name:
@@ -2787,23 +2918,63 @@ class TicketSyncService:
                 or project_name_by_vendor
                 or str(getattr(project, "project_name", "") or "").strip()
             )
-        store_id, store_name = cls._resolve_store_by_external_value(
-            db,
-            vendor_id=vendor_id,
-            ticket_store=ticket_store,
-        )
+        if apply_external_mappings:
+            store_id, store_name = cls._resolve_store_by_external_value(
+                db,
+                vendor_id=vendor_id,
+                ticket_store=ticket_store,
+            )
+        else:
+            store_id, store_name = "", ""
+        if not store_name:
+            store_name = str(log_pull_hints.get("storeName") or log_pull_hints.get("store_name") or "").strip()
+        if not store_id:
+            store_id = str(log_pull_hints.get("storeId") or log_pull_hints.get("store_id") or "").strip()
         if not store_id:
             store_id = str((sync_object.log_pull_config or {}).get("storeId") or "").strip()
-        status_code = cls._resolve_status_by_external_value(
-            status_text=ticket_status or str(sync_object.status or "").strip(),
-            status_mappings=config.get("statusMappings") or [],
-        )
-        assignee_id, assignee_name = cls._resolve_assignee_by_external_value(
-            db,
-            assignee_text=ticket_assignee or str(sync_object.current_assignee_name or "").strip(),
-            assignee_mappings=config.get("assigneeMappings") or [],
-        )
-        if not assignee_id:
+        if apply_external_mappings:
+            status_code = cls._resolve_status_by_external_value(
+                status_text=ticket_status or str(sync_object.status or "").strip(),
+                status_mappings=config.get("statusMappings") or [],
+            )
+            assignee_id, assignee_name = cls._resolve_assignee_by_external_value(
+                db,
+                assignee_text=ticket_assignee or str(sync_object.current_assignee_name or "").strip(),
+                assignee_mappings=config.get("assigneeMappings") or [],
+            )
+        else:
+            status_code = str(sync_object.status or "").strip()
+            assignee_email = str(
+                cls._payload_field_value(
+                    raw_payload,
+                    "currentAssigneeEmail",
+                    "current_assignee_email",
+                    default=cls._payload_field_value(
+                        raw_payload,
+                        "ticketAssigneeEmail",
+                        "ticket_assignee_email",
+                        default=cls._payload_field_value(
+                            raw_payload,
+                            "assigneeEmail",
+                            "assignee_email",
+                            default=cls._payload_field_value(
+                                mapping_payload,
+                                "ticketAssigneeEmail",
+                                "ticket_assignee_email",
+                                default="",
+                            ),
+                        ),
+                    ),
+                )
+                or ""
+            ).strip()
+            assignee_name = ticket_assignee or str(sync_object.current_assignee_name or "").strip()
+            assignee_id, assignee_name = cls._resolve_remote_assignee_by_email_or_name(
+                db,
+                assignee_email=assignee_email,
+                assignee_name=assignee_name,
+            )
+        if apply_external_mappings and not assignee_id:
             assignee_id = cls._safe_int(sync_object.current_assignee_id)
         if not assignee_name:
             assignee_name = str(sync_object.current_assignee_name or "").strip()
@@ -2813,7 +2984,8 @@ class TicketSyncService:
             or str(cls._extract_pattern(text, config.get("versionPatterns")) or "").strip()
         )
         return {
-            "projectId": getattr(project, "project_id", None) or sync_object.project_id,
+            "projectId": getattr(project, "project_id", None)
+            or (sync_object.project_id if apply_external_mappings else None),
             "projectName": (
                 getattr(project, "project_name", "")
                 or project_name_by_vendor
@@ -2822,8 +2994,14 @@ class TicketSyncService:
                 or ""
             ),
             "projectCode": getattr(project, "project_code", "") or sync_object.project_code or "",
-            "moduleId": getattr(module, "module_id", None) or sync_object.module_id,
-            "moduleName": getattr(module, "module_name", "") or sync_object.module_name or "",
+            "moduleId": getattr(module, "module_id", None)
+            or (sync_object.module_id if apply_external_mappings else None),
+            "moduleName": (
+                getattr(module, "module_name", "")
+                or sync_object.module_name
+                or (ticket_modle if apply_external_mappings else "")
+                or ""
+            ),
             "moduleCode": getattr(module, "module_code", "") or sync_object.module_code or "",
             "vendorId": vendor_id,
             "vendorName": vendor_name,
@@ -2833,11 +3011,15 @@ class TicketSyncService:
             "assigneeId": assignee_id,
             "assigneeName": assignee_name,
             "posNo": cls._safe_int(ticket_pos)
+            or cls._safe_int(log_pull_hints.get("posNo"))
+            or cls._safe_int(log_pull_hints.get("pos_no"))
             or cls._safe_int((sync_object.log_pull_config or {}).get("posNo"))
             or cls._safe_int((sync_object.log_pull_config or {}).get("pos_id"))
             or cls._safe_int((sync_object.log_pull_config or {}).get("posId"))
             or cls._safe_int(cls._extract_pattern(text, config.get("posPatterns"))),
             "scoNo": cls._safe_int(ticket_sco)
+            or cls._safe_int(log_pull_hints.get("scoNo"))
+            or cls._safe_int(log_pull_hints.get("sco_no"))
             or cls._safe_int((sync_object.log_pull_config or {}).get("scoNo"))
             or cls._safe_int((sync_object.log_pull_config or {}).get("sco_no"))
             or cls._safe_int((sync_object.log_pull_config or {}).get("scoId"))
@@ -2924,6 +3106,7 @@ class TicketSyncService:
         sync_object: TicketExternalSyncUpsertModel,
         detected: dict[str, Any] | None,
         current_user: CurrentUserModel,
+        sync_scene: str = "external_sync",
     ) -> tuple[dict[str, Any], dict[str, Any], int]:
         now = datetime.now()
         source_extra = dict(ticket.extra_data or {}) if ticket and isinstance(ticket.extra_data, dict) else {}
@@ -2973,6 +3156,9 @@ class TicketSyncService:
         sync_state.setdefault("status", "pending")
         sync_state.setdefault("automation", {})
         meta["sync_state"] = sync_state
+        is_remote_pull = sync_scene == "remote_pull"
+        resolved_assignee_id = cls._safe_int((detected or {}).get("assigneeId"))
+        resolved_assignee_name = str((detected or {}).get("assigneeName") or "").strip()
         payload: dict[str, Any] = {
             "ticket_no": sync_object.ticket_no,
             "title": sync_object.title,
@@ -2984,9 +3170,20 @@ class TicketSyncService:
             "reporter_id": sync_object.reporter_id or (ticket.reporter_id if ticket else _user_id(current_user)),
             "reporter_name": sync_object.reporter_name
             or (ticket.reporter_name if ticket else _user_name(current_user)),
-            "current_assignee_id": sync_object.current_assignee_id or (ticket.current_assignee_id if ticket else None),
-            "current_assignee_name": sync_object.current_assignee_name
-            or (ticket.current_assignee_name if ticket else ""),
+            "current_assignee_id": (
+                resolved_assignee_id
+                if is_remote_pull and resolved_assignee_id
+                else (
+                    None
+                    if is_remote_pull and resolved_assignee_name
+                    else sync_object.current_assignee_id or (ticket.current_assignee_id if ticket else None)
+                )
+            ),
+            "current_assignee_name": (
+                resolved_assignee_name
+                if is_remote_pull and resolved_assignee_name
+                else sync_object.current_assignee_name or (ticket.current_assignee_name if ticket else "")
+            ),
             "status": sync_object.status or (ticket.status if ticket else TicketStatus.PENDING.value),
             "root_cause": sync_object.root_cause or (ticket.root_cause if ticket else None),
             "solution": sync_object.solution or (ticket.solution if ticket else None),
@@ -2995,8 +3192,12 @@ class TicketSyncService:
             "update_by": _user_name(current_user),
             "update_time": now,
         }
-        project_id = cls._safe_int((detected or {}).get("projectId")) or sync_object.project_id
-        module_id = cls._safe_int((detected or {}).get("moduleId")) or sync_object.module_id
+        project_id = cls._safe_int((detected or {}).get("projectId")) or (
+            None if is_remote_pull else sync_object.project_id
+        )
+        module_id = cls._safe_int((detected or {}).get("moduleId")) or (
+            None if is_remote_pull else sync_object.module_id
+        )
         if project_id:
             project = (
                 db.query(HrmProject)
@@ -3041,6 +3242,8 @@ class TicketSyncService:
                 or ""
             )
         payload = cls._merge_external_text_fields(payload, detected or {}, sync_object)
+        if is_remote_pull and resolved_assignee_name and not resolved_assignee_id:
+            payload["current_assignee_id"] = None
         version_key = str((detected or {}).get("versionKey") or sync_object.version_key or "").strip()
         if version_key:
             extra_data["version_key"] = version_key
@@ -3052,7 +3255,10 @@ class TicketSyncService:
         vendor_id_hint = cls._safe_int((detected or {}).get("vendorId"))
         store_id_hint = str((detected or {}).get("storeId") or "").strip()
         pos_no_hint = cls._safe_int((detected or {}).get("posNo")) or cls._safe_int((detected or {}).get("scoNo"))
-        modify_time_hint = cls._resolve_auto_log_pull_modify_time(sync_object=sync_object, log_pull_payload=sync_object.log_pull_config)
+        modify_time_hint = cls._resolve_auto_log_pull_modify_time(
+            sync_object=sync_object,
+            log_pull_payload=sync_object.log_pull_config,
+        )
         if vendor_id_hint:
             log_pull_hints["vendorId"] = vendor_id_hint
         if store_id_hint:
@@ -3177,7 +3383,13 @@ class TicketSyncService:
                         title_meta = {"mode": "fallback", "fallback_title": resolved_title, "error": str(exc)}
             if resolved_title != raw_title:
                 sync_object = sync_object.model_copy(update={"title": resolved_title})
-        detected = cls._detect_fields(db, sync_object, config)
+        apply_external_mappings = sync_scene != "remote_pull"
+        detected = cls._detect_fields(
+            db,
+            sync_object,
+            config,
+            apply_external_mappings=apply_external_mappings,
+        )
         should_translate = False
         translated_description = str(sync_object.description or "").strip()
         translation_meta: dict[str, Any] = {"translated_text": "", "skipped": True}
@@ -3214,14 +3426,22 @@ class TicketSyncService:
                 )
             except Exception as exc:
                 logger.warning(
-                    f"外部工单同步翻译异常，已回退原文: ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}"
+                    "外部工单同步翻译异常，已回退原文: "
+                    f"ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}"
                 )
                 translated_description = str(sync_object.description or "").strip()
                 translation_meta = {"translated_text": "", "skipped": True, "error": str(exc)}
                 origin_description = str(sync_object.description or "").strip()
             if should_translate:
                 sync_object = sync_object.model_copy(update={"description": translated_description})
-        payload, meta, revision = cls._build_upsert_payload(db, ticket, sync_object, detected, current_user)
+        payload, meta, revision = cls._build_upsert_payload(
+            db,
+            ticket,
+            sync_object,
+            detected,
+            current_user,
+            sync_scene=sync_scene,
+        )
         if defer_post_process:
             meta = cls._set_publish_state(
                 meta,
@@ -3249,7 +3469,11 @@ class TicketSyncService:
             payload["extra_data"] = extra_data
         if not defer_post_process and isinstance(ai_extract_meta, dict):
             if not bool(ai_extract_meta.get("skipped")) or str(ai_extract_meta.get("error") or "").strip():
-                extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
+                extra_data = (
+                    dict(payload.get("extra_data") or {})
+                    if isinstance(payload.get("extra_data"), dict)
+                    else {}
+                )
                 extra_data = cls._attach_sync_ai_extract_meta(
                     extra_data,
                     extract_result=ai_extract_result,
@@ -3337,7 +3561,11 @@ class TicketSyncService:
             try:
                 ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
                 pre_category_name = str((ai_extract_result or {}).get("categoryName") or "").strip()
-                prefer_no_ai_fallback = not bool(ai_extract_meta.get("skipped", True)) if isinstance(ai_extract_meta, dict) else False
+                prefer_no_ai_fallback = (
+                    not bool(ai_extract_meta.get("skipped", True))
+                    if isinstance(ai_extract_meta, dict)
+                    else False
+                )
                 ticket, category_summary = cls._run_auto_ticket_category_classification(
                     db,
                     ticket=ticket,
@@ -3555,7 +3783,10 @@ class TicketSyncService:
                     source_ref=sync_object.ticket_no,
                     current_user_name=_user_name(current_user),
                 )
-                sync_object, ai_extract_apply_meta = cls._apply_ai_extract_to_sync_object(sync_object, ai_extract_result)
+                sync_object, ai_extract_apply_meta = cls._apply_ai_extract_to_sync_object(
+                    sync_object,
+                    ai_extract_result,
+                )
                 ai_extract_title = str((ai_extract_result or {}).get("title") or "").strip()
                 if not incoming_title and not existing_title and ai_extract_title:
                     update_data["title"] = ai_extract_title
@@ -3607,7 +3838,11 @@ class TicketSyncService:
                 current_user=current_user,
                 enabled=should_translate,
             )
-            if should_translate and translated_description and translated_description != str(ticket.description or "").strip():
+            if (
+                should_translate
+                and translated_description
+                and translated_description != str(ticket.description or "").strip()
+            ):
                 update_data["description"] = translated_description
             if should_translate and origin_description and str(translation_meta.get("translated_text") or "").strip():
                 extra_data["origin_description"] = origin_description
@@ -3645,12 +3880,21 @@ class TicketSyncService:
             try:
                 ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
                 pre_category_name = str((ai_extract_result or {}).get("categoryName") or "").strip()
-                prefer_no_ai_fallback = not bool(ai_extract_meta.get("skipped", True)) if isinstance(ai_extract_meta, dict) else False
+                prefer_no_ai_fallback = (
+                    not bool(ai_extract_meta.get("skipped", True))
+                    if isinstance(ai_extract_meta, dict)
+                    else False
+                )
                 cls._run_auto_ticket_category_classification(
                     db,
                     ticket=ticket,
                     title=str(update_data.get("title") or ticket.title or "").strip(),
-                    description=str(update_data.get("description") or sync_object.description or ticket.description or "").strip(),
+                    description=str(
+                        update_data.get("description")
+                        or sync_object.description
+                        or ticket.description
+                        or ""
+                    ).strip(),
                     current_user_name=_user_name(current_user),
                     source_type=f"{sync_scene}_auto_category",
                     source_ref=sync_object.ticket_no,
@@ -3662,7 +3906,13 @@ class TicketSyncService:
             except Exception as exc:
                 logger.warning(f"外部工单同步延后自动分类失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
-        detected = cls._detect_fields(db, sync_object, config)
+        apply_external_mappings = sync_scene != "remote_pull"
+        detected = cls._detect_fields(
+            db,
+            sync_object,
+            config,
+            apply_external_mappings=apply_external_mappings,
+        )
 
         should_run_automation = bool(
             (
@@ -3820,7 +4070,12 @@ class TicketSyncService:
                         )
                         if log_result.is_success:
                             summary["logPull"] = log_result.result
-                            cls._mark_automation_step(meta, step="log_pull", status="submitted", detail=log_result.result)
+                            cls._mark_automation_step(
+                                meta,
+                                step="log_pull",
+                                status="submitted",
+                                detail=log_result.result,
+                            )
                             if automation.auto_ai_analysis:
                                 cls._mark_automation_step(
                                     meta,
@@ -4177,6 +4432,20 @@ class TicketSyncService:
             sync_extra_data = item.get("extra_data")
         sync_extra_data = dict(sync_extra_data or {})
         sync_extra_data["_remote_sync_revision"] = remote_sync_revision
+        log_pull_hints = (
+            sync_extra_data.get("log_pull_hints")
+            if isinstance(sync_extra_data.get("log_pull_hints"), dict)
+            else {}
+        )
+        log_pull_config = {
+            "vendorId": log_pull_hints.get("vendorId") or log_pull_hints.get("vendor_id"),
+            "storeId": log_pull_hints.get("storeId") or log_pull_hints.get("store_id"),
+            "storeName": log_pull_hints.get("storeName") or log_pull_hints.get("store_name"),
+            "posNo": log_pull_hints.get("posNo") or log_pull_hints.get("pos_no"),
+            "scoNo": log_pull_hints.get("scoNo") or log_pull_hints.get("sco_no"),
+            "modifyTime": log_pull_hints.get("modifyTime") or log_pull_hints.get("modify_time"),
+        }
+        log_pull_config = {key: value for key, value in log_pull_config.items() if value not in (None, "", [])}
         sync_payload = {
             "source": source_payload,
             "syncConsumer": str(remote_sync.get("consumer") or "").strip() or None,
@@ -4186,11 +4455,11 @@ class TicketSyncService:
             "title": title,
             "description": description,
             "createTime": external_create_time or source_payload.get("pushedAt"),
-            "projectId": item.get("projectId") or item.get("project_id"),
+            "projectId": None,
             "projectName": item.get("projectName") or item.get("project_name") or item.get("merchantName") or "",
             "projectCode": item.get("projectCode") or item.get("project_code") or "",
             "merchantName": item.get("merchantName") or item.get("projectName") or item.get("project_name") or "",
-            "moduleId": item.get("moduleId") or item.get("module_id"),
+            "moduleId": None,
             "moduleName": item.get("moduleName") or item.get("module_name") or "",
             "moduleCode": item.get("moduleCode") or item.get("module_code") or "",
             "versionKey": item.get("versionKey") or item.get("version_key") or "",
@@ -4200,12 +4469,13 @@ class TicketSyncService:
             "severity": item.get("severity") or "",
             "reporterId": item.get("reporterId") or item.get("reporter_id"),
             "reporterName": item.get("reporterName") or item.get("reporter_name") or "",
-            "currentAssigneeId": item.get("currentAssigneeId") or item.get("current_assignee_id"),
+            "currentAssigneeId": None,
             "currentAssigneeName": item.get("currentAssigneeName") or item.get("current_assignee_name") or "",
             "rootCause": item.get("rootCause") or item.get("root_cause") or "",
             "solution": item.get("solution") or "",
             "tags": item.get("tags"),
             "extraData": sync_extra_data,
+            "logPullConfig": log_pull_config or None,
             "createBy": item.get("createBy") or item.get("create_by") or "",
             "updateBy": item.get("updateBy") or item.get("update_by") or "",
         }
