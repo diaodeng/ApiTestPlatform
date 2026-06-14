@@ -2552,6 +2552,58 @@ class TicketSyncService:
         return matched.group(0).lower() if matched else ""
 
     @classmethod
+    def _mask_email_for_log(cls, email: str) -> str:
+        """
+        将邮箱脱敏后写入日志，避免排查同步链路时泄露完整邮箱。
+        :param email: 原始邮箱
+        :return: 脱敏后的邮箱
+        """
+        normalized_email = str(email or "").strip().lower()
+        if "@" not in normalized_email:
+            return normalized_email
+        local_part, domain = normalized_email.split("@", 1)
+        if len(local_part) <= 2:
+            masked_local = f"{local_part[:1]}*"
+        else:
+            masked_local = f"{local_part[:2]}***{local_part[-1:]}"
+        if "." in domain:
+            domain_name, domain_suffix = domain.rsplit(".", 1)
+            masked_domain = f"{domain_name[:1]}***.{domain_suffix}"
+        else:
+            masked_domain = f"{domain[:1]}***"
+        return f"{masked_local}@{masked_domain}"
+
+    @classmethod
+    def _describe_bitable_field_value_for_log(cls, value: Any) -> dict[str, Any]:
+        """
+        生成多维表格字段值的日志摘要，只记录类型、结构和是否像邮箱，不记录原始字段值。
+        :param value: 多维表格字段值
+        :return: 字段值摘要
+        """
+        if value is None:
+            return {"type": "missing", "empty": True}
+        if isinstance(value, list):
+            return {
+                "type": "list",
+                "empty": len(value) == 0,
+                "length": len(value),
+                "itemTypes": sorted({type(item).__name__ for item in value}),
+            }
+        if isinstance(value, dict):
+            return {
+                "type": "dict",
+                "empty": len(value) == 0,
+                "keys": list(value.keys())[:20],
+            }
+        text = str(value or "").strip()
+        return {
+            "type": type(value).__name__,
+            "empty": not bool(text),
+            "length": len(text),
+            "hasEmailPattern": "@" in text,
+        }
+
+    @classmethod
     def _query_external_sync_bitable_record_fields(
         cls,
         config: dict[str, Any],
@@ -2570,14 +2622,37 @@ class TicketSyncService:
             else {}
         )
         if not bool(bitable_config.get("enabled")):
+            logger.info("外部同步多维表格邮箱查询跳过: reason=externalSyncBitable 未启用")
             return {}
         app_id, app_secret = TicketSyncNotifyService._resolve_feishu_auth(bitable_config)
         app_token = str(bitable_config.get("appToken") or "").strip()
         table_id = str(bitable_config.get("tableId") or "").strip()
         normalized_record_id = str(record_id or "").strip()
         if not (app_id and app_secret and app_token and table_id and normalized_record_id):
+            missing_items = []
+            if not app_id:
+                missing_items.append("appId")
+            if not app_secret:
+                missing_items.append("appSecret")
+            if not app_token:
+                missing_items.append("appToken")
+            if not table_id:
+                missing_items.append("tableId")
+            if not normalized_record_id:
+                missing_items.append("recordId")
+            logger.info(
+                "外部同步多维表格邮箱查询跳过: reason=配置不完整, missing=%s, record_id=%s",
+                missing_items,
+                normalized_record_id or "-",
+            )
             return {}
         try:
+            logger.info(
+                "外部同步多维表格邮箱查询开始: record_id=%s, app_token_configured=%s, table_id=%s",
+                normalized_record_id,
+                bool(app_token),
+                table_id,
+            )
             token = TicketSyncNotifyService._get_tenant_access_token(app_id, app_secret)
             url = (
                 f"{TicketSyncNotifyService.FEISHU_BASE_URL}/bitable/v1/apps/"
@@ -2590,6 +2665,12 @@ class TicketSyncService:
             ).get("data") or {}
             record = response_data.get("record") if isinstance(response_data.get("record"), dict) else {}
             fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+            logger.info(
+                "外部同步多维表格邮箱查询完成: record_id=%s, field_count=%s, field_names=%s",
+                normalized_record_id,
+                len(fields),
+                list(fields.keys())[:100],
+            )
             return fields
         except Exception as exc:
             logger.warning(f"外部同步多维表格记录查询失败: record_id={normalized_record_id}, error={exc}")
@@ -2608,19 +2689,73 @@ class TicketSyncService:
         :return: 补齐邮箱快照后的同步模型
         """
         record_id = str(getattr(sync_object.source, "record_id", "") or "").strip()
+        ticket_no = str(getattr(sync_object, "ticket_no", "") or "").strip()
         if not record_id:
+            logger.info(
+                "外部同步多维表格邮箱补齐跳过: ticket_no=%s, reason=外部推送未携带 recordId",
+                ticket_no or "-",
+            )
             return sync_object
+        logger.info(
+            "外部同步多维表格邮箱补齐开始: ticket_no=%s, record_id=%s",
+            ticket_no or "-",
+            record_id,
+        )
         fields = cls._query_external_sync_bitable_record_fields(config, record_id=record_id)
         if not fields:
+            logger.info(
+                "外部同步多维表格邮箱补齐结束: ticket_no=%s, record_id=%s, "
+                "updated=false, reason=未获取到多维表格 fields",
+                ticket_no or "-",
+                record_id,
+            )
             return sync_object
 
-        email_map = {
-            "reporterEmail": cls._extract_email_from_bitable_value(fields.get("(IT) L1 PIC")),
-            "internalOwnerEmail": cls._extract_email_from_bitable_value(fields.get("1.5 当前负责人")),
-            "currentAssigneeEmail": cls._extract_email_from_bitable_value(fields.get("当前负责人")),
+        email_field_map = {
+            "reporterEmail": "(IT) L1 PIC",
+            "internalOwnerEmail": "1.5 当前负责人",
+            "currentAssigneeEmail": "当前负责人",
         }
+        email_map = {}
+        extraction_logs: list[dict[str, Any]] = []
+        for email_key, field_name in email_field_map.items():
+            field_present = field_name in fields
+            field_value = fields.get(field_name)
+            email = cls._extract_email_from_bitable_value(field_value)
+            if email:
+                email_map[email_key] = email
+                status = "success"
+                reason = ""
+            elif not field_present:
+                status = "failed"
+                reason = "field_not_found"
+            else:
+                status = "failed"
+                reason = "email_empty_or_unparseable"
+            extraction_logs.append(
+                {
+                    "emailKey": email_key,
+                    "fieldName": field_name,
+                    "fieldPresent": field_present,
+                    "status": status,
+                    "reason": reason,
+                    "email": cls._mask_email_for_log(email),
+                    "fieldSummary": cls._describe_bitable_field_value_for_log(field_value),
+                }
+            )
+        logger.info(
+            "外部同步多维表格邮箱提取结果: ticket_no=%s, record_id=%s, detail=%s",
+            ticket_no or "-",
+            record_id,
+            json.dumps(extraction_logs, ensure_ascii=False),
+        )
         email_map = {key: value for key, value in email_map.items() if value}
         if not email_map:
+            logger.info(
+                "外部同步多维表格邮箱补齐结束: ticket_no=%s, record_id=%s, updated=false, reason=三类邮箱均未提取成功",
+                ticket_no or "-",
+                record_id,
+            )
             return sync_object
 
         extra_data = dict(sync_object.extra_data or {}) if isinstance(sync_object.extra_data, dict) else {}
@@ -2631,12 +2766,15 @@ class TicketSyncService:
         )
         external_mapping.update(email_map)
         external_mapping["bitableRecordId"] = record_id
-        external_mapping["bitableEmailFields"] = {
-            "reporterEmail": "(IT) L1 PIC",
-            "internalOwnerEmail": "1.5 当前负责人",
-            "currentAssigneeEmail": "当前负责人",
-        }
+        external_mapping["bitableEmailFields"] = email_field_map
         extra_data["external_field_mapping"] = external_mapping
+        logger.info(
+            "外部同步多维表格邮箱补齐结束: ticket_no=%s, record_id=%s, updated=true, email_keys=%s, masked_emails=%s",
+            ticket_no or "-",
+            record_id,
+            list(email_map.keys()),
+            {key: cls._mask_email_for_log(value) for key, value in email_map.items()},
+        )
         return sync_object.model_copy(update={"extra_data": extra_data})
 
     @classmethod
