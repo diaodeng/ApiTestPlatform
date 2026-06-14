@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-15] INGEST-CODE | 新增专题工单会话状态统计定时任务
+- 触发：用户要求根据 `D:\xj\Downloads\topic_ticket_stats.py` 将内部逻辑实现在当前项目的定时任务中，并通过任务参数配置所需信息。
+- 架构层：工单域 / 任务调度 / 飞书群消息统计
+- 创建的页面：`web/public/docs/2026-06-15-ticket-topic-stats-scheduler.md`
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_topic_stats_service.py` / `server/module_task/scheduler_maintenance.py` -> 专题统计定时任务文档
+- 总共涉及页面：3
+
 ## [2026-06-12] INGEST-CODE | 工单群消息@人补强（模板别名 + 人员对象邮箱解析）
 - 触发：用户要求外部推单/远端拉取发群时，按模板决定是否 @ 报告人与当前责任人，并通过邮箱查询飞书 `open_id` 稳定 @ 人。
 - 架构层：工单域 / 外部同步链路 / 飞书通知

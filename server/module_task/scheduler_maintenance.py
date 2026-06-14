@@ -7,6 +7,7 @@ from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.service.report_service import ReportService
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
 from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ticket_topic_stats_service import TicketTopicStatsService
 from utils.log_util import logger
 
 from .task_register import register_job
@@ -251,3 +252,69 @@ def ticket_summary_report(
         result.get("skipped"),
     )
     return result
+
+
+@register_job("module_task.scheduler_maintenance.ticket_topic_stats_report")
+def ticket_topic_stats_report(
+    *args,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    sources: list[dict[str, Any]] | None = None,
+    webhook: str | None = None,
+    send: bool | None = None,
+    keyword: str = "TRunner",
+    lark_cli_bin: str | None = None,
+    page_size: int | None = None,
+    **kwargs,
+):
+    """
+    专题工单会话状态统计定时任务。
+
+    :param start_date: 统计开始日期，格式 YYYY-MM-DD；为空时取上海时区当天。
+    :param end_date: 统计结束日期，格式 YYYY-MM-DD；为空时取上海时区当天。
+    :param sources: 飞书群来源列表，每项包含 name、chatId/chat_id、priority。
+    :param webhook: 飞书机器人 webhook，send 为 True 时必填。
+    :param send: 是否发送飞书卡片。
+    :param keyword: 卡片副标题关键字。
+    :param lark_cli_bin: lark-cli 可执行文件路径或命令名。
+    :param page_size: 单页拉取消息数量。
+    :return: 统计结果摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+
+    resolved_sources = sources if sources is not None else kwargs.pop("sources", None)
+    resolved_start_date = start_date if start_date is not None else kwargs.pop("startDate", None)
+    resolved_end_date = end_date if end_date is not None else kwargs.pop("endDate", None)
+    resolved_webhook = webhook if webhook is not None else kwargs.pop("webhook", None)
+    resolved_send = bool(send if send is not None else kwargs.pop("send", False))
+    resolved_keyword = keyword if keyword is not None else kwargs.pop("keyword", "TRunner")
+    resolved_lark_cli_bin = lark_cli_bin if lark_cli_bin is not None else kwargs.pop("larkCliBin", None)
+    resolved_page_size = page_size if page_size is not None else kwargs.pop("pageSize", 50)
+
+    logger.info(
+        f"专题工单会话状态统计任务开始 | start_date={resolved_start_date or '-'} "
+        f"end_date={resolved_end_date or '-'} source_count={len(resolved_sources or [])} "
+        f"send={resolved_send} keyword={resolved_keyword or '-'}"
+    )
+    result = TicketTopicStatsService.run_topic_stats(
+        start_date=resolved_start_date,
+        end_date=resolved_end_date,
+        sources=resolved_sources,
+        webhook=resolved_webhook,
+        send=resolved_send,
+        keyword=str(resolved_keyword or "TRunner"),
+        lark_cli_bin=resolved_lark_cli_bin,
+        page_size=int(resolved_page_size or 50),
+    )
+    logger.info(
+        f"专题工单会话状态统计任务完成 | total={result['summary']['total']} "
+        f"status={result['summary']['status']} category={result['summary']['category']}"
+    )
+    return {
+        "range": result.get("range"),
+        "summary": result.get("summary"),
+        "sent": bool(result.get("response")),
+        "response": result.get("response"),
+    }

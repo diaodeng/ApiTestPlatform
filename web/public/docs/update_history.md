@@ -1,5 +1,8 @@
 ## 2026-06-15
 
+1. 新增专题工单会话状态统计定时任务：`module_task.scheduler_maintenance.ticket_topic_stats_report`，将外部脚本的飞书群拉取、Ticket 提取、专题分类、会话状态判断和飞书卡片发送逻辑迁入项目。
+2. 专题统计任务支持通过定时任务参数配置日期范围、飞书群来源、`lark-cli` 路径、webhook、关键字和分页大小；日志按步骤记录来源处理、分页拉取、命中/跳过原因、汇总结果和发送返回。
+3. 补充专题统计定时任务说明文档：`web/public/docs/2026-06-15-ticket-topic-stats-scheduler.md`，包含完整任务参数示例和验证记录。
 1. 修复已有工单重复外部推送时所属模块名称为空的问题：当外部 `ticketModle` 已解析出模块文本，但本地模块 ID 无效或映射未命中时，入库会兜底写入 `module_name`，不会写入错误的 `module_id`。
 2. 同步元数据 `extra_data.external_sync.source.moduleName` 同步记录识别到的模块文本，便于排查外部推送、群消息和统计链路。
 3. 补充外部推送按 `recordId` 查询飞书多维表格邮箱的诊断日志：记录是否调用飞书、返回字段名、三类邮箱字段提取结果、失败原因和最终写入状态；日志不输出飞书密钥，邮箱脱敏展示。
