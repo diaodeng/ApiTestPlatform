@@ -8,6 +8,13 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-16] INGEST-CODE | 工单详情顶部描述布局优化
+- 触发：用户反馈工单详情弹窗顶部详情表格中描述过长会撑变形，灰色关键字列换行会抬高短信息行；随后要求描述自动展示全部内容，并将原文和翻译分开展示、支持手动翻译。
+- 架构层：工单域 / Web 控制台 / 工单详情弹窗 / 轻量 AI 翻译
+- 创建的页面：`web/public/docs/2026-06-16-ticket-detail-summary-description-layout.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 变更传播链：`ticket_controller.py` / `ticket_service.py` / `ticket.js` / `ticket/index.vue` -> 详情顶部基础信息表格、描述独立行和手动翻译入口
+
 ## [2026-06-16] INGEST-CODE | 日志拉取下载来源与 POS 列表区分
 - 触发：用户要求日志拉取管理页下载优先本服务文件、缺失再走原始路径；工单详情页归档地址与原始压缩包分别下载；详情列表增加商家、门店、POSID。
 - 架构层：工单域 / 日志拉取 / 下载来源 / Web 控制台

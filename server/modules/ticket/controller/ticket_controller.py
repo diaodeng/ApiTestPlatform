@@ -902,6 +902,35 @@ async def edit_ticket(
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketController.post(
+    "/{ticket_id:int}/translate-description",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:edit"))],
+)
+@log_decorator(title="工单描述翻译", business_type=2)
+async def translate_ticket_description(
+    request: Request,
+    ticket_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    手动翻译工单描述接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入审计信息
+    :return: 翻译后的工单详情
+    """
+    try:
+        result = TicketService.translate_ticket_description_services(query_db, ticket_id, current_user)
+        if result.is_success:
+            return ResponseUtil.success(data=result.result, msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketController.delete("/{ticket_id:int}", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:remove"))])
 @log_decorator(title="工单管理", business_type=3)
 async def delete_ticket(

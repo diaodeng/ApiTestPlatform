@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-06-15
+freshness: 2026-06-16
 created: 2026-05-20
-updated: 2026-06-15
+updated: 2026-06-16
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
@@ -94,6 +94,8 @@ graph TD
 - 日志拉取管理页新增拉取日期展示，并提供日志下载和记录删除能力；删除会同步清理本地或 FTP 归档文件，未关联工单的独立记录也能直接下载。
 - 日志拉取下载接口支持 `source=auto/service/original`：管理页“下载日志”使用 `auto`，优先本服务归档文件，本服务文件不存在或未下载时回退外部原始地址；工单详情页“归档地址”使用 `service` 只下载本服务归档，“原始压缩包”使用 `original` 只下载外部原始地址。工单详情页日志拉取列表展示商家、门店、POSID，便于同一工单下区分不同 POS 的拉取记录。
 - 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。
+- 工单详情弹窗顶部基础信息表格不再直接承载“描述”，描述改为表格下方独立整行并自动展示全部内容；顶部表格灰色标签列禁止换行，避免长描述或标签换行撑高基础信息行。
+- 工单描述翻译继续复用轻量 AI 翻译配置 `ticket.ai.translate.provider.code` 和 `ticket.ai.translate.prompt.code`：详情页优先用 `extra_data.origin_description` 展示原文，用 `extra_data.ai_translation` 在描述下方单独展示译文；手动翻译入口会在缺少翻译总开关、Provider 或提示词时直接提示，不写入空译文。
 - 工单详情页新增“刷新AI数据”按钮，方便在 AI 任务完成后手动刷新当前详情与任务历史，不再依赖退出重进页面。
 - 日志拉取配置与通知配置已抽成复用组件，分别用于新增工单、工单详情页拉取任务弹窗和日志拉取管理页，确保推送项选择、成功/失败通知开关和表单字段表现一致。
 - 日志包解析阶段只读取文件名包含 `_pos.log` 的条目，其他文件不进入时间戳切片流程。

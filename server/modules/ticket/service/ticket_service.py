@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime
 from typing import Any
 
@@ -102,6 +103,15 @@ def _ticket_no() -> str:
     return f"TK{datetime.now().strftime('%Y%m%d')}{snowIdWorker.get_id()}"
 
 
+def _text_sha256(value: Any) -> str:
+    """
+    计算文本 SHA256，用于记录翻译来源快照。
+    :param value: 原始文本
+    :return: SHA256 摘要
+    """
+    return hashlib.sha256(str(value or "").strip().encode("utf-8")).hexdigest()
+
+
 def _extract_ticket_version_key(extra_data: Any) -> str:
     """
     从工单扩展信息中提取版本号。
@@ -126,6 +136,26 @@ def _extract_ticket_origin_description(extra_data: Any) -> str:
     if not isinstance(extra_data, dict):
         return ""
     return str(extra_data.get("origin_description") or "").strip()
+
+
+def _resolve_ticket_original_description(ticket: Ticket) -> str:
+    """
+    解析工单原始描述，优先使用扩展字段中保存的原文。
+    :param ticket: 工单对象
+    :return: 工单原始描述
+    """
+    extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+    origin_description = str(
+        extra_data.get("origin_description")
+        or extra_data.get("original_description")
+        or ""
+    ).strip()
+    if origin_description:
+        return origin_description
+    description = str(ticket.description or "").strip()
+    if "【AI翻译】" in description:
+        return description.split("【AI翻译】", 1)[0].strip()
+    return description
 
 
 def _extract_ticket_sync_summary(extra_data: Any) -> dict[str, Any] | None:
@@ -480,12 +510,18 @@ class TicketService:
         if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):
             item["externalCreateTime"] = sync_summary.get("externalCreateTime")
         item["submitTime"] = _resolve_ticket_submit_time(extra_data, item.get("createTime") or item.get("create_time"))
-        item["originalDescription"] = (
+        origin_description = str(
             (extra_data or {}).get("origin_description")
             or (extra_data or {}).get("original_description")
-            or item.get("description")
-        )
+            or ""
+        ).strip()
+        description = str(item.get("description") or "").strip()
+        if not origin_description and "【AI翻译】" in description:
+            origin_description = description.split("【AI翻译】", 1)[0].strip()
+        item["originalDescription"] = origin_description or description
         item["aiTranslation"] = (extra_data or {}).get("ai_translation") or ""
+        item["aiTranslationProviderCode"] = (extra_data or {}).get("ai_translation_provider_code") or ""
+        item["aiTranslationPromptCode"] = (extra_data or {}).get("ai_translation_prompt_code") or ""
         item["syncSummary"] = sync_summary
         return item
 
@@ -1228,6 +1264,78 @@ class TicketService:
             )
             query_db.commit()
             return CrudResponseModel(is_success=True, message="更新成功")
+        except Exception:
+            query_db.rollback()
+            raise
+
+    @classmethod
+    def translate_ticket_description_services(
+        cls, query_db: Session, ticket_id: int, current_user: CurrentUserModel
+    ) -> CrudResponseModel:
+        """
+        手动翻译工单描述，并将原文与译文分别保存到扩展字段。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param current_user: 当前登录用户
+        :return: 翻译结果和刷新后的工单详情
+        """
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
+            return CrudResponseModel(is_success=False, message="工单不存在")
+        original_description = _resolve_ticket_original_description(ticket)
+        if not original_description:
+            return CrudResponseModel(is_success=False, message="当前工单描述为空，无法翻译")
+        try:
+            translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
+                query_db,
+                title=str(ticket.title or "").strip(),
+                content=original_description,
+                source_type="ticket_manual_translate",
+                source_id=ticket.ticket_id,
+                source_ref=ticket.ticket_no,
+                current_user_name=_user_name(current_user),
+            )
+            translated_text = str(translation_meta.get("translated_text") or "").strip()
+            if not translated_text:
+                message = str(translation_meta.get("error") or "").strip()
+                if translation_meta.get("skipped") or not translation_meta.get("provider_code") or not translation_meta.get("prompt_code"):
+                    message = "未获取到自动翻译配置或翻译总开关未开启，请先配置翻译 Provider、提示词并开启翻译"
+                return CrudResponseModel(is_success=False, message=message or "翻译未生成有效内容")
+            extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+            extra_data["origin_description"] = original_description
+            extra_data["ai_translation"] = translated_text
+            extra_data["ai_translation_source_hash"] = _text_sha256(original_description)
+            if translation_meta.get("provider_code"):
+                extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
+            if translation_meta.get("prompt_code"):
+                extra_data["ai_translation_prompt_code"] = translation_meta.get("prompt_code")
+            TicketDao.update_ticket(
+                query_db,
+                ticket.ticket_id,
+                {
+                    "description": translated_description,
+                    "extra_data": extra_data,
+                    "update_by": _user_name(current_user),
+                    "update_time": datetime.now(),
+                },
+            )
+            TicketDao.add_event(
+                query_db,
+                TicketEvent(
+                    ticket_id=ticket.ticket_id,
+                    event_type=TicketEventType.TICKET_UPDATED.value,
+                    operator_id=_user_id(current_user),
+                    operator_name=_user_name(current_user),
+                    content="手动翻译工单描述",
+                    event_data={
+                        "provider_code": translation_meta.get("provider_code") or "",
+                        "prompt_code": translation_meta.get("prompt_code") or "",
+                    },
+                ),
+            )
+            query_db.commit()
+            detail = cls.get_ticket_detail_services(query_db, ticket.ticket_id)
+            return CrudResponseModel(is_success=True, message="翻译成功", result=detail)
         except Exception:
             query_db.rollback()
             raise

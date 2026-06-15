@@ -203,6 +203,14 @@ export function changeTicketStatus(ticketId, data) {
   });
 }
 
+// 手动翻译工单描述
+export function translateTicketDescription(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/translate-description`,
+    method: 'post',
+  });
+}
+
 // 新增工单评论
 export function addTicketComment(ticketId, data) {
   return request({

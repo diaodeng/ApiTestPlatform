@@ -514,7 +514,7 @@
         <div class="el-upload__text">将 Excel 拖到此处，或 <em>点击选择</em></div>
       </el-upload>
       <div v-if="importResult" class="import-result">
-        <el-descriptions :column="3" border>
+        <el-descriptions :column="3" border class="ticket-summary-descriptions">
           <el-descriptions-item label="读取行数">{{ importResult.totalRows }}</el-descriptions-item>
           <el-descriptions-item label="导入成功">{{ importResult.importedCount }}</el-descriptions-item>
           <el-descriptions-item label="已向量化">{{ importResult.embeddingCount }}</el-descriptions-item>
@@ -592,10 +592,28 @@
           <el-descriptions-item label="对方优先级">{{ detail.customerPriority || '-' }}</el-descriptions-item>
           <el-descriptions-item label="内部优先级">{{ detail.internalPriority || '-' }}</el-descriptions-item>
           <el-descriptions-item label="总耗时">{{ formatSeconds(detail.totalProcessSeconds) }}</el-descriptions-item>
-          <el-descriptions-item label="描述" :span="3">{{ detail.description || '-' }}</el-descriptions-item>
           <el-descriptions-item label="根因" :span="3">{{ detail.rootCause || '-' }}</el-descriptions-item>
           <el-descriptions-item label="解决方案" :span="3">{{ detail.solution || '-' }}</el-descriptions-item>
         </el-descriptions>
+        <div class="ticket-detail-description">
+          <div class="ticket-detail-description__label">
+            <span>描述</span>
+            <el-button
+              link
+              type="primary"
+              :loading="descriptionTranslateLoading"
+              @click="handleTranslateDescription"
+              v-hasPermi="['ticket:ticket:edit']"
+            >
+              翻译
+            </el-button>
+          </div>
+          <div class="ticket-detail-description__content">{{ detailOriginalDescription || '-' }}</div>
+        </div>
+        <div v-if="detailAiTranslation" class="ticket-detail-description ticket-detail-translation">
+          <div class="ticket-detail-description__label">翻译</div>
+          <div class="ticket-detail-description__content">{{ detailAiTranslation }}</div>
+        </div>
 
         <el-tabs v-model="detailMainTab" class="detail-main-tabs" @tab-click="handleDetailTabClick">
           <el-tab-pane label="概览" name="overview" lazy>
@@ -1829,6 +1847,7 @@ import {
   searchTicketNaturalLanguage,
   getTicketLogPullProjectVendorMap,
   saveTicketLogPullProjectVendorMap,
+  translateTicketDescription,
   updateTicketAiRepoMapping,
   updateTicket
 } from '@/api/ticket/ticket'
@@ -1888,6 +1907,7 @@ const importOpen = ref(false)
 const importing = ref(false)
 const detailOpen = ref(false)
 const detailMainTab = ref('overview')
+const descriptionTranslateLoading = ref(false)
 const historyActiveTab = ref('timeline')
 const title = ref('')
 const currentTicketId = ref()
@@ -2388,6 +2408,25 @@ const {
 } = toRefs(data)
 
 const detailTitle = computed(() => `工单详情：${detail.value.title || ''}`)
+const detailOriginalDescription = computed(() => {
+  const originalText = String(
+    detail.value.originalDescription
+    || detail.value.extraData?.originDescription
+    || detail.value.extraData?.origin_description
+    || ''
+  ).trim()
+  if (originalText) {
+    return originalText
+  }
+  const description = String(detail.value.description || '').trim()
+  return description.includes('【AI翻译】') ? description.split('【AI翻译】')[0].trim() : description
+})
+const detailAiTranslation = computed(() => String(
+  detail.value.aiTranslation
+  || detail.value.extraData?.aiTranslation
+  || detail.value.extraData?.ai_translation
+  || ''
+).trim())
 const latestSnapshotSummary = computed(() => latestSnapshot.value?.summary || detail.value.rootCause || detail.value.description || '')
 const filteredLogPullContent = computed(() => {
   const text = selectedLogPullContent.value?.text || ''
@@ -3468,6 +3507,24 @@ function openDetail(row) {
   })
 }
 
+function handleTranslateDescription() {
+  if (!detail.value.ticketId || descriptionTranslateLoading.value) {
+    return
+  }
+  if (!detailOriginalDescription.value) {
+    proxy.$modal.msgWarning('当前工单描述为空，无法翻译')
+    return
+  }
+  descriptionTranslateLoading.value = true
+  translateTicketDescription(detail.value.ticketId).then(response => {
+    syncDetailBundle(response.data || detail.value)
+    proxy.$modal.msgSuccess(response.msg || '翻译成功')
+    getList()
+  }).finally(() => {
+    descriptionTranslateLoading.value = false
+  })
+}
+
 function resetDetailDialog() {
   detailMainTab.value = 'overview'
   historyActiveTab.value = 'timeline'
@@ -4126,6 +4183,40 @@ loadWorkflowConfig().finally(() => {
   height: 100%;
   overflow: auto;
   padding-right: 4px;
+}
+
+.ticket-summary-descriptions :deep(.el-descriptions__label) {
+  white-space: nowrap;
+}
+
+.ticket-detail-description {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  border: 1px solid var(--el-border-color-lighter);
+  border-top: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ticket-detail-description__label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 8px 11px;
+  color: var(--el-text-color-regular);
+  background: var(--el-fill-color-light);
+  border-right: 1px solid var(--el-border-color-lighter);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ticket-detail-description__content {
+  min-width: 0;
+  padding: 8px 11px;
+  color: var(--el-text-color-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .collab-toolbar {
