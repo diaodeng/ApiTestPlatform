@@ -29,6 +29,8 @@ class Ticket(Base):
     module_name: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="所属模块名称")
     category_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="问题分类ID")
     category_name: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="问题分类名称")
+    issue_type_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default="", comment="工单类型编码")
+    issue_type_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="工单类型名称")
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=TicketStatus.PENDING.value, comment="当前状态"
     )
@@ -47,6 +49,10 @@ class Ticket(Base):
         String(100), nullable=True, default="", comment="内部工单负责人名称"
     )
     is_problem: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment="是否真实问题")
+    root_cause_type: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="根因分类")
+    solution_type: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="解决方式")
+    resolution_code: Mapped[str | None] = mapped_column(String(64), nullable=True, default="", comment="关闭结果编码")
+    resolution_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="关闭结果名称")
     root_cause: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终根因")
     solution: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终解决方案")
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="开始处理时间")

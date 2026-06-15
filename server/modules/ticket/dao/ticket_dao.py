@@ -225,6 +225,13 @@ class TicketDao:
                 Ticket.project_id == query.project_id if query.project_id else True,
                 Ticket.module_id == query.module_id if query.module_id else True,
                 Ticket.category_id == query.category_id if query.category_id else True,
+                Ticket.issue_type_id == query.issue_type_id if query.issue_type_id else True,
+                Ticket.issue_type_name.like(f"%{query.issue_type_name}%") if query.issue_type_name else True,
+                Ticket.is_problem == query.is_problem if query.is_problem is not None else True,
+                Ticket.root_cause_type == query.root_cause_type if query.root_cause_type else True,
+                Ticket.solution_type == query.solution_type if query.solution_type else True,
+                Ticket.resolution_code == query.resolution_code if query.resolution_code else True,
+                Ticket.resolution_name.like(f"%{query.resolution_name}%") if query.resolution_name else True,
                 Ticket.customer_priority == query.customer_priority if query.customer_priority else True,
                 Ticket.internal_priority == query.internal_priority if query.internal_priority else True,
                 Ticket.source == query.source if query.source else True,
@@ -841,6 +848,36 @@ class TicketDao:
             .group_by(Ticket.category_name)
             .all()
         )
+        issue_type_rows = (
+            db.query(Ticket.issue_type_id, Ticket.issue_type_name, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.issue_type_id, Ticket.issue_type_name)
+            .all()
+        )
+        problem_rows = (
+            db.query(Ticket.is_problem, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.is_problem)
+            .all()
+        )
+        root_cause_type_rows = (
+            db.query(Ticket.root_cause_type, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.root_cause_type)
+            .all()
+        )
+        solution_type_rows = (
+            db.query(Ticket.solution_type, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.solution_type)
+            .all()
+        )
+        resolution_rows = (
+            db.query(Ticket.resolution_code, Ticket.resolution_name, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.resolution_code, Ticket.resolution_name)
+            .all()
+        )
         module_rows = (
             db.query(Ticket.module_name, func.count(Ticket.ticket_id))
             .filter(base_filter)
@@ -900,10 +937,40 @@ class TicketDao:
             "avg_process_seconds": int(avg_process_seconds),
             "status_counts": [{"status": row[0], "count": row[1]} for row in status_rows],
             "category_counts": [{"category": row[0] or "未分类", "count": row[1]} for row in category_rows],
+            "issue_type_counts": [
+                {
+                    "issue_type_id": row[0] or "",
+                    "issue_type_name": row[1] or row[0] or "未填写",
+                    "count": row[2],
+                }
+                for row in issue_type_rows
+            ],
+            "problem_counts": [
+                {
+                    "is_problem": row[0],
+                    "label": "真实问题" if row[0] is True else ("非问题" if row[0] is False else "未填写"),
+                    "count": row[1],
+                }
+                for row in problem_rows
+            ],
             "module_counts": [{"module": row[0] or "未填写", "count": row[1]} for row in module_rows],
             "source_counts": [{"source": row[0] or "未填写", "count": row[1]} for row in source_rows],
             "priority_counts": [{"priority": row[0] or "未填写", "count": row[1]} for row in priority_rows],
             "root_cause_counts": [{"root_cause": row[0] or "未填写", "count": row[1]} for row in root_cause_rows],
+            "root_cause_type_counts": [
+                {"root_cause_type": row[0] or "未填写", "count": row[1]} for row in root_cause_type_rows
+            ],
+            "solution_type_counts": [
+                {"solution_type": row[0] or "未填写", "count": row[1]} for row in solution_type_rows
+            ],
+            "resolution_counts": [
+                {
+                    "resolution_code": row[0] or "",
+                    "resolution_name": row[1] or row[0] or "未填写",
+                    "count": row[2],
+                }
+                for row in resolution_rows
+            ],
             "transition_counts": [
                 {"from_status": row[0] or "创建", "to_status": row[1], "count": row[2]} for row in transition_rows
             ],

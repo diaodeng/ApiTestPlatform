@@ -2021,6 +2021,24 @@ async def get_ticket_module_options(
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketController.get(
+    "/stat-classification/options",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))],
+)
+async def get_ticket_stat_classification_options(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取工单分类统计枚举选项接口。
+    :param request: 请求对象
+    :param query_db: 数据库会话
+    :return: 工单类型、根因分类、解决方式和关闭结果选项
+    """
+    try:
+        return ResponseUtil.success(data=TicketSyncService.get_ticket_stat_classification_options(query_db))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketController.get("/statistics/overview", dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))])
 async def get_ticket_statistics(
     request: Request,

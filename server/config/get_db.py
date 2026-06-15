@@ -68,6 +68,7 @@ async def init_create_table():
     _ensure_hrm_project_business_code_column()
     _ensure_hrm_module_business_code_column()
     _ensure_ticket_role_columns()
+    _ensure_ticket_classification_columns()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
 
@@ -180,7 +181,8 @@ def _ensure_celery_periodic_task_execution_mode_column():
                     text(
                         """
                         ALTER TABLE celery_periodic_task
-                        ADD COLUMN execution_mode VARCHAR(16) NOT NULL DEFAULT 'thread' COMMENT '执行方式：thread/process'
+                        ADD COLUMN execution_mode VARCHAR(16) NOT NULL DEFAULT 'thread'
+                        COMMENT '执行方式：thread/process'
                         AFTER queue_name
                         """
                     )
@@ -340,3 +342,64 @@ def _ensure_ticket_role_columns():
                 connection.execute(text(f"ALTER TABLE ticket ADD COLUMN {column_name} {column_type}"))
     except Exception as exc:
         logger.warning(f"检查或升级 ticket 角色字段失败: {exc}")
+
+
+def _ensure_ticket_classification_columns():
+    """
+    为工单主表补齐分类统计字段，兼容旧库。
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    column_specs = [
+        ("issue_type_id", "VARCHAR(64)", "工单类型编码", "category_name"),
+        ("issue_type_name", "VARCHAR(128)", "工单类型名称", "issue_type_id"),
+        ("root_cause_type", "VARCHAR(128)", "根因分类", "is_problem"),
+        ("solution_type", "VARCHAR(128)", "解决方式", "root_cause_type"),
+        ("resolution_code", "VARCHAR(64)", "关闭结果编码", "solution_type"),
+        ("resolution_name", "VARCHAR(128)", "关闭结果名称", "resolution_code"),
+    ]
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                existing_columns = {
+                    row["COLUMN_NAME"]
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'ticket'
+                            """
+                        )
+                    )
+                    .mappings()
+                    .all()
+                }
+                for column_name, column_type, _comment, after_column in column_specs:
+                    if column_name in existing_columns:
+                        continue
+                    logger.info("检测到 ticket.%s 缺少，自动补齐", column_name)
+                    after_clause = f" AFTER {after_column}" if after_column and after_column in existing_columns else ""
+                    connection.execute(
+                        text(
+                            f"""
+                            ALTER TABLE ticket
+                            ADD COLUMN {column_name} {column_type} NULL COMMENT '{_comment}'{after_clause}
+                            """
+                        )
+                    )
+                    existing_columns.add(column_name)
+                return
+
+            rows = connection.execute(text("PRAGMA table_info(ticket)")).mappings().all()
+            existing_columns = {str(row.get("name") or "") for row in rows}
+            for column_name, column_type, _comment, _ in column_specs:
+                if column_name in existing_columns:
+                    continue
+                logger.info("检测到 sqlite ticket.%s 缺少，自动补齐", column_name)
+                connection.execute(text(f"ALTER TABLE ticket ADD COLUMN {column_name} {column_type}"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 ticket 分类统计字段失败: {exc}")

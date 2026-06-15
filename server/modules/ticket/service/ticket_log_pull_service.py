@@ -1205,6 +1205,61 @@ class TicketLogPullService:
             notify_config=notify_config,
         )
 
+    @staticmethod
+    def _extract_record_notify_config(record: TicketLogPullRecord | None) -> dict[str, Any]:
+        """
+        从日志拉取记录原始命令中提取通知配置。
+        :param record: 日志拉取记录
+        :return: 通知配置字典，未配置时返回空字典
+        """
+        command_content = getattr(record, "command_content", None)
+        if not isinstance(command_content, dict):
+            return {}
+        notify_config = command_content.get("notifyConfig") or command_content.get("notify_config")
+        if isinstance(notify_config, dict):
+            return notify_config
+        automation = command_content.get("_automation")
+        if isinstance(automation, dict):
+            nested_notify = automation.get("notifyConfig") or automation.get("notify_config")
+            if isinstance(nested_notify, dict):
+                return nested_notify
+        return {}
+
+    @classmethod
+    def _notify_log_pull_record(
+        cls,
+        query_db: Session,
+        record: TicketLogPullRecord | None,
+        *,
+        status: str,
+        message: str,
+        detail: str | None = None,
+    ) -> None:
+        """
+        按日志拉取记录中的通知配置发送拉取结果通知。
+        :param query_db: 数据库会话
+        :param record: 日志拉取记录
+        :param status: 通知状态，success 或 failed
+        :param message: 通知说明
+        :param detail: 通知详情
+        :return: 无
+        """
+        if not record:
+            return
+        notify_config = cls._extract_record_notify_config(record)
+        if not notify_config:
+            return
+        ticket = TicketDao.get_ticket_by_id(query_db, record.ticket_id) if record.ticket_id else None
+        TicketNotifyService.send_ticket_notification(
+            query_db,
+            ticket,
+            title="日志拉取通知",
+            status=status,
+            message=message,
+            detail=detail,
+            notify_config=notify_config,
+        )
+
     @classmethod
     def redownload_log_pull_services(
         cls, query_db: Session, record_id: int, current_user: CurrentUserModel
@@ -1911,6 +1966,13 @@ class TicketLogPullService:
                             content="外部平台日志拉取失败",
                             event_data={"record_id": record.id, "error_message": matched_row.get("errorMsg")},
                         )
+                        cls._notify_log_pull_record(
+                            db,
+                            record,
+                            status="failed",
+                            message="外部平台日志拉取失败",
+                            detail=f"record_id={record.id}, error={matched_row.get('errorMsg')}",
+                        )
                         db.commit()
                         return
                     if external_status == 1 and command_result_url:
@@ -1972,6 +2034,13 @@ class TicketLogPullService:
                             status_desc="外部平台未返回压缩包地址",
                             error_message="外部平台返回成功状态但缺少 commandResult.url",
                         )
+                        cls._notify_log_pull_record(
+                            db,
+                            record,
+                            status="failed",
+                            message="外部平台未返回压缩包地址",
+                            detail=f"record_id={record.id}",
+                        )
                         return
 
                 if record.status != TicketLogPullStatus.DOWNLOADING.value:
@@ -2015,6 +2084,13 @@ class TicketLogPullService:
                             status=TicketLogPullStatus.FAILED.value,
                             status_desc="日志内容超出入库上限",
                             error_message=str(exc),
+                        )
+                        cls._notify_log_pull_record(
+                            db,
+                            record,
+                            status="failed",
+                            message="日志内容超出入库上限",
+                            detail=f"record_id={record.id}, error={exc}",
                         )
                         return
                     success_desc = "日志拉取完成"
@@ -2086,6 +2162,13 @@ class TicketLogPullService:
                         "whole_archive": not has_log_time_range,
                     },
                 )
+                cls._notify_log_pull_record(
+                    db,
+                    record,
+                    status="success",
+                    message="日志拉取已完成" if has_log_time_range else "日志压缩包已下载，未切割入库",
+                    detail=f"record_id={record.id}, storage_path={storage_path}",
+                )
                 db.commit()
                 cls._trigger_auto_ai_analysis(db, record.id)
         except Exception as exc:
@@ -2105,6 +2188,13 @@ class TicketLogPullService:
                 status_desc="日志拉取流程执行异常",
                 error_message=error_message,
                 exception_detail=traceback.format_exc(),
+            )
+            cls._notify_log_pull_record(
+                db,
+                record,
+                status="failed",
+                message="日志拉取流程执行异常",
+                detail=f"record_id={record.id}, error={error_message}",
             )
         finally:
             if temp_file_path and temp_file_path.exists():
@@ -2155,16 +2245,7 @@ class TicketLogPullService:
             )
             return
         version_key = cls._ensure_ticket_version_key_from_log(db, ticket.ticket_id, record_id)
-        record_notify_config = {}
-        command_notify = record.command_content.get("notifyConfig") or record.command_content.get("notify_config")
-        if isinstance(command_notify, dict):
-            record_notify_config = command_notify
-        else:
-            automation_notify = record.command_content.get("_automation")
-            if isinstance(automation_notify, dict):
-                nested_notify = automation_notify.get("notifyConfig") or automation_notify.get("notify_config")
-                if isinstance(nested_notify, dict):
-                    record_notify_config = nested_notify
+        record_notify_config = cls._extract_record_notify_config(record)
         automation = record.command_content.get("_automation")
         if isinstance(automation, dict):
             auto_ai_enabled = bool(automation.get("autoAiEnabled"))

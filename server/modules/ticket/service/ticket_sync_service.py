@@ -70,6 +70,48 @@ class TicketSyncService:
         "createTime",
         "reporterName",
     ]
+    DEFAULT_TICKET_STAT_CLASSIFICATIONS = {
+        "issueTypes": [
+            {"value": "system_bug", "label": "系统Bug", "isProblem": True},
+            {"value": "data_error", "label": "数据错误", "isProblem": True},
+            {"value": "config_issue", "label": "配置问题", "isProblem": True},
+            {"value": "performance_issue", "label": "性能问题", "isProblem": True},
+            {"value": "support_consulting", "label": "支持咨询", "isProblem": False},
+            {"value": "requirement_consulting", "label": "需求咨询", "isProblem": False},
+            {"value": "user_operation", "label": "用户操作问题", "isProblem": False},
+            {"value": "api_exception", "label": "接口异常", "isProblem": True},
+        ],
+        "rootCauseTypes": [
+            {"value": "code_defect", "label": "代码缺陷"},
+            {"value": "config_error", "label": "配置错误"},
+            {"value": "data_exception", "label": "数据异常"},
+            {"value": "third_party", "label": "第三方问题"},
+            {"value": "network_issue", "label": "网络问题"},
+            {"value": "environment_issue", "label": "环境问题"},
+            {"value": "operation_mistake", "label": "操作失误"},
+            {"value": "requirement_design", "label": "需求设计问题"},
+            {"value": "unknown", "label": "未知"},
+        ],
+        "solutionTypes": [
+            {"value": "code_fix", "label": "代码修复"},
+            {"value": "config_fix", "label": "配置修复"},
+            {"value": "data_fix", "label": "数据修复"},
+            {"value": "temporary_workaround", "label": "临时处理"},
+            {"value": "manual_process", "label": "人工处理"},
+            {"value": "no_action", "label": "无需处理"},
+        ],
+        "resolutions": [
+            {"value": "fixed", "label": "已修复", "isProblem": True},
+            {"value": "non_problem", "label": "非问题", "isProblem": False},
+            {"value": "data_processed", "label": "数据已处理", "isProblem": True},
+            {"value": "config_fixed", "label": "配置已修复", "isProblem": True},
+            {"value": "user_canceled", "label": "用户撤销", "isProblem": False},
+            {"value": "duplicated", "label": "重复工单", "isProblem": False},
+            {"value": "cannot_reproduce", "label": "无法复现", "isProblem": None},
+            {"value": "as_designed", "label": "需求如此", "isProblem": False},
+            {"value": "transferred", "label": "已转其他团队", "isProblem": None},
+        ],
+    }
     GROUP_PUSH_LOCK_TIMEOUT_SECONDS = 300
 
     @classmethod
@@ -970,6 +1012,7 @@ class TicketSyncService:
             "groupPush": cls._default_group_push_config(),
             "personReminder": cls._default_person_reminder_config(),
             "summaryReport": cls._default_summary_report_config(),
+            "statClassification": cls._default_stat_classification_config(),
             "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
             "projectMappings": [],
             "moduleMappings": [],
@@ -1137,6 +1180,84 @@ class TicketSyncService:
         }
 
     @classmethod
+    def _default_stat_classification_config(cls) -> dict[str, Any]:
+        """
+        构建工单分类统计枚举默认配置。
+
+        :return: 分类统计枚举配置。
+        """
+        return {
+            "issueTypes": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["issueTypes"]],
+            "rootCauseTypes": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["rootCauseTypes"]],
+            "solutionTypes": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["solutionTypes"]],
+            "resolutions": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["resolutions"]],
+        }
+
+    @classmethod
+    def _normalize_stat_option_rows(cls, value: Any, default_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        归一化可视化维护的统计枚举行。
+
+        :param value: 前端提交的枚举行。
+        :param default_rows: 默认枚举。
+        :return: 去重后的枚举行。
+        """
+        source_rows = value if isinstance(value, list) else default_rows
+        result: list[dict[str, Any]] = []
+        seen_values: set[str] = set()
+        for row in source_rows:
+            if not isinstance(row, dict):
+                continue
+            option_value = str(row.get("value") or row.get("code") or row.get("id") or "").strip()
+            option_label = str(row.get("label") or row.get("name") or option_value).strip()
+            if not option_value or option_value in seen_values:
+                continue
+            normalized_row: dict[str, Any] = {
+                "value": option_value,
+                "label": option_label or option_value,
+            }
+            if "isProblem" in row:
+                raw_is_problem = row.get("isProblem")
+                normalized_row["isProblem"] = raw_is_problem if isinstance(raw_is_problem, bool) else None
+            elif "is_problem" in row:
+                raw_is_problem = row.get("is_problem")
+                normalized_row["isProblem"] = raw_is_problem if isinstance(raw_is_problem, bool) else None
+            if str(row.get("remark") or "").strip():
+                normalized_row["remark"] = str(row.get("remark") or "").strip()
+            result.append(normalized_row)
+            seen_values.add(option_value)
+        return result or [dict(item) for item in default_rows]
+
+    @classmethod
+    def _normalize_stat_classification_config(cls, value: Any) -> dict[str, Any]:
+        """
+        归一化工单分类统计配置。
+
+        :param value: 原始配置。
+        :return: 带默认值的配置。
+        """
+        source = value if isinstance(value, dict) else {}
+        defaults = cls._default_stat_classification_config()
+        return {
+            "issueTypes": cls._normalize_stat_option_rows(
+                source.get("issueTypes") or source.get("issue_types"),
+                defaults["issueTypes"],
+            ),
+            "rootCauseTypes": cls._normalize_stat_option_rows(
+                source.get("rootCauseTypes") or source.get("root_cause_types"),
+                defaults["rootCauseTypes"],
+            ),
+            "solutionTypes": cls._normalize_stat_option_rows(
+                source.get("solutionTypes") or source.get("solution_types"),
+                defaults["solutionTypes"],
+            ),
+            "resolutions": cls._normalize_stat_option_rows(
+                source.get("resolutions"),
+                defaults["resolutions"],
+            ),
+        }
+
+    @classmethod
     def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
         merged = cls._default_sync_config()
         if isinstance(config, dict):
@@ -1150,6 +1271,7 @@ class TicketSyncService:
             merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
         if not isinstance(merged.get("promptTemplates"), dict):
             merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
+        merged["statClassification"] = cls._normalize_stat_classification_config(merged.get("statClassification"))
         external_sync_bitable = (
             merged.get("externalSyncBitable")
             if isinstance(merged.get("externalSyncBitable"), dict)
@@ -1381,6 +1503,16 @@ class TicketSyncService:
             "configKey": cls.CONFIG_KEY,
             "configValue": cls._load_sync_config(db),
         }
+
+    @classmethod
+    def get_ticket_stat_classification_options(cls, db: Session) -> dict[str, Any]:
+        """
+        获取工单分类统计枚举选项。
+        :param db: 数据库会话
+        :return: 工单分类统计枚举配置
+        """
+        config = cls._load_sync_config(db)
+        return cls._normalize_stat_classification_config(config.get("statClassification"))
 
     @classmethod
     def update_sync_automation_config_services(
@@ -3715,6 +3847,7 @@ class TicketSyncService:
         is_remote_pull = sync_scene == "remote_pull"
         resolved_assignee_id = cls._safe_int((detected or {}).get("assigneeId"))
         resolved_assignee_name = str((detected or {}).get("assigneeName") or "").strip()
+        sync_is_problem = getattr(sync_object, "is_problem", None)
         payload: dict[str, Any] = {
             "ticket_no": sync_object.ticket_no,
             "title": sync_object.title,
@@ -3723,6 +3856,9 @@ class TicketSyncService:
             "internal_priority": sync_object.internal_priority or (ticket.internal_priority if ticket else "P3"),
             "severity": sync_object.severity or (ticket.severity if ticket else ""),
             "source": cls.SOURCE_CODE,
+            "issue_type_id": getattr(sync_object, "issue_type_id", None) or (ticket.issue_type_id if ticket else ""),
+            "issue_type_name": getattr(sync_object, "issue_type_name", None)
+            or (ticket.issue_type_name if ticket else ""),
             "reporter_id": sync_object.reporter_id or (ticket.reporter_id if ticket else _user_id(current_user)),
             "reporter_name": sync_object.reporter_name
             or (ticket.reporter_name if ticket else _user_name(current_user)),
@@ -3749,6 +3885,15 @@ class TicketSyncService:
             "internal_owner_name": getattr(sync_object, "internal_owner_name", None)
             or (ticket.internal_owner_name if ticket else ""),
             "status": sync_object.status or (ticket.status if ticket else TicketStatus.PENDING.value),
+            "is_problem": sync_is_problem if sync_is_problem is not None else (ticket.is_problem if ticket else None),
+            "root_cause_type": getattr(sync_object, "root_cause_type", None)
+            or (ticket.root_cause_type if ticket else ""),
+            "solution_type": getattr(sync_object, "solution_type", None)
+            or (ticket.solution_type if ticket else ""),
+            "resolution_code": getattr(sync_object, "resolution_code", None)
+            or (ticket.resolution_code if ticket else ""),
+            "resolution_name": getattr(sync_object, "resolution_name", None)
+            or (ticket.resolution_name if ticket else ""),
             "root_cause": sync_object.root_cause or (ticket.root_cause if ticket else None),
             "solution": sync_object.solution or (ticket.solution if ticket else None),
             "tags": sync_object.tags or (ticket.tags if ticket else None),
@@ -5085,6 +5230,13 @@ class TicketSyncService:
             "moduleCode": item.get("moduleCode") or item.get("module_code") or "",
             "versionKey": item.get("versionKey") or item.get("version_key") or "",
             "status": ticket_status,
+            "issueTypeId": item.get("issueTypeId") or item.get("issue_type_id") or "",
+            "issueTypeName": item.get("issueTypeName") or item.get("issue_type_name") or "",
+            "isProblem": item.get("isProblem") if item.get("isProblem") is not None else item.get("is_problem"),
+            "rootCauseType": item.get("rootCauseType") or item.get("root_cause_type") or "",
+            "solutionType": item.get("solutionType") or item.get("solution_type") or "",
+            "resolutionCode": item.get("resolutionCode") or item.get("resolution_code") or "",
+            "resolutionName": item.get("resolutionName") or item.get("resolution_name") or "",
             "customerPriority": item.get("customerPriority") or item.get("customer_priority") or "P3",
             "internalPriority": item.get("internalPriority") or item.get("internal_priority") or "P3",
             "severity": item.get("severity") or "",

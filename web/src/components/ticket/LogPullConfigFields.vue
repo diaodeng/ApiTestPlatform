@@ -1,7 +1,7 @@
 <template>
   <template v-if="model">
-    <el-col :span="8">
-      <el-form-item label="vendorId" :prop="getProp('vendorId')">
+    <el-col :span="24">
+      <el-form-item label="商家" :prop="getProp('vendorId')">
         <el-select
           v-model="model.vendorId"
           placeholder="选择或输入商家"
@@ -9,6 +9,7 @@
           filterable
           allow-create
           default-first-option
+          style="width: 100%"
           @change="handleVendorChange"
         >
           <el-option
@@ -20,8 +21,8 @@
         </el-select>
       </el-form-item>
     </el-col>
-    <el-col :span="8">
-      <el-form-item label="storeId" :prop="getProp('storeId')">
+    <el-col :span="24">
+      <el-form-item label="门店" :prop="getProp('storeId')">
         <el-select
           v-model="model.storeId"
           placeholder="选择或输入门店"
@@ -29,6 +30,7 @@
           filterable
           allow-create
           default-first-option
+          style="width: 100%"
         >
           <el-option
             v-for="item in resolvedStoreOptions"
@@ -39,14 +41,14 @@
         </el-select>
       </el-form-item>
     </el-col>
-    <el-col :span="8">
-      <el-form-item label="posNo" :prop="getProp('posNo')">
-        <el-input-number v-model="model.posNo" :min="1" controls-position="right" />
+    <el-col :span="24">
+      <el-form-item label="POSID" :prop="getProp('posNo')">
+        <el-input-number v-model="model.posNo" :min="1" controls-position="right" style="width: 100%" />
       </el-form-item>
     </el-col>
     <el-col :span="12">
       <el-form-item label="数据类型" :prop="getProp('commandDataType')">
-        <el-select v-model="model.commandDataType" placeholder="请选择">
+        <el-select v-model="model.commandDataType" placeholder="请选择" style="width: 100%">
           <el-option
             v-for="item in dataTypeOptions"
             :key="item.value"
@@ -56,7 +58,7 @@
         </el-select>
       </el-form-item>
     </el-col>
-    <el-col :span="12">
+    <el-col v-if="isLogDataType" :span="12">
       <el-form-item label="modifyTime" :prop="getProp('modifyTime')">
         <el-date-picker
           v-model="model.modifyTime"
@@ -64,15 +66,85 @@
           value-format="YYYY-MM-DD"
           placeholder="按日期拉取"
           clearable
+          style="width: 100%"
         />
       </el-form-item>
     </el-col>
-    <el-col :span="24">
+    <el-col v-if="isDatabaseDataType" :span="24">
       <el-form-item label="path" :prop="getProp('path')">
         <el-input v-model="model.path" placeholder="可选，按路径拉取" clearable />
       </el-form-item>
     </el-col>
+    <el-col :span="12">
+      <el-form-item label="单文件上限" :prop="getProp('fileMaxSize')">
+        <el-input-number v-model="model.fileMaxSize" :min="1" controls-position="right" style="width: 100%" />
+      </el-form-item>
+    </el-col>
+    <el-col :span="12">
+      <el-form-item label="压缩包上限" :prop="getProp('zipMaxSize')">
+        <el-input-number v-model="model.zipMaxSize" :min="1" controls-position="right" style="width: 100%" />
+      </el-form-item>
+    </el-col>
+    <el-col :span="12">
+      <el-form-item label="保存方式" :prop="getProp('storageMode')">
+        <el-select v-model="model.storageMode" placeholder="请选择" style="width: 100%">
+          <el-option
+            v-for="item in storageModeOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+      </el-form-item>
+    </el-col>
+    <el-col v-if="showAutoAi" :span="12">
+      <el-form-item label="自动AI" :prop="getProp('autoAiEnabled')">
+        <el-switch v-model="model.autoAiEnabled" inline-prompt active-text="是" inactive-text="否" />
+      </el-form-item>
+    </el-col>
+    <el-col v-if="model.autoAiEnabled" :span="12">
+      <el-form-item label="AI Agent" :prop="getProp('aiAgentCode')">
+        <el-select
+          v-model="model.aiAgentCode"
+          placeholder="请选择Agent"
+          filterable
+          clearable
+          style="width: 100%"
+        >
+          <el-option
+            v-for="item in agentOptions"
+            :key="item.agentCode"
+            :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+            :value="item.agentCode"
+          />
+        </el-select>
+      </el-form-item>
+    </el-col>
+    <el-col v-if="model.autoAiEnabled" :span="12">
+      <el-form-item label="AI Provider" :prop="getProp('aiProviderCode')">
+        <el-select
+          v-model="model.aiProviderCode"
+          placeholder="请选择Provider"
+          filterable
+          clearable
+          style="width: 100%"
+          @change="handleProviderChange"
+        >
+          <el-option
+            v-for="item in providerOptions"
+            :key="item.providerCode"
+            :label="formatProviderOption(item)"
+            :value="item.providerCode"
+          />
+        </el-select>
+      </el-form-item>
+    </el-col>
     <el-col :span="24">
+      <el-form-item label="切割日志" :prop="getProp('cutLogEnabled')">
+        <el-switch v-model="model.cutLogEnabled" inline-prompt active-text="是" inactive-text="否" />
+      </el-form-item>
+    </el-col>
+    <el-col v-if="model.cutLogEnabled" :span="24">
       <el-form-item label="时间方式" :prop="getProp('timeRangeMode')">
         <el-radio-group v-model="model.timeRangeMode">
           <el-radio value="between">开始 + 结束</el-radio>
@@ -80,7 +152,7 @@
         </el-radio-group>
       </el-form-item>
     </el-col>
-    <template v-if="model.timeRangeMode === 'between'">
+    <template v-if="model.cutLogEnabled && model.timeRangeMode === 'between'">
       <el-col :span="12">
         <el-form-item label="开始时间" :prop="getProp('logBeginTime')">
           <el-date-picker
@@ -89,6 +161,7 @@
             value-format="YYYY-MM-DD HH:mm:ss"
             placeholder="可选，筛选日志开始时间"
             clearable
+            style="width: 100%"
           />
         </el-form-item>
       </el-col>
@@ -100,11 +173,12 @@
             value-format="YYYY-MM-DD HH:mm:ss"
             placeholder="可选，筛选日志结束时间"
             clearable
+            style="width: 100%"
           />
         </el-form-item>
       </el-col>
     </template>
-    <template v-else>
+    <template v-else-if="model.cutLogEnabled">
       <el-col :span="12">
         <el-form-item label="时间点" :prop="getProp('logPointTime')">
           <el-date-picker
@@ -113,6 +187,7 @@
             value-format="YYYY-MM-DD HH:mm:ss"
             placeholder="可选，基准时间点"
             clearable
+            style="width: 100%"
           />
         </el-form-item>
       </el-col>
@@ -128,70 +203,6 @@
         </el-form-item>
       </el-col>
     </template>
-    <el-col :span="12">
-      <el-form-item label="单文件上限" :prop="getProp('fileMaxSize')">
-        <el-input-number v-model="model.fileMaxSize" :min="1" controls-position="right" />
-      </el-form-item>
-    </el-col>
-    <el-col :span="12">
-      <el-form-item label="压缩包上限" :prop="getProp('zipMaxSize')">
-        <el-input-number v-model="model.zipMaxSize" :min="1" controls-position="right" />
-      </el-form-item>
-    </el-col>
-    <el-col :span="12">
-      <el-form-item label="保存方式" :prop="getProp('storageMode')">
-        <el-select v-model="model.storageMode" placeholder="请选择">
-          <el-option
-            v-for="item in storageModeOptions"
-            :key="item.value"
-            :label="item.label"
-            :value="item.value"
-          />
-        </el-select>
-      </el-form-item>
-    </el-col>
-    <el-col v-if="showAutoAi" :span="12">
-      <el-form-item label="自动AI" :prop="getProp('autoAiEnabled')">
-        <el-switch v-model="model.autoAiEnabled" inline-prompt active-text="是" inactive-text="否" />
-      </el-form-item>
-    </el-col>
-    <el-col :span="12">
-      <el-form-item label="AI Agent" :prop="getProp('aiAgentCode')">
-        <el-select
-          v-model="model.aiAgentCode"
-          placeholder="请选择Agent"
-          filterable
-          clearable
-          :disabled="!model.autoAiEnabled"
-        >
-          <el-option
-            v-for="item in agentOptions"
-            :key="item.agentCode"
-            :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
-            :value="item.agentCode"
-          />
-        </el-select>
-      </el-form-item>
-    </el-col>
-    <el-col :span="12">
-      <el-form-item label="AI Provider" :prop="getProp('aiProviderCode')">
-        <el-select
-          v-model="model.aiProviderCode"
-          placeholder="请选择Provider"
-          filterable
-          clearable
-          :disabled="!model.autoAiEnabled"
-          @change="handleProviderChange"
-        >
-          <el-option
-            v-for="item in providerOptions"
-            :key="item.providerCode"
-            :label="formatProviderOption(item)"
-            :value="item.providerCode"
-          />
-        </el-select>
-      </el-form-item>
-    </el-col>
   </template>
 </template>
 
@@ -241,6 +252,9 @@ const model = defineModel({
 const fetchedStoreOptions = ref([])
 const activeStoreVendorId = ref(null)
 let storeOptionsRequestSeq = 0
+
+const isDatabaseDataType = computed(() => Number(model.value?.commandDataType) === 2)
+const isLogDataType = computed(() => !isDatabaseDataType.value)
 
 const resolvedStoreOptions = computed(() => {
   const vendorId = Number(model.value?.vendorId)
@@ -319,6 +333,14 @@ function handleVendorChange() {
   model.value.storeId = undefined
 }
 
+function clearLogTimeRange() {
+  model.value.logBeginTime = undefined
+  model.value.logEndTime = undefined
+  model.value.logPointTime = undefined
+  model.value.rangeBeforeMinutes = 30
+  model.value.rangeAfterMinutes = 30
+}
+
 function buildStoreOptionLabel(store) {
   const name = String(store.storeName || '').trim()
   const orgNo = String(store.storeCode || store.storeId || '').trim()
@@ -369,6 +391,38 @@ watch(
       return
     }
     handleProviderChange(providerCode)
+  }
+)
+
+watch(
+  () => model.value?.commandDataType,
+  commandDataType => {
+    if (Number(commandDataType) === 2) {
+      model.value.modifyTime = undefined
+    } else {
+      model.value.path = ''
+    }
+  }
+)
+
+watch(
+  () => model.value?.autoAiEnabled,
+  enabled => {
+    if (!enabled) {
+      model.value.aiAgentCode = ''
+      model.value.aiProviderCode = ''
+    }
+  }
+)
+
+watch(
+  () => model.value?.cutLogEnabled,
+  enabled => {
+    if (!enabled) {
+      clearLogTimeRange()
+    } else if (!model.value.timeRangeMode) {
+      model.value.timeRangeMode = 'between'
+    }
   }
 )
 </script>

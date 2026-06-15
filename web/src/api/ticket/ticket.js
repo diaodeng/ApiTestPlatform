@@ -151,6 +151,14 @@ export function getTicketSyncAutoCategoryStats() {
   });
 }
 
+// 查询工单分类统计枚举选项
+export function getTicketStatClassificationOptions() {
+  return request({
+    url: '/ticket/stat-classification/options',
+    method: 'get',
+  });
+}
+
 // 新增工单
 export function addTicket(data) {
   return request({

@@ -155,8 +155,12 @@ def _extract_ticket_sync_summary(extra_data: Any) -> dict[str, Any] | None:
     return {
         "revision": int(sync_meta.get("revision") or 0),
         "sourceSystem": sync_meta.get("sourceSystem") or source_payload.get("system"),
-        "sourceRecordId": sync_meta.get("sourceRecordId") or source_payload.get("recordId") or source_payload.get("record_id"),
-        "sourceRecordUrl": sync_meta.get("sourceRecordUrl") or source_payload.get("recordUrl") or source_payload.get("record_url"),
+        "sourceRecordId": (
+            sync_meta.get("sourceRecordId") or source_payload.get("recordId") or source_payload.get("record_id")
+        ),
+        "sourceRecordUrl": (
+            sync_meta.get("sourceRecordUrl") or source_payload.get("recordUrl") or source_payload.get("record_url")
+        ),
         "externalCreateTime": external_create_time,
         "status": sync_state.get("status") or "pending",
         "lastPulledAt": sync_state.get("last_pulled_at"),
@@ -555,7 +559,7 @@ class TicketService:
             "project_id": project.project_id,
             "merchant_name": project.project_name,
             "module_id": None,
-            "module_name": "",
+            "module_name": str(data.get("module_name") or "").strip(),
         }
 
         if module_id:
@@ -911,7 +915,11 @@ class TicketService:
                 "\n".join([str(data.get("title") or "").strip(), original_description]).strip()
             )
             extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
-            manual_automation = dict(extra_data.get("manual_automation") or {}) if isinstance(extra_data.get("manual_automation"), dict) else {}
+            manual_automation = (
+                dict(extra_data.get("manual_automation") or {})
+                if isinstance(extra_data.get("manual_automation"), dict)
+                else {}
+            )
             manual_automation["auto_translate"] = auto_translate
             extra_data["manual_automation"] = manual_automation
             if extracted_version_key:
@@ -1020,7 +1028,9 @@ class TicketService:
                         )
                         normalized_category = str(category_name or "").strip()
                         if normalized_category:
-                            next_extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+                            next_extra_data = (
+                                dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+                            )
                             next_extra_data["auto_category_classify"] = {
                                 "sourceType": "ticket_manual_create_auto_category",
                                 "categoryName": normalized_category,
@@ -1142,14 +1152,20 @@ class TicketService:
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()
             ticket_extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-            original_description = str(data.get("description") or ticket_extra_data.get("origin_description") or "").strip()
+            original_description = str(
+                data.get("description") or ticket_extra_data.get("origin_description") or ""
+            ).strip()
             extracted_version_key = version_key or cls._extract_version_key_from_text(
                 "\n".join([str(data.get("title") or ticket.title or "").strip(), original_description]).strip()
             )
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             form_extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
             extra_data.update(form_extra_data)
-            manual_automation = dict(extra_data.get("manual_automation") or {}) if isinstance(extra_data.get("manual_automation"), dict) else {}
+            manual_automation = (
+                dict(extra_data.get("manual_automation") or {})
+                if isinstance(extra_data.get("manual_automation"), dict)
+                else {}
+            )
             manual_automation["auto_translate"] = auto_translate
             extra_data["manual_automation"] = manual_automation
             if extracted_version_key:
@@ -1371,6 +1387,14 @@ class TicketService:
                 update_data["solution"] = status_object.solution
             if status_object.is_problem is not None:
                 update_data["is_problem"] = status_object.is_problem
+            if status_object.root_cause_type is not None:
+                update_data["root_cause_type"] = status_object.root_cause_type
+            if status_object.solution_type is not None:
+                update_data["solution_type"] = status_object.solution_type
+            if status_object.resolution_code is not None:
+                update_data["resolution_code"] = status_object.resolution_code
+            if status_object.resolution_name is not None:
+                update_data["resolution_name"] = status_object.resolution_name
             if not ticket.started_at and status_object.to_status == TicketStatus.PROCESSING.value:
                 update_data["started_at"] = now
             if _is_end_status(status_object.to_status):
@@ -1401,6 +1425,11 @@ class TicketService:
                     event_data={
                         "from_status": ticket.status,
                         "to_status": status_object.to_status,
+                        "is_problem": status_object.is_problem,
+                        "root_cause_type": status_object.root_cause_type,
+                        "solution_type": status_object.solution_type,
+                        "resolution_code": status_object.resolution_code,
+                        "resolution_name": status_object.resolution_name,
                         "target_assignee_id": transition_extension.get("target_assignee_id"),
                         "target_assignee_name": transition_extension.get("target_assignee_name"),
                         "notify_enabled": transition_extension.get("notify_enabled"),
@@ -1892,6 +1921,8 @@ class TicketService:
             ticket_update: dict[str, Any] = {"update_by": _user_name(current_user), "update_time": datetime.now()}
             if rca.root_cause_detail:
                 ticket_update["root_cause"] = rca.root_cause_detail
+            if rca.root_cause_category:
+                ticket_update["root_cause_type"] = rca.root_cause_category
             if rca.fix_solution:
                 ticket_update["solution"] = rca.fix_solution
             TicketDao.update_ticket(query_db, ticket_id, ticket_update)

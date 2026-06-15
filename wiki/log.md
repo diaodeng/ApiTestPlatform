@@ -8,6 +8,32 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-16] INGEST-CODE | 日志拉取弹窗布局与通知修复
+- 触发：用户要求日志拉取弹窗商家/门店/POSID 自动铺满整行，按数据类型切换 `modifyTime/path`，时间方式仅切割日志时显示，默认本地保存，并修复通知配置不生效。
+- 架构层：工单域 / 日志拉取 / Web 控制台 / 推送通知
+- 创建的页面：`web/public/docs/2026-06-16-ticket-log-pull-dialog-layout-notify-fix.md`
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 变更传播链：`LogPullConfigFields.vue` / `LogPullNotifyConfigFields.vue` / `ticket_log_pull_service.py` -> 日志拉取提交参数清洗与结果通知
+
+## [2026-06-16] INGEST-CODE | 工单编辑历史模块与人员名称保留
+- 触发：用户反馈编辑页所属模块与当前项目模块不匹配时应原样显示/保存；1线人员和内部负责人不应重复显示 ID 选择与名称输入，无法匹配用户时应保留原始名称。
+- 架构层：工单列表 / 工单编辑表单 / 工单关系字段解析
+- 更新的页面：`web/public/docs/update_history.md`、`web/public/docs/2026-06-16-ticket-classification-statistics-fields.md`、`entities/services/ticket-domain.md`、`log.md`
+- 变更传播链：`web/src/views/ticket/index.vue` / `UserSelect.vue` / `ticket_service.py` -> 历史模块文本保留 / 人员名称单控件回显与保存
+
+## [2026-06-16] INGEST-CODE | 工单编辑模块回填与工单类型展示修复
+- 触发：用户反馈工单列表中编辑保存后模块显示为空，且工单类型编辑前显示像所属模块、编辑后才正确。
+- 架构层：工单列表 / 工单编辑表单 / 分类统计字段展示
+- 更新的页面：`web/public/docs/update_history.md`、`web/public/docs/2026-06-16-ticket-classification-statistics-fields.md`、`entities/services/ticket-domain.md`、`log.md`
+- 变更传播链：`web/src/views/ticket/index.vue` -> 编辑回填模块保护 / 提交前模块名称补齐 / 工单类型不回退旧分类
+
+## [2026-06-16] INGEST-CODE | 工单分类统计独立字段与可视化枚举配置
+- 触发：用户要求按 `D:\xj\Documents\工单分类统计设计.txt` 实现工单分类统计拆维，并将统计状态/枚举设计为可配置且可视化配置。
+- 架构层：工单域 / 工单统计 / 同步自动化配置 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-16-ticket-classification-statistics-fields.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`entities/data-models/ticket-core-models.md`、`entities/enums/ticket-enums.md`、`log.md`
+- 变更传播链：`ticket.sync.automation.statClassification` -> 工单表独立统计字段 -> 工单列表/流转/RCA/统计页展示
+
 ## [2026-06-15] INGEST-CODE | 远端拉取状态与内部负责人映射修复
 - 触发：用户反馈内网拉取公网工单后状态仍显示公网原始文案，且公网有内部负责人但内网缺失。
 - 架构层：工单域 / 外部同步链路 / 远端拉取入库

@@ -6,7 +6,54 @@ function parseDateTime(value) {
   return hasText(value) ? new Date(value) : null
 }
 
+export function createDefaultLogPullNotifyConfig() {
+  return {
+    allowPush: 0,
+    pushIds: [],
+    success: {
+      push: true,
+      reminder: 1
+    },
+    failed: {
+      push: true,
+      reminder: 1
+    }
+  }
+}
+
+export function normalizeLogPullNotifyConfig(config) {
+  const source = config || {}
+  const allowPush = source.allowPush ?? source.allow_push ?? 0
+  const enabled = allowPush === 1 || allowPush === '1' || allowPush === true
+  if (!enabled) {
+    return createDefaultLogPullNotifyConfig()
+  }
+  return {
+    allowPush: 1,
+    pushIds: Array.isArray(source.pushIds || source.push_ids) ? (source.pushIds || source.push_ids) : [],
+    success: {
+      push: source.success?.push !== false,
+      reminder: source.success?.reminder ?? 1
+    },
+    failed: {
+      push: source.failed?.push !== false,
+      reminder: source.failed?.reminder ?? 1
+    }
+  }
+}
+
+export function hasLogPullTimeRange(config) {
+  return hasText(config?.logBeginTime)
+    || hasText(config?.logEndTime)
+    || hasText(config?.logPointTime)
+    || config?.rangeBeforeMinutes !== undefined
+    || config?.rangeAfterMinutes !== undefined
+}
+
 export function getOptionalLogPullTimeRangeError(form) {
+  if (!form?.cutLogEnabled) {
+    return ''
+  }
   const hasBegin = hasText(form?.logBeginTime)
   const hasEnd = hasText(form?.logEndTime)
   const hasPoint = hasText(form?.logPointTime)
@@ -39,6 +86,9 @@ export function getOptionalLogPullTimeRangeError(form) {
 
 export function buildOptionalLogPullTimeRangePayload(form) {
   const payload = {}
+  if (!form?.cutLogEnabled) {
+    return payload
+  }
   const hasBegin = hasText(form?.logBeginTime)
   const hasEnd = hasText(form?.logEndTime)
   const hasPoint = hasText(form?.logPointTime)

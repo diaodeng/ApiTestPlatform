@@ -60,6 +60,17 @@
           <el-option v-for="item in queryModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
         </el-select>
       </el-form-item>
+      <el-form-item label="工单类型" prop="issueTypeId">
+        <el-select v-model="queryParams.issueTypeId" placeholder="工单类型" clearable filterable style="width: 160px">
+          <el-option v-for="item in issueTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="是否问题" prop="isProblem">
+        <el-select v-model="queryParams.isProblem" placeholder="是否问题" clearable style="width: 140px">
+          <el-option label="真实问题" :value="true" />
+          <el-option label="非问题" :value="false" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="内部优先级" prop="internalPriority">
         <el-select v-model="queryParams.internalPriority" placeholder="内部优先级" clearable style="width: 140px">
           <el-option v-for="item in priorityOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -136,6 +147,16 @@
         <template #default="scope">{{ scope.row.projectName || scope.row.merchantName || '-' }}</template>
       </el-table-column>
       <el-table-column label="模块" prop="moduleName" width="140" show-overflow-tooltip />
+      <el-table-column label="工单类型" width="130" show-overflow-tooltip>
+        <template #default="scope">{{ formatIssueType(scope.row) }}</template>
+      </el-table-column>
+      <el-table-column label="问题性质" width="100" align="center">
+        <template #default="scope">
+          <el-tag v-if="scope.row.isProblem === true" type="danger">真实问题</el-tag>
+          <el-tag v-else-if="scope.row.isProblem === false" type="info">非问题</el-tag>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="对方优先级" prop="customerPriority" width="110" align="center" />
       <el-table-column label="内部优先级" prop="internalPriority" width="110" align="center" />
       <el-table-column label="来源" prop="source" width="110">
@@ -228,8 +249,17 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="所属模块" prop="moduleId">
-              <el-select v-model="form.moduleId" placeholder="请选择模块" filterable clearable :disabled="!form.projectId">
-                <el-option v-for="item in formModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
+              <el-select
+                v-model="formModuleValue"
+                placeholder="请选择或输入模块"
+                filterable
+                clearable
+                allow-create
+                default-first-option
+                :disabled="!form.projectId"
+                @change="handleModuleChange"
+              >
+                <el-option v-for="item in formModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="String(item.moduleId)" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -262,13 +292,9 @@
               <UserSelect
                 v-model="form.firstLineAssigneeId"
                 :initial-option="firstLineAssigneeOption"
+                :raw-label="form.firstLineAssigneeName"
                 @change="handleFirstLineAssigneeChange"
               />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="1线名称" prop="firstLineAssigneeName">
-              <el-input v-model="form.firstLineAssigneeName" placeholder="选择用户后自动填充，也可手动调整" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -276,13 +302,9 @@
               <UserSelect
                 v-model="form.internalOwnerId"
                 :initial-option="internalOwnerOption"
+                :raw-label="form.internalOwnerName"
                 @change="handleInternalOwnerChange"
               />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="负责人名称" prop="internalOwnerName">
-              <el-input v-model="form.internalOwnerName" placeholder="选择用户后自动填充，也可手动调整" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -314,8 +336,18 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="分类" prop="categoryName">
-              <el-input v-model="form.categoryName" placeholder="如接口异常/数据问题" />
+            <el-form-item label="工单类型" prop="issueTypeId">
+              <el-select v-model="form.issueTypeId" placeholder="请选择工单类型" clearable filterable @change="handleIssueTypeChange">
+                <el-option v-for="item in issueTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="是否问题" prop="isProblem">
+              <el-select v-model="form.isProblem" placeholder="请选择" clearable>
+                <el-option label="真实问题" :value="true" />
+                <el-option label="非问题" :value="false" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -326,6 +358,20 @@
           <el-col :span="24">
             <el-form-item label="描述" prop="description">
               <el-input v-model="form.description" type="textarea" :rows="5" placeholder="请输入问题现象和上下文" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="根因分类">
+              <el-select v-model="form.rootCauseType" placeholder="请选择根因分类" clearable filterable>
+                <el-option v-for="item in rootCauseTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="解决方式">
+              <el-select v-model="form.solutionType" placeholder="请选择解决方式" clearable filterable>
+                <el-option v-for="item in solutionTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -417,6 +463,21 @@
             <el-option label="非问题" :value="false" />
           </el-select>
         </el-form-item>
+        <el-form-item label="根因分类">
+          <el-select v-model="statusForm.rootCauseType" placeholder="请选择根因分类" clearable filterable>
+            <el-option v-for="item in rootCauseTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="解决方式">
+          <el-select v-model="statusForm.solutionType" placeholder="请选择解决方式" clearable filterable>
+            <el-option v-for="item in solutionTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关闭结果">
+          <el-select v-model="statusForm.resolutionCode" placeholder="关闭时请选择结果" clearable filterable @change="handleResolutionChange">
+            <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="说明">
           <el-input v-model="statusForm.comment" type="textarea" :rows="3" placeholder="请输入状态流转说明" />
         </el-form-item>
@@ -501,6 +562,11 @@
           <el-descriptions-item label="内部负责人">{{ detail.internalOwnerName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="所属项目">{{ detail.projectName || detail.merchantName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="所属模块">{{ detail.moduleName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="工单类型">{{ formatIssueType(detail) }}</el-descriptions-item>
+          <el-descriptions-item label="问题性质">{{ formatProblemFlag(detail.isProblem) }}</el-descriptions-item>
+          <el-descriptions-item label="根因分类">{{ formatStatOption(rootCauseTypeOptions, detail.rootCauseType) }}</el-descriptions-item>
+          <el-descriptions-item label="解决方式">{{ formatStatOption(solutionTypeOptions, detail.solutionType) }}</el-descriptions-item>
+          <el-descriptions-item label="关闭结果">{{ formatResolution(detail) }}</el-descriptions-item>
           <el-descriptions-item label="版本号">{{ detail.versionKey || detail.extraData?.versionKey || '-' }}</el-descriptions-item>
           <el-descriptions-item label="日志拉取状态">
             <el-tag
@@ -988,7 +1054,9 @@
                     <el-input v-model="rcaForm.investigationProcess" type="textarea" :rows="4" />
                   </el-form-item>
                   <el-form-item label="根因分类">
-                    <el-input v-model="rcaForm.rootCauseCategory" />
+                    <el-select v-model="rcaForm.rootCauseCategory" placeholder="请选择根因分类" clearable filterable>
+                      <el-option v-for="item in rootCauseTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+                    </el-select>
                   </el-form-item>
                   <el-form-item label="根因详情">
                     <el-input v-model="rcaForm.rootCauseDetail" type="textarea" :rows="3" />
@@ -1718,6 +1786,7 @@ import {
   downloadTicketImportTemplate,
   extractTicketKnowledge,
   getTicket,
+  getTicketStatClassificationOptions,
   getTicketWorkflow,
   listTicketLogPullProjectVendorMapOptions,
   getTicketLogPullContent,
@@ -1756,7 +1825,13 @@ import {
   sourceOptions,
   ticketStatusOptions as defaultTicketStatusOptions
 } from './constants'
-import { buildOptionalLogPullTimeRangePayload, getOptionalLogPullTimeRangeError } from './logPull.shared'
+import {
+  buildOptionalLogPullTimeRangePayload,
+  createDefaultLogPullNotifyConfig,
+  getOptionalLogPullTimeRangeError,
+  hasLogPullTimeRange,
+  normalizeLogPullNotifyConfig
+} from './logPull.shared'
 import UserSelect from './components/UserSelect.vue'
 
 const { proxy } = getCurrentInstance()
@@ -1770,6 +1845,10 @@ const projectVendorMapOptions = ref([])
 const formModuleOptions = ref([])
 const formVersionOptions = ref([])
 const queryModuleOptions = ref([])
+const issueTypeOptions = ref([])
+const rootCauseTypeOptions = ref([])
+const solutionTypeOptions = ref([])
+const resolutionOptions = ref([])
 const agentOptions = ref([])
 const providerOptions = ref([])
 const analysisPromptOptions = ref([])
@@ -1796,6 +1875,7 @@ const queryFirstLineAssigneeOption = ref(null)
 const queryInternalOwnerOption = ref(null)
 const firstLineAssigneeOption = ref(null)
 const internalOwnerOption = ref(null)
+const formModuleValue = ref('')
 const detail = ref({})
 const timeline = ref({})
 const ticketMessages = ref([])
@@ -1879,6 +1959,7 @@ const logPullWrapEnabled = ref(false)
 const logPullAutoRefreshing = ref(false)
 
 let logPullRefreshTimer = null
+let suppressProjectWatcher = false
 
 const activeLogPullStatuses = ['created', 'submitting', 'polling', 'downloading', 'processing']
 
@@ -1890,6 +1971,7 @@ function createDefaultLogPullForm() {
     commandDataType: 1,
     modifyTime: undefined,
     path: '',
+    cutLogEnabled: false,
     timeRangeMode: 'between',
     fileMaxSize: 500,
     zipMaxSize: 500,
@@ -1898,22 +1980,11 @@ function createDefaultLogPullForm() {
     logPointTime: undefined,
     rangeBeforeMinutes: 30,
     rangeAfterMinutes: 30,
-    storageMode: undefined,
+    storageMode: 'local',
     autoAiEnabled: false,
     aiAgentCode: '',
     aiProviderCode: '',
-    notifyConfig: {
-      allowPush: 1,
-      pushIds: [],
-      success: {
-        push: true,
-        reminder: 1
-      },
-      failed: {
-        push: true,
-        reminder: 1
-      }
-    }
+    notifyConfig: createDefaultLogPullNotifyConfig()
   }
 }
 
@@ -2166,6 +2237,7 @@ function createDefaultTicketForm() {
     description: undefined,
     projectId: undefined,
     moduleId: undefined,
+    moduleName: '',
     versionKey: '',
     firstLineAssigneeId: undefined,
     firstLineAssigneeName: '',
@@ -2176,6 +2248,13 @@ function createDefaultTicketForm() {
     severity: undefined,
     source: undefined,
     categoryName: undefined,
+    issueTypeId: '',
+    issueTypeName: '',
+    isProblem: undefined,
+    rootCauseType: '',
+    solutionType: '',
+    resolutionCode: '',
+    resolutionName: '',
     rootCause: undefined,
     solution: undefined,
     needLogPull: false,
@@ -2194,6 +2273,11 @@ const data = reactive({
     processStatus: undefined,
     projectId: undefined,
     moduleId: undefined,
+    issueTypeId: undefined,
+    isProblem: undefined,
+    rootCauseType: undefined,
+    solutionType: undefined,
+    resolutionCode: undefined,
     internalPriority: undefined,
     currentAssigneeId: undefined,
     firstLineAssigneeId: undefined,
@@ -2330,6 +2414,47 @@ function formatLogViewSource(source) {
   return '入库内容'
 }
 
+function getStatOptionLabel(options, value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return '-'
+  }
+  const option = (options || []).find(item => item.value === text)
+  return option?.label || text
+}
+
+function formatStatOption(options, value) {
+  return getStatOptionLabel(options.value || options, value)
+}
+
+function formatProblemFlag(value) {
+  if (value === true) return '真实问题'
+  if (value === false) return '非问题'
+  return '-'
+}
+
+function formatIssueType(row) {
+  const issueTypeName = row?.issueTypeName || row?.issue_type_name || ''
+  if (issueTypeName) {
+    return issueTypeName
+  }
+  const issueTypeId = row?.issueTypeId || row?.issue_type_id || ''
+  if (!issueTypeId) {
+    return '-'
+  }
+  const option = issueTypeOptions.value.find(item => item.value === String(issueTypeId).trim())
+  return option?.label || '-'
+}
+
+function formatResolution(row) {
+  const resolutionName = row?.resolutionName || row?.resolution_name || ''
+  if (resolutionName) {
+    return resolutionName
+  }
+  const resolutionCode = row?.resolutionCode || row?.resolution_code || ''
+  return resolutionCode ? getStatOptionLabel(resolutionOptions.value, resolutionCode) : '-'
+}
+
 function normalizeWorkflowStatusOptions(statuses = []) {
   return (statuses || [])
     .map(item => {
@@ -2358,6 +2483,31 @@ function loadWorkflowConfig() {
     workflowConfig.value = response.data || { statuses: [], transitions: [] }
   }).catch(() => {
     workflowConfig.value = { statuses: [], transitions: [] }
+  })
+}
+
+function normalizeStatOptions(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map(item => ({
+      value: String(item.value || item.code || '').trim(),
+      label: String(item.label || item.name || item.value || item.code || '').trim(),
+      isProblem: typeof item.isProblem === 'boolean' ? item.isProblem : undefined
+    }))
+    .filter(item => item.value)
+}
+
+function loadStatClassificationOptions() {
+  return getTicketStatClassificationOptions().then(response => {
+    const config = response.data || {}
+    issueTypeOptions.value = normalizeStatOptions(config.issueTypes)
+    rootCauseTypeOptions.value = normalizeStatOptions(config.rootCauseTypes)
+    solutionTypeOptions.value = normalizeStatOptions(config.solutionTypes)
+    resolutionOptions.value = normalizeStatOptions(config.resolutions)
+  }).catch(() => {
+    issueTypeOptions.value = []
+    rootCauseTypeOptions.value = []
+    solutionTypeOptions.value = []
+    resolutionOptions.value = []
   })
 }
 
@@ -2492,10 +2642,56 @@ function openTicketLink(ticketRow) {
 
 function reset() {
   form.value = createDefaultTicketForm()
+  formModuleValue.value = ''
   tagText.value = ''
   firstLineAssigneeOption.value = null
   internalOwnerOption.value = null
   proxy.resetForm('ticketRef')
+}
+
+function handleIssueTypeChange(value) {
+  const option = issueTypeOptions.value.find(item => item.value === value)
+  form.value.issueTypeName = option?.label || ''
+  if (typeof option?.isProblem === 'boolean') {
+    form.value.isProblem = option.isProblem
+  }
+}
+
+function syncFormModuleValueFromForm() {
+  if (form.value.moduleId) {
+    formModuleValue.value = String(form.value.moduleId)
+    return
+  }
+  formModuleValue.value = form.value.moduleName || ''
+}
+
+function resolveFormModuleOption(value = formModuleValue.value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return null
+  }
+  return formModuleOptions.value.find(item => String(item.moduleId) === text || item.moduleName === text) || null
+}
+
+function handleModuleChange(value) {
+  const option = resolveFormModuleOption(value)
+  if (option) {
+    form.value.moduleId = option.moduleId
+    form.value.moduleName = option.moduleName || ''
+    formModuleValue.value = String(option.moduleId)
+    return
+  }
+  form.value.moduleId = undefined
+  form.value.moduleName = String(value || '').trim()
+  formModuleValue.value = form.value.moduleName
+}
+
+function handleResolutionChange(value) {
+  const option = resolutionOptions.value.find(item => item.value === value)
+  statusForm.value.resolutionName = option?.label || ''
+  if (typeof option?.isProblem === 'boolean') {
+    statusForm.value.isProblem = option.isProblem
+  }
 }
 
 function applyTicketAutomationConfig(ticketData) {
@@ -2508,9 +2704,11 @@ function applyTicketAutomationConfig(ticketData) {
   form.value.logPullConfig = {
     ...createDefaultLogPullForm(),
     ...logPullConfig,
+    cutLogEnabled: Boolean(logPullConfig.cutLogEnabled ?? logPullConfig.cut_log_enabled ?? hasLogPullTimeRange(logPullConfig)),
     autoAiEnabled: Boolean(logPullConfig.autoAiEnabled ?? logPullConfig.auto_ai_enabled ?? false),
     aiAgentCode: logPullConfig.aiAgentCode || logPullConfig.ai_agent_code || '',
-    aiProviderCode: logPullConfig.aiProviderCode || logPullConfig.ai_provider_code || ''
+    aiProviderCode: logPullConfig.aiProviderCode || logPullConfig.ai_provider_code || '',
+    notifyConfig: normalizeLogPullNotifyConfig(logPullConfig.notifyConfig || logPullConfig.notify_config)
   }
 }
 
@@ -2597,6 +2795,7 @@ function handleUpdate(row) {
   reset()
   getTicket(row.ticketId).then(response => {
     const ticketData = response.data || {}
+    suppressProjectWatcher = true
     form.value = {
       ...createDefaultTicketForm(),
       ...ticketData,
@@ -2605,20 +2804,40 @@ function handleUpdate(row) {
         ...(ticketData.logPullConfig || ticketData.log_pull_config || ticketData.extraData?.ticketAutomation?.logPullConfig || ticketData.extraData?.ticket_automation?.log_pull_config || {})
       }
     }
+    form.value.logPullConfig.cutLogEnabled = Boolean(
+      form.value.logPullConfig.cutLogEnabled
+      ?? form.value.logPullConfig.cut_log_enabled
+      ?? hasLogPullTimeRange(form.value.logPullConfig)
+    )
+    form.value.logPullConfig.notifyConfig = normalizeLogPullNotifyConfig(
+      form.value.logPullConfig.notifyConfig || form.value.logPullConfig.notify_config
+    )
     form.value.description = ticketData.originalDescription || ticketData.extraData?.originDescription || ticketData.description || ''
     form.value.autoTranslate = ticketData.extraData?.manualAutomation?.autoTranslate
       ?? ticketData.extraData?.manual_automation?.auto_translate
       ?? ticketData.autoTranslate
       ?? ticketData.auto_translate
       ?? true
+    form.value.issueTypeId = ticketData.issueTypeId || ticketData.issue_type_id || ''
+    form.value.issueTypeName = ticketData.issueTypeName || ticketData.issue_type_name || ''
+    form.value.isProblem = ticketData.isProblem ?? ticketData.is_problem ?? undefined
+    form.value.rootCauseType = ticketData.rootCauseType || ticketData.root_cause_type || ''
+    form.value.solutionType = ticketData.solutionType || ticketData.solution_type || ''
+    form.value.resolutionCode = ticketData.resolutionCode || ticketData.resolution_code || ''
+    form.value.resolutionName = ticketData.resolutionName || ticketData.resolution_name || ''
+    syncFormModuleValueFromForm()
     tagText.value = Array.isArray(form.value.tags) ? form.value.tags.join(',') : ''
     applyTicketAutomationConfig(form.value)
     firstLineAssigneeOption.value = buildTicketUserOption(form.value.firstLineAssigneeId, form.value.firstLineAssigneeName)
     internalOwnerOption.value = buildTicketUserOption(form.value.internalOwnerId, form.value.internalOwnerName)
-    loadFormModuleOptions(form.value.projectId)
+    loadFormModuleOptions(form.value.projectId).finally(() => {
+      suppressProjectWatcher = false
+    })
     loadFormVersionOptions(form.value.projectId)
     open.value = true
     title.value = '编辑工单'
+  }).catch(() => {
+    suppressProjectWatcher = false
   })
 }
 
@@ -2633,6 +2852,14 @@ function validateTicketAutomationConfig() {
   const config = form.value.logPullConfig || {}
   if (!config.vendorId || !config.storeId || !config.posNo) {
     proxy.$modal.msgWarning('启用日志拉取时，vendorId、storeId、posNo 不能为空')
+    return false
+  }
+  if (Number(config.commandDataType) === 2 && !String(config.path || '').trim()) {
+    proxy.$modal.msgWarning('启用日志拉取且数据类型为数据库时，path 不能为空')
+    return false
+  }
+  if (Number(config.commandDataType) !== 2 && !config.modifyTime) {
+    proxy.$modal.msgWarning('启用日志拉取且数据类型为日志时，modifyTime 不能为空')
     return false
   }
   const timeRangeError = getOptionalLogPullTimeRangeError(config)
@@ -2651,38 +2878,44 @@ function validateTicketAutomationConfig() {
   return true
 }
 
+function buildCleanLogPullConfig(source) {
+  const config = { ...(source || {}) }
+  config.notifyConfig = normalizeLogPullNotifyConfig(config.notifyConfig)
+  if (Number(config.commandDataType) === 2) {
+    delete config.modifyTime
+  } else {
+    delete config.path
+  }
+  if (!config.cutLogEnabled) {
+    delete config.timeRangeMode
+    delete config.logBeginTime
+    delete config.logEndTime
+    delete config.logPointTime
+    delete config.rangeBeforeMinutes
+    delete config.rangeAfterMinutes
+  } else if (config.timeRangeMode === 'between') {
+    delete config.logPointTime
+    delete config.rangeBeforeMinutes
+    delete config.rangeAfterMinutes
+  } else if (config.timeRangeMode === 'point') {
+    delete config.logBeginTime
+    delete config.logEndTime
+  }
+  delete config.cutLogEnabled
+  if (!config.autoAiEnabled) {
+    config.aiAgentCode = ''
+    config.aiProviderCode = ''
+  }
+  return config
+}
+
 function submitForm() {
   proxy.$refs.ticketRef.validate(valid => {
     if (!valid) return
     if (!validateTicketAutomationConfig()) {
       return
     }
-    const logPullConfig = form.value.needLogPull ? { ...form.value.logPullConfig } : undefined
-    if (logPullConfig) {
-      if (logPullConfig.timeRangeMode === 'between') {
-        if (logPullConfig.logBeginTime || logPullConfig.logEndTime) {
-          delete logPullConfig.logPointTime
-          delete logPullConfig.rangeBeforeMinutes
-          delete logPullConfig.rangeAfterMinutes
-        } else {
-          delete logPullConfig.logBeginTime
-          delete logPullConfig.logEndTime
-          delete logPullConfig.logPointTime
-          delete logPullConfig.rangeBeforeMinutes
-          delete logPullConfig.rangeAfterMinutes
-        }
-      } else if (logPullConfig.timeRangeMode === 'point') {
-        delete logPullConfig.logBeginTime
-        delete logPullConfig.logEndTime
-      } else {
-        delete logPullConfig.logBeginTime
-        delete logPullConfig.logEndTime
-        delete logPullConfig.logPointTime
-        delete logPullConfig.rangeBeforeMinutes
-        delete logPullConfig.rangeAfterMinutes
-      }
-      delete logPullConfig.timeRangeMode
-    }
+    const logPullConfig = form.value.needLogPull ? buildCleanLogPullConfig(form.value.logPullConfig) : undefined
     const payload = {
       ...form.value,
       tags: tagText.value ? tagText.value.split(',').map(item => item.trim()).filter(Boolean) : undefined,
@@ -2690,9 +2923,14 @@ function submitForm() {
       autoTranslate: Boolean(form.value.autoTranslate),
       logPullConfig
     }
-    if (payload.logPullConfig && !payload.logPullConfig.autoAiEnabled) {
-      payload.logPullConfig.aiAgentCode = ''
-      payload.logPullConfig.aiProviderCode = ''
+    handleModuleChange(formModuleValue.value)
+    payload.moduleId = form.value.moduleId
+    payload.moduleName = form.value.moduleName || ''
+    if (payload.issueTypeId) {
+      payload.issueTypeName = payload.issueTypeName || getStatOptionLabel(issueTypeOptions.value, payload.issueTypeId)
+    }
+    if (payload.resolutionCode) {
+      payload.resolutionName = payload.resolutionName || getStatOptionLabel(resolutionOptions.value, payload.resolutionCode)
     }
     const request = payload.ticketId ? updateTicket(payload) : addTicket(payload)
     request.then(() => {
@@ -2770,11 +3008,21 @@ function buildTicketUserOption(userId, userName) {
 }
 
 function handleFirstLineAssigneeChange(user) {
+  if (user?.isRawLabel) {
+    form.value.firstLineAssigneeId = undefined
+    firstLineAssigneeOption.value = null
+    return
+  }
   form.value.firstLineAssigneeName = user?.nickName || user?.userName || ''
   firstLineAssigneeOption.value = user
 }
 
 function handleInternalOwnerChange(user) {
+  if (user?.isRawLabel) {
+    form.value.internalOwnerId = undefined
+    internalOwnerOption.value = null
+    return
+  }
   form.value.internalOwnerName = user?.nickName || user?.userName || ''
   internalOwnerOption.value = user
 }
@@ -2787,7 +3035,11 @@ function openStatus(row) {
     comment: '',
     rootCause: row.rootCause,
     solution: row.solution,
-    isProblem: row.isProblem
+    isProblem: row.isProblem,
+    rootCauseType: row.rootCauseType || row.root_cause_type || '',
+    solutionType: row.solutionType || row.solution_type || '',
+    resolutionCode: row.resolutionCode || row.resolution_code || '',
+    resolutionName: row.resolutionName || row.resolution_name || ''
   }
   if (!statusTransitionOptions.value.length) {
     proxy.$modal.msgWarning('当前状态未配置可用流转规则，请先在工单工作流中配置流转规则')
@@ -3380,8 +3632,12 @@ function submitRca() {
 function submitLogPull() {
   proxy.$refs.logPullRef.validate(valid => {
     if (!valid) return
-    if (!logPullForm.value.modifyTime && !logPullForm.value.path) {
-      proxy.$modal.msgWarning('modifyTime 和 path 至少需要填写一个')
+    if (Number(logPullForm.value.commandDataType) === 2 && !String(logPullForm.value.path || '').trim()) {
+      proxy.$modal.msgWarning('数据类型为数据库时，path 不能为空')
+      return
+    }
+    if (Number(logPullForm.value.commandDataType) !== 2 && !logPullForm.value.modifyTime) {
+      proxy.$modal.msgWarning('数据类型为日志时，modifyTime 不能为空')
       return
     }
     const timeRangeError = getOptionalLogPullTimeRangeError(logPullForm.value)
@@ -3402,11 +3658,15 @@ function submitLogPull() {
       storeId: logPullForm.value.storeId,
       posNo: logPullForm.value.posNo,
       commandDataType: logPullForm.value.commandDataType,
-      modifyTime: logPullForm.value.modifyTime,
-      path: logPullForm.value.path,
       fileMaxSize: logPullForm.value.fileMaxSize,
       zipMaxSize: logPullForm.value.zipMaxSize,
-      storageMode: logPullForm.value.storageMode
+      storageMode: logPullForm.value.storageMode,
+      notifyConfig: normalizeLogPullNotifyConfig(logPullForm.value.notifyConfig)
+    }
+    if (Number(logPullForm.value.commandDataType) === 2) {
+      payload.path = logPullForm.value.path
+    } else {
+      payload.modifyTime = logPullForm.value.modifyTime
     }
     Object.assign(payload, buildOptionalLogPullTimeRangePayload(logPullForm.value))
     payload.autoAiEnabled = Boolean(logPullForm.value.autoAiEnabled)
@@ -3553,6 +3813,12 @@ function loadFormModuleOptions(projectId) {
   }
   return listTicketModuleOptions(projectId ? { projectId } : {}).then(response => {
     formModuleOptions.value = response.data || []
+    const option = resolveFormModuleOption(form.value.moduleId)
+    if (option) {
+      form.value.moduleId = option.moduleId
+      form.value.moduleName = option.moduleName || ''
+    }
+    syncFormModuleValueFromForm()
   })
 }
 
@@ -3716,7 +3982,12 @@ watch(
 watch(
   () => form.value.projectId,
   value => {
+    if (suppressProjectWatcher) {
+      return
+    }
     form.value.moduleId = undefined
+    form.value.moduleName = ''
+    formModuleValue.value = ''
     if (!open.value) {
       return
     }
@@ -3730,6 +4001,7 @@ onBeforeUnmount(() => {
 })
 
 loadProjectOptions()
+loadStatClassificationOptions()
 loadProjectVendorMapOptions()
 loadAgentOptions()
 loadProviderOptions()

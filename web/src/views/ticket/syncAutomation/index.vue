@@ -45,6 +45,139 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
+          <span>统计枚举配置</span>
+          <el-tag effect="plain">用于工单页与统计页的可视化配置</el-tag>
+        </div>
+      </template>
+
+      <div class="stat-config-grid">
+        <section class="stat-config-section">
+          <div class="stat-config-section__head">
+            <span>工单类型</span>
+            <el-button link type="primary" icon="Plus" @click="addStatOption('issueTypes')">新增</el-button>
+          </div>
+          <el-table :data="form.statClassification.issueTypes" border size="small">
+            <el-table-column label="编码" min-width="160">
+              <template #default="scope">
+                <el-input v-model="scope.row.value" placeholder="如 system_bug" />
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="180">
+              <template #default="scope">
+                <el-input v-model="scope.row.label" placeholder="如 系统Bug" />
+              </template>
+            </el-table-column>
+            <el-table-column label="是否问题" width="140">
+              <template #default="scope">
+                <el-select v-model="scope.row.isProblem" placeholder="可选" clearable style="width: 100%">
+                  <el-option label="真实问题" :value="true" />
+                  <el-option label="非问题" :value="false" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="80" align="center">
+              <template #default="scope">
+                <el-button link type="danger" icon="Delete" @click="removeStatOption('issueTypes', scope.$index)" />
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <section class="stat-config-section">
+          <div class="stat-config-section__head">
+            <span>根因分类</span>
+            <el-button link type="primary" icon="Plus" @click="addStatOption('rootCauseTypes')">新增</el-button>
+          </div>
+          <el-table :data="form.statClassification.rootCauseTypes" border size="small">
+            <el-table-column label="编码" min-width="160">
+              <template #default="scope">
+                <el-input v-model="scope.row.value" placeholder="如 code_defect" />
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="180">
+              <template #default="scope">
+                <el-input v-model="scope.row.label" placeholder="如 代码缺陷" />
+              </template>
+            </el-table-column>
+            <el-table-column label="备注" min-width="180">
+              <template #default="scope">
+                <el-input v-model="scope.row.remark" placeholder="可选备注" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="80" align="center">
+              <template #default="scope">
+                <el-button link type="danger" icon="Delete" @click="removeStatOption('rootCauseTypes', scope.$index)" />
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <section class="stat-config-section">
+          <div class="stat-config-section__head">
+            <span>解决方式</span>
+            <el-button link type="primary" icon="Plus" @click="addStatOption('solutionTypes')">新增</el-button>
+          </div>
+          <el-table :data="form.statClassification.solutionTypes" border size="small">
+            <el-table-column label="编码" min-width="160">
+              <template #default="scope">
+                <el-input v-model="scope.row.value" placeholder="如 code_fix" />
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="180">
+              <template #default="scope">
+                <el-input v-model="scope.row.label" placeholder="如 代码修复" />
+              </template>
+            </el-table-column>
+            <el-table-column label="备注" min-width="180">
+              <template #default="scope">
+                <el-input v-model="scope.row.remark" placeholder="可选备注" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="80" align="center">
+              <template #default="scope">
+                <el-button link type="danger" icon="Delete" @click="removeStatOption('solutionTypes', scope.$index)" />
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <section class="stat-config-section">
+          <div class="stat-config-section__head">
+            <span>关闭结果</span>
+            <el-button link type="primary" icon="Plus" @click="addStatOption('resolutions')">新增</el-button>
+          </div>
+          <el-table :data="form.statClassification.resolutions" border size="small">
+            <el-table-column label="编码" min-width="160">
+              <template #default="scope">
+                <el-input v-model="scope.row.value" placeholder="如 fixed" />
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="180">
+              <template #default="scope">
+                <el-input v-model="scope.row.label" placeholder="如 已修复" />
+              </template>
+            </el-table-column>
+            <el-table-column label="是否问题" width="140">
+              <template #default="scope">
+                <el-select v-model="scope.row.isProblem" placeholder="可选" clearable style="width: 100%">
+                  <el-option label="真实问题" :value="true" />
+                  <el-option label="非问题" :value="false" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="80" align="center">
+              <template #default="scope">
+                <el-button link type="danger" icon="Delete" @click="removeStatOption('resolutions', scope.$index)" />
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+      </div>
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
           <span>外部推送多维表格邮箱补全</span>
           <el-tag type="warning" effect="plain">按 recordId 查询人员邮箱</el-tag>
         </div>
@@ -1040,7 +1173,6 @@ const autoCategoryForm = reactive({
   pageSize: 100
 })
 
-const form = reactive(createDefaultForm())
 const mappingTexts = reactive({
   projectMappings: '[]',
   moduleMappings: '[]',
@@ -1142,6 +1274,49 @@ const remoteRules = {
   consumer: [{ validator: createRemoteRequiredValidator('消费者标识不能为空'), trigger: 'blur' }],
   limit: [{ required: true, message: '每次拉取数量不能为空', trigger: 'change' }],
   timeoutSec: [{ required: true, message: '抓取超时不能为空', trigger: 'change' }]
+}
+
+const defaultStatClassification = {
+  issueTypes: [
+    { value: 'system_bug', label: '系统Bug', isProblem: true },
+    { value: 'data_error', label: '数据错误', isProblem: true },
+    { value: 'config_issue', label: '配置问题', isProblem: true },
+    { value: 'performance_issue', label: '性能问题', isProblem: true },
+    { value: 'support_consulting', label: '支持咨询', isProblem: false },
+    { value: 'requirement_consulting', label: '需求咨询', isProblem: false },
+    { value: 'user_operation', label: '用户操作问题', isProblem: false },
+    { value: 'api_exception', label: '接口异常', isProblem: true }
+  ],
+  rootCauseTypes: [
+    { value: 'code_defect', label: '代码缺陷' },
+    { value: 'config_error', label: '配置错误' },
+    { value: 'data_exception', label: '数据异常' },
+    { value: 'third_party', label: '第三方问题' },
+    { value: 'network_issue', label: '网络问题' },
+    { value: 'environment_issue', label: '环境问题' },
+    { value: 'operation_mistake', label: '操作失误' },
+    { value: 'requirement_design', label: '需求设计问题' },
+    { value: 'unknown', label: '未知' }
+  ],
+  solutionTypes: [
+    { value: 'code_fix', label: '代码修复' },
+    { value: 'config_fix', label: '配置修复' },
+    { value: 'data_fix', label: '数据修复' },
+    { value: 'temporary_workaround', label: '临时处理' },
+    { value: 'manual_process', label: '人工处理' },
+    { value: 'no_action', label: '无需处理' }
+  ],
+  resolutions: [
+    { value: 'fixed', label: '已修复', isProblem: true },
+    { value: 'non_problem', label: '非问题', isProblem: false },
+    { value: 'data_processed', label: '数据已处理', isProblem: true },
+    { value: 'config_fixed', label: '配置已修复', isProblem: true },
+    { value: 'user_canceled', label: '用户撤销', isProblem: false },
+    { value: 'duplicated', label: '重复工单', isProblem: false },
+    { value: 'cannot_reproduce', label: '无法复现', isProblem: null },
+    { value: 'as_designed', label: '需求如此', isProblem: false },
+    { value: 'transferred', label: '已转其他团队', isProblem: null }
+  ]
 }
 
 function createDefaultForm() {
@@ -1266,6 +1441,7 @@ function createDefaultForm() {
     promptTemplates: {
       classificationHint: ''
     },
+    statClassification: normalizeStatClassificationConfig(),
     externalSyncRequiredFields: [
       'ticketNo',
       'description',
@@ -1277,6 +1453,8 @@ function createDefaultForm() {
     ]
   }
 }
+
+const form = reactive(createDefaultForm())
 
 function normalizeArray(value, fallback = []) {
   if (Array.isArray(value)) {
@@ -1291,6 +1469,61 @@ function normalizeArray(value, fallback = []) {
     }
   }
   return fallback
+}
+
+function normalizeStatOptionRows(value, fallback = [], allowProblemFlag = false) {
+  const sourceRows = Array.isArray(value) ? value : fallback
+  const seenValues = new Set()
+  const rows = []
+  sourceRows.forEach(item => {
+    const optionValue = String(item?.value || item?.code || item?.id || '').trim()
+    const optionLabel = String(item?.label || item?.name || optionValue).trim()
+    if (!optionValue || seenValues.has(optionValue)) {
+      return
+    }
+    const row = {
+      value: optionValue,
+      label: optionLabel || optionValue
+    }
+    if (allowProblemFlag) {
+      row.isProblem = typeof item?.isProblem === 'boolean' ? item.isProblem : null
+    }
+    const remark = String(item?.remark || '').trim()
+    if (remark) {
+      row.remark = remark
+    }
+    rows.push(row)
+    seenValues.add(optionValue)
+  })
+  return rows.length ? rows : fallback.map(item => ({ ...item }))
+}
+
+function normalizeStatClassificationConfig(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
+  return {
+    issueTypes: normalizeStatOptionRows(source.issueTypes, defaultStatClassification.issueTypes, true),
+    rootCauseTypes: normalizeStatOptionRows(source.rootCauseTypes, defaultStatClassification.rootCauseTypes),
+    solutionTypes: normalizeStatOptionRows(source.solutionTypes, defaultStatClassification.solutionTypes),
+    resolutions: normalizeStatOptionRows(source.resolutions, defaultStatClassification.resolutions, true)
+  }
+}
+
+function addStatOption(groupKey) {
+  if (!Array.isArray(form.statClassification[groupKey])) {
+    form.statClassification[groupKey] = []
+  }
+  form.statClassification[groupKey].push({
+    value: '',
+    label: '',
+    ...(groupKey === 'issueTypes' || groupKey === 'resolutions' ? { isProblem: null } : {})
+  })
+}
+
+function removeStatOption(groupKey, index) {
+  if (!Array.isArray(form.statClassification[groupKey])) {
+    return
+  }
+  form.statClassification[groupKey].splice(index, 1)
 }
 
 /**
@@ -1319,6 +1552,7 @@ function applyConfig(payload) {
   form.autoRunOnSync = Boolean(payload.autoRunOnSync)
   form.autoTranslateOnSync = payload.autoTranslateOnSync !== false
   form.defaultPullLimit = Number(payload.defaultPullLimit || 50)
+  form.statClassification = normalizeStatClassificationConfig(payload.statClassification)
   const feishuAuth = payload.feishuAuth || {}
   form.feishuAuth = {
     appId: feishuAuth.appId || '',
@@ -1621,6 +1855,7 @@ async function handleSave() {
     payload.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
       ? Array.from(new Set(payload.externalSyncRequiredFields.map(item => String(item || '').trim()).filter(Boolean)))
       : []
+    payload.statClassification = normalizeStatClassificationConfig(payload.statClassification)
     await saveTicketSyncAutomationConfig(payload)
     proxy.$modal.msgSuccess('保存成功')
     loadConfig()
@@ -1937,6 +2172,27 @@ onMounted(() => {
 .mapping-blocks {
   display: grid;
   gap: 12px;
+}
+
+.stat-config-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.stat-config-section {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.stat-config-section__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-weight: 600;
 }
 
 .priority-route-list {

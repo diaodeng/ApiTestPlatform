@@ -132,16 +132,81 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <el-row :gutter="16" class="mt16">
+      <el-col :span="8">
+        <el-card shadow="never">
+          <template #header>工单类型</template>
+          <el-table v-loading="loading" :data="overview.issueTypeCounts || []">
+            <el-table-column label="类型">
+              <template #default="scope">{{ formatIssueType(scope.row) }}</template>
+            </el-table-column>
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="never">
+          <template #header>是否真实问题</template>
+          <el-table v-loading="loading" :data="overview.problemCounts || []">
+            <el-table-column label="问题性质">
+              <template #default="scope">{{ formatProblemFlag(scope.row.isProblem) }}</template>
+            </el-table-column>
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="never">
+          <template #header>根因分类</template>
+          <el-table v-loading="loading" :data="overview.rootCauseTypeCounts || []">
+            <el-table-column label="根因">
+              <template #default="scope">{{ getStatOptionLabel(rootCauseTypeOptions, scope.row.rootCauseType) }}</template>
+            </el-table-column>
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="mt16">
+      <el-col :span="12">
+        <el-card shadow="never">
+          <template #header>解决方式</template>
+          <el-table v-loading="loading" :data="overview.solutionTypeCounts || []">
+            <el-table-column label="方式">
+              <template #default="scope">{{ getStatOptionLabel(solutionTypeOptions, scope.row.solutionType) }}</template>
+            </el-table-column>
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+      <el-col :span="12">
+        <el-card shadow="never">
+          <template #header>关闭结果</template>
+          <el-table v-loading="loading" :data="overview.resolutionCounts || []">
+            <el-table-column label="结果">
+              <template #default="scope">{{ formatResolution(scope.row) }}</template>
+            </el-table-column>
+            <el-table-column label="数量" prop="count" width="100" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
 <script setup name="TicketStatistics">
-import { getTicketStatistics } from '@/api/ticket/ticket'
+import { getTicketStatClassificationOptions, getTicketStatistics } from '@/api/ticket/ticket'
 import { getOptionLabel, sourceOptions, ticketStatusOptions } from '../constants'
 
 const loading = ref(false)
 const dateRange = ref([])
 const overview = ref({})
+const issueTypeOptions = ref([])
+const rootCauseTypeOptions = ref([])
+const solutionTypeOptions = ref([])
+const resolutionOptions = ref([])
 const queryParams = ref({
   beginTime: undefined,
   endTime: undefined
@@ -153,6 +218,25 @@ function getStatistics() {
     overview.value = response.data || {}
   }).finally(() => {
     loading.value = false
+  })
+}
+
+function normalizeStatOptions(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map(item => ({
+      value: String(item.value || item.code || '').trim(),
+      label: String(item.label || item.name || item.value || item.code || '').trim()
+    }))
+    .filter(item => item.value)
+}
+
+function loadStatClassificationOptions() {
+  getTicketStatClassificationOptions().then(response => {
+    const config = response.data || {}
+    issueTypeOptions.value = normalizeStatOptions(config.issueTypes)
+    rootCauseTypeOptions.value = normalizeStatOptions(config.rootCauseTypes)
+    solutionTypeOptions.value = normalizeStatOptions(config.solutionTypes)
+    resolutionOptions.value = normalizeStatOptions(config.resolutions)
   })
 }
 
@@ -176,11 +260,41 @@ function formatSeconds(seconds) {
   return `${hour}小时${minute}分${second}秒`
 }
 
+function getStatOptionLabel(options, value) {
+  const text = String(value || '').trim()
+  if (!text || text === '未填写') {
+    return '未填写'
+  }
+  const rows = Array.isArray(options) ? options : options.value || []
+  return rows.find(item => item.value === text)?.label || text
+}
+
+function formatIssueType(row) {
+  if (row.issueTypeName) {
+    return row.issueTypeName
+  }
+  return getStatOptionLabel(issueTypeOptions, row.issueTypeId)
+}
+
+function formatProblemFlag(value) {
+  if (value === true) return '真实问题'
+  if (value === false) return '非问题'
+  return '未填写'
+}
+
+function formatResolution(row) {
+  if (row.resolutionName) {
+    return row.resolutionName
+  }
+  return getStatOptionLabel(resolutionOptions, row.resolutionCode)
+}
+
 function formatTransition(row) {
   const fromStatus = row.fromStatus === '创建' ? '创建' : getOptionLabel(ticketStatusOptions, row.fromStatus)
   return `${fromStatus} -> ${getOptionLabel(ticketStatusOptions, row.toStatus)}`
 }
 
+loadStatClassificationOptions()
 getStatistics()
 </script>
 

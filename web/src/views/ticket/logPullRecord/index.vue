@@ -533,7 +533,12 @@ import { saveAs } from 'file-saver'
 import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
 import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
 import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
-import { buildOptionalLogPullTimeRangePayload, getOptionalLogPullTimeRangeError } from '../logPull.shared'
+import {
+  buildOptionalLogPullTimeRangePayload,
+  createDefaultLogPullNotifyConfig,
+  getOptionalLogPullTimeRangeError,
+  normalizeLogPullNotifyConfig
+} from '../logPull.shared'
 import { blobValidate } from '@/utils/ruoyi'
 
 const { proxy } = getCurrentInstance()
@@ -612,6 +617,7 @@ function createDefaultForm() {
     commandDataType: 1,
     modifyTime: '',
     path: '',
+    cutLogEnabled: false,
     timeRangeMode: 'between',
     logBeginTime: '',
     logEndTime: '',
@@ -624,18 +630,7 @@ function createDefaultForm() {
     autoAiEnabled: false,
     aiAgentCode: '',
     aiProviderCode: '',
-    notifyConfig: {
-      allowPush: 1,
-      pushIds: [],
-      success: {
-        push: true,
-        reminder: 1
-      },
-      failed: {
-        push: true,
-        reminder: 1
-      }
-    }
+    notifyConfig: createDefaultLogPullNotifyConfig()
   }
 }
 
@@ -1022,8 +1017,12 @@ function resetCreateForm() {
 function submitCreateForm() {
   proxy.$refs.createRef.validate(valid => {
     if (!valid) return
-    if (!createForm.value.modifyTime && !createForm.value.path) {
-      proxy.$modal.msgWarning('modifyTime 和 path 至少需要填写一个')
+    if (Number(createForm.value.commandDataType) === 2 && !createForm.value.path) {
+      proxy.$modal.msgWarning('数据类型为数据库时，path 不能为空')
+      return
+    }
+    if (Number(createForm.value.commandDataType) !== 2 && !createForm.value.modifyTime) {
+      proxy.$modal.msgWarning('数据类型为日志时，modifyTime 不能为空')
       return
     }
     const timeRangeError = getOptionalLogPullTimeRangeError(createForm.value)
@@ -1047,8 +1046,15 @@ function submitCreateForm() {
     submitting.value = true
     const payload = {
       ...createForm.value,
-      ticketId: createForm.value.ticketId || null
+      ticketId: createForm.value.ticketId || null,
+      notifyConfig: normalizeLogPullNotifyConfig(createForm.value.notifyConfig)
     }
+    if (Number(payload.commandDataType) === 2) {
+      delete payload.modifyTime
+    } else {
+      delete payload.path
+    }
+    delete payload.cutLogEnabled
     const timeRangePayload = buildOptionalLogPullTimeRangePayload(createForm.value)
     Object.assign(payload, timeRangePayload)
     if (!timeRangePayload.timeRangeMode) {

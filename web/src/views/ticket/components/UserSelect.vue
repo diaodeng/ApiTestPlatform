@@ -36,6 +36,10 @@ const props = defineProps({
   initialOption: {
     type: Object,
     default: null
+  },
+  rawLabel: {
+    type: String,
+    default: ''
   }
 })
 
@@ -44,6 +48,7 @@ const emit = defineEmits(['update:modelValue', 'change'])
 const loading = ref(false)
 const options = ref([])
 const selectedValue = ref(props.modelValue)
+const rawOptionValue = '__ticket_raw_user_label__'
 
 watch(
   () => props.modelValue,
@@ -57,6 +62,11 @@ watch(
   () => props.initialOption,
   () => syncInitialOption(),
   { deep: true }
+)
+
+watch(
+  () => props.rawLabel,
+  () => syncInitialOption()
 )
 
 function normalizeOption(option) {
@@ -81,7 +91,18 @@ function upsertOption(option) {
 }
 
 function syncInitialOption() {
+  const rawLabel = String(props.rawLabel || '').trim()
   if (props.modelValue === undefined || props.modelValue === null || props.modelValue === '') {
+    if (rawLabel) {
+      selectedValue.value = rawOptionValue
+      upsertOption({
+        userId: rawOptionValue,
+        userName: rawLabel,
+        nickName: rawLabel,
+        label: rawLabel,
+        isRawLabel: true
+      })
+    }
     return
   }
   const option = normalizeOption(props.initialOption)
@@ -102,7 +123,7 @@ function remoteSearch(keyword) {
 
 function handleChange(value) {
   const selected = options.value.find(item => String(item.userId) === String(value))
-  emit('update:modelValue', value)
+  emit('update:modelValue', value === rawOptionValue ? undefined : value)
   emit('change', selected || null)
 }
 
