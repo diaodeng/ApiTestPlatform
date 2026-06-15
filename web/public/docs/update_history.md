@@ -1,5 +1,8 @@
 ## 2026-06-15
 
+1. 修复工单详情页和日志拉取记录页点击“重新拉取”时，历史记录因 `command_content` 格式或空时间范围字段导致恢复参数失败的问题。
+2. 重新拉取参数恢复兼容 JSON 字符串、驼峰/下划线字段名和历史空时间范围；仍要求至少可恢复 `modifyTime` 或 `path`，避免提交不完整外部命令。
+3. 新增说明文档：`web/public/docs/2026-06-15-ticket-log-pull-retry-payload-fallback.md`。
 1. 将 API Key 最后使用时间/IP 审计更新改为非阻断操作：鉴权仍校验 API Key 有效性，`last_used_ip/last_used_time` 使用独立会话尝试更新，失败只记录 warning，不再影响远端推单入库。
 2. 新增说明文档：`web/public/docs/2026-06-15-api-key-usage-audit-nonblocking.md`。
 1. 修复工单状态流转候选项不随工作流配置变化的问题：工单列表页加载 `/ticket/workflow/config`，状态筛选、列表展示、详情展示和时间线优先使用动态工作流状态节点。

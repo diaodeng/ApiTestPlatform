@@ -250,6 +250,34 @@ class TicketLogPullService:
         except Exception:
             return default
 
+    @staticmethod
+    def _first_present_value(source: dict[str, Any], *keys: str) -> Any:
+        """
+        按字段优先级读取第一个非空值。
+        :param source: 数据来源字典
+        :param keys: 候选字段名列表
+        :return: 第一个非空字段值，未命中时返回 None
+        """
+        for key in keys:
+            value = source.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    @staticmethod
+    def _parse_positive_int(value: Any, default: int) -> int:
+        """
+        将历史记录中的数值字段安全解析为正整数。
+        :param value: 原始值
+        :param default: 解析失败或非正数时的默认值
+        :return: 正整数
+        """
+        try:
+            parsed_value = int(float(str(value).strip()))
+            return parsed_value if parsed_value > 0 else default
+        except Exception:
+            return default
+
     @classmethod
     def _log_chain_step(
         cls,
@@ -802,9 +830,17 @@ class TicketLogPullService:
                 step="project-vendor-map",
                 status="saved",
                 reason="项目商家映射已保存",
-                detail={"projectId": saved.project_id, "venderNo": saved.vender_no, "user": cls._user_name(current_user)},
+                detail={
+                    "projectId": saved.project_id,
+                    "venderNo": saved.vender_no,
+                    "user": cls._user_name(current_user),
+                },
             )
-            return CrudResponseModel(is_success=True, message="项目商家映射已保存", result=CamelCaseUtil.transform_result(saved))
+            return CrudResponseModel(
+                is_success=True,
+                message="项目商家映射已保存",
+                result=CamelCaseUtil.transform_result(saved),
+            )
         except Exception:
             query_db.rollback()
             raise
@@ -2355,7 +2391,10 @@ class TicketLogPullService:
             step="poll-external",
             status="running",
             reason="开始轮询外部平台结果",
-            detail={"timeoutSeconds": int(storage_config.get("pollTimeoutSec") or 1800), "intervalSeconds": interval_seconds},
+            detail={
+                "timeoutSeconds": int(storage_config.get("pollTimeoutSec") or 1800),
+                "intervalSeconds": interval_seconds,
+            },
         )
         while datetime.now() < deadline:
             rows = cls._fetch_external_rows(db, record)
@@ -2914,7 +2953,9 @@ class TicketLogPullService:
         storage_path = str(record.storage_path or "").strip()
         if not storage_path:
             return
-        storage_mode = str(record.storage_mode or cls._get_storage_config_dict(db).get("mode") or "local").strip().lower()
+        storage_mode = (
+            str(record.storage_mode or cls._get_storage_config_dict(db).get("mode") or "local").strip().lower()
+        )
         if storage_mode == "ftp":
             ftp = cls._connect_ftp(cls._get_storage_config_dict(db))
             try:
@@ -3171,37 +3212,62 @@ class TicketLogPullService:
         :param record: 日志拉取记录
         :return: 可重新提交的创建模型
         """
-        command_content = record.command_content if isinstance(record.command_content, dict) else cls._json_loads(
-            record.command_content, {}
+        command_content = (
+            dict(record.command_content)
+            if isinstance(record.command_content, dict)
+            else cls._json_loads(record.command_content, {})
         )
-        time_range_mode = str(command_content.get("timeRangeMode") or "").strip().lower()
+        if not isinstance(command_content, dict):
+            command_content = {}
+        time_range_mode = str(
+            cls._first_present_value(command_content, "timeRangeMode", "time_range_mode") or ""
+        ).strip().lower()
         payload_data: dict[str, Any] = {
             "vendorId": record.vendor_id,
             "storeId": str(record.store_id or "").strip(),
             "posNo": record.pos_no,
             "commandDataType": record.command_data_type,
-            "modifyTime": command_content.get("modifyTime"),
-            "path": command_content.get("path"),
-            "fileMaxSize": int(command_content.get("fileMaxSize") or 500),
-            "zipMaxSize": int(command_content.get("zipMaxSize") or 500),
+            "fileMaxSize": cls._parse_positive_int(
+                cls._first_present_value(command_content, "fileMaxSize", "file_max_size"), 500
+            ),
+            "zipMaxSize": cls._parse_positive_int(
+                cls._first_present_value(command_content, "zipMaxSize", "zip_max_size"), 500
+            ),
             "storageMode": record.storage_mode,
         }
-        point_time_value = command_content.get("logPointTime")
+        modify_time = cls._first_present_value(command_content, "modifyTime", "modify_time")
+        path = cls._first_present_value(command_content, "path")
+        if modify_time:
+            payload_data["modifyTime"] = str(modify_time)[:10]
+        if path:
+            payload_data["path"] = str(path).strip()
+
+        point_time_value = cls._first_present_value(command_content, "logPointTime", "log_point_time")
         if time_range_mode == "point" and point_time_value not in (None, ""):
+            before_minutes = cls._first_present_value(
+                command_content, "rangeBeforeMinutes", "range_before_minutes"
+            )
+            after_minutes = cls._first_present_value(command_content, "rangeAfterMinutes", "range_after_minutes")
             payload_data.update(
                 {
                     "logPointTime": point_time_value,
-                    "rangeBeforeMinutes": command_content.get("rangeBeforeMinutes"),
-                    "rangeAfterMinutes": command_content.get("rangeAfterMinutes"),
+                    "rangeBeforeMinutes": before_minutes,
+                    "rangeAfterMinutes": after_minutes,
                 }
             )
         else:
-            payload_data.update(
-                {
-                    "logBeginTime": command_content.get("logBeginTime") or record.log_begin_time,
-                    "logEndTime": command_content.get("logEndTime") or record.log_end_time,
-                }
+            # 历史记录可能没有配置日志截取范围，不能把 None 显式传给模型，否则会被判定为范围缺失。
+            begin_time = (
+                cls._first_present_value(command_content, "logBeginTime", "log_begin_time")
+                or record.log_begin_time
             )
+            end_time = (
+                cls._first_present_value(command_content, "logEndTime", "log_end_time")
+                or record.log_end_time
+            )
+            if begin_time or end_time:
+                payload_data["logBeginTime"] = begin_time
+                payload_data["logEndTime"] = end_time
         notify_config = command_content.get("notifyConfig") or command_content.get("notify_config")
         if not isinstance(notify_config, dict):
             automation = (

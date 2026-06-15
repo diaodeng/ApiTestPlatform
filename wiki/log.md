@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-15] INGEST-CODE | 日志拉取重新拉取参数恢复兼容
+- 触发：用户反馈工单详情页日志拉取记录点击“重新拉取”时报“当前记录缺少可重新拉取的原始参数”。
+- 架构层：工单域 / 日志拉取 / 历史记录兼容
+- 创建的页面：`web/public/docs/2026-06-15-ticket-log-pull-retry-payload-fallback.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_log_pull_service.py` -> 重新拉取参数恢复说明
+- 总共涉及页面：4
+
 ## [2026-06-15] INGEST-CODE | API Key 使用审计非阻断处理
 - 触发：用户反馈远端推单偶发 MySQL 2013，堆栈显示失败点为 API Key 鉴权阶段更新 `sys_api_key.last_used_ip/last_used_time`。
 - 架构层：认证鉴权 / API Key / 工单外部同步入口
