@@ -211,6 +211,7 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     field_value_map = {
         "ticketNo": ticket_no,
         "description": description,
+        "customerPriority": customer_priority,
         "internalPriority": internal_priority,
         "ticketVender": ticket_vender,
         "ticketModle": ticket_modle,
