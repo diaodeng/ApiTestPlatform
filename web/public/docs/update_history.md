@@ -1,5 +1,8 @@
 ## 2026-06-15
 
+1. 修复内网远端拉取公网工单后状态和内部负责人未按内网配置生效的问题：`remote_pull` 入库时会使用内网 `statusMappings` 映射远端状态文本，并通过 `assigneeMappings`、邮箱或姓名解析内部负责人。
+2. 远端 pending 工单转换模型时补齐 `internalOwnerName/internalOwnerEmail`，兼容公网 `extraData.external_field_mapping` 快照，避免外部推送进入公网后的内部负责人跨环境丢失。
+3. 新增说明文档：`web/public/docs/2026-06-15-ticket-remote-pull-status-owner-mapping.md`。
 1. 修复工单详情页 `协同/AI` 追问只保存消息、不明显触发 AI 分析的问题：后端将追问正文作为 `extraInstruction` 下发给 AI 任务，前端按 `aiSuccess/aiMessage` 展示触发结果并刷新任务历史。
 2. 新增说明文档：`web/public/docs/2026-06-15-ticket-message-run-ai-trigger-fix.md`。
 1. 优化工单 AI 整包日志分析：Agent 解压完整日志包后先生成 `logs_ai_digest.txt`，prompt 默认只要求优先读取摘要，避免 Codex 无目标通读几十 MB 原始日志导致 token 消耗过高。

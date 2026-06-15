@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-15] INGEST-CODE | 远端拉取状态与内部负责人映射修复
+- 触发：用户反馈内网拉取公网工单后状态仍显示公网原始文案，且公网有内部负责人但内网缺失。
+- 架构层：工单域 / 外部同步链路 / 远端拉取入库
+- 创建的页面：`web/public/docs/2026-06-15-ticket-remote-pull-status-owner-mapping.md`
+- 更新的页面：`web/public/docs/update_history.md`、`flows/ticket-external-sync-flow.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_sync_service.py` -> 远端拉取状态与内部负责人映射说明
+- 总共涉及页面：4
+
 ## [2026-06-15] INGEST-CODE | 工单协同追问触发 AI 修复
 - 触发：用户反馈工单详情页 `协同/AI` 中追问有保存输入内容，但没有发起 AI 分析
 - 架构层：工单域 / AI Worker 编排 / 前端详情页

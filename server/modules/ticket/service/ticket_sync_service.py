@@ -3466,9 +3466,13 @@ class TicketSyncService:
                 assignee_mappings=config.get("assigneeMappings") or [],
             )
         else:
-            status_code = str(sync_object.status or "").strip()
+            # 远端拉取不复用公网项目/模块/用户 ID，但状态与人员文本仍允许按内网本地配置映射。
+            status_code = cls._resolve_status_by_external_value(
+                status_text=ticket_status or str(sync_object.status or "").strip(),
+                status_mappings=config.get("statusMappings") or [],
+            )
             assignee_email = str(
-                cls._payload_field_value(
+                current_assignee_email or cls._payload_field_value(
                     raw_payload,
                     "currentAssigneeEmail",
                     "current_assignee_email",
@@ -3492,15 +3496,24 @@ class TicketSyncService:
                 or ""
             ).strip()
             assignee_name = ticket_assignee or str(sync_object.current_assignee_name or "").strip()
-            assignee_id, assignee_name = cls._resolve_remote_assignee_by_email_or_name(
+            assignee_id, assignee_name = cls._resolve_external_person_by_mapping_or_email(
                 db,
-                assignee_email=assignee_email,
-                assignee_name=assignee_name,
+                person_text=assignee_name,
+                person_email=assignee_email,
+                assignee_mappings=config.get("assigneeMappings") or [],
             )
-            first_line_assignee_id = cls._safe_int(getattr(sync_object, "first_line_assignee_id", None))
-            first_line_assignee_name = str(getattr(sync_object, "first_line_assignee_name", "") or "").strip()
-            internal_owner_id = cls._safe_int(getattr(sync_object, "internal_owner_id", None))
-            internal_owner_name = str(getattr(sync_object, "internal_owner_name", "") or "").strip()
+            first_line_assignee_id, first_line_assignee_name = cls._resolve_external_person_by_mapping_or_email(
+                db,
+                person_text=reporter_person,
+                person_email=reporter_email,
+                assignee_mappings=config.get("assigneeMappings") or [],
+            )
+            internal_owner_id, internal_owner_name = cls._resolve_external_person_by_mapping_or_email(
+                db,
+                person_text=internal_owner,
+                person_email=internal_owner_email,
+                assignee_mappings=config.get("assigneeMappings") or [],
+            )
         if apply_external_mappings and not assignee_id:
             assignee_id = cls._safe_int(sync_object.current_assignee_id)
         if not assignee_name:
@@ -5008,6 +5021,13 @@ class TicketSyncService:
             if isinstance(sync_extra_data.get("external_field_mapping"), dict)
             else {}
         )
+        ticket_status = str(
+            item.get("ticketStatus")
+            or item.get("ticket_status")
+            or item.get("status")
+            or external_field_mapping.get("ticketStatus")
+            or ""
+        ).strip()
         module_name = str(
             item.get("moduleName")
             or item.get("module_name")
@@ -5032,6 +5052,21 @@ class TicketSyncService:
             "modifyTime": log_pull_hints.get("modifyTime") or log_pull_hints.get("modify_time"),
         }
         log_pull_config = {key: value for key, value in log_pull_config.items() if value not in (None, "", [])}
+        internal_owner_name = str(
+            item.get("internalOwner")
+            or item.get("internal_owner")
+            or item.get("internalOwnerName")
+            or item.get("internal_owner_name")
+            or external_field_mapping.get("internalOwner")
+            or external_field_mapping.get("internalOwnerName")
+            or ""
+        ).strip()
+        internal_owner_email = str(
+            item.get("internalOwnerEmail")
+            or item.get("internal_owner_email")
+            or external_field_mapping.get("internalOwnerEmail")
+            or ""
+        ).strip()
         sync_payload = {
             "source": source_payload,
             "syncConsumer": str(remote_sync.get("consumer") or "").strip() or None,
@@ -5049,7 +5084,7 @@ class TicketSyncService:
             "moduleName": module_name,
             "moduleCode": item.get("moduleCode") or item.get("module_code") or "",
             "versionKey": item.get("versionKey") or item.get("version_key") or "",
-            "status": item.get("status") or "",
+            "status": ticket_status,
             "customerPriority": item.get("customerPriority") or item.get("customer_priority") or "P3",
             "internalPriority": item.get("internalPriority") or item.get("internal_priority") or "P3",
             "severity": item.get("severity") or "",
@@ -5057,6 +5092,9 @@ class TicketSyncService:
             "reporterName": item.get("reporterName") or item.get("reporter_name") or "",
             "currentAssigneeId": None,
             "currentAssigneeName": item.get("currentAssigneeName") or item.get("current_assignee_name") or "",
+            "internalOwnerId": item.get("internalOwnerId") or item.get("internal_owner_id"),
+            "internalOwnerName": internal_owner_name,
+            "internalOwnerEmail": internal_owner_email,
             "rootCause": item.get("rootCause") or item.get("root_cause") or "",
             "solution": item.get("solution") or "",
             "tags": item.get("tags"),
