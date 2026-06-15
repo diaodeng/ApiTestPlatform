@@ -3797,6 +3797,13 @@ class TicketSyncService:
             or str(sync_object.module_name or "").strip()
             or (str(ticket.module_name or "").strip() if ticket else "")
         )
+        incoming_module_name = (
+            str((detected or {}).get("moduleName") or "").strip()
+            or str(sync_object.module_name or "").strip()
+        )
+        if incoming_module_name and not module_id and not is_remote_pull:
+            payload["module_id"] = None
+            payload["module_name"] = incoming_module_name
         if module_name_fallback and not str(payload.get("module_name") or "").strip():
             payload["module_name"] = module_name_fallback
         if module_name_fallback:
