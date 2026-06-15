@@ -707,6 +707,9 @@
                   {{ getOptionLabel(logPullDataTypeOptions, scope.row.commandDataType) }}
                 </template>
               </el-table-column>
+              <el-table-column label="商家" prop="vendorId" width="110" show-overflow-tooltip />
+              <el-table-column label="门店" prop="storeId" min-width="150" show-overflow-tooltip />
+              <el-table-column label="POSID" prop="posNo" width="110" show-overflow-tooltip />
               <el-table-column label="状态" min-width="170">
                 <template #default="scope">
                   <el-tag :type="getLogPullStatusTagType(scope.row.status)">
@@ -717,11 +720,18 @@
               <el-table-column label="保存方式" width="90" align="center">
                 <template #default="scope">{{ getOptionLabel(logPullStorageModeOptions, scope.row.storageMode) }}</template>
               </el-table-column>
-              <el-table-column label="归档地址" prop="storagePath" min-width="220" show-overflow-tooltip />
+              <el-table-column label="归档地址" min-width="220" show-overflow-tooltip>
+                <template #default="scope">
+                  <el-link v-if="scope.row.storagePath" type="primary" @click="downloadLogPullArchive(scope.row)">
+                    {{ scope.row.storagePath }}
+                  </el-link>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
               <el-table-column label="原始压缩包" min-width="180" show-overflow-tooltip>
                 <template #default="scope">
-                  <el-link v-if="scope.row.commandResultUrl" :href="scope.row.commandResultUrl" target="_blank" type="primary">
-                    查看地址
+                  <el-link v-if="scope.row.commandResultUrl" type="primary" @click="downloadLogPullOriginal(scope.row)">
+                    下载原始包
                   </el-link>
                   <span v-else>-</span>
                 </template>
@@ -1104,6 +1114,9 @@
                       {{ getOptionLabel(logPullDataTypeOptions, scope.row.commandDataType) }}
                     </template>
                   </el-table-column>
+                  <el-table-column label="商家" prop="vendorId" width="110" show-overflow-tooltip />
+                  <el-table-column label="门店" prop="storeId" min-width="150" show-overflow-tooltip />
+                  <el-table-column label="POSID" prop="posNo" width="110" show-overflow-tooltip />
                   <el-table-column label="状态" min-width="170">
                     <template #default="scope">
                       <el-tag :type="getLogPullStatusTagType(scope.row.status)">
@@ -1114,11 +1127,18 @@
                   <el-table-column label="保存方式" width="90" align="center">
                     <template #default="scope">{{ getOptionLabel(logPullStorageModeOptions, scope.row.storageMode) }}</template>
                   </el-table-column>
-                  <el-table-column label="归档地址" prop="storagePath" min-width="220" show-overflow-tooltip />
+                  <el-table-column label="归档地址" min-width="220" show-overflow-tooltip>
+                    <template #default="scope">
+                      <el-link v-if="scope.row.storagePath" type="primary" @click="downloadLogPullArchive(scope.row)">
+                        {{ scope.row.storagePath }}
+                      </el-link>
+                      <span v-else>-</span>
+                    </template>
+                  </el-table-column>
                   <el-table-column label="原始压缩包" min-width="180" show-overflow-tooltip>
                     <template #default="scope">
-                      <el-link v-if="scope.row.commandResultUrl" :href="scope.row.commandResultUrl" target="_blank" type="primary">
-                        查看地址
+                      <el-link v-if="scope.row.commandResultUrl" type="primary" @click="downloadLogPullOriginal(scope.row)">
+                        下载原始包
                       </el-link>
                       <span v-else>-</span>
                     </template>
@@ -1783,6 +1803,7 @@ import {
   delTicket,
   delTicketLogPull,
   delTicketAiRepoMapping,
+  downloadTicketLogPull,
   downloadTicketImportTemplate,
   extractTicketKnowledge,
   getTicket,
@@ -1833,6 +1854,7 @@ import {
   normalizeLogPullNotifyConfig
 } from './logPull.shared'
 import UserSelect from './components/UserSelect.vue'
+import { blobValidate } from '@/utils/ruoyi'
 
 const { proxy } = getCurrentInstance()
 
@@ -3747,6 +3769,72 @@ function redownloadLogPull(row) {
     return
   }
   runLogPullAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载', true)
+}
+
+function resolveLogPullDownloadFileName(row, source = 'auto') {
+  let remoteName = ''
+  if (row?.commandResultUrl) {
+    try {
+      remoteName = new URL(String(row.commandResultUrl)).pathname.split('/').pop() || ''
+    } catch (error) {
+      remoteName = String(row.commandResultUrl).split('/').pop() || ''
+    }
+  }
+  const candidates = [
+    row?.downloadFileName,
+    source !== 'original' && row?.storagePath ? String(row.storagePath).split(/[\\/]/).pop() : '',
+    remoteName,
+    `ticket_log_pull_${row?.id || Date.now()}.zip`
+  ]
+  for (const candidate of candidates) {
+    const text = String(candidate || '').trim()
+    if (text) {
+      return text
+    }
+  }
+  return `ticket_log_pull_${row?.id || Date.now()}.zip`
+}
+
+async function downloadLogPullFile(row, source, emptyMessage) {
+  if (!row?.id) {
+    return
+  }
+  try {
+    logPullActionLoading.value = true
+    const blob = await downloadTicketLogPull(row.id, source)
+    if (!blobValidate(blob)) {
+      try {
+        const text = await blob.text()
+        const payload = JSON.parse(text)
+        proxy.$modal.msgError(payload.msg || emptyMessage || '下载失败')
+      } catch (error) {
+        proxy.$modal.msgError(emptyMessage || '下载失败')
+      }
+      return
+    }
+    saveAs(blob, resolveLogPullDownloadFileName(row, source))
+  } catch (error) {
+    console.error(error)
+    proxy.$modal.msgError(emptyMessage || '下载失败')
+  } finally {
+    logPullActionLoading.value = false
+  }
+}
+
+function downloadLogPullArchive(row) {
+  if (!row?.storagePath) {
+    proxy.$modal.msgWarning('当前记录缺少本服务归档地址')
+    return
+  }
+  downloadLogPullFile(row, 'service', '本服务归档文件不存在或不可下载')
+}
+
+function downloadLogPullOriginal(row) {
+  if (!row?.commandResultUrl) {
+    proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
+    return
+  }
+  downloadLogPullFile(row, 'original', '原始压缩包不存在或不可下载')
 }
 
 function reextractLogPull(row = selectedLogPullRecord.value) {

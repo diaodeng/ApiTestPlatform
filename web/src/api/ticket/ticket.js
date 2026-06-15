@@ -375,10 +375,11 @@ export function createTicketLogPullRecord(data) {
 }
 
 // 下载日志拉取压缩包
-export function downloadTicketLogPull(recordId) {
+export function downloadTicketLogPull(recordId, source) {
   return request({
     url: `/ticket/log-pulls/${recordId}/download`,
     method: 'get',
+    params: source ? { source } : undefined,
     responseType: 'blob',
   });
 }

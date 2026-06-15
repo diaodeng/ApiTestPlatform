@@ -1159,19 +1159,21 @@ async def save_ticket_log_pull_project_vendor_map(
 async def download_ticket_log_pull(
     request: Request,
     record_id: int,
+    source: str = "auto",
     query_db: Session = Depends(get_db),
 ):
     """
     下载日志拉取压缩包接口。
     :param request: 请求对象
     :param record_id: 日志拉取记录ID
+    :param source: 下载来源，auto/service/original
     :param query_db: 数据库会话
     :return: 压缩包文件
     """
     temp_file_path = None
     try:
         temp_file_path, should_cleanup, download_file_name = TicketLogPullService.download_log_pull_file_services(
-            query_db, record_id
+            query_db, record_id, source=source
         )
         if not temp_file_path:
             return ResponseUtil.failure(msg="日志拉取记录不存在或没有可下载的文件")

@@ -1727,12 +1727,13 @@ class TicketLogPullService:
 
     @classmethod
     def download_log_pull_file_services(
-        cls, query_db: Session, record_id: int
+        cls, query_db: Session, record_id: int, source: str = "auto"
     ) -> tuple[Path | None, bool, str | None]:
         """
         获取日志拉取记录对应的可下载文件。
         :param query_db: 数据库会话
         :param record_id: 日志拉取记录ID
+        :param source: 下载来源，auto 优先本服务归档并回退原始地址，service 仅本服务归档，original 仅原始地址
         :return: 文件路径、是否需要清理临时文件、下载文件名
         """
         record = TicketLogPullDao.get_record_by_id(query_db, record_id)
@@ -1746,7 +1747,12 @@ class TicketLogPullService:
                 reason="日志拉取记录不存在",
             )
             return None, False, None
-        archive_path, should_cleanup = cls._resolve_archive_source_for_view(record, query_db)
+        normalized_source = str(source or "auto").strip().lower()
+        if normalized_source not in {"auto", "service", "original"}:
+            normalized_source = "auto"
+        archive_path, should_cleanup = cls._resolve_archive_source_for_download(
+            record, query_db, source=normalized_source
+        )
         if not archive_path:
             cls._log_chain_step(
                 query_db,
@@ -1755,6 +1761,7 @@ class TicketLogPullService:
                 step="download-log-pull",
                 status="skipped",
                 reason="没有可下载的归档文件",
+                detail={"source": normalized_source},
             )
             return None, False, None
         cls._log_chain_step(
@@ -1764,6 +1771,7 @@ class TicketLogPullService:
             step="download-log-pull",
             status="requested",
             reason="准备下载归档文件",
+            detail={"source": normalized_source},
         )
         return archive_path, should_cleanup, cls._build_download_file_name(record, archive_path)
 
@@ -2957,6 +2965,39 @@ class TicketLogPullService:
             except Exception as exc:
                 logger.warning("从 FTP 下载日志压缩包失败: %s", exc)
         if str(record.command_result_url or "").strip():
+            try:
+                temp_file, _ = cls._download_archive(record, db)
+                return temp_file, True
+            except Exception as exc:
+                logger.warning("从外部地址重新下载日志压缩包失败: %s", exc)
+        return None, False
+
+    @classmethod
+    def _resolve_archive_source_for_download(
+        cls, record: TicketLogPullRecord, db: Session, *, source: str = "auto"
+    ) -> tuple[Path | None, bool]:
+        """
+        按下载来源解析压缩包文件。
+        :param record: 日志拉取记录
+        :param db: 数据库会话
+        :param source: 下载来源，auto/service/original
+        :return: 压缩包路径和是否需要清理临时文件
+        """
+        normalized_source = str(source or "auto").strip().lower()
+        storage_path = str(record.storage_path or "").strip()
+        storage_mode = str(record.storage_mode or "").strip().lower()
+        if normalized_source in {"auto", "service"} and storage_path:
+            local_path = Path(storage_path)
+            if local_path.exists() and local_path.is_file():
+                return local_path, False
+            if storage_mode == "ftp":
+                try:
+                    return cls._download_file_from_ftp_to_temp(db, storage_path), True
+                except Exception as exc:
+                    logger.warning("从 FTP 下载日志压缩包失败: %s", exc)
+            if normalized_source == "service":
+                return None, False
+        if normalized_source in {"auto", "original"} and str(record.command_result_url or "").strip():
             try:
                 temp_file, _ = cls._download_archive(record, db)
                 return temp_file, True

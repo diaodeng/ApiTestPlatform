@@ -1220,7 +1220,7 @@ async function downloadLogPull(row) {
   }
   try {
     actionLoading.value = true
-    const blob = await downloadTicketLogPull(row.id)
+    const blob = await downloadTicketLogPull(row.id, 'auto')
     if (!blobValidate(blob)) {
       try {
         const text = await blob.text()

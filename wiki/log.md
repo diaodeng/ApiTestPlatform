@@ -8,6 +8,13 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-16] INGEST-CODE | 日志拉取下载来源与 POS 列表区分
+- 触发：用户要求日志拉取管理页下载优先本服务文件、缺失再走原始路径；工单详情页归档地址与原始压缩包分别下载；详情列表增加商家、门店、POSID。
+- 架构层：工单域 / 日志拉取 / 下载来源 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-16-ticket-log-pull-download-source-fix.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 变更传播链：`ticket_log_pull_service.py` / `ticket_controller.py` / `ticket.js` / `ticket/index.vue` / `logPullRecord/index.vue` -> 下载来源参数与详情页日志拉取列表展示
+
 ## [2026-06-16] INGEST-CODE | 日志拉取弹窗布局与通知修复
 - 触发：用户要求日志拉取弹窗商家/门店/POSID 自动铺满整行，按数据类型切换 `modifyTime/path`，时间方式仅切割日志时显示，默认本地保存，并修复通知配置不生效。
 - 架构层：工单域 / 日志拉取 / Web 控制台 / 推送通知
