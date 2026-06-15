@@ -3304,15 +3304,24 @@ function submitMessage() {
   if (attachments === null) {
     return
   }
-    addTicketMessage(currentTicketId.value, {
-      ...messageForm.value,
-      content,
-      attachments
+  addTicketMessage(currentTicketId.value, {
+    ...messageForm.value,
+    content,
+    attachments
   }).then(response => {
-    const payload = response.data || {}
-    proxy.$modal.msgSuccess(payload.message || '消息提交成功')
+    const payload = response.data || response || {}
+    const aiResult = payload.result || {}
+    if (messageForm.value.runAi && !aiResult.aiSuccess) {
+      proxy.$modal.msgWarning(aiResult.aiMessage || payload.message || '消息已保存，但AI追问未发起')
+    } else {
+      proxy.$modal.msgSuccess(payload.message || (aiResult.aiSuccess ? 'AI追问任务已提交' : '消息提交成功'))
+    }
     resetMessageForm()
-    Promise.all([refreshDetail(), getList()])
+    const refreshTasks = [refreshDetail(), getList()]
+    if (aiResult.aiSuccess) {
+      refreshTasks.push(loadAiAnalysisTasks(true))
+    }
+    Promise.all(refreshTasks)
   })
 }
 

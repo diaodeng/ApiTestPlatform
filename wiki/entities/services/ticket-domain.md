@@ -80,6 +80,7 @@ graph TD
 - 工单自动化通知统一复用已有推送配置，页面侧可选择具体推送项和成功/失败通知开关；自动 AI 成功和失败都会发送消息，便于业务闭环确认。
 - 参数配置说明改为通用提示按钮组件 `PromptButton`，后续可在其他页面复用。
 - 日志拉取时间范围支持可空：有时间范围时按“开始/结束时间”或“时间点+前后分钟范围”提取入库；未填时间范围时只下载整包压缩文件，不落日志正文，供 AI 分析时由 Agent 基于 `commandResultUrl` 在本地工作区下载并解压整包。
+- AI 整包日志分析不再默认让 Codex 通读 `source_logs/` 完整日志目录；Agent 会先生成受控大小的 `logs_ai_digest.txt`，prompt 要求优先读取摘要，证据不足时再按摘要文件名和行号定点读取原始日志。
 - 日志拉取管理页新增拉取日期展示，并提供日志下载和记录删除能力；删除会同步清理本地或 FTP 归档文件，未关联工单的独立记录也能直接下载。
 - 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。
 - 工单详情页新增“刷新AI数据”按钮，方便在 AI 任务完成后手动刷新当前详情与任务历史，不再依赖退出重进页面。
@@ -103,6 +104,7 @@ graph TD
 - 工单 AI 分析已接入 Codex CLI：新增仓库映射表 `ticket_ai_repo_mapping`、分析任务表 `ticket_ai_analysis_task`，分析结果写回 `ticket.ai_analysis` 并同步更新 RCA/事件。
 - 工单二阶段闭环新增消息流 `ticket_message` 和 ACR 快照 `ticket_snapshot`：评论、追问、AI 回复、开发/测试补充会进入消息流；AI 分析、RCA 保存、状态闭环或手工操作会生成快照版本。
 - AI 分析上下文现在包含工单消息、最近 ACR 快照和相似工单推荐，追问入口会先保存消息，再按工单版本和 Agent 配置提交新的 AI 分析任务。
+- 协同/AI 追问提交时，本次追问正文会作为 AI 分析任务的 `extraInstruction` 下发；若版本号、映射或 Agent/Provider 配置导致 AI 未发起，消息仍保留，前端会展示 `aiMessage` 失败原因并避免误提示为完整成功。
 - AI 分析结束后无论成功失败都会发送通知，通知内容会包含工单号、工单标题、项目名称、状态和摘要说明。
 - AI 协同追问的输出契约需要满足 Codex structured output 约束，`evidence`、`risk_items`、`next_steps` 也必须出现在 `required` 中；`symptom`、`similar_cases`、`sop_suggestion`、`monitoring_suggestion` 等增强字段允许为空或缺省，由服务端归一化补默认值，避免模型未产出扩展字段时任务失败。
 - AI 分析下发给 Agent 的日志正文会做中间截断，默认最多保留首尾约 80 万字符，并记录 `textTruncatedForAi` 与原始字符数，避免追问请求因超大上下文触发 Codex/OpenAI `bad_response_status_code`。
@@ -124,6 +126,8 @@ graph TD
 - AI 分析 Worker 的认证环境优先从 Codex 配置目录 `.env` 读取，再回退进程环境变量，避免开发机密钥只配置在 Codex 目录时失效。
 - AI 分析 Agent 会在任务工作区落盘 `worker.stdout.txt` 和 `worker.stderr.txt`，并在系统日志中记录环境快照，便于对比手工终端与后端线程的运行差异。
 - AI 分析 Agent 通过工作区内 `analysis.lock` 规避同任务重复并发执行；锁文件存在且未过期时会直接返回运行中提示，锁文件异常或过期会自动放行重试。
+- `client_new` Agent 执行工单 AI 分析时必须使用 Codex CLI；可执行文件通过 `codex --version` 校验，返回 `codex-cli` 才允许执行，即使入口位于 OpenAI Codex 安装目录也可使用；可通过本地配置 `ticket_ai_codex_cli_path` 显式指定 CLI 路径，Windows 子进程会隐藏控制台窗口。
+- 工单 AI Worker 失败时只向服务端返回错误摘要和工作区日志路径；Codex 账号并发限制会归一提示 `Concurrency limit exceeded`，完整 stdout/stderr 保留在任务工作区文件中。
 - AI 分析 Worker 的输出 schema 必须满足 Codex `response_format` 约束，根对象需要显式设置 `additionalProperties: false`，否则会返回 `invalid_request_error`。
 - 输出 schema 不应把协同增强字段全部设为必填；核心字段用于写回 RCA 和 ACR，增强字段用于知识沉淀与经验复用，缺失时由服务端默认空数组、空字符串或人工复核标记。
 - Agent 执行过程会通过 `ai_analysis_step` / `ai_analysis_status` / `ai_analysis_error` / `ai_analysis_finished` 事件把阶段日志回传服务端，服务端只记录系统日志，不把调试细节落到业务表。

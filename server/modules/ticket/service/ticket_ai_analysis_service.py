@@ -52,8 +52,8 @@ from modules.ticket.service.ticket_embedding_service import TicketEmbeddingServi
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_notify_service import TicketNotifyService
 from modules.ticket.service.ticket_prompt_service import TicketPromptService
-from utils.common_util import CamelCaseUtil
 from utils.api_key_util import ApiKeyUtil
+from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.snowflake import snowIdWorker
 
@@ -953,8 +953,9 @@ class TicketAiAnalysisService:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
 3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或
-   {workspace_path}/logs.txt 只是整包分析说明，请优先阅读 {workspace_path}/source_logs/ 目录中的解压日志文件，
-   再结合代码搜索、调用链、日志和历史事件分析根因。
+   {workspace_path}/logs.txt 只是整包分析说明，请优先阅读 {workspace_path}/logs_ai_digest.txt；
+   只有摘要证据不足时，才按摘要中的文件名和行号去 {workspace_path}/source_logs/ 目录定点读取原始日志，
+   禁止无目标地通读整包日志。
 4. 工单不是一次性分析，请结合 messages、snapshots 和 similarTickets：
    - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
    - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
@@ -1107,7 +1108,9 @@ class TicketAiAnalysisService:
         worker_env = os.environ.copy()
         worker_env.update(cls._load_codex_env(codex_home))
         if env_overrides:
-            worker_env.update({str(key): str(value) for key, value in env_overrides.items() if key and value is not None})
+            worker_env.update(
+                {str(key): str(value) for key, value in env_overrides.items() if key and value is not None}
+            )
         worker_env["CODEX_HOME"] = str(codex_home)
         process = subprocess.run(
             command,

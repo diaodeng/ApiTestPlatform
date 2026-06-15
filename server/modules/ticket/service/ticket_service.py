@@ -1658,6 +1658,7 @@ class TicketService:
                             agentCode=message_object.agent_code,
                             aiProviderCode=message_object.ai_provider_code,
                             forceRefresh=True,
+                            extraInstruction=content,
                         )
                         ai_result = TicketAiAnalysisService.create_analysis_task_services(
                             query_db,
@@ -1671,7 +1672,13 @@ class TicketService:
                     ai_message = f"AI追问提交失败: {exc}"
             return CrudResponseModel(
                 is_success=True,
-                message="消息提交成功",
+                message=(
+                    "消息提交成功，AI追问任务已提交"
+                    if ai_success
+                    else f"消息已保存，但AI追问未发起：{ai_message}"
+                    if message_object.run_ai and ai_message
+                    else "消息提交成功"
+                ),
                 result={
                     "message": CamelCaseUtil.transform_result(message),
                     "aiTask": (
@@ -1679,6 +1686,7 @@ class TicketService:
                         if ai_result and ai_result.is_success
                         else None
                     ),
+                    "aiTriggered": bool(message_object.run_ai),
                     "aiMessage": ai_message,
                     "aiSuccess": ai_success,
                 },

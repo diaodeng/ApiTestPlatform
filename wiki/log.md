@@ -8,6 +8,33 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-15] INGEST-CODE | 工单协同追问触发 AI 修复
+- 触发：用户反馈工单详情页 `协同/AI` 中追问有保存输入内容，但没有发起 AI 分析
+- 架构层：工单域 / AI Worker 编排 / 前端详情页
+- 创建的页面：`web/public/docs/2026-06-15-ticket-message-run-ai-trigger-fix.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_service.py` / `web/src/views/ticket/index.vue` -> 工单协同追问触发 AI 说明
+- 总共涉及页面：4
+
+## [2026-06-15] INGEST-CODE | 工单 AI 整包日志摘要优化
+- 触发：用户询问几十 MB 日志是否完整给 AI 分析，担心 token 消耗过高。
+- 架构层：client_new Agent / 工单 AI 分析 / 日志整包处理
+- 创建的页面：`web/public/docs/2026-06-15-ticket-ai-log-digest-optimization.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`client_new/services/ticket_ai_analysis_service.py` / `server/modules/ticket/service/ticket_ai_analysis_service.py` -> 工单 AI 日志整包摘要说明
+- 总共涉及页面：4
+
+## [2026-06-15] INGEST-CODE | Agent Codex CLI 执行链路修复
+- 触发：用户反馈 Windows Agent 安装 Codex 桌面应用后，工单 AI 分析误用桌面应用 `codex.exe`、弹出 cmd 窗口，且账号并发限制错误被业务日志污染。
+- 架构层：client_new Agent / 工单 AI 分析 / Codex CLI 执行
+- 创建的页面：`web/public/docs/2026-06-15-agent-codex-cli-runtime-fix.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`client_new/services/ticket_ai_analysis_service.py` / `client_new/model/config.py` -> Agent Codex CLI 执行修复说明
+- 总共涉及页面：4
+
 ## [2026-06-15] INGEST-CODE | 日志拉取重新拉取参数恢复兼容
 - 触发：用户反馈工单详情页日志拉取记录点击“重新拉取”时报“当前记录缺少可重新拉取的原始参数”。
 - 架构层：工单域 / 日志拉取 / 历史记录兼容

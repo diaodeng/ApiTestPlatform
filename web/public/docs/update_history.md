@@ -1,5 +1,13 @@
 ## 2026-06-15
 
+1. 修复工单详情页 `协同/AI` 追问只保存消息、不明显触发 AI 分析的问题：后端将追问正文作为 `extraInstruction` 下发给 AI 任务，前端按 `aiSuccess/aiMessage` 展示触发结果并刷新任务历史。
+2. 新增说明文档：`web/public/docs/2026-06-15-ticket-message-run-ai-trigger-fix.md`。
+1. 优化工单 AI 整包日志分析：Agent 解压完整日志包后先生成 `logs_ai_digest.txt`，prompt 默认只要求优先读取摘要，避免 Codex 无目标通读几十 MB 原始日志导致 token 消耗过高。
+2. 摘要保留命中片段的文件名和行号，必要时仍可让 Codex 定点读取 `source_logs/` 原始日志，不影响完整日志复核能力。
+3. 新增说明文档：`web/public/docs/2026-06-15-ticket-ai-log-digest-optimization.md`。
+1. 修复 `client_new` Agent 调用 Codex 执行工单 AI 分析时误用 Codex 桌面应用的问题：解析 Worker 时跳过桌面应用目录，新增 `ticket_ai_codex_cli_path` 显式 CLI 路径配置，并在 Windows 下隐藏子进程 cmd 窗口。
+2. 优化 Agent Worker 失败返回：只返回错误摘要与 stdout/stderr 文件路径；Codex 账号并发限制会明确提示 `Concurrency limit exceeded`，不再把整段业务日志内容回传为错误消息。
+3. 新增说明文档：`web/public/docs/2026-06-15-agent-codex-cli-runtime-fix.md`。
 1. 修复工单详情页和日志拉取记录页点击“重新拉取”时，历史记录因 `command_content` 格式或空时间范围字段导致恢复参数失败的问题。
 2. 重新拉取参数恢复兼容 JSON 字符串、驼峰/下划线字段名和历史空时间范围；仍要求至少可恢复 `modifyTime` 或 `path`，避免提交不完整外部命令。
 3. 新增说明文档：`web/public/docs/2026-06-15-ticket-log-pull-retry-payload-fallback.md`。

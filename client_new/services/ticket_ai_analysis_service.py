@@ -30,6 +30,10 @@ class TicketAiAnalysisService:
     DEFAULT_TIMEOUT_SEC = 3600
     DEFAULT_WORKER_COMMAND = "codex exec"
     DEFAULT_WORKER_SANDBOX = "workspace-write"
+    DEFAULT_LOG_DIGEST_MAX_CHARS = 300000
+    DEFAULT_LOG_DIGEST_MAX_MATCHES_PER_FILE = 80
+    DEFAULT_LOG_DIGEST_CONTEXT_LINES = 3
+    DEFAULT_LOG_DIGEST_MAX_LINE_CHARS = 1200
 
     @staticmethod
     def _json_safe_value(value: Any) -> Any:
@@ -138,7 +142,7 @@ class TicketAiAnalysisService:
     @classmethod
     def _resolve_worker_command_parts(cls, command_parts: list[str]) -> list[str]:
         """
-        解析 Worker 命令为可直接执行的进程参数。
+        解析 Worker 命令为可直接执行的进程参数，并避免误用 Codex 桌面应用。
         :param command_parts: 原始命令参数
         :return: 可执行的命令参数
         """
@@ -146,20 +150,102 @@ class TicketAiAnalysisService:
         if not parts:
             parts = ["codex", "exec"]
         executable = parts[0]
-        if Path(executable).suffix:
+        if Path(executable).suffix and cls._is_codex_cli_executable(executable):
             return parts
-        resolved_executable = shutil.which(executable)
-        if not resolved_executable and Path(r"C:\nvm4w\nodejs\codex.cmd").exists():
-            resolved_executable = str(Path(r"C:\nvm4w\nodejs\codex.cmd"))
-        if not resolved_executable and Path(r"C:\nvm4w\nodejs\codex.exe").exists():
-            resolved_executable = str(Path(r"C:\nvm4w\nodejs\codex.exe"))
-        if not resolved_executable and Path(r"C:\nvm4w\nodejs\codex").exists():
-            resolved_executable = str(Path(r"C:\nvm4w\nodejs\codex"))
+        config = AgentConfig.read_config()
+        configured_cli = str(getattr(config, "ticket_ai_codex_cli_path", "") or "").strip()
+        resolved_executable = cls._resolve_codex_cli_executable(executable, configured_cli)
         if not resolved_executable:
-            raise FileNotFoundError("未找到可执行的 codex Worker，请检查 codex 是否已安装并加入 PATH")
+            raise FileNotFoundError(
+                "未找到可执行的 Codex CLI。"
+                "请安装 Codex CLI，或在 Agent 配置 ticket_ai_codex_cli_path 中填写 CLI 路径"
+            )
         if resolved_executable.lower().endswith((".cmd", ".bat")):
             return ["cmd", "/c", resolved_executable, *parts[1:]]
         return [resolved_executable, *parts[1:]]
+
+    @staticmethod
+    def _is_codex_desktop_app_path(executable: str | Path | None) -> bool:
+        """
+        判断可执行文件是否来自 OpenAI Codex 安装目录。
+        :param executable: 可执行文件路径
+        :return: 是否为 OpenAI Codex 安装目录路径
+        """
+        if not executable:
+            return False
+        normalized = str(executable).replace("/", "\\").lower()
+        return "\\appdata\\local\\programs\\openai\\codex\\" in normalized
+
+    @staticmethod
+    def _is_codex_cli_executable(executable: str | Path | None) -> bool:
+        """
+        通过 --version 判断可执行文件是否为可用的 Codex CLI。
+        :param executable: 可执行文件路径
+        :return: 是否为可执行 Codex CLI
+        """
+        if not executable:
+            return False
+        try:
+            popen_kwargs: dict[str, Any] = TicketAiAnalysisService._build_hidden_subprocess_kwargs()
+            if str(executable).lower().endswith((".cmd", ".bat")):
+                command = ["cmd", "/c", str(executable), "--version"]
+            else:
+                command = [str(executable), "--version"]
+            result = subprocess.run(
+                command,
+                text=True,
+                capture_output=True,
+                timeout=10,
+                **popen_kwargs,
+            )
+            version_text = f"{result.stdout}\n{result.stderr}".strip().lower()
+            return result.returncode == 0 and "codex-cli" in version_text
+        except Exception:
+            return False
+
+    @classmethod
+    def _resolve_codex_cli_executable(cls, executable: str, configured_cli: str | None = None) -> str | None:
+        """
+        解析 Codex CLI 可执行文件，优先使用本地配置和 Node/npm CLI，并用 --version 校验 CLI 身份。
+        :param executable: 命令名或配置的可执行文件
+        :param configured_cli: Agent 本地显式配置的 Codex CLI 路径
+        :return: Codex CLI 可执行文件路径
+        """
+        candidates: list[str | None] = [
+            configured_cli,
+            str(Path(r"C:\nvm4w\nodejs\codex.cmd")),
+            str(Path(r"C:\nvm4w\nodejs\codex.exe")),
+            str(Path(r"C:\nvm4w\nodejs\codex")),
+            str(Path.home() / "AppData" / "Roaming" / "npm" / "codex.cmd"),
+            str(Path.home() / "AppData" / "Roaming" / "npm" / "codex.exe"),
+            str(Path.home() / "AppData" / "Roaming" / "npm" / "codex"),
+            shutil.which(executable),
+        ]
+        if Path(executable).suffix:
+            candidates.insert(0, executable)
+        for candidate in candidates:
+            if not candidate:
+                continue
+            candidate_path = Path(candidate)
+            if candidate_path.exists() and cls._is_codex_cli_executable(candidate_path):
+                return str(candidate_path)
+        return None
+
+    @staticmethod
+    def _build_hidden_subprocess_kwargs() -> dict[str, Any]:
+        """
+        构建 Windows 下隐藏子进程控制台窗口的参数。
+        :return: subprocess.run 可用的额外参数
+        """
+        if os.name != "nt":
+            return {}
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+        return {
+            "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            "startupinfo": startupinfo,
+        }
 
     @staticmethod
     def _persist_worker_streams(workspace_dir: Path, stdout_text: str | None, stderr_text: str | None) -> None:
@@ -203,6 +289,7 @@ class TicketAiAnalysisService:
             cwd=str(repo_path),
             env=env_values,
             timeout=max(timeout_sec, 60),
+            **TicketAiAnalysisService._build_hidden_subprocess_kwargs(),
         )
 
     @staticmethod
@@ -354,15 +441,198 @@ class TicketAiAnalysisService:
                 extracted_files.append(member)
         return extracted_files
 
+    @classmethod
+    def _build_log_digest_keywords(cls, ticket: dict[str, Any], context_payload: dict[str, Any]) -> list[str]:
+        """
+        从工单和日志提示中提取日志预筛选关键词。
+        :param ticket: 工单信息
+        :param context_payload: AI 上下文
+        :return: 去重后的关键词列表
+        """
+        source_log_pull = context_payload.get("sourceLogPull") if isinstance(context_payload, dict) else {}
+        log_hints = (
+            ticket.get("extraData", {}).get("log_pull_hints")
+            if isinstance(ticket.get("extraData"), dict)
+            else {}
+        ) or {}
+        text_sources = [
+            ticket.get("ticketNo"),
+            ticket.get("ticket_no"),
+            ticket.get("title"),
+            ticket.get("description"),
+            context_payload.get("extraInstruction") if isinstance(context_payload, dict) else "",
+            source_log_pull.get("contentSummary") if isinstance(source_log_pull, dict) else "",
+            log_hints.get("storeId") if isinstance(log_hints, dict) else "",
+            log_hints.get("posNo") if isinstance(log_hints, dict) else "",
+            log_hints.get("modifyTime") if isinstance(log_hints, dict) else "",
+        ]
+        default_keywords = [
+            "error",
+            "exception",
+            "fail",
+            "failed",
+            "timeout",
+            "payment",
+            "pay",
+            "nets",
+            "cash",
+            "withdrawal",
+            "duplicate",
+            "reversal",
+            "refund",
+            "receipt",
+            "terminal",
+            "ref.no",
+            "transaction",
+            "offline",
+        ]
+        candidates: list[str] = []
+        for value in text_sources:
+            text = str(value or "")
+            candidates.extend(re.findall(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,}", text))
+        candidates.extend(default_keywords)
+        seen: set[str] = set()
+        keywords: list[str] = []
+        for item in candidates:
+            normalized = str(item or "").strip().lower()
+            if len(normalized) < 3 or normalized in seen:
+                continue
+            seen.add(normalized)
+            keywords.append(normalized)
+        return keywords[:80]
+
+    @classmethod
+    def _read_log_lines(cls, file_path: Path) -> list[str]:
+        """
+        读取日志文件行，兼容常见编码并忽略坏字符。
+        :param file_path: 日志文件路径
+        :return: 日志行列表
+        """
+        for encoding in ("utf-8", "gbk", "latin-1"):
+            try:
+                return file_path.read_text(encoding=encoding, errors="ignore").splitlines()
+            except Exception:
+                continue
+        return []
+
+    @classmethod
+    def _build_log_digest(
+        cls,
+        *,
+        extract_dir: Path,
+        extracted_files: list[str],
+        ticket: dict[str, Any],
+        context_payload: dict[str, Any],
+        digest_path: Path,
+    ) -> dict[str, Any]:
+        """
+        从整包日志中生成受控大小的 AI 摘要，避免 Codex 默认读取全量几十 MB 日志。
+        :param extract_dir: 解压目录
+        :param extracted_files: 解压出的相对文件列表
+        :param ticket: 工单信息
+        :param context_payload: AI 上下文
+        :param digest_path: 摘要文件路径
+        :return: 摘要元数据
+        """
+        keywords = cls._build_log_digest_keywords(ticket, context_payload)
+        keyword_tuple = tuple(keywords)
+        digest_parts: list[str] = [
+            "# AI 日志预筛选摘要",
+            "",
+            "说明：本文件由 Agent 从完整日志包中按工单关键词、错误关键词和支付关键词预筛选生成。",
+            "请优先基于本摘要分析；只有摘要证据不足时，才按本文件中的文件名和行号去 source_logs 定点读取原始日志。",
+            "",
+            f"关键词：{', '.join(keywords[:60])}",
+            "",
+            "## 文件清单",
+        ]
+        total_size = 0
+        matched_files = 0
+        matched_lines = 0
+        for relative_name in extracted_files:
+            file_path = extract_dir / relative_name
+            if not file_path.exists() or not file_path.is_file():
+                continue
+            try:
+                total_size += file_path.stat().st_size
+                digest_parts.append(f"- {relative_name} ({file_path.stat().st_size} bytes)")
+            except Exception:
+                digest_parts.append(f"- {relative_name}")
+        digest_parts.append("")
+        digest_parts.append("## 命中片段")
+
+        for relative_name in extracted_files:
+            file_path = extract_dir / relative_name
+            if not file_path.exists() or not file_path.is_file():
+                continue
+            lowered_name = relative_name.lower()
+            if not any(marker in lowered_name for marker in (".log", "fault", "error", "request")):
+                continue
+            lines = cls._read_log_lines(file_path)
+            if not lines:
+                continue
+            file_matches = 0
+            used_line_indexes: set[int] = set()
+            file_blocks: list[str] = []
+            for index, line in enumerate(lines):
+                lowered_line = line.lower()
+                if not any(keyword in lowered_line for keyword in keyword_tuple):
+                    continue
+                start = max(0, index - cls.DEFAULT_LOG_DIGEST_CONTEXT_LINES)
+                end = min(len(lines), index + cls.DEFAULT_LOG_DIGEST_CONTEXT_LINES + 1)
+                block_lines: list[str] = []
+                for line_index in range(start, end):
+                    if line_index in used_line_indexes:
+                        continue
+                    used_line_indexes.add(line_index)
+                    line_text = lines[line_index]
+                    if len(line_text) > cls.DEFAULT_LOG_DIGEST_MAX_LINE_CHARS:
+                        line_text = f"{line_text[:cls.DEFAULT_LOG_DIGEST_MAX_LINE_CHARS]} ...<line truncated>"
+                    block_lines.append(f"{line_index + 1}: {line_text}")
+                if block_lines:
+                    file_matches += 1
+                    matched_lines += len(block_lines)
+                    file_blocks.append("\n".join(block_lines))
+                if file_matches >= cls.DEFAULT_LOG_DIGEST_MAX_MATCHES_PER_FILE:
+                    break
+            if not file_blocks:
+                continue
+            matched_files += 1
+            digest_parts.append("")
+            digest_parts.append(f"### {relative_name}")
+            digest_parts.extend(file_blocks)
+            digest_text = "\n".join(digest_parts)
+            if len(digest_text) >= cls.DEFAULT_LOG_DIGEST_MAX_CHARS:
+                digest_parts.append(
+                    f"\n... 摘要已达到 {cls.DEFAULT_LOG_DIGEST_MAX_CHARS} 字符上限，后续日志未继续写入 ...\n"
+                )
+                break
+
+        digest_text = "\n".join(digest_parts)
+        if len(digest_text) > cls.DEFAULT_LOG_DIGEST_MAX_CHARS:
+            digest_text = digest_text[: cls.DEFAULT_LOG_DIGEST_MAX_CHARS] + "\n... 摘要已截断 ...\n"
+        digest_path.write_text(digest_text, encoding="utf-8")
+        return {
+            "digestPath": str(digest_path),
+            "digestCharCount": len(digest_text),
+            "maxDigestChars": cls.DEFAULT_LOG_DIGEST_MAX_CHARS,
+            "keywordCount": len(keywords),
+            "matchedFiles": matched_files,
+            "matchedLines": matched_lines,
+            "sourceTotalBytes": total_size,
+        }
+
     @staticmethod
     def _extract_stderr_context(
         stderr_text: str | None,
         keywords: tuple[str, ...] = (
+            "error:",
             "openai_error",
             "bad_response_status_code",
             "invalid_request_error",
             "stream disconnected",
             "error sending request",
+            "concurrency limit exceeded",
         ),
     ) -> str:
         """
@@ -377,15 +647,27 @@ class TicketAiAnalysisService:
         if not lines:
             return ""
         lowered_keywords = tuple(keyword.lower() for keyword in keywords)
+        matched_windows: list[str] = []
         for idx, line in enumerate(lines):
             lower_line = line.strip().lower()
             if any(keyword in lower_line for keyword in lowered_keywords):
-                start = max(0, idx - 10)
+                start = max(0, idx - 2)
                 end = min(len(lines), idx + 11)
-                window = [re.sub(r"\s+", " ", item.strip()) for item in lines[start:end] if item.strip() not in {"{", "}", "[", "]"}]
+                window = [
+                    re.sub(r"\s+", " ", item.strip())
+                    for item in lines[start:end]
+                    if item.strip() not in {"{", "}", "[", "]"}
+                ]
                 if window:
-                    return " | ".join(window)[:4000]
-        tail_lines = [re.sub(r"\s+", " ", item.strip()) for item in lines[-20:] if item.strip() not in {"{", "}", "[", "]"}]
+                    matched_windows.extend(window)
+        if matched_windows:
+            # Codex 会把检索到的业务日志也写入 stderr，这里只返回命中的错误窗口，避免污染工单错误摘要。
+            return " | ".join(dict.fromkeys(matched_windows))[:4000]
+        tail_lines = [
+            re.sub(r"\s+", " ", item.strip())
+            for item in lines[-20:]
+            if item.strip() not in {"{", "}", "[", "]"}
+        ]
         return " | ".join(tail_lines)[:4000] if tail_lines else ""
 
     @staticmethod
@@ -403,10 +685,32 @@ class TicketAiAnalysisService:
             lines = [line.rstrip() for line in str(raw_text).splitlines() if line.strip()]
             if not lines:
                 continue
-            tail_lines = [re.sub(r"\s+", " ", item.strip()) for item in lines[-20:] if item.strip() not in {"{", "}", "[", "]"}]
+            error_context = TicketAiAnalysisService._extract_stderr_context(str(raw_text))
+            if error_context:
+                return error_context
+            tail_lines = [
+                re.sub(r"\s+", " ", item.strip())
+                for item in lines[-20:]
+                if item.strip() not in {"{", "}", "[", "]"}
+            ]
             if tail_lines:
                 return " | ".join(tail_lines)[:4000]
         return default_message
+
+    @staticmethod
+    def _normalize_worker_failure_message(message: str) -> str:
+        """
+        将 Codex/模型侧错误归一为面向业务的失败说明。
+        :param message: 原始失败摘要
+        :return: 归一化后的失败说明
+        """
+        normalized = str(message or "").strip() or "AI Worker 未返回可解析的 JSON 结果"
+        lower_message = normalized.lower()
+        if "concurrency limit exceeded" in lower_message:
+            return f"Codex 账号并发限制，请稍后重试或更换可用账号/Provider：{normalized}"
+        if "openai_error" in lower_message or "bad_response_status_code" in lower_message:
+            return f"AI模型接口返回异常，请检查模型配置、请求上下文大小或上游服务状态：{normalized}"
+        return normalized
 
     @staticmethod
     async def _emit_event(event_sender: EventSender | None, event_type: str, task_id: int, message: str, **extra: Any) -> None:
@@ -463,7 +767,9 @@ class TicketAiAnalysisService:
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
-3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或 {workspace_path}/logs.txt 只有说明而没有正文，请先阅读 {workspace_path}/source_logs/ 目录中的解压日志文件，再结合代码搜索、调用链、日志和历史事件分析根因。
+3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或 {workspace_path}/logs.txt 只有说明而没有正文，请优先阅读
+   {workspace_path}/logs_ai_digest.txt；只有摘要证据不足时，才按摘要中的文件名和行号去
+   {workspace_path}/source_logs/ 目录定点读取原始日志，禁止无目标地通读整包日志。
 4. 输出严格 JSON，不要输出多余说明文本。
 4. 工单不是一次性分析，请结合 context.json 中的 messages、snapshots 和 similarTickets：
    - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
@@ -595,6 +901,7 @@ class TicketAiAnalysisService:
             timeline_file = workspace_dir / "timeline.json"
             context_file = workspace_dir / "context.json"
             logs_file = workspace_dir / "logs.txt"
+            log_digest_file = workspace_dir / "logs_ai_digest.txt"
             source_logs_dir = workspace_dir / "source_logs"
             source_logs_zip = workspace_dir / "source_logs.zip"
             source_logs_manifest = workspace_dir / "source_logs_manifest.json"
@@ -708,9 +1015,11 @@ class TicketAiAnalysisService:
                             "\n".join(
                                 [
                                     "日志内容未入库，已改为整包分析模式。",
+                                    f"AI预筛选摘要: {log_digest_file}",
                                     f"压缩包地址: {archive_url or '<none>'}",
                                     f"压缩包本地路径: {source_logs_zip}",
                                     f"解压目录: {source_logs_dir}",
+                                    "请优先阅读 AI 预筛选摘要，摘要不足时再定点读取原始日志。",
                                 ]
                             ),
                             encoding="utf-8",
@@ -731,8 +1040,16 @@ class TicketAiAnalysisService:
                             extract_dir=str(source_logs_dir),
                         )
                         downloaded = cls._download_archive(str(archive_url), source_logs_zip)
+                        digest_payload: dict[str, Any] = {}
                         if downloaded:
                             extracted_files = cls._extract_archive(downloaded, source_logs_dir)
+                            digest_payload = cls._build_log_digest(
+                                extract_dir=source_logs_dir,
+                                extracted_files=extracted_files,
+                                ticket=ticket,
+                                context_payload=context_payload,
+                                digest_path=log_digest_file,
+                            )
                         source_logs_manifest.write_text(
                             cls._dumps(
                                 {
@@ -740,6 +1057,7 @@ class TicketAiAnalysisService:
                                     "archivePath": str(source_logs_zip),
                                     "extractDir": str(source_logs_dir),
                                     "extractedFiles": extracted_files,
+                                    "aiDigest": digest_payload,
                                 }
                             ),
                             encoding="utf-8",
@@ -831,8 +1149,7 @@ class TicketAiAnalysisService:
                         or cls._extract_stderr_context(raw_stdout)
                         or cls._summarize_worker_error(raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果")
                     )
-                    if "openai_error" in failure_message or "bad_response_status_code" in failure_message:
-                        failure_message = f"AI模型接口返回异常，请检查模型配置、请求上下文大小或上游服务状态：{failure_message}"
+                    failure_message = cls._normalize_worker_failure_message(failure_message)
                     await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message)
                     return {
                         "request_type": req_data.get("requestType"),
@@ -845,8 +1162,9 @@ class TicketAiAnalysisService:
                             "workspace_path": str(workspace_dir),
                             "result_path": str(result_file),
                             "command_line": " ".join(command),
-                            "stdout": raw_stdout,
-                            "stderr": raw_stderr,
+                            "stdout_path": str(workspace_dir / "worker.stdout.txt"),
+                            "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                            "stderr_context": cls._extract_stderr_context(raw_stderr),
                         },
                     }
 
