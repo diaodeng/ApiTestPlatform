@@ -12,7 +12,7 @@ entry_points:
     path: /ticket/{ticket_id}/status
     trigger: 工单详情页执行状态流转
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-06-15
 ---
 
 # 工单流转路由流程
@@ -50,12 +50,13 @@ sequenceDiagram
 
 | 步骤 | 说明 |
 |---|---|
-| 1 | 工作流页读取状态节点和流转规则，并把 `allowed_roles` 扩展 JSON 展平成允许角色、默认处理人、通知预留。 |
+| 1 | 工作流页和工单列表页读取状态节点和流转规则，并把 `allowed_roles` 扩展 JSON 展平成允许角色、默认处理人、通知预留。 |
 | 2 | 用户在流转规则里配置默认处理人和通知备注后，前端提交给 `/ticket/workflow/transition`。 |
 | 3 | `TicketService.save_workflow_transition` 将角色、处理人、通知配置统一写回 `WorkflowTransition.allowed_roles`。 |
-| 4 | 工单状态流转时，`TicketService.change_ticket_status` 校验目标流转是否合法。 |
-| 5 | 若命中默认处理人，服务端自动更新 `current_assignee_id/current_assignee_name`，并补写指派历史和 `ASSIGNED` 事件。 |
-| 6 | 若规则开启通知预留，服务端追加 `NOTIFY_PENDING` 事件，后续通知渠道统一从该入口继续扩展。 |
+| 4 | 工单状态流转弹窗按当前工单状态过滤 `WorkflowTransition`，只展示已配置规则的目标状态；新增状态节点后必须配置流转规则才会出现在下拉中。 |
+| 5 | 工单状态流转时，`TicketService.change_ticket_status` 校验目标流转是否合法。 |
+| 6 | 若命中默认处理人，服务端自动更新 `current_assignee_id/current_assignee_name`，并补写指派历史和 `ASSIGNED` 事件。 |
+| 7 | 若规则开启通知预留，服务端追加 `NOTIFY_PENDING` 事件，后续通知渠道统一从该入口继续扩展。 |
 
 ## 错误处理
 

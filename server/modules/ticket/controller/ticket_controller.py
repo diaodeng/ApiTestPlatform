@@ -1859,7 +1859,10 @@ async def upsert_ticket_rca(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketController.get("/workflow/config", dependencies=[Depends(CheckUserInterfaceAuth("ticket:workflow:list"))])
+@ticketController.get(
+    "/workflow/config",
+    dependencies=[Depends(CheckUserInterfaceAuth(["ticket:workflow:list", "ticket:ticket:status"], False))],
+)
 async def get_ticket_workflow(request: Request, query_db: Session = Depends(get_db)):
     """
     获取工单工作流配置接口。

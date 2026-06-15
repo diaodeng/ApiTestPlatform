@@ -4996,6 +4996,21 @@ class TicketSyncService:
             sync_extra_data = item.get("extra_data")
         sync_extra_data = dict(sync_extra_data or {})
         sync_extra_data["_remote_sync_revision"] = remote_sync_revision
+        external_field_mapping = (
+            sync_extra_data.get("external_field_mapping")
+            if isinstance(sync_extra_data.get("external_field_mapping"), dict)
+            else {}
+        )
+        module_name = str(
+            item.get("moduleName")
+            or item.get("module_name")
+            or item.get("ticketModle")
+            or item.get("ticketModel")
+            or item.get("ticket_model")
+            or external_field_mapping.get("ticketModle")
+            or external_field_mapping.get("ticketModel")
+            or ""
+        ).strip()
         log_pull_hints = (
             sync_extra_data.get("log_pull_hints")
             if isinstance(sync_extra_data.get("log_pull_hints"), dict)
@@ -5024,7 +5039,7 @@ class TicketSyncService:
             "projectCode": item.get("projectCode") or item.get("project_code") or "",
             "merchantName": item.get("merchantName") or item.get("projectName") or item.get("project_name") or "",
             "moduleId": None,
-            "moduleName": item.get("moduleName") or item.get("module_name") or "",
+            "moduleName": module_name,
             "moduleCode": item.get("moduleCode") or item.get("module_code") or "",
             "versionKey": item.get("versionKey") or item.get("version_key") or "",
             "status": item.get("status") or "",

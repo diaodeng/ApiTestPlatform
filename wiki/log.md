@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-15] INGEST-CODE | 工单动态工作流状态与远端模块同步修复
+- 触发：用户反馈远端推送 `ticketModle` 变化未正确更新，以及工作流新增/修改状态后工单流转无法选择新增状态。
+- 架构层：工单域 / 外部同步链路 / 工作流流转 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-15-ticket-workflow-dynamic-status-and-remote-module.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`flows/ticket-workflow-routing.md`、`flows/ticket-external-sync-flow.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/controller/ticket_controller.py` / `server/modules/ticket/service/ticket_sync_service.py` / `web/src/views/ticket/index.vue` -> 工单动态状态与远端模块同步文档
+- 总共涉及页面：6
+
 ## [2026-06-15] INGEST-CODE | 新增专题工单会话状态统计定时任务
 - 触发：用户要求根据 `D:\xj\Downloads\topic_ticket_stats.py` 将内部逻辑实现在当前项目的定时任务中，并通过任务参数配置所需信息。
 - 架构层：工单域 / 任务调度 / 飞书群消息统计

@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-06-09
+freshness: 2026-06-15
 created: 2026-05-20
-updated: 2026-06-09
+updated: 2026-06-15
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
@@ -56,6 +56,7 @@ graph TD
 - 工单 `extra_data.version_key` 作为版本号来源，AI 分析按“项目 + 版本号”匹配仓库映射。
 - 工单 AI 仓库映射中的本地仓库路径和工作区根目录已下沉为 Agent 本地配置优先；服务端仍保留兼容字段用于历史审计和兜底。
 - 工单同步新增独立外部入口与内网拉取链路：`POST /ticket/sync/external` 负责入站创建/更新工单，`GET /ticket/sync/pending` 负责按 `consumer` 拉取未交付 revision，`POST /ticket/sync/ack` 用于可选回执处理结果。
+- 远端拉取入库时会兼容 `moduleName/module_name` 与外部字段 `ticketModle/ticketModel/ticket_model`，并可从 `extra_data.external_field_mapping.ticketModle` 回填模块名称，避免跨环境二次同步丢失远端模块文本。
 - 同步状态统一写入 `ticket.extra_data.external_sync`，不再依赖单一“是否已同步”布尔值，而是按 `revision + consumers.{consumer}.delivered_revision` 判断某个消费方是否已经拿到当前版本。
 - `/ticket/sync/pending` 只会返回真正带同步元数据的工单，避免把普通人工创建的工单误返回给内网同步系统。
 - 外部同步后的自动化链路支持规则化识别项目、模块、商家、门店、POS/SCO、版本号，识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。
@@ -126,6 +127,7 @@ graph TD
 - 输出 schema 不应把协同增强字段全部设为必填；核心字段用于写回 RCA 和 ACR，增强字段用于知识沉淀与经验复用，缺失时由服务端默认空数组、空字符串或人工复核标记。
 - Agent 执行过程会通过 `ai_analysis_step` / `ai_analysis_status` / `ai_analysis_error` / `ai_analysis_finished` 事件把阶段日志回传服务端，服务端只记录系统日志，不把调试细节落到业务表。
 - 工作流流转规则会把允许角色、默认处理人和通知预留统一压到 `workflow_transition.allowed_roles` JSON 中，避免引入额外表结构迁移。
+- 工单列表页和流转弹窗的状态选项优先读取 `/ticket/workflow/config` 的动态工作流状态节点；流转弹窗只展示当前状态已配置流转规则的目标状态。新增状态节点后必须配置对应流转规则，才会出现在目标状态下拉中。
 
 ## 参见
 

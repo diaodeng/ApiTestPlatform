@@ -403,7 +403,12 @@
       <el-form ref="statusRef" :model="statusForm" :rules="statusRules" label-width="100px">
         <el-form-item label="目标状态" prop="toStatus">
           <el-select v-model="statusForm.toStatus" placeholder="请选择目标状态">
-            <el-option v-for="item in ticketStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+            <el-option
+              v-for="item in statusTransitionOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="是否问题">
@@ -1713,6 +1718,7 @@ import {
   downloadTicketImportTemplate,
   extractTicketKnowledge,
   getTicket,
+  getTicketWorkflow,
   listTicketLogPullProjectVendorMapOptions,
   getTicketLogPullContent,
   getTicketLogPullVendorStoreOptions,
@@ -1740,7 +1746,7 @@ import {
   eventTypeOptions,
   getLogPullStatusTagType,
   getOptionLabel,
-  getStatusTagType,
+  getStatusTagType as getDefaultStatusTagType,
   logPullDataTypeOptions,
   logPullStatusOptions,
   logPullStorageModeOptions,
@@ -1748,7 +1754,7 @@ import {
   ticketProcessStatusOptions,
   severityOptions,
   sourceOptions,
-  ticketStatusOptions
+  ticketStatusOptions as defaultTicketStatusOptions
 } from './constants'
 import { buildOptionalLogPullTimeRangePayload, getOptionalLogPullTimeRangeError } from './logPull.shared'
 import UserSelect from './components/UserSelect.vue'
@@ -1769,6 +1775,11 @@ const providerOptions = ref([])
 const analysisPromptOptions = ref([])
 const vendorOptions = ref([])
 const pushOptions = ref([])
+const workflowConfig = ref({
+  statuses: [],
+  transitions: []
+})
+const currentTicketStatus = ref('')
 const open = ref(false)
 const assignOpen = ref(false)
 const statusOpen = ref(false)
@@ -2319,6 +2330,37 @@ function formatLogViewSource(source) {
   return '入库内容'
 }
 
+function normalizeWorkflowStatusOptions(statuses = []) {
+  return (statuses || [])
+    .map(item => {
+      const value = String(item.code || '').trim()
+      if (!value) {
+        return null
+      }
+      const fallback = defaultTicketStatusOptions.find(option => option.value === value)
+      return {
+        label: String(item.name || fallback?.label || value).trim(),
+        value,
+        type: fallback?.type || 'info',
+        orderNum: Number(item.orderNum ?? item.order_num ?? 0)
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.orderNum - b.orderNum)
+}
+
+function getStatusTagType(value) {
+  return ticketStatusOptions.value.find(item => item.value === value)?.type || getDefaultStatusTagType(value)
+}
+
+function loadWorkflowConfig() {
+  return getTicketWorkflow().then(response => {
+    workflowConfig.value = response.data || { statuses: [], transitions: [] }
+  }).catch(() => {
+    workflowConfig.value = { statuses: [], transitions: [] }
+  })
+}
+
 const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null)
 
 const latestSnapshot = computed(() => detail.value.latestSnapshot || ticketSnapshots.value[0] || null)
@@ -2346,13 +2388,32 @@ const aiPromptHintDesc = computed(() => {
   return '项目和模块的默认提示词会自动参与本次分析，额外说明仅用于补充临时背景，不会覆盖系统约束和输出结构。'
 })
 
+const ticketStatusOptions = computed(() => {
+  const dynamicOptions = normalizeWorkflowStatusOptions(workflowConfig.value.statuses)
+  return dynamicOptions.length ? dynamicOptions : defaultTicketStatusOptions
+})
+
+const statusTransitionOptions = computed(() => {
+  const fromStatus = String(currentTicketStatus.value || '').trim()
+  if (!fromStatus) {
+    return []
+  }
+  const toStatusSet = new Set(
+    (workflowConfig.value.transitions || [])
+      .filter(item => String(item.fromStatus || '').trim() === fromStatus)
+      .map(item => String(item.toStatus || '').trim())
+      .filter(Boolean)
+  )
+  return ticketStatusOptions.value.filter(item => toStatusSet.has(item.value))
+})
+
 const timelineItems = computed(() => {
   const items = []
   ;(timeline.value.statusHistory || []).forEach(item => {
     items.push({
       key: `status-${item.id}`,
       time: item.startedAt,
-      title: `状态流转：${getOptionLabel(ticketStatusOptions, item.fromStatus)} -> ${getOptionLabel(ticketStatusOptions, item.toStatus)}`,
+      title: `状态流转：${getOptionLabel(ticketStatusOptions.value, item.fromStatus)} -> ${getOptionLabel(ticketStatusOptions.value, item.toStatus)}`,
       content: item.comment
     })
   })
@@ -2720,12 +2781,16 @@ function handleInternalOwnerChange(user) {
 
 function openStatus(row) {
   currentTicketId.value = row.ticketId
+  currentTicketStatus.value = row.status || ''
   statusForm.value = {
     toStatus: undefined,
     comment: '',
     rootCause: row.rootCause,
     solution: row.solution,
     isProblem: row.isProblem
+  }
+  if (!statusTransitionOptions.value.length) {
+    proxy.$modal.msgWarning('当前状态未配置可用流转规则，请先在工单工作流中配置流转规则')
   }
   statusOpen.value = true
 }
@@ -3663,7 +3728,9 @@ loadVendorOptions()
 loadAnalysisPromptOptions()
 loadPushOptions()
 loadQueryModuleOptions()
-getList()
+loadWorkflowConfig().finally(() => {
+  getList()
+})
 </script>
 
 <style scoped>
