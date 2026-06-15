@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-15] INGEST-CODE | API Key 使用审计非阻断处理
+- 触发：用户反馈远端推单偶发 MySQL 2013，堆栈显示失败点为 API Key 鉴权阶段更新 `sys_api_key.last_used_ip/last_used_time`。
+- 架构层：认证鉴权 / API Key / 工单外部同步入口
+- 创建的页面：`web/public/docs/2026-06-15-api-key-usage-audit-nonblocking.md`
+- 更新的页面：`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/module_admin/service/api_key_service.py` -> API Key 使用审计非阻断说明
+- 总共涉及页面：3
+
 ## [2026-06-15] INGEST-CODE | 工单动态工作流状态与远端模块同步修复
 - 触发：用户反馈远端推送 `ticketModle` 变化未正确更新，以及工作流新增/修改状态后工单流转无法选择新增状态。
 - 架构层：工单域 / 外部同步链路 / 工作流流转 / Web 控制台

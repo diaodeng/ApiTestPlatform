@@ -1,5 +1,7 @@
 ## 2026-06-15
 
+1. 将 API Key 最后使用时间/IP 审计更新改为非阻断操作：鉴权仍校验 API Key 有效性，`last_used_ip/last_used_time` 使用独立会话尝试更新，失败只记录 warning，不再影响远端推单入库。
+2. 新增说明文档：`web/public/docs/2026-06-15-api-key-usage-audit-nonblocking.md`。
 1. 修复工单状态流转候选项不随工作流配置变化的问题：工单列表页加载 `/ticket/workflow/config`，状态筛选、列表展示、详情展示和时间线优先使用动态工作流状态节点。
 2. 状态流转弹窗改为按当前状态过滤已配置流转规则，只展示可达目标状态；新增状态节点后必须配置对应流转规则才会出现。
 3. `/ticket/workflow/config` 读取权限兼容 `ticket:ticket:status`，保证只有流转权限但没有工作流配置权限的用户也能获取流转候选项。
