@@ -188,6 +188,67 @@ class TicketSyncService:
         return bool(sync_state.get("publish_ready"))
 
     @classmethod
+    def _can_recover_publish_state(cls, db: Session, *, ticket: Ticket, meta: dict[str, Any]) -> tuple[bool, str]:
+        """
+        判断未发布同步数据是否可恢复为可发布状态。
+        :param db: 数据库会话
+        :param ticket: 待检查工单
+        :param meta: 同步元数据
+        :return: (是否可恢复, 恢复原因)
+        """
+        if cls._is_publish_ready(meta):
+            return False, "already_ready"
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        publish_status = str(sync_state.get("publish_status") or "").strip()
+        if publish_status != cls.PUBLISH_STATUS_PROCESSING_AI:
+            return False, f"publish_status_not_recoverable:{publish_status or '-'}"
+        ai_pending, ai_status = cls._resolve_ai_pending_state(db, ticket_id=ticket.ticket_id, meta=meta)
+        if ai_pending:
+            return False, f"ai_still_pending:{ai_status or '-'}"
+        return True, f"ai_not_pending:{ai_status or '-'}"
+
+    @classmethod
+    def _ensure_publish_ready_for_pull(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        current_user: CurrentUserModel,
+    ) -> tuple[Ticket, dict[str, Any], bool]:
+        """
+        拉取前自愈同步发布状态，避免服务重启后 processing_ai 长期卡住。
+        :param db: 数据库会话
+        :param ticket: 候选工单
+        :param current_user: 当前用户
+        :return: (刷新后的工单, 同步元数据, 是否已恢复)
+        """
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        meta = cls._build_meta(extra_data)
+        recoverable, recover_reason = cls._can_recover_publish_state(db, ticket=ticket, meta=meta)
+        if not recoverable:
+            return ticket, meta, False
+        logger.warning(
+            "工单同步发布状态自愈: ticket_no=%s, revision=%s, reason=%s",
+            ticket.ticket_no,
+            meta.get("revision"),
+            recover_reason,
+        )
+        meta = cls._set_publish_state(
+            meta,
+            ready=True,
+            status=cls.PUBLISH_STATUS_READY,
+            reason="拉取前检测到无活动AI任务，自动恢复发布状态",
+            ai_task_status=str((meta.get("sync_state") or {}).get("ai_task_status") or "").strip(),
+        )
+        ticket = cls._persist_sync_meta(
+            db,
+            ticket=ticket,
+            meta=meta,
+            update_by=_user_name(current_user),
+        )
+        return ticket, meta, True
+
+    @classmethod
     def _is_group_push_sent_once(cls, meta: dict[str, Any]) -> bool:
         """
         判断工单是否已成功发送过群推送。
@@ -982,6 +1043,8 @@ class TicketSyncService:
                     f"remote_revision_not_newer(remote={remote_sync_revision}, local={local_source_revision})",
                 )
             return True, "remote_revision_newer"
+        if remote_sync_revision > 0 and local_source_revision is None:
+            return True, "remote_revision_available_without_local_revision"
 
         local_source = local_meta.get("source") if isinstance(local_meta.get("source"), dict) else {}
         local_pushed_at = (
@@ -3729,11 +3792,30 @@ class TicketSyncService:
         message: str | None = None,
         detail: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """
+        更新消费者同步状态。
+        :param meta: 同步元数据
+        :param consumer: 消费者标识
+        :param revision: 本次交付版本
+        :param batch_id: 批次ID
+        :param status: 交付状态，pulled 表示已返回但待回执，只有 delivered/success 才确认交付
+        :param message: 回执说明
+        :param detail: 回执明细
+        :return: 更新后的同步元数据
+        """
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
         consumers = sync_state.get("consumers") if isinstance(sync_state.get("consumers"), dict) else {}
+        previous_consumer_state = consumers.get(consumer) if isinstance(consumers.get(consumer), dict) else {}
+        normalized_status = str(status or "").strip().lower() or "delivered"
+        delivered_revision = int(previous_consumer_state.get("delivered_revision") or 0)
+        if normalized_status in {"delivered", "success", "succeeded"}:
+            delivered_revision = max(delivered_revision, int(revision or 0))
+        elif int(revision or 0) > 0 and delivered_revision == int(revision or 0):
+            delivered_revision = max(int(revision or 0) - 1, 0)
         consumers[consumer] = {
             "status": status,
-            "delivered_revision": revision,
+            "delivered_revision": delivered_revision,
+            "last_revision": int(revision or 0),
             "delivered_at": cls._now_iso(),
             "batch_id": batch_id,
             "message": message,
@@ -4879,12 +4961,19 @@ class TicketSyncService:
         batch_id = f"{query.consumer}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         payload_rows: list[dict[str, Any]] = []
         for ticket in rows:
-            extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-            meta = cls._build_meta(extra_data)
+            ticket, meta, _ = cls._ensure_publish_ready_for_pull(db, ticket=ticket, current_user=current_user)
             if not cls._is_publish_ready(meta):
                 continue
+            extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             revision = int(meta.get("revision") or 0)
-            meta = cls._update_consumer_state(meta, consumer=query.consumer, revision=revision, batch_id=batch_id)
+            meta = cls._update_consumer_state(
+                meta,
+                consumer=query.consumer,
+                revision=revision,
+                batch_id=batch_id,
+                status="pulled",
+                message="已返回给消费者，等待成功回执确认",
+            )
             extra_data = cls._attach_meta(extra_data, meta)
             TicketDao.update_ticket(
                 db,

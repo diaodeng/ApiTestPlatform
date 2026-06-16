@@ -15,6 +15,13 @@ updated: 2026-05-20
 - 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
 - 变更传播链：`ticket_controller.py` / `ticket_service.py` / `ticket.js` / `ticket/index.vue` -> 详情顶部基础信息表格、描述独立行和手动翻译入口
 
+## [2026-06-16] INGEST-CODE | 工单同步重启恢复与远端拉取重试修复
+- 触发：用户反馈服务重新部署/异常重启后同步状态可能不对，远端推送可更新但内部拉取后内部数据未更新。
+- 架构层：工单域 / 外部同步链路 / 内网远端拉取 / 发布状态恢复
+- 创建的页面：`web/public/docs/2026-06-16-ticket-sync-restart-retry-fix.md`
+- 更新的页面：`web/public/docs/update_history.md`、`web/public/docs/ticket-sync-automation.md`、`flows/ticket-external-sync-flow.md`、`log.md`
+- 变更传播链：`server/modules/ticket/service/ticket_sync_service.py` / `server/modules/ticket/dao/ticket_dao.py` -> 工单同步发布状态、pending 租约与远端拉取重试说明
+
 ## [2026-06-16] INGEST-CODE | 日志拉取下载来源与 POS 列表区分
 - 触发：用户要求日志拉取管理页下载优先本服务文件、缺失再走原始路径；工单详情页归档地址与原始压缩包分别下载；详情列表增加商家、门店、POSID。
 - 架构层：工单域 / 日志拉取 / 下载来源 / Web 控制台

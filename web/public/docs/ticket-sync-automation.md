@@ -47,6 +47,13 @@
   - 仅控制“内网定时拉取外网工单”这条链路是否自动翻译。
   - 这样可以和第三方直推场景独立控制，避免同一工单在不同同步链路里重复翻译。
 
+### 2.1 发布状态与重试
+
+- 外部推送主链路会先写入 `publish_ready=false / publish_status=processing_ai`，后台 AI/自动化结束后再恢复为可发布。
+- 如果服务重启导致后台任务未完成，`/ticket/sync/pending` 会在拉取前检查是否仍有活动 AI 任务；没有活动任务时自动恢复 `publish_ready=true`，避免数据长期不对内网发布。
+- `/ticket/sync/pending` 返回数据时只写入 `status=pulled` 和 `last_revision` 租约，不直接确认 `delivered_revision`；30 分钟内避免重复返回，超过租约未成功回执则允许重试。
+- `/ticket/sync/ack` 只有 `delivered/success/succeeded` 会推进 `delivered_revision`；`failed` 只记录错误和本次 revision，不会阻止下次继续拉取同一版本。
+
 ### 2.5 工单手动新增/编辑
 
 - `auto_translate`

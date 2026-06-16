@@ -1,5 +1,9 @@
 ## 2026-06-16
 
+1. 修复工单同步在服务重启后可能卡在 `processing_ai/publish_ready=false` 导致内网拉不到新版本的问题：pending 拉取前会在无活动 AI 任务时自动恢复发布状态。
+2. 修复内网远端拉取失败后远端 revision 被永久标记已交付的问题：failed 回执不再推进 `delivered_revision`，下次拉取可继续重试同一版本。
+3. 新增说明文档：`web/public/docs/2026-06-16-ticket-sync-restart-retry-fix.md`。
+
 1. 优化工单详情弹窗顶部基础信息布局：描述改为表格下方独立整行显示，避免长描述撑变形。
 2. 工单详情顶部基础信息表格的灰色标签列不再换行，避免短信息行被标签换行抬高。
 3. 新增说明文档：`web/public/docs/2026-06-16-ticket-detail-summary-description-layout.md`。

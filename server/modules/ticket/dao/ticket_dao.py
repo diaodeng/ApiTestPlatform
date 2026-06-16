@@ -56,6 +56,23 @@ def _date_end(value: date | datetime | str | None) -> datetime | None:
     return datetime.combine(date.fromisoformat(str(value)[:10]), time.max)
 
 
+def _parse_sync_time(value: Any) -> datetime | None:
+    """
+    解析同步元数据时间。
+    :param value: ISO 时间字符串或 datetime 对象
+    :return: 可比较的 datetime，解析失败返回 None
+    """
+    if isinstance(value, datetime):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
 def _json_safe_value(value: Any) -> Any:
     """
     将值递归转换为可 JSON 序列化内容。
@@ -305,17 +322,38 @@ class TicketDao:
         rows = query.order_by(Ticket.update_time.asc(), Ticket.create_time.asc()).limit(safe_limit * 4).all()
         result: list[Ticket] = []
         consumer_key = str(consumer or "").strip()
+        pulled_retry_seconds = 30 * 60
+        now = datetime.now()
         for ticket in rows:
             extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
             sync_meta = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
             state = sync_meta.get("sync_state") if isinstance(sync_meta.get("sync_state"), dict) else {}
-            if not bool(state.get("publish_ready", True)):
+            publish_status = str(state.get("publish_status") or "").strip()
+            if not bool(state.get("publish_ready", True)) and publish_status != "processing_ai":
                 continue
             consumers = state.get("consumers") if isinstance(state.get("consumers"), dict) else {}
             consumer_state = consumers.get(consumer_key) if isinstance(consumers.get(consumer_key), dict) else {}
             current_revision = int(sync_meta.get("revision") or 0)
             delivered_revision = int(consumer_state.get("delivered_revision") or 0)
-            if current_revision > 0 and delivered_revision < current_revision:
+            consumer_status = str(consumer_state.get("status") or "").strip().lower()
+            last_revision = int(consumer_state.get("last_revision") or 0)
+            last_pulled_at = _parse_sync_time(consumer_state.get("delivered_at") or state.get("last_pulled_at"))
+            pulled_active = (
+                consumer_status == "pulled"
+                and last_revision == current_revision
+                and last_pulled_at is not None
+                and (now - last_pulled_at).total_seconds() < pulled_retry_seconds
+            )
+            pulled_expired = (
+                consumer_status == "pulled"
+                and last_revision == current_revision
+                and (
+                    last_pulled_at is None
+                    or (now - last_pulled_at).total_seconds() >= pulled_retry_seconds
+                )
+            )
+            should_return_ticket = (delivered_revision < current_revision and not pulled_active) or pulled_expired
+            if current_revision > 0 and should_return_ticket:
                 result.append(ticket)
             if len(result) >= safe_limit:
                 break
