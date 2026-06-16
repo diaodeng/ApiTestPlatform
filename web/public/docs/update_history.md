@@ -1,5 +1,9 @@
 ## 2026-06-16
 
+1. 优化外部推单多维表格邮箱补齐：同一工单已成功同步过同一个 `recordId` 时，不再重复请求飞书多维表格。
+2. 成功补齐状态写入 `extra_data.external_sync.bitableEmailSync`；推送侧仍由 `externalSyncBitable.enabled` 控制，拉取侧由 `remoteSync.enabled` 控制且不会重复查多维，只消费远端已携带邮箱。
+3. 新增说明文档：`web/public/docs/2026-06-16-ticket-bitable-email-sync-idempotent.md`。
+
 1. 修复日志拉取下载入口阻塞服务的问题：工单详情页“原始压缩包”改为浏览器直接打开 `commandResultUrl`，不再由后端代理下载外部大文件。
 2. 工单详情页“归档地址”和日志拉取管理页“下载”在目标为 HTTP 地址或仅存在原始地址时直接走浏览器下载；本地/FTP 归档仍保留后端鉴权下载。
 3. 外部推送、pending 拉取、ack、日志内容读取、日志列表、重新下载等 `async def` 内的同步服务调用改为 `run_in_threadpool`，避免同步 SQLAlchemy、requests、文件/FTP 操作阻塞事件循环。

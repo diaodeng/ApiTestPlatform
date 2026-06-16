@@ -3099,11 +3099,13 @@ class TicketSyncService:
         cls,
         config: dict[str, Any],
         sync_object: TicketExternalSyncUpsertModel,
+        existing_ticket: Ticket | None = None,
     ) -> TicketExternalSyncUpsertModel:
         """
         外部推送时按 recordId 查询多维表格人员邮箱，并写入 external_field_mapping 快照供落库和群 @ 复用。
         :param config: 同步配置
         :param sync_object: 外部同步入库模型
+        :param existing_ticket: 已存在的工单，用于判断同一 recordId 是否已成功补齐过邮箱
         :return: 补齐邮箱快照后的同步模型
         """
         record_id = str(getattr(sync_object.source, "record_id", "") or "").strip()
@@ -3112,6 +3114,27 @@ class TicketSyncService:
             logger.info(
                 "外部同步多维表格邮箱补齐跳过: ticket_no=%s, reason=外部推送未携带 recordId",
                 ticket_no or "-",
+            )
+            return sync_object
+        existing_extra = (
+            dict(getattr(existing_ticket, "extra_data", None) or {})
+            if existing_ticket and isinstance(getattr(existing_ticket, "extra_data", None), dict)
+            else {}
+        )
+        existing_meta = cls._build_meta(existing_extra) if existing_extra else {}
+        existing_bitable_sync = (
+            existing_meta.get("bitableEmailSync")
+            if isinstance(existing_meta.get("bitableEmailSync"), dict)
+            else {}
+        )
+        if (
+            str(existing_bitable_sync.get("status") or "").strip().lower() == "success"
+            and str(existing_bitable_sync.get("recordId") or "").strip() == record_id
+        ):
+            logger.info(
+                "外部同步多维表格邮箱补齐跳过: ticket_no=%s, record_id=%s, reason=已成功同步过同一 recordId",
+                ticket_no or "-",
+                record_id,
             )
             return sync_object
         logger.info(
@@ -3185,7 +3208,15 @@ class TicketSyncService:
         external_mapping.update(email_map)
         external_mapping["bitableRecordId"] = record_id
         external_mapping["bitableEmailFields"] = email_field_map
+        external_mapping["bitableEmailSyncedAt"] = cls._now_iso()
+        external_mapping["bitableEmailSyncStatus"] = "success"
         extra_data["external_field_mapping"] = external_mapping
+        extra_data["_bitable_email_sync"] = {
+            "status": "success",
+            "recordId": record_id,
+            "emailKeys": list(email_map.keys()),
+            "syncedAt": external_mapping["bitableEmailSyncedAt"],
+        }
         logger.info(
             "外部同步多维表格邮箱补齐结束: ticket_no=%s, record_id=%s, updated=true, email_keys=%s, masked_emails=%s",
             ticket_no or "-",
@@ -4303,6 +4334,13 @@ class TicketSyncService:
             log_pull_hints["modifyTime"] = modify_time_hint
         if log_pull_hints:
             extra_data["log_pull_hints"] = log_pull_hints
+        bitable_email_sync = (
+            dict(extra_data.pop("_bitable_email_sync"))
+            if isinstance(extra_data.get("_bitable_email_sync"), dict)
+            else {}
+        )
+        if bitable_email_sync:
+            meta["bitableEmailSync"] = bitable_email_sync
         extra_data = cls._attach_meta(extra_data, meta)
         payload["extra_data"] = extra_data
         if not ticket:
@@ -4338,7 +4376,7 @@ class TicketSyncService:
         config = cls._load_sync_config(db)
         automation = sync_object.automation
         if sync_scene == "external_sync":
-            sync_object = cls._enrich_external_person_emails_from_bitable(config, sync_object)
+            sync_object = cls._enrich_external_person_emails_from_bitable(config, sync_object, ticket)
         raw_title = str(sync_object.title or "").strip()
         existing_title = str(ticket.title or "").strip() if ticket else ""
         skip_ai_analysis_due_to_update_title = cls._should_skip_ai_analysis_for_update_with_title(

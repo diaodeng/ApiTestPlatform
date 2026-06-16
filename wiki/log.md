@@ -8,6 +8,13 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-16] INGEST-CODE | 工单多维表格邮箱同步幂等优化
+- 触发：用户要求外部推单入库时，如果多维表格邮箱之前已经成功同步过则不要每次重复同步，并确认推送和拉取是否都由配置控制。
+- 架构层：工单域 / 外部同步链路 / 多维表格邮箱补齐 / 内网远端拉取
+- 创建的页面：`web/public/docs/2026-06-16-ticket-bitable-email-sync-idempotent.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`flows/ticket-external-sync-flow.md`、`log.md`
+- 变更传播链：`server/modules/ticket/service/ticket_sync_service.py` / `server/tests/test_ticket_sync_mapping_boundary.py` -> 多维邮箱同步成功标记与推拉配置边界说明
+
 ## [2026-06-16] INGEST-CODE | 日志下载与工单同步接口非阻塞修复
 - 触发：用户反馈日志拉取列表点击归档地址、原始压缩包和重新下载会导致 FastAPI 服务卡住，并要求检查外部推送、内网拉取等高频工单接口。
 - 架构层：工单域 / 日志拉取 / 外部同步链路 / FastAPI 事件循环

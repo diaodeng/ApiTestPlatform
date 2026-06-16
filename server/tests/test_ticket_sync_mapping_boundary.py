@@ -50,13 +50,12 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncService, "_resolve_project_by_ticket_vender") as resolve_project,
             patch.object(TicketSyncService, "_resolve_module_by_ticket_modle") as resolve_module,
             patch.object(TicketSyncService, "_resolve_vendor_by_ticket_vender") as resolve_vendor,
-            patch.object(TicketSyncService, "_resolve_status_by_external_value") as resolve_status,
             patch.object(TicketSyncService, "_resolve_assignee_by_external_value") as resolve_assignee,
             patch.object(
                 TicketSyncService,
-                "_resolve_remote_assignee_by_email_or_name",
-                return_value=(None, "内部处理人"),
-            ) as resolve_remote_assignee,
+                "_resolve_external_person_by_mapping_or_email",
+                side_effect=[(None, "内部处理人"), (None, ""), (None, "")],
+            ) as resolve_person,
             patch.object(TicketSyncService, "_extract_pattern", return_value=None),
         ):
             detected = TicketSyncService._detect_fields(
@@ -78,18 +77,17 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         resolve_project.assert_not_called()
         resolve_module.assert_not_called()
         resolve_vendor.assert_not_called()
-        resolve_status.assert_not_called()
         resolve_assignee.assert_not_called()
-        resolve_remote_assignee.assert_called_once()
-        self.assertEqual(resolve_remote_assignee.call_args.kwargs["assignee_email"], "remote@example.com")
-        self.assertEqual(resolve_remote_assignee.call_args.kwargs["assignee_name"], "外部人员")
+        self.assertEqual(resolve_person.call_count, 3)
+        self.assertEqual(resolve_person.call_args_list[0].kwargs["person_email"], "remote@example.com")
+        self.assertEqual(resolve_person.call_args_list[0].kwargs["person_text"], "外部人员")
         self.assertIsNone(detected["projectId"])
         self.assertIsNone(detected["moduleId"])
         self.assertEqual(detected["vendorId"], 1001)
         self.assertEqual(detected["storeId"], "S001")
         self.assertEqual(detected["storeName"], "远端门店")
         self.assertEqual(detected["posNo"], 9)
-        self.assertEqual(detected["status"], "processing")
+        self.assertEqual(detected["status"], "closed")
         self.assertIsNone(detected["assigneeId"])
         self.assertEqual(detected["assigneeName"], "内部处理人")
 
@@ -185,6 +183,13 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             internal_owner_id=None,
             internal_owner_name="",
             status="pending",
+            issue_type_id="",
+            issue_type_name="",
+            is_problem=None,
+            root_cause_type="",
+            solution_type="",
+            resolution_code="",
+            resolution_name="",
             root_cause=None,
             solution=None,
             tags=None,
@@ -334,6 +339,98 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(payload["module_name"], "远端模块")
         self.assertIsNone(payload["current_assignee_id"])
         self.assertEqual(payload["current_assignee_name"], "远端处理人")
+
+    def test_bitable_email_enrich_skips_when_record_already_success(self):
+        """同一 recordId 已成功补齐过邮箱时，不应再次请求多维表格。"""
+        sync_object = SimpleNamespace(
+            source=SimpleNamespace(record_id="rec_001"),
+            ticket_no="EXT-BITABLE",
+            extra_data={},
+        )
+        existing_ticket = SimpleNamespace(
+            extra_data={
+                TicketSyncService.META_KEY: {
+                    "bitableEmailSync": {
+                        "status": "success",
+                        "recordId": "rec_001",
+                    }
+                }
+            }
+        )
+
+        with patch.object(TicketSyncService, "_query_external_sync_bitable_record_fields") as query_fields:
+            result = TicketSyncService._enrich_external_person_emails_from_bitable(
+                {"externalSyncBitable": {"enabled": True}},
+                sync_object,
+                existing_ticket,
+            )
+
+        query_fields.assert_not_called()
+        self.assertIs(result, sync_object)
+
+    def test_bitable_email_success_meta_is_attached_to_upsert_payload(self):
+        """多维表格邮箱补齐成功后，应把成功状态写入 external_sync 元数据。"""
+        sync_object = SimpleNamespace(
+            source=SimpleNamespace(system="external", record_id="rec_002", record_url="", pushed_at=None),
+            extra_data={
+                "_bitable_email_sync": {
+                    "status": "success",
+                    "recordId": "rec_002",
+                    "emailKeys": ["reporterEmail"],
+                    "syncedAt": "2026-06-16T10:00:00",
+                },
+                "external_field_mapping": {
+                    "reporterEmail": "l1@example.com",
+                    "bitableRecordId": "rec_002",
+                },
+            },
+            raw_payload={},
+            ticket_no="EXT-BITABLE-2",
+            ticket_url=None,
+            title="外部工单",
+            description="外部描述",
+            customer_priority="P3",
+            internal_priority="P2",
+            severity="",
+            reporter_id=None,
+            reporter_name="外部报告人",
+            current_assignee_id=None,
+            current_assignee_name="",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            status="processing",
+            root_cause=None,
+            solution=None,
+            tags=None,
+            project_id=None,
+            project_name="",
+            merchant_name="",
+            module_id=None,
+            module_name="",
+            version_key="",
+            log_pull_config={},
+            create_time=None,
+        )
+        current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
+
+        payload, meta, _revision = TicketSyncService._build_upsert_payload(
+            db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
+            ticket=None,
+            sync_object=sync_object,
+            detected={},
+            current_user=current_user,
+            sync_scene="external_sync",
+        )
+
+        self.assertEqual(meta["bitableEmailSync"]["status"], "success")
+        self.assertEqual(meta["bitableEmailSync"]["recordId"], "rec_002")
+        self.assertNotIn("_bitable_email_sync", payload["extra_data"])
+        self.assertEqual(
+            payload["extra_data"][TicketSyncService.META_KEY]["bitableEmailSync"]["recordId"],
+            "rec_002",
+        )
 
 
 class _EmptyQuery:
