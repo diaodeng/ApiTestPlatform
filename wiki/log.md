@@ -15,6 +15,14 @@ updated: 2026-05-20
 - 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
 - 变更传播链：`ticket_controller.py` / `ticket_service.py` / `ticket.js` / `ticket/index.vue` -> 详情顶部基础信息表格、描述独立行和手动翻译入口
 
+## [2026-06-16] INGEST-CODE | 工单 stepReason 排查过程评论同步
+- 触发：用户要求将飞书 webhook 的 `stepReason` 大文本拆分为工单评论，并支持幂等、内网同步、本地评论不被覆盖和评论附件预留。
+- 架构层：工单域 / 外部同步链路 / 评论模型 / 内网远端拉取
+- 创建的页面：`web/public/docs/2026-06-16-ticket-step-reason-comment-sync.md`
+- 创建的 SQL：`server/sql/20260616_ticket_comment_sync_source.sql`
+- 更新的页面：`web/public/docs/update_history.md`、`flows/ticket-external-sync-flow.md`、`log.md`
+- 变更传播链：`ticket_controller.py` / `ticket_sync_service.py` / `ticket_service.py` / `ticket_dao.py` / `ticket_do.py` / `ticket_vo.py` -> stepReason 评论幂等同步说明
+
 ## [2026-06-16] INGEST-CODE | 工单同步重启恢复与远端拉取重试修复
 - 触发：用户反馈服务重新部署/异常重启后同步状态可能不对，远端推送可更新但内部拉取后内部数据未更新。
 - 架构层：工单域 / 外部同步链路 / 内网远端拉取 / 发布状态恢复

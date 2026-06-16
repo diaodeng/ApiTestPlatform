@@ -456,9 +456,75 @@ class TicketDao:
         :param comment: 评论对象
         :return: 评论对象
         """
+        if comment.attachments is not None:
+            comment.attachments = _json_safe_value(comment.attachments)
         db.add(comment)
         db.flush()
         return comment
+
+    @classmethod
+    def get_comment_by_source_segment_key(
+        cls,
+        db: Session,
+        *,
+        ticket_id: int,
+        source_segment_key: str,
+    ) -> TicketComment | None:
+        """
+        根据外部评论分段幂等键查询评论。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param source_segment_key: 外部评论分段幂等键
+        :return: 评论对象或 None
+        """
+        normalized_key = str(source_segment_key or "").strip()
+        if not normalized_key:
+            return None
+        return (
+            db.query(TicketComment)
+            .filter(
+                TicketComment.ticket_id == ticket_id,
+                TicketComment.source_segment_key == normalized_key,
+            )
+            .first()
+        )
+
+    @classmethod
+    def update_comment(cls, db: Session, comment_id: int, data: dict[str, Any]) -> None:
+        """
+        更新评论字段。
+        :param db: 数据库会话
+        :param comment_id: 评论ID
+        :param data: 待更新字段
+        :return: 无
+        """
+        if "attachments" in data and data["attachments"] is not None:
+            data["attachments"] = _json_safe_value(data["attachments"])
+        db.query(TicketComment).filter(TicketComment.id == comment_id).update(data)
+
+    @classmethod
+    def update_message_by_reference(
+        cls,
+        db: Session,
+        *,
+        reference_type: str,
+        reference_id: int,
+        data: dict[str, Any],
+    ) -> None:
+        """
+        按来源对象更新消息流内容。
+        :param db: 数据库会话
+        :param reference_type: 来源对象类型
+        :param reference_id: 来源对象ID
+        :param data: 待更新字段
+        :return: 无
+        """
+        if "attachments" in data and data["attachments"] is not None:
+            data["attachments"] = _json_safe_value(data["attachments"])
+        db.query(TicketMessage).filter(
+            TicketMessage.reference_type == reference_type,
+            TicketMessage.reference_id == reference_id,
+        ).update(data)
 
     @classmethod
     def add_message(cls, db: Session, message: TicketMessage) -> TicketMessage:

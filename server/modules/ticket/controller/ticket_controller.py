@@ -199,6 +199,7 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     ) or internal_owner_email_from_name
     title = str(_compatible_field_value(data, "title", "title", default="") or "").strip()
     reason = str(_compatible_field_value(data, "reason", "reason", default="") or "").strip()
+    step_reason = str(_compatible_field_value(data, "stepReason", "step_reason", default="") or "").strip()
     ticket_url = str(
         _compatible_field_value(
             data,
@@ -277,6 +278,7 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
         "reporterEmail": reporter_email,
         "ticketPos": str(_compatible_field_value(data, "ticketPos", "ticket_pos", default="") or "").strip(),
         "ticketSco": str(_compatible_field_value(data, "ticketSco", "ticket_sco", default="") or "").strip(),
+        "stepReason": step_reason,
     }
     external_field_mapping = {
         key: value
@@ -291,6 +293,8 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     if external_field_mapping:
         # 外部字段上下文只在外部推送边界生成，后续通知链路只复用该快照，不再重新猜字段。
         extra_data["external_field_mapping"] = external_field_mapping
+    if step_reason:
+        extra_data["step_reason"] = step_reason
 
     data["source"] = {
         "system": str(source_system or "").strip() or "external",
@@ -312,6 +316,7 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     data["internalOwnerName"] = internal_owner_name
     data["title"] = title
     data["reason"] = reason
+    data["stepReason"] = step_reason
     data["ticketUrl"] = ticket_url
     data["extraData"] = extra_data
     if raw_payload:

@@ -163,6 +163,7 @@ class TicketCommentCreateModel(BaseModel):
 
     content: str = Field(description="评论内容")
     is_internal: bool = Field(default=False, description="是否内部评论")
+    attachments: dict[str, Any] | list[dict[str, Any]] | None = Field(default=None, description="评论附件或引用信息")
 
 
 class TicketMessageCreateModel(BaseModel):
@@ -469,6 +470,7 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
     automation: TicketSyncAutomationModel | None = Field(default=None, description="同步后自动化配置")
     sync_consumer: str | None = Field(default=None, description="同步消费者名称，用于预初始化交付状态")
     raw_payload: dict[str, Any] | None = Field(default=None, description="外部工单原始载荷")
+    step_reason: str | None = Field(default=None, description="外部排查过程原始文本")
     ticket_no: str = Field(description="工单编号")
     title: str | None = Field(default=None, description="工单标题，可为空后由服务端自动生成")
 
@@ -477,6 +479,7 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
         self.ticket_no = str(self.ticket_no or "").strip()
         self.title = str(self.title or "").strip() or None
         self.sync_consumer = str(self.sync_consumer or "").strip() or None
+        self.step_reason = str(self.step_reason or "").strip() or None
         if not self.ticket_no:
             raise ValueError("ticketNo 不能为空")
         return self

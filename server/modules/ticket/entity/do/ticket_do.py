@@ -119,6 +119,10 @@ class TicketComment(Base):
     """
 
     __tablename__ = "ticket_comment"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "source_segment_key", name="uk_ticket_comment_source_segment"),
+        Index("idx_ticket_comment_source", "source_type", "source_record_id"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="评论ID")
     ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="工单ID")
@@ -126,6 +130,15 @@ class TicketComment(Base):
     user_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="评论人名称")
     content: Mapped[str] = mapped_column(long_text_type(), nullable=False, comment="评论内容")
     is_internal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否内部评论")
+    attachments: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="评论附件或引用信息")
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False, default="local", comment="评论来源类型")
+    source_system: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="外部来源系统")
+    source_record_id: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="外部来源记录ID")
+    source_field: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="外部来源字段")
+    source_segment_key: Mapped[str | None] = mapped_column(String(256), nullable=True, comment="外部评论分段幂等键")
+    source_segment_index: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="外部分段序号")
+    source_content_hash: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="外部内容哈希")
+    external_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="外部评论时间")
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
