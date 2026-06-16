@@ -1210,12 +1210,29 @@ function resolveDownloadFileName(row) {
   return `ticket_log_pull_${row?.id || Date.now()}.zip`
 }
 
+function openBrowserDownload(url) {
+  const targetUrl = String(url || '').trim()
+  if (!targetUrl) {
+    return false
+  }
+  window.open(targetUrl, '_blank', 'noopener')
+  return true
+}
+
 async function downloadLogPull(row) {
   if (!row?.id) {
     return
   }
   if (!row.commandResultUrl && !row.storagePath) {
     proxy.$modal.msgWarning('当前记录缺少可下载的归档文件')
+    return
+  }
+  if (!row.storagePath && row.commandResultUrl) {
+    openBrowserDownload(row.commandResultUrl)
+    return
+  }
+  if (/^https?:\/\//i.test(String(row.storagePath || ''))) {
+    openBrowserDownload(row.storagePath)
     return
   }
   try {

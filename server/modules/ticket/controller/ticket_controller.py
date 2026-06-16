@@ -2,6 +2,7 @@ import json
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -559,7 +560,7 @@ async def sync_external_ticket(
     """
     try:
         payload = await _load_external_sync_payload(request)
-        sync_config = TicketSyncService._load_sync_config(query_db)
+        sync_config = await run_in_threadpool(TicketSyncService._load_sync_config, query_db)
         external_sync_required_fields = (
             sync_config.get("externalSyncRequiredFields")
             if isinstance(sync_config, dict)
@@ -586,15 +587,17 @@ async def sync_external_ticket(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        result = TicketSyncService.sync_external_ticket(
+        result = await run_in_threadpool(
+            TicketSyncService.sync_external_ticket,
             query_db,
             sync_object,
             current_user,
-            sync_scene="external_sync",
-            defer_post_process=True,
+            "external_sync",
+            True,
         )
         if result.is_success:
-            deferred_dispatch = TicketSyncService.dispatch_deferred_sync_post_process_task(
+            deferred_dispatch = await run_in_threadpool(
+                TicketSyncService.dispatch_deferred_sync_post_process_task,
                 sync_object.model_dump(),
                 current_user.model_dump(),
                 "external_sync",
@@ -627,7 +630,8 @@ async def pull_pending_sync_tickets(
     内网系统拉取未同步或更新后的工单数据。
     """
     try:
-        return ResponseUtil.success(data=TicketSyncService.pull_pending_tickets(query_db, query, current_user))
+        result = await run_in_threadpool(TicketSyncService.pull_pending_tickets, query_db, query, current_user)
+        return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -644,7 +648,7 @@ async def ack_sync_tickets(
     内网系统回执本次拉取数据的交付状态。
     """
     try:
-        result = TicketSyncService.ack_sync_delivery(query_db, ack_object, current_user)
+        result = await run_in_threadpool(TicketSyncService.ack_sync_delivery, query_db, ack_object, current_user)
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -998,7 +1002,7 @@ async def get_ticket_log_pull_content(
     :return: 解压后的日志文本内容
     """
     try:
-        result = TicketLogPullService.get_log_pull_content_services(query_db, record_id, query)
+        result = await run_in_threadpool(TicketLogPullService.get_log_pull_content_services, query_db, record_id, query)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="日志拉取记录不存在")
     except Exception as e:
         logger.exception(e)
@@ -1206,8 +1210,11 @@ async def download_ticket_log_pull(
     """
     temp_file_path = None
     try:
-        temp_file_path, should_cleanup, download_file_name = TicketLogPullService.download_log_pull_file_services(
-            query_db, record_id, source=source
+        temp_file_path, should_cleanup, download_file_name = await run_in_threadpool(
+            TicketLogPullService.download_log_pull_file_services,
+            query_db,
+            record_id,
+            source,
         )
         if not temp_file_path:
             return ResponseUtil.failure(msg="日志拉取记录不存在或没有可下载的文件")
@@ -1245,7 +1252,7 @@ async def get_ticket_log_pull_list(
     :return: 日志拉取记录分页列表
     """
     try:
-        result = TicketLogPullService.list_log_pull_records_services(query_db, query)
+        result = await run_in_threadpool(TicketLogPullService.list_log_pull_records_services, query_db, query)
         if query.is_page:
             return ResponseUtil.success(model_content=result)
         return ResponseUtil.success(data=result)
@@ -1271,7 +1278,11 @@ async def get_ticket_log_pull_manage_list(
     :return: 日志拉取分页列表
     """
     try:
-        result = TicketLogPullService.list_log_pull_management_records_services(query_db, query)
+        result = await run_in_threadpool(
+            TicketLogPullService.list_log_pull_management_records_services,
+            query_db,
+            query,
+        )
         if query.is_page:
             return ResponseUtil.success(model_content=result)
         return ResponseUtil.success(data=result)
@@ -1301,7 +1312,9 @@ async def create_ticket_log_pull(
     :return: 创建结果
     """
     try:
-        result = TicketLogPullService.create_log_pull_services(query_db, ticket_id, create_object, current_user)
+        result = await run_in_threadpool(
+            TicketLogPullService.create_log_pull_services, query_db, ticket_id, create_object, current_user
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -1327,7 +1340,12 @@ async def retry_ticket_log_pull(
     :return: 重新提交结果
     """
     try:
-        result = TicketLogPullService.retry_log_pull_services(query_db, record_id, current_user)
+        result = await run_in_threadpool(
+            TicketLogPullService.retry_log_pull_services,
+            query_db,
+            record_id,
+            current_user,
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -1353,7 +1371,9 @@ async def redownload_ticket_log_pull(
     :return: 重新下载结果
     """
     try:
-        result = TicketLogPullService.redownload_log_pull_services(query_db, record_id, current_user)
+        result = await run_in_threadpool(
+            TicketLogPullService.redownload_log_pull_services, query_db, record_id, current_user
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -1381,7 +1401,9 @@ async def reextract_ticket_log_pull(
     :return: 重新截取结果
     """
     try:
-        result = TicketLogPullService.reextract_log_pull_services(query_db, record_id, query, current_user)
+        result = await run_in_threadpool(
+            TicketLogPullService.reextract_log_pull_services, query_db, record_id, query, current_user
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -1408,7 +1430,12 @@ async def delete_ticket_log_pull(
     :return: 删除结果
     """
     try:
-        result = TicketLogPullService.delete_log_pull_services(query_db, record_id, current_user)
+        result = await run_in_threadpool(
+            TicketLogPullService.delete_log_pull_services,
+            query_db,
+            record_id,
+            current_user,
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -1773,8 +1800,12 @@ async def create_ticket_log_pull_manage(
     :return: 创建结果
     """
     try:
-        result = TicketLogPullService.create_log_pull_services(
-            query_db, create_object.ticket_id, create_object, current_user
+        result = await run_in_threadpool(
+            TicketLogPullService.create_log_pull_services,
+            query_db,
+            create_object.ticket_id,
+            create_object,
+            current_user,
         )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:

@@ -8,6 +8,13 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-16] INGEST-CODE | 日志下载与工单同步接口非阻塞修复
+- 触发：用户反馈日志拉取列表点击归档地址、原始压缩包和重新下载会导致 FastAPI 服务卡住，并要求检查外部推送、内网拉取等高频工单接口。
+- 架构层：工单域 / 日志拉取 / 外部同步链路 / FastAPI 事件循环
+- 创建的页面：`web/public/docs/2026-06-16-ticket-log-pull-download-nonblocking.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 变更传播链：`server/modules/ticket/controller/ticket_controller.py` / `web/src/views/ticket/index.vue` / `web/src/views/ticket/logPullRecord/index.vue` -> 浏览器直链下载与同步服务线程池边界说明
+
 ## [2026-06-16] INGEST-CODE | 工单详情顶部描述布局优化
 - 触发：用户反馈工单详情弹窗顶部详情表格中描述过长会撑变形，灰色关键字列换行会抬高短信息行；随后要求描述自动展示全部内容，并将原文和翻译分开展示、支持手动翻译。
 - 架构层：工单域 / Web 控制台 / 工单详情弹窗 / 轻量 AI 翻译

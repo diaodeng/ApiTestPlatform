@@ -3828,6 +3828,15 @@ function redownloadLogPull(row) {
   runLogPullAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载', true)
 }
 
+function openBrowserDownload(url) {
+  const targetUrl = String(url || '').trim()
+  if (!targetUrl) {
+    return false
+  }
+  window.open(targetUrl, '_blank', 'noopener')
+  return true
+}
+
 function resolveLogPullDownloadFileName(row, source = 'auto') {
   let remoteName = ''
   if (row?.commandResultUrl) {
@@ -3883,6 +3892,10 @@ function downloadLogPullArchive(row) {
     proxy.$modal.msgWarning('当前记录缺少本服务归档地址')
     return
   }
+  if (/^https?:\/\//i.test(String(row.storagePath))) {
+    openBrowserDownload(row.storagePath)
+    return
+  }
   downloadLogPullFile(row, 'service', '本服务归档文件不存在或不可下载')
 }
 
@@ -3891,7 +3904,7 @@ function downloadLogPullOriginal(row) {
     proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
     return
   }
-  downloadLogPullFile(row, 'original', '原始压缩包不存在或不可下载')
+  openBrowserDownload(row.commandResultUrl)
 }
 
 function reextractLogPull(row = selectedLogPullRecord.value) {
