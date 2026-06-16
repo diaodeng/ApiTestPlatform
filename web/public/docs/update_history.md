@@ -4,6 +4,12 @@
 2. 移除该任务对 `lark-cli`、`larkCliBin` 和机器人 `webhook` 的依赖；新增 `receiveChatIds/appChatIds` 作为发送目标，未配置时默认发送到 `sources` 中的群。
 3. 新增说明文档：`web/public/docs/2026-06-17-ticket-topic-stats-feishu-api.md`。
 
+1. `ticket.sync.automation` 新增 `aiClassification` 可视化配置，支持分别控制外部同步入库、远端拉取入库、手动创建入库是否执行 AI 分类统计。
+2. AI 分类统计回填 `ticket` 主表结构化字段，执行摘要写入 `extra_data.ai_classification`；同文本成功结果会自动防重，手动强制重归类仍可覆盖。
+3. 新增说明文档：`web/public/docs/2026-06-17-ticket-ai-classification-statistics.md`。
+4. AI 分类统计上下文纳入最近评论，防重 hash 同步包含评论内容；默认 prompt 分工调整为 system 放规则、user 放业务上下文。
+5. `aiClassification` 新增 `promptContent`，未配置自定义提示词时后端自动回填内置默认提示词，配置页进入后可直接基于默认内容编辑；AI 执行时该内容只作为 system prompt，工单标题、描述和评论仍放入 user prompt。
+
 ## 2026-06-16
 
 1. 修复工单新增/编辑保存慢时阻塞其他接口的问题：`POST /ticket`、`PUT /ticket` 在 `async def` 内使用 `run_in_threadpool` 执行业务保存，并在线程内创建独立数据库会话。

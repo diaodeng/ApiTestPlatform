@@ -1049,47 +1049,25 @@ class TicketService:
                 create_time=now,
             )
             query_db.commit()
-            if not str(getattr(ticket, "category_name", "") or "").strip():
-                try:
-                    if TicketLightAiService.is_category_classification_enabled(query_db):
-                        category_name, category_meta = TicketLightAiService.classify_ticket_category(
-                            query_db,
-                            ticket=ticket,
-                            title=str(ticket.title or "").strip(),
-                            description=str(ticket.description or "").strip(),
-                            source_type="ticket_manual_create_auto_category",
-                            source_id=ticket.ticket_id,
-                            source_ref=ticket.ticket_no,
-                            current_user_name=_user_name(current_user),
-                        )
-                        normalized_category = str(category_name or "").strip()
-                        if normalized_category:
-                            next_extra_data = (
-                                dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-                            )
-                            next_extra_data["auto_category_classify"] = {
-                                "sourceType": "ticket_manual_create_auto_category",
-                                "categoryName": normalized_category,
-                                "providerCode": str(category_meta.get("provider_code") or "").strip(),
-                                "promptCode": str(category_meta.get("prompt_code") or "").strip(),
-                                "successAt": datetime.now().isoformat(),
-                                "forceReclassify": False,
-                            }
-                            TicketDao.update_ticket(
-                                query_db,
-                                ticket.ticket_id,
-                                {
-                                    "category_name": normalized_category,
-                                    "extra_data": next_extra_data,
-                                    "update_by": _user_name(current_user),
-                                    "update_time": datetime.now(),
-                                },
-                            )
-                            query_db.commit()
-                            ticket = TicketDao.get_ticket_by_id(query_db, ticket.ticket_id) or ticket
-                except Exception as exc:
-                    query_db.rollback()
-                    logger.warning("工单[%s]自动分类执行失败: %s", ticket.ticket_id, exc)
+            try:
+                from modules.ticket.service.ticket_sync_service import TicketSyncService
+
+                ticket, ai_stat_summary = TicketSyncService._run_auto_ticket_ai_classification(
+                    query_db,
+                    ticket=ticket,
+                    title=str(ticket.title or "").strip(),
+                    description=str(ticket.description or "").strip(),
+                    current_user_name=_user_name(current_user),
+                    source_type="ticket_manual_create_auto_category",
+                    source_ref=ticket.ticket_no,
+                    force_reclassify=False,
+                    enabled_by_scene=True,
+                )
+                if ai_stat_summary.get("skipped"):
+                    logger.info(f"工单[{ticket.ticket_id}]自动分类统计跳过: {ai_stat_summary.get('skipReason')}")
+            except Exception as exc:
+                query_db.rollback()
+                logger.warning(f"工单[{ticket.ticket_id}]自动分类执行失败: {exc}")
             if need_log_pull or log_pull_config:
                 try:
                     log_pull_result = TicketLogPullService.create_log_pull_services(
@@ -1099,11 +1077,9 @@ class TicketService:
                         current_user,
                     )
                     if not log_pull_result.is_success:
-                        logger.warning(
-                            "工单[%s]创建后自动提交日志拉取失败: %s", ticket.ticket_id, log_pull_result.message
-                        )
+                        logger.warning(f"工单[{ticket.ticket_id}]创建后自动提交日志拉取失败: {log_pull_result.message}")
                 except Exception as exc:
-                    logger.exception("工单[%s]创建后自动提交日志拉取异常: %s", ticket.ticket_id, exc)
+                    logger.exception(f"工单[{ticket.ticket_id}]创建后自动提交日志拉取异常: {exc}")
             result = CamelCaseUtil.transform_result(ticket)
             cls._decorate_ticket_item(result)
             return CrudResponseModel(is_success=True, message="新增成功", result=result)
@@ -1568,7 +1544,7 @@ class TicketService:
                 try:
                     cls.create_knowledge_from_ticket(query_db, ticket_id, current_user)
                 except Exception as exc:
-                    logger.warning("工单[%s]关闭后自动提炼知识库失败: %s", ticket_id, exc)
+                    logger.warning(f"工单[{ticket_id}]关闭后自动提炼知识库失败: {exc}")
             query_db.commit()
             return CrudResponseModel(is_success=True, message="状态流转成功")
         except Exception:
@@ -2049,7 +2025,7 @@ class TicketService:
                 current_user_name=_user_name(current_user) if current_user else "system",
             )
         except Exception as exc:
-            logger.warning("工单[%s]知识提炼AI执行失败，已回退规则方案: %s", ticket_id, exc)
+            logger.warning(f"工单[{ticket_id}]知识提炼AI执行失败，已回退规则方案: {exc}")
         investigation_lines = [
             f"- {item.create_time:%Y-%m-%d %H:%M:%S} {item.event_type}: {item.content or ''}"
             for item in events[-20:]
@@ -2170,7 +2146,7 @@ class TicketService:
         try:
             TicketEmbeddingService.vectorize_ticket(query_db, ticket)
         except Exception as exc:
-            logger.warning("工单[%s]向量刷新失败: %s", ticket_id, exc)
+            logger.warning(f"工单[{ticket_id}]向量刷新失败: {exc}")
         return CrudResponseModel(
             is_success=True,
             message="知识库案例生成成功",

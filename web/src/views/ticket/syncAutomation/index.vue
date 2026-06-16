@@ -45,6 +45,91 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
+          <span>AI 分类统计配置</span>
+          <el-tag type="warning" effect="plain">外部同步、远端拉取、手动创建可分别控制</el-tag>
+        </div>
+      </template>
+
+      <el-form :model="form.aiClassification" label-width="150px">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="启用AI分类">
+              <el-switch v-model="form.aiClassification.enabled" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="外部同步执行">
+              <el-switch v-model="form.aiClassification.runOnExternalSync" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="远端拉取执行">
+              <el-switch v-model="form.aiClassification.runOnRemotePull" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="手动创建执行">
+              <el-switch v-model="form.aiClassification.runOnManualCreate" inline-prompt active-text="开" inactive-text="关" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="Provider 编码">
+              <el-select
+                v-model="form.aiClassification.providerCode"
+                placeholder="留空则使用后端默认配置"
+                filterable
+                allow-create
+                clearable
+                default-first-option
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in providerOptions"
+                  :key="item.providerCode || item.value"
+                  :label="item.providerName || item.label || item.providerCode || item.value"
+                  :value="item.providerCode || item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="提示词编码">
+              <el-select
+                v-model="form.aiClassification.promptCode"
+                placeholder="如 ticket_stat_classify_default"
+                filterable
+                allow-create
+                clearable
+                default-first-option
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in promptOptions"
+                  :key="item.promptCode || item.value"
+                  :label="item.promptName || item.label || item.promptCode || item.value"
+                  :value="item.promptCode || item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="24">
+            <el-form-item label="提示词内容">
+              <el-input
+                v-model="form.aiClassification.promptContent"
+                type="textarea"
+                :rows="12"
+                resize="vertical"
+                placeholder="未配置自定义提示词时，后端会自动回填默认提示词，可在此基础上直接修改"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="config-card mt16">
+      <template #header>
+        <div class="card-header">
           <span>统计枚举配置</span>
           <el-tag effect="plain">用于工单页与统计页的可视化配置</el-tag>
         </div>
@@ -1135,6 +1220,8 @@ import {
   saveTicketSyncAutomationConfig,
   sendTicketSyncGroupPushByTicket
 } from '@/api/ticket/ticket'
+import { listAiProviderOptions } from '@/api/system/aiprovider'
+import { listAiPromptTemplateOptions } from '@/api/system/aiprompt'
 
 const { proxy } = getCurrentInstance()
 
@@ -1142,6 +1229,8 @@ const loading = ref(false)
 const saving = ref(false)
 const pushOptionsLoading = ref(false)
 const pushOptions = ref([])
+const providerOptions = ref([])
+const promptOptions = ref([])
 const groupSendLoading = ref(false)
 const personPreviewLoading = ref(false)
 const personRunLoading = ref(false)
@@ -1441,6 +1530,15 @@ function createDefaultForm() {
     promptTemplates: {
       classificationHint: ''
     },
+    aiClassification: {
+      enabled: false,
+      runOnExternalSync: false,
+      runOnRemotePull: false,
+      runOnManualCreate: false,
+      providerCode: '',
+      promptCode: 'ticket_stat_classify_default',
+      promptContent: ''
+    },
     statClassification: normalizeStatClassificationConfig(),
     externalSyncRequiredFields: [
       'ticketNo',
@@ -1672,6 +1770,16 @@ function applyConfig(payload) {
     includeClosed: summaryReport.includeClosed !== false,
     messageTemplate: summaryReport.messageTemplate || ''
   }
+  const aiClassification = payload.aiClassification || {}
+  form.aiClassification = {
+    enabled: Boolean(aiClassification.enabled),
+    runOnExternalSync: Boolean(aiClassification.runOnExternalSync),
+    runOnRemotePull: Boolean(aiClassification.runOnRemotePull),
+    runOnManualCreate: Boolean(aiClassification.runOnManualCreate),
+    providerCode: aiClassification.providerCode || '',
+    promptCode: aiClassification.promptCode || 'ticket_stat_classify_default',
+    promptContent: aiClassification.promptContent || ''
+  }
 
   form.projectMappings = normalizeArray(payload.projectMappings)
   form.moduleMappings = normalizeArray(payload.moduleMappings)
@@ -1852,6 +1960,15 @@ async function handleSave() {
     payload.summaryReport.aiEnabled = Boolean(payload.summaryReport?.aiEnabled)
     payload.summaryReport.aiProviderCode = String(payload.summaryReport?.aiProviderCode || '').trim()
     payload.summaryReport.aiPromptCode = String(payload.summaryReport?.aiPromptCode || '').trim()
+    payload.aiClassification = {
+      enabled: Boolean(payload.aiClassification?.enabled),
+      runOnExternalSync: Boolean(payload.aiClassification?.runOnExternalSync),
+      runOnRemotePull: Boolean(payload.aiClassification?.runOnRemotePull),
+      runOnManualCreate: Boolean(payload.aiClassification?.runOnManualCreate),
+      providerCode: String(payload.aiClassification?.providerCode || '').trim(),
+      promptCode: String(payload.aiClassification?.promptCode || '').trim() || 'ticket_stat_classify_default',
+      promptContent: String(payload.aiClassification?.promptContent || '').trim()
+    }
     payload.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
       ? Array.from(new Set(payload.externalSyncRequiredFields.map(item => String(item || '').trim()).filter(Boolean)))
       : []
@@ -1864,6 +1981,30 @@ async function handleSave() {
   } finally {
     saving.value = false
   }
+}
+
+/**
+ * 加载 AI Provider 和提示词模板选项。
+ * 页面仍允许手工输入编码，选项加载失败时不阻塞配置保存。
+ */
+function loadAiOptions() {
+  listAiProviderOptions()
+    .then(response => {
+      providerOptions.value = Array.isArray(response.data) ? response.data : []
+    })
+    .catch(() => {
+      providerOptions.value = []
+    })
+  listAiPromptTemplateOptions({
+    template_category: 'classification,analysis,common',
+    enabled_only: true
+  })
+    .then(response => {
+      promptOptions.value = Array.isArray(response.data) ? response.data : []
+    })
+    .catch(() => {
+      promptOptions.value = []
+    })
 }
 
 function normalizeOptionalInt(value) {
@@ -1982,7 +2123,7 @@ function parseAutoCategoryRegexRules() {
 function buildAutoCategoryPayload(overrides = {}) {
   const payload = {
     strategy: autoCategoryForm.strategy,
-    aiPromptCode: String(autoCategoryForm.aiPromptCode || '').trim() || null,
+    aiPromptCode: String(autoCategoryForm.aiPromptCode || form.aiClassification.promptCode || '').trim() || null,
     onlyUncategorized: Boolean(autoCategoryForm.onlyUncategorized),
     allTickets: Boolean(autoCategoryForm.allTickets),
     forceReclassify: Boolean(autoCategoryForm.forceReclassify),
@@ -2081,6 +2222,7 @@ function handleSendGroupPushByTicket() {
 onMounted(() => {
   loadConfig()
   loadPushOptions()
+  loadAiOptions()
   handleLoadAutoCategoryStats()
 })
 </script>

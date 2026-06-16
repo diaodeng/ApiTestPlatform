@@ -78,6 +78,39 @@ class TicketLightAiService:
         "支持类": "支持类",
         "support": "支持类",
     }
+    DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT = (
+        "你是工单分类标注助手。请基于工单标题、描述、当前字段和候选枚举，"
+        "输出一个严格 JSON 对象，不要输出 Markdown。"
+        "\n\n目标：\n"
+        "1. 判断这张工单是否真实问题。\n"
+        "2. 判断问题/咨询类型、所属模块、严重程度、根因分类、解决方式和关闭结果。\n"
+        "3. 只使用候选枚举中的编码和值；不确定时留空字符串，不要编造。\n\n"
+        "输出 JSON 字段：\n"
+        "{\n"
+        '  "categoryName": "旧分类名称，可选",\n'
+        '  "isProblem": true,\n'
+        '  "issueTypeId": "候选工单类型编码",\n'
+        '  "issueTypeName": "候选工单类型名称",\n'
+        '  "moduleName": "业务模块名称，可为空",\n'
+        '  "severity": "高/中/低/轻微，可为空",\n'
+        '  "rootCauseType": "候选根因分类名称或编码",\n'
+        '  "solutionType": "候选解决方式名称或编码",\n'
+        '  "resolutionCode": "候选关闭结果编码",\n'
+        '  "resolutionName": "候选关闭结果名称",\n'
+        '  "rootCause": "简短根因，关闭或已有排查信息时填写",\n'
+        '  "solution": "简短解决方案，关闭或已有排查信息时填写",\n'
+        '  "needRnd": false,\n'
+        '  "needMonitor": false,\n'
+        '  "needKb": false,\n'
+        '  "confidence": 0.0,\n'
+        '  "reason": "一句话解释"\n'
+        "}\n\n"
+        "判定规则：\n"
+        "- 用户咨询、操作问题、需求如此、重复工单通常不是系统真实问题。\n"
+        "- 代码缺陷、配置错误、数据异常、接口异常、性能问题通常是真实问题。\n"
+        "- 工单未关闭或没有处理结论时，rootCauseType、solutionType、resolutionCode 可以留空。\n"
+        "- confidence 使用 0 到 1 的小数。"
+    )
 
     @classmethod
     def is_translation_enabled(cls, db: Session) -> bool:
@@ -171,6 +204,38 @@ class TicketLightAiService:
         return "\n\n".join([part for part in parts if str(part or "").strip()])
 
     @classmethod
+    def _build_structured_classification_prompt(
+        cls,
+        *,
+        title: str,
+        content: str,
+        comments: list[str] | None = None,
+        current_fields: dict[str, Any],
+        stat_options: dict[str, Any],
+    ) -> str:
+        """
+        构建工单结构化分类请求内容。
+        :param title: 工单标题。
+        :param content: 工单描述。
+        :param comments: 工单评论上下文。
+        :param current_fields: 当前工单已有字段。
+        :param stat_options: 可视化维护的统计枚举。
+        :return: 用户提示词。
+        """
+        comment_lines = [str(item or "").strip() for item in comments or [] if str(item or "").strip()]
+        comments_text = "\n".join(comment_lines) if comment_lines else "无"
+        return "\n\n".join(
+            [
+                f"工单标题：{title}".strip(),
+                f"工单描述：\n{content}".strip(),
+                f"工单评论：\n{comments_text}".strip(),
+                "当前字段：\n" + json.dumps(current_fields, ensure_ascii=False, default=str),
+                "候选枚举：\n" + json.dumps(stat_options, ensure_ascii=False, default=str),
+                "请按系统提示词要求输出严格 JSON 对象。",
+            ]
+        ).strip()
+
+    @classmethod
     def _build_sync_extract_prompt(cls, title: str, content: str, raw_payload: dict[str, Any] | None = None) -> str:
         """
         构建工单同步统一提取请求内容。
@@ -220,6 +285,148 @@ class TicketLightAiService:
             if alias and alias in lowered:
                 return target
         return ""
+
+    @staticmethod
+    def _normalize_bool_or_none(value: Any) -> bool | None:
+        """
+        将模型返回的布尔含义归一化为 bool 或 None。
+        :param value: 原始值。
+        :return: bool 或 None。
+        """
+        if isinstance(value, bool):
+            return value
+        text = str(value or "").strip().lower()
+        if text in {"true", "1", "yes", "y", "是", "真实问题", "问题"}:
+            return True
+        if text in {"false", "0", "no", "n", "否", "非问题", "不是问题"}:
+            return False
+        return None
+
+    @staticmethod
+    def _normalize_float(value: Any) -> float | None:
+        """
+        将模型返回的小数归一化到 0 到 1。
+        :param value: 原始值。
+        :return: 置信度。
+        """
+        try:
+            number = float(value)
+        except Exception:
+            return None
+        if number > 1:
+            number = number / 100
+        return max(0.0, min(number, 1.0))
+
+    @staticmethod
+    def _find_option_by_value_or_label(options: list[dict[str, Any]], raw_value: Any) -> dict[str, Any] | None:
+        """
+        按编码或名称查找统计枚举。
+        :param options: 枚举行。
+        :param raw_value: 模型返回值。
+        :return: 命中的枚举行。
+        """
+        text = str(raw_value or "").strip()
+        if not text:
+            return None
+        lowered = text.lower()
+        for option in options:
+            value = str(option.get("value") or "").strip()
+            label = str(option.get("label") or "").strip()
+            if lowered in {value.lower(), label.lower()}:
+                return option
+        for option in options:
+            value = str(option.get("value") or "").strip()
+            label = str(option.get("label") or "").strip()
+            if lowered and (lowered in value.lower() or lowered in label.lower()):
+                return option
+        return None
+
+    @classmethod
+    def _normalize_structured_classification_result(
+        cls,
+        raw_payload: dict[str, Any],
+        *,
+        response_text: str,
+        stat_options: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        归一化结构化分类结果。
+        :param raw_payload: 模型 JSON。
+        :param response_text: 原始模型输出。
+        :param stat_options: 统计枚举。
+        :return: 可直接回填主表的结构化字段。
+        """
+        payload = raw_payload if isinstance(raw_payload, dict) else {}
+        issue_options = (
+            stat_options.get("issueTypes") if isinstance(stat_options.get("issueTypes"), list) else []
+        )
+        root_options = (
+            stat_options.get("rootCauseTypes") if isinstance(stat_options.get("rootCauseTypes"), list) else []
+        )
+        solution_options = (
+            stat_options.get("solutionTypes") if isinstance(stat_options.get("solutionTypes"), list) else []
+        )
+        resolution_options = (
+            stat_options.get("resolutions") if isinstance(stat_options.get("resolutions"), list) else []
+        )
+
+        issue_option = cls._find_option_by_value_or_label(
+            issue_options,
+            payload.get("issueTypeId") or payload.get("issue_type_id") or payload.get("issueTypeName"),
+        )
+        root_option = cls._find_option_by_value_or_label(
+            root_options,
+            payload.get("rootCauseType") or payload.get("root_cause_type"),
+        )
+        solution_option = cls._find_option_by_value_or_label(
+            solution_options,
+            payload.get("solutionType") or payload.get("solution_type"),
+        )
+        resolution_option = cls._find_option_by_value_or_label(
+            resolution_options,
+            payload.get("resolutionCode") or payload.get("resolution_code") or payload.get("resolutionName"),
+        )
+
+        raw_category = str(
+            payload.get("categoryName")
+            or payload.get("category")
+            or payload.get("classification")
+            or ""
+        ).strip()
+        normalized = {
+            "categoryName": cls._normalize_ticket_category(raw_category) or raw_category,
+            "isProblem": cls._normalize_bool_or_none(payload.get("isProblem") or payload.get("is_problem")),
+            "issueTypeId": str((issue_option or {}).get("value") or payload.get("issueTypeId") or "").strip(),
+            "issueTypeName": str((issue_option or {}).get("label") or payload.get("issueTypeName") or "").strip(),
+            "moduleName": str(payload.get("moduleName") or payload.get("module") or "").strip(),
+            "severity": str(payload.get("severity") or "").strip(),
+            "rootCauseType": str((root_option or {}).get("label") or payload.get("rootCauseType") or "").strip(),
+            "solutionType": str((solution_option or {}).get("label") or payload.get("solutionType") or "").strip(),
+            "resolutionCode": str(
+                (resolution_option or {}).get("value") or payload.get("resolutionCode") or ""
+            ).strip(),
+            "resolutionName": str(
+                (resolution_option or {}).get("label") or payload.get("resolutionName") or ""
+            ).strip(),
+            "rootCause": str(payload.get("rootCause") or payload.get("root_cause") or "").strip(),
+            "solution": str(payload.get("solution") or "").strip(),
+            "needRnd": cls._normalize_bool_or_none(payload.get("needRnd") or payload.get("need_rnd")),
+            "needMonitor": cls._normalize_bool_or_none(payload.get("needMonitor") or payload.get("need_monitor")),
+            "needKb": cls._normalize_bool_or_none(payload.get("needKb") or payload.get("need_kb")),
+            "confidence": cls._normalize_float(payload.get("confidence")),
+            "reason": str(payload.get("reason") or "").strip(),
+            "rawPayload": payload,
+            "responseText": response_text,
+        }
+        if normalized["isProblem"] is None and issue_option and isinstance(issue_option.get("isProblem"), bool):
+            normalized["isProblem"] = issue_option.get("isProblem")
+        if (
+            normalized["isProblem"] is None
+            and resolution_option
+            and isinstance(resolution_option.get("isProblem"), bool)
+        ):
+            normalized["isProblem"] = resolution_option.get("isProblem")
+        return normalized
 
     @staticmethod
     def _normalize_pos_or_sco_no(value: Any) -> int | None:
@@ -672,7 +879,7 @@ class TicketLightAiService:
                 "parsed": parsed_data,
             }
         except Exception as exc:
-            logger.warning("工单知识库提炼失败，已回退规则提炼: %s", exc)
+            logger.warning(f"工单知识库提炼失败，已回退规则提炼: {exc}")
             cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
             return {}, {
                 "provider_code": provider_code,
@@ -740,7 +947,7 @@ class TicketLightAiService:
                     },
                 )
         except Exception as exc:
-            logger.warning("轻量AI审计记录[%s]更新失败: %s", execution_id, exc)
+            logger.warning(f"轻量AI审计记录[{execution_id}]更新失败: {exc}")
 
     @classmethod
     def _resolve_provider_headers(cls, provider) -> dict[str, str]:
@@ -936,7 +1143,12 @@ class TicketLightAiService:
                     created_by_name=current_user_name,
                 ),
             )
-            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未配置日志参数提取Provider或提示词")
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="未配置日志参数提取Provider或提示词",
+            )
             return empty_result, {"provider_code": provider_code, "prompt_code": prompt_code, "skipped": True}
 
         provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
@@ -1081,7 +1293,7 @@ class TicketLightAiService:
             }
         except Exception as exc:
             cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
-            logger.warning("工单同步统一提取失败: %s", exc)
+            logger.warning(f"工单同步统一提取失败: {exc}")
             return empty_result, {
                 "provider_code": provider_code,
                 "prompt_code": prompt_code,
@@ -1136,8 +1348,18 @@ class TicketLightAiService:
                     created_by_name=current_user_name,
                 ),
             )
-            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未配置标题总结Provider或提示词")
-            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "summary_title": "", "skipped": True}
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="未配置标题总结Provider或提示词",
+            )
+            return "", {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "summary_title": "",
+                "skipped": True,
+            }
 
         provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
         if not provider or not bool(getattr(provider, "enabled", True)):
@@ -1156,8 +1378,18 @@ class TicketLightAiService:
                     created_by_name=current_user_name,
                 ),
             )
-            cls._finish_execution_record(db, execution_id, status="skipped", error_message="Provider不存在或已停用")
-            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "summary_title": "", "skipped": True}
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="Provider不存在或已停用",
+            )
+            return "", {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "summary_title": "",
+                "skipped": True,
+            }
 
         prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
         if not prompt_templates:
@@ -1178,8 +1410,18 @@ class TicketLightAiService:
                     created_by_name=current_user_name,
                 ),
             )
-            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未找到提示词模板")
-            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "summary_title": "", "skipped": True}
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="未找到提示词模板",
+            )
+            return "", {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "summary_title": "",
+                "skipped": True,
+            }
 
         prompt_template = prompt_templates[0]
         system_prompt = AiPromptTemplateService.render_prompt_text(
@@ -1303,8 +1545,18 @@ class TicketLightAiService:
                     created_by_name=current_user_name,
                 ),
             )
-            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未配置自动分类Provider或提示词")
-            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "category_name": "", "skipped": True}
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="未配置自动分类Provider或提示词",
+            )
+            return "", {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "category_name": "",
+                "skipped": True,
+            }
 
         provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
         if not provider or not bool(getattr(provider, "enabled", True)):
@@ -1323,8 +1575,18 @@ class TicketLightAiService:
                     created_by_name=current_user_name,
                 ),
             )
-            cls._finish_execution_record(db, execution_id, status="skipped", error_message="Provider不存在或已停用")
-            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "category_name": "", "skipped": True}
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="Provider不存在或已停用",
+            )
+            return "", {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "category_name": "",
+                "skipped": True,
+            }
 
         prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
         if not prompt_templates:
@@ -1345,8 +1607,18 @@ class TicketLightAiService:
                     created_by_name=current_user_name,
                 ),
             )
-            cls._finish_execution_record(db, execution_id, status="skipped", error_message="未找到提示词模板")
-            return "", {"provider_code": provider_code, "prompt_code": prompt_code, "category_name": "", "skipped": True}
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="未找到提示词模板",
+            )
+            return "", {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "category_name": "",
+                "skipped": True,
+            }
 
         prompt_template = prompt_templates[0]
         system_prompt = AiPromptTemplateService.render_prompt_text(
@@ -1423,6 +1695,191 @@ class TicketLightAiService:
             }
 
     @classmethod
+    def classify_ticket_statistics(
+        cls,
+        db: Session,
+        *,
+        title: str,
+        description: str,
+        comments: list[str] | None = None,
+        current_fields: dict[str, Any] | None = None,
+        stat_options: dict[str, Any] | None = None,
+        override_provider_code: str | None = None,
+        override_prompt_code: str | None = None,
+        override_prompt_content: str | None = None,
+        source_type: str = "ticket",
+        source_id: int | None = None,
+        source_ref: str | None = None,
+        current_user_name: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """
+        使用轻量 AI 生成工单统计分类结构化字段。
+        :param db: 数据库会话。
+        :param title: 工单标题。
+        :param description: 工单描述。
+        :param comments: 工单评论上下文。
+        :param current_fields: 当前工单已有字段。
+        :param stat_options: 可视化维护的统计枚举。
+        :param override_provider_code: 可选覆盖 Provider 编码。
+        :param override_prompt_code: 可选覆盖提示词编码。
+        :param override_prompt_content: 可选覆盖 system prompt 内容。
+        :param source_type: 来源类型。
+        :param source_id: 来源ID。
+        :param source_ref: 来源引用。
+        :param current_user_name: 当前用户名称。
+        :return: (结构化分类结果, 元信息)。
+        """
+        title_text = str(title or "").strip()
+        content = str(description or "").strip()
+        comment_lines = [str(item or "").strip() for item in comments or [] if str(item or "").strip()]
+        empty_result: dict[str, Any] = {}
+        if not title_text and not content and not comment_lines:
+            return empty_result, {
+                "provider_code": "",
+                "prompt_code": "",
+                "skipped": True,
+                "skipReason": "标题和描述为空",
+            }
+
+        default_provider_code, default_prompt_code = cls._resolve_task_settings(
+            db, cls.CONFIG_CATEGORY_CLASSIFY_PROVIDER, cls.CONFIG_CATEGORY_CLASSIFY_PROMPT
+        )
+        provider_code = str(override_provider_code or "").strip() or default_provider_code
+        prompt_code = str(override_prompt_code or "").strip() or default_prompt_code
+        options = stat_options if isinstance(stat_options, dict) else {}
+        fields = current_fields if isinstance(current_fields, dict) else {}
+        request_payload = {
+            "title": title_text,
+            "description": content,
+            "comments": comment_lines,
+            "currentFields": fields,
+            "statOptions": options,
+            "overrideProviderCode": str(override_provider_code or "").strip() or None,
+            "overridePromptCode": str(override_prompt_code or "").strip() or None,
+            "overridePromptContent": str(override_prompt_content or "").strip() or None,
+        }
+        if not provider_code or not prompt_code:
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_stat_classify",
+                    task_name="工单AI分类统计",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    status="skipped",
+                    error_message="未配置分类统计Provider或提示词",
+                    request_payload=request_payload,
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="skipped",
+                error_message="未配置分类统计Provider或提示词",
+            )
+            return empty_result, {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "skipped": True,
+            }
+
+        provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
+        if not provider or not bool(getattr(provider, "enabled", True)):
+            execution_id = cls._write_execution_record(
+                execution_data=cls._build_execution_payload(
+                    task_type="ticket_stat_classify",
+                    task_name="工单AI分类统计",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_ref=source_ref,
+                    provider_code=provider_code,
+                    prompt_code=prompt_code,
+                    status="skipped",
+                    error_message="Provider不存在或已停用",
+                    request_payload=request_payload,
+                    created_by_name=current_user_name,
+                ),
+            )
+            cls._finish_execution_record(db, execution_id, status="skipped", error_message="Provider不存在或已停用")
+            return empty_result, {"provider_code": provider_code, "prompt_code": prompt_code, "skipped": True}
+
+        prompt_content = str(override_prompt_content or "").strip()
+        prompt_templates = []
+        if not prompt_content:
+            prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
+        if prompt_content:
+            system_prompt = prompt_content
+        elif prompt_templates:
+            prompt_template = prompt_templates[0]
+            system_prompt = AiPromptTemplateService.render_prompt_text(
+                prompt_template["promptContent"],
+                {
+                    "title": title_text,
+                    "content": content,
+                    "current_fields": json.dumps(fields, ensure_ascii=False, default=str),
+                    "stat_options": json.dumps(options, ensure_ascii=False, default=str),
+                },
+            )
+        else:
+            system_prompt = cls.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT
+        user_prompt = cls._build_structured_classification_prompt(
+            title=title_text,
+            content=content,
+            comments=comment_lines,
+            current_fields=fields,
+            stat_options=options,
+        )
+        execution_id = cls._write_execution_record(
+            execution_data=cls._build_execution_payload(
+                task_type="ticket_stat_classify",
+                task_name="工单AI分类统计",
+                source_type=source_type,
+                source_id=source_id,
+                source_ref=source_ref,
+                provider_code=provider_code,
+                prompt_code=prompt_code,
+                model_name=str(getattr(provider, "model_name", "") or "").strip() or None,
+                base_url=str(getattr(provider, "base_url", "") or "").strip() or None,
+                request_payload={**request_payload, "system_prompt": system_prompt, "user_prompt": user_prompt},
+                status="running",
+                created_by_name=current_user_name,
+            ),
+        )
+        try:
+            response_text = str(
+                cls._call_model_api(provider=provider, system_prompt=system_prompt, user_prompt=user_prompt)
+                or ""
+            ).strip()
+            parsed_payload = cls._extract_json_object(response_text)
+            normalized_result = cls._normalize_structured_classification_result(
+                parsed_payload,
+                response_text=response_text,
+                stat_options=options,
+            )
+            cls._finish_execution_record(
+                db,
+                execution_id,
+                status="success",
+                response_text=response_text,
+                response_payload=normalized_result,
+            )
+            return normalized_result, {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "skipped": False,
+            }
+        except Exception as exc:
+            logger.warning(f"工单AI分类统计失败: {exc}")
+            cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
+            return empty_result, {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "skipped": True,
+                "error": str(exc),
+            }
+
+    @classmethod
     def translate_ticket_description(
         cls,
         db: Session,
@@ -1457,7 +1914,11 @@ class TicketLightAiService:
                 f"source_id={source_id}, source_ref={source_ref}"
             )
             return origin_text, {"provider_code": "", "prompt_code": "", "translated_text": "", "skipped": True}
-        provider_code, prompt_code = cls._resolve_task_settings(db, cls.CONFIG_TRANSLATE_PROVIDER, cls.CONFIG_TRANSLATE_PROMPT)
+        provider_code, prompt_code = cls._resolve_task_settings(
+            db,
+            cls.CONFIG_TRANSLATE_PROVIDER,
+            cls.CONFIG_TRANSLATE_PROMPT,
+        )
         if not provider_code or not prompt_code:
             logger.info(
                 f"工单轻量翻译跳过: provider/prompt 未配置, provider={provider_code or '-'}, "

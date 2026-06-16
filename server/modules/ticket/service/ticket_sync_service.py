@@ -17,7 +17,7 @@ from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
-from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketMessage, TicketStatusHistory
+from modules.ticket.entity.do.ticket_do import Ticket, TicketComment, TicketEvent, TicketMessage, TicketStatusHistory
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullProjectVendorMap, TicketLogPullStoreConfig
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import (
@@ -1299,6 +1299,7 @@ class TicketSyncService:
             "personReminder": cls._default_person_reminder_config(),
             "summaryReport": cls._default_summary_report_config(),
             "statClassification": cls._default_stat_classification_config(),
+            "aiClassification": cls._default_ai_classification_config(),
             "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
             "projectMappings": [],
             "moduleMappings": [],
@@ -1480,6 +1481,23 @@ class TicketSyncService:
         }
 
     @classmethod
+    def _default_ai_classification_config(cls) -> dict[str, Any]:
+        """
+        构建工单 AI 分类统计默认配置。
+
+        :return: AI 分类统计配置。
+        """
+        return {
+            "enabled": False,
+            "runOnExternalSync": False,
+            "runOnRemotePull": False,
+            "runOnManualCreate": False,
+            "providerCode": "",
+            "promptCode": "ticket_stat_classify_default",
+            "promptContent": TicketLightAiService.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT,
+        }
+
+    @classmethod
     def _normalize_stat_option_rows(cls, value: Any, default_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         归一化可视化维护的统计枚举行。
@@ -1544,6 +1562,36 @@ class TicketSyncService:
         }
 
     @classmethod
+    def _normalize_ai_classification_config(cls, value: Any) -> dict[str, Any]:
+        """
+        归一化工单 AI 分类统计配置。
+
+        :param value: 原始配置。
+        :return: 带默认值的配置。
+        """
+        source = value if isinstance(value, dict) else {}
+        defaults = cls._default_ai_classification_config()
+        return {
+            "enabled": bool(source.get("enabled", defaults["enabled"])),
+            "runOnExternalSync": bool(source.get("runOnExternalSync", source.get("run_on_external_sync", False))),
+            "runOnRemotePull": bool(source.get("runOnRemotePull", source.get("run_on_remote_pull", False))),
+            "runOnManualCreate": bool(source.get("runOnManualCreate", source.get("run_on_manual_create", False))),
+            "providerCode": str(source.get("providerCode") or source.get("provider_code") or "").strip(),
+            "promptCode": str(
+                source.get("promptCode")
+                or source.get("prompt_code")
+                or defaults["promptCode"]
+                or ""
+            ).strip(),
+            "promptContent": str(
+                source.get("promptContent")
+                or source.get("prompt_content")
+                or defaults["promptContent"]
+                or ""
+            ).strip(),
+        }
+
+    @classmethod
     def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
         merged = cls._default_sync_config()
         if isinstance(config, dict):
@@ -1558,6 +1606,7 @@ class TicketSyncService:
         if not isinstance(merged.get("promptTemplates"), dict):
             merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
         merged["statClassification"] = cls._normalize_stat_classification_config(merged.get("statClassification"))
+        merged["aiClassification"] = cls._normalize_ai_classification_config(merged.get("aiClassification"))
         external_sync_bitable = (
             merged.get("externalSyncBitable")
             if isinstance(merged.get("externalSyncBitable"), dict)
@@ -3676,6 +3725,262 @@ class TicketSyncService:
             raise
 
     @classmethod
+    def _run_auto_ticket_ai_classification(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        title: str,
+        description: str,
+        current_user_name: str,
+        source_type: str,
+        source_ref: str,
+        force_reclassify: bool = False,
+        ai_prompt_code: str | None = None,
+        enabled_by_scene: bool = True,
+    ) -> tuple[Ticket, dict[str, Any]]:
+        """
+        执行工单 AI 分类统计并回填统计字段。
+
+        :param db: 数据库会话。
+        :param ticket: 工单对象。
+        :param title: 工单标题。
+        :param description: 工单描述。
+        :param current_user_name: 当前用户名。
+        :param source_type: 分类来源类型。
+        :param source_ref: 分类来源引用。
+        :param force_reclassify: 是否强制重新分类。
+        :param ai_prompt_code: 可选覆盖提示词编码。
+        :param enabled_by_scene: 当前场景是否启用。
+        :return: (最新工单对象, 分类摘要)。
+        """
+        if not enabled_by_scene and not force_reclassify:
+            return ticket, {"skipped": True, "skipReason": "当前场景未启用AI分类统计"}
+        config = cls._load_sync_config(db)
+        if not cls._should_run_ai_classification_for_scene(config, source_type) and not force_reclassify:
+            return ticket, {"skipped": True, "skipReason": "当前场景未开启AI分类统计"}
+        title_text = str(title or "").strip()
+        description_text = str(description or "").strip()
+        comment_context = cls._build_ticket_comment_context(db, ticket_id=ticket.ticket_id)
+        if not force_reclassify and cls._has_successful_ai_classification(
+            ticket,
+            title=title_text,
+            description=description_text,
+            comments=comment_context,
+        ):
+            return ticket, {"skipped": True, "skipReason": "已有相同文本的成功AI分类结果"}
+
+        ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
+        stat_options = config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
+        result_payload, meta = TicketLightAiService.classify_ticket_statistics(
+            db,
+            title=title_text,
+            description=description_text,
+            comments=comment_context,
+            current_fields=cls._build_ticket_stat_current_fields(ticket),
+            stat_options=stat_options,
+            override_provider_code=str(ai_config.get("providerCode") or "").strip() or None,
+            override_prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
+            override_prompt_content=str(ai_config.get("promptContent") or "").strip() or None,
+            source_type=source_type,
+            source_id=ticket.ticket_id,
+            source_ref=source_ref,
+            current_user_name=current_user_name,
+        )
+        if not result_payload:
+            return ticket, {
+                "skipped": True,
+                "skipReason": str(meta.get("error") or meta.get("skipReason") or "AI未返回分类统计结果").strip(),
+                "meta": meta,
+            }
+
+        source_hash = cls._build_ai_classification_source_hash(
+            title=title_text,
+            description=description_text,
+            comments=comment_context,
+        )
+        next_extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        next_extra_data["ai_classification"] = {
+            "success": True,
+            "sourceType": source_type,
+            "sourceRef": source_ref,
+            "sourceHash": source_hash,
+            "commentCount": len(comment_context),
+            "providerCode": meta.get("provider_code"),
+            "promptCode": meta.get("prompt_code"),
+            "classifiedAt": cls._now_iso(),
+            "forceReclassify": bool(force_reclassify),
+            "confidence": result_payload.get("confidence"),
+            "reason": result_payload.get("reason"),
+            "needRnd": result_payload.get("needRnd"),
+            "needMonitor": result_payload.get("needMonitor"),
+            "needKb": result_payload.get("needKb"),
+            "rawPayload": result_payload.get("rawPayload"),
+        }
+        update_data: dict[str, Any] = {
+            "extra_data": next_extra_data,
+            "update_by": str(current_user_name or "").strip() or "system",
+            "update_time": datetime.now(),
+        }
+        field_map = {
+            "categoryName": "category_name",
+            "issueTypeId": "issue_type_id",
+            "issueTypeName": "issue_type_name",
+            "moduleName": "module_name",
+            "severity": "severity",
+            "rootCauseType": "root_cause_type",
+            "solutionType": "solution_type",
+            "resolutionCode": "resolution_code",
+            "resolutionName": "resolution_name",
+            "rootCause": "root_cause",
+            "solution": "solution",
+        }
+        for result_key, db_field in field_map.items():
+            value = result_payload.get(result_key)
+            if value not in (None, ""):
+                update_data[db_field] = value
+        if result_payload.get("isProblem") is not None:
+            update_data["is_problem"] = bool(result_payload.get("isProblem"))
+
+        TicketDao.update_ticket(db, ticket.ticket_id, update_data)
+        db.commit()
+        ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+        return ticket, {
+            "skipped": False,
+            "categoryName": result_payload.get("categoryName"),
+            "issueTypeName": result_payload.get("issueTypeName"),
+            "isProblem": result_payload.get("isProblem"),
+            "rootCauseType": result_payload.get("rootCauseType"),
+            "solutionType": result_payload.get("solutionType"),
+            "resolutionName": result_payload.get("resolutionName"),
+            "meta": meta,
+        }
+
+    @classmethod
+    def _build_ticket_stat_current_fields(cls, ticket: Ticket) -> dict[str, Any]:
+        """
+        构建 AI 分类统计需要的当前工单字段。
+
+        :param ticket: 工单对象。
+        :return: 当前字段字典。
+        """
+        return {
+            "ticketNo": ticket.ticket_no,
+            "categoryName": ticket.category_name,
+            "issueTypeId": ticket.issue_type_id,
+            "issueTypeName": ticket.issue_type_name,
+            "moduleName": ticket.module_name,
+            "status": ticket.status,
+            "isProblem": ticket.is_problem,
+            "rootCauseType": ticket.root_cause_type,
+            "solutionType": ticket.solution_type,
+            "resolutionCode": ticket.resolution_code,
+            "resolutionName": ticket.resolution_name,
+            "severity": ticket.severity,
+            "rootCause": ticket.root_cause,
+            "solution": ticket.solution,
+        }
+
+    @classmethod
+    def _build_ticket_comment_context(cls, db: Session, *, ticket_id: int, limit: int = 30) -> list[str]:
+        """
+        构建 AI 分类统计使用的评论上下文。
+
+        :param db: 数据库会话。
+        :param ticket_id: 工单ID。
+        :param limit: 最多取最近评论数量。
+        :return: 按时间升序排列的评论文本。
+        """
+        rows = (
+            db.query(TicketComment)
+            .filter(TicketComment.ticket_id == ticket_id)
+            .order_by(TicketComment.create_time.desc(), TicketComment.id.desc())
+            .limit(max(int(limit or 30), 1))
+            .all()
+        )
+        comment_lines: list[str] = []
+        for comment in reversed(rows):
+            content = str(getattr(comment, "content", "") or "").strip()
+            if not content:
+                continue
+            created_at = getattr(comment, "create_time", None)
+            created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if isinstance(created_at, datetime) else ""
+            user_name = str(getattr(comment, "user_name", "") or "").strip() or "未知人员"
+            prefix_parts = [item for item in (created_text, user_name) if item]
+            prefix = " ".join(prefix_parts)
+            comment_lines.append(f"{prefix}：{content}" if prefix else content)
+        return comment_lines
+
+    @classmethod
+    def _build_ai_classification_source_hash(
+        cls,
+        *,
+        title: str,
+        description: str,
+        comments: list[str] | None = None,
+    ) -> str:
+        """
+        构建 AI 分类防重用来源摘要。
+
+        :param title: 工单标题。
+        :param description: 工单描述。
+        :param comments: 工单评论上下文。
+        :return: 来源内容 SHA256。
+        """
+        comment_text = "\n".join(str(item or "").strip() for item in comments or [] if str(item or "").strip())
+        return cls._text_sha256("\n\n".join([str(title or "").strip(), str(description or "").strip(), comment_text]))
+
+    @classmethod
+    def _has_successful_ai_classification(
+        cls,
+        ticket: Ticket,
+        *,
+        title: str,
+        description: str,
+        comments: list[str] | None = None,
+    ) -> bool:
+        """
+        判断工单是否已经基于相同文本完成过 AI 分类统计。
+
+        :param ticket: 工单对象。
+        :param title: 当前标题。
+        :param description: 当前描述。
+        :param comments: 当前评论上下文。
+        :return: 已成功分类且文本未变化时返回 True。
+        """
+        extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+        ai_meta = extra_data.get("ai_classification") if isinstance(extra_data.get("ai_classification"), dict) else {}
+        source_hash = cls._build_ai_classification_source_hash(
+            title=title,
+            description=description,
+            comments=comments,
+        )
+        return bool(ai_meta.get("success")) and str(ai_meta.get("sourceHash") or "") == source_hash
+
+    @classmethod
+    def _should_run_ai_classification_for_scene(cls, config: dict[str, Any], scene: str) -> bool:
+        """
+        判断指定入库场景是否启用 AI 分类统计。
+
+        :param config: 同步自动化配置。
+        :param scene: 场景 external_sync/remote_pull/manual_create/batch_reclassify。
+        :return: 是否启用。
+        """
+        ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
+        if not bool(ai_config.get("enabled")):
+            return False
+        normalized_scene = str(scene or "").strip()
+        if normalized_scene == "external_sync" or normalized_scene.startswith("external_sync"):
+            return bool(ai_config.get("runOnExternalSync"))
+        if normalized_scene == "remote_pull" or normalized_scene.startswith("remote_pull"):
+            return bool(ai_config.get("runOnRemotePull"))
+        if normalized_scene == "manual_create" or normalized_scene.startswith("ticket_manual_create"):
+            return bool(ai_config.get("runOnManualCreate"))
+        if normalized_scene == "batch_reclassify" or normalized_scene.startswith("ticket_batch_reclassify"):
+            return True
+        return False
+
+    @classmethod
     def _extract_pattern(cls, text: str, patterns: Any) -> str | None:
         if not isinstance(patterns, list):
             return None
@@ -4654,13 +4959,7 @@ class TicketSyncService:
         else:
             try:
                 ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
-                pre_category_name = str((ai_extract_result or {}).get("categoryName") or "").strip()
-                prefer_no_ai_fallback = (
-                    not bool(ai_extract_meta.get("skipped", True))
-                    if isinstance(ai_extract_meta, dict)
-                    else False
-                )
-                ticket, category_summary = cls._run_auto_ticket_category_classification(
+                ticket, category_summary = cls._run_auto_ticket_ai_classification(
                     db,
                     ticket=ticket,
                     title=str(sync_object.title or ticket.title or "").strip(),
@@ -4669,9 +4968,7 @@ class TicketSyncService:
                     source_type=f"{sync_scene}_auto_category",
                     source_ref=sync_object.ticket_no,
                     force_reclassify=False,
-                    pre_classified_category=pre_category_name,
-                    pre_classified_meta=ai_extract_meta if isinstance(ai_extract_meta, dict) else None,
-                    prefer_no_ai_fallback=prefer_no_ai_fallback,
+                    enabled_by_scene=cls._should_run_ai_classification_for_scene(config, sync_scene),
                 )
             except Exception as exc:
                 logger.warning(f"外部工单同步自动分类执行失败: ticket_no={sync_object.ticket_no}, error={exc}")
@@ -4975,13 +5272,7 @@ class TicketSyncService:
         if not skip_ai_analysis_due_to_update_title:
             try:
                 ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
-                pre_category_name = str((ai_extract_result or {}).get("categoryName") or "").strip()
-                prefer_no_ai_fallback = (
-                    not bool(ai_extract_meta.get("skipped", True))
-                    if isinstance(ai_extract_meta, dict)
-                    else False
-                )
-                cls._run_auto_ticket_category_classification(
+                cls._run_auto_ticket_ai_classification(
                     db,
                     ticket=ticket,
                     title=str(update_data.get("title") or ticket.title or "").strip(),
@@ -4995,9 +5286,7 @@ class TicketSyncService:
                     source_type=f"{sync_scene}_auto_category",
                     source_ref=sync_object.ticket_no,
                     force_reclassify=False,
-                    pre_classified_category=pre_category_name,
-                    pre_classified_meta=ai_extract_meta if isinstance(ai_extract_meta, dict) else None,
-                    prefer_no_ai_fallback=prefer_no_ai_fallback,
+                    enabled_by_scene=cls._should_run_ai_classification_for_scene(config, sync_scene),
                 )
             except Exception as exc:
                 logger.warning(f"外部工单同步延后自动分类失败: ticket_no={sync_object.ticket_no}, error={exc}")
@@ -5213,7 +5502,7 @@ class TicketSyncService:
                     cls._mark_automation_step(meta, step="ai_analysis", status="skipped", detail={"reason": reason})
         except Exception as exc:
             cls._mark_automation_step(meta, step="automation", status="failed", error=str(exc))
-            logger.exception("工单[%s]同步自动化执行异常: %s", ticket_id, exc)
+            logger.exception(f"工单[{ticket_id}]同步自动化执行异常: {exc}")
         finally:
             ticket = TicketDao.get_ticket_by_id(db, ticket_id)
             extra_data = dict(ticket.extra_data or {}) if ticket and isinstance(ticket.extra_data, dict) else {}
@@ -5361,10 +5650,9 @@ class TicketSyncService:
         base_query = db.query(Ticket).filter(Ticket.del_flag == "0")
         if only_uncategorized:
             base_query = base_query.filter(
-                or_(
-                    Ticket.category_name.is_(None),
-                    Ticket.category_name == "",
-                )
+                Ticket.is_problem.is_(None),
+                or_(Ticket.category_name.is_(None), Ticket.category_name == ""),
+                or_(Ticket.issue_type_name.is_(None), Ticket.issue_type_name == ""),
             )
         base_query = base_query.order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc())
 
@@ -5407,19 +5695,33 @@ class TicketSyncService:
 
         for ticket in tickets:
             try:
-                _, category_result = cls._run_auto_ticket_category_classification(
-                    db,
-                    ticket=ticket,
-                    title=str(ticket.title or "").strip(),
-                    description=str(ticket.description or "").strip(),
-                    current_user_name=current_user_name,
-                    source_type="ticket_batch_reclassify",
-                    source_ref=str(ticket.ticket_no or ticket.ticket_id),
-                    force_reclassify=bool(getattr(request, "force_reclassify", False)),
-                    classification_strategy=strategy,
-                    regex_rules=regex_rules,
-                    ai_prompt_code=ai_prompt_code,
-                )
+                if strategy == "regex":
+                    _, category_result = cls._run_auto_ticket_category_classification(
+                        db,
+                        ticket=ticket,
+                        title=str(ticket.title or "").strip(),
+                        description=str(ticket.description or "").strip(),
+                        current_user_name=current_user_name,
+                        source_type="ticket_batch_reclassify",
+                        source_ref=str(ticket.ticket_no or ticket.ticket_id),
+                        force_reclassify=bool(getattr(request, "force_reclassify", False)),
+                        classification_strategy=strategy,
+                        regex_rules=regex_rules,
+                        ai_prompt_code=ai_prompt_code,
+                    )
+                else:
+                    _, category_result = cls._run_auto_ticket_ai_classification(
+                        db,
+                        ticket=ticket,
+                        title=str(ticket.title or "").strip(),
+                        description=str(ticket.description or "").strip(),
+                        current_user_name=current_user_name,
+                        source_type="ticket_batch_reclassify",
+                        source_ref=str(ticket.ticket_no or ticket.ticket_id),
+                        force_reclassify=bool(getattr(request, "force_reclassify", False)),
+                        ai_prompt_code=ai_prompt_code,
+                        enabled_by_scene=True,
+                    )
                 detail = {
                     "ticketId": ticket.ticket_id,
                     "ticketNo": ticket.ticket_no,
@@ -5459,9 +5761,14 @@ class TicketSyncService:
             db.query(Ticket)
             .filter(
                 Ticket.del_flag == "0",
+                Ticket.is_problem.is_(None),
                 or_(
                     Ticket.category_name.is_(None),
                     Ticket.category_name == "",
+                ),
+                or_(
+                    Ticket.issue_type_name.is_(None),
+                    Ticket.issue_type_name == "",
                 ),
             )
             .count()
