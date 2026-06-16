@@ -2,6 +2,10 @@
 
 1. 新增飞书 `stepReason` 排查过程评论同步：按 `20260616 人员：` 或 `20260616：` 拆分为外部评论，并按 `segmentIndex` 生成幂等键避免重复追加。
 2. 评论表扩展来源和附件字段，区分本地评论与同步评论；本地评论不会被外部同步覆盖，内网拉取会同步公网外部评论。
+1. 修复公网 pending 拉取候选窗口过小导致内网 10 点后拉不到新工单的问题：`get_tickets_for_sync` 改为分批扫描候选数据，避免旧工单占满前 200 条后新数据无法进入同步判断。
+2. 排查确认 `dev` 为公网、`prod` 为内网；公网数据已入库且可发布，内网定时任务正常每分钟执行，根因在公网 `/ticket/sync/pending` 返回为空。
+3. 新增说明文档：`web/public/docs/2026-06-16-ticket-sync-pending-scan-window-fix.md`。
+
 3. 新增说明文档：`web/public/docs/2026-06-16-ticket-step-reason-comment-sync.md`，新增迁移 SQL：`server/sql/20260616_ticket_comment_sync_source.sql`。
 
 1. 修复工单同步在服务重启后可能卡在 `processing_ai/publish_ready=false` 导致内网拉不到新版本的问题：pending 拉取前会在无活动 AI 任务时自动恢复发布状态。

@@ -319,43 +319,52 @@ class TicketDao:
                     ]
                 )
             )
-        rows = query.order_by(Ticket.update_time.asc(), Ticket.create_time.asc()).limit(safe_limit * 4).all()
         result: list[Ticket] = []
         consumer_key = str(consumer or "").strip()
         pulled_retry_seconds = 30 * 60
         now = datetime.now()
-        for ticket in rows:
-            extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-            sync_meta = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
-            state = sync_meta.get("sync_state") if isinstance(sync_meta.get("sync_state"), dict) else {}
-            publish_status = str(state.get("publish_status") or "").strip()
-            if not bool(state.get("publish_ready", True)) and publish_status != "processing_ai":
-                continue
-            consumers = state.get("consumers") if isinstance(state.get("consumers"), dict) else {}
-            consumer_state = consumers.get(consumer_key) if isinstance(consumers.get(consumer_key), dict) else {}
-            current_revision = int(sync_meta.get("revision") or 0)
-            delivered_revision = int(consumer_state.get("delivered_revision") or 0)
-            consumer_status = str(consumer_state.get("status") or "").strip().lower()
-            last_revision = int(consumer_state.get("last_revision") or 0)
-            last_pulled_at = _parse_sync_time(consumer_state.get("delivered_at") or state.get("last_pulled_at"))
-            pulled_active = (
-                consumer_status == "pulled"
-                and last_revision == current_revision
-                and last_pulled_at is not None
-                and (now - last_pulled_at).total_seconds() < pulled_retry_seconds
-            )
-            pulled_expired = (
-                consumer_status == "pulled"
-                and last_revision == current_revision
-                and (
-                    last_pulled_at is None
-                    or (now - last_pulled_at).total_seconds() >= pulled_retry_seconds
+        scan_offset = 0
+        scan_limit = max(safe_limit * 4, 200)
+        ordered_query = query.order_by(Ticket.update_time.asc(), Ticket.create_time.asc())
+        while len(result) < safe_limit:
+            rows = ordered_query.offset(scan_offset).limit(scan_limit).all()
+            if not rows:
+                break
+            scan_offset += len(rows)
+            for ticket in rows:
+                extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+                sync_meta = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
+                state = sync_meta.get("sync_state") if isinstance(sync_meta.get("sync_state"), dict) else {}
+                publish_status = str(state.get("publish_status") or "").strip()
+                if not bool(state.get("publish_ready", True)) and publish_status != "processing_ai":
+                    continue
+                consumers = state.get("consumers") if isinstance(state.get("consumers"), dict) else {}
+                consumer_state = consumers.get(consumer_key) if isinstance(consumers.get(consumer_key), dict) else {}
+                current_revision = int(sync_meta.get("revision") or 0)
+                delivered_revision = int(consumer_state.get("delivered_revision") or 0)
+                consumer_status = str(consumer_state.get("status") or "").strip().lower()
+                last_revision = int(consumer_state.get("last_revision") or 0)
+                last_pulled_at = _parse_sync_time(consumer_state.get("delivered_at") or state.get("last_pulled_at"))
+                pulled_active = (
+                    consumer_status == "pulled"
+                    and last_revision == current_revision
+                    and last_pulled_at is not None
+                    and (now - last_pulled_at).total_seconds() < pulled_retry_seconds
                 )
-            )
-            should_return_ticket = (delivered_revision < current_revision and not pulled_active) or pulled_expired
-            if current_revision > 0 and should_return_ticket:
-                result.append(ticket)
-            if len(result) >= safe_limit:
+                pulled_expired = (
+                    consumer_status == "pulled"
+                    and last_revision == current_revision
+                    and (
+                        last_pulled_at is None
+                        or (now - last_pulled_at).total_seconds() >= pulled_retry_seconds
+                    )
+                )
+                should_return_ticket = (delivered_revision < current_revision and not pulled_active) or pulled_expired
+                if current_revision > 0 and should_return_ticket:
+                    result.append(ticket)
+                if len(result) >= safe_limit:
+                    break
+            if len(rows) < scan_limit:
                 break
         return result
 

@@ -522,6 +522,15 @@ updated: 2026-05-20
 - 变更传播链：`server/modules/ticket/service/ticket_ai_analysis_service.py` -> 工单域知识页
 - 总共涉及页面：2
 
+## [2026-06-16] INGEST-CODE | 修复工单 pending 候选窗口导致内网拉取为空
+- 触发：用户反馈 2026-06-16 上午 10 点后公网能接收推送，但内网拉不到新增数据
+- 架构层：工单域 / 外部同步 / 内网远端拉取
+- 创建的页面：无
+- 更新的页面：`docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/dao/ticket_dao.py` -> 工单外部同步与内网拉取流程
+- 总共涉及页面：2
+
 ## [2026-05-22] INGEST-CODE | 修复 Windows 下 codex Worker 路径解析问题
 - 触发：用户在 Windows 开发环境提交 AI 分析时，日志显示 `WinError 2`，服务进程找不到 `codex` 可执行文件
 - 架构层：工单域 / AI Worker 编排
