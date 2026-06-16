@@ -1,5 +1,9 @@
 ## 2026-06-16
 
+1. 修复工单新增/编辑保存慢时阻塞其他接口的问题：`POST /ticket`、`PUT /ticket` 在 `async def` 内使用 `run_in_threadpool` 执行业务保存，并在线程内创建独立数据库会话。
+2. 工单编辑弹窗保存按钮增加提交中状态，接口响应前“确定”和“取消”按钮不可再次点击，避免重复提交。
+3. 新增说明文档：`web/public/docs/2026-06-16-ticket-save-nonblocking-submit-lock.md`。
+
 1. 优化外部推单多维表格邮箱补齐：同一工单已成功同步过同一个 `recordId` 时，不再重复请求飞书多维表格。
 2. 成功补齐状态写入 `extra_data.external_sync.bitableEmailSync`；推送侧仍由 `externalSyncBitable.enabled` 控制，拉取侧由 `remoteSync.enabled` 控制且不会重复查多维，只消费远端已携带邮箱。
 3. 新增说明文档：`web/public/docs/2026-06-16-ticket-bitable-email-sync-idempotent.md`。

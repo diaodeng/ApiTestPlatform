@@ -417,8 +417,8 @@
       </el-form>
       <template #footer>
         <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm">确 定</el-button>
-          <el-button @click="cancel">取 消</el-button>
+          <el-button type="primary" :loading="formSubmitting" :disabled="formSubmitting" @click="submitForm">确 定</el-button>
+          <el-button :disabled="formSubmitting" @click="cancel">取 消</el-button>
         </div>
       </template>
     </el-dialog>
@@ -1901,6 +1901,7 @@ const workflowConfig = ref({
 })
 const currentTicketStatus = ref('')
 const open = ref(false)
+const formSubmitting = ref(false)
 const assignOpen = ref(false)
 const statusOpen = ref(false)
 const importOpen = ref(false)
@@ -2702,6 +2703,7 @@ function openTicketLink(ticketRow) {
 }
 
 function reset() {
+  formSubmitting.value = false
   form.value = createDefaultTicketForm()
   formModuleValue.value = ''
   tagText.value = ''
@@ -2971,11 +2973,15 @@ function buildCleanLogPullConfig(source) {
 }
 
 function submitForm() {
+  if (formSubmitting.value) {
+    return
+  }
   proxy.$refs.ticketRef.validate(valid => {
     if (!valid) return
     if (!validateTicketAutomationConfig()) {
       return
     }
+    formSubmitting.value = true
     const logPullConfig = form.value.needLogPull ? buildCleanLogPullConfig(form.value.logPullConfig) : undefined
     const payload = {
       ...form.value,
@@ -2998,6 +3004,8 @@ function submitForm() {
       proxy.$modal.msgSuccess(payload.ticketId ? '修改成功' : '新增成功')
       open.value = false
       getList()
+    }).finally(() => {
+      formSubmitting.value = false
     })
   })
 }

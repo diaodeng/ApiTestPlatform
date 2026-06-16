@@ -8,6 +8,13 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-16] INGEST-CODE | 工单保存接口非阻塞与按钮防重复提交
+- 触发：用户反馈工单编辑弹窗保存响应慢，接口响应前保存按钮仍可重复点击，并要求接口异步化避免阻塞其他接口。
+- 架构层：工单域 / Web 控制台 / FastAPI 事件循环 / 工单新增编辑保存链路
+- 创建的页面：`web/public/docs/2026-06-16-ticket-save-nonblocking-submit-lock.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 变更传播链：`server/modules/ticket/controller/ticket_controller.py` / `web/src/views/ticket/index.vue` -> 新增编辑保存线程池调度与弹窗提交态说明
+
 ## [2026-06-16] INGEST-CODE | 工单多维表格邮箱同步幂等优化
 - 触发：用户要求外部推单入库时，如果多维表格邮箱之前已经成功同步过则不要每次重复同步，并确认推送和拉取是否都由配置控制。
 - 架构层：工单域 / 外部同步链路 / 多维表格邮箱补齐 / 内网远端拉取

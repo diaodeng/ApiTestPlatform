@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
+from config.database import SessionLocal
 from config.get_db import get_db
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
@@ -63,6 +64,34 @@ from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
 ticketController = APIRouter(prefix="/ticket", dependencies=[Depends(LoginService.get_current_user)])
+
+
+def _create_ticket_with_independent_session(
+    ticket_object: TicketCreateModel,
+    current_user: CurrentUserModel,
+):
+    """
+    在线程池中使用独立数据库会话创建工单，避免同步 AI、日志拉取等保存链路阻塞 FastAPI 事件循环。
+    :param ticket_object: 新增工单请求体，包含标题、描述、项目、模块和自动化配置。
+    :param current_user: 当前登录用户，用于写入创建人、更新人和审计字段。
+    :return: 工单创建服务返回结果。
+    """
+    with SessionLocal() as db:
+        return TicketService.create_ticket(db, ticket_object, current_user)
+
+
+def _update_ticket_with_independent_session(
+    ticket_object: TicketUpdateModel,
+    current_user: CurrentUserModel,
+):
+    """
+    在线程池中使用独立数据库会话更新工单，避免同步翻译等耗时保存链路阻塞其他接口。
+    :param ticket_object: 编辑工单请求体，包含工单ID、基础字段、人员、标签和自动化配置。
+    :param current_user: 当前登录用户，用于写入更新人和事件操作者。
+    :return: 工单更新服务返回结果。
+    """
+    with SessionLocal() as db:
+        return TicketService.update_ticket(db, ticket_object, current_user)
 
 
 def _compatible_field_value(payload: dict, camel_key: str, snake_key: str | None = None, default=None):
@@ -527,12 +556,13 @@ async def add_ticket(
     新增工单接口。
     :param request: 请求对象
     :param add_ticket_object: 工单标题、描述、所属项目ID、所属模块ID、1线人员、内部负责人、优先级、来源和扩展上下文
-    :param query_db: 数据库会话
+    :param query_db: 数据库会话，仅用于操作日志记录；保存逻辑在线程池独立会话中执行
     :param current_user: 当前登录用户，用于写入提单人和审计信息
     :return: 新增结果
     """
     try:
-        result = TicketService.create_ticket(query_db, add_ticket_object, current_user)
+        _ = query_db
+        result = await run_in_threadpool(_create_ticket_with_independent_session, add_ticket_object, current_user)
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -897,12 +927,13 @@ async def edit_ticket(
     编辑工单接口。
     :param request: 请求对象
     :param edit_ticket_object: 工单基础字段、1线人员、内部负责人、标签、扩展上下文和 AI 分析预留字段
-    :param query_db: 数据库会话
+    :param query_db: 数据库会话，仅用于操作日志记录；保存逻辑在线程池独立会话中执行
     :param current_user: 当前登录用户，用于写入更新人
     :return: 编辑结果
     """
     try:
-        result = TicketService.update_ticket(query_db, edit_ticket_object, current_user)
+        _ = query_db
+        result = await run_in_threadpool(_update_ticket_with_independent_session, edit_ticket_object, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
