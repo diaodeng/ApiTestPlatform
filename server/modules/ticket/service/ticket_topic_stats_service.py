@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
-import subprocess
+import urllib.parse
 import urllib.request
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -52,12 +50,8 @@ class TopicTicketRecord:
 class TicketTopicStatsService:
     """飞书群专题工单统计服务。"""
 
-    DEFAULT_LARK_CLI_CANDIDATES = (
-        os.environ.get("LARK_CLI_BIN", "").strip(),
-        "lark-cli.cmd",
-        "lark-cli",
-        r"C:\nvm4w\nodejs\lark-cli.cmd",
-    )
+    FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
+    _tenant_token_cache: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def run_topic_stats(
@@ -66,10 +60,11 @@ class TicketTopicStatsService:
         start_date: str | None = None,
         end_date: str | None = None,
         sources: list[dict[str, Any]] | None = None,
-        webhook: str | None = None,
+        app_id: str | None = None,
+        app_secret: str | None = None,
+        receive_chat_ids: list[str] | str | None = None,
         send: bool = False,
         keyword: str = "TRunner",
-        lark_cli_bin: str | None = None,
         page_size: int = 50,
     ) -> dict[str, Any]:
         """
@@ -78,10 +73,11 @@ class TicketTopicStatsService:
         :param start_date: 统计开始日期，格式为 YYYY-MM-DD；为空时取上海时区当天。
         :param end_date: 统计结束日期，格式为 YYYY-MM-DD；为空时取上海时区当天。
         :param sources: 飞书群来源列表，每项包含 name、chatId/chat_id、priority。
-        :param webhook: 飞书机器人 webhook，send 为 True 时必填。
+        :param app_id: 飞书应用 app_id，用于获取群消息与发送消息。
+        :param app_secret: 飞书应用 app_secret，用于获取群消息与发送消息。
+        :param receive_chat_ids: 发送统计卡片的飞书群 chat_id 列表。
         :param send: 是否发送飞书卡片。
         :param keyword: 卡片副标题关键字。
-        :param lark_cli_bin: lark-cli 可执行文件路径或命令名。
         :param page_size: 单页拉取消息数量。
         :return: 统计结果和发送结果摘要。
         """
@@ -92,8 +88,17 @@ class TicketTopicStatsService:
             raise ValueError("end_date 不能早于 start_date")
 
         normalized_sources = cls.normalize_sources(sources)
-        if send and not str(webhook or "").strip():
-            raise ValueError("send=true 时必须配置 webhook")
+        resolved_app_id = str(app_id or "").strip()
+        resolved_app_secret = str(app_secret or "").strip()
+        if not resolved_app_id or not resolved_app_secret:
+            raise ValueError("必须配置飞书应用 appId/appSecret")
+        normalized_receive_chat_ids = cls.normalize_receive_chat_ids(receive_chat_ids)
+        if send and not normalized_receive_chat_ids:
+            normalized_receive_chat_ids = cls.normalize_receive_chat_ids(
+                [source.chat_id for source in normalized_sources]
+            )
+        if send and not normalized_receive_chat_ids:
+            raise ValueError("send=true 时必须配置接收群列表")
 
         logger.info(
             f"开始执行专题工单统计 | start_date={resolved_start_date.isoformat()} "
@@ -104,7 +109,8 @@ class TicketTopicStatsService:
             start_date=resolved_start_date,
             end_date=resolved_end_date,
             sources=normalized_sources,
-            lark_cli_bin=lark_cli_bin,
+            app_id=resolved_app_id,
+            app_secret=resolved_app_secret,
             page_size=page_size,
         )
         result = cls.build_result(
@@ -114,10 +120,15 @@ class TicketTopicStatsService:
         )
         if send:
             card = cls.build_feishu_card(result=result, records=records, keyword=keyword)
-            result["response"] = cls.send_feishu_card(card=card, webhook=str(webhook or "").strip())
+            result["response"] = cls.send_feishu_card(
+                card=card,
+                app_id=resolved_app_id,
+                app_secret=resolved_app_secret,
+                receive_chat_ids=normalized_receive_chat_ids,
+            )
             logger.info(
                 f"专题工单统计卡片发送完成 | total={result['summary']['total']} "
-                f"webhook_configured={bool(webhook)} response={result.get('response')}"
+                f"receive_chat_count={len(normalized_receive_chat_ids)} response={result.get('response')}"
             )
         logger.info(
             f"专题工单统计执行完成 | total={result['summary']['total']} "
@@ -159,6 +170,28 @@ class TicketTopicStatsService:
         return normalized_sources
 
     @classmethod
+    def normalize_receive_chat_ids(cls, value: list[str] | str | None) -> list[str]:
+        """
+        归一化飞书应用发送目标群列表。
+
+        :param value: 群 chat_id 列表或逗号分隔字符串。
+        :return: 去重后的 chat_id 列表。
+        """
+        if isinstance(value, str):
+            source_list = [item.strip() for item in value.split(",")]
+        elif isinstance(value, list):
+            source_list = value
+        else:
+            source_list = []
+
+        result: list[str] = []
+        for item in source_list:
+            chat_id = str(item or "").strip()
+            if chat_id and chat_id not in result:
+                result.append(chat_id)
+        return result
+
+    @classmethod
     def cell_text(cls, value: Any) -> str:
         """
         将 Lark 字段值统一转成纯文本。
@@ -170,6 +203,10 @@ class TicketTopicStatsService:
             return ""
         if isinstance(value, list):
             return "" if not value else str(value[0])
+        if isinstance(value, dict):
+            if "content" in value:
+                return cls.cell_text(value.get("content"))
+            return json.dumps(value, ensure_ascii=False)
         return str(value)
 
     @classmethod
@@ -182,6 +219,11 @@ class TicketTopicStatsService:
         """
         if not date_text or not date_text.strip():
             return None
+        if date_text.isdigit():
+            timestamp = int(date_text)
+            if timestamp > 10_000_000_000:
+                timestamp = timestamp / 1000
+            return datetime.fromtimestamp(timestamp, tz=SHANGHAI_TZ).date()
         try:
             return datetime.fromisoformat(date_text).date()
         except ValueError:
@@ -361,47 +403,226 @@ class TicketTopicStatsService:
         return "无结论"
 
     @classmethod
-    def resolve_lark_cli(cls, lark_cli_bin: str | None = None) -> str:
+    def request_feishu_json(
+        cls,
+        *,
+        method: str,
+        path: str,
+        tenant_access_token: str | None = None,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        timeout_sec: int = 30,
+    ) -> dict[str, Any]:
         """
-        解析可执行的 lark-cli 命令路径。
+        调用飞书开放平台接口并返回 JSON。
 
-        :param lark_cli_bin: 指定的 lark-cli 路径或命令名。
-        :return: 可执行命令路径。
+        :param method: HTTP 方法。
+        :param path: 以 /open-apis 开头之后的接口路径。
+        :param tenant_access_token: 飞书 tenant_access_token。
+        :param params: 查询参数。
+        :param json_body: JSON 请求体。
+        :param timeout_sec: 超时时间，单位秒。
+        :return: 飞书接口返回 JSON。
         """
-        candidates = (str(lark_cli_bin or "").strip(), *cls.DEFAULT_LARK_CLI_CANDIDATES)
-        for candidate in candidates:
-            if not candidate:
-                continue
-            if os.path.isabs(candidate) and os.path.exists(candidate):
-                logger.info(f"已解析 lark-cli 绝对路径 | path={candidate}")
-                return candidate
-            resolved = shutil.which(candidate)
-            if resolved:
-                logger.info(f"已解析 lark-cli 命令 | candidate={candidate} resolved={resolved}")
-                return resolved
-        raise FileNotFoundError("未找到可执行的 lark-cli，请通过参数 larkCliBin 或环境变量 LARK_CLI_BIN 配置")
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        url = f"{cls.FEISHU_BASE_URL}{normalized_path}"
+        if params:
+            query = urllib.parse.urlencode(
+                {key: value for key, value in params.items() if value not in (None, "")}
+            )
+            if query:
+                url = f"{url}?{query}"
+
+        headers = {"Content-Type": "application/json; charset=utf-8"}
+        if tenant_access_token:
+            headers["Authorization"] = f"Bearer {tenant_access_token}"
+        data = json.dumps(json_body or {}, ensure_ascii=False).encode("utf-8") if json_body is not None else None
+        request = urllib.request.Request(url=url, data=data, headers=headers, method=method.upper())
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError(f"飞书接口请求失败: {url}, error={exc}") from exc
+
+        if int(payload.get("code") or 0) != 0:
+            raise RuntimeError(f"飞书接口返回失败: {payload.get('msg') or payload}")
+        return payload
 
     @classmethod
-    def run_lark_cli(cls, command: list[str], *, lark_cli_bin: str | None = None) -> dict[str, Any]:
+    def get_tenant_access_token(cls, app_id: str, app_secret: str) -> str:
         """
-        执行 lark-cli 命令并返回 JSON。
+        获取飞书 tenant_access_token，并按 app_id 做内存缓存。
 
-        :param command: 命令参数列表，不包含解释器名。
-        :param lark_cli_bin: lark-cli 可执行文件路径或命令名。
-        :return: 解析后的 JSON 对象。
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :return: tenant_access_token。
         """
-        lark_cli = cls.resolve_lark_cli(lark_cli_bin)
-        display_command = " ".join(command)
-        logger.info(f"开始执行 lark-cli 命令 | command={display_command}")
-        completed = subprocess.run(
-            [lark_cli, *command],
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
+        normalized_app_id = str(app_id or "").strip()
+        normalized_secret = str(app_secret or "").strip()
+        if not normalized_app_id or not normalized_secret:
+            raise ValueError("飞书应用 appId/appSecret 未配置")
+
+        now = datetime.now(SHANGHAI_TZ)
+        cached = cls._tenant_token_cache.get(normalized_app_id)
+        if isinstance(cached, dict):
+            expire_at = cached.get("expire_at")
+            token = str(cached.get("token") or "").strip()
+            if isinstance(expire_at, datetime) and expire_at > now and token:
+                return token
+
+        payload = cls.request_feishu_json(
+            method="POST",
+            path="/auth/v3/tenant_access_token/internal",
+            json_body={"app_id": normalized_app_id, "app_secret": normalized_secret},
         )
-        logger.info(f"lark-cli 命令执行完成 | command={display_command} stdout_length={len(completed.stdout or '')}")
-        return json.loads(completed.stdout)
+        token = str(
+            payload.get("tenant_access_token")
+            or payload.get("data", {}).get("tenant_access_token")
+            or ""
+        ).strip()
+        expire = int(payload.get("expire") or payload.get("data", {}).get("expire") or 7200)
+        if not token:
+            raise RuntimeError("飞书 tenant_access_token 为空")
+        cls._tenant_token_cache[normalized_app_id] = {
+            "token": token,
+            "expire_at": now + timedelta(seconds=max(expire - 120, 60)),
+        }
+        return token
+
+    @classmethod
+    def parse_message_content(cls, message: dict[str, Any]) -> str:
+        """
+        从飞书消息结构中提取可统计的正文文本。
+
+        :param message: 飞书消息对象。
+        :return: 消息正文文本。
+        """
+        raw_content = message.get("content")
+        body = message.get("body") if isinstance(message.get("body"), dict) else {}
+        if raw_content in (None, ""):
+            raw_content = body.get("content")
+        content_text = cls.cell_text(raw_content)
+        try:
+            content_json = json.loads(content_text)
+        except Exception:
+            return content_text
+
+        if isinstance(content_json, dict):
+            if isinstance(content_json.get("title"), str) or isinstance(content_json.get("content"), list):
+                text_parts: list[str] = []
+                title = str(content_json.get("title") or "").strip()
+                if title:
+                    text_parts.append(title)
+                for line in content_json.get("content") or []:
+                    for item in line if isinstance(line, list) else []:
+                        if isinstance(item, dict):
+                            text = str(item.get("text") or item.get("content") or "").strip()
+                            if text:
+                                text_parts.append(text)
+                return "\n".join(text_parts).strip() or content_text
+            for key in ("text", "content"):
+                if isinstance(content_json.get(key), str):
+                    return str(content_json.get(key) or "")
+        return content_text
+
+    @classmethod
+    def normalize_feishu_message(cls, message: dict[str, Any]) -> dict[str, Any]:
+        """
+        将飞书开放 API 消息结构归一化为统计逻辑使用的字段。
+
+        :param message: 飞书开放 API 原始消息。
+        :return: 归一化后的消息字段。
+        """
+        message_id = str(message.get("message_id") or message.get("messageId") or "").strip()
+        root_id = str(message.get("root_id") or message.get("rootId") or "").strip()
+        parent_id = str(message.get("parent_id") or message.get("parentId") or "").strip()
+        thread_id = str(message.get("thread_id") or message.get("threadId") or "").strip()
+        create_time = str(message.get("create_time") or message.get("createTime") or "").strip()
+        content = cls.parse_message_content(message)
+        return {
+            **message,
+            "message_id": message_id,
+            "msg_type": message.get("msg_type") or message.get("msgType"),
+            "content": content,
+            "create_time": create_time,
+            "root_id": root_id,
+            "parent_id": parent_id,
+            "thread_id": thread_id,
+            "thread_message_position": message.get("thread_message_position") or message.get("threadMessagePosition"),
+            "thread_replies": [],
+        }
+
+    @classmethod
+    def is_root_message(cls, message: dict[str, Any]) -> bool:
+        """
+        判断消息是否为群会话根消息。
+
+        :param message: 归一化后的飞书消息。
+        :return: 根消息返回 True。
+        """
+        position = str(message.get("thread_message_position") or "").strip()
+        if position:
+            return position == "-1"
+        message_id = str(message.get("message_id") or "").strip()
+        root_id = str(message.get("root_id") or "").strip()
+        parent_id = str(message.get("parent_id") or "").strip()
+        return not root_id or root_id == message_id or not parent_id
+
+    @classmethod
+    def list_thread_replies(
+        cls,
+        *,
+        tenant_access_token: str,
+        message: dict[str, Any],
+        page_size: int,
+    ) -> list[dict[str, Any]]:
+        """
+        通过飞书开放 API 拉取单条根消息的会话回复。
+
+        :param tenant_access_token: 飞书 tenant_access_token。
+        :param message: 根消息。
+        :param page_size: 单页拉取数量。
+        :return: 归一化后的回复消息列表。
+        """
+        message_id = str(message.get("message_id") or "").strip()
+        thread_id = str(message.get("thread_id") or message_id).strip()
+        if not thread_id:
+            return []
+
+        replies: list[dict[str, Any]] = []
+        page_token = None
+        page_index = 1
+        resolved_page_size = max(1, min(int(page_size or 50), 100))
+        while True:
+            params = {
+                "container_id_type": "thread",
+                "container_id": thread_id,
+                "page_size": resolved_page_size,
+                "sort_type": "ByCreateTimeAsc",
+                "page_token": page_token,
+            }
+            logger.info(f"开始拉取飞书消息回复 | message_id={message_id} thread_id={thread_id} page_index={page_index}")
+            payload = cls.request_feishu_json(
+                method="GET",
+                path="/im/v1/messages",
+                tenant_access_token=tenant_access_token,
+                params=params,
+            )
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            page_items = data.get("items") or data.get("messages") or []
+            normalized_items = [cls.normalize_feishu_message(item) for item in page_items if isinstance(item, dict)]
+            replies.extend(
+                item for item in normalized_items if str(item.get("message_id") or "") != message_id
+            )
+            logger.info(
+                f"飞书消息回复页拉取完成 | message_id={message_id} page_index={page_index} "
+                f"page_count={len(page_items)} total_count={len(replies)} has_more={bool(data.get('has_more'))}"
+            )
+            if not data.get("has_more"):
+                break
+            page_token = data.get("page_token")
+            page_index += 1
+        return replies
 
     @classmethod
     def list_chat_messages(
@@ -410,55 +631,60 @@ class TicketTopicStatsService:
         chat_id: str,
         start_date: date,
         end_date: date,
-        lark_cli_bin: str | None = None,
+        tenant_access_token: str,
         page_size: int = 50,
     ) -> list[dict[str, Any]]:
         """
-        分页拉取指定群在日期范围内的消息。
+        通过飞书开放 API 分页拉取指定群在日期范围内的消息。
 
         :param chat_id: 飞书群 chat_id。
         :param start_date: 起始日期，闭区间。
         :param end_date: 结束日期，闭区间。
-        :param lark_cli_bin: lark-cli 可执行文件路径或命令名。
+        :param tenant_access_token: 飞书 tenant_access_token。
         :param page_size: 单页数量。
-        :return: 原始消息列表。
+        :return: 归一化后的消息列表。
         """
-        query_end = end_date + timedelta(days=1)
-        start_text = f"{start_date.isoformat()}T00:00:00+08:00"
-        end_text = f"{query_end.isoformat()}T00:00:00+08:00"
+        start_time = datetime.combine(start_date, datetime.min.time(), tzinfo=SHANGHAI_TZ)
+        end_time = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=SHANGHAI_TZ)
+        start_timestamp = int(start_time.timestamp())
+        end_timestamp = int(end_time.timestamp())
         page_token = None
         messages: list[dict[str, Any]] = []
         resolved_page_size = max(1, min(int(page_size or 50), 100))
         page_index = 1
 
         while True:
-            command = [
-                "im",
-                "+chat-messages-list",
-                "--as",
-                "user",
-                "--chat-id",
-                chat_id,
-                "--start",
-                start_text,
-                "--end",
-                end_text,
-                "--page-size",
-                str(resolved_page_size),
-                "--json",
-                "--no-reactions",
-            ]
-            if page_token:
-                command.extend(["--page-token", page_token])
-
             logger.info(
                 f"开始拉取飞书群消息 | chat_id={chat_id} page_index={page_index} "
-                f"start={start_text} end={end_text}"
+                f"start_timestamp={start_timestamp} end_timestamp={end_timestamp}"
             )
-            payload = cls.run_lark_cli(command, lark_cli_bin=lark_cli_bin)
-            data = payload.get("data", {})
-            page_messages = data.get("messages") or []
-            messages.extend(page_messages)
+            payload = cls.request_feishu_json(
+                method="GET",
+                path="/im/v1/messages",
+                tenant_access_token=tenant_access_token,
+                params={
+                    "container_id_type": "chat",
+                    "container_id": chat_id,
+                    "start_time": start_timestamp,
+                    "end_time": end_timestamp,
+                    "page_size": resolved_page_size,
+                    "sort_type": "ByCreateTimeAsc",
+                    "page_token": page_token,
+                },
+            )
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            page_messages = data.get("items") or data.get("messages") or []
+            normalized_messages = [
+                cls.normalize_feishu_message(message) for message in page_messages if isinstance(message, dict)
+            ]
+            for message in normalized_messages:
+                if cls.is_root_message(message):
+                    message["thread_replies"] = cls.list_thread_replies(
+                        tenant_access_token=tenant_access_token,
+                        message=message,
+                        page_size=page_size,
+                    )
+            messages.extend(normalized_messages)
             logger.info(
                 f"飞书群消息页拉取完成 | chat_id={chat_id} page_index={page_index} "
                 f"page_count={len(page_messages)} total_count={len(messages)} has_more={bool(data.get('has_more'))}"
@@ -476,7 +702,8 @@ class TicketTopicStatsService:
         start_date: date,
         end_date: date,
         sources: list[TopicTicketSource],
-        lark_cli_bin: str | None = None,
+        app_id: str,
+        app_secret: str,
         page_size: int = 50,
     ) -> list[TopicTicketRecord]:
         """
@@ -485,12 +712,14 @@ class TicketTopicStatsService:
         :param start_date: 统计起始日期。
         :param end_date: 统计结束日期。
         :param sources: 飞书群来源配置。
-        :param lark_cli_bin: lark-cli 可执行文件路径或命令名。
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
         :param page_size: 单页拉取消息数量。
         :return: 已去重、分类和状态判断的工单记录。
         """
         records: list[TopicTicketRecord] = []
         seen_ticket_keys: set[str] = set()
+        tenant_access_token = cls.get_tenant_access_token(app_id, app_secret)
 
         for source in sources:
             logger.info(
@@ -500,7 +729,7 @@ class TicketTopicStatsService:
                 chat_id=source.chat_id,
                 start_date=start_date,
                 end_date=end_date,
-                lark_cli_bin=lark_cli_bin,
+                tenant_access_token=tenant_access_token,
                 page_size=page_size,
             )
             logger.info(f"专题工单来源消息拉取完成 | group_name={source.name} raw_count={len(messages)}")
@@ -508,7 +737,7 @@ class TicketTopicStatsService:
             for message in messages:
                 if message.get("msg_type") != "post":
                     continue
-                if str(message.get("thread_message_position")) != "-1":
+                if not cls.is_root_message(message):
                     continue
 
                 content = cls.cell_text(message.get("content"))
@@ -620,7 +849,7 @@ class TicketTopicStatsService:
         :param result: 最终统计结果。
         :param records: 工单明细列表。
         :param keyword: 副标题关键字。
-        :return: 可发送到飞书 webhook 的卡片对象。
+        :return: 可发送到飞书应用的卡片对象。
         """
         summary = result["summary"]
         subtitle = (
@@ -743,22 +972,39 @@ class TicketTopicStatsService:
         }
 
     @classmethod
-    def send_feishu_card(cls, *, card: dict[str, Any], webhook: str) -> dict[str, Any]:
+    def send_feishu_card(
+        cls,
+        *,
+        card: dict[str, Any],
+        app_id: str,
+        app_secret: str,
+        receive_chat_ids: list[str],
+    ) -> dict[str, Any]:
         """
-        发送飞书卡片消息。
+        通过飞书应用发送卡片消息。
 
         :param card: 飞书卡片对象。
-        :param webhook: 飞书机器人 webhook 地址。
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :param receive_chat_ids: 接收群 chat_id 列表。
         :return: 飞书接口返回结果。
         """
-        logger.info(f"开始发送专题工单统计卡片 | webhook_configured={bool(webhook)}")
-        request = urllib.request.Request(
-            url=webhook,
-            data=json.dumps(card, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        logger.info(f"专题工单统计卡片发送接口返回 | response={payload}")
-        return payload
+        tenant_access_token = cls.get_tenant_access_token(app_id, app_secret)
+        result = {"sentCount": 0, "responses": []}
+        for chat_id in receive_chat_ids:
+            logger.info(f"开始发送专题工单统计卡片 | chat_id={chat_id}")
+            payload = cls.request_feishu_json(
+                method="POST",
+                path="/im/v1/messages",
+                tenant_access_token=tenant_access_token,
+                params={"receive_id_type": "chat_id"},
+                json_body={
+                    "receive_id": chat_id,
+                    "msg_type": "interactive",
+                    "content": json.dumps(card.get("card") or card, ensure_ascii=False),
+                },
+            )
+            result["sentCount"] += 1
+            result["responses"].append({"chat_id": chat_id, "response": payload})
+            logger.info(f"专题工单统计卡片发送接口返回 | chat_id={chat_id} response={payload}")
+        return result

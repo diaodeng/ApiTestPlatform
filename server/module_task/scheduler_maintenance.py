@@ -260,10 +260,11 @@ def ticket_topic_stats_report(
     start_date: str | None = None,
     end_date: str | None = None,
     sources: list[dict[str, Any]] | None = None,
-    webhook: str | None = None,
+    app_id: str | None = None,
+    app_secret: str | None = None,
+    receive_chat_ids: list[str] | str | None = None,
     send: bool | None = None,
     keyword: str = "TRunner",
-    lark_cli_bin: str | None = None,
     page_size: int | None = None,
     **kwargs,
 ):
@@ -273,10 +274,11 @@ def ticket_topic_stats_report(
     :param start_date: 统计开始日期，格式 YYYY-MM-DD；为空时取上海时区当天。
     :param end_date: 统计结束日期，格式 YYYY-MM-DD；为空时取上海时区当天。
     :param sources: 飞书群来源列表，每项包含 name、chatId/chat_id、priority。
-    :param webhook: 飞书机器人 webhook，send 为 True 时必填。
+    :param app_id: 飞书应用 app_id。
+    :param app_secret: 飞书应用 app_secret。
+    :param receive_chat_ids: 发送统计卡片的群 chat_id 列表；为空时默认发到 sources 中配置的群。
     :param send: 是否发送飞书卡片。
     :param keyword: 卡片副标题关键字。
-    :param lark_cli_bin: lark-cli 可执行文件路径或命令名。
     :param page_size: 单页拉取消息数量。
     :return: 统计结果摘要。
     """
@@ -287,10 +289,13 @@ def ticket_topic_stats_report(
     resolved_sources = sources if sources is not None else kwargs.pop("sources", None)
     resolved_start_date = start_date if start_date is not None else kwargs.pop("startDate", None)
     resolved_end_date = end_date if end_date is not None else kwargs.pop("endDate", None)
-    resolved_webhook = webhook if webhook is not None else kwargs.pop("webhook", None)
+    resolved_app_id = app_id if app_id is not None else kwargs.pop("appId", None)
+    resolved_app_secret = app_secret if app_secret is not None else kwargs.pop("appSecret", None)
+    resolved_receive_chat_ids = receive_chat_ids if receive_chat_ids is not None else (
+        kwargs.pop("receiveChatIds", None) or kwargs.pop("appChatIds", None)
+    )
     resolved_send = bool(send if send is not None else kwargs.pop("send", False))
     resolved_keyword = keyword if keyword is not None else kwargs.pop("keyword", "TRunner")
-    resolved_lark_cli_bin = lark_cli_bin if lark_cli_bin is not None else kwargs.pop("larkCliBin", None)
     resolved_page_size = page_size if page_size is not None else kwargs.pop("pageSize", 50)
 
     logger.info(
@@ -302,10 +307,11 @@ def ticket_topic_stats_report(
         start_date=resolved_start_date,
         end_date=resolved_end_date,
         sources=resolved_sources,
-        webhook=resolved_webhook,
+        app_id=resolved_app_id,
+        app_secret=resolved_app_secret,
+        receive_chat_ids=resolved_receive_chat_ids,
         send=resolved_send,
         keyword=str(resolved_keyword or "TRunner"),
-        lark_cli_bin=resolved_lark_cli_bin,
         page_size=int(resolved_page_size or 50),
     )
     logger.info(

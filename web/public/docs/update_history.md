@@ -1,3 +1,9 @@
+## 2026-06-17
+
+1. 工单专题信息统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 改为直接调用飞书开放 API：用任务参数 `appId/appSecret` 获取 tenant token，拉取群消息和线程回复后统计专题工单信息，并通过飞书应用发送交互卡片。
+2. 移除该任务对 `lark-cli`、`larkCliBin` 和机器人 `webhook` 的依赖；新增 `receiveChatIds/appChatIds` 作为发送目标，未配置时默认发送到 `sources` 中的群。
+3. 新增说明文档：`web/public/docs/2026-06-17-ticket-topic-stats-feishu-api.md`。
+
 ## 2026-06-16
 
 1. 修复工单新增/编辑保存慢时阻塞其他接口的问题：`POST /ticket`、`PUT /ticket` 在 `async def` 内使用 `run_in_threadpool` 执行业务保存，并在线程内创建独立数据库会话。
