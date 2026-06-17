@@ -56,6 +56,41 @@ def _build_remote_sync_override(
     return override
 
 
+def _build_person_reminder_config_override(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """
+    从定时任务参数中提取人员催办覆盖配置。
+
+    :param kwargs: 定时任务关键字参数。
+    :return: 非空覆盖配置；为空的字段由全局同步参数配置兜底。
+    """
+    nested_config = kwargs.pop("personReminder", None)
+    if nested_config is None:
+        nested_config = kwargs.pop("person_reminder", None)
+    source_config = dict(nested_config) if isinstance(nested_config, dict) else {}
+    for key, value in kwargs.items():
+        if value is not None and str(value).strip() != "":
+            source_config[key] = value
+    field_aliases = {
+        "appToken": ("appToken", "app_token"),
+        "tableId": ("tableId", "table_id"),
+        "viewId": ("viewId", "view_id", "view"),
+        "filterFormula": ("filterFormula", "filter_formula", "feishuFilter", "feishu_filter", "filter"),
+        "personField": ("personField", "person_field", "personFieldName", "person_field_name"),
+        "timeField": ("timeField", "time_field", "timeFieldName", "time_field_name"),
+        "dataSource": ("dataSource", "data_source"),
+        "pageSize": ("pageSize", "page_size"),
+    }
+    override: dict[str, Any] = {}
+    for target_key, aliases in field_aliases.items():
+        for alias in aliases:
+            if alias in source_config:
+                value = source_config.get(alias)
+                if value is not None and str(value).strip() != "":
+                    override[target_key] = value
+                break
+    return override
+
+
 @register_job("module_task.scheduler_maintenance.cleanup_test_reports")
 def cleanup_test_reports(
     *args,
@@ -164,6 +199,7 @@ def ticket_person_overdue_reminder(
 
     :param user_id: 可选用户ID，传入后仅提醒该用户。
     :param email: 可选邮箱，传入后仅提醒该邮箱对应用户。
+    :param kwargs: 支持 appToken/tableId/viewId/filterFormula/personField/timeField 等任务级覆盖配置。
     :return: 执行结果摘要。
     """
     task_id = int(kwargs.pop("_task_id", 0) or 0)
@@ -172,23 +208,37 @@ def ticket_person_overdue_reminder(
 
     resolved_user_id = user_id if user_id is not None else kwargs.pop("userId", None)
     resolved_emails = email if email is not None else kwargs.pop("email", [])
-    is_all = user_id if user_id is not None else kwargs.pop("isAll", False)
+    is_all_raw = kwargs.pop("isAll", False)
+    is_all = (
+        str(is_all_raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+        if isinstance(is_all_raw, str)
+        else bool(is_all_raw)
+    )
+    person_config_override = _build_person_reminder_config_override(kwargs)
     if is_all:
         with SessionLocal() as db:
             result = TicketSyncService.run_person_reminder_services(
                 db,
                 trigger_source="scheduler",
-                is_all=is_all
+                is_all=is_all,
+                person_config_override=person_config_override,
             )
-        return
+        logger.info(
+            f"工单人维度全员催办任务执行完成 | sent_people={result.get('sentPeople')} "
+            f"sent_push_count={result.get('sentPushCount')} skipped={result.get('skipped')} "
+            f"override_keys={list(person_config_override.keys())}"
+        )
+        return result
 
 
     try:
         if resolved_emails and isinstance(resolved_emails, str):
-            resolved_emails = json.loads(resolved_emails)
-    except Exception as e:
-        logger.error(f"参数错误：{e}")
-        return
+            parsed_emails = json.loads(resolved_emails)
+            resolved_emails = parsed_emails if isinstance(parsed_emails, list) else [parsed_emails]
+    except Exception:
+        resolved_emails = [resolved_emails]
+    if not isinstance(resolved_emails, list):
+        resolved_emails = [resolved_emails] if resolved_emails else []
 
     normalized_user_id = None
     try:
@@ -196,6 +246,9 @@ def ticket_person_overdue_reminder(
             normalized_user_id = int(resolved_user_id)
     except Exception:
         normalized_user_id = None
+    if normalized_user_id and not resolved_emails:
+        resolved_emails = [None]
+    result = {"skipped": True, "skipReason": "未指定用户或邮箱"}
     for resolved_email in resolved_emails:
         with SessionLocal() as db:
             result = TicketSyncService.run_person_reminder_services(
@@ -203,14 +256,13 @@ def ticket_person_overdue_reminder(
                 trigger_source="scheduler",
                 user_id=normalized_user_id,
                 email=str(resolved_email or "").strip() or None,
+                person_config_override=person_config_override,
             )
         logger.info(
-            "工单人维度催办任务执行完成 | user_id={} email={} sent_people={} sent_push_count={} skipped={}",
-            resolved_user_id or "-",
-            resolved_email or "-",
-            result.get("sentPeople"),
-            result.get("sentPushCount"),
-            result.get("skipped"),
+            f"工单人维度催办任务执行完成 | user_id={resolved_user_id or '-'} "
+            f"email={resolved_email or '-'} sent_people={result.get('sentPeople')} "
+            f"sent_push_count={result.get('sentPushCount')} skipped={result.get('skipped')} "
+            f"override_keys={list(person_config_override.keys())}"
         )
     return result
 

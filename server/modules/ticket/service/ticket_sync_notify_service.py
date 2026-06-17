@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import requests
-from sqlalchemy import or_
+from sqlalchemy import or_, false
 from sqlalchemy.orm import Session
 
 from module_admin.dao.ai_provider_dao import AiProviderDao
@@ -883,7 +883,7 @@ class TicketSyncNotifyService:
         return f"https://feishu.cn/base/{app_token}?table={table_id}&view={view_id}&record={record_id}"
 
     @classmethod
-    def _normalize_bitable_filter_formula(cls, value: Any) -> str:
+    def _normalize_bitable_filter_formula(cls, value: Any) -> dict:
         """
         归一化飞书多维表格过滤公式。
 
@@ -892,15 +892,14 @@ class TicketSyncNotifyService:
         """
         filter_formula = str(value or "").strip()
         if not filter_formula:
-            return ""
+            return {}
         try:
             parsed = json.loads(filter_formula)
-        except Exception:
-            return filter_formula
-        if isinstance(parsed, str):
-            return parsed.strip()
-        if isinstance(parsed, (dict, list)):
+        except Exception as e:
+            logger.warning(f"参数错误：{filter_formula}, 错误：{e}")
             raise ValueError('过滤公式格式错误，请直接填写飞书公式文本，例如：CurrentValue.[状态] != "已关闭"')
+        if isinstance(parsed, str):
+            return json.loads(parsed.strip())
         return filter_formula
 
     @classmethod
@@ -915,8 +914,8 @@ class TicketSyncNotifyService:
         app_token = str(config.get("appToken") or "").strip()
         table_id = str(config.get("tableId") or "").strip()
         view_id = str(config.get("viewId") or "").strip()
-        # filter_formula = cls._normalize_bitable_filter_formula(config.get("filterFormula"))
-        filter_formula = str(config.get("filterFormula") or "").strip()
+        filter_formula = cls._normalize_bitable_filter_formula(config.get("filterFormula"))
+        # filter_formula = str(config.get("filterFormula") or "").strip()
         page_size = min(max(int(config.get("pageSize") or 500), 1), 500)
 
         if not app_id or not app_secret:
@@ -937,8 +936,8 @@ class TicketSyncNotifyService:
             if view_id:
                 params["view_id"] = view_id
             if filter_formula:
-                params["filter"] = json.loads(filter_formula)
-            logger.info(params)
+                params["filter"] = filter_formula
+            logger.info(f"飞书多维表格查询参数: {params}")
             response_data = cls._request_feishu_json(
                 method="POST",
                 url=url,
@@ -1469,6 +1468,7 @@ class TicketSyncNotifyService:
                     "rows": sorted(person_rows, key=lambda item: item.get("overdueMinutes", 0), reverse=True),
                 }
             )
+            logger.info(f"催办人： {person_email}, IDS: {[i.get('ticketNo', '') for i in person_rows]}")
 
         people.sort(key=lambda item: item.get("overdueCount") or 0, reverse=True)
         return {
@@ -1811,7 +1811,9 @@ class TicketSyncNotifyService:
             private_success_count = 0
             person_email = cls._normalize_email(person.get("email"))
             if enable_feishu_app:
-                if person_email:
+                logger.info(f"推送：{person_email}   --  {content}")
+
+                if False and person_email:
                     private_success_count = cls._send_feishu_text_messages(
                         app_id=app_id,
                         app_secret=app_secret,

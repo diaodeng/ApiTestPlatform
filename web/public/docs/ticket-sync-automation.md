@@ -216,10 +216,15 @@
 1. 页面可通过用户ID或邮箱预览“本人名下超时记录统计”。
 2. 页面可直接手动触发催办发送。
 3. 可通过调度任务 `module_task.scheduler_maintenance.ticket_person_overdue_reminder` 定时执行。
-4. 统计数据源可选：
+4. 定时任务支持任务级覆盖参数：`appToken`、`tableId`、`viewId`、`filterFormula`、`personField`、`timeField`、`dataSource`、`pageSize`。
+5. 覆盖规则：任务参数中对应字段为非空时优先使用任务值；未配置或为空字符串时继续使用“工单同步配置”里的 `personReminder` 全局配置。
+6. 覆盖参数既可平铺在任务 JSON，也可放入 `personReminder` 对象，例如：
+   `{"isAll": true, "appToken": "...", "tableId": "...", "personField": "当前负责人", "timeField": "更新时间"}`
+   或 `{"isAll": true, "personReminder": {"appToken": "...", "tableId": "...", "filterFormula": "CurrentValue.[状态] != \"已关闭\""}}`。
+7. 统计数据源可选：
    - `bitable`：从飞书多维表格读取后按人聚合；
    - `local`：从本地工单表按当前处理人聚合。
-5. 触发后会记录关键日志：配置是否启用、数据源、数据读取结果、人员匹配结果、发送结果与失败原因。
+8. 触发后会记录关键日志：配置是否启用、数据源、数据读取结果、人员匹配结果、发送结果与失败原因。
 
 ### 汇总统计通知（手动与定时）
 

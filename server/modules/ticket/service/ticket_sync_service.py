@@ -1927,6 +1927,7 @@ class TicketSyncService:
         user_id: int | None = None,
         email: str | None = None,
         is_all: bool = False,
+        person_config_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         执行人维度催办通知。
@@ -1936,10 +1937,23 @@ class TicketSyncService:
         :param user_id: 可选用户ID。
         :param email: 可选邮箱。
         :param is_all: 是否直接统计所有。
+        :param person_config_override: 定时任务传入的人员催办配置覆盖项，非空字段优先于全局参数配置。
         :return: 执行结果摘要。
         """
         config = cls._load_sync_config(db)
         person_config = config.get("personReminder") if isinstance(config.get("personReminder"), dict) else {}
+        if isinstance(person_config_override, dict):
+            normalized_override = {
+                str(key): value
+                for key, value in person_config_override.items()
+                if value is not None and str(value).strip() != ""
+            }
+            if normalized_override:
+                person_config = {**person_config, **normalized_override}
+                logger.info(
+                    f"人员催办使用任务级配置覆盖: trigger={trigger_source}, "
+                    f"override_keys={list(normalized_override.keys())}"
+                )
         return TicketSyncNotifyService.run_person_overdue_reminder(
             db,
             config=person_config,
@@ -3686,7 +3700,9 @@ class TicketSyncService:
                 }
             config = cls._load_sync_config(db)
             ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
-            stat_options = config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
+            stat_options = (
+                config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
+            )
             legacy_prompt_content = cls._resolve_legacy_ai_classification_prompt_content(
                 ai_config,
                 prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,

@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-17] INGEST-CODE | 按人催办定时任务支持飞书参数覆盖
+- 触发：用户要求按人催办通知的飞书筛选条件、人员字段名、时间字段名、视图、tableId、appToken 可在定时任务中配置；任务未配置时回退原参数配置。
+- 架构层：工单域 / 飞书通知 / 任务调度
+- 创建的页面：`web/public/docs/2026-06-17-ticket-person-reminder-task-override.md`
+- 更新的页面：`server/module_task/scheduler_maintenance.py`、`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/service/ticket_sync_notify_service.py`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`scheduler_maintenance.ticket_person_overdue_reminder` -> `TicketSyncService.run_person_reminder_services` -> `TicketSyncNotifyService.query_bitable_records`
+- 总共涉及页面：6
+
 ## [2026-06-17] INGEST-CODE | 工单分类 AI 配置统一
 - 触发：用户反馈工单分类统计配置分散在工单同步配置和 AI 配置中心，要求统一 Provider/提示词管理，并避免修改配置影响现有业务。
 - 架构层：工单域 / 同步自动化 / AI Provider / AI 提示词模板 / 分类统计

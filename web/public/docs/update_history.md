@@ -1,5 +1,9 @@
 ## 2026-06-17
 
+1. 按人催办定时任务支持任务级覆盖飞书参数：`appToken/tableId/viewId/filterFormula/personField/timeField/dataSource/pageSize`，任务非空值优先，否则继续走全局同步配置。
+2. 修复全员催办分支未返回结果、单邮箱字符串不兼容，以及 `filterFormula` 被 JSON 解析导致普通公式文本失败的问题。
+3. 新增说明文档：`web/public/docs/2026-06-17-ticket-person-reminder-task-override.md`。
+
 1. 统一工单分类 AI 配置职责：Provider 和提示词正文统一在系统管理的 AI Provider / AI 提示词中维护，工单同步配置页只选择 Provider 编码、提示词编码和场景开关。
 2. 清理旧默认模板 `ticket_category_classify_default`，分类统计默认值统一使用 `ticket_stat_classify_default`；历史 `aiClassification.promptContent` 不再作为新编辑入口，但保存配置时会保留并作为旧环境兜底，避免现有业务因配置保存突变。
 3. 工单同步配置页按基础配置、拉取配置、推送配置、手动配置标识区块，批量重归类提示词改为模板下拉选择。
