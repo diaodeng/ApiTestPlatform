@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-06-16
 created: 2026-05-20
-updated: 2026-06-16
+updated: 2026-06-17
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
@@ -128,6 +128,11 @@ graph TD
 - AI 协同追问的输出契约需要满足 Codex structured output 约束，`evidence`、`risk_items`、`next_steps` 也必须出现在 `required` 中；`symptom`、`similar_cases`、`sop_suggestion`、`monitoring_suggestion` 等增强字段允许为空或缺省，由服务端归一化补默认值，避免模型未产出扩展字段时任务失败。
 - AI 分析下发给 Agent 的日志正文会做中间截断，默认最多保留首尾约 80 万字符，并记录 `textTruncatedForAi` 与原始字符数，避免追问请求因超大上下文触发 Codex/OpenAI `bad_response_status_code`。
 - 工单关闭时会尝试从工单、RCA、事件和消息流自动生成知识库案例，知识文章关联原工单并刷新工单向量，供下一次相似工单检索复用。
+- 工单相似度检索已抽象为 `TicketEmbeddingService` 配置化 Provider：系统参数 `ticket.similarity.config` 控制 `local_hash` 或 `qdrant`，默认保留本地哈希兜底；Qdrant 不可用时查询会回退本地向量。
+- 相似工单入库文本扩展为标题、描述、AI 摘要、最终根因、解决方案和 RCA，批量重建接口 `POST /ticket/similarity/rebuild` 可刷新历史工单本地 `embedding_record` 并按配置同步 Qdrant。
+- 关键词命中在相似度合并中只作为弱加分，不再直接写成 100% 分，避免“包含同一字段文案”导致相似工单统计失真。
+- 相似工单配置已新增独立菜单 `ticket.similarity.config`，页面组件为 `ticket/similarityConfig/index`；页面可保存 Provider、Embedding、Qdrant、参与字段、阈值权重和 `sceneTriggers`，也可手动触发全部或指定工单向量重建。
+- `sceneTriggers` 当前支持 `externalSync`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge` 六类场景；外部同步延后后处理、远端拉取、手动新增/编辑、Excel 导入和关闭工单知识沉淀都会先检查开关，再调用 `vectorize_ticket_for_scene` 或 `vectorize_tickets_for_scene`。
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
 - AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本号匹配映射，未命中时拒绝提交。

@@ -35,11 +35,13 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketBatchReclassifyRequestModel,
     TicketCommentCreateModel,
     TicketCreateModel,
+    TicketEmbeddingRebuildRequestModel,
     TicketEventCreateModel,
     TicketExternalSyncUpsertModel,
     TicketMessageCreateModel,
     TicketQueryModel,
     TicketRcaModel,
+    TicketSimilarityConfigModel,
     TicketSnapshotModel,
     TicketStatisticsQueryModel,
     TicketStatusChangeModel,
@@ -92,6 +94,39 @@ def _update_ticket_with_independent_session(
     """
     with SessionLocal() as db:
         return TicketService.update_ticket(db, ticket_object, current_user)
+
+
+def _rebuild_ticket_embeddings_with_independent_session(payload: TicketEmbeddingRebuildRequestModel) -> None:
+    """
+    在后台任务中使用独立数据库会话重建工单向量，避免复用请求会话。
+    :param payload: 工单向量重建请求参数
+    :return: 无
+    """
+    with SessionLocal() as db:
+        result = TicketEmbeddingService.rebuild_ticket_embeddings(
+            db,
+            ticket_ids=payload.ticket_ids,
+            page_size=payload.page_size,
+            provider=payload.provider,
+            include_qdrant=payload.include_qdrant,
+        )
+        logger.info(f"工单向量后台重建完成: result={result}")
+
+
+def _rebuild_ticket_embeddings_result_with_independent_session(payload: TicketEmbeddingRebuildRequestModel) -> dict:
+    """
+    在线程池中使用独立数据库会话重建工单向量并返回结果。
+    :param payload: 工单向量重建请求参数
+    :return: 重建结果摘要
+    """
+    with SessionLocal() as db:
+        return TicketEmbeddingService.rebuild_ticket_embeddings(
+            db,
+            ticket_ids=payload.ticket_ids,
+            page_size=payload.page_size,
+            provider=payload.provider,
+            include_qdrant=payload.include_qdrant,
+        )
 
 
 def _compatible_field_value(payload: dict, camel_key: str, snake_key: str | None = None, default=None):
@@ -472,6 +507,98 @@ async def search_ticket_natural_language(
     """
     try:
         return ResponseUtil.success(data=TicketEmbeddingService.search_tickets(query_db, keyword, limit))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/similarity/config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:similarity:config:list"))],
+)
+async def get_ticket_similarity_config(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取工单相似度检索配置接口。
+    :param request: 请求对象
+    :param query_db: 数据库会话
+    :return: 当前相似度 Provider、Embedding 和 Qdrant 配置
+    """
+    try:
+        config = await run_in_threadpool(TicketEmbeddingService.ensure_default_config, query_db)
+        return ResponseUtil.success(data=config)
+    except Exception as e:
+        query_db.rollback()
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.put(
+    "/similarity/config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:similarity:config:edit"))],
+)
+async def save_ticket_similarity_config(
+    request: Request,
+    config_object: TicketSimilarityConfigModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    保存工单相似度检索配置接口。
+    :param request: 请求对象
+    :param config_object: Provider、Embedding、Qdrant 和场景触发开关配置
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 保存后的规范化配置
+    """
+    try:
+        data = config_object.model_dump(by_alias=True, exclude_none=False)
+        saved_config = await run_in_threadpool(
+            TicketEmbeddingService.save_similarity_config,
+            query_db,
+            data,
+            current_user_name=current_user.user.user_name if current_user and current_user.user else "system",
+        )
+        return ResponseUtil.success(data=saved_config, msg="保存成功")
+    except Exception as e:
+        query_db.rollback()
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/similarity/rebuild",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:similarity:rebuild"))],
+)
+async def rebuild_ticket_similarity_embeddings(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    rebuild_object: TicketEmbeddingRebuildRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    重建工单相似度向量接口。
+    :param request: 请求对象
+    :param background_tasks: FastAPI 后台任务容器
+    :param rebuild_object: 重建范围、批大小和 Provider 参数
+    :param query_db: 数据库会话
+    :return: 后台提交结果或同步重建摘要
+    """
+    try:
+        if rebuild_object.run_in_background:
+            background_tasks.add_task(_rebuild_ticket_embeddings_with_independent_session, rebuild_object)
+            return ResponseUtil.success(
+                data={
+                    "mode": "background",
+                    "ticketIds": rebuild_object.ticket_ids,
+                    "allTickets": rebuild_object.all_tickets,
+                    "pageSize": rebuild_object.page_size,
+                    "provider": rebuild_object.provider,
+                    "includeQdrant": rebuild_object.include_qdrant,
+                },
+                msg="工单向量重建任务已提交后台执行",
+            )
+        result = await run_in_threadpool(_rebuild_ticket_embeddings_result_with_independent_session, rebuild_object)
+        return ResponseUtil.success(data=result, msg="工单向量重建完成")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

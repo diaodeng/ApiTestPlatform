@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-05-20
 created: 2026-05-20
-updated: 2026-05-28
+updated: 2026-06-17
 related_files:
   - server/modules/ticket/entity/do/ticket_do.py
   - server/modules/ticket/entity/do/ticket_log_pull_do.py
@@ -60,6 +60,9 @@ erDiagram
 - `TicketAiAnalysisTask.analysis_context` 仅保留 `selectedAgentCode`、`forceRefresh`、`extraInstruction`、`promptLayers`、日志记录ID等轻量任务快照，完整工单/日志上下文落到工作区 `context.json`，避免任务表因超大日志包触发 MySQL `max_allowed_packet`；`Ticket.ai_analysis` 则保存最新一次分析结论。
 - `TicketMessage` 是持续协同和追问的上下文来源，字段包含 `role`、`message_type`、`content`、`attachments`、来源对象和创建人信息。
 - `TicketSnapshot` 是 ACR 当前快照版本，字段包含 `version`、`summary`、`root_cause`、`solution`、`prevention`、`risk`、`owner`、`source_type` 和结构化数据。
+- `EmbeddingRecord` 继续保存工单本地向量兜底索引，唯一键为 `object_type/object_id/embedding_model/embedding_version`；当 `ticket.similarity.config.provider=qdrant` 时，Qdrant 作为主检索索引，本表仍用于回退和审计。
+- 相似度重建会按工单标题、描述、AI 摘要、根因、解决方案和 RCA 重新计算 `EmbeddingRecord.embedding/content_hash`，并可同步写入 Qdrant payload。
+- `ticket.similarity.config` 是系统参数 JSON，不新增业务表；其中 `sceneTriggers` 控制外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀是否自动刷新向量。
 
 ## 参见
 

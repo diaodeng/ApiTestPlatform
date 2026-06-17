@@ -1068,6 +1068,12 @@ class TicketService:
             except Exception as exc:
                 query_db.rollback()
                 logger.warning(f"工单[{ticket.ticket_id}]自动分类执行失败: {exc}")
+            try:
+                TicketEmbeddingService.vectorize_ticket_for_scene(query_db, ticket, "manualCreate")
+                query_db.commit()
+            except Exception as exc:
+                query_db.rollback()
+                logger.warning(f"工单[{ticket.ticket_id}]手动新增后向量刷新失败: {exc}")
             if need_log_pull or log_pull_config:
                 try:
                     log_pull_result = TicketLogPullService.create_log_pull_services(
@@ -1228,6 +1234,11 @@ class TicketService:
             data["update_time"] = datetime.now()
             data["ticket_no"] = ticket_no
             TicketDao.update_ticket(query_db, ticket.ticket_id, data)
+            refreshed_ticket = TicketDao.get_ticket_by_id(query_db, ticket.ticket_id) or ticket
+            try:
+                TicketEmbeddingService.vectorize_ticket_for_scene(query_db, refreshed_ticket, "manualUpdate")
+            except Exception as exc:
+                logger.warning(f"工单[{ticket.ticket_id}]手动更新后向量刷新失败: {exc}")
             TicketDao.add_event(
                 query_db,
                 TicketEvent(
@@ -2144,7 +2155,7 @@ class TicketService:
             ),
         )
         try:
-            TicketEmbeddingService.vectorize_ticket(query_db, ticket)
+            TicketEmbeddingService.vectorize_ticket_for_scene(query_db, ticket, "closeKnowledge")
         except Exception as exc:
             logger.warning(f"工单[{ticket_id}]向量刷新失败: {exc}")
         return CrudResponseModel(

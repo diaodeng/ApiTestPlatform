@@ -16,7 +16,7 @@ entry_points:
     path: /ticket/{ticket_id}/ai-analysis
     trigger: 手工或日志拉取成功后触发AI分析任务
 created: 2026-05-22
-updated: 2026-06-01
+updated: 2026-06-17
 ---
 
 # 工单自动化链路流程
@@ -79,8 +79,10 @@ sequenceDiagram
 | 14 | AI 结果通知在分析成功和失败两种情况下都会发送，方便业务侧闭环确认。 |
 | 15 | AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
 | 8 | 工单详情页中的时间线、日志拉取和 AI 分析改为按需加载，避免打开详情时一次性拉取大量数据。 |
-| 9 | 协同追问会先写入 `ticket_message`，再复用 AI 分析任务入口读取消息流、快照和相似历史工单做增量分析；下发给 Agent 的日志正文会按首尾保留策略截断，避免超大上下文导致上游模型接口失败。 |
+| 9 | 协同追问会先写入 `ticket_message`，再复用 AI 分析任务入口读取消息流、快照和相似历史工单做增量分析；相似工单由 `ticket.similarity.config` 选择 `local_hash` 或 `qdrant` Provider，查询失败时回退本地向量；下发给 Agent 的日志正文会按首尾保留策略截断，避免超大上下文导致上游模型接口失败。 |
 | 10 | AI 分析成功后写回 `ticket.ai_analysis`、RCA、AI 消息和 `ticket_snapshot`；工单关闭时自动提炼 `knowledge_article` 供后续相似工单检索。 |
+| 11 | 历史工单可通过 `POST /ticket/similarity/rebuild` 批量重建向量，重建文本包含标题、描述、AI 摘要和 RCA，并可同步写入 Qdrant。 |
+| 12 | 相似工单配置页面可保存 `sceneTriggers`；外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路会按开关决定是否自动调用向量化。 |
 
 ## 错误处理
 

@@ -287,7 +287,7 @@ class TicketImportService:
                 cls._save_rca(query_db, ticket, row, current_user, create_time)
                 imported_tickets.append(ticket)
 
-            embedding_count = TicketEmbeddingService.vectorize_tickets(query_db, imported_tickets)
+            embedding_count = TicketEmbeddingService.vectorize_tickets_for_scene(query_db, imported_tickets, "import")
             query_db.commit()
             return {
                 "totalRows": len(rows),

@@ -739,6 +739,61 @@ class KnowledgeArticleQueryModel(QueryModel):
     keyword: str | None = Field(default=None, description="关键字，匹配标题和内容")
 
 
+class TicketEmbeddingRebuildRequestModel(BaseModel):
+    """
+    工单向量重建请求模型，用于手工批量刷新本地向量和外部向量库。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    ticket_ids: list[int] | None = Field(default=None, description="指定重建的工单ID列表，为空时按条件批量重建")
+    all_tickets: bool = Field(default=True, description="是否重建全部有效工单")
+    page_size: int = Field(default=100, description="每批处理数量")
+    provider: str | None = Field(default=None, description="指定检索提供方，默认读取系统配置")
+    include_qdrant: bool | None = Field(default=None, description="是否同步写入 Qdrant，默认由系统配置决定")
+    run_in_background: bool = Field(default=True, description="是否后台执行，避免长任务阻塞接口")
+
+    @model_validator(mode="after")
+    def normalize_payload(self):
+        """
+        归一化重建参数，限制分页大小并清理无效工单ID。
+        :return: 当前模型
+        """
+        ids: list[int] = []
+        for ticket_id in self.ticket_ids or []:
+            try:
+                normalized_id = int(ticket_id)
+            except Exception:
+                continue
+            if normalized_id > 0 and normalized_id not in ids:
+                ids.append(normalized_id)
+        self.ticket_ids = ids or None
+        self.all_tickets = bool(self.all_tickets or not self.ticket_ids)
+        self.page_size = min(max(int(self.page_size or 100), 1), 500)
+        self.provider = str(self.provider or "").strip() or None
+        return self
+
+
+class TicketSimilarityConfigModel(BaseModel):
+    """
+    工单相似度配置模型，用于可视化保存 Provider、Embedding、Qdrant 和场景触发开关。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    enabled: bool = Field(default=True, description="是否启用相似工单检索")
+    provider: str = Field(default="local_hash", description="相似度检索 Provider")
+    fallback_provider: str = Field(default="local_hash", description="降级 Provider")
+    top_k: int = Field(default=20, description="默认召回数量")
+    threshold: float = Field(default=0.05, description="相似度阈值")
+    keyword_weight: float = Field(default=0.15, description="关键词加权")
+    vector_weight: float = Field(default=0.85, description="向量加权")
+    fields: list[str] = Field(default_factory=list, description="参与向量化的字段")
+    embedding: dict[str, Any] = Field(default_factory=dict, description="Embedding 服务配置")
+    qdrant: dict[str, Any] = Field(default_factory=dict, description="Qdrant 配置")
+    scene_triggers: dict[str, bool] = Field(default_factory=dict, description="不同业务场景的自动向量化开关")
+
+
 class WorkflowStatusModel(BaseModel):
     """
     工作流状态模型。

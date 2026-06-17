@@ -1,5 +1,12 @@
 ## 2026-06-17
 
+1. 工单相似度检索改为配置化 Provider：默认保留 `local_hash`，新增 `qdrant` Provider 和兼容 OpenAI Embedding 的配置入口。
+2. 相似工单文本扩展为标题、描述、AI 摘要、根因、解决方案和 RCA；关键词命中改为弱加分，不再直接给 100% 相似度。
+3. 新增 `GET /ticket/similarity/config` 和 `POST /ticket/similarity/rebuild`，支持初始化配置和批量重建历史工单向量。
+4. 新增 `PUT /ticket/similarity/config` 和相似工单配置菜单页，可视化维护 Provider、Embedding、Qdrant、参与字段和 `sceneTriggers` 场景开关。
+5. 外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路会按 `sceneTriggers` 自动刷新工单向量。
+6. 新增说明文档：`web/public/docs/2026-06-17-ticket-similarity-qdrant-provider.md`。
+
 1. 工单 AI Agent 执行代码分析改为按仓库映射分支隔离：优先校验 `localRepoPath` 当前分支，未配置时按 `repoUrl + branchName` 自动创建固定 Git worktree。
 2. Agent 不再在已有目录上自动 checkout；提示词、请求快照和阶段事件会记录实际分析代码目录和当前分支，分支不匹配时明确失败。
 3. 新增说明文档：`web/public/docs/2026-06-17-ticket-ai-agent-worktree-branch-isolation.md`。

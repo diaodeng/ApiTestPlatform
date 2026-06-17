@@ -48,6 +48,32 @@ export function searchTicketNaturalLanguage(query) {
   });
 }
 
+// 查询相似工单检索配置
+export function getTicketSimilarityConfig() {
+  return request({
+    url: '/ticket/similarity/config',
+    method: 'get',
+  });
+}
+
+// 保存相似工单检索配置
+export function saveTicketSimilarityConfig(data) {
+  return request({
+    url: '/ticket/similarity/config',
+    method: 'put',
+    data,
+  });
+}
+
+// 重建相似工单向量
+export function rebuildTicketSimilarity(data) {
+  return request({
+    url: '/ticket/similarity/rebuild',
+    method: 'post',
+    data,
+  });
+}
+
 // 查询工单详情
 export function getTicket(ticketId) {
   return request({

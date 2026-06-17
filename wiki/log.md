@@ -8,6 +8,14 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-17] INGEST-CODE | 工单相似度检索 Qdrant Provider
+- 触发：用户反馈相似工单统计不准确，要求按标题和描述智能判断，并将向量库接入做成可配置方式。
+- 架构层：工单域 / 相似工单检索 / Embedding / Qdrant / 批量重建任务
+- 创建的页面：`web/public/docs/2026-06-17-ticket-similarity-qdrant-provider.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`entities/data-models/ticket-core-models.md`、`flows/ticket-automation-flow.md`、`log.md`
+- 变更传播链：`TicketEmbeddingService` -> `ticket.similarity.config` Provider 配置 -> `GET /ticket/similarity/config` / `POST /ticket/similarity/rebuild` -> 工单详情、协同追问、AI 分析上下文复用相似工单结果
+- 追加：新增 `PUT /ticket/similarity/config`、菜单 `ticket.similarity.config` 和页面 `ticket/similarityConfig/index`；`sceneTriggers` 控制外部同步、远端拉取、手动新增、手动编辑、Excel 导入、关闭知识沉淀六类自动向量刷新场景。
+
 ## [2026-06-17] INGEST-CODE | 工单 AI Agent 分支 worktree 隔离
 - 触发：用户反馈同一 Agent 并发分析不同工单时可能需要不同分支，并要求不影响原代码；未配置 localRepoPath 时自动创建目录并 checkout。
 - 架构层：工单域 / client_new Agent / Codex Worker / Git worktree

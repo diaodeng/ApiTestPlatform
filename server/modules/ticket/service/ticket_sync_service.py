@@ -5317,6 +5317,17 @@ class TicketSyncService:
                 logger.warning(f"外部工单同步延后自动化失败: ticket_no={sync_object.ticket_no}, error={exc}")
         ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
         try:
+            vector_scene = "remotePull" if sync_scene == "remote_pull" else "externalSync"
+            TicketEmbeddingService.vectorize_ticket_for_scene(db, ticket, vector_scene)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning(
+                f"外部工单同步延后向量刷新失败: ticket_no={sync_object.ticket_no}, "
+                f"scene={sync_scene}, error={exc}"
+            )
+            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+        try:
             cls._finalize_publish_state_after_post_process(
                 db,
                 ticket=ticket,

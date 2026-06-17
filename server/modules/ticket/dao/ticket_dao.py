@@ -1143,6 +1143,49 @@ class TicketDao:
         )
 
     @classmethod
+    def list_tickets_for_embedding(
+        cls, db: Session, *, offset: int = 0, limit: int = 100, ticket_ids: list[int] | None = None
+    ) -> list[Ticket]:
+        """
+        分页查询需要重建向量的有效工单。
+        :param db: 数据库会话
+        :param offset: 分页偏移量
+        :param limit: 返回数量
+        :param ticket_ids: 可选的指定工单ID列表
+        :return: 工单列表
+        """
+        query = db.query(Ticket).filter(Ticket.del_flag == "0")
+        if ticket_ids:
+            query = query.filter(Ticket.ticket_id.in_(ticket_ids))
+        return query.order_by(Ticket.update_time.desc(), Ticket.create_time.desc()).offset(offset).limit(limit).all()
+
+    @classmethod
+    def count_tickets_for_embedding(cls, db: Session, ticket_ids: list[int] | None = None) -> int:
+        """
+        统计需要重建向量的有效工单数量。
+        :param db: 数据库会话
+        :param ticket_ids: 可选的指定工单ID列表
+        :return: 工单数量
+        """
+        query = db.query(func.count(Ticket.ticket_id)).filter(Ticket.del_flag == "0")
+        if ticket_ids:
+            query = query.filter(Ticket.ticket_id.in_(ticket_ids))
+        return int(query.scalar() or 0)
+
+    @classmethod
+    def list_rca_by_ticket_ids(cls, db: Session, ticket_ids: list[int]) -> dict[int, TicketRca]:
+        """
+        批量查询工单 RCA 并按工单ID映射。
+        :param db: 数据库会话
+        :param ticket_ids: 工单ID列表
+        :return: 工单ID到 RCA 的映射
+        """
+        if not ticket_ids:
+            return {}
+        rows = db.query(TicketRca).filter(TicketRca.ticket_id.in_(ticket_ids)).all()
+        return {row.ticket_id: row for row in rows}
+
+    @classmethod
     def search_tickets_by_keyword(cls, db: Session, keyword: str, limit: int = 20) -> list[Ticket]:
         """
         按自然语言关键字匹配工单文本字段。
