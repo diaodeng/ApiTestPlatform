@@ -248,6 +248,182 @@ class TicketAiAnalysisService:
         }
 
     @staticmethod
+    def _sanitize_path_segment(value: str, fallback: str = "repo") -> str:
+        """
+        将文本转换为可作为目录名的安全片段。
+        :param value: 原始文本。
+        :param fallback: 文本为空时的默认片段。
+        :return: 安全目录名片段。
+        """
+        normalized = re.sub(r"[^0-9A-Za-z._-]+", "_", str(value or "").strip())
+        normalized = normalized.strip("._-")
+        return normalized[:120] or fallback
+
+    @staticmethod
+    def _normalize_branch_name(branch_name: str | None) -> str:
+        """
+        归一化分支名，兼容 refs/heads 与 origin 前缀。
+        :param branch_name: 原始分支名。
+        :return: 本地分支名。
+        """
+        normalized = str(branch_name or "").strip().replace("\\", "/")
+        for prefix in ("refs/heads/", "remotes/origin/", "origin/"):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+        return normalized.strip("/")
+
+    @classmethod
+    def _run_git_command(
+        cls,
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        timeout_sec: int = 120,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess:
+        """
+        执行 git 命令，并在失败时返回面向 Agent 的明确错误。
+        :param args: git 子命令参数。
+        :param cwd: 执行目录。
+        :param timeout_sec: 超时时间。
+        :param check: 是否校验退出码。
+        :return: git 执行结果。
+        """
+        command = ["git", *args]
+        try:
+            result = subprocess.run(
+                command,
+                text=True,
+                capture_output=True,
+                cwd=str(cwd) if cwd else None,
+                timeout=max(timeout_sec, 10),
+                **cls._build_hidden_subprocess_kwargs(),
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("未找到 git 命令，请先安装 Git 并确认 git 已加入 PATH") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"执行 git 命令超时: {' '.join(command)}") from exc
+        if check and result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(f"执行 git 命令失败: {' '.join(command)}; {detail}")
+        return result
+
+    @classmethod
+    def _get_repo_current_branch(cls, repo_path: Path) -> str:
+        """
+        读取本地仓库当前分支。
+        :param repo_path: 本地仓库或 worktree 目录。
+        :return: 当前分支名。
+        """
+        result = cls._run_git_command(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path)
+        branch_name = result.stdout.strip()
+        if not branch_name or branch_name == "HEAD":
+            raise RuntimeError(f"本地仓库处于 detached HEAD，无法校验分支: {repo_path}")
+        return branch_name
+
+    @classmethod
+    def _ensure_repo_branch_matches(cls, repo_path: Path, expected_branch: str) -> str:
+        """
+        校验本地仓库分支必须与工单映射分支一致。
+        :param repo_path: 本地仓库或 worktree 目录。
+        :param expected_branch: 工单映射要求的分支。
+        :return: 当前分支名。
+        """
+        expected = cls._normalize_branch_name(expected_branch)
+        if not expected:
+            raise RuntimeError("仓库映射 branchName 为空，无法校验 AI 分析代码分支")
+        if not repo_path.exists():
+            raise FileNotFoundError(f"本地仓库路径不存在: {repo_path}")
+        current = cls._get_repo_current_branch(repo_path)
+        if cls._normalize_branch_name(current) != expected:
+            raise RuntimeError(
+                "本地仓库分支与工单映射不一致，已停止 AI 分析。"
+                f"期望分支: {expected}; 当前分支: {current}; localRepoPath: {repo_path}"
+            )
+        return current
+
+    @classmethod
+    def _repo_cache_dir(cls, workspace_root: Path, repo_url: str) -> Path:
+        """
+        根据远端仓库地址生成 bare 仓库缓存目录。
+        :param workspace_root: AI 工作区根目录。
+        :param repo_url: 远端仓库地址。
+        :return: bare 仓库缓存目录。
+        """
+        safe_repo = cls._sanitize_path_segment(repo_url.replace(":", "_").replace("/", "_"), "repo")
+        return workspace_root / "_repo_cache" / f"{safe_repo}.git"
+
+    @classmethod
+    def _worktree_path(cls, workspace_root: Path, repo_url: str, branch_name: str) -> Path:
+        """
+        根据远端仓库地址和分支生成固定 worktree 目录。
+        :param workspace_root: AI 工作区根目录。
+        :param repo_url: 远端仓库地址。
+        :param branch_name: 分支名称。
+        :return: worktree 目录。
+        """
+        safe_repo = cls._sanitize_path_segment(repo_url.replace(":", "_").replace("/", "_"), "repo")
+        safe_branch = cls._sanitize_path_segment(cls._normalize_branch_name(branch_name).replace("/", "_"), "branch")
+        return workspace_root / "repo_worktrees" / safe_repo / safe_branch
+
+    @classmethod
+    def _ensure_worktree_repo(
+        cls,
+        *,
+        workspace_root: Path,
+        repo_url: str,
+        branch_name: str,
+    ) -> Path:
+        """
+        准备分支固定 worktree；已有目录只校验分支，不自动 checkout。
+        :param workspace_root: AI 工作区根目录。
+        :param repo_url: 远端仓库地址。
+        :param branch_name: 分支名称。
+        :return: 可用于 Codex 分析的 worktree 目录。
+        """
+        expected_branch = cls._normalize_branch_name(branch_name)
+        if not repo_url:
+            raise RuntimeError("仓库映射 localRepoPath 为空，且 repoUrl 为空，无法自动创建 worktree")
+        if not expected_branch:
+            raise RuntimeError("仓库映射 localRepoPath 为空，且 branchName 为空，无法自动创建 worktree")
+
+        worktree_path = cls._worktree_path(workspace_root, repo_url, expected_branch)
+        if worktree_path.exists():
+            cls._ensure_repo_branch_matches(worktree_path, expected_branch)
+            return worktree_path
+
+        cache_dir = cls._repo_cache_dir(workspace_root, repo_url)
+        cache_dir.parent.mkdir(parents=True, exist_ok=True)
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cache_dir.exists():
+            logger.info(f"AI 分析 worktree 缺失，开始克隆 bare 仓库: repo_url={repo_url}, cache_dir={cache_dir}")
+            cls._run_git_command(["clone", "--bare", repo_url, str(cache_dir)], timeout_sec=1800)
+        else:
+            logger.info(f"AI 分析 worktree 缺失，刷新 bare 仓库引用: cache_dir={cache_dir}, branch={expected_branch}")
+            cls._run_git_command(["fetch", "origin", expected_branch], cwd=cache_dir, timeout_sec=600, check=False)
+
+        local_branch_check = cls._run_git_command(
+            ["show-ref", "--verify", f"refs/heads/{expected_branch}"],
+            cwd=cache_dir,
+            check=False,
+        )
+        logger.info(f"创建 AI 分析固定 worktree: branch={expected_branch}, path={worktree_path}")
+        if local_branch_check.returncode == 0:
+            cls._run_git_command(
+                ["worktree", "add", str(worktree_path), expected_branch],
+                cwd=cache_dir,
+                timeout_sec=900,
+            )
+        else:
+            cls._run_git_command(
+                ["worktree", "add", "-b", expected_branch, str(worktree_path), f"origin/{expected_branch}"],
+                cwd=cache_dir,
+                timeout_sec=900,
+            )
+        cls._ensure_repo_branch_matches(worktree_path, expected_branch)
+        return worktree_path
+
+    @staticmethod
     def _persist_worker_streams(workspace_dir: Path, stdout_text: str | None, stderr_text: str | None) -> None:
         """
         将 Worker 的 stdout 和 stderr 记录到任务工作区。
@@ -747,7 +923,8 @@ class TicketAiAnalysisService:
         :param workspace_root: 实际使用的工作区根目录。
         :return: 提示词文本
         """
-        resolved_repo_path = repo_path or mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""
+        resolved_repo_path = repo_path or mapping.get("resolvedLocalRepoPath") or mapping.get("resolved_local_repo_path")
+        resolved_repo_path = resolved_repo_path or mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""
         resolved_workspace_root = workspace_root or mapping.get("workspaceRoot") or mapping.get("workspace_root") or ""
         fallback_workspace_root = str(Path(workspace_path).parent.parent)
         return f"""你是工单自动分析 Worker，请基于当前工作区中的上下文进行根因分析。
@@ -760,9 +937,10 @@ class TicketAiAnalysisService:
 - 版本: {mapping.get("versionKey") or mapping.get("version_key") or ""}
 - 仓库地址: {mapping.get("repoUrl") or mapping.get("repo_url") or ""}
 - 分支: {mapping.get("branchName") or mapping.get("branch_name") or ""}
-- 本地仓库路径: {resolved_repo_path}
+- 本地仓库路径: {mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""}
+- 实际分析代码目录: {resolved_repo_path}
 - 工作区根目录: {resolved_workspace_root or fallback_workspace_root}
-- 说明: 如果 Agent 本地配置中存在仓库路径或工作区根目录，则以 Agent 本地配置为准，映射中的值仅用于兼容和审计。
+- 说明: Agent 启动 Worker 前会校验实际分析代码目录的当前分支必须等于上面的分支；如果映射未提供 localRepoPath，则会在工作区下创建固定 Git worktree 后再执行。
 
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
@@ -812,11 +990,11 @@ class TicketAiAnalysisService:
     def _resolve_ai_repo_runtime_settings(
         cls,
         mapping: dict[str, Any],
-    ) -> tuple[Path, Path]:
+    ) -> tuple[Path, Path, str]:
         """
         解析 Agent 本地 AI 仓库运行目录。
         :param mapping: 仓库映射数据。
-        :return: (工作区根目录, 本地仓库路径)
+        :return: (工作区根目录, 实际仓库路径, 当前分支)
         """
         config = AgentConfig.read_config()
         workspace_root_text = str(
@@ -832,28 +1010,30 @@ class TicketAiAnalysisService:
         else:
             workspace_root = get_client_root_dir() / "storage" / "ticket_ai_analysis"
 
-        repo_path_text = str(
-            getattr(config, "ticket_ai_local_repo_path", "")
-            or mapping.get("localRepoPath")
-            or mapping.get("local_repo_path")
-            or ""
-        ).strip()
-        if not repo_path_text:
-            raise FileNotFoundError(
-                "本地仓库路径未配置，请在 Agent 本地配置中填写 ticket_ai_local_repo_path，"
-                "或在仓库映射中维护 localRepoPath"
-            )
-        repo_path = Path(repo_path_text).expanduser()
-        if not repo_path.is_absolute():
-            repo_path = repo_path.resolve()
-        if not repo_path.exists():
-            raise FileNotFoundError(
-                "本地仓库路径不存在，请在 Agent 本地配置中填写 ticket_ai_local_repo_path，"
-                "或在仓库映射中维护 localRepoPath"
-            )
-
         workspace_root.mkdir(parents=True, exist_ok=True)
-        return workspace_root, repo_path
+        branch_name = cls._normalize_branch_name(mapping.get("branchName") or mapping.get("branch_name"))
+        repo_url = str(mapping.get("repoUrl") or mapping.get("repo_url") or "").strip()
+        repo_path_text = str(mapping.get("localRepoPath") or mapping.get("local_repo_path") or "").strip()
+
+        if repo_path_text:
+            repo_path = Path(repo_path_text).expanduser()
+            if not repo_path.is_absolute():
+                repo_path = repo_path.resolve()
+            current_branch = cls._ensure_repo_branch_matches(repo_path, branch_name)
+            mapping["resolvedLocalRepoPath"] = str(repo_path)
+            mapping["resolvedBranchName"] = current_branch
+            return workspace_root, repo_path, current_branch
+
+        repo_path = cls._ensure_worktree_repo(
+            workspace_root=workspace_root,
+            repo_url=repo_url,
+            branch_name=branch_name,
+        )
+        current_branch = cls._ensure_repo_branch_matches(repo_path, branch_name)
+        mapping["localRepoPath"] = str(repo_path)
+        mapping["resolvedLocalRepoPath"] = str(repo_path)
+        mapping["resolvedBranchName"] = current_branch
+        return workspace_root, repo_path, current_branch
 
     @classmethod
     async def handle_request(
@@ -891,7 +1071,7 @@ class TicketAiAnalysisService:
                 "message": "taskId 或 ticketId 不能为空",
             }
         try:
-            workspace_root, repo_path = cls._resolve_ai_repo_runtime_settings(mapping)
+            workspace_root, repo_path, current_branch = cls._resolve_ai_repo_runtime_settings(mapping)
             workspace_dir = workspace_root / f"ticket_{ticket_id}" / f"task_{task_id}"
             workspace_dir.mkdir(parents=True, exist_ok=True)
             schema_file = workspace_dir / "result.schema.json"
@@ -916,6 +1096,7 @@ class TicketAiAnalysisService:
                 workspace_root=str(workspace_root),
                 workspace_path=str(workspace_dir),
                 repo_path=str(repo_path),
+                branch_name=current_branch,
             )
             try:
                 request_snapshot_file.write_text(
@@ -928,6 +1109,8 @@ class TicketAiAnalysisService:
                             "payloadSize": len(cls._dumps(req_data, indent=None)),
                             "providerCode": request_provider_code,
                             "workerModel": selected_worker_model,
+                            "resolvedLocalRepoPath": str(repo_path),
+                            "resolvedBranchName": current_branch,
                             "createdAt": datetime.now().isoformat(),
                         }
                     ),
@@ -1064,6 +1247,8 @@ class TicketAiAnalysisService:
                         )
                 schema_file.write_text(cls._dumps(schema_payload), encoding="utf-8")
 
+                mapping["resolvedLocalRepoPath"] = str(repo_path)
+                mapping["resolvedBranchName"] = current_branch
                 resolved_prompt = prompt_template.replace("{workspace_path}", str(workspace_dir))
                 if not resolved_prompt:
                     resolved_prompt = cls._build_prompt(
@@ -1102,6 +1287,7 @@ class TicketAiAnalysisService:
                     "开始执行 Worker",
                     command_line=" ".join(command),
                     repo_path=str(repo_path),
+                    branch_name=current_branch,
                     workspace_root=str(workspace_root),
                     workspace_path=str(workspace_dir),
                     codex_home=str(codex_home),

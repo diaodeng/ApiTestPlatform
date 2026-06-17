@@ -33,6 +33,6 @@ C:\Users\xj\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe
 }
 ```
 
-工作区和仓库路径优先级保持不变：Agent 本地 `ticket_ai_workspace_root/ticket_ai_local_repo_path` 优先，其次使用服务端仓库映射下发的路径。
+工作区仍优先使用 Agent 本地 `ticket_ai_workspace_root`。仓库路径在 2026-06-17 起改为按仓库映射分支隔离：优先校验映射下发的 `localRepoPath`，未配置时由 Agent 按 `repoUrl + branchName` 在工作区下创建固定 Git worktree；`ticket_ai_local_repo_path` 不再覆盖分支映射路径。
 
 Provider 优先级保持不变：服务端下发 `providerEnv` 时覆盖本次 Worker 环境；未下发时使用 Agent 本地 Codex 配置。

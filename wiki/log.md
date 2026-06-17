@@ -8,6 +8,13 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-17] INGEST-CODE | 工单 AI Agent 分支 worktree 隔离
+- 触发：用户反馈同一 Agent 并发分析不同工单时可能需要不同分支，并要求不影响原代码；未配置 localRepoPath 时自动创建目录并 checkout。
+- 架构层：工单域 / client_new Agent / Codex Worker / Git worktree
+- 创建的页面：`web/public/docs/2026-06-17-ticket-ai-agent-worktree-branch-isolation.md`
+- 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 变更传播链：`client_new/services/ticket_ai_analysis_service.py` -> 仓库映射 localRepoPath 分支校验、缺省 worktree 创建、Worker 提示词和阶段事件记录实际代码目录
+
 ## [2026-06-16] INGEST-CODE | 工单保存接口非阻塞与按钮防重复提交
 - 触发：用户反馈工单编辑弹窗保存响应慢，接口响应前保存按钮仍可重复点击，并要求接口异步化避免阻塞其他接口。
 - 架构层：工单域 / Web 控制台 / FastAPI 事件循环 / 工单新增编辑保存链路

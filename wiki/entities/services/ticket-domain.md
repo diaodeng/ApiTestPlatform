@@ -147,6 +147,7 @@ graph TD
 - AI 分析 Agent 通过工作区内 `analysis.lock` 规避同任务重复并发执行；锁文件存在且未过期时会直接返回运行中提示，锁文件异常或过期会自动放行重试。
 - `client_new` Agent 执行工单 AI 分析时必须使用 Codex CLI；可执行文件通过 `codex --version` 校验，返回 `codex-cli` 才允许执行，即使入口位于 OpenAI Codex 安装目录也可使用；可通过本地配置 `ticket_ai_codex_cli_path` 显式指定 CLI 路径，Windows 子进程会隐藏控制台窗口。
 - 工单 AI Worker 失败时只向服务端返回错误摘要和工作区日志路径；Codex 账号并发限制会归一提示 `Concurrency limit exceeded`，完整 stdout/stderr 保留在任务工作区文件中。
+- 工单 AI 执行仓库现在按分支隔离：优先校验仓库映射中的 `localRepoPath` 当前分支必须等于 `branchName`；若未配置 `localRepoPath`，Agent 会按 `repoUrl + branchName` 在工作区下自动创建固定 Git worktree。执行前不会自动 checkout，分支不匹配时直接失败并提示实际路径与当前分支。
 - AI 分析 Worker 的输出 schema 必须满足 Codex `response_format` 约束，根对象需要显式设置 `additionalProperties: false`，否则会返回 `invalid_request_error`。
 - 输出 schema 不应把协同增强字段全部设为必填；核心字段用于写回 RCA 和 ACR，增强字段用于知识沉淀与经验复用，缺失时由服务端默认空数组、空字符串或人工复核标记。
 - Agent 执行过程会通过 `ai_analysis_step` / `ai_analysis_status` / `ai_analysis_error` / `ai_analysis_finished` 事件把阶段日志回传服务端，服务端只记录系统日志，不把调试细节落到业务表。
