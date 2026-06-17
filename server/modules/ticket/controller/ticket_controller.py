@@ -998,7 +998,7 @@ async def send_sync_group_push_by_ticket(
     "/sync/auto-category/reclassify",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
 )
-async def batch_reclassify_sync_tickets(
+def batch_reclassify_sync_tickets(
     request: Request,
     query_object: TicketBatchReclassifyRequestModel,
     query_db: Session = Depends(get_db),
