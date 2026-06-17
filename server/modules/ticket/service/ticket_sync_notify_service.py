@@ -895,12 +895,10 @@ class TicketSyncNotifyService:
             return {}
         try:
             parsed = json.loads(filter_formula)
+            return parsed
         except Exception as e:
             logger.warning(f"参数错误：{filter_formula}, 错误：{e}")
             raise ValueError('过滤公式格式错误，请直接填写飞书公式文本，例如：CurrentValue.[状态] != "已关闭"')
-        if isinstance(parsed, str):
-            return json.loads(parsed.strip())
-        return filter_formula
 
     @classmethod
     def query_bitable_records(cls, config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -937,7 +935,7 @@ class TicketSyncNotifyService:
                 params["view_id"] = view_id
             if filter_formula:
                 params["filter"] = filter_formula
-            logger.info(f"飞书多维表格查询参数: {params}")
+            logger.info(f"飞书多维表格查询参数: {json.dumps(params, ensure_ascii=False)}")
             response_data = cls._request_feishu_json(
                 method="POST",
                 url=url,
@@ -1813,7 +1811,7 @@ class TicketSyncNotifyService:
             if enable_feishu_app:
                 logger.info(f"推送：{person_email}   --  {content}")
 
-                if False and person_email:
+                if person_email:
                     private_success_count = cls._send_feishu_text_messages(
                         app_id=app_id,
                         app_secret=app_secret,
