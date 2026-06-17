@@ -9,7 +9,7 @@
 
 1. 工单 AI Agent 执行代码分析改为按仓库映射分支隔离：优先校验 `localRepoPath` 当前分支，未配置时按 `repoUrl + branchName` 自动创建固定 Git worktree。
 2. Agent 不再在已有目录上自动 checkout；提示词、请求快照和阶段事件会记录实际分析代码目录和当前分支，分支不匹配时明确失败。
-3. 当历史映射的 `localRepoPath` 指向普通 clone 且当前分支不等于 `branchName` 时，如果存在 `repoUrl + branchName`，Agent 会自动改用分支固定 worktree，不再直接在原项目中失败。
+3. 当历史映射的 `localRepoPath` 指向普通 clone 且当前分支不等于 `branchName` 时，Agent 会优先基于该本地仓库创建分支固定 worktree，复用原项目 `.git/config`、remote 和本地 Git 凭据，不再直接在原项目中失败。
 4. 新增说明文档：`web/public/docs/2026-06-17-ticket-ai-agent-worktree-branch-isolation.md`。
 
 1. 工单专题信息统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 改为直接调用飞书开放 API：用任务参数 `appId/appSecret` 获取 tenant token，拉取群消息和线程回复后统计专题工单信息，并通过飞书应用发送交互卡片。

@@ -367,6 +367,82 @@ class TicketAiAnalysisService:
         return workspace_root / "repo_worktrees" / safe_repo / safe_branch
 
     @classmethod
+    def _local_worktree_path(cls, workspace_root: Path, source_repo_path: Path, branch_name: str) -> Path:
+        """
+        根据本地仓库路径和分支生成固定 worktree 目录。
+        :param workspace_root: AI 工作区根目录。
+        :param source_repo_path: 仓库映射配置的本地仓库目录。
+        :param branch_name: 分支名称。
+        :return: 本地仓库派生的 worktree 目录。
+        """
+        safe_repo = cls._sanitize_path_segment(str(source_repo_path.resolve()).replace(":", "_").replace("\\", "_"), "repo")
+        safe_branch = cls._sanitize_path_segment(cls._normalize_branch_name(branch_name).replace("/", "_"), "branch")
+        return workspace_root / "repo_worktrees" / "local" / safe_repo / safe_branch
+
+    @classmethod
+    def _ensure_local_worktree_repo(
+        cls,
+        *,
+        workspace_root: Path,
+        source_repo_path: Path,
+        branch_name: str,
+    ) -> Path:
+        """
+        基于仓库映射中的本地仓库创建分支固定 worktree，复用原仓库 Git 配置和凭据。
+        :param workspace_root: AI 工作区根目录。
+        :param source_repo_path: 仓库映射配置的本地仓库目录。
+        :param branch_name: 分支名称。
+        :return: 可用于 Codex 分析的 worktree 目录。
+        """
+        expected_branch = cls._normalize_branch_name(branch_name)
+        if not expected_branch:
+            raise RuntimeError("仓库映射 branchName 为空，无法基于本地仓库创建 worktree")
+        if not source_repo_path.exists():
+            raise FileNotFoundError(f"本地仓库路径不存在: {source_repo_path}")
+
+        worktree_path = cls._local_worktree_path(workspace_root, source_repo_path, expected_branch)
+        if worktree_path.exists():
+            cls._ensure_repo_branch_matches(worktree_path, expected_branch)
+            return worktree_path
+
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            f"基于映射本地仓库创建 AI 分析固定 worktree: "
+            f"source_repo_path={source_repo_path}, branch={expected_branch}, path={worktree_path}"
+        )
+        local_branch_check = cls._run_git_command(
+            ["show-ref", "--verify", f"refs/heads/{expected_branch}"],
+            cwd=source_repo_path,
+            check=False,
+        )
+        if local_branch_check.returncode == 0:
+            cls._run_git_command(
+                ["worktree", "add", str(worktree_path), expected_branch],
+                cwd=source_repo_path,
+                timeout_sec=900,
+            )
+        else:
+            fetch_result = cls._run_git_command(
+                ["fetch", "origin", expected_branch],
+                cwd=source_repo_path,
+                timeout_sec=600,
+                check=False,
+            )
+            if fetch_result.returncode != 0:
+                detail = (fetch_result.stderr or fetch_result.stdout or "").strip()
+                raise RuntimeError(
+                    f"基于本地仓库创建 worktree 前拉取远端分支失败: "
+                    f"branch={expected_branch}, source_repo_path={source_repo_path}, detail={detail}"
+                )
+            cls._run_git_command(
+                ["worktree", "add", "-b", expected_branch, str(worktree_path), f"origin/{expected_branch}"],
+                cwd=source_repo_path,
+                timeout_sec=900,
+            )
+        cls._ensure_repo_branch_matches(worktree_path, expected_branch)
+        return worktree_path
+
+    @classmethod
     def _ensure_worktree_repo(
         cls,
         *,
@@ -1025,12 +1101,21 @@ class TicketAiAnalysisService:
                 mapping["resolvedBranchName"] = current_branch
                 return workspace_root, repo_path, current_branch
             except Exception as exc:
-                if not repo_url or not branch_name:
+                if not branch_name:
                     raise
                 logger.warning(
-                    f"AI 分析映射本地仓库不可直接使用，改用分支固定 worktree: "
+                    f"AI 分析映射本地仓库不可直接使用，改用本地仓库派生 worktree: "
                     f"local_repo_path={repo_path}, branch={branch_name}, reason={exc}"
                 )
+                repo_path = cls._ensure_local_worktree_repo(
+                    workspace_root=workspace_root,
+                    source_repo_path=repo_path,
+                    branch_name=branch_name,
+                )
+                current_branch = cls._ensure_repo_branch_matches(repo_path, branch_name)
+                mapping["resolvedLocalRepoPath"] = str(repo_path)
+                mapping["resolvedBranchName"] = current_branch
+                return workspace_root, repo_path, current_branch
 
         repo_path = cls._ensure_worktree_repo(
             workspace_root=workspace_root,
