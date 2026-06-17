@@ -1,5 +1,9 @@
 ## 2026-06-17
 
+1. 工单同步配置页“统计未归类工单”明确为只统计不自动归类；执行归类仍使用“按当前配置重归类”或“强制重归类全部”。
+2. 自动归类链路补充详细服务日志：入口参数、筛选结果、逐条处理、跳过原因、AI 配置、模型执行、字段回填和汇总结果均可从日志排查。
+3. 新增说明文档：`web/public/docs/2026-06-17-ticket-auto-category-debug-logs.md`。
+
 1. 工单相似度检索改为配置化 Provider：默认保留 `local_hash`，新增 `qdrant` Provider 和兼容 OpenAI Embedding 的配置入口。
 2. 相似工单文本扩展为标题、描述、AI 摘要、根因、解决方案和 RCA；关键词命中改为弱加分，不再直接给 100% 相似度。
 3. 新增 `GET /ticket/similarity/config` 和 `POST /ticket/similarity/rebuild`，支持初始化配置和批量重建历史工单向量。

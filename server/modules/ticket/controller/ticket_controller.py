@@ -1012,6 +1012,10 @@ async def batch_reclassify_sync_tickets(
     :param current_user: 当前登录用户。
     :return: 批量重归类执行结果。
     """
+    logger.info(
+        f"/sync/auto-category/reclassify 请求参数: {query_object.model_dump_json()}, "
+        f"user={current_user.user.user_name if current_user and current_user.user else 'system'}"
+    )
     try:
         result = TicketSyncService.batch_reclassify_ticket_categories_services(query_db, query_object, current_user)
         return ResponseUtil.success(data=result)
@@ -1034,6 +1038,7 @@ async def get_sync_auto_category_stats(
     :param query_db: 数据库会话。
     :return: 未归类统计结果。
     """
+    logger.info("/sync/auto-category/stats 请求到达: 仅统计未归类数量，不执行自动归类")
     try:
         result = TicketSyncService.get_uncategorized_ticket_statistics_services(query_db)
         return ResponseUtil.success(data=result)

@@ -1061,7 +1061,7 @@
         </el-row>
       </el-form>
       <el-space wrap>
-        <el-button :loading="autoCategoryStatsLoading" @click="handleLoadAutoCategoryStats">一键统计未归类工单</el-button>
+        <el-button :loading="autoCategoryStatsLoading" @click="handleLoadAutoCategoryStats">统计未归类工单</el-button>
         <el-button type="primary" :loading="autoCategoryRunLoading" @click="handleBatchReclassifyByConfig">按当前配置重归类</el-button>
         <el-button type="danger" plain :loading="autoCategoryRunLoading" @click="handleForceReclassifyAll">强制重归类全部</el-button>
       </el-space>
@@ -2158,7 +2158,7 @@ function handleLoadAutoCategoryStats() {
   getTicketSyncAutoCategoryStats()
     .then(response => {
       autoCategoryStats.value = response.data || null
-      proxy.$modal.msgSuccess('未归类统计完成')
+      proxy.$modal.msgSuccess('未归类统计完成，不会触发自动归类')
     })
     .catch(error => {
       autoCategoryStats.value = null

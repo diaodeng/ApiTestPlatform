@@ -3641,7 +3641,17 @@ class TicketSyncService:
         :return: (最新工单对象, 分类执行摘要)
         """
         existing_category = str(getattr(ticket, "category_name", "") or "").strip()
+        logger.info(
+            f"工单自动分类开始: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"source_type={source_type}, source_ref={source_ref}, strategy={classification_strategy}, "
+            f"force_reclassify={bool(force_reclassify)}, existing_category={existing_category or '-'}, "
+            f"title_len={len(str(title or '').strip())}, description_len={len(str(description or '').strip())}"
+        )
         if existing_category and not force_reclassify:
+            logger.info(
+                f"工单自动分类跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=工单已归类且未开启强制重归类, category={existing_category}"
+            )
             return ticket, {
                 "skipped": True,
                 "skipReason": "工单已归类，跳过自动分类",
@@ -3654,6 +3664,11 @@ class TicketSyncService:
         if normalized_strategy not in {"ai", "regex"}:
             normalized_strategy = "ai"
         if normalized_strategy == "regex" and not normalized_category:
+            logger.info(
+                f"工单自动分类开始正则匹配: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"rule_count={len(regex_rules or [])}, title_len={len(str(title or '').strip())}, "
+                f"description_len={len(str(description or '').strip())}"
+            )
             normalized_category, regex_meta = cls._classify_ticket_category_by_regex(
                 title=title,
                 description=description,
@@ -3662,12 +3677,22 @@ class TicketSyncService:
             category_meta = {**category_meta, **regex_meta}
         if not normalized_category:
             if prefer_no_ai_fallback:
+                logger.info(
+                    f"工单自动分类跳过二次AI: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                    f"reason=统一提取未返回分类且配置禁止二次AI调用"
+                )
                 return ticket, {
                     "skipped": True,
                     "skipReason": "统一提取未返回分类，已按配置跳过二次分类AI调用",
                     "categoryName": existing_category,
                     "meta": category_meta,
                 }
+            logger.info(
+                f"工单自动分类调用轻量AI: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"source_type={source_type}, source_ref={source_ref}, strategy={normalized_strategy}, "
+                f"provider_code={category_meta.get('provider_code') or '-'}, "
+                f"prompt_code={category_meta.get('prompt_code') or '-'}"
+            )
             category_name, category_meta = TicketLightAiService.classify_ticket_category(
                 db,
                 title=title,
@@ -3680,6 +3705,10 @@ class TicketSyncService:
             )
             normalized_category = str(category_name or "").strip()
         if not normalized_category:
+            logger.info(
+                f"工单自动分类未返回结果: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason={str(category_meta.get('error') or '未返回可识别分类').strip()}"
+            )
             return ticket, {
                 "skipped": True,
                 "skipReason": str(category_meta.get("error") or "未返回可识别分类").strip(),
@@ -3715,6 +3744,11 @@ class TicketSyncService:
             )
             db.commit()
             ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            logger.info(
+                f"工单自动分类完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"category={normalized_category}, strategy={category_meta.get('strategy') or normalized_strategy}, "
+                f"force_reclassify={bool(force_reclassify)}"
+            )
             return ticket, {
                 "skipped": False,
                 "categoryName": normalized_category,
@@ -3754,24 +3788,52 @@ class TicketSyncService:
         :param enabled_by_scene: 当前场景是否启用。
         :return: (最新工单对象, 分类摘要)。
         """
+        logger.info(
+            f"工单AI分类统计流程开始: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"source_type={source_type}, source_ref={source_ref}, enabled_by_scene={enabled_by_scene}, "
+            f"force_reclassify={bool(force_reclassify)}, ai_prompt_code={ai_prompt_code or '-'}"
+        )
         if not enabled_by_scene and not force_reclassify:
+            logger.info(
+                f"工单AI分类统计跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=当前场景入参未启用且未强制重归类, source_type={source_type}"
+            )
             return ticket, {"skipped": True, "skipReason": "当前场景未启用AI分类统计"}
         config = cls._load_sync_config(db)
         if not cls._should_run_ai_classification_for_scene(config, source_type) and not force_reclassify:
+            logger.info(
+                f"工单AI分类统计跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=同步配置未开启当前场景AI分类统计, source_type={source_type}"
+            )
             return ticket, {"skipped": True, "skipReason": "当前场景未开启AI分类统计"}
         title_text = str(title or "").strip()
         description_text = str(description or "").strip()
         comment_context = cls._build_ticket_comment_context(db, ticket_id=ticket.ticket_id)
+        logger.info(
+            f"工单AI分类统计上下文: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"title_len={len(title_text)}, description_len={len(description_text)}, "
+            f"comment_count={len(comment_context)}"
+        )
         if not force_reclassify and cls._has_successful_ai_classification(
             ticket,
             title=title_text,
             description=description_text,
             comments=comment_context,
         ):
+            logger.info(
+                f"工单AI分类统计跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=已有相同标题描述评论的成功AI分类结果"
+            )
             return ticket, {"skipped": True, "skipReason": "已有相同文本的成功AI分类结果"}
 
         ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
         stat_options = config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
+        logger.info(
+            f"工单AI分类统计调用轻量AI: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"provider_code={str(ai_config.get('providerCode') or '').strip() or '-'}, "
+            f"prompt_code={ai_prompt_code or str(ai_config.get('promptCode') or '').strip() or '-'}, "
+            f"has_prompt_content={bool(str(ai_config.get('promptContent') or '').strip())}"
+        )
         result_payload, meta = TicketLightAiService.classify_ticket_statistics(
             db,
             title=title_text,
@@ -3788,6 +3850,10 @@ class TicketSyncService:
             current_user_name=current_user_name,
         )
         if not result_payload:
+            logger.info(
+                f"工单AI分类统计无结果: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason={str(meta.get('error') or meta.get('skipReason') or 'AI未返回分类统计结果').strip()}"
+            )
             return ticket, {
                 "skipped": True,
                 "skipReason": str(meta.get("error") or meta.get("skipReason") or "AI未返回分类统计结果").strip(),
@@ -3845,6 +3911,14 @@ class TicketSyncService:
         TicketDao.update_ticket(db, ticket.ticket_id, update_data)
         db.commit()
         ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+        logger.info(
+            f"工单AI分类统计回填完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"category={result_payload.get('categoryName') or '-'}, "
+            f"issue_type={result_payload.get('issueTypeName') or '-'}, "
+            f"is_problem={result_payload.get('isProblem')}, "
+            f"root_cause_type={result_payload.get('rootCauseType') or '-'}, "
+            f"solution_type={result_payload.get('solutionType') or '-'}"
+        )
         return ticket, {
             "skipped": False,
             "categoryName": result_payload.get("categoryName"),
@@ -5657,6 +5731,16 @@ class TicketSyncService:
         regex_rules = getattr(request, "regex_rules", None)
         only_uncategorized = bool(getattr(request, "only_uncategorized", False))
         all_tickets = bool(getattr(request, "all_tickets", False))
+        logger.info(
+            f"工单批量重归类开始: user={current_user_name}, strategy={strategy}, "
+            f"only_uncategorized={only_uncategorized}, all_tickets={all_tickets}, "
+            f"force_reclassify={bool(getattr(request, 'force_reclassify', False))}, "
+            f"page_num={int(getattr(request, 'page_num', 1) or 1)}, "
+            f"page_size={int(getattr(request, 'page_size', 100) or 100)}, "
+            f"ticket_ids_count={len(getattr(request, 'ticket_ids', None) or [])}, "
+            f"regex_rules_count={len(regex_rules or [])}, "
+            f"ai_prompt_code={ai_prompt_code or '-'}"
+        )
 
         base_query = db.query(Ticket).filter(Ticket.del_flag == "0")
         if only_uncategorized:
@@ -5679,6 +5763,10 @@ class TicketSyncService:
                 page_num = max(int(getattr(request, "page_num", 1) or 1), 1)
                 page_size = min(max(int(getattr(request, "page_size", 100) or 100), 1), 500)
                 tickets = base_query.offset((page_num - 1) * page_size).limit(page_size).all()
+        logger.info(
+            f"工单批量重归类筛选完成: total={total}, selected={len(tickets)}, strategy={strategy}, "
+            f"only_uncategorized={only_uncategorized}, all_tickets={all_tickets}"
+        )
 
         summary = {
             "total": total,
@@ -5692,6 +5780,10 @@ class TicketSyncService:
             "details": [],
         }
         if strategy == "regex" and not regex_rules:
+            logger.info(
+                f"工单批量重归类跳过: strategy=regex 但未配置正则规则, selected={len(tickets)}, "
+                f"only_uncategorized={only_uncategorized}, all_tickets={all_tickets}"
+            )
             summary["skippedCount"] = len(tickets)
             summary["details"] = [
                 {
@@ -5706,6 +5798,12 @@ class TicketSyncService:
 
         for ticket in tickets:
             try:
+                logger.info(
+                    f"工单批量重归类处理开始: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                    f"title_len={len(str(ticket.title or '').strip())}, "
+                    f"description_len={len(str(ticket.description or '').strip())}, "
+                    f"strategy={strategy}, force_reclassify={bool(getattr(request, 'force_reclassify', False))}"
+                )
                 if strategy == "regex":
                     _, category_result = cls._run_auto_ticket_category_classification(
                         db,
@@ -5740,8 +5838,18 @@ class TicketSyncService:
                 }
                 summary["details"].append(detail)
                 if category_result.get("skipped"):
+                    logger.info(
+                        f"工单批量重归类跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                        f"reason={detail.get('skipReason') or category_result.get('skipReason') or '未说明'}"
+                    )
                     summary["skippedCount"] += 1
                 else:
+                    logger.info(
+                        f"工单批量重归类成功: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                        f"category={category_result.get('categoryName') or '-'}, "
+                        f"issue_type={category_result.get('issueTypeName') or '-'}, "
+                        f"is_problem={category_result.get('isProblem')}"
+                    )
                     summary["successCount"] += 1
             except Exception as exc:
                 logger.warning(
@@ -5757,6 +5865,10 @@ class TicketSyncService:
                         "error": str(exc),
                     }
                 )
+        logger.info(
+            f"工单批量重归类结束: total={summary['total']}, selected={summary['selectedCount']}, "
+            f"success={summary['successCount']}, skipped={summary['skippedCount']}, failed={summary['failedCount']}"
+        )
         return summary
 
     @classmethod
@@ -5767,6 +5879,7 @@ class TicketSyncService:
         :param db: 数据库会话。
         :return: 未归类统计结果。
         """
+        logger.info("工单未归类统计开始: 仅执行统计查询，不触发自动归类")
         total_count = db.query(Ticket).filter(Ticket.del_flag == "0").count()
         uncategorized_count = (
             db.query(Ticket)
@@ -5786,6 +5899,10 @@ class TicketSyncService:
         )
         categorized_count = max(total_count - uncategorized_count, 0)
         uncategorized_ratio = round((uncategorized_count / total_count) * 100, 2) if total_count else 0
+        logger.info(
+            f"工单未归类统计完成: total_count={total_count}, categorized_count={categorized_count}, "
+            f"uncategorized_count={uncategorized_count}, uncategorized_ratio={uncategorized_ratio}"
+        )
         return {
             "totalCount": total_count,
             "categorizedCount": categorized_count,

@@ -1511,6 +1511,10 @@ class TicketLightAiService:
         title_text = str(title or "").strip()
         content = str(description or "").strip()
         if not title_text and not content:
+            logger.info(
+                f"工单自动分类跳过: 标题和描述均为空, source_type={source_type}, "
+                f"source_id={source_id}, source_ref={source_ref}"
+            )
             return "", {"provider_code": "", "prompt_code": "", "category_name": "", "skipped": True}
         if not cls.is_category_classification_enabled(db):
             logger.info(
@@ -1524,6 +1528,11 @@ class TicketLightAiService:
         )
         provider_code = str(override_provider_code or "").strip() or default_provider_code
         prompt_code = str(override_prompt_code or "").strip() or default_prompt_code
+        logger.info(
+            f"工单自动分类准备: source_type={source_type}, source_id={source_id}, source_ref={source_ref}, "
+            f"title_len={len(title_text)}, description_len={len(content)}, "
+            f"provider_code={provider_code or '-'}, prompt_code={prompt_code or '-'}"
+        )
         request_payload = {
             "title": title_text,
             "description": content,
@@ -1532,6 +1541,10 @@ class TicketLightAiService:
             "overridePromptCode": str(override_prompt_code or "").strip() or None,
         }
         if not provider_code or not prompt_code:
+            logger.info(
+                f"工单自动分类跳过: provider/prompt 未配置, provider={provider_code or '-'}, "
+                f"prompt={prompt_code or '-'}, source_ref={source_ref}"
+            )
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_category_classify",
@@ -1560,6 +1573,9 @@ class TicketLightAiService:
 
         provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
         if not provider or not bool(getattr(provider, "enabled", True)):
+            logger.warning(
+                f"工单自动分类跳过: Provider不存在或已停用, provider={provider_code}, source_ref={source_ref}"
+            )
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_category_classify",
@@ -1590,6 +1606,7 @@ class TicketLightAiService:
 
         prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
         if not prompt_templates:
+            logger.warning(f"工单自动分类跳过: 未找到提示词模板, prompt={prompt_code}, source_ref={source_ref}")
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_category_classify",
@@ -1650,6 +1667,11 @@ class TicketLightAiService:
                 created_by_name=current_user_name,
             ),
         )
+        logger.info(
+            f"工单自动分类开始执行: execution_id={execution_id}, provider_code={provider_code}, "
+            f"prompt_code={prompt_code}, model_name={str(getattr(provider, 'model_name', '') or '').strip() or '-'}, "
+            f"source_type={source_type}, source_ref={source_ref}"
+        )
         try:
             response_text = str(
                 cls._call_model_api(
@@ -1677,6 +1699,11 @@ class TicketLightAiService:
                     "categoryCandidate": category_candidate,
                     "categoryName": normalized_category,
                 },
+            )
+            logger.info(
+                f"工单自动分类完成: execution_id={execution_id}, source_type={source_type}, "
+                f"source_ref={source_ref}, category={normalized_category or '-'}, "
+                f"raw_category={category_candidate or '-'}"
             )
             return normalized_category, {
                 "provider_code": provider_code,
@@ -1734,6 +1761,10 @@ class TicketLightAiService:
         comment_lines = [str(item or "").strip() for item in comments or [] if str(item or "").strip()]
         empty_result: dict[str, Any] = {}
         if not title_text and not content and not comment_lines:
+            logger.info(
+                f"工单AI分类统计跳过: 标题、描述和评论均为空, source_type={source_type}, "
+                f"source_id={source_id}, source_ref={source_ref}"
+            )
             return empty_result, {
                 "provider_code": "",
                 "prompt_code": "",
@@ -1748,6 +1779,11 @@ class TicketLightAiService:
         prompt_code = str(override_prompt_code or "").strip() or default_prompt_code
         options = stat_options if isinstance(stat_options, dict) else {}
         fields = current_fields if isinstance(current_fields, dict) else {}
+        logger.info(
+            f"工单AI分类统计准备: source_type={source_type}, source_id={source_id}, source_ref={source_ref}, "
+            f"title_len={len(title_text)}, description_len={len(content)}, comment_count={len(comment_lines)}, "
+            f"provider_code={provider_code or '-'}, prompt_code={prompt_code or '-'}"
+        )
         request_payload = {
             "title": title_text,
             "description": content,
@@ -1759,6 +1795,10 @@ class TicketLightAiService:
             "overridePromptContent": str(override_prompt_content or "").strip() or None,
         }
         if not provider_code or not prompt_code:
+            logger.info(
+                f"工单AI分类统计跳过: provider/prompt 未配置, provider={provider_code or '-'}, "
+                f"prompt={prompt_code or '-'}, source_ref={source_ref}"
+            )
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_stat_classify",
@@ -1786,6 +1826,9 @@ class TicketLightAiService:
 
         provider = AiProviderDao.get_ai_provider_by_code(db, provider_code)
         if not provider or not bool(getattr(provider, "enabled", True)):
+            logger.warning(
+                f"工单AI分类统计跳过: Provider不存在或已停用, provider={provider_code}, source_ref={source_ref}"
+            )
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_stat_classify",
@@ -1846,6 +1889,11 @@ class TicketLightAiService:
                 created_by_name=current_user_name,
             ),
         )
+        logger.info(
+            f"工单AI分类统计开始执行: execution_id={execution_id}, provider_code={provider_code}, "
+            f"prompt_code={prompt_code}, model_name={str(getattr(provider, 'model_name', '') or '').strip() or '-'}, "
+            f"source_type={source_type}, source_ref={source_ref}"
+        )
         try:
             response_text = str(
                 cls._call_model_api(provider=provider, system_prompt=system_prompt, user_prompt=user_prompt)
@@ -1863,6 +1911,10 @@ class TicketLightAiService:
                 status="success",
                 response_text=response_text,
                 response_payload=normalized_result,
+            )
+            logger.info(
+                f"工单AI分类统计完成: execution_id={execution_id}, source_type={source_type}, "
+                f"source_ref={source_ref}, result_keys={list(normalized_result.keys())}"
             )
             return normalized_result, {
                 "provider_code": provider_code,

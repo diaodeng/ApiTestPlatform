@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-17] INGEST-CODE | 摄入工单自动归类排障日志增强
+- 触发：用户反馈工单同步配置中点击统计未归类调用 `/sync/auto-category/stats` 没有自动归类，需要知道为什么没执行、正在执行什么、正在处理什么数据
+- 架构层：工单域 / 同步自动化 / 轻量 AI 分类统计
+- 创建的页面：无
+- 更新的页面：`entities/services/ticket-domain.md`、`web/public/docs/2026-06-17-ticket-auto-category-debug-logs.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/controller/ticket_controller.py` / `server/modules/ticket/service/ticket_sync_service.py` / `server/modules/ticket/service/ticket_light_ai_service.py` / `web/src/views/ticket/syncAutomation/index.vue` -> 工单同步自动归类排障
+- 总共涉及页面：4
+
 ## [2026-06-17] INGEST-CODE | 工单相似度检索 Qdrant Provider
 - 触发：用户反馈相似工单统计不准确，要求按标题和描述智能判断，并将向量库接入做成可配置方式。
 - 架构层：工单域 / 相似工单检索 / Embedding / Qdrant / 批量重建任务

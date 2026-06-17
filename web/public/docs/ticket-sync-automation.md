@@ -152,6 +152,7 @@
 
 - 一键统计未归类：`GET /ticket/sync/auto-category/stats`
   - 返回总工单数、已归类数、未归类数、未归类占比。
+  - 该接口只统计，不执行自动归类；需要处理未归类工单时调用批量重归类接口。
 - 批量重归类：`POST /ticket/sync/auto-category/reclassify`
   - `strategy`：`ai` / `regex`
   - `aiPromptCode`：AI 归类提示词编码（可选，空则走系统默认）
@@ -159,6 +160,7 @@
   - `onlyUncategorized`：仅处理未归类
   - `allTickets`：全量扫描（否则按分页）
   - `forceReclassify`：强制覆盖已有分类
+  - 服务日志会记录筛选条件、每条工单处理状态、跳过原因、AI/正则执行结果和最终汇总。
 
 ## 逻辑梳理
 

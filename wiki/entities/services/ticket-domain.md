@@ -97,6 +97,7 @@ graph TD
 - 日志拉取下载接口支持 `source=auto/service/original`：管理页“下载日志”使用 `auto`，优先本服务归档文件，本服务文件不存在或未下载时回退外部原始地址；工单详情页“归档地址”使用 `service` 只下载本服务归档，“原始压缩包”使用 `original` 只下载外部原始地址。工单详情页日志拉取列表展示商家、门店、POSID，便于同一工单下区分不同 POS 的拉取记录。
 - 为避免大文件下载卡住 FastAPI 事件循环，工单详情页“原始压缩包”改为浏览器直接打开 `commandResultUrl`，不再由后端代理下载外部压缩包；HTTP 形式的归档地址也直接浏览器打开，本地/FTP 归档仍走后端鉴权下载。
 - 工单外部推送、内网 pending 拉取、ack、日志内容读取、日志列表、日志拉取提交、重新拉取、重新下载、重新截取和删除等 `async def` 接口内的同步服务调用已显式使用 `run_in_threadpool`；这样保留异步请求体/后台任务编排能力，同时避免同步数据库、`requests`、文件和 FTP 操作直接阻塞事件循环。
+- 工单同步配置页的 `GET /ticket/sync/auto-category/stats` 只统计未归类数量，不执行自动归类；批量处理必须调用 `POST /ticket/sync/auto-category/reclassify`。自动归类链路已经补充入口、筛选、逐条处理、跳过原因、AI 配置、模型执行和字段回填日志，便于从服务日志判断为什么未执行。
 - 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。
 - 工单详情弹窗顶部基础信息表格不再直接承载“描述”，描述改为表格下方独立整行并自动展示全部内容；顶部表格灰色标签列禁止换行，避免长描述或标签换行撑高基础信息行。
 - 工单描述翻译继续复用轻量 AI 翻译配置 `ticket.ai.translate.provider.code` 和 `ticket.ai.translate.prompt.code`：详情页优先用 `extra_data.origin_description` 展示原文，用 `extra_data.ai_translation` 在描述下方单独展示译文；手动翻译入口会在缺少翻译总开关、Provider 或提示词时直接提示，不写入空译文。
