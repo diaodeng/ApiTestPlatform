@@ -1019,10 +1019,18 @@ class TicketAiAnalysisService:
             repo_path = Path(repo_path_text).expanduser()
             if not repo_path.is_absolute():
                 repo_path = repo_path.resolve()
-            current_branch = cls._ensure_repo_branch_matches(repo_path, branch_name)
-            mapping["resolvedLocalRepoPath"] = str(repo_path)
-            mapping["resolvedBranchName"] = current_branch
-            return workspace_root, repo_path, current_branch
+            try:
+                current_branch = cls._ensure_repo_branch_matches(repo_path, branch_name)
+                mapping["resolvedLocalRepoPath"] = str(repo_path)
+                mapping["resolvedBranchName"] = current_branch
+                return workspace_root, repo_path, current_branch
+            except Exception as exc:
+                if not repo_url or not branch_name:
+                    raise
+                logger.warning(
+                    f"AI 分析映射本地仓库不可直接使用，改用分支固定 worktree: "
+                    f"local_repo_path={repo_path}, branch={branch_name}, reason={exc}"
+                )
 
         repo_path = cls._ensure_worktree_repo(
             workspace_root=workspace_root,

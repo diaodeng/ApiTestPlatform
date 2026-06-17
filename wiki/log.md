@@ -22,6 +22,7 @@ updated: 2026-05-20
 - 创建的页面：`web/public/docs/2026-06-17-ticket-ai-agent-worktree-branch-isolation.md`
 - 更新的页面：`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
 - 变更传播链：`client_new/services/ticket_ai_analysis_service.py` -> 仓库映射 localRepoPath 分支校验、缺省 worktree 创建、Worker 提示词和阶段事件记录实际代码目录
+- 追加：当历史映射携带 `localRepoPath` 但该目录当前分支与 `branchName` 不一致时，如果存在 `repoUrl + branchName`，Agent 会记录原因并自动改用分支固定 worktree；只有无法自动创建 worktree 时才失败。
 
 ## [2026-06-16] INGEST-CODE | 工单保存接口非阻塞与按钮防重复提交
 - 触发：用户反馈工单编辑弹窗保存响应慢，接口响应前保存按钮仍可重复点击，并要求接口异步化避免阻塞其他接口。
