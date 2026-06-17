@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-17] INGEST-CODE | 工单分类 AI 配置统一
+- 触发：用户反馈工单分类统计配置分散在工单同步配置和 AI 配置中心，要求统一 Provider/提示词管理，并避免修改配置影响现有业务。
+- 架构层：工单域 / 同步自动化 / AI Provider / AI 提示词模板 / 分类统计
+- 创建的页面：`web/public/docs/2026-06-17-ticket-classification-config-unification.md`
+- 更新的页面：`server/module_admin/service/ai_prompt_template_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`web/src/views/ticket/syncAutomation/index.vue`、`web/src/views/system/aiconfig/index.vue`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：AI 提示词默认模板 -> `ticket.sync.automation.aiClassification` 场景开关与选择项 -> `TicketLightAiService.classify_ticket_statistics` -> 工单分类统计字段回填
+- 兼容策略：历史 `aiClassification.promptContent` 保存时保留，只作为旧配置兜底；新页面不再提供正文编辑入口。
+
 ## [2026-06-17] INGEST-CODE | 摄入工单自动归类排障日志增强
 - 触发：用户反馈工单同步配置中点击统计未归类调用 `/sync/auto-category/stats` 没有自动归类，需要知道为什么没执行、正在执行什么、正在处理什么数据
 - 架构层：工单域 / 同步自动化 / 轻量 AI 分类统计

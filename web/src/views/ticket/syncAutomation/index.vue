@@ -2,9 +2,9 @@
   <div class="app-container ticket-sync-automation-page" v-loading="loading">
     <section class="page-intro">
       <div class="page-intro__eyebrow">工单同步自动化</div>
-      <h2 class="page-intro__title">这里配置外部同步入库后的自动化行为</h2>
+      <h2 class="page-intro__title">按基础、拉取、推送、手动能力统一管理同步配置</h2>
       <p class="page-intro__desc">
-        这里只管三方直推和内网定时拉取两条外部同步链路。手动新增、编辑后的自动翻译，以及创建后拉日志，走工单页本身的开关，不在这里配置。
+        Provider 和提示词正文统一在系统管理的 AI Provider 与 AI 提示词中维护，这里只选择编码并配置同步场景开关。
       </p>
     </section>
 
@@ -12,7 +12,7 @@
       <template #header>
         <div class="card-header">
           <span>外部同步基础开关</span>
-          <el-tag type="success" effect="plain">保存后立即生效</el-tag>
+          <el-tag type="success" effect="plain">基础配置</el-tag>
         </div>
       </template>
 
@@ -46,7 +46,7 @@
       <template #header>
         <div class="card-header">
           <span>AI 分类统计配置</span>
-          <el-tag type="warning" effect="plain">外部同步、远端拉取、手动创建可分别控制</el-tag>
+          <el-tag type="warning" effect="plain">手动配置与场景开关</el-tag>
         </div>
       </template>
 
@@ -76,17 +76,15 @@
             <el-form-item label="Provider 编码">
               <el-select
                 v-model="form.aiClassification.providerCode"
-                placeholder="留空则使用后端默认配置"
+                placeholder="请选择 Provider；留空则使用 AI 配置中心"
                 filterable
-                allow-create
                 clearable
-                default-first-option
                 style="width: 100%"
               >
                 <el-option
                   v-for="item in providerOptions"
                   :key="item.providerCode || item.value"
-                  :label="item.providerName || item.label || item.providerCode || item.value"
+                  :label="formatProviderOptionLabel(item)"
                   :value="item.providerCode || item.value"
                 />
               </el-select>
@@ -96,42 +94,38 @@
             <el-form-item label="提示词编码">
               <el-select
                 v-model="form.aiClassification.promptCode"
-                placeholder="如 ticket_stat_classify_default"
+                placeholder="请选择提示词模板；留空使用默认模板"
                 filterable
-                allow-create
                 clearable
-                default-first-option
                 style="width: 100%"
               >
                 <el-option
                   v-for="item in promptOptions"
                   :key="item.promptCode || item.value"
-                  :label="item.promptName || item.label || item.promptCode || item.value"
+                  :label="formatPromptOptionLabel(item)"
                   :value="item.promptCode || item.value"
                 />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="24">
-            <el-form-item label="提示词内容">
-              <el-input
-                v-model="form.aiClassification.promptContent"
-                type="textarea"
-                :rows="12"
-                resize="vertical"
-                placeholder="未配置自定义提示词时，后端会自动回填默认提示词，可在此基础上直接修改"
-              />
-            </el-form-item>
-          </el-col>
         </el-row>
       </el-form>
+      <el-alert
+        v-if="form.aiClassification.promptContent"
+        class="mt8"
+        type="warning"
+        show-icon
+        :closable="false"
+        title="检测到历史内联提示词"
+        description="系统会保留它作为旧配置兜底；新配置请到 AI 提示词管理中维护模板正文。保存本页不会继续写入新的提示词正文。"
+      />
     </el-card>
 
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
           <span>统计枚举配置</span>
-          <el-tag effect="plain">用于工单页与统计页的可视化配置</el-tag>
+          <el-tag effect="plain">基础配置</el-tag>
         </div>
       </template>
 
@@ -264,7 +258,7 @@
       <template #header>
         <div class="card-header">
           <span>外部推送多维表格邮箱补全</span>
-          <el-tag type="warning" effect="plain">按 recordId 查询人员邮箱</el-tag>
+          <el-tag type="warning" effect="plain">推送配置</el-tag>
         </div>
       </template>
 
@@ -314,7 +308,7 @@
       <template #header>
         <div class="card-header">
           <span>远端同步链接</span>
-          <el-tag type="warning" effect="plain">这里只配置拉取地址，不会自动启动任务</el-tag>
+          <el-tag type="warning" effect="plain">拉取配置</el-tag>
         </div>
       </template>
 
@@ -404,7 +398,7 @@
       <template #header>
         <div class="card-header">
           <span>工单汇总统计通知</span>
-          <el-tag type="success" effect="plain">可定时统计状态/分类/优先级并推送</el-tag>
+          <el-tag type="success" effect="plain">推送配置</el-tag>
         </div>
       </template>
 
@@ -597,7 +591,7 @@
       <template #header>
         <div class="card-header">
           <span>飞书统一凭证</span>
-          <el-tag type="info" effect="plain">群推送/按人催办/汇总通知共用，子配置可覆盖</el-tag>
+          <el-tag type="info" effect="plain">基础配置</el-tag>
         </div>
       </template>
       <el-form :model="form.feishuAuth" label-width="150px">
@@ -620,7 +614,7 @@
       <template #header>
         <div class="card-header">
           <span>工单群消息推送</span>
-          <el-tag type="success" effect="plain">推送项来自推送配置管理</el-tag>
+          <el-tag type="success" effect="plain">推送配置</el-tag>
         </div>
       </template>
 
@@ -1020,7 +1014,20 @@
           </el-col>
           <el-col v-if="autoCategoryForm.strategy === 'ai'" :xs="24" :md="12">
             <el-form-item label="AI提示词编码">
-              <el-input v-model="autoCategoryForm.aiPromptCode" placeholder="可选，留空走系统默认提示词" />
+              <el-select
+                v-model="autoCategoryForm.aiPromptCode"
+                placeholder="可选，留空走当前分类配置"
+                filterable
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in promptOptions"
+                  :key="`auto-category-${item.promptCode || item.value}`"
+                  :label="formatPromptOptionLabel(item)"
+                  :value="item.promptCode || item.value"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="8">
@@ -1122,7 +1129,7 @@
       <template #header>
         <div class="card-header">
           <span>拉日志默认值</span>
-          <el-tag type="info" effect="plain">同步后自动拉日志可复用</el-tag>
+          <el-tag type="info" effect="plain">拉取配置</el-tag>
         </div>
       </template>
 
@@ -1554,6 +1561,19 @@ function createDefaultForm() {
 
 const form = reactive(createDefaultForm())
 
+function formatProviderOptionLabel(item = {}) {
+  const code = item.providerCode || item.value || ''
+  const name = item.providerName || item.label || code || '-'
+  const modelName = item.modelName || item.model_name || ''
+  return `${name}${code && name !== code ? ` [${code}]` : ''}${modelName ? ` - ${modelName}` : ''}`
+}
+
+function formatPromptOptionLabel(item = {}) {
+  const code = item.promptCode || item.templateCode || item.value || ''
+  const name = item.promptName || item.templateName || item.label || code || '-'
+  return `${name}${code && name !== code ? ` [${code}]` : ''}`
+}
+
 function normalizeArray(value, fallback = []) {
   if (Array.isArray(value)) {
     return value
@@ -1967,7 +1987,7 @@ async function handleSave() {
       runOnManualCreate: Boolean(payload.aiClassification?.runOnManualCreate),
       providerCode: String(payload.aiClassification?.providerCode || '').trim(),
       promptCode: String(payload.aiClassification?.promptCode || '').trim() || 'ticket_stat_classify_default',
-      promptContent: String(payload.aiClassification?.promptContent || '').trim()
+      promptContent: ''
     }
     payload.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
       ? Array.from(new Set(payload.externalSyncRequiredFields.map(item => String(item || '').trim()).filter(Boolean)))

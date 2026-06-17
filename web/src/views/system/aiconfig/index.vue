@@ -4,7 +4,7 @@
       <div class="page-intro__eyebrow">AI 配置中心</div>
       <h2 class="page-intro__title">集中管理工单 AI 相关配置</h2>
       <p class="page-intro__desc">
-        轻量翻译、标题总结、自动分类与知识提炼在工单链路中触发，AI 分析 Worker 配置用于版本仓库分析任务。提示词模板建议在模板页统一维护，这里只负责选择和组合。
+        轻量翻译、标题总结、工单分类、日志参数提取与知识提炼在工单链路中触发。Provider 和提示词正文统一维护，这里只负责选择和组合。
       </p>
     </section>
 
@@ -104,12 +104,12 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
-            <el-form-item label="自动分类开关" prop="categoryClassifyEnabled">
+            <el-form-item label="分类统计开关" prop="categoryClassifyEnabled">
               <el-switch v-model="form.categoryClassifyEnabled" inline-prompt active-text="开" inactive-text="关" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
-            <el-form-item label="自动分类 Provider" prop="categoryClassifyProviderCode">
+            <el-form-item label="分类统计 Provider" prop="categoryClassifyProviderCode">
               <el-select
                 v-model="form.categoryClassifyProviderCode"
                 placeholder="请选择 Provider"
@@ -127,7 +127,7 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
-            <el-form-item label="自动分类提示词" prop="categoryClassifyPromptCode">
+            <el-form-item label="分类统计提示词" prop="categoryClassifyPromptCode">
               <el-select
                 v-model="form.categoryClassifyPromptCode"
                 placeholder="请选择提示词模板"
@@ -392,7 +392,10 @@ function applyFormData(payload) {
   form.titleSummaryPromptCode = payload.titleSummaryPromptCode ?? payload.title_summary_prompt_code ?? ''
   form.categoryClassifyEnabled = payload.categoryClassifyEnabled ?? payload.category_classify_enabled ?? false
   form.categoryClassifyProviderCode = payload.categoryClassifyProviderCode ?? payload.category_classify_provider_code ?? ''
-  form.categoryClassifyPromptCode = payload.categoryClassifyPromptCode ?? payload.category_classify_prompt_code ?? ''
+  const classifyPromptCode = payload.categoryClassifyPromptCode ?? payload.category_classify_prompt_code ?? ''
+  form.categoryClassifyPromptCode = classifyPromptCode === 'ticket_category_classify_default'
+    ? 'ticket_stat_classify_default'
+    : classifyPromptCode
   form.logExtractEnabled = payload.logExtractEnabled ?? payload.log_extract_enabled ?? false
   form.logExtractProviderCode = payload.logExtractProviderCode ?? payload.log_extract_provider_code ?? ''
   form.logExtractPromptCode = payload.logExtractPromptCode ?? payload.log_extract_prompt_code ?? ''
@@ -457,7 +460,11 @@ async function handleSave() {
     return
   }
   saving.value = true
-  updateAiConfig({ ...form })
+  const payload = { ...form }
+  if (!payload.categoryClassifyPromptCode || payload.categoryClassifyPromptCode === 'ticket_category_classify_default') {
+    payload.categoryClassifyPromptCode = 'ticket_stat_classify_default'
+  }
+  updateAiConfig(payload)
     .then(() => {
       proxy.$modal.msgSuccess('保存成功')
       loadSummary()

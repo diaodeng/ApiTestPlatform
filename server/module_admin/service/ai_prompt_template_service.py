@@ -76,13 +76,13 @@ class AiPromptTemplateService:
             "remark": "工单分析可选追加模板",
         },
         {
-            "template_code": "ticket_category_classify_default",
-            "template_name": "工单自动分类默认提示词",
+            "template_code": "ticket_stat_classify_default",
+            "template_name": "工单分类统计默认提示词",
             "template_category": "common",
             "prompt_content": "",
             "sort": 20,
             "enabled": True,
-            "remark": "工单自动分类的默认提示词占位模板，允许先选中后再补充内容",
+            "remark": "工单分类统计结构化字段默认模板，启动时会自动补齐内置内容",
         },
         {
             "template_code": "ticket_log_extract_default",
@@ -133,11 +133,23 @@ class AiPromptTemplateService:
         :param db: 数据库会话
         :return: 无
         """
+        from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
+
         now = datetime.now()
         for item in cls.DEFAULT_PROMPT_TEMPLATES:
             existing = AiPromptTemplateDao.get_prompt_template_by_code(db, item["template_code"])
             if existing:
+                if (
+                    item["template_code"] == "ticket_stat_classify_default"
+                    and not str(getattr(existing, "prompt_content", "") or "").strip()
+                ):
+                    existing.prompt_content = TicketLightAiService.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT
+                    existing.update_by = "system"
+                    existing.update_time = now
                 continue
+            prompt_content = item["prompt_content"]
+            if item["template_code"] == "ticket_stat_classify_default":
+                prompt_content = TicketLightAiService.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT
             db.add(
                 SysAiPromptTemplate(
                     template_code=item["template_code"],
@@ -145,7 +157,7 @@ class AiPromptTemplateService:
                     template_category=item["template_category"],
                     provider_code=item.get("provider_code") or None,
                     model_name=item.get("model_name") or None,
-                    prompt_content=item["prompt_content"],
+                    prompt_content=prompt_content,
                     enabled=bool(item.get("enabled", True)),
                     sort=int(item.get("sort") or 0),
                     extra_config=cls._normalize_extra_config(item.get("extra_config")),
@@ -156,6 +168,12 @@ class AiPromptTemplateService:
                     remark=item.get("remark") or "",
                 )
             )
+        legacy_template = AiPromptTemplateDao.get_prompt_template_by_code(db, "ticket_category_classify_default")
+        if legacy_template:
+            legacy_template.del_flag = "2"
+            legacy_template.enabled = False
+            legacy_template.update_by = "system"
+            legacy_template.update_time = now
         db.flush()
 
     @classmethod

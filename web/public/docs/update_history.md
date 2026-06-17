@@ -1,5 +1,11 @@
 ## 2026-06-17
 
+1. 统一工单分类 AI 配置职责：Provider 和提示词正文统一在系统管理的 AI Provider / AI 提示词中维护，工单同步配置页只选择 Provider 编码、提示词编码和场景开关。
+2. 清理旧默认模板 `ticket_category_classify_default`，分类统计默认值统一使用 `ticket_stat_classify_default`；历史 `aiClassification.promptContent` 不再作为新编辑入口，但保存配置时会保留并作为旧环境兜底，避免现有业务因配置保存突变。
+3. 工单同步配置页按基础配置、拉取配置、推送配置、手动配置标识区块，批量重归类提示词改为模板下拉选择。
+4. 分类统计自动处理标题、描述、最近评论和当前字段，并回填 `category_name`、`issue_type_id/issue_type_name`、`module_name`、`severity`、`root_cause_type`、`solution_type`、`resolution_code/resolution_name`、`root_cause`、`solution`、`is_problem`。
+5. 新增说明文档：`web/public/docs/2026-06-17-ticket-classification-config-unification.md`。
+
 1. 工单同步配置页“统计未归类工单”明确为只统计不自动归类；执行归类仍使用“按当前配置重归类”或“强制重归类全部”。
 2. 自动归类链路补充详细服务日志：入口参数、筛选结果、逐条处理、跳过原因、AI 配置、模型执行、字段回填和汇总结果均可从日志排查。
 3. 新增说明文档：`web/public/docs/2026-06-17-ticket-auto-category-debug-logs.md`。

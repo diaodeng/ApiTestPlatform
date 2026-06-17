@@ -13,7 +13,9 @@
 - 内网系统调用 `/ticket/sync/pending` 拉取外网工单
 - 拉取后回写 `/ticket/sync/ack` 的交付状态
 
-手动新增/编辑工单的“创建后拉日志”不在这里配置，走工单新增页；手动新增工单的轻量翻译与自动分类走 AI 配置中心（`ticket.ai.translate.*` / `ticket.ai.category.classify.*`）。
+手动新增/编辑工单的“创建后拉日志”不在这里配置，走工单新增页；轻量翻译 Provider/提示词走 AI 配置中心（`ticket.ai.translate.*`）。
+工单分类统计的 Provider 和提示词正文统一在 AI Provider 管理、AI 提示词管理中维护；同步配置页只选择 Provider 编码、提示词编码和执行场景开关。
+旧 `ticket_category_classify_default` 已清理，默认只保留 `ticket_stat_classify_default`。
 工单新增/编辑页现在额外提供“手动自动翻译”开关，最终值会写到 `extraData.manualAutomation.autoTranslate`。
 
 ## 配置项
@@ -88,18 +90,27 @@
 - `promptTemplates.classificationHint`
   - 后续扩展 AI 识别时复用的分类提示词。
 
-### 5.5 工单自动分类（AI 配置中心）
+### 5.5 工单分类 AI 统一配置
 
 - `ticket.ai.category.classify.enabled`
-  - 工单自动分类总开关。
+  - 旧分类字段 `category_name` 的轻量自动分类总开关。
 - `ticket.ai.category.classify.provider.code`
-  - 工单自动分类使用的 Provider。
+  - 默认 Provider 编码；当 `aiClassification.providerCode` 为空时作为兜底。
 - `ticket.ai.category.classify.prompt.code`
-  - 工单自动分类使用的提示词。
-- 生效范围
-  - 外部系统直推、内网拉取入库后都可触发自动分类；
-  - 已有分类的工单默认不重复分类；
-  - 可通过接口批量重跑历史工单分类。
+  - 默认提示词编码；当 `aiClassification.promptCode` 为空时作为兜底，历史旧值会自动映射到 `ticket_stat_classify_default`。
+- `ticket.sync.automation.aiClassification`
+  - 控制分类统计是否启用，以及外部同步、远端拉取、手动创建场景是否执行。
+  - 只保存 Provider 编码和提示词编码选择；提示词正文统一在 AI 提示词管理维护。
+  - 历史 `promptContent` 会保留作为旧配置兜底，但不再作为新编辑入口。
+- `ticket.sync.automation.statClassification`
+  - 维护工单类型、根因分类、解决方式、关闭结果枚举；它是业务枚举配置，不属于 AI Provider/Prompt 底座配置。
+
+### 5.6 分类统计回填
+
+- 自动处理数据：标题、描述、最近评论、当前字段和统计枚举。
+- 自动触发场景：外部同步入库、远端拉取入库、手动创建工单、批量重归类。
+- 回填字段：`category_name`、`issue_type_id`、`issue_type_name`、`module_name`、`severity`、`root_cause_type`、`solution_type`、`resolution_code`、`resolution_name`、`root_cause`、`solution`、`is_problem`。
+- 执行摘要写入 `extra_data.ai_classification`，保留来源 hash、Provider、Prompt、置信度和模型原始结果。
 
 ### 6. 工单通知配置
 
@@ -155,7 +166,7 @@
   - 该接口只统计，不执行自动归类；需要处理未归类工单时调用批量重归类接口。
 - 批量重归类：`POST /ticket/sync/auto-category/reclassify`
   - `strategy`：`ai` / `regex`
-  - `aiPromptCode`：AI 归类提示词编码（可选，空则走系统默认）
+  - `aiPromptCode`：AI 归类提示词编码（可选，空则走当前分类统计配置）
   - `regexRules`：正则规则数组（元素含 `pattern/category/flags`）
   - `onlyUncategorized`：仅处理未归类
   - `allTickets`：全量扫描（否则按分页）

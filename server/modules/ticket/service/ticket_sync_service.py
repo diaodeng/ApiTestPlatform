@@ -1494,7 +1494,7 @@ class TicketSyncService:
             "runOnManualCreate": False,
             "providerCode": "",
             "promptCode": "ticket_stat_classify_default",
-            "promptContent": TicketLightAiService.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT,
+            "promptContent": "",
         }
 
     @classmethod
@@ -1583,12 +1583,7 @@ class TicketSyncService:
                 or defaults["promptCode"]
                 or ""
             ).strip(),
-            "promptContent": str(
-                source.get("promptContent")
-                or source.get("prompt_content")
-                or defaults["promptContent"]
-                or ""
-            ).strip(),
+            "promptContent": str(source.get("promptContent") or source.get("prompt_content") or "").strip(),
         }
 
     @classmethod
@@ -1857,7 +1852,9 @@ class TicketSyncService:
         current_user_name: str,
     ) -> CrudResponseModel:
         try:
+            current_config = cls._load_sync_config(db)
             merged = cls._normalize_sync_config(config_value)
+            merged = cls._merge_legacy_ai_classification_prompt_content(current_config, merged)
             now = datetime.now()
             row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
             if row:
@@ -3687,23 +3684,37 @@ class TicketSyncService:
                     "categoryName": existing_category,
                     "meta": category_meta,
                 }
+            config = cls._load_sync_config(db)
+            ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
+            stat_options = config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
+            legacy_prompt_content = cls._resolve_legacy_ai_classification_prompt_content(
+                ai_config,
+                prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
+            )
             logger.info(
-                f"工单自动分类调用轻量AI: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"工单AI分类统计调用轻量AI: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
                 f"source_type={source_type}, source_ref={source_ref}, strategy={normalized_strategy}, "
                 f"provider_code={category_meta.get('provider_code') or '-'}, "
                 f"prompt_code={category_meta.get('prompt_code') or '-'}"
             )
-            category_name, category_meta = TicketLightAiService.classify_ticket_category(
+            result_payload, category_meta = TicketLightAiService.classify_ticket_statistics(
                 db,
                 title=title,
                 description=description,
-                override_prompt_code=ai_prompt_code,
+                comments=cls._build_ticket_comment_context(db, ticket_id=ticket.ticket_id),
+                current_fields=cls._build_ticket_stat_current_fields(ticket),
+                stat_options=stat_options,
+                override_provider_code=str(ai_config.get("providerCode") or "").strip() or None,
+                override_prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
+                override_prompt_content=legacy_prompt_content,
                 source_type=source_type,
                 source_id=ticket.ticket_id,
                 source_ref=source_ref,
                 current_user_name=current_user_name,
             )
-            normalized_category = str(category_name or "").strip()
+            normalized_category = str(
+                result_payload.get("categoryName") or result_payload.get("issueTypeName") or ""
+            ).strip()
         if not normalized_category:
             logger.info(
                 f"工单自动分类未返回结果: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
@@ -3757,6 +3768,38 @@ class TicketSyncService:
         except Exception:
             db.rollback()
             raise
+
+    @classmethod
+    def _merge_legacy_ai_classification_prompt_content(
+        cls,
+        current_config: dict[str, Any],
+        next_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        保存同步配置时保留旧版内联 AI 分类提示词正文。
+
+        新版页面只保存 Provider/Prompt 编码，但旧环境可能依赖 `aiClassification.promptContent`
+        作为默认模板为空时的兜底。当前端提交空正文时保留旧值，避免保存其他配置导致分类 AI 行为突变。
+        :param current_config: 当前已生效配置。
+        :param next_config: 本次待保存配置。
+        :return: 合并后的配置。
+        """
+        current_ai_config = (
+            current_config.get("aiClassification")
+            if isinstance(current_config.get("aiClassification"), dict)
+            else {}
+        )
+        next_ai_config = (
+            next_config.get("aiClassification")
+            if isinstance(next_config.get("aiClassification"), dict)
+            else {}
+        )
+        legacy_prompt_content = str(current_ai_config.get("promptContent") or "").strip()
+        next_prompt_content = str(next_ai_config.get("promptContent") or "").strip()
+        if legacy_prompt_content and not next_prompt_content:
+            next_ai_config["promptContent"] = legacy_prompt_content
+            next_config["aiClassification"] = next_ai_config
+        return next_config
 
     @classmethod
     def _run_auto_ticket_ai_classification(
@@ -3834,6 +3877,10 @@ class TicketSyncService:
             f"prompt_code={ai_prompt_code or str(ai_config.get('promptCode') or '').strip() or '-'}, "
             f"has_prompt_content={bool(str(ai_config.get('promptContent') or '').strip())}"
         )
+        legacy_prompt_content = cls._resolve_legacy_ai_classification_prompt_content(
+            ai_config,
+            prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
+        )
         result_payload, meta = TicketLightAiService.classify_ticket_statistics(
             db,
             title=title_text,
@@ -3843,7 +3890,7 @@ class TicketSyncService:
             stat_options=stat_options,
             override_provider_code=str(ai_config.get("providerCode") or "").strip() or None,
             override_prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
-            override_prompt_content=str(ai_config.get("promptContent") or "").strip() or None,
+            override_prompt_content=legacy_prompt_content,
             source_type=source_type,
             source_id=ticket.ticket_id,
             source_ref=source_ref,
@@ -3929,6 +3976,30 @@ class TicketSyncService:
             "resolutionName": result_payload.get("resolutionName"),
             "meta": meta,
         }
+
+    @classmethod
+    def _resolve_legacy_ai_classification_prompt_content(
+        cls,
+        ai_config: dict[str, Any],
+        *,
+        prompt_code: str | None,
+    ) -> str | None:
+        """
+        解析旧版同步配置内联提示词正文，仅作为历史兼容兜底。
+
+        新版配置统一在 AI 提示词模板中维护正文，同步配置只保存模板编码。为避免旧环境中
+        `ticket_stat_classify_default` 模板为空导致现有业务异常，历史 `promptContent` 仍在模板缺失或为空时可参与兜底。
+        :param ai_config: 同步配置中的 AI 分类配置。
+        :param prompt_code: 本次选择的提示词编码。
+        :return: 需要覆盖的提示词正文；不需要覆盖时返回 None。
+        """
+        legacy_content = str((ai_config or {}).get("promptContent") or "").strip()
+        if not legacy_content:
+            return None
+        normalized_prompt_code = str(prompt_code or "").strip()
+        if normalized_prompt_code and normalized_prompt_code != "ticket_stat_classify_default":
+            return None
+        return legacy_content
 
     @classmethod
     def _build_ticket_stat_current_fields(cls, ticket: Ticket) -> dict[str, Any]:

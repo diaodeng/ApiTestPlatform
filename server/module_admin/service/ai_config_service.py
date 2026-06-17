@@ -89,8 +89,8 @@ class AiConfigService:
             "field_name": "category_classify_prompt_code",
             "config_key": "ticket.ai.category.classify.prompt.code",
             "config_name": "工单自动分类提示词编码",
-            "default_value": "ticket_category_classify_default",
-            "remark": "工单自动分类时使用的提示词模板编码",
+            "default_value": "ticket_stat_classify_default",
+            "remark": "工单分类统计时使用的提示词模板编码",
             "section": "light_translate",
         },
         {
@@ -275,6 +275,18 @@ class AiConfigService:
         return str(default_value)
 
     @classmethod
+    def _normalize_classify_prompt_code(cls, prompt_code: str | None) -> str:
+        """
+        归一化工单分类提示词编码。
+        :param prompt_code: 系统参数或前端提交的提示词编码。
+        :return: 可用的分类统计提示词编码。
+        """
+        normalized = str(prompt_code or "").strip()
+        if not normalized or normalized == "ticket_category_classify_default":
+            return "ticket_stat_classify_default"
+        return normalized
+
+    @classmethod
     def _upsert_config(cls, db: Session, *, config_key: str, config_name: str, config_value: Any, remark: str, current_user_name: str):
         """
         新增或更新系统参数。
@@ -361,8 +373,10 @@ class AiConfigService:
             category_classify_enabled=str(cls._get_config_text(db, "ticket.ai.category.classify.enabled", "false")).lower()
             == "true",
             category_classify_provider_code=cls._get_config_text(db, "ticket.ai.category.classify.provider.code", ""),
-            category_classify_prompt_code=cls._get_config_text_with_blank_default(
-                db, "ticket.ai.category.classify.prompt.code", "ticket_category_classify_default"
+            category_classify_prompt_code=cls._normalize_classify_prompt_code(
+                cls._get_config_text_with_blank_default(
+                    db, "ticket.ai.category.classify.prompt.code", "ticket_stat_classify_default"
+                )
             ),
             log_extract_enabled=str(cls._get_config_text(db, "ticket.ai.log_extract.enabled", "false")).lower() == "true",
             log_extract_provider_code=cls._get_config_text(db, "ticket.ai.log_extract.provider.code", ""),
@@ -423,6 +437,8 @@ class AiConfigService:
                 if field_name not in field_to_config:
                     continue
                 config_def = field_to_config[field_name]
+                if field_name == "category_classify_prompt_code":
+                    value = cls._normalize_classify_prompt_code(value)
                 cls._upsert_config(
                     query_db,
                     config_key=config_def["config_key"],
