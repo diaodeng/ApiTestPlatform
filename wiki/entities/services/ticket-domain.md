@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-06-16
+freshness: 2026-06-18
 created: 2026-05-20
-updated: 2026-06-17
+updated: 2026-06-18
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
@@ -103,6 +103,8 @@ graph TD
 - 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。
 - 工单详情弹窗顶部基础信息表格不再直接承载“描述”，描述改为表格下方独立整行并自动展示全部内容；顶部表格灰色标签列禁止换行，避免长描述或标签换行撑高基础信息行。
 - 工单描述翻译继续复用轻量 AI 翻译配置 `ticket.ai.translate.provider.code` 和 `ticket.ai.translate.prompt.code`：详情页优先用 `extra_data.origin_description` 展示原文，用 `extra_data.ai_translation` 在描述下方单独展示译文；手动翻译入口会在缺少翻译总开关、Provider 或提示词时直接提示，不写入空译文。
+- 工单详情页描述与翻译支持独立展开/收起，默认展开描述、收起翻译，收起时保留一行内容预览；评论已从历史页二级 tab 提升为详情页一级 tab，并通过 `GET /ticket/{ticket_id}/comments` 在点击评论时按需加载。
+- 前端时间线接口调用 `TicketDao.get_timeline(..., include_comments=False)`，不再为历史页捎带评论；DAO 默认仍保留评论，供 AI 分析和知识提炼内部上下文复用。
 - 工单详情页新增“刷新AI数据”按钮，方便在 AI 任务完成后手动刷新当前详情与任务历史，不再依赖退出重进页面。
 - 工单新增/编辑接口保持同步返回业务结果，但保存服务调用已放入 `run_in_threadpool`，并在线程内使用独立数据库会话执行轻量 AI 翻译、自动分类、日志拉取任务创建等同步逻辑，避免保存慢时占用 FastAPI 事件循环。
 - 工单新增/编辑弹窗保存期间会锁定“确定”和“取消”按钮，接口响应前不能重复点击提交。

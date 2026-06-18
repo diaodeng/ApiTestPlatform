@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-18] INGEST-CODE | 工单列表处理状态与评论按需加载
+- 触发：用户要求工单列表“日志拉取”列改为“处理状态”并补充日志拉取中状态，详情页描述/翻译可收起，评论从历史页移到同级且点击后再异步请求。
+- 架构层：工单域 / Web 控制台 / 评论接口 / 日志拉取状态筛选
+- 创建的页面：`web/public/docs/2026-06-18-ticket-list-process-status-and-comments-lazy.md`
+- 更新的页面：`server/modules/ticket/controller/ticket_controller.py`、`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/dao/ticket_dao.py`、`web/src/api/ticket/ticket.js`、`web/src/views/ticket/constants.js`、`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`entities/enums/ticket-enums.md`、`flows/ticket-automation-flow.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketDao.list_comments` -> `GET /ticket/{ticket_id}/comments` -> 工单详情评论 tab 按需加载；`ticketProcessStatusOptions` -> `_build_ticket_process_status_filter` -> 工单列表处理状态筛选
+- 总共涉及页面：10
+
 ## [2026-06-17] INGEST-CODE | 按人催办定时任务支持飞书参数覆盖
 - 触发：用户要求按人催办通知的飞书筛选条件、人员字段名、时间字段名、视图、tableId、appToken 可在定时任务中配置；任务未配置时回退原参数配置。
 - 架构层：工单域 / 飞书通知 / 任务调度

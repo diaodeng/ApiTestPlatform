@@ -1881,6 +1881,25 @@ async def add_ticket_comment(
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketController.get(
+    "/{ticket_id:int}/comments", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:timeline"))]
+)
+async def list_ticket_comments(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
+    """
+    查询工单评论列表接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param query_db: 数据库会话
+    :return: 工单评论列表
+    """
+    try:
+        result = await run_in_threadpool(TicketService.list_comment_services, query_db, ticket_id)
+        return ResponseUtil.success(data=result) if result is not None else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketController.post("/{ticket_id:int}/events", dependencies=[Depends(CheckUserInterfaceAuth("ticket:event:add"))])
 async def add_ticket_event(
     request: Request,
@@ -1915,7 +1934,7 @@ async def get_ticket_timeline(request: Request, ticket_id: int, query_db: Sessio
     :param request: 请求对象
     :param ticket_id: 工单ID
     :param query_db: 数据库会话
-    :return: 状态历史、指派历史、评论、事件和 RCA
+    :return: 状态历史、指派历史、事件和 RCA
     """
     try:
         result = TicketService.get_timeline_services(query_db, ticket_id)

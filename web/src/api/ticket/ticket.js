@@ -246,6 +246,14 @@ export function addTicketComment(ticketId, data) {
   });
 }
 
+// 查询工单评论列表
+export function getTicketComments(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/comments`,
+    method: 'get',
+  });
+}
+
 // 查询工单协同消息
 export function getTicketMessages(ticketId) {
   return request({

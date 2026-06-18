@@ -132,13 +132,13 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="日志拉取" min-width="150" align="center">
+      <el-table-column label="处理状态" min-width="160" align="center">
         <template #default="scope">
           <el-tag
-            v-if="scope.row.latestLogPull?.status"
-            :type="getLogPullStatusTagType(scope.row.latestLogPull.status)"
+            v-if="resolveTicketProcessStatus(scope.row).label"
+            :type="resolveTicketProcessStatus(scope.row).type"
           >
-            {{ scope.row.latestLogPull.statusDesc || getOptionLabel(logPullStatusOptions, scope.row.latestLogPull.status) }}
+            {{ resolveTicketProcessStatus(scope.row).label }}
           </el-tag>
           <span v-else>-</span>
         </template>
@@ -598,21 +598,39 @@
         <div class="ticket-detail-description">
           <div class="ticket-detail-description__label">
             <span>描述</span>
-            <el-button
-              link
-              type="primary"
-              :loading="descriptionTranslateLoading"
-              @click="handleTranslateDescription"
-              v-hasPermi="['ticket:ticket:edit']"
-            >
-              翻译
-            </el-button>
+            <div class="ticket-detail-description__actions">
+              <el-button
+                link
+                type="primary"
+                :loading="descriptionTranslateLoading"
+                @click="handleTranslateDescription"
+                v-hasPermi="['ticket:ticket:edit']"
+              >
+                翻译
+              </el-button>
+              <el-button link type="primary" @click="descriptionExpanded = !descriptionExpanded">
+                {{ descriptionExpanded ? '收起' : '展开' }}
+              </el-button>
+            </div>
           </div>
-          <div class="ticket-detail-description__content">{{ detailOriginalDescription || '-' }}</div>
+          <div
+            :class="['ticket-detail-description__content', { 'ticket-detail-description__content--collapsed': !descriptionExpanded }]"
+          >
+            {{ detailOriginalDescription || '-' }}
+          </div>
         </div>
         <div v-if="detailAiTranslation" class="ticket-detail-description ticket-detail-translation">
-          <div class="ticket-detail-description__label">翻译</div>
-          <div class="ticket-detail-description__content">{{ detailAiTranslation }}</div>
+          <div class="ticket-detail-description__label">
+            <span>翻译</span>
+            <el-button link type="primary" @click="translationExpanded = !translationExpanded">
+              {{ translationExpanded ? '收起' : '展开' }}
+            </el-button>
+          </div>
+          <div
+            :class="['ticket-detail-description__content', { 'ticket-detail-description__content--collapsed': !translationExpanded }]"
+          >
+            {{ detailAiTranslation }}
+          </div>
         </div>
 
         <el-tabs v-model="detailMainTab" class="detail-main-tabs" @tab-click="handleDetailTabClick">
@@ -995,6 +1013,31 @@
             </el-row>
           </el-tab-pane>
 
+          <el-tab-pane label="评论" name="comments" lazy>
+            <el-form :model="commentForm" label-width="80px" class="mb16">
+              <el-form-item label="评论">
+                <el-input v-model="commentForm.content" type="textarea" :rows="3" placeholder="请输入沟通评论" />
+              </el-form-item>
+              <el-form-item>
+                <el-checkbox v-model="commentForm.isInternal">内部评论</el-checkbox>
+                <el-button type="primary" class="ml12" @click="submitComment" v-hasPermi="['ticket:comment:add']">
+                  提交评论
+                </el-button>
+              </el-form-item>
+            </el-form>
+            <div v-loading="commentLoading">
+              <el-empty v-if="!commentList.length" description="暂无评论" />
+              <el-card v-for="item in commentList" :key="item.id" shadow="never" class="mb8">
+                <div class="record-head">
+                  <span>{{ item.userName || '-' }}</span>
+                  <el-tag v-if="item.isInternal" size="small" type="warning">内部</el-tag>
+                  <span>{{ parseTime(item.createTime) }}</span>
+                </div>
+                <div>{{ item.content }}</div>
+              </el-card>
+            </div>
+          </el-tab-pane>
+
           <el-tab-pane label="历史" name="history" lazy>
             <el-tabs v-model="historyActiveTab" class="history-entry-tabs" @tab-click="handleHistoryTabClick">
               <el-tab-pane label="时间线" name="timeline" lazy>
@@ -1011,28 +1054,6 @@
                     </el-card>
                   </el-timeline-item>
                 </el-timeline>
-              </el-tab-pane>
-              <el-tab-pane label="评论" name="comments" lazy>
-                <el-form :model="commentForm" label-width="80px" class="mb16">
-                  <el-form-item label="评论">
-                    <el-input v-model="commentForm.content" type="textarea" :rows="3" placeholder="请输入沟通评论" />
-                  </el-form-item>
-                  <el-form-item>
-                    <el-checkbox v-model="commentForm.isInternal">内部评论</el-checkbox>
-                    <el-button type="primary" class="ml12" @click="submitComment" v-hasPermi="['ticket:comment:add']">
-                      提交评论
-                    </el-button>
-                  </el-form-item>
-                </el-form>
-                <el-empty v-if="!timeline.comments?.length" description="暂无评论" />
-                <el-card v-for="item in timeline.comments" :key="item.id" shadow="never" class="mb8">
-                  <div class="record-head">
-                    <span>{{ item.userName || '-' }}</span>
-                    <el-tag v-if="item.isInternal" size="small" type="warning">内部</el-tag>
-                    <span>{{ parseTime(item.createTime) }}</span>
-                  </div>
-                  <div>{{ item.content }}</div>
-                </el-card>
               </el-tab-pane>
               <el-tab-pane label="排查事件" name="events" lazy>
                 <el-form :model="eventForm" label-width="90px" class="mb16">
@@ -1825,6 +1846,7 @@ import {
   downloadTicketImportTemplate,
   extractTicketKnowledge,
   getTicket,
+  getTicketComments,
   getTicketStatClassificationOptions,
   getTicketWorkflow,
   listTicketLogPullProjectVendorMapOptions,
@@ -1908,6 +1930,8 @@ const importOpen = ref(false)
 const importing = ref(false)
 const detailOpen = ref(false)
 const detailMainTab = ref('overview')
+const descriptionExpanded = ref(true)
+const translationExpanded = ref(false)
 const descriptionTranslateLoading = ref(false)
 const historyActiveTab = ref('timeline')
 const title = ref('')
@@ -1921,6 +1945,9 @@ const internalOwnerOption = ref(null)
 const formModuleValue = ref('')
 const detail = ref({})
 const timeline = ref({})
+const commentList = ref([])
+const commentLoading = ref(false)
+const commentLoaded = ref(false)
 const ticketMessages = ref([])
 const ticketSnapshots = ref([])
 const similarTickets = ref([])
@@ -2515,6 +2542,37 @@ function formatResolution(row) {
   }
   const resolutionCode = row?.resolutionCode || row?.resolution_code || ''
   return resolutionCode ? getStatOptionLabel(resolutionOptions.value, resolutionCode) : '-'
+}
+
+function resolveTicketProcessStatus(row) {
+  const latestAi = row?.latestAiAnalysis || row?.latest_ai_analysis || null
+  const latestLog = row?.latestLogPull || row?.latest_log_pull || null
+  const aiStatus = String(latestAi?.status || '').trim()
+  if (aiStatus) {
+    if (['created', 'running'].includes(aiStatus)) {
+      return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_running'), type: 'warning' }
+    }
+    if (aiStatus === 'success') {
+      return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_success'), type: 'success' }
+    }
+    if (['failed', 'canceled'].includes(aiStatus)) {
+      return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_failed'), type: 'danger' }
+    }
+  }
+  const logStatus = String(latestLog?.status || '').trim()
+  if (!logStatus) {
+    return { label: getOptionLabel(ticketProcessStatusOptions, 'no_log_pull'), type: 'info' }
+  }
+  if (logStatus === 'success') {
+    return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_not_analyzed'), type: 'primary' }
+  }
+  if (['failed', 'exception'].includes(logStatus)) {
+    return { label: getOptionLabel(ticketProcessStatusOptions, 'log_pull_failed'), type: 'danger' }
+  }
+  return {
+    label: latestLog?.statusDesc || getOptionLabel(logPullStatusOptions, logStatus),
+    type: getLogPullStatusTagType(logStatus)
+  }
 }
 
 function normalizeWorkflowStatusOptions(statuses = []) {
@@ -3487,11 +3545,15 @@ function openDetail(row) {
   detailOpen.value = true
   detailMainTab.value = 'overview'
   historyActiveTab.value = 'timeline'
+  descriptionExpanded.value = true
+  translationExpanded.value = false
   logPullContentOpen.value = false
   logPullSubmitOpen.value = false
   aiTaskHistoryOpen.value = false
   aiTaskDetailOpen.value = false
   timeline.value = {}
+  commentList.value = []
+  commentLoaded.value = false
   ticketMessages.value = []
   ticketSnapshots.value = []
   similarTickets.value = []
@@ -3536,9 +3598,14 @@ function handleTranslateDescription() {
 function resetDetailDialog() {
   detailMainTab.value = 'overview'
   historyActiveTab.value = 'timeline'
+  descriptionExpanded.value = true
+  translationExpanded.value = false
   detail.value = {}
   detailVersionOptions.value = []
   timeline.value = {}
+  commentList.value = []
+  commentLoaded.value = false
+  commentLoading.value = false
   logPullContentOpen.value = false
   logPullSubmitOpen.value = false
   aiTaskHistoryOpen.value = false
@@ -3558,9 +3625,13 @@ function switchDetailSection(section) {
 function handleDetailTabClick(tab) {
   const tabName = tab?.props?.name || tab?.paneName || tab?.name
   if (tabName === 'history') {
-    if (!timeline.value?.statusHistory && !timeline.value?.comments && !timeline.value?.events) {
+    if (!timeline.value?.statusHistory && !timeline.value?.events) {
       refreshTimeline()
     }
+    return
+  }
+  if (tabName === 'comments') {
+    loadComments()
     return
   }
   if (tabName === 'logPull') {
@@ -3574,8 +3645,8 @@ function handleDetailTabClick(tab) {
 
 function handleHistoryTabClick(tab) {
   const tabName = tab?.props?.name || tab?.paneName || tab?.name
-  if (tabName === 'timeline' || tabName === 'comments' || tabName === 'events' || tabName === 'rca') {
-    if (!timeline.value?.statusHistory && !timeline.value?.comments && !timeline.value?.events) {
+  if (tabName === 'timeline' || tabName === 'events' || tabName === 'rca') {
+    if (!timeline.value?.statusHistory && !timeline.value?.events) {
       refreshTimeline()
     }
     return
@@ -3589,6 +3660,19 @@ function refreshTimeline() {
   })
 }
 
+function loadComments(force = false) {
+  if (!currentTicketId.value || commentLoading.value || (commentLoaded.value && !force)) {
+    return Promise.resolve()
+  }
+  commentLoading.value = true
+  return getTicketComments(currentTicketId.value).then(response => {
+    commentList.value = response.data || []
+    commentLoaded.value = true
+  }).finally(() => {
+    commentLoading.value = false
+  })
+}
+
 function submitComment() {
   if (!commentForm.value.content) {
     proxy.$modal.msgWarning('请填写评论内容')
@@ -3597,7 +3681,7 @@ function submitComment() {
   addTicketComment(currentTicketId.value, commentForm.value).then(() => {
     proxy.$modal.msgSuccess('评论成功')
     commentForm.value = { content: '', isInternal: false }
-    Promise.all([refreshTimeline(), refreshDetail()])
+    Promise.all([loadComments(true), refreshDetail()])
   })
 }
 
@@ -4212,7 +4296,7 @@ loadWorkflowConfig().finally(() => {
 
 .ticket-detail-description {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 112px minmax(0, 1fr);
   border: 1px solid var(--el-border-color-lighter);
   border-top: 0;
   font-size: 14px;
@@ -4232,12 +4316,30 @@ loadWorkflowConfig().finally(() => {
   white-space: nowrap;
 }
 
+.ticket-detail-description__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+.ticket-detail-description__actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
 .ticket-detail-description__content {
   min-width: 0;
   padding: 8px 11px;
   color: var(--el-text-color-primary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.ticket-detail-description__content--collapsed {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .collab-toolbar {

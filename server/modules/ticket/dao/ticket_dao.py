@@ -158,6 +158,16 @@ def _build_ticket_process_status_filter(latest_log_status, latest_ai_status, pro
     """
     if process_status == "no_log_pull":
         return latest_log_status.is_(None)
+    if process_status in {
+        "log_pull_created",
+        "log_pull_submitting",
+        "log_pull_polling",
+        "log_pull_downloading",
+        "log_pull_processing",
+    }:
+        return latest_log_status == process_status.replace("log_pull_", "", 1)
+    if process_status == "log_pull_running":
+        return latest_log_status.in_(["created", "submitting", "polling", "downloading", "processing"])
     if process_status == "log_pull_success":
         return latest_log_status == "success"
     if process_status == "log_pull_failed":
@@ -472,6 +482,21 @@ class TicketDao:
         return comment
 
     @classmethod
+    def list_comments(cls, db: Session, ticket_id: int) -> list[TicketComment]:
+        """
+        查询工单评论列表。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 按创建时间升序排列的评论列表
+        """
+        return (
+            db.query(TicketComment)
+            .filter(TicketComment.ticket_id == ticket_id)
+            .order_by(TicketComment.create_time.asc(), TicketComment.id.asc())
+            .all()
+        )
+
+    @classmethod
     def get_comment_by_source_segment_key(
         cls,
         db: Session,
@@ -650,14 +675,15 @@ class TicketDao:
         return event
 
     @classmethod
-    def get_timeline(cls, db: Session, ticket_id: int) -> dict:
+    def get_timeline(cls, db: Session, ticket_id: int, include_comments: bool = True) -> dict:
         """
         获取工单时间线相关数据。
         :param db: 数据库会话
         :param ticket_id: 工单ID
+        :param include_comments: 是否包含评论；前端历史页按需独立拉取评论时传 False
         :return: 状态历史、指派历史、评论、事件和 RCA
         """
-        return {
+        result = {
             "status_history": db.query(TicketStatusHistory)
             .filter(TicketStatusHistory.ticket_id == ticket_id)
             .order_by(TicketStatusHistory.started_at.asc())
@@ -665,10 +691,6 @@ class TicketDao:
             "assign_history": db.query(TicketAssignHistory)
             .filter(TicketAssignHistory.ticket_id == ticket_id)
             .order_by(TicketAssignHistory.assigned_at.asc())
-            .all(),
-            "comments": db.query(TicketComment)
-            .filter(TicketComment.ticket_id == ticket_id)
-            .order_by(TicketComment.create_time.asc())
             .all(),
             "events": db.query(TicketEvent)
             .filter(TicketEvent.ticket_id == ticket_id)
@@ -684,6 +706,9 @@ class TicketDao:
             .all(),
             "rca": db.query(TicketRca).filter(TicketRca.ticket_id == ticket_id).first(),
         }
+        if include_comments:
+            result["comments"] = cls.list_comments(db, ticket_id)
+        return result
 
     @classmethod
     def get_transition(cls, db: Session, from_status: str, to_status: str) -> WorkflowTransition | None:

@@ -890,15 +890,19 @@ class TicketSyncNotifyService:
         :param value: 原始过滤公式，支持普通公式文本或 JSON 字符串包裹的公式文本。
         :return: 可直接传给飞书 records 接口 filter 参数的公式文本。
         """
-        filter_formula = str(value or "").strip()
-        if not filter_formula:
+        if isinstance(value, str):
+            filter_formula = str(value or "").strip()
+            try:
+                parsed = json.loads(filter_formula)
+                return parsed
+            except Exception as e:
+                logger.warning(f"参数错误：{filter_formula}, 错误：{e}")
+                raise ValueError('过滤公式格式错误，请直接填写飞书公式') from e
+        if not value:
             return {}
-        try:
-            parsed = json.loads(filter_formula)
-            return parsed
-        except Exception as e:
-            logger.warning(f"参数错误：{filter_formula}, 错误：{e}")
-            raise ValueError('过滤公式格式错误，请直接填写飞书公式文本，例如：CurrentValue.[状态] != "已关闭"')
+        else:
+            return value
+
 
     @classmethod
     def query_bitable_records(cls, config: dict[str, Any]) -> list[dict[str, Any]]:

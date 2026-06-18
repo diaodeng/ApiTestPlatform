@@ -72,6 +72,12 @@ export const logPullStorageModeOptions = [
 
 export const ticketProcessStatusOptions = [
   { label: '未拉取', value: 'no_log_pull' },
+  { label: '日志待执行', value: 'log_pull_created' },
+  { label: '日志拉取中', value: 'log_pull_running' },
+  { label: '提交申请中', value: 'log_pull_submitting' },
+  { label: '轮询处理中', value: 'log_pull_polling' },
+  { label: '下载中', value: 'log_pull_downloading' },
+  { label: '解析中', value: 'log_pull_processing' },
   { label: '日志拉取成功', value: 'log_pull_success' },
   { label: '拉取失败', value: 'log_pull_failed' },
   { label: 'AI未分析', value: 'ai_not_analyzed' },

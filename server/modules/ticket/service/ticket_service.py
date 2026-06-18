@@ -1144,7 +1144,6 @@ class TicketService:
         result["snapshots"] = message_bundle.get("snapshots") or []
         result["latestSnapshot"] = message_bundle.get("latestSnapshot")
         result["similarTickets"] = message_bundle.get("similarTickets") or []
-        result["comments"] = CamelCaseUtil.transform_result(TicketDao.get_timeline(query_db, ticket_id).get("comments"))
         result["aiPromptLayers"] = TicketPromptService.resolve_prompt_layers(query_db, ticket)
         return result
 
@@ -1631,6 +1630,18 @@ class TicketService:
             raise
 
     @classmethod
+    def list_comment_services(cls, query_db: Session, ticket_id: int) -> list | None:
+        """
+        获取工单评论列表。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 评论列表；工单不存在时返回 None
+        """
+        if not TicketDao.get_ticket_by_id(query_db, ticket_id):
+            return None
+        return CamelCaseUtil.transform_result(TicketDao.list_comments(query_db, ticket_id))
+
+    @classmethod
     def upsert_synced_comment(
         cls,
         query_db: Session,
@@ -1845,7 +1856,7 @@ class TicketService:
         """
         if not TicketDao.get_ticket_by_id(query_db, ticket_id):
             return None
-        timeline = TicketDao.get_timeline(query_db, ticket_id)
+        timeline = TicketDao.get_timeline(query_db, ticket_id, include_comments=False)
         return {key: CamelCaseUtil.transform_result(value) for key, value in timeline.items()}
 
     @classmethod
