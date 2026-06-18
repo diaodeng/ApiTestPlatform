@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-18] INGEST-CODE | 工单 AI Agent 已登记 worktree 分支复用
+- 触发：用户反馈工单 AI 分析创建 `wemn_vender_master_1.3.8.41` 分支 worktree 时，目标目录不存在但 Git 提示该分支已被旧工作区路径占用。
+- 架构层：工单域 / client_new Agent / Git worktree
+- 创建的页面：`web/public/docs/2026-06-18-ticket-ai-worktree-registered-branch-reuse.md`
+- 更新的页面：`client_new/services/ticket_ai_analysis_service.py`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`_ensure_local_worktree_repo` / `_ensure_worktree_repo` -> `_find_registered_worktree_by_branch` -> 复用 Git 已登记且分支校验通过的 worktree
+- 总共涉及页面：4
+
 ## [2026-06-18] INGEST-CODE | 工单列表处理状态与评论按需加载
 - 触发：用户要求工单列表“日志拉取”列改为“处理状态”并补充日志拉取中状态，详情页描述/翻译可收起，评论从历史页移到同级且点击后再异步请求。
 - 架构层：工单域 / Web 控制台 / 评论接口 / 日志拉取状态筛选

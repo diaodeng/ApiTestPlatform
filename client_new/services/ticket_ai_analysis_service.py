@@ -343,6 +343,46 @@ class TicketAiAnalysisService:
         return current
 
     @classmethod
+    def _find_registered_worktree_by_branch(cls, repo_path: Path, expected_branch: str) -> Path | None:
+        """
+        从当前 Git 仓库已登记的 worktree 中查找指定分支目录。
+        :param repo_path: Git 仓库、bare 仓库或任意 worktree 目录。
+        :param expected_branch: 需要复用的分支名。
+        :return: 已登记且分支匹配的 worktree 路径，不存在时返回 None。
+        """
+        expected = cls._normalize_branch_name(expected_branch)
+        if not expected or not repo_path.exists():
+            return None
+
+        result = cls._run_git_command(["worktree", "list", "--porcelain"], cwd=repo_path, check=False)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            logger.warning(f"读取 Git worktree 列表失败，跳过已登记目录复用: repo_path={repo_path}, detail={detail}")
+            return None
+
+        current_path: Path | None = None
+        current_branch = ""
+        for raw_line in (result.stdout or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                if current_path and cls._normalize_branch_name(current_branch) == expected and current_path.exists():
+                    cls._ensure_repo_branch_matches(current_path, expected)
+                    return current_path
+                current_path = None
+                current_branch = ""
+                continue
+            if line.startswith("worktree "):
+                current_path = Path(line[len("worktree "):].strip())
+                current_branch = ""
+            elif line.startswith("branch "):
+                current_branch = line[len("branch "):].strip()
+
+        if current_path and cls._normalize_branch_name(current_branch) == expected and current_path.exists():
+            cls._ensure_repo_branch_matches(current_path, expected)
+            return current_path
+        return None
+
+    @classmethod
     def _repo_cache_dir(cls, workspace_root: Path, repo_url: str) -> Path:
         """
         根据远端仓库地址生成 bare 仓库缓存目录。
@@ -404,6 +444,14 @@ class TicketAiAnalysisService:
         if worktree_path.exists():
             cls._ensure_repo_branch_matches(worktree_path, expected_branch)
             return worktree_path
+
+        registered_worktree = cls._find_registered_worktree_by_branch(source_repo_path, expected_branch)
+        if registered_worktree:
+            logger.info(
+                f"复用 Git 已登记的本地派生 worktree: "
+                f"source_repo_path={source_repo_path}, branch={expected_branch}, path={registered_worktree}"
+            )
+            return registered_worktree
 
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info(
@@ -477,6 +525,14 @@ class TicketAiAnalysisService:
         else:
             logger.info(f"AI 分析 worktree 缺失，刷新 bare 仓库引用: cache_dir={cache_dir}, branch={expected_branch}")
             cls._run_git_command(["fetch", "origin", expected_branch], cwd=cache_dir, timeout_sec=600, check=False)
+
+        registered_worktree = cls._find_registered_worktree_by_branch(cache_dir, expected_branch)
+        if registered_worktree:
+            logger.info(
+                f"复用 Git 已登记的远端仓库 worktree: "
+                f"repo_url={repo_url}, branch={expected_branch}, path={registered_worktree}"
+            )
+            return registered_worktree
 
         local_branch_check = cls._run_git_command(
             ["show-ref", "--verify", f"refs/heads/{expected_branch}"],
