@@ -9,1581 +9,1624 @@
       </p>
     </section>
 
-    <el-card shadow="never" class="config-card">
-      <template #header>
-        <div class="card-header">
-          <span>外部同步基础开关</span>
-          <el-tag type="success" effect="plain">基础配置</el-tag>
-        </div>
-      </template>
-
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="同步后自动执行" prop="autoRunOnSync">
-              <el-switch
-                v-model="form.autoRunOnSync"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="同步后自动翻译" prop="autoTranslateOnSync">
-              <el-switch
-                v-model="form.autoTranslateOnSync"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="默认拉取数量" prop="defaultPullLimit">
-              <el-input-number
-                v-model="form.defaultPullLimit"
-                :min="1"
-                :max="200"
-                :step="1"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="远端来源系统" prop="remoteSync.sourceSystem">
-              <el-input
-                v-model="form.remoteSync.sourceSystem"
-                placeholder="例如 public / hrm / partner"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>AI 分类统计配置</span>
-          <el-tag type="warning" effect="plain">手动配置与场景开关</el-tag>
-        </div>
-      </template>
-
-      <el-form :model="form.aiClassification" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用AI分类">
-              <el-switch
-                v-model="form.aiClassification.enabled"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="外部同步执行">
-              <el-switch
-                v-model="form.aiClassification.runOnExternalSync"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="远端拉取执行">
-              <el-switch
-                v-model="form.aiClassification.runOnRemotePull"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="手动创建执行">
-              <el-switch
-                v-model="form.aiClassification.runOnManualCreate"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="Provider 编码">
-              <el-select
-                v-model="form.aiClassification.providerCode"
-                placeholder="请选择 Provider；留空则使用 AI 配置中心"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in providerOptions"
-                  :key="item.providerCode"
-                  :label="formatProviderOptionLabel(item)"
-                  :value="item.providerCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="提示词编码">
-              <el-select
-                v-model="form.aiClassification.promptCode"
-                placeholder="请选择提示词模板；留空使用默认模板"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in promptOptions"
-                  :key="item.templateCode || item.value"
-                  :label="formatPromptOptionLabel(item)"
-                  :value="item.templateCode || item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-      <el-alert
-        v-if="form.aiClassification.promptContent"
-        class="mt8"
-        type="warning"
-        show-icon
-        :closable="false"
-        title="检测到历史内联提示词"
-        description="系统会保留它作为旧配置兜底；新配置请到 AI 提示词管理中维护模板正文。保存本页不会继续写入新的提示词正文。"
-      />
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>统计枚举配置</span>
-          <el-tag effect="plain">基础配置</el-tag>
-        </div>
-      </template>
-
-      <div class="stat-config-grid">
-        <section class="stat-config-section">
-          <div class="stat-config-section__head">
-            <span>工单类型</span>
-            <el-button link type="primary" icon="Plus" @click="addStatOption('issueTypes')"
-              >新增</el-button
-            >
-          </div>
-          <el-table :data="form.statClassification.issueTypes" border size="small">
-            <el-table-column label="编码" min-width="160">
-              <template #default="scope">
-                <el-input v-model="scope.row.value" placeholder="如 system_bug" />
-              </template>
-            </el-table-column>
-            <el-table-column label="名称" min-width="180">
-              <template #default="scope">
-                <el-input v-model="scope.row.label" placeholder="如 系统Bug" />
-              </template>
-            </el-table-column>
-            <el-table-column label="是否问题" width="140">
-              <template #default="scope">
-                <el-select
-                  v-model="scope.row.isProblem"
-                  placeholder="可选"
-                  clearable
-                  style="width: 100%"
-                >
-                  <el-option label="真实问题" :value="true" />
-                  <el-option label="非问题" :value="false" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="80" align="center">
-              <template #default="scope">
-                <el-button
-                  link
-                  type="danger"
-                  icon="Delete"
-                  @click="removeStatOption('issueTypes', scope.$index)"
-                />
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
-
-        <section class="stat-config-section">
-          <div class="stat-config-section__head">
-            <span>根因分类</span>
-            <el-button link type="primary" icon="Plus" @click="addStatOption('rootCauseTypes')"
-              >新增</el-button
-            >
-          </div>
-          <el-table :data="form.statClassification.rootCauseTypes" border size="small">
-            <el-table-column label="编码" min-width="160">
-              <template #default="scope">
-                <el-input v-model="scope.row.value" placeholder="如 code_defect" />
-              </template>
-            </el-table-column>
-            <el-table-column label="名称" min-width="180">
-              <template #default="scope">
-                <el-input v-model="scope.row.label" placeholder="如 代码缺陷" />
-              </template>
-            </el-table-column>
-            <el-table-column label="备注" min-width="180">
-              <template #default="scope">
-                <el-input v-model="scope.row.remark" placeholder="可选备注" />
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="80" align="center">
-              <template #default="scope">
-                <el-button
-                  link
-                  type="danger"
-                  icon="Delete"
-                  @click="removeStatOption('rootCauseTypes', scope.$index)"
-                />
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
-
-        <section class="stat-config-section">
-          <div class="stat-config-section__head">
-            <span>解决方式</span>
-            <el-button link type="primary" icon="Plus" @click="addStatOption('solutionTypes')"
-              >新增</el-button
-            >
-          </div>
-          <el-table :data="form.statClassification.solutionTypes" border size="small">
-            <el-table-column label="编码" min-width="160">
-              <template #default="scope">
-                <el-input v-model="scope.row.value" placeholder="如 code_fix" />
-              </template>
-            </el-table-column>
-            <el-table-column label="名称" min-width="180">
-              <template #default="scope">
-                <el-input v-model="scope.row.label" placeholder="如 代码修复" />
-              </template>
-            </el-table-column>
-            <el-table-column label="备注" min-width="180">
-              <template #default="scope">
-                <el-input v-model="scope.row.remark" placeholder="可选备注" />
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="80" align="center">
-              <template #default="scope">
-                <el-button
-                  link
-                  type="danger"
-                  icon="Delete"
-                  @click="removeStatOption('solutionTypes', scope.$index)"
-                />
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
-
-        <section class="stat-config-section">
-          <div class="stat-config-section__head">
-            <span>关闭结果</span>
-            <el-button link type="primary" icon="Plus" @click="addStatOption('resolutions')"
-              >新增</el-button
-            >
-          </div>
-          <el-table :data="form.statClassification.resolutions" border size="small">
-            <el-table-column label="编码" min-width="160">
-              <template #default="scope">
-                <el-input v-model="scope.row.value" placeholder="如 fixed" />
-              </template>
-            </el-table-column>
-            <el-table-column label="名称" min-width="180">
-              <template #default="scope">
-                <el-input v-model="scope.row.label" placeholder="如 已修复" />
-              </template>
-            </el-table-column>
-            <el-table-column label="是否问题" width="140">
-              <template #default="scope">
-                <el-select
-                  v-model="scope.row.isProblem"
-                  placeholder="可选"
-                  clearable
-                  style="width: 100%"
-                >
-                  <el-option label="真实问题" :value="true" />
-                  <el-option label="非问题" :value="false" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="80" align="center">
-              <template #default="scope">
-                <el-button
-                  link
-                  type="danger"
-                  icon="Delete"
-                  @click="removeStatOption('resolutions', scope.$index)"
-                />
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
-      </div>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>外部推送多维表格邮箱补全</span>
-          <el-tag type="warning" effect="plain">推送配置</el-tag>
-        </div>
-      </template>
-
-      <el-form :model="form.externalSyncBitable" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用邮箱补全">
-              <el-switch
-                v-model="form.externalSyncBitable.enabled"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="多维 appToken">
-              <el-input
-                v-model="form.externalSyncBitable.appToken"
-                placeholder="飞书多维表格应用 Token"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="多维 tableId">
-              <el-input v-model="form.externalSyncBitable.tableId" placeholder="飞书多维表格表ID" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="多维 viewId">
-              <el-input
-                v-model="form.externalSyncBitable.viewId"
-                placeholder="可选，不填默认表视图"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appId">
-              <el-input
-                v-model="form.externalSyncBitable.appId"
-                placeholder="覆盖统一凭证（可选）"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appSecret">
-              <el-input
-                v-model="form.externalSyncBitable.appSecret"
-                show-password
-                placeholder="覆盖统一凭证（可选）"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <div class="mapping-desc">
-              外部推送传入的 <code>recordId</code> 会作为飞书多维表格记录ID查询固定字段：
-              <code>(IT) L1 PIC</code>、<code>1.5 当前负责人</code>、<code>当前负责人</code>。
-            </div>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>远端同步链接</span>
-          <el-tag type="warning" effect="plain">拉取配置</el-tag>
-        </div>
-      </template>
-
-      <el-form
-        ref="remoteFormRef"
-        :model="form.remoteSync"
-        :rules="remoteRules"
-        label-width="150px"
-      >
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用远端同步" prop="enabled">
-              <el-switch
-                v-model="form.remoteSync.enabled"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="抓取超时(秒)" prop="timeoutSec">
-              <el-input-number
-                v-model="form.remoteSync.timeoutSec"
-                :min="10"
-                :max="300"
-                :step="5"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="拉取地址" prop="pullUrl">
-              <el-input
-                v-model="form.remoteSync.pullUrl"
-                placeholder="https://example.com/api/tickets/pending"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="回写地址" prop="ackUrl">
-              <el-input
-                v-model="form.remoteSync.ackUrl"
-                placeholder="https://example.com/api/tickets/ack"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="消费者标识" prop="consumer">
-              <el-input v-model="form.remoteSync.consumer" placeholder="例如 public-ticket-sync" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="每次拉取数量" prop="limit">
-              <el-input-number
-                v-model="form.remoteSync.limit"
-                :min="1"
-                :max="200"
-                :step="1"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="包含已关闭" prop="includeClosed">
-              <el-switch
-                v-model="form.remoteSync.includeClosed"
-                inline-prompt
-                active-text="是"
-                inactive-text="否"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="拉取后自动翻译" prop="autoTranslateOnPull">
-              <el-switch
-                v-model="form.remoteSync.autoTranslateOnPull"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>外部同步必填字段</span>
-          <el-tag type="info" effect="plain">支持选择已有字段，也支持直接输入自定义字段名</el-tag>
-        </div>
-      </template>
-
-      <el-form :model="form" label-width="150px">
-        <el-form-item label="支持字段说明">
-          <div class="mapping-desc">
-            目前支持的字段：{{
-              externalSyncRequiredFieldOptions.map((item) => item.value).join('、')
-            }}。可直接下拉选择，也可手动输入新增字段名。
-          </div>
-        </el-form-item>
-        <el-form-item label="必填字段列表">
-          <el-select
-            v-model="form.externalSyncRequiredFields"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            collapse-tags
-            placeholder="ticketNo, description, internalPriority, ticketVender, ticketModle, createTime, reporterName"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="item in externalSyncRequiredFieldOptions"
-              :key="`external-required-${item.value}`"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>工单汇总统计通知</span>
-          <el-tag type="success" effect="plain">推送配置</el-tag>
-        </div>
-      </template>
-
-      <el-form :model="form.summaryReport" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用汇总通知">
-              <el-switch
-                v-model="form.summaryReport.enabled"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="发送模式">
-              <el-select v-model="form.summaryReport.sendMode" style="width: 100%">
-                <el-option
-                  v-for="item in notifySendModes"
-                  :key="`summary-mode-${item.value}`"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="统计数据源">
-              <el-select v-model="form.summaryReport.dataSource" style="width: 100%">
-                <el-option
-                  v-for="item in summaryDataSourceOptions"
-                  :key="`summary-source-${item.value}`"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="推送渠道">
-              <el-select
-                v-model="form.summaryReport.pushIds"
-                multiple
-                filterable
-                collapse-tags
-                :loading="pushOptionsLoading"
-                placeholder="push_config/hybrid 模式使用"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in pushOptions"
-                  :key="`summary-push-${item.pushId}`"
-                  :label="item.label"
-                  :value="item.pushId"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="应用群 chat_id">
-              <el-select
-                v-model="form.summaryReport.appChatIds"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                placeholder="feishu_app/hybrid 模式使用"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'local'" :xs="24" :md="12">
-            <el-form-item label="本地时间字段">
-              <el-select v-model="form.summaryReport.timeField" style="width: 100%">
-                <el-option
-                  v-for="item in summaryTimeFieldOptions"
-                  :key="`summary-time-${item.value}`"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="多维表格 appToken">
-              <el-input
-                v-model="form.summaryReport.appToken"
-                placeholder="飞书多维表格应用 Token"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="多维表格 tableId">
-              <el-input v-model="form.summaryReport.tableId" placeholder="飞书多维表格表ID" />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="视图 viewId">
-              <el-input v-model="form.summaryReport.viewId" placeholder="可选，不填默认表视图" />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="多维时间字段">
-              <el-input
-                v-model="form.summaryReport.bitableTimeField"
-                placeholder="可选，不填回退记录创建时间"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
-            <el-form-item label="状态字段">
-              <el-input v-model="form.summaryReport.statusField" placeholder="默认：状态" />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
-            <el-form-item label="分类字段">
-              <el-input v-model="form.summaryReport.categoryField" placeholder="默认：分类" />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
-            <el-form-item label="优先级字段">
-              <el-input v-model="form.summaryReport.priorityField" placeholder="默认：优先级" />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="分页大小">
-              <el-input-number
-                v-model="form.summaryReport.pageSize"
-                :min="1"
-                :max="500"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.summaryReport.dataSource === 'bitable'" :span="24">
-            <el-form-item label="过滤公式">
-              <el-input
-                v-model="form.summaryReport.filterFormula"
-                type="textarea"
-                :rows="3"
-                placeholder='可选，飞书 filter 公式，例如 CurrentValue.[状态] != "已关闭"'
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="窗口分钟数">
-              <el-input-number
-                v-model="form.summaryReport.windowMinutes"
-                :min="1"
-                :max="10080"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="结束延迟(分钟)">
-              <el-input-number
-                v-model="form.summaryReport.endDelayMinutes"
-                :min="0"
-                :max="1440"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="包含已关闭">
-              <el-switch
-                v-model="form.summaryReport.includeClosed"
-                inline-prompt
-                active-text="是"
-                inactive-text="否"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appId">
-              <el-input v-model="form.summaryReport.appId" placeholder="覆盖统一凭证（可选）" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appSecret">
-              <el-input
-                v-model="form.summaryReport.appSecret"
-                show-password
-                placeholder="覆盖统一凭证（可选）"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用AI解读">
-              <el-switch
-                v-model="form.summaryReport.aiEnabled"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="AI Provider编码">
-              <el-input
-                v-model="form.summaryReport.aiProviderCode"
-                placeholder="示例：openai_default"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="AI提示词编码">
-              <el-input
-                v-model="form.summaryReport.aiPromptCode"
-                placeholder="示例：ticket_summary_report_default"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="固定开始时间">
-              <el-input
-                v-model="form.summaryReport.startTime"
-                placeholder="可选，格式如 2026-06-10 09:00:00"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="固定结束时间">
-              <el-input
-                v-model="form.summaryReport.endTime"
-                placeholder="可选，格式如 2026-06-10 18:00:00"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="汇总模板">
-              <el-input
-                v-model="form.summaryReport.messageTemplate"
-                type="textarea"
-                :rows="6"
-                placeholder="可用变量：${data_source} ${start_time} ${end_time} ${time_field} ${total_count} ${status_summary} ${category_summary} ${priority_summary} ${ai_summary} ${now_time}"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>飞书统一凭证</span>
-          <el-tag type="info" effect="plain">基础配置</el-tag>
-        </div>
-      </template>
-      <el-form :model="form.feishuAuth" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appId">
-              <el-input v-model="form.feishuAuth.appId" placeholder="开放平台应用 app_id" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appSecret">
-              <el-input
-                v-model="form.feishuAuth.appSecret"
-                show-password
-                placeholder="开放平台应用 app_secret"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>工单群消息推送</span>
-          <el-tag type="success" effect="plain">推送配置</el-tag>
-        </div>
-      </template>
-
-      <el-form :model="form.groupPush" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用群推送">
-              <el-switch
-                v-model="form.groupPush.enabled"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="发送模式">
-              <el-select v-model="form.groupPush.sendMode" style="width: 100%">
-                <el-option
-                  v-for="item in notifySendModes"
-                  :key="`group-mode-${item.value}`"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="推送渠道">
-              <el-select
-                v-model="form.groupPush.pushIds"
-                multiple
-                filterable
-                collapse-tags
-                :loading="pushOptionsLoading"
-                placeholder="请选择推送配置"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in pushOptions"
-                  :key="item.pushId"
-                  :label="item.label"
-                  :value="item.pushId"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="应用群 chat_id">
-              <el-select
-                v-model="form.groupPush.appChatIds"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                placeholder="feishu_app/hybrid 模式必填"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="外部推送后发送">
-              <el-switch
-                v-model="form.groupPush.sendAfterExternalSync"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="远端拉取后发送">
-              <el-switch
-                v-model="form.groupPush.sendAfterRemotePull"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="自动推送状态条件">
-              <el-select
-                v-model="form.groupPush.autoPushStatuses"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                collapse-tags
-                placeholder="留空表示不按状态限制；默认保留原有三种状态"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in groupPushAutoStatusOptions"
-                  :key="`group-auto-status-${item}`"
-                  :label="item"
-                  :value="item"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="自动推送起始时间">
-              <el-date-picker
-                v-model="form.groupPush.autoSendAfterTime"
-                type="datetime"
-                value-format="YYYY-MM-DD HH:mm:ss"
-                format="YYYY-MM-DD HH:mm:ss"
-                placeholder="不填表示不限制提交时间"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="优先级路由">
-              <div class="priority-route-list">
-                <div
-                  v-for="(route, idx) in form.groupPush.priorityRoutes"
-                  :key="`route-${idx}`"
-                  class="priority-route-item"
-                >
-                  <el-row :gutter="12">
-                    <el-col :xs="24" :md="6">
-                      <el-select
-                        v-model="route.priorities"
-                        multiple
-                        placeholder="优先级"
-                        style="width: 100%"
-                      >
-                        <el-option label="P1" value="P1" />
-                        <el-option label="P2" value="P2" />
-                        <el-option label="P3" value="P3" />
-                        <el-option label="P4" value="P4" />
-                      </el-select>
-                    </el-col>
-                    <el-col :xs="24" :md="9">
-                      <el-select
-                        v-model="route.pushIds"
-                        multiple
-                        filterable
-                        collapse-tags
-                        :loading="pushOptionsLoading"
-                        placeholder="路由推送渠道（机器人）"
-                        style="width: 100%"
-                      >
-                        <el-option
-                          v-for="item in pushOptions"
-                          :key="`route-push-${idx}-${item.pushId}`"
-                          :label="item.label"
-                          :value="item.pushId"
-                        />
-                      </el-select>
-                    </el-col>
-                    <el-col :xs="24" :md="9">
-                      <el-select
-                        v-model="route.chatIds"
-                        multiple
-                        filterable
-                        allow-create
-                        default-first-option
-                        placeholder="路由群 chat_id（应用身份）"
-                        style="width: 100%"
-                      />
-                    </el-col>
-                  </el-row>
-                </div>
+    <el-container>
+      <el-tabs>
+        <el-tab-pane label="公共配置">
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>飞书统一凭证</span>
+                <el-tag type="info" effect="plain">基础配置</el-tag>
               </div>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="自动推送模板">
-              <el-input
-                v-model="form.groupPush.template"
-                type="textarea"
-                :rows="5"
-                placeholder="可用变量：${ticket_no} ${ticket_title} ${project_name} ${module_name} ${ticket_status} ${assignee_name} ${ticket_url} ${sync_source_record_url} ${description} ${report_at} ${reporter_at} ${assignee_at} ${mention_at}"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="手动发送模板">
-              <el-input
-                v-model="form.groupPush.manualTemplate"
-                type="textarea"
-                :rows="4"
-                placeholder="留空时复用自动推送模板"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
+            </template>
+            <el-form :model="form.feishuAuth" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appId">
+                    <el-input v-model="form.feishuAuth.appId" placeholder="开放平台应用 app_id" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appSecret">
+                    <el-input
+                      v-model="form.feishuAuth.appSecret"
+                      show-password
+                      placeholder="开放平台应用 app_secret"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
 
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>按人催办通知</span>
-          <el-tag type="warning" effect="plain">按人和时间阈值聚合后通知</el-tag>
-        </div>
-      </template>
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>工单汇总统计通知</span>
+                <el-tag type="success" effect="plain">推送配置</el-tag>
+              </div>
+            </template>
 
-      <el-form :model="form.personReminder" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="启用按人催办">
-              <el-switch
-                v-model="form.personReminder.enabled"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="发送模式">
-              <el-select v-model="form.personReminder.sendMode" style="width: 100%">
-                <el-option
-                  v-for="item in notifySendModes"
-                  :key="`person-mode-${item.value}`"
-                  :label="item.label"
-                  :value="item.value"
+            <el-form :model="form.summaryReport" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用汇总通知">
+                    <el-switch
+                      v-model="form.summaryReport.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="发送模式">
+                    <el-select v-model="form.summaryReport.sendMode" style="width: 100%">
+                      <el-option
+                        v-for="item in notifySendModes"
+                        :key="`summary-mode-${item.value}`"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="统计数据源">
+                    <el-select v-model="form.summaryReport.dataSource" style="width: 100%">
+                      <el-option
+                        v-for="item in summaryDataSourceOptions"
+                        :key="`summary-source-${item.value}`"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="推送渠道">
+                    <el-select
+                      v-model="form.summaryReport.pushIds"
+                      multiple
+                      filterable
+                      collapse-tags
+                      :loading="pushOptionsLoading"
+                      placeholder="push_config/hybrid 模式使用"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in pushOptions"
+                        :key="`summary-push-${item.pushId}`"
+                        :label="item.label"
+                        :value="item.pushId"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="应用群 chat_id">
+                    <el-select
+                      v-model="form.summaryReport.appChatIds"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      placeholder="feishu_app/hybrid 模式使用"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'local'" :xs="24" :md="12">
+                  <el-form-item label="本地时间字段">
+                    <el-select v-model="form.summaryReport.timeField" style="width: 100%">
+                      <el-option
+                        v-for="item in summaryTimeFieldOptions"
+                        :key="`summary-time-${item.value}`"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="多维表格 appToken">
+                    <el-input
+                      v-model="form.summaryReport.appToken"
+                      placeholder="飞书多维表格应用 Token"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="多维表格 tableId">
+                    <el-input v-model="form.summaryReport.tableId" placeholder="飞书多维表格表ID" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="视图 viewId">
+                    <el-input
+                      v-model="form.summaryReport.viewId"
+                      placeholder="可选，不填默认表视图"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="多维时间字段">
+                    <el-input
+                      v-model="form.summaryReport.bitableTimeField"
+                      placeholder="可选，不填回退记录创建时间"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
+                  <el-form-item label="状态字段">
+                    <el-input v-model="form.summaryReport.statusField" placeholder="默认：状态" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
+                  <el-form-item label="分类字段">
+                    <el-input v-model="form.summaryReport.categoryField" placeholder="默认：分类" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="8">
+                  <el-form-item label="优先级字段">
+                    <el-input
+                      v-model="form.summaryReport.priorityField"
+                      placeholder="默认：优先级"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="分页大小">
+                    <el-input-number
+                      v-model="form.summaryReport.pageSize"
+                      :min="1"
+                      :max="500"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.summaryReport.dataSource === 'bitable'" :span="24">
+                  <el-form-item label="过滤公式">
+                    <el-input
+                      v-model="form.summaryReport.filterFormula"
+                      type="textarea"
+                      :rows="3"
+                      placeholder='可选，飞书 filter 公式，例如 CurrentValue.[状态] != "已关闭"'
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="窗口分钟数">
+                    <el-input-number
+                      v-model="form.summaryReport.windowMinutes"
+                      :min="1"
+                      :max="10080"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="结束延迟(分钟)">
+                    <el-input-number
+                      v-model="form.summaryReport.endDelayMinutes"
+                      :min="0"
+                      :max="1440"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="包含已关闭">
+                    <el-switch
+                      v-model="form.summaryReport.includeClosed"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appId">
+                    <el-input
+                      v-model="form.summaryReport.appId"
+                      placeholder="覆盖统一凭证（可选）"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appSecret">
+                    <el-input
+                      v-model="form.summaryReport.appSecret"
+                      show-password
+                      placeholder="覆盖统一凭证（可选）"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用AI解读">
+                    <el-switch
+                      v-model="form.summaryReport.aiEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="AI Provider编码">
+                    <el-input
+                      v-model="form.summaryReport.aiProviderCode"
+                      placeholder="示例：openai_default"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="AI提示词编码">
+                    <el-input
+                      v-model="form.summaryReport.aiPromptCode"
+                      placeholder="示例：ticket_summary_report_default"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="固定开始时间">
+                    <el-input
+                      v-model="form.summaryReport.startTime"
+                      placeholder="可选，格式如 2026-06-10 09:00:00"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="固定结束时间">
+                    <el-input
+                      v-model="form.summaryReport.endTime"
+                      placeholder="可选，格式如 2026-06-10 18:00:00"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="汇总模板">
+                    <el-input
+                      v-model="form.summaryReport.messageTemplate"
+                      type="textarea"
+                      :rows="6"
+                      placeholder="可用变量：${data_source} ${start_time} ${end_time} ${time_field} ${total_count} ${status_summary} ${category_summary} ${priority_summary} ${ai_summary} ${now_time}"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>按人催办通知</span>
+                <el-tag type="warning" effect="plain">按人和时间阈值聚合后通知</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.personReminder" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用按人催办">
+                    <el-switch
+                      v-model="form.personReminder.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="发送模式">
+                    <el-select v-model="form.personReminder.sendMode" style="width: 100%">
+                      <el-option
+                        v-for="item in notifySendModes"
+                        :key="`person-mode-${item.value}`"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="统计数据源">
+                    <el-select v-model="form.personReminder.dataSource" style="width: 100%">
+                      <el-option
+                        v-for="item in personDataSourceOptions"
+                        :key="`person-source-${item.value}`"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="催办推送渠道">
+                    <el-select
+                      v-model="form.personReminder.pushIds"
+                      multiple
+                      filterable
+                      collapse-tags
+                      :loading="pushOptionsLoading"
+                      placeholder="请选择推送配置"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in pushOptions"
+                        :key="`person-${item.pushId}`"
+                        :label="item.label"
+                        :value="item.pushId"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appId">
+                    <el-input
+                      v-model="form.personReminder.appId"
+                      placeholder="覆盖统一凭证（可选）"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appSecret">
+                    <el-input
+                      v-model="form.personReminder.appSecret"
+                      show-password
+                      placeholder="覆盖统一凭证（可选）"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="多维表格 appToken">
+                    <el-input
+                      v-model="form.personReminder.appToken"
+                      placeholder="飞书多维表格应用 Token"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="多维表格 tableId">
+                    <el-input
+                      v-model="form.personReminder.tableId"
+                      placeholder="飞书多维表格表ID"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="视图 viewId">
+                    <el-input
+                      v-model="form.personReminder.viewId"
+                      placeholder="可选，不填默认表视图"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="阈值(分钟)">
+                    <el-input-number
+                      v-model="form.personReminder.thresholdMinutes"
+                      :min="1"
+                      :max="10080"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="人员字段名">
+                    <el-input
+                      v-model="form.personReminder.personField"
+                      placeholder="多维表格中的人员字段名"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="时间字段名">
+                    <el-input
+                      v-model="form.personReminder.timeField"
+                      placeholder="多维表格中的时间字段名"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-else :xs="24" :md="12">
+                  <el-form-item label="本地时间字段">
+                    <el-select v-model="form.personReminder.timeField" style="width: 100%">
+                      <el-option
+                        v-for="item in personLocalTimeFieldOptions"
+                        :key="`person-local-time-${item.value}`"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="明细条数上限">
+                    <el-input-number
+                      v-model="form.personReminder.maxRowsPerPerson"
+                      :min="1"
+                      :max="200"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="明细行模板">
+                    <el-input
+                      v-model="form.personReminder.rowsMarkdownTemplate"
+                      type="textarea"
+                      :rows="5"
+                      placeholder="可用变量：${index} ${created_at} ${ticket_no} ${detail_url} ${detail_link}"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
+                  <el-form-item label="分页大小">
+                    <el-input-number
+                      v-model="form.personReminder.pageSize"
+                      :min="1"
+                      :max="500"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.personReminder.dataSource === 'bitable'" :span="24">
+                  <el-form-item label="过滤公式">
+                    <el-input
+                      v-model="form.personReminder.filterFormula"
+                      type="textarea"
+                      :rows="3"
+                      placeholder='可选，飞书 filter 公式，例如 CurrentValue.[状态] != "已关闭"'
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="催办消息模板">
+                    <el-input
+                      v-model="form.personReminder.messageTemplate"
+                      type="textarea"
+                      :rows="6"
+                      placeholder="可用变量：${person_name} ${overdue_count} ${threshold_minutes} ${rows_markdown} ${now_time} ${email}"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>拉日志默认值</span>
+                <el-tag type="info" effect="plain">拉取配置</el-tag>
+              </div>
+            </template>
+
+            <el-form ref="pullFormRef" :model="form.logPullDefaults" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="命令类型">
+                    <el-input-number
+                      v-model="form.logPullDefaults.commandDataType"
+                      :min="1"
+                      :max="10"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="文件上限(MB)">
+                    <el-input-number
+                      v-model="form.logPullDefaults.fileMaxSize"
+                      :min="1"
+                      :max="2000"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="压缩包上限(MB)">
+                    <el-input-number
+                      v-model="form.logPullDefaults.zipMaxSize"
+                      :min="1"
+                      :max="2000"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="存储方式">
+                    <el-select
+                      v-model="form.logPullDefaults.storageMode"
+                      placeholder="请选择"
+                      style="width: 100%"
+                    >
+                      <el-option label="本地" value="local" />
+                      <el-option label="FTP" value="ftp" />
+                      <el-option label="对象存储" value="oss" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="前置分钟数">
+                    <el-input-number
+                      v-model="form.logPullDefaults.rangeBeforeMinutes"
+                      :min="0"
+                      :max="120"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="后置分钟数">
+                    <el-input-number
+                      v-model="form.logPullDefaults.rangeAfterMinutes"
+                      :min="0"
+                      :max="120"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="自动 AI 分析">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoAiEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Agent 编码">
+                    <el-input
+                      v-model="form.logPullDefaults.aiAgentCode"
+                      placeholder="留空则走默认 Agent"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="Provider 编码">
+                    <el-input
+                      v-model="form.logPullDefaults.aiProviderCode"
+                      placeholder="留空则走默认 Provider"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>提示词模板</span>
+                <el-tag effect="plain">后续扩展 AI 识别时复用</el-tag>
+              </div>
+            </template>
+
+            <el-form label-width="150px">
+              <el-form-item label="分类提示词">
+                <el-input
+                  v-model="form.promptTemplates.classificationHint"
+                  type="textarea"
+                  :rows="10"
+                  placeholder="用于项目、模块、状态、处理人等识别场景"
                 />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="统计数据源">
-              <el-select v-model="form.personReminder.dataSource" style="width: 100%">
-                <el-option
-                  v-for="item in personDataSourceOptions"
-                  :key="`person-source-${item.value}`"
-                  :label="item.label"
-                  :value="item.value"
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-tab-pane>
+        <el-tab-pane label="同步">
+          <el-card shadow="never" class="config-card">
+            <template #header>
+              <div class="card-header">
+                <span>外部同步基础开关</span>
+                <el-tag type="success" effect="plain">基础配置</el-tag>
+              </div>
+            </template>
+
+            <el-form ref="formRef" :model="form" :rules="rules" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="同步后自动执行" prop="autoRunOnSync">
+                    <el-switch
+                      v-model="form.autoRunOnSync"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="同步后自动翻译" prop="autoTranslateOnSync">
+                    <el-switch
+                      v-model="form.autoTranslateOnSync"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="默认拉取数量" prop="defaultPullLimit">
+                    <el-input-number
+                      v-model="form.defaultPullLimit"
+                      :min="1"
+                      :max="200"
+                      :step="1"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="远端来源系统" prop="remoteSync.sourceSystem">
+                    <el-input
+                      v-model="form.remoteSync.sourceSystem"
+                      placeholder="例如 public / hrm / partner"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>AI 分类统计配置</span>
+                <el-tag type="warning" effect="plain">手动配置与场景开关</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.aiClassification" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用AI分类">
+                    <el-switch
+                      v-model="form.aiClassification.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="外部同步执行">
+                    <el-switch
+                      v-model="form.aiClassification.runOnExternalSync"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="远端拉取执行">
+                    <el-switch
+                      v-model="form.aiClassification.runOnRemotePull"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="手动创建执行">
+                    <el-switch
+                      v-model="form.aiClassification.runOnManualCreate"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Provider 编码">
+                    <el-select
+                      v-model="form.aiClassification.providerCode"
+                      placeholder="请选择 Provider；留空则使用 AI 配置中心"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in providerOptions"
+                        :key="item.providerCode"
+                        :label="formatProviderOptionLabel(item)"
+                        :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="提示词编码">
+                    <el-select
+                      v-model="form.aiClassification.promptCode"
+                      placeholder="请选择提示词模板；留空使用默认模板"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in promptOptions"
+                        :key="item.templateCode || item.value"
+                        :label="formatPromptOptionLabel(item)"
+                        :value="item.templateCode || item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+            <el-alert
+              v-if="form.aiClassification.promptContent"
+              class="mt8"
+              type="warning"
+              show-icon
+              :closable="false"
+              title="检测到历史内联提示词"
+              description="系统会保留它作为旧配置兜底；新配置请到 AI 提示词管理中维护模板正文。保存本页不会继续写入新的提示词正文。"
+            />
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>工单群消息推送</span>
+                <el-tag type="success" effect="plain">推送配置</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.groupPush" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用群推送">
+                    <el-switch
+                      v-model="form.groupPush.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="发送模式">
+                    <el-select v-model="form.groupPush.sendMode" style="width: 100%">
+                      <el-option
+                        v-for="item in notifySendModes"
+                        :key="`group-mode-${item.value}`"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="推送渠道">
+                    <el-select
+                      v-model="form.groupPush.pushIds"
+                      multiple
+                      filterable
+                      collapse-tags
+                      :loading="pushOptionsLoading"
+                      placeholder="请选择推送配置"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in pushOptions"
+                        :key="item.pushId"
+                        :label="item.label"
+                        :value="item.pushId"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="应用群 chat_id">
+                    <el-select
+                      v-model="form.groupPush.appChatIds"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      placeholder="feishu_app/hybrid 模式必填"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="外部推送后发送">
+                    <el-switch
+                      v-model="form.groupPush.sendAfterExternalSync"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="远端拉取后发送">
+                    <el-switch
+                      v-model="form.groupPush.sendAfterRemotePull"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="自动推送状态条件">
+                    <el-select
+                      v-model="form.groupPush.autoPushStatuses"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      collapse-tags
+                      placeholder="留空表示不按状态限制；默认保留原有三种状态"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in groupPushAutoStatusOptions"
+                        :key="`group-auto-status-${item}`"
+                        :label="item"
+                        :value="item"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="自动推送起始时间">
+                    <el-date-picker
+                      v-model="form.groupPush.autoSendAfterTime"
+                      type="datetime"
+                      value-format="YYYY-MM-DD HH:mm:ss"
+                      format="YYYY-MM-DD HH:mm:ss"
+                      placeholder="不填表示不限制提交时间"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="优先级路由">
+                    <div class="priority-route-list">
+                      <div
+                        v-for="(route, idx) in form.groupPush.priorityRoutes"
+                        :key="`route-${idx}`"
+                        class="priority-route-item"
+                      >
+                        <el-row :gutter="12">
+                          <el-col :xs="24" :md="6">
+                            <el-select
+                              v-model="route.priorities"
+                              multiple
+                              placeholder="优先级"
+                              style="width: 100%"
+                            >
+                              <el-option label="P1" value="P1" />
+                              <el-option label="P2" value="P2" />
+                              <el-option label="P3" value="P3" />
+                              <el-option label="P4" value="P4" />
+                            </el-select>
+                          </el-col>
+                          <el-col :xs="24" :md="9">
+                            <el-select
+                              v-model="route.pushIds"
+                              multiple
+                              filterable
+                              collapse-tags
+                              :loading="pushOptionsLoading"
+                              placeholder="路由推送渠道（机器人）"
+                              style="width: 100%"
+                            >
+                              <el-option
+                                v-for="item in pushOptions"
+                                :key="`route-push-${idx}-${item.pushId}`"
+                                :label="item.label"
+                                :value="item.pushId"
+                              />
+                            </el-select>
+                          </el-col>
+                          <el-col :xs="24" :md="9">
+                            <el-select
+                              v-model="route.chatIds"
+                              multiple
+                              filterable
+                              allow-create
+                              default-first-option
+                              placeholder="路由群 chat_id（应用身份）"
+                              style="width: 100%"
+                            />
+                          </el-col>
+                        </el-row>
+                      </div>
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="自动推送模板">
+                    <el-input
+                      v-model="form.groupPush.template"
+                      type="textarea"
+                      :rows="5"
+                      placeholder="可用变量：${ticket_no} ${ticket_title} ${project_name} ${module_name} ${ticket_status} ${assignee_name} ${ticket_url} ${sync_source_record_url} ${description} ${report_at} ${reporter_at} ${assignee_at} ${mention_at}"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="手动发送模板">
+                    <el-input
+                      v-model="form.groupPush.manualTemplate"
+                      type="textarea"
+                      :rows="4"
+                      placeholder="留空时复用自动推送模板"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+        </el-tab-pane>
+        <el-tab-pane label="映射/规则">
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>识别规则</span>
+                <el-tag effect="plain">按文本匹配，找不到则保留原值</el-tag>
+              </div>
+            </template>
+
+            <el-form ref="patternFormRef" :model="form" label-width="150px">
+              <el-form-item label="POS 正则规则">
+                <el-input
+                  v-model="posPatternsText"
+                  type="textarea"
+                  :rows="6"
+                  placeholder='请输入 JSON 数组，例如 ["A", "B"]'
                 />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="催办推送渠道">
-              <el-select
-                v-model="form.personReminder.pushIds"
-                multiple
-                filterable
-                collapse-tags
-                :loading="pushOptionsLoading"
-                placeholder="请选择推送配置"
-                style="width: 100%"
+              </el-form-item>
+              <el-form-item label="SCO 正则规则">
+                <el-input
+                  v-model="scoPatternsText"
+                  type="textarea"
+                  :rows="6"
+                  placeholder='请输入 JSON 数组，例如 ["A", "B"]'
+                />
+              </el-form-item>
+              <el-form-item label="版本号正则规则">
+                <el-input
+                  v-model="versionPatternsText"
+                  type="textarea"
+                  :rows="6"
+                  placeholder='请输入 JSON 数组，例如 ["A", "B"]'
+                />
+              </el-form-item>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>映射配置</span>
+                <el-tag effect="plain">给三方直推和内网拉取共用</el-tag>
+              </div>
+            </template>
+
+            <div class="mapping-blocks">
+              <div v-for="item in mappingSections" :key="item.key" class="mapping-section">
+                <div class="mapping-title">{{ item.label }}</div>
+                <div class="mapping-desc">{{ item.description }}</div>
+                <el-input
+                  v-model="mappingTexts[item.key]"
+                  type="textarea"
+                  :rows="item.rows"
+                  placeholder='请输入 JSON 数组，例如 [{"source":"A","target":"B"}]'
+                />
+              </div>
+            </div>
+          </el-card>
+        </el-tab-pane>
+        <el-tab-pane label="系统字段">
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>统计枚举配置</span>
+                <el-tag effect="plain">基础配置</el-tag>
+              </div>
+            </template>
+
+            <div class="stat-config-grid">
+              <section class="stat-config-section">
+                <div class="stat-config-section__head">
+                  <span>工单类型</span>
+                  <el-button link type="primary" icon="Plus" @click="addStatOption('issueTypes')"
+                    >新增</el-button
+                  >
+                </div>
+                <el-table :data="form.statClassification.issueTypes" border size="small">
+                  <el-table-column label="编码" min-width="160">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.value" placeholder="如 system_bug" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="名称" min-width="180">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.label" placeholder="如 系统Bug" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="是否问题" width="140">
+                    <template #default="scope">
+                      <el-select
+                        v-model="scope.row.isProblem"
+                        placeholder="可选"
+                        clearable
+                        style="width: 100%"
+                      >
+                        <el-option label="真实问题" :value="true" />
+                        <el-option label="非问题" :value="false" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="80" align="center">
+                    <template #default="scope">
+                      <el-button
+                        link
+                        type="danger"
+                        icon="Delete"
+                        @click="removeStatOption('issueTypes', scope.$index)"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </section>
+
+              <section class="stat-config-section">
+                <div class="stat-config-section__head">
+                  <span>根因分类</span>
+                  <el-button
+                    link
+                    type="primary"
+                    icon="Plus"
+                    @click="addStatOption('rootCauseTypes')"
+                    >新增</el-button
+                  >
+                </div>
+                <el-table :data="form.statClassification.rootCauseTypes" border size="small">
+                  <el-table-column label="编码" min-width="160">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.value" placeholder="如 code_defect" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="名称" min-width="180">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.label" placeholder="如 代码缺陷" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="备注" min-width="180">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.remark" placeholder="可选备注" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="80" align="center">
+                    <template #default="scope">
+                      <el-button
+                        link
+                        type="danger"
+                        icon="Delete"
+                        @click="removeStatOption('rootCauseTypes', scope.$index)"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </section>
+
+              <section class="stat-config-section">
+                <div class="stat-config-section__head">
+                  <span>解决方式</span>
+                  <el-button link type="primary" icon="Plus" @click="addStatOption('solutionTypes')"
+                    >新增</el-button
+                  >
+                </div>
+                <el-table :data="form.statClassification.solutionTypes" border size="small">
+                  <el-table-column label="编码" min-width="160">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.value" placeholder="如 code_fix" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="名称" min-width="180">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.label" placeholder="如 代码修复" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="备注" min-width="180">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.remark" placeholder="可选备注" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="80" align="center">
+                    <template #default="scope">
+                      <el-button
+                        link
+                        type="danger"
+                        icon="Delete"
+                        @click="removeStatOption('solutionTypes', scope.$index)"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </section>
+
+              <section class="stat-config-section">
+                <div class="stat-config-section__head">
+                  <span>关闭结果</span>
+                  <el-button link type="primary" icon="Plus" @click="addStatOption('resolutions')"
+                    >新增</el-button
+                  >
+                </div>
+                <el-table :data="form.statClassification.resolutions" border size="small">
+                  <el-table-column label="编码" min-width="160">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.value" placeholder="如 fixed" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="名称" min-width="180">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.label" placeholder="如 已修复" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="是否问题" width="140">
+                    <template #default="scope">
+                      <el-select
+                        v-model="scope.row.isProblem"
+                        placeholder="可选"
+                        clearable
+                        style="width: 100%"
+                      >
+                        <el-option label="真实问题" :value="true" />
+                        <el-option label="非问题" :value="false" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="80" align="center">
+                    <template #default="scope">
+                      <el-button
+                        link
+                        type="danger"
+                        icon="Delete"
+                        @click="removeStatOption('resolutions', scope.$index)"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </section>
+            </div>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>外部推送多维表格邮箱补全</span>
+                <el-tag type="warning" effect="plain">推送配置</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.externalSyncBitable" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用邮箱补全">
+                    <el-switch
+                      v-model="form.externalSyncBitable.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 appToken">
+                    <el-input
+                      v-model="form.externalSyncBitable.appToken"
+                      placeholder="飞书多维表格应用 Token"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 tableId">
+                    <el-input
+                      v-model="form.externalSyncBitable.tableId"
+                      placeholder="飞书多维表格表ID"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 viewId">
+                    <el-input
+                      v-model="form.externalSyncBitable.viewId"
+                      placeholder="可选，不填默认表视图"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appId">
+                    <el-input
+                      v-model="form.externalSyncBitable.appId"
+                      placeholder="覆盖统一凭证（可选）"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appSecret">
+                    <el-input
+                      v-model="form.externalSyncBitable.appSecret"
+                      show-password
+                      placeholder="覆盖统一凭证（可选）"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <div class="mapping-desc">
+                    外部推送传入的 <code>recordId</code> 会作为飞书多维表格记录ID查询固定字段：
+                    <code>(IT) L1 PIC</code>、<code>1.5 当前负责人</code>、<code>当前负责人</code>。
+                  </div>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>远端同步链接</span>
+                <el-tag type="warning" effect="plain">拉取配置</el-tag>
+              </div>
+            </template>
+
+            <el-form
+              ref="remoteFormRef"
+              :model="form.remoteSync"
+              :rules="remoteRules"
+              label-width="150px"
+            >
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用远端同步" prop="enabled">
+                    <el-switch
+                      v-model="form.remoteSync.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="抓取超时(秒)" prop="timeoutSec">
+                    <el-input-number
+                      v-model="form.remoteSync.timeoutSec"
+                      :min="10"
+                      :max="300"
+                      :step="5"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="拉取地址" prop="pullUrl">
+                    <el-input
+                      v-model="form.remoteSync.pullUrl"
+                      placeholder="https://example.com/api/tickets/pending"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="回写地址" prop="ackUrl">
+                    <el-input
+                      v-model="form.remoteSync.ackUrl"
+                      placeholder="https://example.com/api/tickets/ack"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="消费者标识" prop="consumer">
+                    <el-input
+                      v-model="form.remoteSync.consumer"
+                      placeholder="例如 public-ticket-sync"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="每次拉取数量" prop="limit">
+                    <el-input-number
+                      v-model="form.remoteSync.limit"
+                      :min="1"
+                      :max="200"
+                      :step="1"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="包含已关闭" prop="includeClosed">
+                    <el-switch
+                      v-model="form.remoteSync.includeClosed"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="拉取后自动翻译" prop="autoTranslateOnPull">
+                    <el-switch
+                      v-model="form.remoteSync.autoTranslateOnPull"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>外部同步必填字段</span>
+                <el-tag type="info" effect="plain"
+                  >支持选择已有字段，也支持直接输入自定义字段名</el-tag
+                >
+              </div>
+            </template>
+
+            <el-form :model="form" label-width="150px">
+              <el-form-item label="支持字段说明">
+                <div class="mapping-desc">
+                  目前支持的字段：{{
+                    externalSyncRequiredFieldOptions.map((item) => item.value).join('、')
+                  }}。可直接下拉选择，也可手动输入新增字段名。
+                </div>
+              </el-form-item>
+              <el-form-item label="必填字段列表">
+                <el-select
+                  v-model="form.externalSyncRequiredFields"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  collapse-tags
+                  placeholder="ticketNo, description, internalPriority, ticketVender, ticketModle, createTime, reporterName"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="item in externalSyncRequiredFieldOptions"
+                    :key="`external-required-${item.value}`"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-tab-pane>
+        <el-tab-pane label="操作">
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>手动触发入口</span>
+                <el-tag effect="plain">输入工单号或用户信息后直接执行</el-tag>
+              </div>
+            </template>
+
+            <el-row :gutter="24">
+              <el-col :xs="24" :lg="12">
+                <el-form :model="groupSendForm" label-width="110px">
+                  <el-form-item label="工单号">
+                    <el-input
+                      v-model="groupSendForm.ticketNo"
+                      placeholder="输入工单号后发送群消息"
+                    />
+                  </el-form-item>
+                  <el-form-item label="强制推送">
+                    <el-switch
+                      v-model="groupSendForm.forcePush"
+                      active-text="是（忽略已推送状态）"
+                      inactive-text="否（遵循已推送状态）"
+                    />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button
+                      type="primary"
+                      :loading="groupSendLoading"
+                      @click="handleSendGroupPushByTicket"
+                    >
+                      发送工单群消息
+                    </el-button>
+                  </el-form-item>
+                </el-form>
+              </el-col>
+              <el-col :xs="24" :lg="12">
+                <el-form :model="personQueryForm" label-width="110px">
+                  <el-form-item label="用户ID">
+                    <el-input v-model="personQueryForm.userId" placeholder="可选，支持数字ID" />
+                  </el-form-item>
+                  <el-form-item label="邮箱">
+                    <el-input v-model="personQueryForm.email" placeholder="可选，支持邮箱" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button :loading="personPreviewLoading" @click="handlePreviewPersonReminder"
+                      >统计该用户</el-button
+                    >
+                    <el-button
+                      type="primary"
+                      :loading="personRunLoading"
+                      @click="handleRunPersonReminder"
+                    >
+                      发送该用户催办
+                    </el-button>
+                  </el-form-item>
+                  <el-divider content-position="left">汇总统计手动触发</el-divider>
+                  <el-form-item label="开始时间">
+                    <el-input
+                      v-model="summaryRunForm.startTime"
+                      placeholder="可选，格式如 2026-06-10 09:00:00"
+                    />
+                  </el-form-item>
+                  <el-form-item label="结束时间">
+                    <el-input
+                      v-model="summaryRunForm.endTime"
+                      placeholder="可选，格式如 2026-06-10 18:00:00"
+                    />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button
+                      type="success"
+                      :loading="summaryRunLoading"
+                      @click="handleRunSummaryReport"
+                    >
+                      发送汇总统计
+                    </el-button>
+                  </el-form-item>
+                </el-form>
+              </el-col>
+            </el-row>
+
+            <el-alert
+              v-if="personPreviewResult"
+              type="info"
+              show-icon
+              :closable="false"
+              :title="`统计结果：命中 ${personPreviewResult.personCount || 0} 人，超时记录 ${personPreviewResult.overdueRecordCount || 0} 条`"
+            />
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>自动分类管理</span>
+                <el-tag effect="plain">支持未归类统计与批量重归类</el-tag>
+              </div>
+            </template>
+            <el-form :model="autoCategoryForm" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="归类策略">
+                    <el-select v-model="autoCategoryForm.strategy" style="width: 100%">
+                      <el-option label="AI归类" value="ai" />
+                      <el-option label="正则归类" value="regex" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="autoCategoryForm.strategy === 'ai'" :xs="24" :md="12">
+                  <el-form-item label="AI提示词编码">
+                    <el-select
+                      v-model="autoCategoryForm.aiPromptCode"
+                      placeholder="可选，留空走当前分类配置"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in promptOptions"
+                        :key="`auto-category-${item.templateCode || item.value}`"
+                        :label="formatPromptOptionLabel(item)"
+                        :value="item.templateCode || item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="仅未归类">
+                    <el-switch
+                      v-model="autoCategoryForm.onlyUncategorized"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="全量扫描">
+                    <el-switch
+                      v-model="autoCategoryForm.allTickets"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="强制覆盖已有分类">
+                    <el-switch
+                      v-model="autoCategoryForm.forceReclassify"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="!autoCategoryForm.allTickets" :xs="24" :md="12">
+                  <el-form-item label="分页页码">
+                    <el-input-number
+                      v-model="autoCategoryForm.pageNum"
+                      :min="1"
+                      :max="999999"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="!autoCategoryForm.allTickets" :xs="24" :md="12">
+                  <el-form-item label="分页大小">
+                    <el-input-number
+                      v-model="autoCategoryForm.pageSize"
+                      :min="1"
+                      :max="500"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="autoCategoryForm.strategy === 'regex'" :span="24">
+                  <el-form-item label="正则规则(JSON数组)">
+                    <el-input
+                      v-model="autoCategoryRegexText"
+                      type="textarea"
+                      :rows="6"
+                      placeholder='示例：[{"pattern":"支付|扣款","category":"支付问题","flags":"i"}]'
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+            <el-space wrap>
+              <el-button :loading="autoCategoryStatsLoading" @click="handleLoadAutoCategoryStats"
+                >统计未归类工单</el-button
               >
-                <el-option
-                  v-for="item in pushOptions"
-                  :key="`person-${item.pushId}`"
-                  :label="item.label"
-                  :value="item.pushId"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appId">
-              <el-input v-model="form.personReminder.appId" placeholder="覆盖统一凭证（可选）" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="飞书 appSecret">
-              <el-input
-                v-model="form.personReminder.appSecret"
-                show-password
-                placeholder="覆盖统一凭证（可选）"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="多维表格 appToken">
-              <el-input
-                v-model="form.personReminder.appToken"
-                placeholder="飞书多维表格应用 Token"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="多维表格 tableId">
-              <el-input v-model="form.personReminder.tableId" placeholder="飞书多维表格表ID" />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="视图 viewId">
-              <el-input v-model="form.personReminder.viewId" placeholder="可选，不填默认表视图" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="阈值(分钟)">
-              <el-input-number
-                v-model="form.personReminder.thresholdMinutes"
-                :min="1"
-                :max="10080"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="人员字段名">
-              <el-input
-                v-model="form.personReminder.personField"
-                placeholder="多维表格中的人员字段名"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="时间字段名">
-              <el-input
-                v-model="form.personReminder.timeField"
-                placeholder="多维表格中的时间字段名"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-else :xs="24" :md="12">
-            <el-form-item label="本地时间字段">
-              <el-select v-model="form.personReminder.timeField" style="width: 100%">
-                <el-option
-                  v-for="item in personLocalTimeFieldOptions"
-                  :key="`person-local-time-${item.value}`"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="明细条数上限">
-              <el-input-number
-                v-model="form.personReminder.maxRowsPerPerson"
-                :min="1"
-                :max="200"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="明细行模板">
-              <el-input
-                v-model="form.personReminder.rowsMarkdownTemplate"
-                type="textarea"
-                :rows="5"
-                placeholder="可用变量：${index} ${created_at} ${ticket_no} ${detail_url} ${detail_link}"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.personReminder.dataSource === 'bitable'" :xs="24" :md="12">
-            <el-form-item label="分页大小">
-              <el-input-number
-                v-model="form.personReminder.pageSize"
-                :min="1"
-                :max="500"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.personReminder.dataSource === 'bitable'" :span="24">
-            <el-form-item label="过滤公式">
-              <el-input
-                v-model="form.personReminder.filterFormula"
-                type="textarea"
-                :rows="3"
-                placeholder='可选，飞书 filter 公式，例如 CurrentValue.[状态] != "已关闭"'
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="催办消息模板">
-              <el-input
-                v-model="form.personReminder.messageTemplate"
-                type="textarea"
-                :rows="6"
-                placeholder="可用变量：${person_name} ${overdue_count} ${threshold_minutes} ${rows_markdown} ${now_time} ${email}"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>手动触发入口</span>
-          <el-tag effect="plain">输入工单号或用户信息后直接执行</el-tag>
-        </div>
-      </template>
-
-      <el-row :gutter="16">
-        <el-col :xs="24" :lg="12">
-          <el-form :model="groupSendForm" label-width="110px">
-            <el-form-item label="工单号">
-              <el-input v-model="groupSendForm.ticketNo" placeholder="输入工单号后发送群消息" />
-            </el-form-item>
-            <el-form-item label="强制推送">
-              <el-switch
-                v-model="groupSendForm.forcePush"
-                active-text="是（忽略已推送状态）"
-                inactive-text="否（遵循已推送状态）"
-              />
-            </el-form-item>
-            <el-form-item>
               <el-button
                 type="primary"
-                :loading="groupSendLoading"
-                @click="handleSendGroupPushByTicket"
-              >
-                发送工单群消息
-              </el-button>
-            </el-form-item>
-          </el-form>
-        </el-col>
-        <el-col :xs="24" :lg="12">
-          <el-form :model="personQueryForm" label-width="110px">
-            <el-form-item label="用户ID">
-              <el-input v-model="personQueryForm.userId" placeholder="可选，支持数字ID" />
-            </el-form-item>
-            <el-form-item label="邮箱">
-              <el-input v-model="personQueryForm.email" placeholder="可选，支持邮箱" />
-            </el-form-item>
-            <el-form-item>
-              <el-button :loading="personPreviewLoading" @click="handlePreviewPersonReminder"
-                >统计该用户</el-button
+                :loading="autoCategoryRunLoading"
+                @click="handleBatchReclassifyByConfig"
+                >按当前配置重归类</el-button
               >
               <el-button
-                type="primary"
-                :loading="personRunLoading"
-                @click="handleRunPersonReminder"
+                type="danger"
+                plain
+                :loading="autoCategoryRunLoading"
+                @click="handleForceReclassifyAll"
+                >强制重归类全部</el-button
               >
-                发送该用户催办
-              </el-button>
-            </el-form-item>
-            <el-divider content-position="left">汇总统计手动触发</el-divider>
-            <el-form-item label="开始时间">
-              <el-input
-                v-model="summaryRunForm.startTime"
-                placeholder="可选，格式如 2026-06-10 09:00:00"
-              />
-            </el-form-item>
-            <el-form-item label="结束时间">
-              <el-input
-                v-model="summaryRunForm.endTime"
-                placeholder="可选，格式如 2026-06-10 18:00:00"
-              />
-            </el-form-item>
-            <el-form-item>
-              <el-button
-                type="success"
-                :loading="summaryRunLoading"
-                @click="handleRunSummaryReport"
-              >
-                发送汇总统计
-              </el-button>
-            </el-form-item>
-          </el-form>
-        </el-col>
-      </el-row>
-
-      <el-alert
-        v-if="personPreviewResult"
-        type="info"
-        show-icon
-        :closable="false"
-        :title="`统计结果：命中 ${personPreviewResult.personCount || 0} 人，超时记录 ${personPreviewResult.overdueRecordCount || 0} 条`"
-      />
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>自动分类管理</span>
-          <el-tag effect="plain">支持未归类统计与批量重归类</el-tag>
-        </div>
-      </template>
-      <el-form :model="autoCategoryForm" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="归类策略">
-              <el-select v-model="autoCategoryForm.strategy" style="width: 100%">
-                <el-option label="AI归类" value="ai" />
-                <el-option label="正则归类" value="regex" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col v-if="autoCategoryForm.strategy === 'ai'" :xs="24" :md="12">
-            <el-form-item label="AI提示词编码">
-              <el-select
-                v-model="autoCategoryForm.aiPromptCode"
-                placeholder="可选，留空走当前分类配置"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in promptOptions"
-                  :key="`auto-category-${item.templateCode || item.value}`"
-                  :label="formatPromptOptionLabel(item)"
-                  :value="item.templateCode || item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="仅未归类">
-              <el-switch
-                v-model="autoCategoryForm.onlyUncategorized"
-                inline-prompt
-                active-text="是"
-                inactive-text="否"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="全量扫描">
-              <el-switch
-                v-model="autoCategoryForm.allTickets"
-                inline-prompt
-                active-text="是"
-                inactive-text="否"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="强制覆盖已有分类">
-              <el-switch
-                v-model="autoCategoryForm.forceReclassify"
-                inline-prompt
-                active-text="是"
-                inactive-text="否"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="!autoCategoryForm.allTickets" :xs="24" :md="12">
-            <el-form-item label="分页页码">
-              <el-input-number
-                v-model="autoCategoryForm.pageNum"
-                :min="1"
-                :max="999999"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="!autoCategoryForm.allTickets" :xs="24" :md="12">
-            <el-form-item label="分页大小">
-              <el-input-number
-                v-model="autoCategoryForm.pageSize"
-                :min="1"
-                :max="500"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="autoCategoryForm.strategy === 'regex'" :span="24">
-            <el-form-item label="正则规则(JSON数组)">
-              <el-input
-                v-model="autoCategoryRegexText"
-                type="textarea"
-                :rows="6"
-                placeholder='示例：[{"pattern":"支付|扣款","category":"支付问题","flags":"i"}]'
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-      <el-space wrap>
-        <el-button :loading="autoCategoryStatsLoading" @click="handleLoadAutoCategoryStats"
-          >统计未归类工单</el-button
-        >
-        <el-button
-          type="primary"
-          :loading="autoCategoryRunLoading"
-          @click="handleBatchReclassifyByConfig"
-          >按当前配置重归类</el-button
-        >
-        <el-button
-          type="danger"
-          plain
-          :loading="autoCategoryRunLoading"
-          @click="handleForceReclassifyAll"
-          >强制重归类全部</el-button
-        >
-      </el-space>
-      <el-alert
-        v-if="autoCategoryStats"
-        class="mt16"
-        type="info"
-        show-icon
-        :closable="false"
-        :title="`工单总数 ${autoCategoryStats.totalCount || 0}，已归类 ${autoCategoryStats.categorizedCount || 0}，未归类 ${autoCategoryStats.uncategorizedCount || 0}（${autoCategoryStats.uncategorizedRatio || 0}%）`"
-      />
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>识别规则</span>
-          <el-tag effect="plain">按文本匹配，找不到则保留原值</el-tag>
-        </div>
-      </template>
-
-      <el-form ref="patternFormRef" :model="form" label-width="150px">
-        <el-form-item label="POS 正则规则">
-          <el-input
-            v-model="posPatternsText"
-            type="textarea"
-            :rows="6"
-            placeholder='请输入 JSON 数组，例如 ["A", "B"]'
-          />
-        </el-form-item>
-        <el-form-item label="SCO 正则规则">
-          <el-input
-            v-model="scoPatternsText"
-            type="textarea"
-            :rows="6"
-            placeholder='请输入 JSON 数组，例如 ["A", "B"]'
-          />
-        </el-form-item>
-        <el-form-item label="版本号正则规则">
-          <el-input
-            v-model="versionPatternsText"
-            type="textarea"
-            :rows="6"
-            placeholder='请输入 JSON 数组，例如 ["A", "B"]'
-          />
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>映射配置</span>
-          <el-tag effect="plain">给三方直推和内网拉取共用</el-tag>
-        </div>
-      </template>
-
-      <div class="mapping-blocks">
-        <div v-for="item in mappingSections" :key="item.key" class="mapping-section">
-          <div class="mapping-title">{{ item.label }}</div>
-          <div class="mapping-desc">{{ item.description }}</div>
-          <el-input
-            v-model="mappingTexts[item.key]"
-            type="textarea"
-            :rows="item.rows"
-            placeholder='请输入 JSON 数组，例如 [{"source":"A","target":"B"}]'
-          />
-        </div>
-      </div>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>拉日志默认值</span>
-          <el-tag type="info" effect="plain">拉取配置</el-tag>
-        </div>
-      </template>
-
-      <el-form ref="pullFormRef" :model="form.logPullDefaults" label-width="150px">
-        <el-row :gutter="16">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="命令类型">
-              <el-input-number
-                v-model="form.logPullDefaults.commandDataType"
-                :min="1"
-                :max="10"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="文件上限(MB)">
-              <el-input-number
-                v-model="form.logPullDefaults.fileMaxSize"
-                :min="1"
-                :max="2000"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="压缩包上限(MB)">
-              <el-input-number
-                v-model="form.logPullDefaults.zipMaxSize"
-                :min="1"
-                :max="2000"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="存储方式">
-              <el-select
-                v-model="form.logPullDefaults.storageMode"
-                placeholder="请选择"
-                style="width: 100%"
-              >
-                <el-option label="本地" value="local" />
-                <el-option label="FTP" value="ftp" />
-                <el-option label="对象存储" value="oss" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="前置分钟数">
-              <el-input-number
-                v-model="form.logPullDefaults.rangeBeforeMinutes"
-                :min="0"
-                :max="120"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="后置分钟数">
-              <el-input-number
-                v-model="form.logPullDefaults.rangeAfterMinutes"
-                :min="0"
-                :max="120"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="自动 AI 分析">
-              <el-switch
-                v-model="form.logPullDefaults.autoAiEnabled"
-                inline-prompt
-                active-text="开"
-                inactive-text="关"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="Agent 编码">
-              <el-input
-                v-model="form.logPullDefaults.aiAgentCode"
-                placeholder="留空则走默认 Agent"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="Provider 编码">
-              <el-input
-                v-model="form.logPullDefaults.aiProviderCode"
-                placeholder="留空则走默认 Provider"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="config-card mt16">
-      <template #header>
-        <div class="card-header">
-          <span>提示词模板</span>
-          <el-tag effect="plain">后续扩展 AI 识别时复用</el-tag>
-        </div>
-      </template>
-
-      <el-form label-width="150px">
-        <el-form-item label="分类提示词">
-          <el-input
-            v-model="form.promptTemplates.classificationHint"
-            type="textarea"
-            :rows="10"
-            placeholder="用于项目、模块、状态、处理人等识别场景"
-          />
-        </el-form-item>
-      </el-form>
-    </el-card>
+            </el-space>
+            <el-alert
+              v-if="autoCategoryStats"
+              class="mt16"
+              type="info"
+              show-icon
+              :closable="false"
+              :title="`工单总数 ${autoCategoryStats.totalCount || 0}，已归类 ${autoCategoryStats.categorizedCount || 0}，未归类 ${autoCategoryStats.uncategorizedCount || 0}（${autoCategoryStats.uncategorizedRatio || 0}%）`"
+            />
+          </el-card>
+        </el-tab-pane>
+      </el-tabs>
+    </el-container>
 
     <div class="action-bar">
       <el-button
