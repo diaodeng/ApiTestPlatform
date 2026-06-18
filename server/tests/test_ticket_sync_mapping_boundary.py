@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 
 
@@ -430,6 +431,42 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(
             payload["extra_data"][TicketSyncService.META_KEY]["bitableEmailSync"]["recordId"],
             "rec_002",
+        )
+
+    def test_person_reminder_uses_bitable_record_url_when_local_ticket_url_missing(self):
+        """本地工单没有详情 URL 时，催办明细应回退到飞书多维表格记录 URL。"""
+        db = SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery())
+        config = {
+            "dataSource": "bitable",
+            "appToken": "base_token",
+            "tableId": "tbl_token",
+            "viewId": "vew_token",
+            "personField": "处理人",
+            "timeField": "更新时间",
+            "thresholdMinutes": 1,
+        }
+        record = {
+            "record_id": "rec_003",
+            "fields": {
+                "处理人": [{"email": "owner@example.com", "name": "负责人"}],
+                "更新时间": "2020-01-01 09:00:00",
+                "ticketNo": "EXT-003",
+                "title": "待处理工单",
+            },
+        }
+
+        with patch.object(TicketSyncNotifyService, "query_bitable_records", return_value=[record]):
+            result = TicketSyncNotifyService._collect_person_overdue_data(
+                db,
+                config=config,
+                email="owner@example.com",
+                all=True,
+            )
+
+        rows = result["people"][0]["rows"]
+        self.assertEqual(
+            rows[0]["detailUrl"],
+            "https://feishu.cn/base/base_token?table=tbl_token&view=vew_token&record=rec_003",
         )
 
 

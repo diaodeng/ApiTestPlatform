@@ -130,6 +130,7 @@ graph TD
 - AI 分析上下文现在包含工单消息、最近 ACR 快照和相似工单推荐，追问入口会先保存消息，再按工单版本和 Agent 配置提交新的 AI 分析任务。
 - 协同/AI 追问提交时，本次追问正文会作为 AI 分析任务的 `extraInstruction` 下发；若版本号、映射或 Agent/Provider 配置导致 AI 未发起，消息仍保留，前端会展示 `aiMessage` 失败原因并避免误提示为完整成功。
 - AI 分析结束后无论成功失败都会发送通知，通知内容会包含工单号、工单标题、项目名称、状态和摘要说明。
+- 按人催办使用多维表格数据源时，明细链接优先读取本地工单 `ticket_url`；本地未保存链接但记录包含飞书 `recordId` 时，会按人员催办配置的 `appToken/tableId/viewId` 生成飞书多维表格记录 URL，默认行模板的 `${detail_link}` 会自动带出可点击链接。
 - AI 协同追问的输出契约需要满足 Codex structured output 约束，`evidence`、`risk_items`、`next_steps` 也必须出现在 `required` 中；`symptom`、`similar_cases`、`sop_suggestion`、`monitoring_suggestion` 等增强字段允许为空或缺省，由服务端归一化补默认值，避免模型未产出扩展字段时任务失败。
 - AI 分析下发给 Agent 的日志正文会做中间截断，默认最多保留首尾约 80 万字符，并记录 `textTruncatedForAi` 与原始字符数，避免追问请求因超大上下文触发 Codex/OpenAI `bad_response_status_code`。
 - 工单关闭时会尝试从工单、RCA、事件和消息流自动生成知识库案例，知识文章关联原工单并刷新工单向量，供下一次相似工单检索复用。

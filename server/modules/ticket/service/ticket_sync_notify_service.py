@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import requests
-from sqlalchemy import or_, false
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from module_admin.dao.ai_provider_dao import AiProviderDao
@@ -39,9 +39,7 @@ class TicketSyncNotifyService:
         "统计时间：${now_time}\n\n"
         "${rows_markdown}"
     )
-    DEFAULT_PERSON_ROWS_MARKDOWN_TEMPLATE = (
-        "${index}. [${created_at}] 工单号：${ticket_no}${detail_link}"
-    )
+    DEFAULT_PERSON_ROWS_MARKDOWN_TEMPLATE = "${index}. [${created_at}] 工单号：${detail_link}"
     DEFAULT_GROUP_TEMPLATE = (
         "【工单同步通知】\n"
         "工单：${ticket_no}\n"
@@ -711,18 +709,18 @@ class TicketSyncNotifyService:
         if not app_id or not app_secret:
             return [], []
         mention_candidates: list[dict[str, Any]] = []
-        reporter_name = str(ticket.reporter_name or '').strip()
+        reporter_name = str(ticket.reporter_name or "").strip()
         if reporter_name:
-            mention_candidates.append({'role': 'reporter', 'name': reporter_name})
+            mention_candidates.append({"role": "reporter", "name": reporter_name})
         first_line_name = str(getattr(ticket, "first_line_assignee_name", "") or "").strip()
         if first_line_name and first_line_name != reporter_name:
-            mention_candidates.append({'role': 'first_line', 'name': first_line_name})
-        assignee_name = str(ticket.current_assignee_name or '').strip()
+            mention_candidates.append({"role": "first_line", "name": first_line_name})
+        assignee_name = str(ticket.current_assignee_name or "").strip()
         if assignee_name:
-            mention_candidates.append({'role': 'assignee', 'name': assignee_name})
+            mention_candidates.append({"role": "assignee", "name": assignee_name})
         internal_owner_name = str(getattr(ticket, "internal_owner_name", "") or "").strip()
         if internal_owner_name:
-            mention_candidates.append({'role': 'internal_owner', 'name': internal_owner_name})
+            mention_candidates.append({"role": "internal_owner", "name": internal_owner_name})
         if not mention_candidates:
             return [], []
 
@@ -730,15 +728,15 @@ class TicketSyncNotifyService:
         detail_rows: list[dict[str, Any]] = []
         feishu_user_cache: dict[str, dict[str, Any] | None] = {}
         for candidate in mention_candidates:
-            role = str(candidate.get('role') or '').strip()
-            name = str(candidate.get('name') or '').strip()
+            role = str(candidate.get("role") or "").strip()
+            name = str(candidate.get("name") or "").strip()
             email = cls._resolve_ticket_person_email(
                 db,
                 ticket=ticket,
                 person_role=role,
                 person_name=name,
             )
-            open_id = ''
+            open_id = ""
             feishu_user = None
             if email:
                 if email not in feishu_user_cache:
@@ -748,15 +746,15 @@ class TicketSyncNotifyService:
                         email=email,
                     )
                 feishu_user = feishu_user_cache.get(email) if isinstance(feishu_user_cache.get(email), dict) else None
-                open_id = str((feishu_user or {}).get('openId') or '').strip()
+                open_id = str((feishu_user or {}).get("openId") or "").strip()
                 if open_id and open_id not in open_ids:
                     open_ids.append(open_id)
             detail_rows.append(
                 {
-                    'role': role,
-                    'name': name or None,
-                    'email': email or None,
-                    'openId': open_id or None,
+                    "role": role,
+                    "name": name or None,
+                    "email": email or None,
+                    "openId": open_id or None,
                 }
             )
         return open_ids, detail_rows
@@ -770,46 +768,47 @@ class TicketSyncNotifyService:
         :return: mention 相关模板变量。
         """
         mention_open_ids: list[str] = []
-        reporter_open_id = ''
-        first_line_open_id = ''
-        assignee_open_id = ''
-        internal_owner_open_id = ''
+        reporter_open_id = ""
+        first_line_open_id = ""
+        assignee_open_id = ""
+        internal_owner_open_id = ""
         for item in mention_targets or []:
             if not isinstance(item, dict):
                 continue
-            role = str(item.get('role') or '').strip().lower()
-            open_id = str(item.get('openId') or '').strip()
+            role = str(item.get("role") or "").strip().lower()
+            open_id = str(item.get("openId") or "").strip()
             if not open_id:
                 continue
             if open_id not in mention_open_ids:
                 mention_open_ids.append(open_id)
-            if role == 'reporter' and not reporter_open_id:
+            if role == "reporter" and not reporter_open_id:
                 reporter_open_id = open_id
-            elif role == 'first_line' and not first_line_open_id:
+            elif role == "first_line" and not first_line_open_id:
                 first_line_open_id = open_id
-            elif role == 'assignee' and not assignee_open_id:
+            elif role == "assignee" and not assignee_open_id:
                 assignee_open_id = open_id
-            elif role == 'internal_owner' and not internal_owner_open_id:
+            elif role == "internal_owner" and not internal_owner_open_id:
                 internal_owner_open_id = open_id
         if not first_line_open_id:
             first_line_open_id = reporter_open_id
-        reporter_at = cls._build_feishu_at_tags([reporter_open_id]) if reporter_open_id else ''
-        first_line_at = cls._build_feishu_at_tags([first_line_open_id]) if first_line_open_id else ''
-        assignee_at = cls._build_feishu_at_tags([assignee_open_id]) if assignee_open_id else ''
-        internal_owner_at = cls._build_feishu_at_tags([internal_owner_open_id]) if internal_owner_open_id else ''
+        reporter_at = cls._build_feishu_at_tags([reporter_open_id]) if reporter_open_id else ""
+        first_line_at = cls._build_feishu_at_tags([first_line_open_id]) if first_line_open_id else ""
+        assignee_at = cls._build_feishu_at_tags([assignee_open_id]) if assignee_open_id else ""
+        internal_owner_at = cls._build_feishu_at_tags([internal_owner_open_id]) if internal_owner_open_id else ""
         mention_at = cls._build_feishu_at_tags(mention_open_ids)
         return {
-            'report_at': reporter_at,
-            'reporter_at': reporter_at,
-            'first_line_at': first_line_at,
-            'first_line_assignee_at': first_line_at,
-            'assignee_at': assignee_at,
-            'internal_owner_at': internal_owner_at,
-            'mention_at': mention_at,
-            'mention_all_at': mention_at,
-            'mention_open_ids': mention_open_ids,
-            'mention_targets': mention_targets,
+            "report_at": reporter_at,
+            "reporter_at": reporter_at,
+            "first_line_at": first_line_at,
+            "first_line_assignee_at": first_line_at,
+            "assignee_at": assignee_at,
+            "internal_owner_at": internal_owner_at,
+            "mention_at": mention_at,
+            "mention_all_at": mention_at,
+            "mention_open_ids": mention_open_ids,
+            "mention_targets": mention_targets,
         }
+
     @classmethod
     def _build_feishu_at_tags(cls, open_ids: list[str]) -> str:
         """
@@ -825,7 +824,7 @@ class TicketSyncNotifyService:
                 unique_ids.append(normalized_open_id)
         if not unique_ids:
             return ""
-        return " ".join([f"<at user_id=\"{open_id}\"></at>" for open_id in unique_ids])
+        return " ".join([f'<at user_id="{open_id}"></at>' for open_id in unique_ids])
 
     @classmethod
     def query_feishu_user_by_email(cls, *, app_id: str, app_secret: str, email: str) -> dict[str, Any] | None:
@@ -843,13 +842,16 @@ class TicketSyncNotifyService:
         try:
             token = cls._get_tenant_access_token(app_id, app_secret)
             batch_url = f"{cls.FEISHU_BASE_URL}/contact/v3/users/batch_get_id"
-            batch_data = cls._request_feishu_json(
-                method="POST",
-                url=batch_url,
-                tenant_access_token=token,
-                params={"user_id_type": "open_id"},
-                json_body={"emails": [normalized_email]},
-            ).get("data") or {}
+            batch_data = (
+                cls._request_feishu_json(
+                    method="POST",
+                    url=batch_url,
+                    tenant_access_token=token,
+                    params={"user_id_type": "open_id"},
+                    json_body={"emails": [normalized_email]},
+                ).get("data")
+                or {}
+            )
             user_list = batch_data.get("user_list") if isinstance(batch_data.get("user_list"), list) else []
             if not user_list:
                 return {"email": normalized_email}
@@ -858,12 +860,15 @@ class TicketSyncNotifyService:
             if not open_id:
                 return {"email": normalized_email}
             user_detail_url = f"{cls.FEISHU_BASE_URL}/contact/v3/users/{open_id}"
-            user_detail_data = cls._request_feishu_json(
-                method="GET",
-                url=user_detail_url,
-                tenant_access_token=token,
-                params={"user_id_type": "open_id"},
-            ).get("data") or {}
+            user_detail_data = (
+                cls._request_feishu_json(
+                    method="GET",
+                    url=user_detail_url,
+                    tenant_access_token=token,
+                    params={"user_id_type": "open_id"},
+                ).get("data")
+                or {}
+            )
             user_payload = user_detail_data.get("user") if isinstance(user_detail_data.get("user"), dict) else {}
             return {
                 "openId": open_id,
@@ -875,12 +880,53 @@ class TicketSyncNotifyService:
             return None
 
     @classmethod
-    def get_bitable_record_url(cls, config: dict[str, Any], record_id:str) -> str:
-        app_id, app_secret = cls._resolve_feishu_auth(config)
+    def get_bitable_record_url(cls, config: dict[str, Any], record_id: str) -> str:
+        """
+        根据多维表格配置和记录 ID 构建飞书记录详情 URL。
+
+        :param config: 人员催办配置，包含 appToken/tableId/viewId。
+        :param record_id: 飞书多维表格记录 ID。
+        :return: 可打开的飞书记录详情 URL，配置缺失时返回空字符串。
+        """
         app_token = str(config.get("appToken") or "").strip()
         table_id = str(config.get("tableId") or "").strip()
         view_id = str(config.get("viewId") or "").strip()
+        normalized_record_id = str(record_id or "").strip()
+        if not app_token or not table_id or not normalized_record_id:
+            return ""
         return f"https://feishu.cn/base/{app_token}?table={table_id}&view={view_id}&record={record_id}"
+
+    @classmethod
+    def _resolve_bitable_reminder_detail_url(
+        cls,
+        db: Session,
+        *,
+        config: dict[str, Any],
+        ticket_no: str,
+        record_id: str,
+        ticket_url_cache: dict[str, str],
+    ) -> str:
+        """
+        解析多维表格催办明细的详情 URL，优先使用本地工单 URL，缺失时回退飞书记录 URL。
+
+        :param db: 数据库会话。
+        :param config: 人员催办配置。
+        :param ticket_no: 工单号。
+        :param record_id: 飞书多维表格记录 ID。
+        :param ticket_url_cache: 本地工单 URL 缓存。
+        :return: 工单详情 URL 或飞书记录详情 URL。
+        """
+        detail_url = cls._resolve_ticket_detail_url_by_ticket_no(
+            db,
+            ticket_no=ticket_no,
+            ticket_url_cache=ticket_url_cache,
+        )
+        if detail_url:
+            return detail_url
+        fallback_url = cls.get_bitable_record_url(config, record_id)
+        if fallback_url:
+            logger.info(f"催办详情链接使用飞书多维表格记录兜底: ticket_no={ticket_no or '-'}, record_id={record_id}")
+        return fallback_url
 
     @classmethod
     def _normalize_bitable_filter_formula(cls, value: Any) -> dict:
@@ -897,12 +943,11 @@ class TicketSyncNotifyService:
                 return parsed
             except Exception as e:
                 logger.warning(f"参数错误：{filter_formula}, 错误：{e}")
-                raise ValueError('过滤公式格式错误，请直接填写飞书公式') from e
+                raise ValueError("过滤公式格式错误，请直接填写飞书公式") from e
         if not value:
             return {}
         else:
             return value
-
 
     @classmethod
     def query_bitable_records(cls, config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -939,13 +984,18 @@ class TicketSyncNotifyService:
                 params["view_id"] = view_id
             if filter_formula:
                 params["filter"] = filter_formula
+            query_data = {"with_shared_url": "true"}
             logger.info(f"飞书多维表格查询参数: {json.dumps(params, ensure_ascii=False)}")
-            response_data = cls._request_feishu_json(
-                method="POST",
-                url=url,
-                tenant_access_token=token,
-                json_body=params,
-            ).get("data") or {}
+            response_data = (
+                cls._request_feishu_json(
+                    method="POST",
+                    url=url,
+                    tenant_access_token=token,
+                    json_body=params,
+                    params=query_data,
+                ).get("data")
+                or {}
+            )
             page_records = response_data.get("items")
             # logger.info(
             #     f"多维表格数据结构：{json.dumps(page_records[0] if page_records else {}, ensure_ascii=False)}"
@@ -1027,7 +1077,7 @@ class TicketSyncNotifyService:
             created_at = cls._parse_datetime_value(row.get("createdAt"))
             created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
             ticket_no = cls._extract_ticket_no_from_row_payload(row) or "-"
-            detail_url = row.get('detailUrl', '')
+            detail_url = row.get("detailUrl", "")
             line_data = f"{index}. [{created_text}]（工单ID: {ticket_no}）"
             if detail_url:
                 line_data = f"{line_data} [详情]({row.get('detailUrl', '')})"
@@ -1054,9 +1104,9 @@ class TicketSyncNotifyService:
         for index, row in enumerate(rows[: max(max_rows, 1)], start=1):
             created_at = cls._parse_datetime_value(row.get("createdAt"))
             created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
-            ticket_no = cls._extract_ticket_no_from_row_payload(row) or "-"
+            ticket_no = row.get("ticketNo", "-")
             detail_url = str(row.get("detailUrl") or "").strip()
-            detail_link = f" [详情]({detail_url})" if detail_url else ""
+            detail_link = f" [{ticket_no}]({detail_url})" if detail_url else ""
             variables = {
                 "index": index,
                 "row_index": index,
@@ -1126,11 +1176,7 @@ class TicketSyncNotifyService:
             return ""
         if normalized_ticket_no in ticket_url_cache:
             return ticket_url_cache[normalized_ticket_no]
-        ticket_row = (
-            db.query(Ticket)
-            .filter(Ticket.ticket_no == normalized_ticket_no, Ticket.del_flag == "0")
-            .first()
-        )
+        ticket_row = db.query(Ticket).filter(Ticket.ticket_no == normalized_ticket_no, Ticket.del_flag == "0").first()
         detail_url = str(getattr(ticket_row, "ticket_url", "") or "").strip() if ticket_row else ""
         ticket_url_cache[normalized_ticket_no] = detail_url
         return detail_url
@@ -1345,6 +1391,17 @@ class TicketSyncNotifyService:
         return result
 
     @classmethod
+    def _collect_value_from_fields(cls, field_data):
+        if isinstance(field_data, dict):
+            return field_data.get("value", [])[0].get("text", "")
+        elif isinstance(field_data, list):
+            return field_data[0].get("text", "")
+        elif isinstance(field_data, str):
+            return field_data.strip()
+        else:
+            return field_data
+
+    @classmethod
     def _collect_person_overdue_data(
         cls,
         db: Session,
@@ -1352,7 +1409,7 @@ class TicketSyncNotifyService:
         config: dict[str, Any],
         user_id: int | None = None,
         email: str | None = None,
-        all:bool = False,
+        all: bool = False,
     ) -> dict[str, Any]:
         """
         统计按人聚合的超时记录。
@@ -1382,7 +1439,6 @@ class TicketSyncNotifyService:
         records = cls.query_bitable_records(config)
         now = datetime.now()
 
-
         grouped: dict[str, list[dict[str, Any]]] = {}
         skipped_no_person = 0
         skipped_no_time = 0
@@ -1410,7 +1466,7 @@ class TicketSyncNotifyService:
                 skipped_not_overdue += 1
                 continue
             record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
-            ticket_no = str(
+            ticket_no = (
                 fields.get("ticketNo")
                 or fields.get("ticket_no")
                 or fields.get("(IT)SNow工单号_TICKET_NO")
@@ -1418,10 +1474,14 @@ class TicketSyncNotifyService:
                 or fields.get("ticketId")
                 or fields.get("ticket_id")
                 or ""
-            ).strip()
-            detail_url = cls._resolve_ticket_detail_url_by_ticket_no(
+            )
+
+            ticket_no = cls._collect_value_from_fields(ticket_no)
+            detail_url = cls._resolve_bitable_reminder_detail_url(
                 db,
+                config=config,
                 ticket_no=ticket_no,
+                record_id=record_id,
                 ticket_url_cache=ticket_url_cache,
             )
             row_payload = {
@@ -1540,9 +1600,7 @@ class TicketSyncNotifyService:
                 resolved_user = user_by_id_cache.get(row_user_id)
             if not row_person_name and resolved_user:
                 row_person_name = str(
-                    getattr(resolved_user, "nick_name", "")
-                    or getattr(resolved_user, "user_name", "")
-                    or ""
+                    getattr(resolved_user, "nick_name", "") or getattr(resolved_user, "user_name", "") or ""
                 ).strip()
             if not row_person_name:
                 skipped_no_person += 1
@@ -1565,9 +1623,7 @@ class TicketSyncNotifyService:
                     "userName": getattr(resolved_user, "user_name", None) if resolved_user else None,
                     "nickName": getattr(resolved_user, "nick_name", None) if resolved_user else None,
                     "email": (
-                        cls._normalize_email(getattr(resolved_user, "email", "")) or None
-                        if resolved_user
-                        else None
+                        cls._normalize_email(getattr(resolved_user, "email", "")) or None if resolved_user else None
                     ),
                     "rows": [],
                 }
@@ -1613,9 +1669,7 @@ class TicketSyncNotifyService:
             if target_user_id and user_id_value != target_user_id:
                 continue
 
-            user_email = cls._normalize_email(
-                getattr(user, "email", "") if user else item.get("email")
-            )
+            user_email = cls._normalize_email(getattr(user, "email", "") if user else item.get("email"))
             if target_email and user_email != target_email:
                 continue
 
@@ -1866,12 +1920,7 @@ class TicketSyncNotifyService:
         :param db: 数据库会话。
         :return: 推送配置选项。
         """
-        rows = (
-            db.query(PushTarget)
-            .filter(PushTarget.allow_push == 1)
-            .order_by(PushTarget.create_time.desc())
-            .all()
-        )
+        rows = db.query(PushTarget).filter(PushTarget.allow_push == 1).order_by(PushTarget.create_time.desc()).all()
         return [
             {
                 "pushId": row.push_id,
@@ -1898,16 +1947,8 @@ class TicketSyncNotifyService:
         """
         sync_data = sync_summary if isinstance(sync_summary, dict) else {}
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        external_sync = (
-            extra_data.get("external_sync")
-            if isinstance(extra_data.get("external_sync"), dict)
-            else {}
-        )
-        source_snapshot = (
-            external_sync.get("source")
-            if isinstance(external_sync.get("source"), dict)
-            else {}
-        )
+        external_sync = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
+        source_snapshot = external_sync.get("source") if isinstance(external_sync.get("source"), dict) else {}
         external_field_mapping = (
             extra_data.get("external_field_mapping")
             if isinstance(extra_data.get("external_field_mapping"), dict)
@@ -2256,9 +2297,7 @@ class TicketSyncNotifyService:
                 continue
             category_value = cls._normalize_summary_counter_label(fields.get(category_field)) or "未分类"
             priority_value = (
-                cls._normalize_priority(
-                    cls._normalize_summary_counter_label(fields.get(priority_field))
-                )
+                cls._normalize_priority(cls._normalize_summary_counter_label(fields.get(priority_field)))
                 or "未知优先级"
             )
             status_counter[status_value] = status_counter.get(status_value, 0) + 1
@@ -2406,8 +2445,7 @@ class TicketSyncNotifyService:
         if config_errors:
             skip_reason = "；".join(config_errors)
             logger.warning(
-                f"工单汇总通知跳过: trigger={trigger_source}, "
-                f"data_source={data_source}, reason={skip_reason}"
+                f"工单汇总通知跳过: trigger={trigger_source}, data_source={data_source}, reason={skip_reason}"
             )
             return {
                 "triggerSource": trigger_source,
