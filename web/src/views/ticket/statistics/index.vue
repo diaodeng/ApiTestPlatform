@@ -41,7 +41,6 @@
           filterable
           placeholder="所属模块"
           style="width: 280px"
-          :disabled="!selectedProjectIds.length"
         >
           <el-option
             v-for="item in moduleOptions"
@@ -305,12 +304,10 @@ function loadProjectOptions() {
 
 async function loadModuleOptions(projectIds = []) {
   const ids = Array.isArray(projectIds) ? projectIds.filter(Boolean) : []
-  if (!ids.length) {
-    moduleOptions.value = []
-    selectedModuleIds.value = []
-    return
-  }
-  const responses = await Promise.all(ids.map(projectId => listTicketModuleOptions({ projectId })))
+  const requests = ids.length
+    ? ids.map(projectId => listTicketModuleOptions({ projectId }))
+    : [listTicketModuleOptions({})]
+  const responses = await Promise.all(requests)
   const moduleMap = new Map()
   responses.forEach(response => {
     ;(response.data || []).forEach(item => {
@@ -339,8 +336,8 @@ function resetQuery() {
   dateRange.value = []
   selectedProjectIds.value = []
   selectedModuleIds.value = []
-  moduleOptions.value = []
   queryParams.value = { beginTime: undefined, endTime: undefined }
+  loadModuleOptions([])
   getStatistics()
 }
 
@@ -391,7 +388,7 @@ function formatTransition(row) {
   return `${fromStatus} -> ${getOptionLabel(ticketStatusOptions, row.toStatus)}`
 }
 
-loadProjectOptions()
+loadProjectOptions().then(() => loadModuleOptions([]))
 loadStatClassificationOptions()
 getStatistics()
 </script>

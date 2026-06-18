@@ -56,7 +56,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="模块" prop="moduleId">
-        <el-select v-model="queryParams.moduleId" placeholder="所属模块" clearable filterable :disabled="!queryParams.projectId" style="width: 180px">
+        <el-select v-model="queryParams.moduleId" placeholder="所属模块" clearable filterable style="width: 180px">
           <el-option v-for="item in queryModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
         </el-select>
       </el-form-item>

@@ -2452,13 +2452,12 @@ class TicketService:
         """
         获取工单可选测试模块列表。
         :param query_db: 数据库会话
-        :param project_id: 目标项目ID；为空时返回空列表
+        :param project_id: 目标项目ID；为空时返回全部有效模块
         :return: 模块选项列表
         """
-        if not project_id:
-            return []
         query = query_db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
-        query = query.filter(HrmModule.project_id == project_id)
+        if project_id:
+            query = query.filter(HrmModule.project_id == project_id)
         modules = query.order_by(HrmModule.sort.asc(), HrmModule.create_time.desc()).all()
         seen_module_ids: set[int] = set()
         unique_modules = []

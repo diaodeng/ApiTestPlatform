@@ -15,6 +15,7 @@ updated: 2026-05-20
 - 更新的页面：`web/src/views/ticket/statistics/index.vue`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/controller/ticket_controller.py`、`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/dao/ticket_dao.py`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
 - 创建的双向链接：0 对
 - 变更传播链：统计页多选筛选 -> `TicketStatisticsQueryModel.projectIds/moduleIds` -> `TicketService.get_statistics_services` -> `TicketDao.get_ticket_statistics`
+- 追加：模块筛选改为未选择项目时展示全部有效模块，选择项目后展示所选项目下模块；工单列表页同步使用该筛选规则。
 - 总共涉及页面：8
 
 ## [2026-06-18] INGEST-CODE | 工单 AI Agent 已登记 worktree 分支复用
