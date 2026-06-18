@@ -961,12 +961,21 @@ class TicketDao:
         return PageUtil.paginate(article_query, query.page_num, query.page_size, query.is_page)
 
     @classmethod
-    def get_ticket_statistics(cls, db: Session, begin_time: datetime | None, end_time: datetime | None) -> dict:
+    def get_ticket_statistics(
+        cls,
+        db: Session,
+        begin_time: datetime | None,
+        end_time: datetime | None,
+        project_ids: list[int] | None = None,
+        module_ids: list[int] | None = None,
+    ) -> dict:
         """
         实时统计指定时间范围内的工单数量、分类和人员处理量。
         :param db: 数据库会话
         :param begin_time: 开始时间
         :param end_time: 结束时间
+        :param project_ids: 项目ID多选过滤
+        :param module_ids: 模块ID多选过滤
         :return: 统计结果
         """
         filters = [Ticket.del_flag == "0"]
@@ -974,6 +983,10 @@ class TicketDao:
             filters.append(Ticket.create_time >= begin_time)
         if end_time:
             filters.append(Ticket.create_time <= end_time)
+        if project_ids:
+            filters.append(Ticket.project_id.in_(project_ids))
+        if module_ids:
+            filters.append(Ticket.module_id.in_(module_ids))
 
         base_filter = and_(*filters)
         total = db.query(func.count(Ticket.ticket_id)).filter(base_filter).scalar() or 0
@@ -1052,6 +1065,10 @@ class TicketDao:
             transition_filters.append(TicketStatusHistory.create_time >= begin_time)
         if end_time:
             transition_filters.append(TicketStatusHistory.create_time <= end_time)
+        if project_ids:
+            transition_filters.append(Ticket.project_id.in_(project_ids))
+        if module_ids:
+            transition_filters.append(Ticket.module_id.in_(module_ids))
         transition_rows = (
             db.query(
                 TicketStatusHistory.from_status,

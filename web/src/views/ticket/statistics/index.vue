@@ -11,6 +11,46 @@
           end-placeholder="结束日期"
         />
       </el-form-item>
+      <el-form-item label="项目">
+        <el-select
+          v-model="selectedProjectIds"
+          multiple
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          filterable
+          placeholder="所属项目"
+          style="width: 260px"
+          @change="handleProjectChange"
+        >
+          <el-option
+            v-for="item in projectOptions"
+            :key="item.projectId"
+            :label="item.projectName"
+            :value="item.projectId"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="模块">
+        <el-select
+          v-model="selectedModuleIds"
+          multiple
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          filterable
+          placeholder="所属模块"
+          style="width: 280px"
+          :disabled="!selectedProjectIds.length"
+        >
+          <el-option
+            v-for="item in moduleOptions"
+            :key="`${item.projectId}-${item.moduleId}`"
+            :label="formatModuleOptionLabel(item)"
+            :value="item.moduleId"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">查询</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -197,12 +237,21 @@
 </template>
 
 <script setup name="TicketStatistics">
-import { getTicketStatClassificationOptions, getTicketStatistics } from '@/api/ticket/ticket'
+import {
+  getTicketStatClassificationOptions,
+  getTicketStatistics,
+  listTicketModuleOptions,
+  listTicketProjectOptions
+} from '@/api/ticket/ticket'
 import { getOptionLabel, sourceOptions, ticketStatusOptions } from '../constants'
 
 const loading = ref(false)
 const dateRange = ref([])
 const overview = ref({})
+const projectOptions = ref([])
+const moduleOptions = ref([])
+const selectedProjectIds = ref([])
+const selectedModuleIds = ref([])
 const issueTypeOptions = ref([])
 const rootCauseTypeOptions = ref([])
 const solutionTypeOptions = ref([])
@@ -214,11 +263,19 @@ const queryParams = ref({
 
 function getStatistics() {
   loading.value = true
-  getTicketStatistics(queryParams.value).then(response => {
+  getTicketStatistics(buildQueryParams()).then(response => {
     overview.value = response.data || {}
   }).finally(() => {
     loading.value = false
   })
+}
+
+function buildQueryParams() {
+  return {
+    ...queryParams.value,
+    projectIds: selectedProjectIds.value.length ? selectedProjectIds.value.join(',') : undefined,
+    moduleIds: selectedModuleIds.value.length ? selectedModuleIds.value.join(',') : undefined
+  }
 }
 
 function normalizeStatOptions(items = []) {
@@ -240,6 +297,38 @@ function loadStatClassificationOptions() {
   })
 }
 
+function loadProjectOptions() {
+  return listTicketProjectOptions().then(response => {
+    projectOptions.value = response.data || []
+  })
+}
+
+async function loadModuleOptions(projectIds = []) {
+  const ids = Array.isArray(projectIds) ? projectIds.filter(Boolean) : []
+  if (!ids.length) {
+    moduleOptions.value = []
+    selectedModuleIds.value = []
+    return
+  }
+  const responses = await Promise.all(ids.map(projectId => listTicketModuleOptions({ projectId })))
+  const moduleMap = new Map()
+  responses.forEach(response => {
+    ;(response.data || []).forEach(item => {
+      const key = `${item.projectId || ''}-${item.moduleId}`
+      if (item.moduleId && !moduleMap.has(key)) {
+        moduleMap.set(key, item)
+      }
+    })
+  })
+  moduleOptions.value = Array.from(moduleMap.values())
+  const validModuleIds = new Set(moduleOptions.value.map(item => item.moduleId))
+  selectedModuleIds.value = selectedModuleIds.value.filter(moduleId => validModuleIds.has(moduleId))
+}
+
+function handleProjectChange(projectIds) {
+  loadModuleOptions(projectIds)
+}
+
 function handleQuery() {
   queryParams.value.beginTime = dateRange.value?.[0]
   queryParams.value.endTime = dateRange.value?.[1]
@@ -248,6 +337,9 @@ function handleQuery() {
 
 function resetQuery() {
   dateRange.value = []
+  selectedProjectIds.value = []
+  selectedModuleIds.value = []
+  moduleOptions.value = []
   queryParams.value = { beginTime: undefined, endTime: undefined }
   getStatistics()
 }
@@ -289,11 +381,17 @@ function formatResolution(row) {
   return getStatOptionLabel(resolutionOptions, row.resolutionCode)
 }
 
+function formatModuleOptionLabel(item) {
+  const project = projectOptions.value.find(projectItem => projectItem.projectId === item.projectId)
+  return project?.projectName ? `${project.projectName} / ${item.moduleName}` : item.moduleName
+}
+
 function formatTransition(row) {
   const fromStatus = row.fromStatus === '创建' ? '创建' : getOptionLabel(ticketStatusOptions, row.fromStatus)
   return `${fromStatus} -> ${getOptionLabel(ticketStatusOptions, row.toStatus)}`
 }
 
+loadProjectOptions()
 loadStatClassificationOptions()
 getStatistics()
 </script>

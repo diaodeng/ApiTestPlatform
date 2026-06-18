@@ -1,5 +1,9 @@
 ## 2026-06-18
 
+1. 工单统计页顶部新增项目、模块多选筛选；模块候选按已选项目加载，统计接口支持 `projectIds/moduleIds` 逗号分隔参数。
+2. 工单统计接口改为在线程池执行同步聚合查询，避免大统计阻塞 FastAPI 事件循环。
+3. 新增说明文档：`web/public/docs/2026-06-18-ticket-statistics-project-module-multiselect.md`。
+
 1. 修复工单 AI Agent 创建分支 worktree 时，目标固定目录不存在但同分支已登记在旧工作区路径下会报 `already used by worktree` 的问题；Agent 现在会先读取 `git worktree list --porcelain` 并复用已登记且分支校验通过的目录。
 2. 新增说明文档：`web/public/docs/2026-06-18-ticket-ai-worktree-registered-branch-reuse.md`。
 

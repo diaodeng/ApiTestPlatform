@@ -55,6 +55,7 @@ graph TD
 - 历史 `ticket.sync.automation.aiClassification.promptContent` 不再作为新编辑入口，但保存同步配置时会保留并作为旧环境兜底，避免默认模板缺失时影响现有分类统计链路。
 - 工单列表、状态流转、RCA、外部同步入库和统计页均读取同一套枚举配置；旧 `category_name` 与 `categoryCounts` 继续保留兼容，不再承担新统计主维度。
 - 工单列表展示工单类型时只读取 `issue_type_name` 或命中配置的 `issue_type_id`，不再回退 `category_name`，避免历史分类/模块文案误显示为新工单类型。
+- 工单统计页支持按项目和模块多选筛选；`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds` 逗号分隔参数，后端所有统计维度和状态流转统计都共用该过滤条件。
 - 工单编辑弹窗回填时会抑制项目监听器误清空 `module_id`，模块下拉变更和提交前会按 `module_id` 补齐 `module_name`，保证列表模块列在编辑保存后不丢失。
 - 若工单的 `module_name` 来自外部同步或历史数据且无法匹配当前项目 HRM 模块，编辑弹窗会以可创建下拉项形式原样展示并保存文本；只有用户手动选择现有模块时才切换为标准 `module_id/module_name`。
 - `first_line_assignee_name` 与 `internal_owner_name` 允许在对应用户 ID 为空时作为原始名称保留，编辑页通过同一个人员选择控件显示，匹配不到现有用户时不强制清空名称。

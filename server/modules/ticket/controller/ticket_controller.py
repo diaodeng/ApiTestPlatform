@@ -2297,12 +2297,19 @@ async def get_ticket_statistics(
     """
     获取工单统计接口。
     :param request: 请求对象
-    :param query: 时间范围参数
+    :param query: 时间范围、项目ID和模块ID筛选参数
     :param query_db: 数据库会话
     :return: 总量、平均处理耗时、状态分布、分类分布和人员处理量
     """
     try:
-        statistics = TicketService.get_statistics_services(query_db, query.begin_time, query.end_time)
+        statistics = await run_in_threadpool(
+            TicketService.get_statistics_services,
+            query_db,
+            query.begin_time,
+            query.end_time,
+            query.project_ids,
+            query.module_ids,
+        )
         return ResponseUtil.success(data=statistics)
     except Exception as e:
         logger.exception(e)

@@ -848,3 +848,5 @@ class TicketStatisticsQueryModel(QueryModel):
 
     begin_time: date | datetime | str | None = Field(default=None, description="开始时间")
     end_time: date | datetime | str | None = Field(default=None, description="结束时间")
+    project_ids: str | list[int] | None = Field(default=None, description="项目ID多选，支持逗号分隔或数组")
+    module_ids: str | list[int] | None = Field(default=None, description="模块ID多选，支持逗号分隔或数组")

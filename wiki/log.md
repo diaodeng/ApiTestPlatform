@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-18] INGEST-CODE | 工单统计项目模块多选筛选
+- 触发：用户要求工单统计页面顶部增加按项目、模块筛选，并支持多选。
+- 架构层：工单域 / Web 控制台 / 统计接口
+- 创建的页面：`web/public/docs/2026-06-18-ticket-statistics-project-module-multiselect.md`
+- 更新的页面：`web/src/views/ticket/statistics/index.vue`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/controller/ticket_controller.py`、`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/dao/ticket_dao.py`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：统计页多选筛选 -> `TicketStatisticsQueryModel.projectIds/moduleIds` -> `TicketService.get_statistics_services` -> `TicketDao.get_ticket_statistics`
+- 总共涉及页面：8
+
 ## [2026-06-18] INGEST-CODE | 工单 AI Agent 已登记 worktree 分支复用
 - 触发：用户反馈工单 AI 分析创建 `wemn_vender_master_1.3.8.41` 分支 worktree 时，目标目录不存在但 Git 提示该分支已被旧工作区路径占用。
 - 架构层：工单域 / client_new Agent / Git worktree
