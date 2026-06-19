@@ -17,7 +17,14 @@
   - `GET /ticket/logs/context`
   - `POST /ticket/logs/search_time`
   - `POST /ticket/logs/errors`
-- 搜索使用 `rg`，避免 Python 逐行遍历大文件。
+- 搜索读取模式由环境变量 `TICKET_LOG_SEARCH_MODE` 控制，取值 `auto/native/python`：
+  - 默认 `auto`，优先查找 `rg`、`rg.exe`、`ripgrep`、`ripgrep.exe`。
+  - 找不到原生工具或原生工具执行失败时，会记录日志并降级为 Python 逐文件搜索。
+  - `python` 强制使用 Python 读取，适合没有 ripgrep 的环境。
+- 上下文读取模式由环境变量 `TICKET_LOG_CONTEXT_MODE` 控制，取值 `auto/native/python`：
+  - 默认 `auto` 使用 Python 行偏移索引读取，适合按行号精确取前后文。
+  - `native` 会尝试用系统命令读取当前文件行段：Windows 使用 PowerShell，Linux/macOS 使用 `sed`；失败后降级为 Python 行偏移索引。
+  - `python` 强制使用 Python 行偏移索引。
 - 上下文读取使用 `.lineidx` 行偏移索引：
   - 首次查看某个日志文件时扫描一次生成“行号 -> 字节偏移”索引。
   - 后续按前端传入的中心行号和前后行数直接 `seek` 读取目标行段，不再为每次上下文查看扫描整份日志。
@@ -44,5 +51,6 @@
 
 ## 注意事项
 - 当前实现复用最新一条日志拉取记录的归档文件或原始下载地址，不新增数据库表。
-- 使用搜索能力前服务端环境需要安装 `rg`。
+- 推荐服务端安装 `rg`，搜索会更快；未安装时会自动降级为 Python 搜索。
+- 按行号读取上下文时，Python 行偏移索引更适合当前需求；原生命令方式每次通常仍需要从文件头扫描到目标行，主要作为可配置兼容方案保留。
 - 处理 `.rar`、`.7z` 需要安装 `7z`。

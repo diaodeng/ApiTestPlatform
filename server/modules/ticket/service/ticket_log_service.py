@@ -4,6 +4,7 @@ import bz2
 import gzip
 import json
 import lzma
+import os
 import re
 import shutil
 import subprocess
@@ -44,6 +45,8 @@ class LogService:
     ERROR_KEYWORDS = ("ERROR", "Exception", "Traceback", "timeout", "failed")
     MAX_RECURSIVE_EXTRACT_ROUNDS = 20
     LINE_INDEX_SUFFIX = ".lineidx"
+    SEARCH_MODE_ENV = "TICKET_LOG_SEARCH_MODE"
+    CONTEXT_MODE_ENV = "TICKET_LOG_CONTEXT_MODE"
 
     @classmethod
     def prepare(cls, db: Session, ticket_id: int) -> TicketLogPrepareModel:
@@ -185,7 +188,22 @@ class LogService:
         extract_dir = cls._extract_dir(ticket_id)
         if not extract_dir.exists():
             return []
-        command = ["rg", "-n", "--no-heading", "--color", "never", "--fixed-strings", keyword, "."]
+        search_mode = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
+        if search_mode == "python":
+            logger.info(f"日志搜索使用 Python 降级模式，ticket_id={ticket_id}，keyword={keyword}")
+            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
+
+        executable = (
+            shutil.which("rg")
+            or shutil.which("rg.exe")
+            or shutil.which("ripgrep")
+            or shutil.which("ripgrep.exe")
+        )
+        if not executable:
+            logger.warning(f"未找到 rg/ripgrep，日志搜索降级为 Python，ticket_id={ticket_id}，keyword={keyword}")
+            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
+
+        command = [executable, "-n", "--no-heading", "--color", "never", "--fixed-strings", keyword, "."]
         try:
             process = subprocess.run(
                 command,
@@ -196,9 +214,14 @@ class LogService:
                 errors="replace",
             )
         except FileNotFoundError as exc:
-            raise RuntimeError("未找到 ripgrep(rg)，请先安装 rg 后再使用日志搜索") from exc
+            logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
+            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
         if process.returncode not in (0, 1):
-            raise RuntimeError(f"日志搜索执行失败：{process.stderr.strip() or process.stdout.strip()}")
+            logger.warning(
+                f"rg 搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，"
+                f"reason={process.stderr.strip() or process.stdout.strip()}"
+            )
+            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
 
         hits: list[TicketLogSearchHitModel] = []
         for raw_line in process.stdout.splitlines():
@@ -223,6 +246,29 @@ class LogService:
         :param after: 后置行数
         :return: 上下文内容
         """
+        context_mode = cls._resolve_mode(cls.CONTEXT_MODE_ENV, default="auto")
+        if context_mode == "native":
+            try:
+                return cls._context_by_native(ticket_id, file_path, line_no, before, after)
+            except Exception as exc:
+                logger.warning(f"原生命令读取日志上下文失败，降级为 Python 行索引，ticket_id={ticket_id}，reason={exc}")
+        elif context_mode == "auto":
+            logger.debug(f"日志上下文读取使用 Python 行索引模式，ticket_id={ticket_id}，file={file_path}")
+        return cls._context_by_python(ticket_id, file_path, line_no, before, after)
+
+    @classmethod
+    def _context_by_python(
+        cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int
+    ) -> TicketLogContextModel:
+        """
+        使用 Python 行偏移索引读取日志上下文。
+        :param ticket_id: 工单ID
+        :param file_path: 相对日志文件路径
+        :param line_no: 中心行号
+        :param before: 前置行数
+        :param after: 后置行数
+        :return: 上下文内容
+        """
         normalized_file = cls._normalize_relative_path(file_path)
         target_path = cls._resolve_log_file(ticket_id, normalized_file)
         center = max(int(line_no or 1), 1)
@@ -233,63 +279,17 @@ class LogService:
         bounded_center = min(center, max(total, 1))
         start = max(bounded_center - before_count, 1)
         end = min(bounded_center + after_count, total)
-
-        context_parts: list[tuple[str, int, str]] = []
-        missing_before = max(before_count - (bounded_center - start), 0)
-        missing_after = max(after_count - (end - bounded_center), 0)
-        previous_file = None
-        next_file = None
-        if missing_before > 0:
-            previous_file = cls._adjacent_log_file(ticket_id, normalized_file, direction="previous")
-            if previous_file:
-                previous_path = cls._resolve_log_file(ticket_id, previous_file)
-                previous_index = cls._ensure_line_index(previous_path)
-                previous_total = int(previous_index.get("line_count") or 0)
-                previous_start = max(previous_total - missing_before + 1, 1)
-                context_parts.extend(
-                    (previous_file, line, content)
-                    for line, content in cls._read_lines_by_index(previous_path, previous_start, previous_total)
-                )
-
-        context_parts.extend(
-            (normalized_file, line, content) for line, content in cls._read_lines_by_index(target_path, start, end)
-        )
-
-        if missing_after > 0:
-            next_file = cls._adjacent_log_file(ticket_id, normalized_file, direction="next")
-            if next_file:
-                next_path = cls._resolve_log_file(ticket_id, next_file)
-                context_parts.extend(
-                    (next_file, line, content)
-                    for line, content in cls._read_lines_by_index(next_path, 1, missing_after)
-                )
-
-        context_lines = [
-            TicketLogContextLineModel(file=line_file, line=index, content=content.rstrip("\r\n"))
-            for line_file, index, content in context_parts
-        ]
-        has_prev = start > 1 or cls._adjacent_log_file(ticket_id, normalized_file, direction="previous") is not None
-        has_next = end < total or cls._adjacent_log_file(ticket_id, normalized_file, direction="next") is not None
-        prev_file, prev_line = cls._build_context_page_pointer(
-            ticket_id, normalized_file, start, end, total, direction="previous"
-        )
-        next_file, next_line = cls._build_context_page_pointer(
-            ticket_id, normalized_file, start, end, total, direction="next"
-        )
-        return TicketLogContextModel(
+        current_lines = cls._read_lines_by_index(target_path, start, end)
+        return cls._build_context_model(
             ticket_id=ticket_id,
-            file=normalized_file,
-            line=bounded_center,
+            file_path=normalized_file,
+            center=bounded_center,
             start=start,
             end=end,
-            has_prev=has_prev,
-            has_next=has_next,
-            prev_file=prev_file,
-            prev_line=prev_line,
-            next_file=next_file,
-            next_line=next_line,
-            total_lines=total,
-            lines=context_lines,
+            total=total,
+            before_count=before_count,
+            after_count=after_count,
+            current_lines=current_lines,
         )
 
     @classmethod
@@ -313,6 +313,83 @@ class LogService:
         :return: 搜索命中列表
         """
         return cls.search(ticket_id, time_keyword, context_before, context_after, limit, with_context)
+
+    @classmethod
+    def _search_by_python(
+        cls,
+        ticket_id: int,
+        keyword: str,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        Python 降级搜索实现，在没有 rg/ripgrep 时使用。
+        :param ticket_id: 工单ID
+        :param keyword: 搜索关键字
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :return: 搜索命中列表
+        """
+        hits: list[TicketLogSearchHitModel] = []
+        for file_item in cls.files(ticket_id):
+            if len(hits) >= limit:
+                break
+            path = cls._resolve_log_file(ticket_id, file_item.file)
+            encoding = cls._detect_file_encoding(path)
+            with path.open("r", encoding=encoding, errors="replace") as file_obj:
+                for line_no, content in enumerate(file_obj, start=1):
+                    if keyword not in content:
+                        continue
+                    hit = TicketLogSearchHitModel(
+                        file=file_item.file,
+                        line=line_no,
+                        content=content.rstrip("\r\n"),
+                    )
+                    if with_context:
+                        hit.context = cls.context(ticket_id, file_item.file, line_no, context_before, context_after)
+                    hits.append(hit)
+                    if len(hits) >= limit:
+                        break
+        return hits
+
+    @classmethod
+    def _context_by_native(
+        cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int
+    ) -> TicketLogContextModel:
+        """
+        使用系统命令读取当前文件上下文，再复用 Python 索引补跨文件边界。
+        :param ticket_id: 工单ID
+        :param file_path: 相对日志文件路径
+        :param line_no: 中心行号
+        :param before: 前置行数
+        :param after: 后置行数
+        :return: 上下文内容
+        """
+        normalized_file = cls._normalize_relative_path(file_path)
+        target_path = cls._resolve_log_file(ticket_id, normalized_file)
+        center = max(int(line_no or 1), 1)
+        before_count = max(int(before or 0), 0)
+        after_count = max(int(after or 0), 0)
+        total = int(cls._ensure_line_index(target_path).get("line_count") or 0)
+        bounded_center = min(center, max(total, 1))
+        start = max(bounded_center - before_count, 1)
+        end = min(bounded_center + after_count, total)
+        current_lines = cls._read_current_file_lines_by_native(target_path, start, end)
+        return cls._build_context_model(
+            ticket_id=ticket_id,
+            file_path=normalized_file,
+            center=bounded_center,
+            start=start,
+            end=end,
+            total=total,
+            before_count=before_count,
+            after_count=after_count,
+            current_lines=current_lines,
+        )
 
     @classmethod
     def errors(cls, ticket_id: int, limit: int = 100) -> TicketLogErrorSummaryModel:
@@ -579,6 +656,131 @@ class LogService:
         return meta
 
     @classmethod
+    def _build_context_model(
+        cls,
+        ticket_id: int,
+        file_path: str,
+        center: int,
+        start: int,
+        end: int,
+        total: int,
+        before_count: int,
+        after_count: int,
+        current_lines: list[tuple[int, str]],
+    ) -> TicketLogContextModel:
+        """
+        统一组装上下文响应，并在当前文件边界不足时跨轮转文件补齐上下文。
+        :param ticket_id: 工单ID
+        :param file_path: 当前日志相对路径
+        :param center: 当前中心行
+        :param start: 当前文件开始行
+        :param end: 当前文件结束行
+        :param total: 当前文件总行数
+        :param before_count: 需要的前置上下文行数
+        :param after_count: 需要的后置上下文行数
+        :param current_lines: 当前文件已读取行
+        :return: 上下文响应
+        """
+        context_parts: list[tuple[str, int, str]] = []
+        missing_before = max(before_count - (center - start), 0)
+        missing_after = max(after_count - (end - center), 0)
+        if missing_before > 0:
+            previous_file = cls._adjacent_log_file(ticket_id, file_path, direction="previous")
+            if previous_file:
+                previous_path = cls._resolve_log_file(ticket_id, previous_file)
+                previous_index = cls._ensure_line_index(previous_path)
+                previous_total = int(previous_index.get("line_count") or 0)
+                previous_start = max(previous_total - missing_before + 1, 1)
+                context_parts.extend(
+                    (previous_file, line, content)
+                    for line, content in cls._read_lines_by_index(previous_path, previous_start, previous_total)
+                )
+
+        context_parts.extend((file_path, line, content) for line, content in current_lines)
+
+        if missing_after > 0:
+            next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next")
+            if next_file:
+                next_path = cls._resolve_log_file(ticket_id, next_file)
+                context_parts.extend(
+                    (next_file, line, content)
+                    for line, content in cls._read_lines_by_index(next_path, 1, missing_after)
+                )
+
+        context_lines = [
+            TicketLogContextLineModel(file=line_file, line=index, content=content.rstrip("\r\n"))
+            for line_file, index, content in context_parts
+        ]
+        has_prev = start > 1 or cls._adjacent_log_file(ticket_id, file_path, direction="previous") is not None
+        has_next = end < total or cls._adjacent_log_file(ticket_id, file_path, direction="next") is not None
+        prev_file, prev_line = cls._build_context_page_pointer(
+            ticket_id, file_path, start, end, total, direction="previous"
+        )
+        next_file, next_line = cls._build_context_page_pointer(
+            ticket_id, file_path, start, end, total, direction="next"
+        )
+        return TicketLogContextModel(
+            ticket_id=ticket_id,
+            file=file_path,
+            line=center,
+            start=start,
+            end=end,
+            has_prev=has_prev,
+            has_next=has_next,
+            prev_file=prev_file,
+            prev_line=prev_line,
+            next_file=next_file,
+            next_line=next_line,
+            total_lines=total,
+            lines=context_lines,
+        )
+
+    @classmethod
+    def _read_current_file_lines_by_native(cls, path: Path, start: int, end: int) -> list[tuple[int, str]]:
+        """
+        使用系统工具读取当前文件指定行段。
+        :param path: 日志文件路径
+        :param start: 起始行号
+        :param end: 结束行号
+        :return: 行号与内容列表
+        """
+        if end < start:
+            return []
+        count = end - start + 1
+        if os.name == "nt":
+            executable = shutil.which("powershell") or shutil.which("powershell.exe")
+            if not executable:
+                raise RuntimeError("未找到 PowerShell")
+            escaped_path = str(path).replace("'", "''")
+            powershell_command = (
+                "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::UTF8;"
+                f"Get-Content -LiteralPath '{escaped_path}' "
+                f"| Select-Object -Skip {start - 1} -First {count}"
+            )
+            command = [
+                executable,
+                "-NoProfile",
+                "-Command",
+                powershell_command,
+            ]
+        else:
+            executable = shutil.which("sed")
+            if not executable:
+                raise RuntimeError("未找到 sed")
+            command = [executable, "-n", f"{start},{end}p", str(path)]
+
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "原生命令读取上下文失败")
+        return [(line_no, content) for line_no, content in enumerate(process.stdout.splitlines(), start=start)]
+
+    @classmethod
     def _read_lines_by_index(cls, path: Path, start: int, end: int) -> list[tuple[int, str]]:
         """
         基于行索引读取指定行范围，不扫描整份日志。
@@ -808,6 +1010,20 @@ class LogService:
         if not text:
             return ""
         return text[:200]
+
+    @classmethod
+    def _resolve_mode(cls, env_key: str, default: str = "auto") -> str:
+        """
+        从环境变量读取日志读取模式，非法值按默认值处理。
+        :param env_key: 环境变量名称
+        :param default: 默认模式
+        :return: auto/native/python
+        """
+        value = str(os.getenv(env_key) or default or "auto").strip().lower()
+        if value not in {"auto", "native", "python"}:
+            logger.warning(f"日志读取模式配置非法，env_key={env_key}，value={value}，fallback={default}")
+            return default
+        return value
 
     @classmethod
     def _write_meta(cls, path: Path, payload: dict[str, Any]) -> None:
