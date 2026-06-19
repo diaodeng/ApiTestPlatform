@@ -356,6 +356,124 @@ class TicketLogPullContentQueryModel(TicketLogPullBaseModel):
         return self
 
 
+class TicketLogPrepareRequestModel(TicketLogPullBaseModel):
+    """
+    工单日志查看准备请求模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+
+
+class TicketLogPrepareModel(TicketLogPullBaseModel):
+    """
+    工单日志查看准备结果模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    prepared: bool = Field(default=False, description="是否已准备完成")
+    source_path: str | None = Field(default=None, description="本地缓存的原始压缩包路径")
+    extract_path: str | None = Field(default=None, description="日志解压目录")
+    file_count: int = Field(default=0, description="识别到的日志文本文件数")
+    message: str | None = Field(default=None, description="准备结果说明")
+
+
+class TicketLogFileModel(TicketLogPullBaseModel):
+    """
+    工单日志文件列表项模型。
+    """
+
+    file: str = Field(description="相对日志文件路径")
+    size: int = Field(default=0, description="文件大小")
+    modified_at: datetime | None = Field(default=None, description="文件修改时间")
+
+
+class TicketLogContextLineModel(TicketLogPullBaseModel):
+    """
+    日志上下文单行模型。
+    """
+
+    file: str | None = Field(default=None, description="相对日志文件路径，跨文件上下文时用于标识来源")
+    line: int = Field(description="行号")
+    content: str = Field(default="", description="行内容")
+
+
+class TicketLogContextModel(TicketLogPullBaseModel):
+    """
+    日志上下文响应模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    file: str = Field(description="相对日志文件路径")
+    line: int = Field(description="命中行号")
+    start: int = Field(description="上下文开始行")
+    end: int = Field(description="上下文结束行")
+    has_prev: bool = Field(default=False, description="是否还有上一段")
+    has_next: bool = Field(default=False, description="是否还有下一段")
+    prev_file: str | None = Field(default=None, description="上一段建议读取文件")
+    prev_line: int | None = Field(default=None, description="上一段建议中心行")
+    next_file: str | None = Field(default=None, description="下一段建议读取文件")
+    next_line: int | None = Field(default=None, description="下一段建议中心行")
+    total_lines: int = Field(default=0, description="文件总行数")
+    lines: list[TicketLogContextLineModel] = Field(default_factory=list, description="上下文行")
+
+
+class TicketLogSearchHitModel(TicketLogPullBaseModel):
+    """
+    日志搜索命中项模型。
+    """
+
+    file: str = Field(description="相对日志文件路径")
+    line: int = Field(description="命中行号")
+    content: str = Field(default="", description="命中行内容")
+    context: TicketLogContextModel | None = Field(default=None, description="命中上下文")
+
+
+class TicketLogSearchRequestModel(TicketLogPullBaseModel):
+    """
+    日志关键字搜索请求模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    keyword: str = Field(description="搜索关键字")
+    context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
+    context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
+    limit: int = Field(default=100, ge=1, le=500, description="最大返回命中数量")
+    with_context: bool = Field(default=True, description="是否直接返回上下文")
+
+
+class TicketLogSearchTimeRequestModel(TicketLogPullBaseModel):
+    """
+    日志时间点搜索请求模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    time: str = Field(description="时间关键字，例如 14:32")
+    context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
+    context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
+    limit: int = Field(default=100, ge=1, le=500, description="最大返回命中数量")
+    with_context: bool = Field(default=True, description="是否直接返回上下文")
+
+
+class TicketLogErrorsRequestModel(TicketLogPullBaseModel):
+    """
+    日志异常摘要请求模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    limit: int = Field(default=100, ge=1, le=500, description="最大扫描命中数量")
+
+
+class TicketLogErrorSummaryModel(TicketLogPullBaseModel):
+    """
+    日志异常摘要响应模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    total: int = Field(default=0, description="异常命中总数")
+    items: dict[str, int] = Field(default_factory=dict, description="异常内容计数")
+    samples: list[TicketLogSearchHitModel] = Field(default_factory=list, description="异常样例")
+
+
 class TicketLogPullSummaryModel(TicketLogPullBaseModel):
     """
     工单最新日志拉取摘要模型。

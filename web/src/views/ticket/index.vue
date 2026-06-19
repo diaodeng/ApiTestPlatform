@@ -171,10 +171,13 @@
       <el-table-column label="创建时间" prop="createTime" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" align="center" width="390" fixed="right">
+      <el-table-column label="操作" align="center" width="450" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="View" @click="openDetail(scope.row)" v-hasPermi="['ticket:ticket:query']">
             详情
+          </el-button>
+          <el-button link type="primary" icon="Search" @click="openTicketLogViewer(scope.row)" v-hasPermi="['ticket:logpull:query']">
+            日志
           </el-button>
           <el-button
             v-if="resolveTicketDetailUrl(scope.row)"
@@ -1806,6 +1809,53 @@
           </el-button>
           <el-button link type="primary" @click="resetLogPullViewRange">恢复记录范围</el-button>
         </div>
+        <el-divider content-position="left">日志搜索</el-divider>
+        <div class="panel-header mb16 log-view-controls">
+          <el-input v-model="logViewerForm.keyword" placeholder="关键词搜索" clearable class="log-search-input" @keyup.enter="searchLogViewerKeyword" />
+          <el-input v-model="logViewerForm.time" placeholder="时间搜索，如 14:32" clearable class="log-time-input" @keyup.enter="searchLogViewerTime" />
+          <span>上下文</span>
+          <el-input-number v-model="logViewerForm.contextLines" :min="0" :max="500" controls-position="right" />
+          <el-button type="primary" :loading="logViewerSearching" @click="searchLogViewerKeyword">搜索</el-button>
+          <el-button type="success" :loading="logViewerSearching" @click="searchLogViewerTime">按时间</el-button>
+          <el-button type="warning" :loading="logViewerSearching" @click="loadLogViewerErrors">异常提取</el-button>
+        </div>
+        <el-alert
+          v-if="logViewerErrorSummary"
+          type="warning"
+          show-icon
+          :closable="false"
+          class="mb16"
+        >
+          <template #title>
+            异常命中 {{ logViewerErrorSummary.total || 0 }} 条：
+            <span v-for="(count, text) in logViewerErrorTopItems" :key="text" class="log-error-chip">
+              {{ text }} ({{ count }})
+            </span>
+          </template>
+        </el-alert>
+        <el-table
+          v-if="logViewerHits.length"
+          :data="logViewerHits"
+          row-key="hitKey"
+          size="small"
+          class="mb16"
+          max-height="220"
+          @row-click="selectLogViewerHit"
+        >
+          <el-table-column label="文件" prop="file" min-width="220" show-overflow-tooltip />
+          <el-table-column label="行号" prop="line" width="90" />
+          <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip />
+        </el-table>
+        <div v-if="logViewerContext" class="log-context-panel mb16">
+          <div class="panel-header mb8">
+            <span>{{ logViewerContext.file }}:{{ logViewerContext.line }}（{{ logViewerContext.start }}-{{ logViewerContext.end }}/{{ logViewerContext.totalLines }}）</span>
+            <div class="panel-inline">
+              <el-button link type="primary" :disabled="!logViewerContext.hasPrev || logViewerSearching" @click="pageLogViewerContext(-1)">上一段</el-button>
+              <el-button link type="primary" :disabled="!logViewerContext.hasNext || logViewerSearching" @click="pageLogViewerContext(1)">下一段</el-button>
+            </div>
+          </div>
+          <pre :class="['log-content-block', 'log-context-block', { 'log-content-wrap': logPullWrapEnabled }]">{{ logViewerContextText }}</pre>
+        </div>
         <el-alert
           v-if="selectedLogPullContent?.contentTruncated"
           type="warning"
@@ -1860,14 +1910,19 @@ import {
   listTicketLogPulls,
   listTicketModuleOptions,
   listTicketProjectOptions,
+  prepareTicketLogs,
   reextractTicketLogPull,
   redownloadTicketLogPull,
   retryTicketLogPull,
   retryTicketAiAnalysis,
   addTicketSnapshot,
   saveTicketRca,
+  searchTicketLogs,
+  searchTicketLogsByTime,
   searchTicketNaturalLanguage,
   getTicketLogPullProjectVendorMap,
+  getTicketLogContext,
+  getTicketLogErrors,
   saveTicketLogPullProjectVendorMap,
   translateTicketDescription,
   updateTicketAiRepoMapping,
@@ -1965,6 +2020,16 @@ const logPullContentLoading = ref(false)
 const logPullContentOpen = ref(false)
 const logPullList = ref([])
 const logPullTotal = ref(0)
+const logViewerSearching = ref(false)
+const logViewerHits = ref([])
+const logViewerContext = ref(null)
+const logViewerErrorSummary = ref(null)
+const logViewerForm = ref({
+  ticketId: undefined,
+  keyword: '',
+  time: '',
+  contextLines: 20
+})
 const aiAnalysisLoading = ref(false)
 const aiAnalysisSubmitting = ref(false)
 const aiAnalysisRetryLoading = ref(false)
@@ -2476,6 +2541,14 @@ const logPullContentDisplayText = computed(() => {
     return '当前关键字过滤后无匹配日志，请清空过滤关键字后重试'
   }
   return filteredLogPullContent.value
+})
+const logViewerContextText = computed(() => {
+  const lines = logViewerContext.value?.lines || []
+  return lines.map(item => `${String(item.line).padStart(6, ' ')}  ${item.content || ''}`).join('\n')
+})
+const logViewerErrorTopItems = computed(() => {
+  const items = logViewerErrorSummary.value?.items || {}
+  return Object.fromEntries(Object.entries(items).slice(0, 5))
 })
 
 function decodeLogText(text) {
@@ -4137,9 +4210,39 @@ function viewLogPullContent(row) {
   })
 }
 
+function openTicketLogViewer(row) {
+  if (!row?.ticketId) {
+    return
+  }
+  logViewerSearching.value = true
+  prepareTicketLogs(row.ticketId).then(() => {
+    detail.value = row
+    currentTicketId.value = row.ticketId
+    selectedLogPullRecord.value = {
+      id: undefined,
+      ticketId: row.ticketId,
+      storagePath: row.latestLogPull?.storagePath || '',
+      commandResultUrl: row.latestLogPull?.commandResultUrl || ''
+    }
+    selectedLogPullContent.value = null
+    logPullViewForm.value = {
+      viewMode: 'stored',
+      logBeginTime: undefined,
+      logEndTime: undefined
+    }
+    resetLogViewerState(row.ticketId)
+    logPullContentOpen.value = true
+  }).finally(() => {
+    logViewerSearching.value = false
+  })
+}
+
 function handleLogPullDialogClosed() {
   logPullKeyword.value = ''
   logPullWrapEnabled.value = false
+  logViewerHits.value = []
+  logViewerContext.value = null
+  logViewerErrorSummary.value = null
 }
 
 function resetLogPullViewRange(row = selectedLogPullRecord.value) {
@@ -4168,6 +4271,126 @@ function refreshLogPullContent() {
     }
   }).finally(() => {
     logPullContentLoading.value = false
+  })
+}
+
+function resetLogViewerState(ticketId = currentTicketId.value) {
+  logViewerForm.value = {
+    ticketId,
+    keyword: '',
+    time: '',
+    contextLines: 20
+  }
+  logViewerHits.value = []
+  logViewerContext.value = null
+  logViewerErrorSummary.value = null
+}
+
+function buildLogViewerPayload(keywordField = 'keyword') {
+  const contextLines = Number(logViewerForm.value.contextLines || 0)
+  const payload = {
+    ticketId: currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId,
+    contextBefore: contextLines,
+    contextAfter: contextLines,
+    limit: 100,
+    withContext: true
+  }
+  payload[keywordField] = logViewerForm.value[keywordField]
+  return payload
+}
+
+function searchLogViewerKeyword() {
+  const keyword = String(logViewerForm.value.keyword || '').trim()
+  if (!keyword) {
+    proxy.$modal.msgWarning('请输入搜索关键字')
+    return
+  }
+  const payload = buildLogViewerPayload('keyword')
+  logViewerSearching.value = true
+  searchTicketLogs(payload).then(response => {
+    setLogViewerHits(response?.data || [])
+  }).finally(() => {
+    logViewerSearching.value = false
+  })
+}
+
+function searchLogViewerTime() {
+  const time = String(logViewerForm.value.time || '').trim()
+  if (!time) {
+    proxy.$modal.msgWarning('请输入时间关键字')
+    return
+  }
+  const payload = buildLogViewerPayload('time')
+  logViewerSearching.value = true
+  searchTicketLogsByTime(payload).then(response => {
+    setLogViewerHits(response?.data || [])
+  }).finally(() => {
+    logViewerSearching.value = false
+  })
+}
+
+function loadLogViewerErrors() {
+  const ticketId = currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId
+  if (!ticketId) {
+    return
+  }
+  logViewerSearching.value = true
+  getTicketLogErrors({ ticketId, limit: 100 }).then(response => {
+    logViewerErrorSummary.value = response?.data || null
+    setLogViewerHits(logViewerErrorSummary.value?.samples || [])
+  }).finally(() => {
+    logViewerSearching.value = false
+  })
+}
+
+function setLogViewerHits(rows = []) {
+  logViewerHits.value = rows.map((item, index) => ({
+    ...item,
+    hitKey: `${item.file || ''}:${item.line || 0}:${index}`
+  }))
+  logViewerContext.value = logViewerHits.value[0]?.context || null
+}
+
+function selectLogViewerHit(row) {
+  if (!row) {
+    return
+  }
+  if (row.context) {
+    logViewerContext.value = row.context
+    return
+  }
+  loadLogViewerContext(row.file, row.line)
+}
+
+function pageLogViewerContext(direction) {
+  const context = logViewerContext.value
+  if (!context) {
+    return
+  }
+  if (direction > 0) {
+    loadLogViewerContext(context.nextFile || context.file, context.nextLine || context.end + 1)
+    return
+  }
+  loadLogViewerContext(context.prevFile || context.file, context.prevLine || Math.max(context.start - 1, 1))
+}
+
+function loadLogViewerContext(file, line) {
+  const ticketId = currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId
+  if (!ticketId || !file || !line) {
+    return
+  }
+  const contextLines = Number(logViewerForm.value.contextLines || 0)
+  logViewerSearching.value = true
+  getTicketLogContext({
+    ticketId,
+    file,
+    line,
+    before: contextLines,
+    after: contextLines
+  }).then(response => {
+    logViewerContext.value = response?.data || null
+  }).finally(() => {
+    logViewerSearching.value = false
   })
 }
 

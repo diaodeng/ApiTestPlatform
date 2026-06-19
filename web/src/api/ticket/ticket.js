@@ -529,6 +529,60 @@ export function getTicketLogPullContent(recordId, query) {
   });
 }
 
+// 准备工单日志查看目录
+export function prepareTicketLogs(ticketId) {
+  return request({
+    url: '/ticket/logs/prepare',
+    method: 'post',
+    data: { ticketId },
+  });
+}
+
+// 查询工单日志文件列表
+export function listTicketLogFiles(ticketId) {
+  return request({
+    url: '/ticket/logs/files',
+    method: 'get',
+    params: { ticketId },
+  });
+}
+
+// 搜索工单日志关键字
+export function searchTicketLogs(data) {
+  return request({
+    url: '/ticket/logs/search',
+    method: 'post',
+    data,
+  });
+}
+
+// 查询工单日志上下文
+export function getTicketLogContext(query) {
+  return request({
+    url: '/ticket/logs/context',
+    method: 'get',
+    params: query,
+  });
+}
+
+// 按时间搜索工单日志
+export function searchTicketLogsByTime(data) {
+  return request({
+    url: '/ticket/logs/search_time',
+    method: 'post',
+    data,
+  });
+}
+
+// 提取工单日志异常摘要
+export function getTicketLogErrors(data) {
+  return request({
+    url: '/ticket/logs/errors',
+    method: 'post',
+    data,
+  });
+}
+
 // 保存工单RCA
 export function saveTicketRca(ticketId, data) {
   return request({

@@ -15,6 +15,8 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from modules.ticket.entity.vo.ticket_log_pull_vo import (
+    TicketLogErrorsRequestModel,
+    TicketLogPrepareRequestModel,
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
     TicketLogPullProjectVendorMapQueryModel,
@@ -22,6 +24,8 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullQueryModel,
     TicketLogPullStorageConfigModel,
     TicketLogPullStoreConfigQueryModel,
+    TicketLogSearchRequestModel,
+    TicketLogSearchTimeRequestModel,
 )
 from modules.ticket.entity.vo.ticket_vo import (
     KnowledgeArticleModel,
@@ -60,6 +64,7 @@ from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisSe
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_import_service import TicketImportService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.ticket_log_service import LogService
 from modules.ticket.service.ticket_service import TicketService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 from utils.log_util import logger
@@ -1167,6 +1172,152 @@ async def get_ticket_log_pull_content(
     try:
         result = await run_in_threadpool(TicketLogPullService.get_log_pull_content_services, query_db, record_id, query)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="日志拉取记录不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/logs/prepare",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def prepare_ticket_logs(
+    request: Request,
+    prepare_object: TicketLogPrepareRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    准备工单日志查看目录接口。
+    :param request: 请求对象
+    :param prepare_object: 工单日志准备请求
+    :param query_db: 数据库会话
+    :return: 日志准备结果
+    """
+    try:
+        result = await run_in_threadpool(LogService.prepare, query_db, prepare_object.ticket_id)
+        return ResponseUtil.success(data=result) if result.prepared else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/logs/files",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_files(request: Request, ticket_id: int):
+    """
+    查询工单已准备日志文件列表接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :return: 日志文件列表
+    """
+    try:
+        result = await run_in_threadpool(LogService.files, ticket_id)
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/logs/search",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def search_ticket_logs(request: Request, search_object: TicketLogSearchRequestModel):
+    """
+    搜索工单日志接口。
+    :param request: 请求对象
+    :param search_object: 日志搜索请求
+    :return: 搜索命中列表
+    """
+    try:
+        result = await run_in_threadpool(
+            LogService.search,
+            search_object.ticket_id,
+            search_object.keyword,
+            search_object.context_before,
+            search_object.context_after,
+            search_object.limit,
+            search_object.with_context,
+        )
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.get(
+    "/logs/context",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_context(
+    request: Request,
+    ticket_id: int,
+    file: str,
+    line: int,
+    before: int = 20,
+    after: int = 20,
+):
+    """
+    获取日志命中上下文接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param file: 相对日志文件路径
+    :param line: 中心行号
+    :param before: 前置行数
+    :param after: 后置行数
+    :return: 上下文内容
+    """
+    try:
+        result = await run_in_threadpool(LogService.context, ticket_id, file, line, before, after)
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/logs/search_time",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def search_ticket_logs_by_time(request: Request, search_object: TicketLogSearchTimeRequestModel):
+    """
+    按时间关键字搜索工单日志接口。
+    :param request: 请求对象
+    :param search_object: 日志时间搜索请求
+    :return: 搜索命中列表
+    """
+    try:
+        result = await run_in_threadpool(
+            LogService.search_time,
+            search_object.ticket_id,
+            search_object.time,
+            search_object.context_before,
+            search_object.context_after,
+            search_object.limit,
+            search_object.with_context,
+        )
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/logs/errors",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_errors(request: Request, errors_object: TicketLogErrorsRequestModel):
+    """
+    提取工单日志异常摘要接口。
+    :param request: 请求对象
+    :param errors_object: 异常摘要请求
+    :return: 异常摘要
+    """
+    try:
+        result = await run_in_threadpool(LogService.errors, errors_object.ticket_id, errors_object.limit)
+        return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
