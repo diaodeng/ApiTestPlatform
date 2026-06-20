@@ -171,16 +171,6 @@
           <el-button
             link
             type="danger"
-            icon="Scissor"
-            @click="reextractLogPull(scope.row)"
-            :disabled="actionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
-            v-hasPermi="['ticket:logpull:add']"
-          >
-            重新截取
-          </el-button>
-          <el-button
-            link
-            type="danger"
             icon="Delete"
             @click="deleteLogPull(scope.row)"
             :disabled="actionLoading"
@@ -378,7 +368,6 @@
           <el-button type="primary" @click="reloadContent">{{ viewForm.viewMode === 'archive' ? '按当前范围查看' : '查看入库内容' }}</el-button>
           <el-button type="warning" @click="retryLogPull(selectedRecord)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">重新拉取</el-button>
           <el-button type="success" @click="redownloadLogPull(selectedRecord)" :disabled="actionLoading || !canDownloadCurrent" v-hasPermi="['ticket:logpull:add']">重新下载</el-button>
-          <el-button type="danger" @click="reextractLogPull(selectedRecord)" :disabled="actionLoading || viewForm.viewMode !== 'archive'" v-hasPermi="['ticket:logpull:add']">重新截取</el-button>
         </div>
         <el-alert
           v-if="contentDetail?.contentTruncated"
@@ -523,7 +512,6 @@ import {
   listTicketLogPullRecords,
   importTicketLogPullStoreConfigs,
   redownloadTicketLogPull,
-  reextractTicketLogPull,
   retryTicketLogPull
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
@@ -1265,11 +1253,6 @@ function retryLogPull(row) {
 function redownloadLogPull(row) {
   if (!row?.id) return
   runAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载', true)
-}
-
-function reextractLogPull(row) {
-  if (!row?.id) return
-  runAction(reextractTicketLogPull(row.id, buildContentQuery()), '日志已重新截取', true)
 }
 
 function deleteLogPull(row) {

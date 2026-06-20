@@ -450,15 +450,6 @@ export function redownloadTicketLogPull(recordId) {
   });
 }
 
-// 重新截取日志内容
-export function reextractTicketLogPull(recordId, query) {
-  return request({
-    url: `/ticket/log-pulls/${recordId}/reextract`,
-    method: 'post',
-    params: query,
-  });
-}
-
 // 查询工单AI仓库映射
 export function listTicketAiRepoMappings(query) {
   return request({
@@ -543,7 +534,8 @@ export function listTicketLogFiles(ticketId) {
   return request({
     url: '/ticket/logs/files',
     method: 'get',
-    params: { ticketId },
+    // GET 查询参数需要使用后端显式声明的 snake_case 字段名。
+    params: { ticket_id: ticketId },
   });
 }
 
@@ -558,19 +550,16 @@ export function searchTicketLogs(data) {
 
 // 查询工单日志上下文
 export function getTicketLogContext(query) {
+  const params = { ...(query || {}) };
+  // 上下文接口的 ticket_id 不是 Pydantic body，前端这里统一做一次兼容转换。
+  if (params.ticketId !== undefined && params.ticket_id === undefined) {
+    params.ticket_id = params.ticketId;
+    delete params.ticketId;
+  }
   return request({
     url: '/ticket/logs/context',
     method: 'get',
-    params: query,
-  });
-}
-
-// 按时间搜索工单日志
-export function searchTicketLogsByTime(data) {
-  return request({
-    url: '/ticket/logs/search_time',
-    method: 'post',
-    data,
+    params,
   });
 }
 

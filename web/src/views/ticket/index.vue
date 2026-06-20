@@ -786,8 +786,8 @@
                     <el-button
                       link
                       type="primary"
-                      @click="viewLogPullContent(scope.row)"
-                      :disabled="!scope.row.hasContent || logPullActionLoading"
+                      @click="openLogViewerFromPullRecord(scope.row)"
+                      :disabled="logPullActionLoading"
                     >
                       查看日志
                     </el-button>
@@ -808,15 +808,6 @@
                       v-hasPermi="['ticket:logpull:add']"
                     >
                       重新下载
-                    </el-button>
-                    <el-button
-                      link
-                      type="danger"
-                      @click="reextractLogPull(scope.row)"
-                      :disabled="logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
-                      v-hasPermi="['ticket:logpull:add']"
-                    >
-                      重新截取
                     </el-button>
                     <el-button
                       link
@@ -1196,8 +1187,8 @@
                         <el-button
                           link
                           type="primary"
-                          @click="viewLogPullContent(scope.row)"
-                          :disabled="!scope.row.hasContent || logPullActionLoading"
+                          @click="openLogViewerFromPullRecord(scope.row)"
+                          :disabled="logPullActionLoading"
                         >
                           查看日志
                         </el-button>
@@ -1218,15 +1209,6 @@
                           v-hasPermi="['ticket:logpull:add']"
                         >
                           重新下载
-                        </el-button>
-                        <el-button
-                          link
-                          type="danger"
-                          @click="reextractLogPull(scope.row)"
-                          :disabled="logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
-                          v-hasPermi="['ticket:logpull:add']"
-                        >
-                          重新截取
                         </el-button>
                       </el-button-group>
                     </template>
@@ -1732,62 +1714,26 @@
 
     <el-dialog
       v-model="logPullContentOpen"
-      title="日志内容"
-      width="80%"
-      top="5vh"
+      :title="logViewerDialogTitle"
+      fullscreen
       append-to-body
       destroy-on-close
       :close-on-click-modal="false"
+      class="ticket-log-viewer-dialog"
       @closed="handleLogPullDialogClosed"
     >
-      <div v-loading="logPullContentLoading">
-        <el-descriptions :column="3" border class="mb16">
-          <el-descriptions-item label="记录ID">{{ selectedLogPullRecord?.id || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="查看模式">{{ formatLogViewSource(selectedLogPullContent?.viewSource) }}</el-descriptions-item>
-          <el-descriptions-item label="本次截取范围">
-            {{ formatLogViewRange(selectedLogPullContent?.viewBeginTime, selectedLogPullContent?.viewEndTime) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="命中条目">{{ selectedLogPullContent?.matchedEntryCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="压缩包文件数">{{ selectedLogPullContent?.archiveEntryCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="日志字符数">{{ selectedLogPullContent?.contentCharCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="归档地址" :span="2">
-            {{ selectedLogPullContent?.storagePath || '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
+      <div v-loading="logViewerSearching">
         <div class="panel-header mb16 log-view-controls">
-          <el-radio-group v-model="logPullViewForm.viewMode">
-            <el-radio value="stored">入库内容</el-radio>
-            <el-radio value="archive">原始文档</el-radio>
-          </el-radio-group>
-          <el-date-picker
-            v-model="logPullViewForm.logBeginTime"
-            type="datetime"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            placeholder="开始时间"
-            clearable
-            :disabled="logPullViewForm.viewMode !== 'archive'"
-            class="log-view-time-picker"
-          />
-          <span>至</span>
-          <el-date-picker
-            v-model="logPullViewForm.logEndTime"
-            type="datetime"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            placeholder="结束时间"
-            clearable
-            :disabled="logPullViewForm.viewMode !== 'archive'"
-            class="log-view-time-picker"
-          />
-          <el-input v-model="logPullKeyword" placeholder="本地过滤关键字，按日志块筛选" clearable class="log-filter-input" />
+          <el-input v-model="logViewerForm.keyword" placeholder="关键词搜索" clearable @keyup.enter="searchLogViewerKeyword" />
+          <el-button type="primary" :loading="logViewerSearching" @click="searchLogViewerKeyword">搜索</el-button>
+          <el-text>上下文</el-text>
+          <el-input-number v-model="logViewerForm.contextLines" :min="0" :max="500" controls-position="right" />
           <el-switch
             v-model="logPullWrapEnabled"
             inline-prompt
             active-text="换行"
             inactive-text="不换行"
           />
-          <el-button type="primary" @click="refreshLogPullContent">
-            {{ logPullViewForm.viewMode === 'archive' ? '按当前范围查看' : '查看入库内容' }}
-          </el-button>
           <el-button type="warning" @click="retryLogPull(selectedLogPullRecord)" :disabled="logPullActionLoading" v-hasPermi="['ticket:logpull:add']">
             重新拉取
           </el-button>
@@ -1799,24 +1745,6 @@
           >
             重新下载
           </el-button>
-          <el-button
-            type="danger"
-            @click="reextractLogPull(selectedLogPullRecord)"
-            :disabled="logPullActionLoading || logPullViewForm.viewMode !== 'archive'"
-            v-hasPermi="['ticket:logpull:add']"
-          >
-            重新截取
-          </el-button>
-          <el-button link type="primary" @click="resetLogPullViewRange">恢复记录范围</el-button>
-        </div>
-        <el-divider content-position="left">日志搜索</el-divider>
-        <div class="panel-header mb16 log-view-controls">
-          <el-input v-model="logViewerForm.keyword" placeholder="关键词搜索" clearable class="log-search-input" @keyup.enter="searchLogViewerKeyword" />
-          <el-input v-model="logViewerForm.time" placeholder="时间搜索，如 14:32" clearable class="log-time-input" @keyup.enter="searchLogViewerTime" />
-          <span>上下文</span>
-          <el-input-number v-model="logViewerForm.contextLines" :min="0" :max="500" controls-position="right" />
-          <el-button type="primary" :loading="logViewerSearching" @click="searchLogViewerKeyword">搜索</el-button>
-          <el-button type="success" :loading="logViewerSearching" @click="searchLogViewerTime">按时间</el-button>
           <el-button type="warning" :loading="logViewerSearching" @click="loadLogViewerErrors">异常提取</el-button>
         </div>
         <el-alert
@@ -1825,21 +1753,15 @@
           show-icon
           :closable="false"
           class="mb16"
-        >
-          <template #title>
-            异常命中 {{ logViewerErrorSummary.total || 0 }} 条：
-            <span v-for="(count, text) in logViewerErrorTopItems" :key="text" class="log-error-chip">
-              {{ text }} ({{ count }})
-            </span>
-          </template>
-        </el-alert>
+          :title="`异常命中 ${logViewerErrorSummary.total || 0} 条`"
+        />
         <el-table
           v-if="logViewerHits.length"
           :data="logViewerHits"
           row-key="hitKey"
           size="small"
           class="mb16"
-          max-height="220"
+          max-height="320"
           @row-click="selectLogViewerHit"
         >
           <el-table-column label="文件" prop="file" min-width="220" show-overflow-tooltip />
@@ -1856,15 +1778,6 @@
           </div>
           <pre :class="['log-content-block', 'log-context-block', { 'log-content-wrap': logPullWrapEnabled }]">{{ logViewerContextText }}</pre>
         </div>
-        <el-alert
-          v-if="selectedLogPullContent?.contentTruncated"
-          type="warning"
-          show-icon
-          title="当前日志文本已按配置截断入库，如需更多内容请调整字符上限后重新拉取。"
-          class="mb16"
-        />
-        <pre :class="['log-content-block', 'log-content-dialog', { 'log-content-wrap': logPullWrapEnabled }]">
-{{ logPullContentDisplayText }}</pre>
       </div>
     </el-dialog>
   </div>
@@ -1872,7 +1785,6 @@
 
 <script setup name="TicketIndex">
 import { saveAs } from 'file-saver'
-import { decompressText } from '@/utils/tools'
 import { listAiProviderOptions } from '@/api/system/aiprovider'
 import { listAiPromptTemplateOptions } from '@/api/system/aiprompt'
 import { all as listAllAgents } from '@/api/hrm/agent'
@@ -1900,7 +1812,6 @@ import {
   getTicketStatClassificationOptions,
   getTicketWorkflow,
   listTicketLogPullProjectVendorMapOptions,
-  getTicketLogPullContent,
   getTicketLogPullVendorStoreOptions,
   getTicketTimeline,
   importTicketExcel,
@@ -1911,14 +1822,12 @@ import {
   listTicketModuleOptions,
   listTicketProjectOptions,
   prepareTicketLogs,
-  reextractTicketLogPull,
   redownloadTicketLogPull,
   retryTicketLogPull,
   retryTicketAiAnalysis,
   addTicketSnapshot,
   saveTicketRca,
   searchTicketLogs,
-  searchTicketLogsByTime,
   searchTicketNaturalLanguage,
   getTicketLogPullProjectVendorMap,
   getTicketLogContext,
@@ -2016,8 +1925,12 @@ const logPullLoading = ref(false)
 const logPullSubmitting = ref(false)
 const logPullActionLoading = ref(false)
 const logPullSubmitOpen = ref(false)
-const logPullContentLoading = ref(false)
 const logPullContentOpen = ref(false)
+const logViewerTicketMeta = ref({
+  ticketId: undefined,
+  ticketNo: '',
+  title: ''
+})
 const logPullList = ref([])
 const logPullTotal = ref(0)
 const logViewerSearching = ref(false)
@@ -2027,7 +1940,6 @@ const logViewerErrorSummary = ref(null)
 const logViewerForm = ref({
   ticketId: undefined,
   keyword: '',
-  time: '',
   contextLines: 20
 })
 const aiAnalysisLoading = ref(false)
@@ -2083,13 +1995,6 @@ const aiTaskQuery = ref({
   status: undefined
 })
 const selectedLogPullRecord = ref(null)
-const selectedLogPullContent = ref(null)
-const logPullViewForm = ref({
-  viewMode: 'stored',
-  logBeginTime: undefined,
-  logEndTime: undefined
-})
-const logPullKeyword = ref('')
 const logPullWrapEnabled = ref(false)
 const logPullAutoRefreshing = ref(false)
 
@@ -2521,60 +2426,24 @@ const detailAiTranslation = computed(() => String(
   || ''
 ).trim())
 const latestSnapshotSummary = computed(() => latestSnapshot.value?.summary || detail.value.rootCause || detail.value.description || '')
-const filteredLogPullContent = computed(() => {
-  const text = selectedLogPullContent.value?.text || ''
-  const keyword = (logPullKeyword.value || '').trim().toLowerCase()
-  if (!keyword || !text) {
-    return text
-  }
-  return text
-    .split(/\n{2,}/)
-    .filter(block => block.toLowerCase().includes(keyword))
-    .join('\n\n')
-})
-const logPullContentDisplayText = computed(() => {
-  const rawText = selectedLogPullContent.value?.text || ''
-  if (!rawText) {
-    return logPullContentLoading.value ? '日志内容加载中...' : '暂无可展示日志内容'
-  }
-  if ((logPullKeyword.value || '').trim() && !filteredLogPullContent.value) {
-    return '当前关键字过滤后无匹配日志，请清空过滤关键字后重试'
-  }
-  return filteredLogPullContent.value
-})
 const logViewerContextText = computed(() => {
   const lines = logViewerContext.value?.lines || []
   return lines.map(item => `${String(item.line).padStart(6, ' ')}  ${item.content || ''}`).join('\n')
 })
-const logViewerErrorTopItems = computed(() => {
-  const items = logViewerErrorSummary.value?.items || {}
-  return Object.fromEntries(Object.entries(items).slice(0, 5))
+const logViewerDialogTitle = computed(() => {
+  const ticketNo = String(logViewerTicketMeta.value?.ticketNo || '').trim()
+  const ticketTitle = String(logViewerTicketMeta.value?.title || '').trim()
+  if (ticketNo && ticketTitle) {
+    return `日志查看 - ${ticketNo} - ${ticketTitle}`
+  }
+  if (ticketNo) {
+    return `日志查看 - ${ticketNo}`
+  }
+  if (ticketTitle) {
+    return `日志查看 - ${ticketTitle}`
+  }
+  return '日志查看'
 })
-
-function decodeLogText(text) {
-  if (text === null || text === undefined || text === '') {
-    return ''
-  }
-  const rawText = String(text)
-  try {
-    return decompressText(rawText)
-  } catch (error) {
-    return rawText
-  }
-}
-
-function formatLogViewRange(beginTime, endTime) {
-  if (!beginTime && !endTime) {
-    return '-'
-  }
-  return `${beginTime || '-'} 至 ${endTime || '-'}`
-}
-function formatLogViewSource(source) {
-  const value = String(source || 'stored')
-  if (value === 'realtime') return '实时重截'
-  if (value === 'fallback') return '实时回退'
-  return '入库内容'
-}
 
 function getStatOptionLabel(options, value) {
   const text = String(value || '').trim()
@@ -3638,8 +3507,6 @@ function openDetail(row) {
   aiRepoMappingList.value = []
   aiRepoMappingTotal.value = 0
   selectedLogPullRecord.value = null
-  selectedLogPullContent.value = null
-  logPullKeyword.value = ''
   logPullQuery.value.pageNum = 1
   resetLogPullForm()
   resetMessageForm()
@@ -3928,18 +3795,12 @@ function submitLogPull() {
   })
 }
 
-function runLogPullAction(actionPromise, successMessage, refreshContent = false) {
+function runLogPullAction(actionPromise, successMessage) {
   logPullActionLoading.value = true
   return actionPromise
     .then(() => {
       proxy.$modal.msgSuccess(successMessage)
       return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
-    })
-    .then(() => {
-      if (refreshContent && selectedLogPullRecord.value?.id) {
-        return refreshLogPullContent()
-      }
-      return undefined
     })
     .finally(() => {
       logPullActionLoading.value = false
@@ -3962,8 +3823,6 @@ function deleteLogPull(row) {
     if (selectedLogPullRecord.value?.id === row.id) {
       logPullContentOpen.value = false
       selectedLogPullRecord.value = null
-      selectedLogPullContent.value = null
-      logPullKeyword.value = ''
     }
     return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
   }).catch(() => {}).finally(() => {
@@ -3990,7 +3849,7 @@ function redownloadLogPull(row) {
     proxy.$modal.msgWarning('当前记录缺少可用于重新下载的归档地址')
     return
   }
-  runLogPullAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载', true)
+  runLogPullAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载')
 }
 
 function openBrowserDownload(url) {
@@ -4072,44 +3931,6 @@ function downloadLogPullOriginal(row) {
   openBrowserDownload(row.commandResultUrl)
 }
 
-function reextractLogPull(row = selectedLogPullRecord.value) {
-  if (!row?.id) {
-    return
-  }
-  const useCurrentView = detailOpen.value && selectedLogPullRecord.value?.id === row.id
-  const query = useCurrentView
-    ? buildLogPullViewQuery()
-    : {
-        viewMode: 'archive',
-        logBeginTime: row.logBeginTime,
-        logEndTime: row.logEndTime
-      }
-  if (useCurrentView && logPullViewForm.value.viewMode !== 'archive') {
-    proxy.$modal.msgWarning('请先切换到原始文档并指定查询时间范围')
-    return
-  }
-  if (!query.logBeginTime || !query.logEndTime) {
-    proxy.$modal.msgWarning('重新截取时开始时间和结束时间必填')
-    return
-  }
-  logPullActionLoading.value = true
-  reextractTicketLogPull(row.id, query)
-    .then(() => {
-      proxy.$modal.msgSuccess('日志已按当前时间范围重新截取')
-      return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
-    })
-    .then(() => {
-      logPullViewForm.value.viewMode = 'stored'
-      if (selectedLogPullRecord.value?.id === row.id) {
-        return refreshLogPullContent()
-      }
-      return undefined
-    })
-    .finally(() => {
-      logPullActionLoading.value = false
-    })
-}
-
 function loadProjectOptions() {
   return listTicketProjectOptions().then(response => {
     projectOptions.value = response.data || []
@@ -4181,104 +4002,89 @@ function loadFormVersionOptions(projectId) {
   })
 }
 
-function viewLogPullContent(row) {
-  if (!row?.id) {
-    return
+function syncLogViewerTicketMeta(payload = {}) {
+  logViewerTicketMeta.value = {
+    ticketId: payload.ticketId,
+    ticketNo: payload.ticketNo || '',
+    title: payload.title || ''
   }
-  const previousRecordId = selectedLogPullRecord.value?.id
-  selectedLogPullRecord.value = row
-  logPullViewForm.value = {
-    viewMode: 'stored',
-    logBeginTime: row?.logBeginTime || undefined,
-    logEndTime: row?.logEndTime || undefined
+}
+
+function buildLogViewerRecord(row, ticketMeta = {}) {
+  return {
+    ...row,
+    ticketId: row?.ticketId || ticketMeta.ticketId,
+    ticketNo: row?.ticketNo || ticketMeta.ticketNo || '',
+    title: row?.title || ticketMeta.title || ''
   }
-  logPullWrapEnabled.value = false
-  logPullContentOpen.value = true
-  if (previousRecordId !== row.id) {
-    logPullKeyword.value = ''
-  }
-  logPullContentLoading.value = true
-  selectedLogPullContent.value = null
-  getTicketLogPullContent(row.id, buildLogPullViewQuery()).then(response => {
-    const payload = response?.data || {}
-    selectedLogPullContent.value = {
-      ...payload,
-      text: decodeLogText(payload?.text || payload?.content || payload?.compressedContent || '')
-    }
-  }).finally(() => {
-    logPullContentLoading.value = false
-  })
 }
 
 function openTicketLogViewer(row) {
-  if (!row?.ticketId) {
+  const ticketId = row?.ticketId
+  if (!ticketId) {
     return
   }
   logViewerSearching.value = true
-  prepareTicketLogs(row.ticketId).then(() => {
-    detail.value = row
-    currentTicketId.value = row.ticketId
-    selectedLogPullRecord.value = {
-      id: undefined,
-      ticketId: row.ticketId,
-      storagePath: row.latestLogPull?.storagePath || '',
-      commandResultUrl: row.latestLogPull?.commandResultUrl || ''
-    }
-    selectedLogPullContent.value = null
-    logPullViewForm.value = {
-      viewMode: 'stored',
-      logBeginTime: undefined,
-      logEndTime: undefined
-    }
-    resetLogViewerState(row.ticketId)
+  prepareTicketLogs(ticketId).then(() => {
+    currentTicketId.value = ticketId
+    syncLogViewerTicketMeta({
+      ticketId,
+      ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
+      title: row?.title || detail.value?.title || ''
+    })
+    selectedLogPullRecord.value = row?.id
+      ? buildLogViewerRecord(row, {
+        ticketId,
+        ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
+        title: row?.title || detail.value?.title || ''
+      })
+      : {
+        id: undefined,
+        ticketId,
+        ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
+        title: row?.title || detail.value?.title || '',
+        storagePath: row.latestLogPull?.storagePath || '',
+        commandResultUrl: row.latestLogPull?.commandResultUrl || ''
+      }
+    resetLogViewerState(ticketId)
+    logPullWrapEnabled.value = false
     logPullContentOpen.value = true
   }).finally(() => {
     logViewerSearching.value = false
   })
 }
 
+function openLogViewerFromPullRecord(row) {
+  const ticketMeta = {
+    ticketId: row?.ticketId || currentTicketId.value || detail.value?.ticketId,
+    ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
+    title: row?.title || detail.value?.title || ''
+  }
+  if (!ticketMeta.ticketId) {
+    proxy.$modal.msgWarning('当前日志记录缺少工单ID，无法查看日志')
+    return
+  }
+  selectedLogPullRecord.value = buildLogViewerRecord(row, ticketMeta)
+  openTicketLogViewer(buildLogViewerRecord(row, ticketMeta))
+}
+
 function handleLogPullDialogClosed() {
-  logPullKeyword.value = ''
+  logViewerTicketMeta.value = {
+    ticketId: undefined,
+    ticketNo: '',
+    title: ''
+  }
+  selectedLogPullRecord.value = null
   logPullWrapEnabled.value = false
   logViewerHits.value = []
   logViewerContext.value = null
   logViewerErrorSummary.value = null
 }
 
-function resetLogPullViewRange(row = selectedLogPullRecord.value) {
-  logPullViewForm.value.logBeginTime = row?.logBeginTime || undefined
-  logPullViewForm.value.logEndTime = row?.logEndTime || undefined
-}
-
-function buildLogPullViewQuery() {
-  return {
-    viewMode: logPullViewForm.value.viewMode,
-    logBeginTime: logPullViewForm.value.logBeginTime,
-    logEndTime: logPullViewForm.value.logEndTime
-  }
-}
-
-function refreshLogPullContent() {
-  if (!selectedLogPullRecord.value?.id) {
-    return
-  }
-  logPullContentLoading.value = true
-  getTicketLogPullContent(selectedLogPullRecord.value.id, buildLogPullViewQuery()).then(response => {
-    const payload = response?.data || {}
-    selectedLogPullContent.value = {
-      ...payload,
-      text: decodeLogText(payload?.text || payload?.content || payload?.compressedContent || '')
-    }
-  }).finally(() => {
-    logPullContentLoading.value = false
-  })
-}
-
 function resetLogViewerState(ticketId = currentTicketId.value) {
   logViewerForm.value = {
     ticketId,
     keyword: '',
-    time: '',
     contextLines: 20
   }
   logViewerHits.value = []
@@ -4308,21 +4114,6 @@ function searchLogViewerKeyword() {
   const payload = buildLogViewerPayload('keyword')
   logViewerSearching.value = true
   searchTicketLogs(payload).then(response => {
-    setLogViewerHits(response?.data || [])
-  }).finally(() => {
-    logViewerSearching.value = false
-  })
-}
-
-function searchLogViewerTime() {
-  const time = String(logViewerForm.value.time || '').trim()
-  if (!time) {
-    proxy.$modal.msgWarning('请输入时间关键字')
-    return
-  }
-  const payload = buildLogViewerPayload('time')
-  logViewerSearching.value = true
-  searchTicketLogsByTime(payload).then(response => {
     setLogViewerHits(response?.data || [])
   }).finally(() => {
     logViewerSearching.value = false
@@ -4375,7 +4166,7 @@ function pageLogViewerContext(direction) {
 }
 
 function loadLogViewerContext(file, line) {
-  const ticketId = currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId
+  const ticketId = currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerTicketMeta.value?.ticketId || logViewerForm.value.ticketId
   if (!ticketId || !file || !line) {
     return
   }
@@ -4659,13 +4450,13 @@ loadWorkflowConfig().finally(() => {
 .panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: start;
   gap: 12px;
 }
 
 .log-view-controls {
-  flex-wrap: wrap;
-  justify-content: flex-start;
+  //flex-wrap: nowrap;
+  //justify-content: flex-start;
 }
 
 .log-view-time-picker {
