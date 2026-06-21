@@ -880,21 +880,32 @@ class TicketSyncNotifyService:
             return None
 
     @classmethod
-    def get_bitable_record_url(cls, config: dict[str, Any], record_id: str) -> str:
+    def _normalize_bitable_record_url(cls, value: Any) -> str:
         """
-        根据多维表格配置和记录 ID 构建飞书记录详情 URL。
+        归一化飞书多维表格记录详情 URL。
 
-        :param config: 人员催办配置，包含 appToken/tableId/viewId。
-        :param record_id: 飞书多维表格记录 ID。
-        :return: 可打开的飞书记录详情 URL，配置缺失时返回空字符串。
+        :param value: 原始链接值，可能为空或不是完整 URL。
+        :return: 可直接访问的详情 URL；无法确认可访问时返回空字符串。
         """
-        app_token = str(config.get("appToken") or "").strip()
-        table_id = str(config.get("tableId") or "").strip()
-        view_id = str(config.get("viewId") or "").strip()
-        normalized_record_id = str(record_id or "").strip()
-        if not app_token or not table_id or not normalized_record_id:
-            return ""
-        return f"https://feishu.cn/base/{app_token}?table={table_id}&view={view_id}&record={record_id}"
+        text = str(value or "").strip()
+        if text.startswith("http://") or text.startswith("https://"):
+            return text
+        return ""
+
+    @classmethod
+    def get_bitable_record_url(cls, config: dict[str, Any], record_id: str, record_url: str | None = None) -> str:
+        """
+        获取飞书多维表格记录详情 URL。
+
+        :param config: 人员催办配置，保留该参数以兼容现有调用。
+        :param record_id: 飞书多维表格记录 ID，仅用于日志和兼容旧调用。
+        :param record_url: 飞书接口返回的记录详情 URL。
+        :return: 可打开的飞书记录详情 URL；仅有 record_id 时不再伪造不可访问链接。
+        """
+        normalized_record_url = cls._normalize_bitable_record_url(record_url)
+        if normalized_record_url:
+            return normalized_record_url
+        return cls._normalize_bitable_record_url(record_id)
 
     @classmethod
     def _resolve_bitable_reminder_detail_url(
@@ -904,6 +915,7 @@ class TicketSyncNotifyService:
         config: dict[str, Any],
         ticket_no: str,
         record_id: str,
+        record_url: str,
         ticket_url_cache: dict[str, str],
     ) -> str:
         """
@@ -913,6 +925,7 @@ class TicketSyncNotifyService:
         :param config: 人员催办配置。
         :param ticket_no: 工单号。
         :param record_id: 飞书多维表格记录 ID。
+        :param record_url: 飞书搜索接口直接返回的记录详情 URL。
         :param ticket_url_cache: 本地工单 URL 缓存。
         :return: 工单详情 URL 或飞书记录详情 URL。
         """
@@ -923,7 +936,7 @@ class TicketSyncNotifyService:
         )
         if detail_url:
             return detail_url
-        fallback_url = cls.get_bitable_record_url(config, record_id)
+        fallback_url = cls.get_bitable_record_url(config, record_id, record_url=record_url)
         if fallback_url:
             logger.info(f"催办详情链接使用飞书多维表格记录兜底: ticket_no={ticket_no or '-'}, record_id={record_id}")
         return fallback_url
@@ -938,6 +951,8 @@ class TicketSyncNotifyService:
         """
         if isinstance(value, str):
             filter_formula = str(value or "").strip()
+            if not filter_formula:
+                return {}
             try:
                 parsed = json.loads(filter_formula)
                 return parsed
@@ -984,6 +999,7 @@ class TicketSyncNotifyService:
                 params["view_id"] = view_id
             if filter_formula:
                 params["filter"] = filter_formula
+            params["with_shared_url"] = True
             query_data = {"with_shared_url": "true"}
             logger.info(f"飞书多维表格查询参数: {json.dumps(params, ensure_ascii=False)}")
             response_data = (
@@ -1008,8 +1024,146 @@ class TicketSyncNotifyService:
             if not has_more or not page_token:
                 break
             logger.info(f"飞书多维表格分页拉取中: page={page_index + 1}, accumulated={len(all_records)}")
+        all_records = cls._hydrate_bitable_record_shared_urls(
+            all_records,
+            config=config,
+            tenant_access_token=token,
+        )
         logger.info(f"飞书多维表格拉取完成: records={len(all_records)}, table_id={table_id}, view_id={view_id or '-'}")
         return all_records
+
+    @classmethod
+    def _hydrate_bitable_record_shared_urls(
+        cls,
+        records: list[dict[str, Any]],
+        *,
+        config: dict[str, Any],
+        tenant_access_token: str,
+    ) -> list[dict[str, Any]]:
+        """
+        为搜索结果补齐飞书记录详情链接。
+
+        :param records: 查询记录接口返回的原始记录列表。
+        :param config: 多维表格配置。
+        :param tenant_access_token: 飞书租户访问令牌。
+        :return: 补齐后的记录列表。
+        """
+        if not isinstance(records, list) or not records:
+            return records
+
+        app_token = str(config.get("appToken") or "").strip()
+        table_id = str(config.get("tableId") or "").strip()
+        if not app_token or not table_id or not tenant_access_token:
+            return records
+
+        missing_record_ids: list[str] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            current_url = str(
+                record.get("record_url") or record.get("recordUrl") or record.get("shared_url") or record.get("sharedUrl") or ""
+            ).strip()
+            record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
+            if not current_url and record_id and record_id not in missing_record_ids:
+                missing_record_ids.append(record_id)
+
+        if not missing_record_ids:
+            return records
+
+        logger.info(
+            f"飞书多维表格开始批量补齐记录详情链接: missing_count={len(missing_record_ids)}, "
+            f"table_id={table_id}, app_token={app_token}"
+        )
+        detail_url_map = cls._batch_get_bitable_record_shared_urls(
+            config=config,
+            tenant_access_token=tenant_access_token,
+            record_ids=missing_record_ids,
+        )
+        if not detail_url_map:
+            return records
+
+        hydrated_count = 0
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
+            if not record_id:
+                continue
+            detail_url = str(detail_url_map.get(record_id) or "").strip()
+            if not detail_url:
+                continue
+            if not str(record.get("shared_url") or "").strip():
+                record["shared_url"] = detail_url
+            if not str(record.get("sharedUrl") or "").strip():
+                record["sharedUrl"] = detail_url
+            hydrated_count += 1
+        logger.info(
+            f"飞书多维表格记录详情链接补齐完成: hydrated_count={hydrated_count}, missing_count={len(missing_record_ids)}"
+        )
+        return records
+
+    @classmethod
+    def _batch_get_bitable_record_shared_urls(
+        cls,
+        *,
+        config: dict[str, Any],
+        tenant_access_token: str,
+        record_ids: list[str],
+    ) -> dict[str, str]:
+        """
+        按 record_id 批量补查飞书记录分享链接。
+
+        :param config: 多维表格配置。
+        :param tenant_access_token: 飞书租户访问令牌。
+        :param record_ids: 待查询的记录 ID 列表。
+        :return: `record_id -> shared_url` 映射。
+        """
+        normalized_record_ids = [str(item or "").strip() for item in record_ids if str(item or "").strip()]
+        if not normalized_record_ids:
+            return {}
+
+        app_token = str(config.get("appToken") or "").strip()
+        table_id = str(config.get("tableId") or "").strip()
+        if not app_token or not table_id:
+            return {}
+
+        url = f"{cls.FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_get"
+        record_url_map: dict[str, str] = {}
+        batch_size = 100
+        for start_index in range(0, len(normalized_record_ids), batch_size):
+            batch_record_ids = normalized_record_ids[start_index : start_index + batch_size]
+            try:
+                response_data = (
+                    cls._request_feishu_json(
+                        method="POST",
+                        url=url,
+                        tenant_access_token=tenant_access_token,
+                        json_body={
+                            "record_ids": batch_record_ids,
+                            "with_shared_url": True,
+                        },
+                    ).get("data")
+                    or {}
+                )
+                response_records = response_data.get("records")
+                if not isinstance(response_records, list):
+                    response_records = []
+                for item in response_records:
+                    if not isinstance(item, dict):
+                        continue
+                    record_id = str(item.get("record_id") or item.get("recordId") or "").strip()
+                    shared_url = str(item.get("shared_url") or item.get("sharedUrl") or "").strip()
+                    if record_id and shared_url:
+                        record_url_map[record_id] = shared_url
+                logger.info(
+                    f"飞书多维表格批量补查记录链接完成: batch_size={len(batch_record_ids)}, "
+                    f"resolved_count={len(record_url_map)}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"飞书多维表格批量补查记录链接失败: batch_size={len(batch_record_ids)}, error={exc}"
+                )
+        return record_url_map
 
     @classmethod
     def _render_template(cls, template: str, variables: dict[str, Any], default_template: str) -> str:
@@ -1466,6 +1620,9 @@ class TicketSyncNotifyService:
                 skipped_not_overdue += 1
                 continue
             record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
+            record_url = str(
+                record.get("record_url") or record.get("recordUrl") or record.get("shared_url") or record.get("sharedUrl") or ""
+            ).strip()
             ticket_no = (
                 fields.get("ticketNo")
                 or fields.get("ticket_no")
@@ -1482,11 +1639,13 @@ class TicketSyncNotifyService:
                 config=config,
                 ticket_no=ticket_no,
                 record_id=record_id,
+                record_url=record_url,
                 ticket_url_cache=ticket_url_cache,
             )
             row_payload = {
                 "detailUrl": detail_url,
                 "recordId": record_id,
+                "recordUrl": record_url,
                 "ticketNo": ticket_no,
                 "title": str(
                     fields.get("title")

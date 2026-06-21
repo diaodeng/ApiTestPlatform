@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 from datetime import datetime, time, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import requests
@@ -69,6 +70,30 @@ class TicketSyncService:
         "ticketModle",
         "createTime",
         "reporterName",
+    ]
+    DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS = [
+        {"fieldName": "ticketNo", "label": "工单号", "required": True, "category": "basic"},
+        {"fieldName": "title", "label": "工单标题", "required": False, "category": "basic"},
+        {"fieldName": "description", "label": "问题描述", "required": True, "category": "basic"},
+        {"fieldName": "customerPriority", "label": "对方优先级", "required": False, "category": "priority"},
+        {"fieldName": "internalPriority", "label": "内部优先级", "required": True, "category": "priority"},
+        {"fieldName": "ticketVender", "label": "商家/供应商", "required": True, "category": "mapping"},
+        {"fieldName": "ticketModle", "label": "模块", "required": True, "category": "mapping"},
+        {"fieldName": "ticketStatus", "label": "外部状态", "required": False, "category": "mapping"},
+        {"fieldName": "ticketStore", "label": "门店信息", "required": False, "category": "mapping"},
+        {"fieldName": "ticketPos", "label": "POS号", "required": False, "category": "mapping"},
+        {"fieldName": "ticketSco", "label": "SCO号", "required": False, "category": "mapping"},
+        {"fieldName": "createTime", "label": "创建时间", "required": True, "category": "time"},
+        {"fieldName": "reporterName", "label": "报告人/1线处理人", "required": True, "category": "person"},
+        {"fieldName": "reporterEmail", "label": "报告人邮箱", "required": False, "category": "person"},
+        {"fieldName": "currentAssigneeName", "label": "当前处理人", "required": False, "category": "person"},
+        {"fieldName": "currentAssigneeEmail", "label": "当前处理人邮箱", "required": False, "category": "person"},
+        {"fieldName": "internalOwner", "label": "内部负责人", "required": False, "category": "person"},
+        {"fieldName": "internalOwnerEmail", "label": "内部负责人邮箱", "required": False, "category": "person"},
+        {"fieldName": "ticketUrl", "label": "工单链接", "required": False, "category": "basic"},
+        {"fieldName": "recordId", "label": "多维表格记录ID", "required": False, "category": "source"},
+        {"fieldName": "reason", "label": "原因说明", "required": False, "category": "basic"},
+        {"fieldName": "stepReason", "label": "排查过程", "required": False, "category": "basic"},
     ]
     DEFAULT_TICKET_STAT_CLASSIFICATIONS = {
         "issueTypes": [
@@ -1293,8 +1318,11 @@ class TicketSyncService:
             "autoTranslateOnSync": True,
             "defaultPullLimit": 50,
             "feishuAuth": cls._default_feishu_auth_config(),
+            "bitableCommon": cls._default_bitable_common_config(),
+            "externalFieldModel": cls._default_external_field_model_config(),
             "externalSyncBitable": cls._default_external_sync_bitable_config(),
             "remoteSync": cls._default_remote_sync_config(),
+            "bitablePull": cls._default_bitable_pull_config(),
             "groupPush": cls._default_group_push_config(),
             "personReminder": cls._default_person_reminder_config(),
             "summaryReport": cls._default_summary_report_config(),
@@ -1341,6 +1369,34 @@ class TicketSyncService:
         }
 
     @classmethod
+    def _default_bitable_common_config(cls) -> dict[str, Any]:
+        """
+        构建飞书多维表格公共配置。
+
+        :return: 公共多维表格配置默认值。
+        """
+        return {
+            "appId": "",
+            "appSecret": "",
+            "appToken": "",
+            "tableId": "",
+            "viewId": "",
+            "pageSize": 500,
+            "filterFormula": "",
+        }
+
+    @classmethod
+    def _default_external_field_model_config(cls) -> dict[str, Any]:
+        """
+        构建外部工单字段模型默认配置。
+
+        :return: 外部字段模型默认值。
+        """
+        return {
+            "fields": [dict(item) for item in cls.DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS],
+        }
+
+    @classmethod
     def _default_external_sync_bitable_config(cls) -> dict[str, Any]:
         """
         构建外部同步多维表格补充查询默认配置。
@@ -1354,6 +1410,36 @@ class TicketSyncService:
             "appToken": "",
             "tableId": "",
             "viewId": "",
+        }
+
+    @classmethod
+    def _default_bitable_pull_config(cls) -> dict[str, Any]:
+        """
+        构建飞书多维表格主动拉取默认配置。
+
+        :return: 主动拉取配置默认值。
+        """
+        return {
+            "enabled": False,
+            "appId": "",
+            "appSecret": "",
+            "appToken": "",
+            "tableId": "",
+            "viewId": "",
+            "pageSize": 200,
+            "filterFormula": "",
+            "fieldMappings": [],
+            "sourceSystem": "feishu_bitable_pull",
+            "ticketNoField": "ticketNo",
+            "updatedAtField": "",
+            "sortField": "",
+            "includeRecordUrl": True,
+            "automation": {
+                "autoIdentify": True,
+                "autoLogPull": False,
+                "autoAiAnalysis": False,
+                "autoTranslate": True,
+            },
         }
 
     @classmethod
@@ -1587,6 +1673,183 @@ class TicketSyncService:
         }
 
     @classmethod
+    def _normalize_external_field_model_config(cls, value: Any) -> dict[str, Any]:
+        """
+        归一化外部工单字段模型配置。
+
+        :param value: 原始配置。
+        :return: 归一化后的字段模型。
+        """
+        source = value if isinstance(value, dict) else {}
+        source_fields = source.get("fields") if isinstance(source.get("fields"), list) else []
+        normalized_fields: list[dict[str, Any]] = []
+        seen_field_names: set[str] = set()
+        for field in source_fields or cls.DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS:
+            if not isinstance(field, dict):
+                continue
+            field_name = str(field.get("fieldName") or field.get("value") or field.get("name") or "").strip()
+            if not field_name or field_name in seen_field_names:
+                continue
+            normalized_fields.append(
+                {
+                    "fieldName": field_name,
+                    "label": str(field.get("label") or field.get("name") or field_name).strip() or field_name,
+                    "required": bool(field.get("required")),
+                    "category": str(field.get("category") or "custom").strip() or "custom",
+                    "description": str(field.get("description") or "").strip(),
+                }
+            )
+            seen_field_names.add(field_name)
+        if not normalized_fields:
+            normalized_fields = [dict(item) for item in cls.DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS]
+        return {"fields": normalized_fields}
+
+    @classmethod
+    def _derive_required_fields_from_external_field_model(cls, value: Any) -> list[str]:
+        """
+        根据外部字段模型推导必填字段列表。
+
+        :param value: 外部字段模型配置。
+        :return: 必填字段列表。
+        """
+        model_config = cls._normalize_external_field_model_config(value)
+        required_fields: list[str] = []
+        for item in model_config.get("fields") or []:
+            if not isinstance(item, dict):
+                continue
+            if not bool(item.get("required")):
+                continue
+            field_name = str(item.get("fieldName") or "").strip()
+            if field_name and field_name not in required_fields:
+                required_fields.append(field_name)
+        return required_fields or list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
+
+    @classmethod
+    def _normalize_bitable_common_config(cls, value: Any, *, feishu_auth: dict[str, Any]) -> dict[str, Any]:
+        """
+        归一化飞书多维表格公共配置。
+
+        :param value: 原始公共配置。
+        :param feishu_auth: 飞书统一凭证。
+        :return: 归一化后的公共配置。
+        """
+        source = value if isinstance(value, dict) else {}
+        config = {**cls._default_bitable_common_config(), **source}
+        config["appId"] = str(config.get("appId") or "").strip() or str(feishu_auth.get("appId") or "").strip()
+        config["appSecret"] = str(config.get("appSecret") or "").strip() or str(feishu_auth.get("appSecret") or "").strip()
+        config["appToken"] = str(config.get("appToken") or "").strip()
+        config["tableId"] = str(config.get("tableId") or "").strip()
+        config["viewId"] = str(config.get("viewId") or "").strip()
+        config["pageSize"] = min(max(cls._safe_int(config.get("pageSize")) or 500, 1), 500)
+        config["filterFormula"] = str(config.get("filterFormula") or "").strip()
+        return config
+
+    @classmethod
+    def _apply_bitable_common_defaults(
+        cls,
+        config: dict[str, Any] | None,
+        *,
+        bitable_common: dict[str, Any],
+        keep_filter_formula: bool = True,
+    ) -> dict[str, Any]:
+        """
+        将公共多维表格配置补齐到具体业务配置中。
+
+        :param config: 业务侧配置。
+        :param bitable_common: 公共多维表格配置。
+        :param keep_filter_formula: 是否保留业务侧的 filterFormula 覆盖。
+        :return: 合并后的配置。
+        """
+        source = dict(config or {})
+        for key in ("appId", "appSecret", "appToken", "tableId", "viewId"):
+            if not str(source.get(key) or "").strip():
+                source[key] = bitable_common.get(key)
+        page_size = cls._safe_int(source.get("pageSize"))
+        if page_size is None:
+            source["pageSize"] = bitable_common.get("pageSize")
+        else:
+            source["pageSize"] = min(max(page_size, 1), 500)
+        if keep_filter_formula and not str(source.get("filterFormula") or "").strip():
+            source["filterFormula"] = bitable_common.get("filterFormula")
+        return source
+
+    @classmethod
+    def _normalize_bitable_field_mappings(cls, value: Any) -> list[dict[str, Any]]:
+        """
+        归一化多维表格字段映射列表。
+
+        :param value: 原始映射列表。
+        :return: 归一化后的映射。
+        """
+        source_rows = value if isinstance(value, list) else []
+        mappings: list[dict[str, Any]] = []
+        seen_targets: set[str] = set()
+        for row in source_rows:
+            if not isinstance(row, dict):
+                continue
+            source_field = str(row.get("sourceField") or row.get("from") or row.get("bitableField") or "").strip()
+            target_field = str(row.get("targetField") or row.get("to") or row.get("externalField") or "").strip()
+            if not source_field or not target_field:
+                continue
+            unique_key = f"{source_field}->{target_field}"
+            if unique_key in seen_targets:
+                continue
+            mappings.append(
+                {
+                    "sourceField": source_field,
+                    "targetField": target_field,
+                    "defaultValue": row.get("defaultValue"),
+                    "joinSeparator": str(row.get("joinSeparator") or "").strip() or ",",
+                }
+            )
+            seen_targets.add(unique_key)
+        return mappings
+
+    @classmethod
+    def _normalize_bitable_pull_config(
+        cls,
+        value: Any,
+        *,
+        feishu_auth: dict[str, Any],
+        bitable_common: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        归一化飞书多维表格主动拉取配置。
+
+        :param value: 原始配置。
+        :param feishu_auth: 飞书统一凭证。
+        :param bitable_common: 多维公共配置。
+        :return: 归一化后的主动拉取配置。
+        """
+        source = value if isinstance(value, dict) else {}
+        config = {**cls._default_bitable_pull_config(), **source}
+        config["enabled"] = bool(config.get("enabled"))
+        config["appId"] = str(config.get("appId") or "").strip() or str(feishu_auth.get("appId") or "").strip()
+        config["appSecret"] = (
+            str(config.get("appSecret") or "").strip() or str(feishu_auth.get("appSecret") or "").strip()
+        )
+        config["appToken"] = str(config.get("appToken") or "").strip()
+        config["tableId"] = str(config.get("tableId") or "").strip()
+        config["viewId"] = str(config.get("viewId") or "").strip()
+        config["pageSize"] = min(max(cls._safe_int(config.get("pageSize")) or 200, 1), 500)
+        config["filterFormula"] = str(config.get("filterFormula") or "").strip()
+        config["sourceSystem"] = str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull"
+        config["ticketNoField"] = str(config.get("ticketNoField") or "ticketNo").strip() or "ticketNo"
+        config["updatedAtField"] = str(config.get("updatedAtField") or "").strip()
+        config["sortField"] = str(config.get("sortField") or "").strip()
+        config["includeRecordUrl"] = bool(config.get("includeRecordUrl", True))
+        config["fieldMappings"] = cls._normalize_bitable_field_mappings(config.get("fieldMappings"))
+        automation = config.get("automation") if isinstance(config.get("automation"), dict) else {}
+        config["automation"] = {
+            "autoIdentify": bool(automation.get("autoIdentify", True)),
+            "autoLogPull": bool(automation.get("autoLogPull", False)),
+            "autoAiAnalysis": bool(automation.get("autoAiAnalysis", False)),
+            "autoTranslate": bool(automation.get("autoTranslate", True)),
+        }
+        config = cls._apply_bitable_common_defaults(config, bitable_common=bitable_common)
+        return config
+
+    @classmethod
     def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
         merged = cls._default_sync_config()
         if isinstance(config, dict):
@@ -1596,6 +1859,11 @@ class TicketSyncService:
         feishu_auth["appId"] = str(feishu_auth.get("appId") or "").strip()
         feishu_auth["appSecret"] = str(feishu_auth.get("appSecret") or "").strip()
         merged["feishuAuth"] = feishu_auth
+        merged["bitableCommon"] = cls._normalize_bitable_common_config(
+            merged.get("bitableCommon"),
+            feishu_auth=feishu_auth,
+        )
+        merged["externalFieldModel"] = cls._normalize_external_field_model_config(merged.get("externalFieldModel"))
         if not isinstance(merged.get("logPullDefaults"), dict):
             merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
         if not isinstance(merged.get("promptTemplates"), dict):
@@ -1612,6 +1880,10 @@ class TicketSyncService:
             **external_sync_bitable,
         }
         external_sync_bitable["enabled"] = bool(external_sync_bitable.get("enabled"))
+        external_sync_bitable = cls._apply_bitable_common_defaults(
+            external_sync_bitable,
+            bitable_common=merged["bitableCommon"],
+        )
         external_sync_bitable["appId"] = str(external_sync_bitable.get("appId") or "").strip()
         external_sync_bitable["appSecret"] = str(external_sync_bitable.get("appSecret") or "").strip()
         external_sync_bitable["appToken"] = str(external_sync_bitable.get("appToken") or "").strip()
@@ -1622,6 +1894,11 @@ class TicketSyncService:
         if not external_sync_bitable["appSecret"]:
             external_sync_bitable["appSecret"] = feishu_auth["appSecret"]
         merged["externalSyncBitable"] = external_sync_bitable
+        merged["bitablePull"] = cls._normalize_bitable_pull_config(
+            merged.get("bitablePull"),
+            feishu_auth=feishu_auth,
+            bitable_common=merged["bitableCommon"],
+        )
         external_sync_required_fields = merged.get("externalSyncRequiredFields")
         if isinstance(external_sync_required_fields, list):
             normalized_required_fields: list[str] = []
@@ -1633,7 +1910,9 @@ class TicketSyncService:
                 cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS
             )
         else:
-            merged["externalSyncRequiredFields"] = list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
+            merged["externalSyncRequiredFields"] = cls._derive_required_fields_from_external_field_model(
+                merged.get("externalFieldModel")
+            )
         if not isinstance(merged.get("remoteSync"), dict):
             merged["remoteSync"] = cls._default_remote_sync_config()
         else:
@@ -1732,6 +2011,7 @@ class TicketSyncService:
         person_reminder["rowsMarkdownTemplate"] = str(person_reminder.get("rowsMarkdownTemplate") or "").strip()
         person_reminder["maxRowsPerPerson"] = max(cls._safe_int(person_reminder.get("maxRowsPerPerson")) or 20, 1)
         person_reminder["pageSize"] = min(max(cls._safe_int(person_reminder.get("pageSize")) or 500, 1), 500)
+        person_reminder = cls._apply_bitable_common_defaults(person_reminder, bitable_common=merged["bitableCommon"])
         if not person_reminder["appId"]:
             person_reminder["appId"] = person_reminder["feishuAppId"] or feishu_auth["appId"]
         if not person_reminder["appSecret"]:
@@ -1773,6 +2053,7 @@ class TicketSyncService:
         summary_report["endTime"] = str(summary_report.get("endTime") or "").strip()
         summary_report["includeClosed"] = bool(summary_report.get("includeClosed", True))
         summary_report["messageTemplate"] = str(summary_report.get("messageTemplate") or "").strip()
+        summary_report = cls._apply_bitable_common_defaults(summary_report, bitable_common=merged["bitableCommon"])
         merged["summaryReport"] = summary_report
         if not isinstance(merged.get("projectMappings"), list):
             merged["projectMappings"] = []
@@ -1829,9 +2110,51 @@ class TicketSyncService:
 
     @classmethod
     def get_sync_automation_config_services(cls, db: Session) -> dict[str, Any]:
+        config_value = cls._load_sync_config(db)
+        config_value["externalSyncRequiredFields"] = cls._derive_required_fields_from_external_field_model(
+            config_value.get("externalFieldModel")
+        )
         return {
             "configKey": cls.CONFIG_KEY,
-            "configValue": cls._load_sync_config(db),
+            "configValue": config_value,
+        }
+
+    @classmethod
+    def preview_bitable_pull_fields_services(
+        cls,
+        db: Session,
+        *,
+        bitable_pull_override: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        预览主动拉取配置对应多维表格中的字段名列表。
+
+        :param db: 数据库会话。
+        :param bitable_pull_override: 页面当前临时配置覆盖。
+        :return: 字段名预览结果。
+        """
+        config = cls._load_sync_config(db)
+        pull_config = dict(config.get("bitablePull") or cls._default_bitable_pull_config())
+        if isinstance(bitable_pull_override, dict):
+            nested_override = (
+                bitable_pull_override.get("bitablePull")
+                if isinstance(bitable_pull_override.get("bitablePull"), dict)
+                else bitable_pull_override
+            )
+            pull_config.update(nested_override)
+        pull_config = cls._normalize_bitable_pull_config(
+            pull_config,
+            feishu_auth=config.get("feishuAuth") or cls._default_feishu_auth_config(),
+            bitable_common=config.get("bitableCommon") or cls._default_bitable_common_config(),
+        )
+        records = TicketSyncNotifyService.query_bitable_records({**pull_config, "pageSize": 1})
+        first_record = records[0] if records else {}
+        fields = first_record.get("fields") if isinstance(first_record.get("fields"), dict) else {}
+        field_names = sorted([str(key).strip() for key in fields.keys() if str(key).strip()])
+        return {
+            "recordCount": len(records),
+            "fieldNames": field_names,
+            "sampleRecordId": str(first_record.get("record_id") or first_record.get("recordId") or "").strip(),
         }
 
     @classmethod
@@ -1992,6 +2315,153 @@ class TicketSyncService:
             start_time=parsed_start_time,
             end_time=parsed_end_time,
         )
+
+    @classmethod
+    def run_bitable_pull_services(
+        cls,
+        db: Session,
+        *,
+        trigger_source: str,
+        current_user: CurrentUserModel | None = None,
+        bitable_pull_override: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        执行飞书多维表格主动拉取并复用外部同步逻辑入库。
+
+        :param db: 数据库会话。
+        :param trigger_source: 触发来源，支持 manual/scheduler。
+        :param current_user: 当前用户，定时任务场景可为空。
+        :param bitable_pull_override: 任务级覆盖配置。
+        :return: 执行结果摘要。
+        """
+        config = cls._load_sync_config(db)
+        pull_config = dict(config.get("bitablePull") or cls._default_bitable_pull_config())
+        if isinstance(bitable_pull_override, dict):
+            nested_override = (
+                bitable_pull_override.get("bitablePull")
+                if isinstance(bitable_pull_override.get("bitablePull"), dict)
+                else bitable_pull_override
+            )
+            pull_config.update(nested_override)
+        pull_config = cls._normalize_bitable_pull_config(
+            pull_config,
+            feishu_auth=config.get("feishuAuth") or cls._default_feishu_auth_config(),
+            bitable_common=config.get("bitableCommon") or cls._default_bitable_common_config(),
+        )
+        if not pull_config.get("enabled"):
+            logger.info(f"飞书多维表格主动拉取已跳过: enabled=false, trigger={trigger_source}")
+            return {"triggerSource": trigger_source, "skipped": True, "skipReason": "主动拉取未启用"}
+
+        normalized_override = {}
+        if isinstance(bitable_pull_override, dict):
+            nested_override = (
+                bitable_pull_override.get("bitablePull")
+                if isinstance(bitable_pull_override.get("bitablePull"), dict)
+                else bitable_pull_override
+            )
+            normalized_override = {
+                str(key): value for key, value in dict(nested_override or {}).items() if value not in (None, "")
+            }
+        if normalized_override:
+            logger.info(
+                f"飞书多维表格主动拉取使用任务级覆盖: trigger={trigger_source}, "
+                f"override_keys={list(normalized_override.keys())}"
+            )
+
+        required_missing: list[str] = []
+        for field_name in ("appId", "appSecret", "appToken", "tableId"):
+            if not str(pull_config.get(field_name) or "").strip():
+                required_missing.append(field_name)
+        if not pull_config.get("fieldMappings"):
+            required_missing.append("fieldMappings")
+        if required_missing:
+            return {
+                "triggerSource": trigger_source,
+                "skipped": True,
+                "skipReason": f"主动拉取配置不完整: {', '.join(required_missing)}",
+                "configErrors": required_missing,
+            }
+
+        records = TicketSyncNotifyService.query_bitable_records(pull_config)
+        summary = {
+            "triggerSource": trigger_source,
+            "skipped": False,
+            "recordCount": len(records),
+            "syncedCount": 0,
+            "skippedCount": 0,
+            "failedCount": 0,
+            "skipReasons": {},
+            "failures": [],
+        }
+        fallback_user = (
+            SimpleNamespace(user=SimpleNamespace(user_id=0, user_name="system", nick_name="system"))
+            if current_user is None
+            else current_user
+        )
+        automation_override = pull_config.get("automation") if isinstance(pull_config.get("automation"), dict) else {}
+
+        for record in records:
+            sync_object = cls._build_bitable_pull_sync_object(
+                record=record,
+                config=pull_config,
+                field_mappings=pull_config.get("fieldMappings") or [],
+            )
+            record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
+            if not sync_object:
+                summary["failedCount"] += 1
+                summary["failures"].append({"recordId": record_id, "reason": "record_to_sync_object_failed"})
+                continue
+            sync_object = sync_object.model_copy(
+                update={
+                    "automation": TicketSyncAutomationModel.model_validate(automation_override),
+                }
+            )
+            existing_ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
+            should_skip, skip_reason = cls._should_skip_bitable_pull_record(
+                existing_ticket=existing_ticket,
+                sync_object=sync_object,
+            )
+            if should_skip:
+                summary["skippedCount"] += 1
+                summary["skipReasons"][skip_reason] = int(summary["skipReasons"].get(skip_reason) or 0) + 1
+                continue
+            try:
+                result = cls.sync_external_ticket(
+                    db,
+                    sync_object,
+                    fallback_user,
+                    "external_sync",
+                    True,
+                )
+                if result.is_success:
+                    summary["syncedCount"] += 1
+                    deferred_dispatch = cls.dispatch_deferred_sync_post_process_task(
+                        sync_object.model_dump(),
+                        {"user": {"user_id": 0, "user_name": "system", "nick_name": "system"}}
+                        if current_user is None
+                        else current_user.model_dump(),
+                        "external_sync",
+                    )
+                    if deferred_dispatch.get("mode") != cls.CELERY_DISPATCH_MODE:
+                        cls.run_deferred_sync_post_process(
+                            sync_object.model_dump(),
+                            {"user": {"user_id": 0, "user_name": "system", "nick_name": "system"}}
+                            if current_user is None
+                            else current_user.model_dump(),
+                            "external_sync",
+                        )
+                else:
+                    summary["failedCount"] += 1
+                    summary["failures"].append(
+                        {"recordId": record_id, "ticketNo": sync_object.ticket_no, "reason": result.message}
+                    )
+            except Exception as exc:
+                logger.exception(f"飞书多维表格主动拉取入库失败: record_id={record_id or '-'}, error={exc}")
+                summary["failedCount"] += 1
+                summary["failures"].append(
+                    {"recordId": record_id, "ticketNo": sync_object.ticket_no, "reason": str(exc)}
+                )
+        return summary
 
     @classmethod
     def send_group_push_by_ticket_no_services(
@@ -3080,6 +3550,232 @@ class TicketSyncService:
             "length": len(text),
             "hasEmailPattern": "@" in text,
         }
+
+    @classmethod
+    def _normalize_bitable_record_scalar(
+        cls,
+        value: Any,
+        *,
+        join_separator: str = ",",
+    ) -> Any:
+        """
+        将飞书多维表格字段值归一化为适合外部同步入参的标量。
+
+        :param value: 多维表格原始字段值。
+        :param join_separator: 列表字段拼接分隔符。
+        :return: 归一化后的字段值。
+        """
+        if value is None:
+            return None
+        if isinstance(value, list):
+            normalized_items: list[str] = []
+            for item in value:
+                normalized_item = cls._normalize_bitable_record_scalar(item, join_separator=join_separator)
+                text = str(normalized_item or "").strip()
+                if text and text not in normalized_items:
+                    normalized_items.append(text)
+            return join_separator.join(normalized_items)
+        if isinstance(value, dict):
+            for key in ("text", "name", "value", "email", "link", "title"):
+                if key in value:
+                    normalized_value = cls._normalize_bitable_record_scalar(value.get(key), join_separator=join_separator)
+                    if normalized_value not in (None, ""):
+                        return normalized_value
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        if isinstance(value, (int, float, bool)):
+            return value
+        text = str(value).strip()
+        return text
+
+    @classmethod
+    def _normalize_bitable_record_datetime_text(cls, value: Any) -> str:
+        """
+        将多维表格时间字段归一化为接口可消费的时间文本。
+
+        :param value: 原始时间字段值。
+        :return: `YYYY-MM-DD HH:MM:SS` 格式文本，失败时返回原始文本。
+        """
+        parsed = cls._parse_datetime_value(value)
+        if parsed:
+            return parsed.strftime("%Y-%m-%d %H:%M:%S")
+        return str(value or "").strip()
+
+    @classmethod
+    def _build_bitable_record_url(
+        cls,
+        config: dict[str, Any],
+        *,
+        record_id: str,
+        record_url: str | None = None,
+    ) -> str:
+        """
+        根据多维表格配置构建记录详情 URL。
+
+        :param config: 多维配置。
+        :param record_id: 记录ID。
+        :param record_url: 飞书接口直接返回的记录详情 URL。
+        :return: 记录详情地址。
+        """
+        return TicketSyncNotifyService.get_bitable_record_url(config, record_id, record_url=record_url)
+
+    @classmethod
+    def _build_bitable_pull_field_mapping_from_record(
+        cls,
+        fields: dict[str, Any],
+        *,
+        field_mappings: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        根据多维表格字段映射生成外部同步字段字典。
+
+        :param fields: 多维表格 fields。
+        :param field_mappings: 可视化或任务参数配置的字段映射。
+        :return: 同步字段字典。
+        """
+        payload: dict[str, Any] = {}
+        for mapping in field_mappings:
+            source_field = str(mapping.get("sourceField") or "").strip()
+            target_field = str(mapping.get("targetField") or "").strip()
+            if not source_field or not target_field:
+                continue
+            raw_value = fields.get(source_field)
+            normalized_value = cls._normalize_bitable_record_scalar(
+                raw_value,
+                join_separator=str(mapping.get("joinSeparator") or ",").strip() or ",",
+            )
+            if normalized_value in (None, "", []):
+                default_value = mapping.get("defaultValue")
+                normalized_value = default_value if default_value not in ("", None) else None
+            if normalized_value in (None, "", []):
+                continue
+            if target_field in {"createTime"}:
+                payload[target_field] = cls._normalize_bitable_record_datetime_text(normalized_value)
+            else:
+                payload[target_field] = normalized_value
+        return payload
+
+    @classmethod
+    def _build_bitable_pull_snapshot_hash(
+        cls,
+        *,
+        source_payload: dict[str, Any],
+        field_mapping_snapshot: dict[str, str],
+    ) -> str:
+        """
+        计算主动拉取记录快照哈希，用于判断记录内容是否变化。
+
+        :param source_payload: 归一化后的同步负载。
+        :param field_mapping_snapshot: 字段映射快照。
+        :return: SHA256 哈希。
+        """
+        raw = {
+            "payload": source_payload,
+            "mapping": field_mapping_snapshot,
+        }
+        return hashlib.sha256(json.dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _build_bitable_pull_sync_object(
+        cls,
+        *,
+        record: dict[str, Any],
+        config: dict[str, Any],
+        field_mappings: list[dict[str, Any]],
+    ) -> TicketExternalSyncUpsertModel | None:
+        """
+        将飞书多维表格记录转换为外部工单同步模型。
+
+        :param record: 飞书多维表格记录。
+        :param config: 主动拉取配置。
+        :param field_mappings: 字段映射关系。
+        :return: 外部同步模型，缺少关键字段时返回 None。
+        """
+        fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+        record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
+        record_url = str(
+            record.get("record_url") or record.get("recordUrl") or record.get("shared_url") or record.get("sharedUrl") or ""
+        ).strip()
+        payload = cls._build_bitable_pull_field_mapping_from_record(fields, field_mappings=field_mappings)
+        if not payload:
+            return None
+        field_mapping_snapshot = {
+            str(item.get("targetField") or "").strip(): str(item.get("sourceField") or "").strip()
+            for item in field_mappings
+            if str(item.get("targetField") or "").strip() and str(item.get("sourceField") or "").strip()
+        }
+        payload["recordId"] = payload.get("recordId") or record_id
+        if config.get("includeRecordUrl", True):
+            payload["ticketUrl"] = payload.get("ticketUrl") or cls._build_bitable_record_url(
+                config,
+                record_id=record_id,
+                record_url=record_url,
+            )
+        payload["source"] = {
+            "system": str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull",
+            "recordId": payload.get("recordId") or record_id,
+            "recordUrl": payload.get("ticketUrl") or cls._build_bitable_record_url(
+                config,
+                record_id=record_id,
+                record_url=record_url,
+            ),
+            "pushedAt": cls._normalize_bitable_record_datetime_text(
+                fields.get(str(config.get("updatedAtField") or "").strip()) or record.get("created_time")
+            )
+            or None,
+        }
+        payload["raw_payload"] = {
+            "recordId": record_id,
+            "recordUrl": record_url or None,
+            "fields": fields,
+            "createdTime": record.get("created_time"),
+            "lastModifiedTime": record.get("last_modified_time"),
+        }
+        extra_data = payload.get("extraData") if isinstance(payload.get("extraData"), dict) else {}
+        extra_data = dict(extra_data or {})
+        extra_data["bitable_pull"] = {
+            "recordId": record_id,
+            "snapshotHash": cls._build_bitable_pull_snapshot_hash(
+                source_payload=payload,
+                field_mapping_snapshot=field_mapping_snapshot,
+            ),
+            "fieldMappings": field_mapping_snapshot,
+            "sourceSystem": payload["source"]["system"],
+            "pulledAt": cls._now_iso(),
+        }
+        payload["extraData"] = extra_data
+        try:
+            return TicketExternalSyncUpsertModel.model_validate(payload)
+        except Exception as exc:
+            logger.warning(f"飞书多维表格记录转换外部同步模型失败: record_id={record_id or '-'}, error={exc}")
+            return None
+
+    @classmethod
+    def _should_skip_bitable_pull_record(
+        cls,
+        *,
+        existing_ticket: Ticket | None,
+        sync_object: TicketExternalSyncUpsertModel,
+    ) -> tuple[bool, str]:
+        """
+        判断主动拉取记录是否因快照未变化而跳过入库。
+
+        :param existing_ticket: 已存在工单。
+        :param sync_object: 当前转换后的同步对象。
+        :return: (是否跳过, 原因)。
+        """
+        if not existing_ticket or not isinstance(existing_ticket.extra_data, dict):
+            return False, ""
+        bitable_pull_meta = existing_ticket.extra_data.get("bitable_pull")
+        if not isinstance(bitable_pull_meta, dict):
+            return False, ""
+        current_pull_meta = sync_object.extra_data.get("bitable_pull") if isinstance(sync_object.extra_data, dict) else {}
+        existing_hash = str(bitable_pull_meta.get("snapshotHash") or "").strip()
+        current_hash = str((current_pull_meta or {}).get("snapshotHash") or "").strip()
+        existing_record_id = str(bitable_pull_meta.get("recordId") or "").strip()
+        current_record_id = str((current_pull_meta or {}).get("recordId") or "").strip()
+        if existing_hash and current_hash and existing_hash == current_hash and existing_record_id == current_record_id:
+            return True, "snapshot_not_changed"
+        return False, ""
 
     @classmethod
     def _query_external_sync_bitable_record_fields(

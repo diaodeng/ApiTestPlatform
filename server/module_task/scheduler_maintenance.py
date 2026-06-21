@@ -91,6 +91,49 @@ def _build_person_reminder_config_override(kwargs: dict[str, Any]) -> dict[str, 
     return override
 
 
+def _build_bitable_pull_config_override(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """
+    从定时任务参数中提取飞书多维表格主动拉取覆盖配置。
+
+    :param kwargs: 定时任务关键字参数。
+    :return: 非空覆盖配置。
+    """
+    nested_config = kwargs.pop("bitablePull", None)
+    if nested_config is None:
+        nested_config = kwargs.pop("bitable_pull", None)
+    source_config = dict(nested_config) if isinstance(nested_config, dict) else {}
+    for key, value in kwargs.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and str(value).strip() == "":
+            continue
+        source_config[key] = value
+    field_aliases = {
+        "enabled": ("enabled",),
+        "appId": ("appId", "app_id"),
+        "appSecret": ("appSecret", "app_secret"),
+        "appToken": ("appToken", "app_token"),
+        "tableId": ("tableId", "table_id"),
+        "viewId": ("viewId", "view_id", "view"),
+        "pageSize": ("pageSize", "page_size"),
+        "filterFormula": ("filterFormula", "filter_formula", "filter"),
+        "sourceSystem": ("sourceSystem", "source_system"),
+        "ticketNoField": ("ticketNoField", "ticket_no_field"),
+        "updatedAtField": ("updatedAtField", "updated_at_field"),
+        "sortField": ("sortField", "sort_field"),
+        "includeRecordUrl": ("includeRecordUrl", "include_record_url"),
+        "fieldMappings": ("fieldMappings", "field_mappings"),
+        "automation": ("automation",),
+    }
+    override: dict[str, Any] = {}
+    for target_key, aliases in field_aliases.items():
+        for alias in aliases:
+            if alias in source_config:
+                override[target_key] = source_config.get(alias)
+                break
+    return override
+
+
 @register_job("module_task.scheduler_maintenance.cleanup_test_reports")
 def cleanup_test_reports(
     *args,
@@ -183,6 +226,36 @@ def pull_public_ticket_sync(
         result.get("skippedCount"),
         result.get("failedCount"),
         result.get("ackedCount"),
+    )
+    return result
+
+
+@register_job("module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync")
+def pull_feishu_bitable_ticket_sync(
+    *args,
+    **kwargs,
+):
+    """
+    飞书多维表格工单主动拉取定时任务。
+
+    :param kwargs: 支持 bitablePull 嵌套对象或平铺字段覆盖 appToken/tableId/viewId/filterFormula/pageSize/fieldMappings。
+    :return: 执行结果摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    override = _build_bitable_pull_config_override(kwargs)
+    with SessionLocal() as db:
+        result = TicketSyncService.run_bitable_pull_services(
+            db,
+            trigger_source="scheduler",
+            current_user=None,
+            bitable_pull_override=override,
+        )
+    logger.info(
+        f"飞书多维表格主动拉取任务执行完成 | record_count={result.get('recordCount')} "
+        f"synced={result.get('syncedCount')} skipped={result.get('skippedCount')} "
+        f"failed={result.get('failedCount')} override_keys={list(override.keys())}"
     )
     return result
 

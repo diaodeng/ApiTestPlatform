@@ -8,6 +8,16 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-22] INGEST-CODE | 修复飞书多维表格记录详情链接
+- 触发：用户反馈 `TicketSyncService._build_bitable_record_url` 使用多维表格搜索结果中的 `record_id` 拼接 URL 无法访问，真实可访问地址需要飞书记录详情 URL。
+- 架构层：工单域 / 飞书多维表格集成 / 按人催办通知
+- 创建的页面：`web/public/docs/2026-06-22-ticket-bitable-record-url-fix.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/service/ticket_sync_notify_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`flows/ticket-external-sync-flow.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketSyncNotifyService.query_bitable_records` 搜索记录 -> `records/batch_get(with_shared_url=true)` 批量补齐 `shared_url` -> `TicketSyncService._build_bitable_pull_sync_object` / `TicketSyncNotifyService._collect_person_overdue_data` -> 工单 `ticket_url` / 来源 `recordUrl` / 催办 `detailUrl`
+- 追加：已用 dev 环境真实参数只读实测，`records/search` 未返回链接，但 `records/batch_get` 可稳定返回 `https://duodian.feishu.cn/record/...` 形式的 `shared_url`；补查后 31 条记录全部成功补齐。
+- 总共涉及页面：7
+
 ## [2026-06-18] INGEST-CODE | 工单统计项目模块多选筛选
 - 触发：用户要求工单统计页面顶部增加按项目、模块筛选，并支持多选。
 - 架构层：工单域 / Web 控制台 / 统计接口
@@ -17,6 +27,16 @@ updated: 2026-05-20
 - 变更传播链：统计页多选筛选 -> `TicketStatisticsQueryModel.projectIds/moduleIds` -> `TicketService.get_statistics_services` -> `TicketDao.get_ticket_statistics`
 - 追加：模块筛选改为未选择项目时展示全部有效模块，选择项目后展示所选项目下模块；工单列表页同步使用该筛选规则。
 - 总共涉及页面：8
+
+## [2026-06-21] INGEST-CODE | 工单主动拉取与多维配置统一
+- 触发：用户要求根据桌面需求文档实现“工单主动拉取与配置优化”，包括外部字段模型、飞书多维表格主动拉取、字段映射和公共多维配置继承。
+- 架构层：工单域 / 飞书多维表格集成 / 任务调度 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-21-ticket-bitable-pull-and-config-unify.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/module_task/scheduler_maintenance.py`、`server/modules/ticket/controller/ticket_controller.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/src/views/ticket/syncAutomation/index.vue`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`flows/ticket-external-sync-flow.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`bitableCommon/externalFieldModel/bitablePull` 配置 -> `TicketSyncService.run_bitable_pull_services` -> `TicketSyncNotifyService.query_bitable_records` -> `TicketSyncService.sync_external_ticket`
+- 追加：主动拉取复用外部同步主链路，但会按 `recordId + snapshotHash` 判断记录是否变化；未变化时跳过，避免周期任务反复递增同步 revision。
+- 总共涉及页面：9
 
 ## [2026-06-18] INGEST-CODE | 工单 AI Agent 已登记 worktree 分支复用
 - 触发：用户反馈工单 AI 分析创建 `wemn_vender_master_1.3.8.41` 分支 worktree 时，目标目录不存在但 Git 提示该分支已被旧工作区路径占用。

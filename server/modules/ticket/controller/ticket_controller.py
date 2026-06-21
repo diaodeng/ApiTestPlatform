@@ -282,16 +282,26 @@ def _normalize_ticket_external_sync_payload(payload: dict, required_fields: list
     field_value_map = {
         "ticketNo": ticket_no,
         "description": description,
+        "title": title,
         "customerPriority": customer_priority,
         "internalPriority": internal_priority,
         "ticketVender": ticket_vender,
         "ticketModle": ticket_modle,
+        "ticketStatus": str(_compatible_field_value(data, "ticketStatus", "ticket_status", default="") or "").strip(),
+        "ticketStore": _compatible_field_value(data, "ticketStore", "ticket_store", default=""),
+        "ticketPos": str(_compatible_field_value(data, "ticketPos", "ticket_pos", default="") or "").strip(),
+        "ticketSco": str(_compatible_field_value(data, "ticketSco", "ticket_sco", default="") or "").strip(),
         "createTime": create_time,
         "reporterName": reporter_name,
-        "title": title,
-        "reason": reason,
+        "reporterEmail": reporter_email,
+        "currentAssigneeName": current_assignee_name,
+        "currentAssigneeEmail": current_assignee_email,
+        "internalOwner": internal_owner_name,
+        "internalOwnerEmail": internal_owner_email,
         "ticketUrl": ticket_url,
-        "ticketStore": _compatible_field_value(data, "ticketStore", "ticket_store", default=""),
+        "recordId": str(_compatible_field_value(data, "recordId", "record_id", default="") or "").strip(),
+        "reason": reason,
+        "stepReason": step_reason,
     }
     default_required_fields = [
         "ticketNo",
@@ -856,6 +866,30 @@ async def update_sync_automation_config(
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketController.post(
+    "/sync/automation/bitable-pull/fields-preview",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:list"))],
+)
+async def preview_bitable_pull_fields(
+    request: Request,
+    config_value: dict,
+    query_db: Session = Depends(get_db),
+):
+    """
+    根据当前主动拉取配置预览多维表格字段列表。
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketSyncService.preview_bitable_pull_fields_services,
+            query_db,
+            bitable_pull_override=config_value,
+        )
+        return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

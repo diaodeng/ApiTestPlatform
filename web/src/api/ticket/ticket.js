@@ -116,6 +116,15 @@ export function saveTicketSyncAutomationConfig(data) {
   });
 }
 
+// 预览主动拉取多维表格字段
+export function previewTicketSyncBitablePullFields(data) {
+  return request({
+    url: '/ticket/sync/automation/bitable-pull/fields-preview',
+    method: 'post',
+    data,
+  });
+}
+
 // 查询同步通知推送配置选项
 export function listTicketSyncNotifyPushOptions() {
   return request({

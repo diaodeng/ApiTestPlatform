@@ -42,6 +42,65 @@
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
+                <span>多维表格公共配置</span>
+                <el-tag type="info" effect="plain">公共覆盖基座</el-tag>
+              </div>
+            </template>
+            <el-form :model="form.bitableCommon" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="默认 appToken">
+                    <el-input
+                      v-model="form.bitableCommon.appToken"
+                      placeholder="供汇总、催办、邮箱补全、主动拉取默认继承"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="默认 tableId">
+                    <el-input v-model="form.bitableCommon.tableId" placeholder="默认多维表格 tableId" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="默认 viewId">
+                    <el-input v-model="form.bitableCommon.viewId" placeholder="可选，默认表视图" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="默认分页大小">
+                    <el-input-number
+                      v-model="form.bitableCommon.pageSize"
+                      :min="1"
+                      :max="500"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="默认过滤公式">
+                    <el-input
+                      v-model="form.bitableCommon.filterFormula"
+                      type="textarea"
+                      :rows="3"
+                      placeholder='可选；各模块未单独配置时继承，例如 CurrentValue.[状态] != "已关闭"'
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <div class="mapping-desc">
+                    工单汇总统计、按人催办、群消息补全、外部推送邮箱补全、主动拉取默认继承这里的多维配置；
+                    各自模块填了同名字段时，以模块自身配置为准。
+                  </div>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
                 <span>工单汇总统计通知</span>
                 <el-tag type="success" effect="plain">推送配置</el-tag>
               </div>
@@ -967,6 +1026,443 @@
               </el-row>
             </el-form>
           </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>外部工单字段模型</span>
+                <el-tag type="info" effect="plain">必填枚举来源</el-tag>
+              </div>
+            </template>
+            <el-form :model="form.externalFieldModel" label-width="150px">
+              <el-form-item label="字段模型说明">
+                <div class="mapping-desc">
+                  外部推送字段全集、主动拉取字段映射目标字段都来自这里；这里的“默认必填”就是外部同步必填规则的唯一编辑入口，不需要再单独维护另一份必填列表。
+                </div>
+              </el-form-item>
+              <el-form-item label="字段列表">
+                <el-table :data="form.externalFieldModel.fields" border size="small">
+                  <el-table-column label="字段名" min-width="180">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.fieldName" placeholder="如 ticketNo" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="显示名" min-width="180">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.label" placeholder="如 工单号" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="分类" min-width="120">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.category" placeholder="basic/person/mapping" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="默认必填" width="120">
+                    <template #default="scope">
+                      <el-switch v-model="scope.row.required" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="说明" min-width="200">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.description" placeholder="可选说明" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="80" align="center">
+                    <template #default="scope">
+                      <el-button link type="danger" icon="Delete" @click="removeExternalFieldModel(scope.$index)" />
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div class="mt8">
+                  <el-button type="primary" link icon="Plus" @click="addExternalFieldModel">新增字段</el-button>
+                </div>
+              </el-form-item>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>外部推送多维表格邮箱补全</span>
+                <el-tag type="warning" effect="plain">推送配置</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.externalSyncBitable" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用邮箱补全">
+                    <el-switch
+                      v-model="form.externalSyncBitable.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 appToken">
+                    <el-input
+                      v-model="form.externalSyncBitable.appToken"
+                      placeholder="飞书多维表格应用 Token"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 tableId">
+                    <el-input
+                      v-model="form.externalSyncBitable.tableId"
+                      placeholder="飞书多维表格表ID"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 viewId">
+                    <el-input
+                      v-model="form.externalSyncBitable.viewId"
+                      placeholder="可选，不填默认表视图"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appId">
+                    <el-input
+                      v-model="form.externalSyncBitable.appId"
+                      placeholder="覆盖统一凭证（可选）"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书 appSecret">
+                    <el-input
+                      v-model="form.externalSyncBitable.appSecret"
+                      show-password
+                      placeholder="覆盖统一凭证（可选）"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <div class="mapping-desc">
+                    外部推送传入的 <code>recordId</code> 会作为飞书多维表格记录ID查询固定字段：
+                    <code>(IT) L1 PIC</code>、<code>1.5 当前负责人</code>、<code>当前负责人</code>。
+                    当前块未填写的多维凭证会继承“多维表格公共配置”。
+                  </div>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>飞书多维表格主动拉取</span>
+                <el-tag type="warning" effect="plain">拉取配置</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.bitablePull" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用主动拉取">
+                    <el-switch
+                      v-model="form.bitablePull.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="来源系统标识">
+                    <el-input v-model="form.bitablePull.sourceSystem" placeholder="如 feishu_bitable_pull" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 appToken">
+                    <el-input v-model="form.bitablePull.appToken" placeholder="为空继承公共配置" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 tableId">
+                    <el-input v-model="form.bitablePull.tableId" placeholder="为空继承公共配置" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维 viewId">
+                    <el-input v-model="form.bitablePull.viewId" placeholder="为空继承公共配置" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="分页大小">
+                    <el-input-number
+                      v-model="form.bitablePull.pageSize"
+                      :min="1"
+                      :max="500"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="工单号字段">
+                    <el-input v-model="form.bitablePull.ticketNoField" placeholder="用于说明，多数情况由字段映射给 ticketNo" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="更新时间字段">
+                    <el-input v-model="form.bitablePull.updatedAtField" placeholder="如 更新时间；用于 pushedAt/去重辅助" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="排序字段">
+                    <el-input v-model="form.bitablePull.sortField" placeholder="预留；当前仅保存说明" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="写入记录链接">
+                    <el-switch
+                      v-model="form.bitablePull.includeRecordUrl"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="过滤公式">
+                    <el-input
+                      v-model="form.bitablePull.filterFormula"
+                      type="textarea"
+                      :rows="3"
+                      placeholder='可选；任务参数未覆盖时按此条件主动查询，如 CurrentValue.[是否入库] = false'
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="主动拉取自动化">
+                    <el-row :gutter="12" style="width: 100%">
+                      <el-col :xs="12" :md="6">
+                        <el-form-item label-width="0" class="switch-inline-desc">
+                          <el-switch
+                            v-model="form.bitablePull.automation.autoIdentify"
+                            inline-prompt
+                            active-text="开启"
+                            inactive-text="关闭"
+                          />
+                          <div class="switch-inline-desc__text">自动识别项目/模块/人员/门店等归属信息</div>
+                        </el-form-item>
+                      </el-col>
+                      <el-col :xs="12" :md="6">
+                        <el-form-item label-width="0" class="switch-inline-desc">
+                          <el-switch
+                            v-model="form.bitablePull.automation.autoLogPull"
+                            inline-prompt
+                            active-text="开启"
+                            inactive-text="关闭"
+                          />
+                          <div class="switch-inline-desc__text">入库后按识别结果自动提交日志拉取任务</div>
+                        </el-form-item>
+                      </el-col>
+                      <el-col :xs="12" :md="6">
+                        <el-form-item label-width="0" class="switch-inline-desc">
+                          <el-switch
+                            v-model="form.bitablePull.automation.autoAiAnalysis"
+                            inline-prompt
+                            active-text="开启"
+                            inactive-text="关闭"
+                          />
+                          <div class="switch-inline-desc__text">日志准备完成后自动发起 AI 分析</div>
+                        </el-form-item>
+                      </el-col>
+                      <el-col :xs="12" :md="6">
+                        <el-form-item label-width="0" class="switch-inline-desc">
+                          <el-switch
+                            v-model="form.bitablePull.automation.autoTranslate"
+                            inline-prompt
+                            active-text="开启"
+                            inactive-text="关闭"
+                          />
+                          <div class="switch-inline-desc__text">描述入库后自动翻译为中文</div>
+                        </el-form-item>
+                      </el-col>
+                    </el-row>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="字段映射">
+                    <div class="mapping-desc mb8">
+                      “多维字段”支持下拉选择或手动输入。点击“读取表格字段”会按当前多维配置查询一条记录并抽取字段名，便于快速选择。
+                    </div>
+                    <div class="mb8">
+                      <el-button
+                        size="small"
+                        :loading="bitablePullFieldsLoading"
+                        @click="handlePreviewBitablePullFields"
+                      >
+                        读取表格字段
+                      </el-button>
+                      <span v-if="bitablePullFieldOptions.length" class="mapping-desc" style="margin-left: 12px">
+                        已读取 {{ bitablePullFieldOptions.length }} 个字段
+                      </span>
+                    </div>
+                    <el-table :data="form.bitablePull.fieldMappings" border size="small">
+                      <el-table-column label="多维字段" min-width="220">
+                        <template #default="scope">
+                          <el-select
+                            v-model="scope.row.sourceField"
+                            filterable
+                            allow-create
+                            default-first-option
+                            style="width: 100%"
+                            placeholder="选择表格字段或手动输入"
+                            @visible-change="handleBitablePullFieldSelectVisibleChange"
+                          >
+                            <el-option
+                              v-for="item in bitablePullFieldOptions"
+                              :key="`bitable-source-field-${item}`"
+                              :label="item"
+                              :value="item"
+                            />
+                          </el-select>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="接口字段" min-width="220">
+                        <template #default="scope">
+                          <el-select
+                            v-model="scope.row.targetField"
+                            filterable
+                            allow-create
+                            default-first-option
+                            style="width: 100%"
+                            placeholder="选择外部字段模型中的字段"
+                          >
+                            <el-option
+                              v-for="item in externalFieldModelOptions"
+                              :key="`bitable-pull-field-${item.value}`"
+                              :label="item.label"
+                              :value="item.value"
+                            />
+                          </el-select>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="默认值" min-width="180">
+                        <template #default="scope">
+                          <el-input v-model="scope.row.defaultValue" placeholder="为空时可回填默认值" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="多值分隔符" width="120">
+                        <template #default="scope">
+                          <el-input v-model="scope.row.joinSeparator" placeholder="," />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="操作" width="80" align="center">
+                        <template #default="scope">
+                          <el-button link type="danger" icon="Delete" @click="removeBitablePullFieldMapping(scope.$index)" />
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                    <div class="mt8">
+                      <el-button type="primary" link icon="Plus" @click="addBitablePullFieldMapping">新增映射</el-button>
+                    </div>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>远端同步链接</span>
+                <el-tag type="warning" effect="plain">拉取配置</el-tag>
+              </div>
+            </template>
+
+            <el-form
+              ref="remoteFormRef"
+              :model="form.remoteSync"
+              :rules="remoteRules"
+              label-width="150px"
+            >
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用远端同步" prop="enabled">
+                    <el-switch
+                      v-model="form.remoteSync.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="抓取超时(秒)" prop="timeoutSec">
+                    <el-input-number
+                      v-model="form.remoteSync.timeoutSec"
+                      :min="10"
+                      :max="300"
+                      :step="5"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="拉取地址" prop="pullUrl">
+                    <el-input
+                      v-model="form.remoteSync.pullUrl"
+                      placeholder="https://example.com/api/tickets/pending"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="回写地址" prop="ackUrl">
+                    <el-input
+                      v-model="form.remoteSync.ackUrl"
+                      placeholder="https://example.com/api/tickets/ack"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="消费者标识" prop="consumer">
+                    <el-input
+                      v-model="form.remoteSync.consumer"
+                      placeholder="例如 public-ticket-sync"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="每次拉取数量" prop="limit">
+                    <el-input-number
+                      v-model="form.remoteSync.limit"
+                      :min="1"
+                      :max="200"
+                      :step="1"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="包含已关闭" prop="includeClosed">
+                    <el-switch
+                      v-model="form.remoteSync.includeClosed"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="拉取后自动翻译" prop="autoTranslateOnPull">
+                    <el-switch
+                      v-model="form.remoteSync.autoTranslateOnPull"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
         </el-tab-pane>
         <el-tab-pane label="映射/规则">
           <el-card shadow="never" class="config-card mt16">
@@ -1203,211 +1699,8 @@
             </div>
           </el-card>
 
-          <el-card shadow="never" class="config-card mt16">
-            <template #header>
-              <div class="card-header">
-                <span>外部推送多维表格邮箱补全</span>
-                <el-tag type="warning" effect="plain">推送配置</el-tag>
-              </div>
-            </template>
 
-            <el-form :model="form.externalSyncBitable" label-width="150px">
-              <el-row :gutter="16">
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="启用邮箱补全">
-                    <el-switch
-                      v-model="form.externalSyncBitable.enabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="多维 appToken">
-                    <el-input
-                      v-model="form.externalSyncBitable.appToken"
-                      placeholder="飞书多维表格应用 Token"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="多维 tableId">
-                    <el-input
-                      v-model="form.externalSyncBitable.tableId"
-                      placeholder="飞书多维表格表ID"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="多维 viewId">
-                    <el-input
-                      v-model="form.externalSyncBitable.viewId"
-                      placeholder="可选，不填默认表视图"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="飞书 appId">
-                    <el-input
-                      v-model="form.externalSyncBitable.appId"
-                      placeholder="覆盖统一凭证（可选）"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="飞书 appSecret">
-                    <el-input
-                      v-model="form.externalSyncBitable.appSecret"
-                      show-password
-                      placeholder="覆盖统一凭证（可选）"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24">
-                  <div class="mapping-desc">
-                    外部推送传入的 <code>recordId</code> 会作为飞书多维表格记录ID查询固定字段：
-                    <code>(IT) L1 PIC</code>、<code>1.5 当前负责人</code>、<code>当前负责人</code>。
-                  </div>
-                </el-col>
-              </el-row>
-            </el-form>
-          </el-card>
 
-          <el-card shadow="never" class="config-card mt16">
-            <template #header>
-              <div class="card-header">
-                <span>远端同步链接</span>
-                <el-tag type="warning" effect="plain">拉取配置</el-tag>
-              </div>
-            </template>
-
-            <el-form
-              ref="remoteFormRef"
-              :model="form.remoteSync"
-              :rules="remoteRules"
-              label-width="150px"
-            >
-              <el-row :gutter="16">
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="启用远端同步" prop="enabled">
-                    <el-switch
-                      v-model="form.remoteSync.enabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="抓取超时(秒)" prop="timeoutSec">
-                    <el-input-number
-                      v-model="form.remoteSync.timeoutSec"
-                      :min="10"
-                      :max="300"
-                      :step="5"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24">
-                  <el-form-item label="拉取地址" prop="pullUrl">
-                    <el-input
-                      v-model="form.remoteSync.pullUrl"
-                      placeholder="https://example.com/api/tickets/pending"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24">
-                  <el-form-item label="回写地址" prop="ackUrl">
-                    <el-input
-                      v-model="form.remoteSync.ackUrl"
-                      placeholder="https://example.com/api/tickets/ack"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="消费者标识" prop="consumer">
-                    <el-input
-                      v-model="form.remoteSync.consumer"
-                      placeholder="例如 public-ticket-sync"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="每次拉取数量" prop="limit">
-                    <el-input-number
-                      v-model="form.remoteSync.limit"
-                      :min="1"
-                      :max="200"
-                      :step="1"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="包含已关闭" prop="includeClosed">
-                    <el-switch
-                      v-model="form.remoteSync.includeClosed"
-                      inline-prompt
-                      active-text="是"
-                      inactive-text="否"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="拉取后自动翻译" prop="autoTranslateOnPull">
-                    <el-switch
-                      v-model="form.remoteSync.autoTranslateOnPull"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </el-form>
-          </el-card>
-
-          <el-card shadow="never" class="config-card mt16">
-            <template #header>
-              <div class="card-header">
-                <span>外部同步必填字段</span>
-                <el-tag type="info" effect="plain"
-                  >支持选择已有字段，也支持直接输入自定义字段名</el-tag
-                >
-              </div>
-            </template>
-
-            <el-form :model="form" label-width="150px">
-              <el-form-item label="支持字段说明">
-                <div class="mapping-desc">
-                  目前支持的字段：{{
-                    externalSyncRequiredFieldOptions.map((item) => item.value).join('、')
-                  }}。可直接下拉选择，也可手动输入新增字段名。
-                </div>
-              </el-form-item>
-              <el-form-item label="必填字段列表">
-                <el-select
-                  v-model="form.externalSyncRequiredFields"
-                  multiple
-                  filterable
-                  allow-create
-                  default-first-option
-                  collapse-tags
-                  placeholder="ticketNo, description, internalPriority, ticketVender, ticketModle, createTime, reporterName"
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="item in externalSyncRequiredFieldOptions"
-                    :key="`external-required-${item.value}`"
-                    :label="item.label"
-                    :value="item.value"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-form>
-          </el-card>
         </el-tab-pane>
         <el-tab-pane label="操作">
           <el-card shadow="never" class="config-card mt16">
@@ -1647,6 +1940,7 @@
     getTicketSyncAutoCategoryStats,
     getTicketSyncAutomationConfig,
     listTicketSyncNotifyPushOptions,
+    previewTicketSyncBitablePullFields,
     previewTicketSyncPersonReminder,
     runTicketSyncPersonReminder,
     runTicketSyncSummaryReport,
@@ -1670,9 +1964,12 @@
   const summaryRunLoading = ref(false);
   const autoCategoryStatsLoading = ref(false);
   const autoCategoryRunLoading = ref(false);
+  const bitablePullFieldsLoading = ref(false);
+  const bitablePullFieldsLoaded = ref(false);
   const personPreviewResult = ref(null);
   const autoCategoryStats = ref(null);
   const autoCategoryRegexText = ref('[]');
+  const bitablePullFieldOptions = ref([]);
   const groupSendForm = reactive({
     ticketNo: '',
     forcePush: false,
@@ -1770,6 +2067,17 @@
     { label: 'internalOwner - 内部负责人', value: 'internalOwner' },
     { label: 'recordId - 飞书多维记录ID', value: 'recordId' },
   ];
+
+  const externalFieldModelOptions = computed(() =>
+    Array.isArray(form.externalFieldModel?.fields)
+      ? form.externalFieldModel.fields
+          .map((item) => ({
+            label: `${String(item?.fieldName || '').trim()} - ${String(item?.label || '').trim() || String(item?.fieldName || '').trim()}`,
+            value: String(item?.fieldName || '').trim(),
+          }))
+          .filter((item) => item.value)
+      : []
+  );
 
   const personDataSourceOptions = [
     { label: '飞书多维表格统计', value: 'bitable' },
@@ -1880,6 +2188,24 @@
         appId: '',
         appSecret: '',
       },
+      bitableCommon: {
+        appId: '',
+        appSecret: '',
+        appToken: '',
+        tableId: '',
+        viewId: '',
+        pageSize: 500,
+        filterFormula: '',
+      },
+      externalFieldModel: {
+        fields: externalSyncRequiredFieldOptions.map((item) => ({
+          fieldName: item.value,
+          label: item.label.split(' - ')[1] || item.value,
+          required: ['ticketNo', 'description', 'internalPriority', 'ticketVender', 'ticketModle', 'createTime', 'reporterName'].includes(item.value),
+          category: 'basic',
+          description: '',
+        })),
+      },
       remoteSync: {
         enabled: false,
         pullUrl: '',
@@ -1920,6 +2246,28 @@
         appToken: '',
         tableId: '',
         viewId: '',
+      },
+      bitablePull: {
+        enabled: false,
+        appId: '',
+        appSecret: '',
+        appToken: '',
+        tableId: '',
+        viewId: '',
+        pageSize: 200,
+        filterFormula: '',
+        sourceSystem: 'feishu_bitable_pull',
+        ticketNoField: 'ticketNo',
+        updatedAtField: '',
+        sortField: '',
+        includeRecordUrl: true,
+        fieldMappings: [],
+        automation: {
+          autoIdentify: true,
+          autoLogPull: false,
+          autoAiAnalysis: false,
+          autoTranslate: true,
+        },
       },
       personReminder: {
         enabled: false,
@@ -2107,6 +2455,45 @@
     });
   }
 
+  function addExternalFieldModel() {
+    if (!Array.isArray(form.externalFieldModel.fields)) {
+      form.externalFieldModel.fields = [];
+    }
+    form.externalFieldModel.fields.push({
+      fieldName: '',
+      label: '',
+      required: false,
+      category: 'custom',
+      description: '',
+    });
+  }
+
+  function removeExternalFieldModel(index) {
+    if (!Array.isArray(form.externalFieldModel.fields)) {
+      return;
+    }
+    form.externalFieldModel.fields.splice(index, 1);
+  }
+
+  function addBitablePullFieldMapping() {
+    if (!Array.isArray(form.bitablePull.fieldMappings)) {
+      form.bitablePull.fieldMappings = [];
+    }
+    form.bitablePull.fieldMappings.push({
+      sourceField: '',
+      targetField: '',
+      defaultValue: '',
+      joinSeparator: ',',
+    });
+  }
+
+  function removeBitablePullFieldMapping(index) {
+    if (!Array.isArray(form.bitablePull.fieldMappings)) {
+      return;
+    }
+    form.bitablePull.fieldMappings.splice(index, 1);
+  }
+
   function removeStatOption(groupKey, index) {
     if (!Array.isArray(form.statClassification[groupKey])) {
       return;
@@ -2146,6 +2533,28 @@
       appId: feishuAuth.appId || '',
       appSecret: feishuAuth.appSecret || '',
     };
+    const bitableCommon = payload.bitableCommon || {};
+    form.bitableCommon = {
+      appId: bitableCommon.appId || '',
+      appSecret: bitableCommon.appSecret || '',
+      appToken: bitableCommon.appToken || '',
+      tableId: bitableCommon.tableId || '',
+      viewId: bitableCommon.viewId || '',
+      pageSize: Number(bitableCommon.pageSize || 500),
+      filterFormula: bitableCommon.filterFormula || '',
+    };
+    const externalFieldModel = payload.externalFieldModel || {};
+    form.externalFieldModel = {
+      fields: Array.isArray(externalFieldModel.fields)
+        ? externalFieldModel.fields.map((item) => ({
+            fieldName: String(item?.fieldName || '').trim(),
+            label: String(item?.label || '').trim(),
+            required: Boolean(item?.required),
+            category: String(item?.category || 'custom').trim(),
+            description: String(item?.description || '').trim(),
+          }))
+        : createDefaultForm().externalFieldModel.fields,
+    };
 
     const remoteSync = payload.remoteSync || {};
     form.remoteSync = {
@@ -2176,6 +2585,36 @@
       appToken: externalSyncBitable.appToken || '',
       tableId: externalSyncBitable.tableId || '',
       viewId: externalSyncBitable.viewId || '',
+    };
+    const bitablePull = payload.bitablePull || {};
+    form.bitablePull = {
+      enabled: Boolean(bitablePull.enabled),
+      appId: bitablePull.appId || '',
+      appSecret: bitablePull.appSecret || '',
+      appToken: bitablePull.appToken || '',
+      tableId: bitablePull.tableId || '',
+      viewId: bitablePull.viewId || '',
+      pageSize: Number(bitablePull.pageSize || 200),
+      filterFormula: bitablePull.filterFormula || '',
+      sourceSystem: bitablePull.sourceSystem || 'feishu_bitable_pull',
+      ticketNoField: bitablePull.ticketNoField || 'ticketNo',
+      updatedAtField: bitablePull.updatedAtField || '',
+      sortField: bitablePull.sortField || '',
+      includeRecordUrl: bitablePull.includeRecordUrl !== false,
+      fieldMappings: Array.isArray(bitablePull.fieldMappings)
+        ? bitablePull.fieldMappings.map((item) => ({
+            sourceField: String(item?.sourceField || '').trim(),
+            targetField: String(item?.targetField || '').trim(),
+            defaultValue: item?.defaultValue ?? '',
+            joinSeparator: String(item?.joinSeparator || ',').trim() || ',',
+          }))
+        : [],
+      automation: {
+        autoIdentify: bitablePull.automation?.autoIdentify !== false,
+        autoLogPull: Boolean(bitablePull.automation?.autoLogPull),
+        autoAiAnalysis: Boolean(bitablePull.automation?.autoAiAnalysis),
+        autoTranslate: bitablePull.automation?.autoTranslate !== false,
+      },
     };
 
     const groupPush = payload.groupPush || {};
@@ -2339,15 +2778,7 @@
     };
     form.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
       ? payload.externalSyncRequiredFields.map((item) => String(item || '').trim()).filter(Boolean)
-      : [
-          'ticketNo',
-          'description',
-          'internalPriority',
-          'ticketVender',
-          'ticketModle',
-          'createTime',
-          'reporterName',
-        ];
+      : form.externalFieldModel.fields.filter((item) => item.required).map((item) => item.fieldName);
   }
 
   function parseJsonArray(text, fallback = []) {
@@ -2409,6 +2840,29 @@
     }
   );
 
+  watch(
+    () => [
+      form.bitablePull.appId,
+      form.bitablePull.appSecret,
+      form.bitablePull.appToken,
+      form.bitablePull.tableId,
+      form.bitablePull.viewId,
+      form.bitablePull.filterFormula,
+      form.bitableCommon.appId,
+      form.bitableCommon.appSecret,
+      form.bitableCommon.appToken,
+      form.bitableCommon.tableId,
+      form.bitableCommon.viewId,
+      form.bitableCommon.filterFormula,
+      form.feishuAuth.appId,
+      form.feishuAuth.appSecret,
+    ],
+    () => {
+      bitablePullFieldsLoaded.value = false;
+      bitablePullFieldOptions.value = [];
+    }
+  );
+
   async function handleSave() {
     const [basicValid, remoteValid] = await Promise.all([
       validateElForm('formRef'),
@@ -2430,6 +2884,28 @@
       payload.feishuAuth = {
         appId: String(payload.feishuAuth?.appId || '').trim(),
         appSecret: String(payload.feishuAuth?.appSecret || '').trim(),
+      };
+      payload.bitableCommon = {
+        appId: String(payload.bitableCommon?.appId || '').trim(),
+        appSecret: String(payload.bitableCommon?.appSecret || '').trim(),
+        appToken: String(payload.bitableCommon?.appToken || '').trim(),
+        tableId: String(payload.bitableCommon?.tableId || '').trim(),
+        viewId: String(payload.bitableCommon?.viewId || '').trim(),
+        pageSize: Math.min(Math.max(Number(payload.bitableCommon?.pageSize || 500), 1), 500),
+        filterFormula: String(payload.bitableCommon?.filterFormula || '').trim(),
+      };
+      payload.externalFieldModel = {
+        fields: Array.isArray(payload.externalFieldModel?.fields)
+          ? payload.externalFieldModel.fields
+              .map((item) => ({
+                fieldName: String(item?.fieldName || '').trim(),
+                label: String(item?.label || '').trim(),
+                required: Boolean(item?.required),
+                category: String(item?.category || 'custom').trim(),
+                description: String(item?.description || '').trim(),
+              }))
+              .filter((item) => item.fieldName)
+          : [],
       };
       payload.groupPush.appChatIds = Array.isArray(payload.groupPush?.appChatIds)
         ? payload.groupPush.appChatIds.map((item) => String(item || '').trim()).filter(Boolean)
@@ -2474,6 +2950,37 @@
         appToken: String(payload.externalSyncBitable?.appToken || '').trim(),
         tableId: String(payload.externalSyncBitable?.tableId || '').trim(),
         viewId: String(payload.externalSyncBitable?.viewId || '').trim(),
+      };
+      payload.bitablePull = {
+        enabled: Boolean(payload.bitablePull?.enabled),
+        appId: String(payload.bitablePull?.appId || '').trim(),
+        appSecret: String(payload.bitablePull?.appSecret || '').trim(),
+        appToken: String(payload.bitablePull?.appToken || '').trim(),
+        tableId: String(payload.bitablePull?.tableId || '').trim(),
+        viewId: String(payload.bitablePull?.viewId || '').trim(),
+        pageSize: Math.min(Math.max(Number(payload.bitablePull?.pageSize || 200), 1), 500),
+        filterFormula: String(payload.bitablePull?.filterFormula || '').trim(),
+        sourceSystem: String(payload.bitablePull?.sourceSystem || 'feishu_bitable_pull').trim(),
+        ticketNoField: String(payload.bitablePull?.ticketNoField || 'ticketNo').trim(),
+        updatedAtField: String(payload.bitablePull?.updatedAtField || '').trim(),
+        sortField: String(payload.bitablePull?.sortField || '').trim(),
+        includeRecordUrl: Boolean(payload.bitablePull?.includeRecordUrl),
+        fieldMappings: Array.isArray(payload.bitablePull?.fieldMappings)
+          ? payload.bitablePull.fieldMappings
+              .map((item) => ({
+                sourceField: String(item?.sourceField || '').trim(),
+                targetField: String(item?.targetField || '').trim(),
+                defaultValue: item?.defaultValue ?? '',
+                joinSeparator: String(item?.joinSeparator || ',').trim() || ',',
+              }))
+              .filter((item) => item.sourceField && item.targetField)
+          : [],
+        automation: {
+          autoIdentify: payload.bitablePull?.automation?.autoIdentify !== false,
+          autoLogPull: Boolean(payload.bitablePull?.automation?.autoLogPull),
+          autoAiAnalysis: Boolean(payload.bitablePull?.automation?.autoAiAnalysis),
+          autoTranslate: payload.bitablePull?.automation?.autoTranslate !== false,
+        },
       };
       payload.personReminder.appId = String(payload.personReminder?.appId || '').trim();
       payload.personReminder.appSecret = String(payload.personReminder?.appSecret || '').trim();
@@ -2548,7 +3055,7 @@
                 .filter(Boolean)
             )
           )
-        : [];
+        : payload.externalFieldModel.fields.filter((item) => item.required).map((item) => item.fieldName);
       payload.statClassification = normalizeStatClassificationConfig(payload.statClassification);
       await saveTicketSyncAutomationConfig(payload);
       proxy.$modal.msgSuccess('保存成功');
@@ -2676,6 +3183,69 @@
       .finally(() => {
         summaryRunLoading.value = false;
       });
+  }
+
+  function buildBitablePullPreviewPayload() {
+    return {
+      bitablePull: {
+        enabled: Boolean(form.bitablePull.enabled),
+        appId: String(form.bitablePull.appId || '').trim(),
+        appSecret: String(form.bitablePull.appSecret || '').trim(),
+        appToken: String(form.bitablePull.appToken || '').trim(),
+        tableId: String(form.bitablePull.tableId || '').trim(),
+        viewId: String(form.bitablePull.viewId || '').trim(),
+        pageSize: Math.min(Math.max(Number(form.bitablePull.pageSize || 1), 1), 500),
+        filterFormula: String(form.bitablePull.filterFormula || '').trim(),
+        sourceSystem: String(form.bitablePull.sourceSystem || '').trim(),
+      },
+      bitableCommon: {
+        appId: String(form.bitableCommon.appId || '').trim(),
+        appSecret: String(form.bitableCommon.appSecret || '').trim(),
+        appToken: String(form.bitableCommon.appToken || '').trim(),
+        tableId: String(form.bitableCommon.tableId || '').trim(),
+        viewId: String(form.bitableCommon.viewId || '').trim(),
+        pageSize: Math.min(Math.max(Number(form.bitableCommon.pageSize || 1), 1), 500),
+        filterFormula: String(form.bitableCommon.filterFormula || '').trim(),
+      },
+      feishuAuth: {
+        appId: String(form.feishuAuth.appId || '').trim(),
+        appSecret: String(form.feishuAuth.appSecret || '').trim(),
+      },
+    };
+  }
+
+  function handlePreviewBitablePullFields() {
+    bitablePullFieldsLoading.value = true;
+    previewTicketSyncBitablePullFields(buildBitablePullPreviewPayload())
+      .then((response) => {
+        bitablePullFieldOptions.value = Array.isArray(response.data?.fieldNames)
+          ? response.data.fieldNames
+          : [];
+        bitablePullFieldsLoaded.value = true;
+        proxy.$modal.msgSuccess(
+          bitablePullFieldOptions.value.length
+            ? `已读取 ${bitablePullFieldOptions.value.length} 个字段`
+            : '未读取到字段，请检查过滤条件或表格是否有数据'
+        );
+      })
+      .catch((error) => {
+        bitablePullFieldOptions.value = [];
+        bitablePullFieldsLoaded.value = false;
+        proxy.$modal.msgError(error?.message || '读取表格字段失败');
+      })
+      .finally(() => {
+        bitablePullFieldsLoading.value = false;
+      });
+  }
+
+  function handleBitablePullFieldSelectVisibleChange(visible) {
+    if (!visible) {
+      return;
+    }
+    if (bitablePullFieldsLoading.value || bitablePullFieldsLoaded.value) {
+      return;
+    }
+    handlePreviewBitablePullFields();
   }
 
   function parseAutoCategoryRegexRules() {
@@ -2947,6 +3517,17 @@
     color: var(--el-text-color-secondary);
     margin-bottom: 10px;
     line-height: 1.5;
+  }
+
+  .switch-inline-desc {
+    margin-bottom: 0;
+  }
+
+  .switch-inline-desc__text {
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--el-text-color-secondary);
   }
 
   .action-bar {

@@ -433,8 +433,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             "rec_002",
         )
 
-    def test_person_reminder_uses_bitable_record_url_when_local_ticket_url_missing(self):
-        """本地工单没有详情 URL 时，催办明细应回退到飞书多维表格记录 URL。"""
+    def test_person_reminder_uses_search_record_url_when_local_ticket_url_missing(self):
+        """本地工单没有详情 URL 时，催办明细应优先使用飞书搜索结果返回的记录 URL。"""
         db = SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery())
         config = {
             "dataSource": "bitable",
@@ -447,6 +447,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         }
         record = {
             "record_id": "rec_003",
+            "record_url": "https://duodian.feishu.cn/record/RotorqQTyeb46qc3BzPcrcvSnSh",
             "fields": {
                 "处理人": [{"email": "owner@example.com", "name": "负责人"}],
                 "更新时间": "2020-01-01 09:00:00",
@@ -466,7 +467,160 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         rows = result["people"][0]["rows"]
         self.assertEqual(
             rows[0]["detailUrl"],
-            "https://feishu.cn/base/base_token?table=tbl_token&view=vew_token&record=rec_003",
+            "https://duodian.feishu.cn/record/RotorqQTyeb46qc3BzPcrcvSnSh",
+        )
+
+    def test_sync_config_inherits_bitable_common_for_person_and_summary(self):
+        """多维表格公共配置应被人员催办、汇总统计和外部邮箱补全继承。"""
+        config = TicketSyncService._normalize_sync_config(
+            {
+                "feishuAuth": {"appId": "app_a", "appSecret": "secret_a"},
+                "bitableCommon": {
+                    "appToken": "common_token",
+                    "tableId": "common_table",
+                    "viewId": "common_view",
+                    "pageSize": 123,
+                    "filterFormula": "CurrentValue.[状态] != \"已关闭\"",
+                },
+                "personReminder": {"enabled": True, "personField": "处理人", "timeField": "更新时间"},
+                "summaryReport": {"enabled": True, "dataSource": "bitable"},
+                "externalSyncBitable": {"enabled": True},
+            }
+        )
+
+        self.assertEqual(config["personReminder"]["appToken"], "common_token")
+        self.assertEqual(config["personReminder"]["tableId"], "common_table")
+        self.assertEqual(config["personReminder"]["viewId"], "common_view")
+        self.assertEqual(config["personReminder"]["pageSize"], 123)
+        self.assertEqual(config["summaryReport"]["appToken"], "common_token")
+        self.assertEqual(config["summaryReport"]["filterFormula"], "CurrentValue.[状态] != \"已关闭\"")
+        self.assertEqual(config["externalSyncBitable"]["appToken"], "common_token")
+        self.assertEqual(config["externalSyncBitable"]["appId"], "app_a")
+        self.assertEqual(config["externalSyncBitable"]["appSecret"], "secret_a")
+
+    def test_bitable_pull_record_skips_when_snapshot_not_changed(self):
+        """主动拉取记录快照未变化时应跳过，避免每次任务都递增 revision。"""
+        sync_object = SimpleNamespace(
+            extra_data={"bitable_pull": {"recordId": "rec_001", "snapshotHash": "hash_001"}},
+        )
+        existing_ticket = SimpleNamespace(
+            extra_data={"bitable_pull": {"recordId": "rec_001", "snapshotHash": "hash_001"}}
+        )
+
+        should_skip, reason = TicketSyncService._should_skip_bitable_pull_record(
+            existing_ticket=existing_ticket,
+            sync_object=sync_object,
+        )
+
+        self.assertTrue(should_skip)
+        self.assertEqual(reason, "snapshot_not_changed")
+
+    def test_bitable_pull_builds_sync_object_from_field_mappings(self):
+        """主动拉取应按字段映射生成外部同步模型，并携带字段映射快照。"""
+        record = {
+            "record_id": "rec_100",
+            "record_url": "https://duodian.feishu.cn/record/RotorqQTyeb46qc3BzPcrcvSnSh",
+            "created_time": "2026-06-21 10:00:00",
+            "fields": {
+                "工单号": "T-100",
+                "标题": "支付失败",
+                "描述": "顾客支付时报错",
+                "优先级": "P1",
+                "提单人": "张三",
+                "创建时间": "2026-06-21 09:59:00",
+            },
+        }
+        config = {
+            "appToken": "app_token",
+            "tableId": "tbl_100",
+            "viewId": "vew_100",
+            "sourceSystem": "feishu_bitable_pull",
+            "includeRecordUrl": True,
+            "updatedAtField": "创建时间",
+        }
+        field_mappings = [
+            {"sourceField": "工单号", "targetField": "ticketNo"},
+            {"sourceField": "标题", "targetField": "title"},
+            {"sourceField": "描述", "targetField": "description"},
+            {"sourceField": "优先级", "targetField": "internalPriority"},
+            {"sourceField": "提单人", "targetField": "reporterName"},
+            {"sourceField": "创建时间", "targetField": "createTime"},
+        ]
+
+        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+            record=record,
+            config=config,
+            field_mappings=field_mappings,
+        )
+
+        self.assertIsNotNone(sync_object)
+        self.assertEqual(sync_object.ticket_no, "T-100")
+        self.assertEqual(sync_object.title, "支付失败")
+        self.assertEqual(sync_object.source.record_id, "rec_100")
+        self.assertEqual(
+            sync_object.ticket_url,
+            "https://duodian.feishu.cn/record/RotorqQTyeb46qc3BzPcrcvSnSh",
+        )
+        self.assertEqual(
+            sync_object.extra_data["bitable_pull"]["fieldMappings"]["ticketNo"],
+            "工单号",
+        )
+
+    def test_bitable_record_url_returns_empty_when_only_record_id_exists(self):
+        """仅有 record_id 且没有飞书返回的详情 URL 时，不应伪造不可访问链接。"""
+        record_url = TicketSyncNotifyService.get_bitable_record_url(
+            {"appToken": "base_token", "tableId": "tbl_token", "viewId": "vew_token"},
+            "rec_404",
+        )
+
+        self.assertEqual(record_url, "")
+
+    def test_query_bitable_records_hydrates_shared_url_from_batch_get(self):
+        """搜索接口未返回详情链接时，应通过 batch_get 按 record_id 补齐 shared_url。"""
+        config = {
+            "appId": "app_id",
+            "appSecret": "app_secret",
+            "appToken": "app_token",
+            "tableId": "tbl_token",
+            "viewId": "vew_token",
+            "pageSize": 1,
+            "filterFormula": "",
+        }
+        search_response = {
+            "data": {
+                "items": [
+                    {
+                        "record_id": "rec_001",
+                        "fields": {"工单号": "T-001"},
+                    }
+                ],
+                "has_more": False,
+                "page_token": "",
+            }
+        }
+        batch_response = {
+            "data": {
+                "records": [
+                    {
+                        "record_id": "rec_001",
+                        "shared_url": "https://duodian.feishu.cn/record/FUY1rD5Cte98g0cx6qYcEOTYnBh",
+                    }
+                ]
+            }
+        }
+
+        with (
+            patch.object(TicketSyncNotifyService, "_resolve_feishu_auth", return_value=("app_id", "app_secret")),
+            patch.object(TicketSyncNotifyService, "_get_tenant_access_token", return_value="tenant_token"),
+            patch.object(TicketSyncNotifyService, "_request_feishu_json", side_effect=[search_response, batch_response]),
+        ):
+            records = TicketSyncNotifyService.query_bitable_records(config)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["record_id"], "rec_001")
+        self.assertEqual(
+            records[0]["shared_url"],
+            "https://duodian.feishu.cn/record/FUY1rD5Cte98g0cx6qYcEOTYnBh",
         )
 
 

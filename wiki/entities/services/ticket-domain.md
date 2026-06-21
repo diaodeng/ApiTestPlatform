@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-06-18
 created: 2026-05-20
-updated: 2026-06-18
+updated: 2026-06-21
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
@@ -75,6 +75,13 @@ graph TD
 - 外部同步后的自动化链路支持规则化识别项目、模块、商家、门店、POS/SCO、版本号，识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。
 - 识别和自动化配置统一由系统参数 `ticket.sync.automation` 驱动，优先通过映射规则、正则和默认参数适配不同工单系统，避免把定制话术写死在服务代码里。
 - 外部推送多维表格邮箱补齐由 `ticket.sync.automation.externalSyncBitable.enabled` 控制；成功补齐后会在 `extra_data.external_sync.bitableEmailSync` 记录 `status=success`、`recordId`、`emailKeys` 和 `syncedAt`，同一工单再次推送同一个 `recordId` 时会跳过重复查询。
+- 飞书多维表格公共配置已下沉到 `ticket.sync.automation.bitableCommon`；工单汇总统计、按人催办、外部推送邮箱补全和主动拉取默认继承该配置，局部配置非空时覆盖公共配置。
+- 外部字段枚举已抽成 `ticket.sync.automation.externalFieldModel`；同步配置页的必填字段下拉与主动拉取字段映射目标字段统一读取该模型。
+- `externalFieldModel` 现在同时承担“字段全集”和“必填标记”职责；页面不再建议单独维护另一份必填字段配置，服务端仅保留 `externalSyncRequiredFields` 作为历史兼容输出。
+- 新增主动拉取配置 `ticket.sync.automation.bitablePull` 与定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync`：任务按条件搜索飞书多维表格记录，经字段映射转换后复用外部同步入库链路。
+- 主动拉取记录会把 `recordId/snapshotHash/fieldMappings/sourceSystem/pulledAt` 落到 `ticket.extra_data.bitable_pull`；同一记录内容未变化时直接跳过，避免定时任务反复递增同步 revision。
+- 飞书多维表格搜索结果中的 `record_id` 不能直接拼成可访问详情链接；当前环境下 `records/search` 实际可能不返回 `record_url/shared_url`，因此服务会继续按缺失记录的 `record_id` 调用 `records/batch_get(with_shared_url=true)` 批量补齐 `shared_url`，再写入 `ticket_url/source.recordUrl/detailUrl`；若补查后仍为空，则保持空字符串，不再伪造 `...?record=record_id` 假链接。
+- 主动拉取映射中的“多维字段”支持按当前配置实时预览一条表格记录字段名，作为下拉选项；同时保留手动输入，兼容字段尚未出现在样本记录中的场景。
 - 远端拉取由 `ticket.sync.automation.remoteSync.enabled` 控制，拉取入库不会再次查询公网多维表格；它只使用远端 payload 已携带的邮箱/姓名，并按内网本地 `assigneeMappings` 或邮箱用户匹配解析人员。
 - 工单项目/模块选项直接复用 HRM 公共项目管理，不单独维护工单项目库；后端按 HRM 的正常状态值 `QtrDataStatusEnum.normal = 2` 过滤有效项。
 - HRM 模块的 `module_code` 约束已调整为“同一项目下唯一”，不同项目允许复用同一业务 code，便于按业务域横向统计问题分布。
