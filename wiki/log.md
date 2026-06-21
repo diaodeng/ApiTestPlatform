@@ -623,6 +623,13 @@ updated: 2026-05-20
 - 变更传播链：`server/modules/ticket/dao/ticket_dao.py` -> 工单外部同步与内网拉取流程
 - 总共涉及页面：2
 
+## [2026-06-21] INGEST-CODE | 工单模块 code 筛选与项目内唯一
+- 触发：用户要求工单列表和工单统计增加按模块 code 搜索，模块 code 改为项目下唯一，并且筛选下拉枚举动态从后端获取。
+- 架构层：工单域 / HRM 模块管理 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-21-ticket-module-code-filter-and-project-unique.md`
+- 更新的页面：`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/controller/ticket_controller.py`、`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/dao/ticket_dao.py`、`server/module_hrm/service/module_service.py`、`web/src/views/ticket/index.vue`、`web/src/views/ticket/statistics/index.vue`、`web/src/views/hrm/module/index.vue`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 变更传播链：`/ticket/modules/options` 返回 `moduleCode` -> 工单列表/统计页动态生成模块 code 下拉 -> `/ticket/list` 与 `/ticket/statistics/overview` 增加 `moduleCode/moduleCodes` 过滤；`module_service.py` -> HRM 模块 code 唯一性改为项目内校验
+
 ## [2026-05-22] INGEST-CODE | 修复 Windows 下 codex Worker 路径解析问题
 - 触发：用户在 Windows 开发环境提交 AI 分析时，日志显示 `WinError 2`，服务进程找不到 `codex` 可执行文件
 - 架构层：工单域 / AI Worker 编排

@@ -118,6 +118,23 @@ def _normalize_int_list(value: Any) -> list[int]:
     return normalized
 
 
+def _normalize_text_list(value: Any) -> list[str]:
+    """
+    将前端多选文本参数归一化为字符串列表。
+    :param value: 逗号分隔字符串、数组或单个值
+    :return: 去重后的非空字符串列表
+    """
+    if value is None or value == "":
+        return []
+    raw_items = value if isinstance(value, (list, tuple, set)) else str(value).split(",")
+    normalized: list[str] = []
+    for item in raw_items:
+        text = str(item or "").strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
 def _ticket_no() -> str:
     """
     生成工单编号。
@@ -2470,6 +2487,7 @@ class TicketService:
             {
                 "moduleId": module.module_id,
                 "moduleName": module.module_name,
+                "moduleCode": str(module.module_code or "").strip(),
                 "projectId": module.project_id,
                 "label": module.module_name,
             }
@@ -2585,6 +2603,7 @@ class TicketService:
         end_time=None,
         project_ids: Any = None,
         module_ids: Any = None,
+        module_codes: Any = None,
     ) -> dict:
         """
         获取工单实时统计数据。
@@ -2593,6 +2612,7 @@ class TicketService:
         :param end_time: 结束时间
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
+        :param module_codes: 模块业务码多选过滤
         :return: 统计结果
         """
         statistics = TicketDao.get_ticket_statistics(
@@ -2601,5 +2621,6 @@ class TicketService:
             _date_end(end_time),
             _normalize_int_list(project_ids),
             _normalize_int_list(module_ids),
+            _normalize_text_list(module_codes),
         )
         return _camelize(statistics)

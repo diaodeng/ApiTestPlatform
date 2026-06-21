@@ -71,7 +71,7 @@
           <el-input v-model="form.moduleName" placeholder="请输入模块名称" />
         </el-form-item>
         <el-form-item label="模块编码" prop="moduleCode">
-          <el-input v-model="form.moduleCode" placeholder="建议人工维护，跨环境同步时保持一致" maxlength="128" />
+          <el-input v-model="form.moduleCode" placeholder="建议人工维护，同一项目下唯一" maxlength="128" />
         </el-form-item>
         <el-form-item label="所属项目" prop="projectId">
           <el-select v-model="form.projectId" placeholder="请选择">

@@ -2412,7 +2412,7 @@ async def get_ticket_module_options(
     :param request: 请求对象
     :param project_id: 项目ID；传入后仅返回当前项目下的模块
     :param query_db: 数据库会话
-    :return: 模块选项列表
+    :return: 模块选项列表，包含模块ID、名称和模块业务码
     """
     try:
         return ResponseUtil.success(data=TicketService.get_module_options_services(query_db, projectId))
@@ -2448,7 +2448,7 @@ async def get_ticket_statistics(
     """
     获取工单统计接口。
     :param request: 请求对象
-    :param query: 时间范围、项目ID和模块ID筛选参数
+    :param query: 时间范围、项目ID、模块ID和模块业务码筛选参数
     :param query_db: 数据库会话
     :return: 总量、平均处理耗时、状态分布、分类分布和人员处理量
     """
@@ -2460,6 +2460,7 @@ async def get_ticket_statistics(
             query.end_time,
             query.project_ids,
             query.module_ids,
+            query.module_codes,
         )
         return ResponseUtil.success(data=statistics)
     except Exception as e:

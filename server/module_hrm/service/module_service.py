@@ -99,11 +99,14 @@ class ModuleService:
                 if incoming_code:
                     duplicate = (
                         query_db.query(HrmModule)
-                        .filter(HrmModule.module_code == incoming_code)
+                        .filter(
+                            HrmModule.module_code == incoming_code,
+                            HrmModule.project_id == page_object.project_id,
+                        )
                         .first()
                     )
                     if duplicate:
-                        return CrudResponseModel(is_success=False, message='妯″潡涓氬姟缂栫爜宸插瓨鍦?')
+                        return CrudResponseModel(is_success=False, message='同一项目下模块编码已存在')
                     add_module.module_code = incoming_code
                 else:
                     add_module.module_code = ""
@@ -136,18 +139,21 @@ class ModuleService:
                     result = {'is_success': False, 'message': '妯″潡鍚嶇О宸插瓨鍦?'}
                     return CrudResponseModel(**result)
 
-            edit_module_code = str(edit.get('module_code') or '').strip()
+            target_project_id = edit.get('project_id') or info.project_id
+            edit_module_code = str(edit.get('module_code') or info.module_code or '').strip()
             if edit_module_code:
                 duplicate = (
                     query_db.query(HrmModule)
                     .filter(
                         HrmModule.module_code == edit_module_code,
+                        HrmModule.project_id == target_project_id,
                         HrmModule.module_id != info.module_id,
                     )
                     .first()
                 )
                 if duplicate:
-                    return CrudResponseModel(is_success=False, message='妯″潡涓氬姟缂栫爜宸插瓨鍦?')
+                    return CrudResponseModel(is_success=False, message='同一项目下模块编码已存在')
+                edit['module_code'] = edit_module_code
             else:
                 edit['module_code'] = info.module_code or ""
 

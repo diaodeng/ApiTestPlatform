@@ -50,6 +50,25 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item label="模块Code">
+        <el-select
+          v-model="selectedModuleCodes"
+          multiple
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          filterable
+          placeholder="模块Code"
+          style="width: 240px"
+        >
+          <el-option
+            v-for="item in moduleCodeOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">查询</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -249,8 +268,10 @@ const dateRange = ref([])
 const overview = ref({})
 const projectOptions = ref([])
 const moduleOptions = ref([])
+const moduleCodeOptions = ref([])
 const selectedProjectIds = ref([])
 const selectedModuleIds = ref([])
+const selectedModuleCodes = ref([])
 const issueTypeOptions = ref([])
 const rootCauseTypeOptions = ref([])
 const solutionTypeOptions = ref([])
@@ -273,7 +294,8 @@ function buildQueryParams() {
   return {
     ...queryParams.value,
     projectIds: selectedProjectIds.value.length ? selectedProjectIds.value.join(',') : undefined,
-    moduleIds: selectedModuleIds.value.length ? selectedModuleIds.value.join(',') : undefined
+    moduleIds: selectedModuleIds.value.length ? selectedModuleIds.value.join(',') : undefined,
+    moduleCodes: selectedModuleCodes.value.length ? selectedModuleCodes.value.join(',') : undefined
   }
 }
 
@@ -318,8 +340,11 @@ async function loadModuleOptions(projectIds = []) {
     })
   })
   moduleOptions.value = Array.from(moduleMap.values())
+  moduleCodeOptions.value = buildModuleCodeOptions(moduleOptions.value)
   const validModuleIds = new Set(moduleOptions.value.map(item => item.moduleId))
   selectedModuleIds.value = selectedModuleIds.value.filter(moduleId => validModuleIds.has(moduleId))
+  const validModuleCodes = new Set(moduleCodeOptions.value.map(item => item.value))
+  selectedModuleCodes.value = selectedModuleCodes.value.filter(moduleCode => validModuleCodes.has(moduleCode))
 }
 
 function handleProjectChange(projectIds) {
@@ -336,6 +361,7 @@ function resetQuery() {
   dateRange.value = []
   selectedProjectIds.value = []
   selectedModuleIds.value = []
+  selectedModuleCodes.value = []
   queryParams.value = { beginTime: undefined, endTime: undefined }
   loadModuleOptions([])
   getStatistics()
@@ -381,6 +407,21 @@ function formatResolution(row) {
 function formatModuleOptionLabel(item) {
   const project = projectOptions.value.find(projectItem => projectItem.projectId === item.projectId)
   return project?.projectName ? `${project.projectName} / ${item.moduleName}` : item.moduleName
+}
+
+function buildModuleCodeOptions(moduleItems = []) {
+  const codeMap = new Map()
+  ;(Array.isArray(moduleItems) ? moduleItems : []).forEach(item => {
+    const code = String(item?.moduleCode || '').trim()
+    if (!code || codeMap.has(code)) {
+      return
+    }
+    codeMap.set(code, {
+      value: code,
+      label: code
+    })
+  })
+  return Array.from(codeMap.values())
 }
 
 function formatTransition(row) {

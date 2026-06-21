@@ -6,6 +6,8 @@ from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from module_admin.entity.do.user_do import SysUser
+from module_hrm.entity.do.module_do import HrmModule
+from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.entity.do.ticket_do import (
     EmbeddingRecord,
     KnowledgeArticle,
@@ -183,6 +185,30 @@ def _build_ticket_process_status_filter(latest_log_status, latest_ai_status, pro
     return True
 
 
+def _resolve_module_ids_by_codes(
+    db: Session,
+    module_codes: list[str],
+    project_ids: list[int] | None = None,
+) -> list[int]:
+    """
+    根据模块业务码解析模块ID列表，支持按项目范围收敛。
+    :param db: 数据库会话
+    :param module_codes: 模块业务码列表
+    :param project_ids: 可选项目ID列表
+    :return: 命中的模块ID列表
+    """
+    normalized_codes = [str(item or "").strip() for item in module_codes if str(item or "").strip()]
+    if not normalized_codes:
+        return []
+    query = db.query(HrmModule.module_id).filter(
+        HrmModule.status == QtrDataStatusEnum.normal.value,
+        HrmModule.module_code.in_(normalized_codes),
+    )
+    if project_ids:
+        query = query.filter(HrmModule.project_id.in_(project_ids))
+    return [row[0] for row in query.distinct().all() if row[0]]
+
+
 class TicketDao:
     """
     工单模块数据库访问层。
@@ -239,9 +265,19 @@ class TicketDao:
         submit_end_time = _date_end(query.submit_end_time)
         ticket_no = str(query.ticket_no or "").strip()
         process_status = str(query.process_status or "").strip()
+        module_code = str(query.module_code or "").strip()
         latest_log_status = _latest_log_pull_status_expr(Ticket.ticket_id)
         latest_ai_status = _latest_ai_status_expr(Ticket.ticket_id)
         submit_time_expr = _ticket_submit_time_expr()
+        matched_module_ids_by_code = (
+            _resolve_module_ids_by_codes(
+                db,
+                [module_code],
+                [query.project_id] if query.project_id else None,
+            )
+            if module_code
+            else []
+        )
         ticket_query = (
             db.query(Ticket)
             .filter(
@@ -251,6 +287,9 @@ class TicketDao:
                 Ticket.status == query.status if query.status else True,
                 Ticket.project_id == query.project_id if query.project_id else True,
                 Ticket.module_id == query.module_id if query.module_id else True,
+                Ticket.module_id.in_(matched_module_ids_by_code) if module_code and matched_module_ids_by_code else (
+                    Ticket.ticket_id == -1 if module_code else True
+                ),
                 Ticket.category_id == query.category_id if query.category_id else True,
                 Ticket.issue_type_id == query.issue_type_id if query.issue_type_id else True,
                 Ticket.issue_type_name.like(f"%{query.issue_type_name}%") if query.issue_type_name else True,
@@ -968,6 +1007,7 @@ class TicketDao:
         end_time: datetime | None,
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
+        module_codes: list[str] | None = None,
     ) -> dict:
         """
         实时统计指定时间范围内的工单数量、分类和人员处理量。
@@ -976,9 +1016,15 @@ class TicketDao:
         :param end_time: 结束时间
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
+        :param module_codes: 模块业务码多选过滤
         :return: 统计结果
         """
         filters = [Ticket.del_flag == "0"]
+        matched_module_ids_by_code = (
+            _resolve_module_ids_by_codes(db, module_codes or [], project_ids or None)
+            if module_codes
+            else []
+        )
         if begin_time:
             filters.append(Ticket.create_time >= begin_time)
         if end_time:
@@ -987,6 +1033,11 @@ class TicketDao:
             filters.append(Ticket.project_id.in_(project_ids))
         if module_ids:
             filters.append(Ticket.module_id.in_(module_ids))
+        if module_codes:
+            if matched_module_ids_by_code:
+                filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
+            else:
+                filters.append(Ticket.ticket_id == -1)
 
         base_filter = and_(*filters)
         total = db.query(func.count(Ticket.ticket_id)).filter(base_filter).scalar() or 0
@@ -1069,6 +1120,11 @@ class TicketDao:
             transition_filters.append(Ticket.project_id.in_(project_ids))
         if module_ids:
             transition_filters.append(Ticket.module_id.in_(module_ids))
+        if module_codes:
+            if matched_module_ids_by_code:
+                transition_filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
+            else:
+                transition_filters.append(Ticket.ticket_id == -1)
         transition_rows = (
             db.query(
                 TicketStatusHistory.from_status,

@@ -99,6 +99,7 @@ class TicketQueryModel(QueryModel):
     process_status: str | None = Field(default=None, description="工单处理状态")
     project_id: int | None = Field(default=None, description="所属项目ID")
     module_id: int | None = Field(default=None, description="所属模块ID")
+    module_code: str | None = Field(default=None, description="所属模块业务码")
     category_id: int | None = Field(default=None, description="问题分类ID")
     issue_type_id: str | None = Field(default=None, description="工单类型编码")
     issue_type_name: str | None = Field(default=None, description="工单类型名称")
@@ -850,3 +851,4 @@ class TicketStatisticsQueryModel(QueryModel):
     end_time: date | datetime | str | None = Field(default=None, description="结束时间")
     project_ids: str | list[int] | None = Field(default=None, description="项目ID多选，支持逗号分隔或数组")
     module_ids: str | list[int] | None = Field(default=None, description="模块ID多选，支持逗号分隔或数组")
+    module_codes: str | list[str] | None = Field(default=None, description="模块业务码多选，支持逗号分隔或数组")

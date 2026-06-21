@@ -55,7 +55,7 @@ graph TD
 - 历史 `ticket.sync.automation.aiClassification.promptContent` 不再作为新编辑入口，但保存同步配置时会保留并作为旧环境兜底，避免默认模板缺失时影响现有分类统计链路。
 - 工单列表、状态流转、RCA、外部同步入库和统计页均读取同一套枚举配置；旧 `category_name` 与 `categoryCounts` 继续保留兼容，不再承担新统计主维度。
 - 工单列表展示工单类型时只读取 `issue_type_name` 或命中配置的 `issue_type_id`，不再回退 `category_name`，避免历史分类/模块文案误显示为新工单类型。
-- 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；统计页支持按项目和模块多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds` 逗号分隔参数，后端所有统计维度和状态流转统计都共用该过滤条件。
+- 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；列表页新增按 `module_code` 下拉筛选，统计页新增按 `moduleCodes` 多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds/moduleCodes` 参数，后端所有统计维度和状态流转统计都共用该过滤条件。
 - 工单编辑弹窗回填时会抑制项目监听器误清空 `module_id`，模块下拉变更和提交前会按 `module_id` 补齐 `module_name`，保证列表模块列在编辑保存后不丢失。
 - 若工单的 `module_name` 来自外部同步或历史数据且无法匹配当前项目 HRM 模块，编辑弹窗会以可创建下拉项形式原样展示并保存文本；只有用户手动选择现有模块时才切换为标准 `module_id/module_name`。
 - `first_line_assignee_name` 与 `internal_owner_name` 允许在对应用户 ID 为空时作为原始名称保留，编辑页通过同一个人员选择控件显示，匹配不到现有用户时不强制清空名称。
@@ -77,6 +77,7 @@ graph TD
 - 外部推送多维表格邮箱补齐由 `ticket.sync.automation.externalSyncBitable.enabled` 控制；成功补齐后会在 `extra_data.external_sync.bitableEmailSync` 记录 `status=success`、`recordId`、`emailKeys` 和 `syncedAt`，同一工单再次推送同一个 `recordId` 时会跳过重复查询。
 - 远端拉取由 `ticket.sync.automation.remoteSync.enabled` 控制，拉取入库不会再次查询公网多维表格；它只使用远端 payload 已携带的邮箱/姓名，并按内网本地 `assigneeMappings` 或邮箱用户匹配解析人员。
 - 工单项目/模块选项直接复用 HRM 公共项目管理，不单独维护工单项目库；后端按 HRM 的正常状态值 `QtrDataStatusEnum.normal = 2` 过滤有效项。
+- HRM 模块的 `module_code` 约束已调整为“同一项目下唯一”，不同项目允许复用同一业务 code，便于按业务域横向统计问题分布。
 - 若后续需要把“工单项目”和“测试项目”显式区分，优先增加结构化 `project_type`，不建议只靠自由标签做长期筛选。
 - 历史字段 `merchant_name` 仍保留，用于兼容旧数据和前端旧字段 `merchantName`，实际语义已经切换为项目名称。
 - 日志拉取不再在工单详情页维护地址、Cookie 和归档参数，统一通过系统参数 `ticket.logPull.external`、`ticket.logPull.storage` 管理。
@@ -151,7 +152,7 @@ graph TD
 - Agent 侧执行 AI Worker 时改为后台线程执行，避免同步 `subprocess.run` 阻塞 WebSocket 事件循环；同时服务端会记录分片大小、请求耗时，客户端会记录关闭码与关闭原因，便于判断是超时还是执行阻塞。
 - 服务端发送 AI 分析请求与回写 Future 时都必须遵守 Agent WebSocket 的事件循环归属：发送阶段需要切回 Agent 所属 loop，回写阶段需要按 Future 所属事件循环使用 `call_soon_threadsafe()`，否则会出现任务卡在“进行中”或 `got Future attached to a different loop`。
 - 服务端心跳在同一 Agent 存在未完成请求时会跳过离线判定，并在完整响应分片到达时明确回写 Future，避免 AI 分析已完成但任务状态仍停留在“进行中”。
-- 工单模块选项会同时读取 HRM 模块的项目字段和项目-模块关联表，保证不同维护方式下都能正确返回模块下拉列表。
+- 工单模块选项会同时返回 `moduleId/moduleName/moduleCode/projectId`；前端的模块 code 筛选下拉统一基于该接口动态生成，避免枚举写死。
 - AI 分析任务的执行过程会在系统日志里按阶段输出，失败时输出异常堆栈；数据库只保留最后失败原因，避免把调试细节落到业务表。
 - Windows 开发环境会优先解析 `codex` 的绝对路径再执行，避免 Agent 进程找不到 Worker 可执行文件。
 - AI 分析 Worker 会为每个任务准备独立 `CODEX_HOME` 并复制当前 Codex 配置，避免 Windows 下复用用户目录临时状态导致的初始化失败。

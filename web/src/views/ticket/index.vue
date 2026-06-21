@@ -60,6 +60,11 @@
           <el-option v-for="item in queryModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
         </el-select>
       </el-form-item>
+      <el-form-item label="模块Code" prop="moduleCode">
+        <el-select v-model="queryParams.moduleCode" placeholder="模块Code" clearable filterable style="width: 180px">
+          <el-option v-for="item in queryModuleCodeOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="工单类型" prop="issueTypeId">
         <el-select v-model="queryParams.issueTypeId" placeholder="工单类型" clearable filterable style="width: 160px">
           <el-option v-for="item in issueTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -1872,6 +1877,7 @@ const projectVendorMapOptions = ref([])
 const formModuleOptions = ref([])
 const formVersionOptions = ref([])
 const queryModuleOptions = ref([])
+const queryModuleCodeOptions = ref([])
 const issueTypeOptions = ref([])
 const rootCauseTypeOptions = ref([])
 const solutionTypeOptions = ref([])
@@ -2313,6 +2319,7 @@ const data = reactive({
     processStatus: undefined,
     projectId: undefined,
     moduleId: undefined,
+    moduleCode: undefined,
     issueTypeId: undefined,
     isProblem: undefined,
     rootCauseType: undefined,
@@ -2734,6 +2741,21 @@ function resolveFormModuleOption(value = formModuleValue.value) {
     return null
   }
   return formModuleOptions.value.find(item => String(item.moduleId) === text || item.moduleName === text) || null
+}
+
+function buildModuleCodeOptions(moduleOptions = []) {
+  const codeMap = new Map()
+  ;(Array.isArray(moduleOptions) ? moduleOptions : []).forEach(item => {
+    const code = String(item?.moduleCode || '').trim()
+    if (!code || codeMap.has(code)) {
+      return
+    }
+    codeMap.set(code, {
+      value: code,
+      label: code
+    })
+  })
+  return Array.from(codeMap.values())
 }
 
 function handleModuleChange(value) {
@@ -3947,6 +3969,13 @@ function loadAgentOptions() {
 function loadQueryModuleOptions(projectId) {
   return listTicketModuleOptions(projectId ? { projectId } : {}).then(response => {
     queryModuleOptions.value = response.data || []
+    queryModuleCodeOptions.value = buildModuleCodeOptions(queryModuleOptions.value)
+    if (
+      queryParams.value.moduleCode
+      && !queryModuleCodeOptions.value.some(item => item.value === queryParams.value.moduleCode)
+    ) {
+      queryParams.value.moduleCode = undefined
+    }
   })
 }
 
@@ -4239,6 +4268,7 @@ watch(
   () => queryParams.value.projectId,
   value => {
     queryParams.value.moduleId = undefined
+    queryParams.value.moduleCode = undefined
     loadQueryModuleOptions(value)
   }
 )
@@ -4449,14 +4479,11 @@ loadWorkflowConfig().finally(() => {
 
 .panel-header {
   display: flex;
-  align-items: center;
   justify-content: start;
   gap: 12px;
 }
 
 .log-view-controls {
-  //flex-wrap: nowrap;
-  //justify-content: flex-start;
 }
 
 .log-view-time-picker {
