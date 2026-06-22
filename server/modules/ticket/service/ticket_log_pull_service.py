@@ -1130,9 +1130,9 @@ class TicketLogPullService:
         log_text = ""
         try:
             log_content_model = cls.get_log_pull_content_services(query_db, record_id)
-            log_text = cls._decode_log_text(log_content_model.text) if log_content_model else ""
+            log_text = log_content_model.text if log_content_model else ""
         except Exception as exc:
-            logger.warning("日志拉取记录[%s] 提取版本号前读取日志失败: %s", record_id, exc)
+            logger.warning(f"日志拉取记录[{record_id}] 提取版本号前读取日志失败: {exc}")
         version_key = cls._extract_version_key_from_text(log_text)
         if not version_key:
             cls._log_chain_step(
@@ -1157,7 +1157,7 @@ class TicketLogPullService:
             )
         except Exception as exc:
             query_db.rollback()
-            logger.warning("日志拉取记录[%s] 回填工单版本号失败: %s", record_id, exc)
+            logger.warning(f"日志拉取记录[{record_id}] 回填工单版本号失败: {exc}")
             cls._log_chain_step(
                 query_db,
                 ticket_id=ticket_id,

@@ -60,7 +60,7 @@ sequenceDiagram
 | 2 | `TicketSyncService.sync_external_ticket` 以 `ticketNo` 为幂等键创建或更新工单，并在 `extra_data.external_sync` 中递增 `revision`。 |
 | 3 | 同步元数据会记录来源系统、来源记录 ID、远端 source revision、外部原始创建时间（`externalCreateTime`）、最近导入时间、最近一次交付状态、每个消费方的交付 revision 以及自动化执行状态。 |
 | 4 | 主链路会先完成工单入库并快速返回；入库后先写 `publish_ready=false`、`publish_status=processing_ai`，AI翻译、AI标题总结、自动化与群推送改为后台异步后处理，避免阻塞 `POST /ticket/sync/external` 请求。 |
-| 5 | 字段识别采用可配置映射和正则规则：项目/模块/商家按关键词包含匹配；处理人按完整名称匹配（支持 email）；门店按商家ID+`sap_org_no` 查询配置。规则统一存放在 `ticket.sync.automation`。 |
+| 5 | 字段识别采用可配置映射和正则规则：项目/模块/商家按关键词包含匹配；处理人按完整名称匹配（支持 email）；门店按商家ID+`sap_org_no` 查询配置。项目或模块未匹配本地 HRM 配置时，会保留外部原始文本到工单项目/模块名称字段。规则统一存放在 `ticket.sync.automation`。 |
 | 5.1 | 外部推送多维表格邮箱补齐由 `externalSyncBitable.enabled` 控制；同一工单已成功补齐过同一个 `recordId` 时，会根据 `extra_data.external_sync.bitableEmailSync` 跳过重复查询。 |
 | 5.1.1 | 飞书多维表格相关配置已收敛到公共配置 `bitableCommon`；外部推送邮箱补齐、按人催办、汇总统计和主动拉取默认继承公共配置，局部配置非空时覆盖。 |
 | 5.1.2 | 新增主动拉取链路 `bitablePull`：调度任务按条件查询飞书多维表格记录，经 `fieldMappings` 映射成外部同步字段后复用 `POST /ticket/sync/external` 入库；任务参数提供映射时优先于可视化配置。 |
@@ -81,7 +81,7 @@ sequenceDiagram
 | 场景 | 处理方式 |
 |---|---|
 | 外部同步缺少必填字段（`ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`） | 直接参数校验失败并记录日志，拒绝入站 |
-| 自动识别无法确定项目/模块归属 | 保留原始工单与同步元数据，识别步骤状态照常落库，不阻断同步主流程 |
+| 自动识别无法确定项目/模块归属 | 保留原始项目/模块文本与同步元数据，识别步骤状态照常落库，不阻断同步主流程 |
 | 自动拉日志或自动 AI 异常 | 在 `extra_data.external_sync.sync_state.automation` 中记录失败步骤和错误信息；AI 任务终态（成功/失败/取消）都会将 `publish_ready` 置为 `true`，不阻断入库数据最终发布 |
 | 消费方拉取后自身处理失败 | failed 回执不会推进 `delivered_revision`，仅记录失败状态、失败 revision 和错误信息；下一次 pending 拉取仍可返回同一 revision 重试 |
 

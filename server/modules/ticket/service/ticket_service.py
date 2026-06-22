@@ -1218,6 +1218,17 @@ class TicketService:
             )
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             form_extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
+            version_fields = (
+                "version_key",
+                "versionKey",
+                "version",
+                "deployVersion",
+                "deploy_version",
+                "appVersion",
+            )
+            for version_field in version_fields:
+                if version_field in form_extra_data and not str(form_extra_data.get(version_field) or "").strip():
+                    form_extra_data.pop(version_field, None)
             extra_data.update(form_extra_data)
             manual_automation = (
                 dict(extra_data.get("manual_automation") or {})
@@ -1228,8 +1239,6 @@ class TicketService:
             extra_data["manual_automation"] = manual_automation
             if extracted_version_key:
                 extra_data["version_key"] = extracted_version_key
-            elif "version_key" in extra_data:
-                extra_data.pop("version_key", None)
             if log_pull_config:
                 extra_data["ticket_automation"] = {
                     "need_log_pull": need_log_pull or bool(log_pull_config),

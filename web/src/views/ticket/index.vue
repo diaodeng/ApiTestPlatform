@@ -2411,7 +2411,7 @@ const data = reactive({
     posNo: [{ required: true, message: 'posNo不能为空', trigger: 'blur' }]
   },
   aiAnalysisRules: {
-    versionKey: [{ required: true, message: '版本号不能为空', trigger: 'blur' }]
+    versionKey: []
   },
   aiRepoMappingRules: {
     projectId: [{ required: true, message: '请选择项目', trigger: 'change' }],
@@ -3435,10 +3435,6 @@ function openAiAnalysisDialog() {
     proxy.$modal.msgWarning('当前工单缺少项目，无法发起AI分析')
     return
   }
-  if (!detail.value.versionKey && !detail.value.extraData?.versionKey) {
-    proxy.$modal.msgWarning('当前工单缺少版本号，请先完善版本号信息')
-    return
-  }
   resetAiAnalysisDialog()
   aiAnalysisTaskForm.value.versionKey = detail.value.versionKey || detail.value.extraData?.versionKey || aiAnalysisTaskForm.value.versionKey || ''
   aiAnalysisOpen.value = true
@@ -3460,13 +3456,9 @@ function openAiTaskDetail(row) {
 function submitAiAnalysis() {
   proxy.$refs.aiAnalysisRef.validate(valid => {
     if (!valid) return
-    if (!aiAnalysisTaskForm.value.versionKey) {
-      proxy.$modal.msgWarning('请先完善版本号信息')
-      return
-    }
     aiAnalysisSubmitting.value = true
     addTicketAiAnalysis(currentTicketId.value, {
-      versionKey: aiAnalysisTaskForm.value.versionKey,
+      versionKey: aiAnalysisTaskForm.value.versionKey || undefined,
       agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
       aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
       forceRefresh: aiAnalysisTaskForm.value.forceRefresh,

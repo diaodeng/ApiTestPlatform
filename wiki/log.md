@@ -8,6 +8,16 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-22] INGEST-CODE | 工单入库原文保留与 AI 分析版本号兜底
+- 触发：用户要求项目、模块匹配失败时保留原文；后续数据无版本号时不清空已有版本；手动发起 AI 分析可选版本号，未选时从日志提取并回写后发起分析。
+- 架构层：工单域 / 外部同步入库 / 工单编辑 / 日志拉取 / AI 分析任务提交
+- 创建的页面：`web/public/docs/2026-06-22-ticket-ingest-version-ai-fallback.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/service/ticket_ai_analysis_service.py`、`server/modules/ticket/service/ticket_log_pull_service.py`、`server/modules/ticket/dao/ticket_log_pull_dao.py`、`server/modules/ticket/entity/vo/ticket_vo.py`、`web/src/views/ticket/index.vue`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`flows/ticket-external-sync-flow.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：外部同步识别 -> `_build_upsert_payload` 原文保留 -> 工单编辑版本保护 -> `TicketAiAnalysisService._ensure_version_key_for_analysis` 日志提取回填 -> AI 分析任务提交
+- 验证：通过本次相关 6 个边界测试；整文件测试仍有既有 `bitableCommon.pageSize` 断言失败，未纳入本次改动范围。
+- 总共涉及页面：13
+
 ## [2026-06-22] INGEST-CODE | 相似工单支持详情跳转
 - 触发：用户要求工单详情页中的相似工单可跳转查看，支持原飞书详情 URL 和当前系统详情页；当前系统详情原为弹窗，需要通过 URL 拼接工单号独立打开。
 - 架构层：工单域 / Web 控制台 / 工单详情弹窗 / 相似工单

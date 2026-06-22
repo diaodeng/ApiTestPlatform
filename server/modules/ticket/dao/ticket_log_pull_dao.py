@@ -55,6 +55,24 @@ class TicketLogPullDao:
         return db.query(TicketLogPullRecord).filter(TicketLogPullRecord.id == record_id).first()
 
     @classmethod
+    def get_latest_success_record_by_ticket_id(cls, db: Session, ticket_id: int) -> TicketLogPullRecord | None:
+        """
+        查询指定工单最近一条成功的日志拉取记录。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 成功的日志拉取记录，未命中返回 None
+        """
+        return (
+            db.query(TicketLogPullRecord)
+            .filter(
+                TicketLogPullRecord.ticket_id == ticket_id,
+                TicketLogPullRecord.status == "success",
+            )
+            .order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc())
+            .first()
+        )
+
+    @classmethod
     def update_record(cls, db: Session, record_id: int, data: dict) -> None:
         """
         更新日志拉取记录字段。

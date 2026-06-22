@@ -73,6 +73,7 @@ graph TD
 - 同步状态统一写入 `ticket.extra_data.external_sync`，不再依赖单一“是否已同步”布尔值，而是按 `revision + consumers.{consumer}.delivered_revision` 判断某个消费方是否已经拿到当前版本。
 - `/ticket/sync/pending` 只会返回真正带同步元数据的工单，避免把普通人工创建的工单误返回给内网同步系统。
 - 外部同步后的自动化链路支持规则化识别项目、模块、商家、门店、POS/SCO、版本号，识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。
+- 外部同步识别项目失败时会保留 `ticketVender/projectName/merchantName` 原始文本到 `merchant_name`，模块识别失败时保留 `ticketModle/moduleName` 原始文本到 `module_name`，避免本地 HRM 未配置映射时入库数据丢失。
 - 识别和自动化配置统一由系统参数 `ticket.sync.automation` 驱动，优先通过映射规则、正则和默认参数适配不同工单系统，避免把定制话术写死在服务代码里。
 - 外部推送多维表格邮箱补齐由 `ticket.sync.automation.externalSyncBitable.enabled` 控制；成功补齐后会在 `extra_data.external_sync.bitableEmailSync` 记录 `status=success`、`recordId`、`emailKeys` 和 `syncedAt`，同一工单再次推送同一个 `recordId` 时会跳过重复查询。
 - 飞书多维表格公共配置已下沉到 `ticket.sync.automation.bitableCommon`；工单汇总统计、按人催办、外部推送邮箱补全和主动拉取默认继承该配置，局部配置非空时覆盖公共配置。
@@ -100,6 +101,7 @@ graph TD
 - 日志拉取记录的 `command_content` 保存前端原始入参，实际提交给三方平台时再按既有过滤逻辑生成请求参数；重试同样基于原始入参重新过滤，避免丢失可恢复字段。
 - 日志拉取管理页的列表现在会回显 `modifyTime` 作为拉取日期，便于直接区分相同工单下的不同拉取批次。
 - 日志拉取成功后会优先从日志正文直接提取版本号，命中后回写到 `ticket.extra_data.version_key`，未提取到则发送通知并终止后续自动 AI。
+- 工单手动编辑或后续同步未携带版本号时不会清空已有 `extra_data.version_key`；手动发起 AI 分析可选择版本号，未选择时后端会先使用工单已有版本号，再尝试从指定日志记录或最近成功日志记录中提取版本号并回写后提交分析。
 - 工单自动化通知统一复用已有推送配置，页面侧可选择具体推送项和成功/失败通知开关；自动 AI 成功和失败都会发送消息，便于业务闭环确认。
 - 参数配置说明改为通用提示按钮组件 `PromptButton`，后续可在其他页面复用。
 - 日志拉取时间范围支持可空：有时间范围时按“开始/结束时间”或“时间点+前后分钟范围”提取入库；未填时间范围时只下载整包压缩文件，不落日志正文，供 AI 分析时由 Agent 基于 `commandResultUrl` 在本地工作区下载并解压整包。

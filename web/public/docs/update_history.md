@@ -1,5 +1,10 @@
 ## 2026-06-22
 
+1. 外部同步入库时，项目匹配失败会保留 `ticketVender/projectName/merchantName` 原始文本，模块匹配失败继续保留原始模块文本，避免归属展示为空。
+2. 手动编辑或后续同步未携带版本号时，不再清空工单已有版本号。
+3. 发起 AI 分析时版本号支持可选：手动选择优先；未选择时后端会从工单已有版本号或成功日志记录中提取并回写后再提交分析。
+4. 新增说明文档：`web/public/docs/2026-06-22-ticket-ingest-version-ai-fallback.md`。
+
 1. 工单详情页“相似工单”新增“系统详情”和“飞书详情”跳转入口，便于直接查看相似工单完整内容。
 2. 新增隐藏路由 `#/ticket/detail/:ticketId`，支持通过 URL 拼接系统工单 ID 独立打开工单详情弹窗。
 3. 新增说明文档：`web/public/docs/2026-06-22-ticket-similar-detail-links.md`。

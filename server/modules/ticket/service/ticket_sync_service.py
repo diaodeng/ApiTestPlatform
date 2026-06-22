@@ -5047,6 +5047,7 @@ class TicketSyncService:
 
         project = None
         project_name_by_vendor = ""
+        raw_project_name = str(sync_object.project_name or sync_object.merchant_name or ticket_vender or "").strip()
         if apply_external_mappings and ticket_vender:
             project, project_name_by_vendor = cls._resolve_project_by_ticket_vender(
                 db,
@@ -5240,6 +5241,7 @@ class TicketSyncService:
                 or project_name_by_vendor
                 or sync_object.project_name
                 or sync_object.merchant_name
+                or (raw_project_name if apply_external_mappings else "")
                 or ""
             ),
             "projectCode": getattr(project, "project_code", "") or sync_object.project_code or "",
@@ -5493,6 +5495,12 @@ class TicketSyncService:
         module_id = cls._safe_int((detected or {}).get("moduleId")) or (
             None if is_remote_pull else sync_object.module_id
         )
+        raw_project_name = str(
+            sync_object.project_name
+            or sync_object.merchant_name
+            or str((detected or {}).get("projectName") or "").strip()
+            or ""
+        ).strip()
         if project_id:
             project = (
                 db.query(HrmProject)
@@ -5506,6 +5514,8 @@ class TicketSyncService:
             if project:
                 payload["project_id"] = project.project_id
                 payload["merchant_name"] = project.project_name
+            else:
+                project_id = None
         elif ticket:
             payload["project_id"] = ticket.project_id
             payload["merchant_name"] = ticket.merchant_name
@@ -5516,6 +5526,16 @@ class TicketSyncService:
                 or str((detected or {}).get("projectName") or "").strip()
                 or ""
             )
+        incoming_project_name = (
+            str((detected or {}).get("projectName") or "").strip()
+            or str(sync_object.project_name or "").strip()
+            or str(sync_object.merchant_name or "").strip()
+        )
+        if incoming_project_name and not project_id and not is_remote_pull:
+            payload["project_id"] = None
+            payload["merchant_name"] = incoming_project_name
+        if raw_project_name and not str(payload.get("merchant_name") or "").strip():
+            payload["merchant_name"] = raw_project_name
         if module_id:
             module_query = db.query(HrmModule).filter(
                 HrmModule.module_id == module_id,

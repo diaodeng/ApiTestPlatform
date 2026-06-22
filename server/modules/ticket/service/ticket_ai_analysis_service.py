@@ -485,6 +485,45 @@ class TicketAiAnalysisService:
         return TicketLogPullDao.get_record_by_id(db, int(latest_summary["id"]))
 
     @classmethod
+    def _ensure_version_key_for_analysis(
+        cls,
+        db: Session,
+        ticket: Ticket,
+        request: TicketAiAnalysisRequestModel | None = None,
+    ) -> tuple[str, TicketLogPullRecord | None]:
+        """
+        解析 AI 分析版本号，缺失时尝试从日志拉取记录提取并回填。
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param request: AI分析请求对象
+        :return: 版本号与用于分析的日志记录
+        """
+        selected_log_record = cls._resolve_log_pull_record(
+            db,
+            ticket.ticket_id,
+            request.log_pull_record_id if request else None,
+        )
+        version_key = cls._resolve_version_key(ticket, request)
+        if version_key:
+            return version_key, selected_log_record
+
+        candidate_records: list[TicketLogPullRecord] = []
+        if selected_log_record:
+            candidate_records.append(selected_log_record)
+        latest_success_record = TicketLogPullDao.get_latest_success_record_by_ticket_id(db, ticket.ticket_id)
+        if latest_success_record and all(record.id != latest_success_record.id for record in candidate_records):
+            candidate_records.append(latest_success_record)
+
+        for record in candidate_records:
+            version_key = TicketLogPullService._ensure_ticket_version_key_from_log(db, ticket.ticket_id, record.id)
+            if version_key:
+                refreshed_ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id)
+                if refreshed_ticket:
+                    ticket.extra_data = refreshed_ticket.extra_data
+                return version_key, record
+        return "", selected_log_record or latest_success_record
+
+    @classmethod
     def _resolve_agent_code(cls, db: Session, requested_agent_code: str | None = None) -> str:
         """
         解析 AI 分析任务使用的 Agent 编码。
@@ -1477,13 +1516,12 @@ class TicketAiAnalysisService:
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
         if not ticket:
             return CrudResponseModel(is_success=False, message="工单不存在")
-        version_key = cls._resolve_version_key(ticket, request)
+        version_key, log_record = cls._ensure_version_key_for_analysis(db, ticket, request)
         if not version_key:
-            return CrudResponseModel(is_success=False, message="请先完善版本号信息后再发起AI分析")
+            return CrudResponseModel(is_success=False, message="未获取到版本号，请先选择版本号或确认日志中包含版本号")
         mapping = cls._resolve_mapping(db, ticket, request)
         if not mapping:
             return CrudResponseModel(is_success=False, message="未找到可用的项目版本仓库映射，请先维护映射配置")
-        log_record = cls._resolve_log_pull_record(db, ticket_id, request.log_pull_record_id)
         context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
         prompt_layers = TicketPromptService.resolve_prompt_layers(db, ticket)
         selected_prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(

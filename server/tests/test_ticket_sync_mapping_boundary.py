@@ -7,6 +7,7 @@ from module_task.scheduler_maintenance import (
     _build_bitable_pull_config_override,
     _ensure_bitable_pull_created_after,
 )
+from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 
@@ -140,6 +141,144 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         self.assertIsNone(detected["moduleId"])
         self.assertEqual(detected["moduleName"], "外部模块文本")
+
+    def test_external_detection_keeps_project_text_when_mapping_misses(self):
+        """外部项目映射失败时应保留 ticketVender 文本，避免项目名称落库为空。"""
+        sync_object = SimpleNamespace(
+            raw_payload={"ticketVender": "外部项目文本"},
+            extra_data={},
+            project_code="",
+            project_id=None,
+            project_name="",
+            merchant_name="",
+            module_code="",
+            module_name="",
+            module_id=None,
+            log_pull_config={},
+            status="",
+            current_assignee_id=None,
+            current_assignee_name="",
+            version_key="",
+            ticket_no="EXT-PROJECT",
+            title="外部工单",
+            description="外部描述",
+            root_cause=None,
+            solution=None,
+        )
+
+        with (
+            patch.object(TicketSyncService, "_extract_pattern", return_value=None),
+            patch.object(TicketSyncService, "_resolve_project_by_ticket_vender", return_value=(None, "")),
+        ):
+            detected = TicketSyncService._detect_fields(
+                db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
+                sync_object=sync_object,
+                config={
+                    "projectMappings": [],
+                    "moduleMappings": [],
+                    "vendorMappings": [],
+                    "statusMappings": [],
+                    "assigneeMappings": [],
+                    "posPatterns": [],
+                    "scoPatterns": [],
+                    "versionPatterns": [],
+                },
+                apply_external_mappings=True,
+            )
+
+        self.assertIsNone(detected["projectId"])
+        self.assertEqual(detected["projectName"], "外部项目文本")
+
+    def test_external_upsert_fills_project_name_from_detected_text(self):
+        """已有工单项目为空时，外部推送映射失败也应保留 ticketVender 文本。"""
+        sync_object = SimpleNamespace(
+            source=SimpleNamespace(system="external", record_id="EXT-PROJECT", record_url="", pushed_at=None),
+            extra_data={},
+            raw_payload={"ticketVender": "外部项目文本"},
+            ticket_no="EXT-PROJECT",
+            ticket_url=None,
+            title="外部工单",
+            description="外部描述",
+            customer_priority="P3",
+            internal_priority="P2",
+            severity="",
+            reporter_id=None,
+            reporter_name="外部报告人",
+            current_assignee_id=None,
+            current_assignee_name="",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            status="processing",
+            root_cause=None,
+            solution=None,
+            tags=None,
+            project_id=888,
+            project_name="",
+            merchant_name="",
+            module_id=None,
+            module_name="",
+            version_key="",
+            log_pull_config={},
+            create_time=None,
+        )
+        current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
+
+        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+            db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
+            ticket=None,
+            sync_object=sync_object,
+            detected={"projectId": 888, "projectName": "外部项目文本"},
+            current_user=current_user,
+            sync_scene="external_sync",
+        )
+
+        self.assertIsNone(payload["project_id"])
+        self.assertEqual(payload["merchant_name"], "外部项目文本")
+
+    def test_manual_update_keeps_existing_version_when_request_has_no_version(self):
+        """手动编辑请求没有版本号时，不应清空工单已有版本号。"""
+        ticket = SimpleNamespace(extra_data={"version_key": "1.2.3"})
+        form_extra_data = {"version_key": ""}
+        extra_data = dict(ticket.extra_data or {})
+        for version_field in ("version_key", "versionKey", "version", "deployVersion", "deploy_version", "appVersion"):
+            if version_field in form_extra_data and not str(form_extra_data.get(version_field) or "").strip():
+                form_extra_data.pop(version_field, None)
+        extra_data.update(form_extra_data)
+
+        self.assertEqual(extra_data["version_key"], "1.2.3")
+
+    def test_ai_analysis_extracts_version_from_log_when_request_missing(self):
+        """AI分析未传版本号时，应从日志记录提取版本号并返回该日志记录。"""
+        ticket = SimpleNamespace(ticket_id=1001, extra_data={})
+        log_record = SimpleNamespace(id=2001)
+
+        with (
+            patch.object(TicketAiAnalysisService, "_resolve_log_pull_record", return_value=log_record),
+            patch.object(TicketAiAnalysisService, "_resolve_version_key", return_value=""),
+            patch.object(TicketSyncService, "_extract_pattern", return_value=None),
+            patch(
+                "modules.ticket.service.ticket_ai_analysis_service.TicketLogPullService._ensure_ticket_version_key_from_log",
+                return_value="2.0.1",
+            ),
+            patch(
+                "modules.ticket.service.ticket_ai_analysis_service.TicketLogPullDao.get_latest_success_record_by_ticket_id",
+                return_value=None,
+            ),
+            patch(
+                "modules.ticket.service.ticket_ai_analysis_service.TicketDao.get_ticket_by_id",
+                return_value=SimpleNamespace(extra_data={"version_key": "2.0.1"}),
+            ),
+        ):
+            version_key, selected_record = TicketAiAnalysisService._ensure_version_key_for_analysis(
+                SimpleNamespace(),
+                ticket,
+                SimpleNamespace(log_pull_record_id=None),
+            )
+
+        self.assertEqual(version_key, "2.0.1")
+        self.assertEqual(selected_record, log_record)
 
     def test_external_upsert_fills_empty_module_name_from_detected_text(self):
         """已有工单模块为空时，外部推送映射失败也应保留 ticketModle 文本。"""

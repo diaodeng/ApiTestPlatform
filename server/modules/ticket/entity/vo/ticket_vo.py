@@ -332,7 +332,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     mapping_id: int | None = Field(default=None, description="仓库映射ID，兼容手动指定")
-    version_key: str = Field(description="版本标识，用于匹配仓库映射")
+    version_key: str | None = Field(default=None, description="版本标识，用于匹配仓库映射；留空时后端会尝试从日志提取")
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
     ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
@@ -346,9 +346,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
         校验 AI 分析提交参数。
         :return: 当前模型
         """
-        self.version_key = str(self.version_key or "").strip()
-        if not self.version_key:
-            raise ValueError("版本号不能为空")
+        self.version_key = str(self.version_key or "").strip() or None
         self.agent_code = str(self.agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip()
