@@ -1,9 +1,12 @@
 ## 2026-06-22
 
-1. 修复飞书多维表格记录详情链接生成错误：主动拉取和按人催办不再把 `record_id` 直接拼成详情页 URL，而是优先使用飞书搜索接口返回的 `record_url/shared_url`。
-2. 针对飞书 `records/search` 在实际环境中未返回链接的问题，新增只读补查：搜索结果缺少详情链接时，系统会按 `record_id` 批量调用 `records/batch_get(with_shared_url=true)` 补齐 `shared_url`。
-3. 当飞书仍未返回记录详情链接时，系统不再伪造不可访问的 `...?record=record_id` 链接，避免错误链接进入工单详情和催办消息。
-4. 新增说明文档：`web/public/docs/2026-06-22-ticket-bitable-record-url-fix.md`。
+1. 多维表格主动拉取定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync` 增加创建时间窗口：默认处理当前时间前 1 小时之后创建的记录，指定 `createdAfter/created_after/startTime/beginTime` 时按指定时间过滤。
+2. 主动拉取结果新增 `queriedRecordCount`、`createdAfter`，便于确认飞书原始查询数量和实际过滤窗口。
+3. 新增说明文档：`web/public/docs/2026-06-22-ticket-bitable-pull-created-after.md`。
+4. 修复飞书多维表格记录详情链接生成错误：主动拉取和按人催办不再把 `record_id` 直接拼成详情页 URL，而是优先使用飞书搜索接口返回的 `record_url/shared_url`。
+5. 针对飞书 `records/search` 在实际环境中未返回链接的问题，新增只读补查：搜索结果缺少详情链接时，系统会按 `record_id` 批量调用 `records/batch_get(with_shared_url=true)` 补齐 `shared_url`。
+6. 当飞书仍未返回记录详情链接时，系统不再伪造不可访问的 `...?record=record_id` 链接，避免错误链接进入工单详情和催办消息。
+7. 新增说明文档：`web/public/docs/2026-06-22-ticket-bitable-record-url-fix.md`。
 
 ## 2026-06-21
 

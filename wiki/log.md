@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-22] INGEST-CODE | 多维表格主动拉取创建时间窗口
+- 触发：用户要求定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync` 默认查询当前时间前 1 小时之后的数据，指定时间时按指定时间之后的数据查询。
+- 架构层：工单域 / 飞书多维表格主动拉取 / 任务调度
+- 创建的页面：`web/public/docs/2026-06-22-ticket-bitable-pull-created-after.md`
+- 更新的页面：`server/module_task/scheduler_maintenance.py`、`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`pull_feishu_bitable_ticket_sync` 补齐 `createdAfter` -> `TicketSyncService.run_bitable_pull_services` 按飞书记录创建时间过滤 -> 外部同步入库链路
+- 总共涉及页面：5
+
 ## [2026-06-22] INGEST-CODE | 修复飞书多维表格记录详情链接
 - 触发：用户反馈 `TicketSyncService._build_bitable_record_url` 使用多维表格搜索结果中的 `record_id` 拼接 URL 无法访问，真实可访问地址需要飞书记录详情 URL。
 - 架构层：工单域 / 飞书多维表格集成 / 按人催办通知

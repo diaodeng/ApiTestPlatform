@@ -1,7 +1,12 @@
 import unittest
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from module_task.scheduler_maintenance import (
+    _build_bitable_pull_config_override,
+    _ensure_bitable_pull_created_after,
+)
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 
@@ -612,7 +617,11 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         with (
             patch.object(TicketSyncNotifyService, "_resolve_feishu_auth", return_value=("app_id", "app_secret")),
             patch.object(TicketSyncNotifyService, "_get_tenant_access_token", return_value="tenant_token"),
-            patch.object(TicketSyncNotifyService, "_request_feishu_json", side_effect=[search_response, batch_response]),
+            patch.object(
+                TicketSyncNotifyService,
+                "_request_feishu_json",
+                side_effect=[search_response, batch_response],
+            ),
         ):
             records = TicketSyncNotifyService.query_bitable_records(config)
 
@@ -622,6 +631,38 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             records[0]["shared_url"],
             "https://duodian.feishu.cn/record/FUY1rD5Cte98g0cx6qYcEOTYnBh",
         )
+
+    def test_bitable_pull_override_adds_default_created_after(self):
+        """主动拉取任务未指定时间时，应默认查询当前时间前 1 小时后的记录。"""
+        before_call = datetime.now() - timedelta(hours=1, seconds=2)
+        override = _ensure_bitable_pull_created_after(_build_bitable_pull_config_override({}))
+        after_call = datetime.now() - timedelta(hours=1) + timedelta(seconds=2)
+        created_after = datetime.strptime(override["createdAfter"], "%Y-%m-%d %H:%M:%S")
+
+        self.assertGreaterEqual(created_after, before_call.replace(microsecond=0))
+        self.assertLessEqual(created_after, after_call.replace(microsecond=0))
+
+    def test_bitable_pull_override_keeps_specified_created_after(self):
+        """主动拉取任务指定时间时，应使用指定时间作为创建时间下限。"""
+        override = _ensure_bitable_pull_created_after(
+            _build_bitable_pull_config_override({"created_after": "2026-06-22 10:48:00"})
+        )
+
+        self.assertEqual(override["createdAfter"], "2026-06-22 10:48:00")
+
+    def test_bitable_pull_records_filter_uses_created_time(self):
+        """主动拉取应按飞书记录创建时间过滤指定时间之后的数据。"""
+        records = [
+            {"record_id": "rec_old", "created_time": "2026-06-22 10:47:59"},
+            {"record_id": "rec_new", "created_time": "2026-06-22 10:48:00"},
+            {"record_id": "rec_empty"},
+        ]
+        filtered_records = TicketSyncService._filter_bitable_pull_records_by_created_after(
+            records,
+            created_after=datetime(2026, 6, 22, 10, 48, 0),
+        )
+
+        self.assertEqual([record["record_id"] for record in filtered_records], ["rec_new"])
 
 
 class _EmptyQuery:

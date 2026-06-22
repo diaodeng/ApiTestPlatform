@@ -1,7 +1,7 @@
 import hashlib
 import json
 import re
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -1434,6 +1434,7 @@ class TicketSyncService:
             "updatedAtField": "",
             "sortField": "",
             "includeRecordUrl": True,
+            "createdAfter": "",
             "automation": {
                 "autoIdentify": True,
                 "autoLogPull": False,
@@ -1736,7 +1737,9 @@ class TicketSyncService:
         source = value if isinstance(value, dict) else {}
         config = {**cls._default_bitable_common_config(), **source}
         config["appId"] = str(config.get("appId") or "").strip() or str(feishu_auth.get("appId") or "").strip()
-        config["appSecret"] = str(config.get("appSecret") or "").strip() or str(feishu_auth.get("appSecret") or "").strip()
+        config["appSecret"] = (
+            str(config.get("appSecret") or "").strip() or str(feishu_auth.get("appSecret") or "").strip()
+        )
         config["appToken"] = str(config.get("appToken") or "").strip()
         config["tableId"] = str(config.get("tableId") or "").strip()
         config["viewId"] = str(config.get("viewId") or "").strip()
@@ -1833,11 +1836,14 @@ class TicketSyncService:
         config["viewId"] = str(config.get("viewId") or "").strip()
         config["pageSize"] = min(max(cls._safe_int(config.get("pageSize")) or 200, 1), 500)
         config["filterFormula"] = str(config.get("filterFormula") or "").strip()
-        config["sourceSystem"] = str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull"
+        config["sourceSystem"] = (
+            str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull"
+        )
         config["ticketNoField"] = str(config.get("ticketNoField") or "ticketNo").strip() or "ticketNo"
         config["updatedAtField"] = str(config.get("updatedAtField") or "").strip()
         config["sortField"] = str(config.get("sortField") or "").strip()
         config["includeRecordUrl"] = bool(config.get("includeRecordUrl", True))
+        config["createdAfter"] = str(config.get("createdAfter") or "").strip()
         config["fieldMappings"] = cls._normalize_bitable_field_mappings(config.get("fieldMappings"))
         automation = config.get("automation") if isinstance(config.get("automation"), dict) else {}
         config["automation"] = {
@@ -1848,6 +1854,54 @@ class TicketSyncService:
         }
         config = cls._apply_bitable_common_defaults(config, bitable_common=bitable_common)
         return config
+
+    @classmethod
+    def _resolve_bitable_pull_created_after(cls, value: Any) -> datetime | None:
+        """
+        解析飞书多维表格主动拉取的创建时间下限。
+
+        :param value: 用户指定的时间，支持 datetime、时间戳或常见日期时间文本。
+        :return: 可比较的时间对象；为空或无法解析时返回 None。
+        """
+        if value in (None, ""):
+            return None
+        return cls._parse_datetime_value(value)
+
+    @classmethod
+    def _filter_bitable_pull_records_by_created_after(
+        cls,
+        records: list[dict[str, Any]],
+        *,
+        created_after: datetime | None,
+    ) -> list[dict[str, Any]]:
+        """
+        按飞书记录创建时间过滤主动拉取记录。
+
+        :param records: 飞书多维表格记录列表。
+        :param created_after: 创建时间下限，记录创建时间必须大于等于该值。
+        :return: 过滤后的记录列表。
+        """
+        if not created_after:
+            return records
+        filtered_records: list[dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            record_created_at = cls._parse_datetime_value(
+                record.get("created_time")
+                or record.get("createdTime")
+                or record.get("created_at")
+                or record.get("createdAt")
+            )
+            if not record_created_at:
+                logger.info(
+                    f"飞书多维表格主动拉取记录跳过: reason=创建时间为空, "
+                    f"record_id={record.get('record_id') or record.get('recordId') or '-'}"
+                )
+                continue
+            if record_created_at >= created_after:
+                filtered_records.append(record)
+        return filtered_records
 
     @classmethod
     def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
@@ -2368,10 +2422,11 @@ class TicketSyncService:
                 f"override_keys={list(normalized_override.keys())}"
             )
 
-        required_missing: list[str] = []
-        for field_name in ("appId", "appSecret", "appToken", "tableId"):
-            if not str(pull_config.get(field_name) or "").strip():
-                required_missing.append(field_name)
+        required_missing: list[str] = [
+            field_name
+            for field_name in ("appId", "appSecret", "appToken", "tableId")
+            if not str(pull_config.get(field_name) or "").strip()
+        ]
         if not pull_config.get("fieldMappings"):
             required_missing.append("fieldMappings")
         if required_missing:
@@ -2382,11 +2437,33 @@ class TicketSyncService:
                 "configErrors": required_missing,
             }
 
+        raw_created_after = str(pull_config.get("createdAfter") or "").strip()
+        created_after = cls._resolve_bitable_pull_created_after(raw_created_after)
+        if raw_created_after and not created_after:
+            return {
+                "triggerSource": trigger_source,
+                "skipped": True,
+                "skipReason": "主动拉取创建时间格式错误",
+                "configErrors": ["createdAfter"],
+                "createdAfter": raw_created_after,
+            }
+        if not created_after and trigger_source == "scheduler":
+            created_after = datetime.now() - timedelta(hours=1)
+            pull_config["createdAfter"] = created_after.strftime("%Y-%m-%d %H:%M:%S")
+        if created_after:
+            logger.info(
+                f"飞书多维表格主动拉取创建时间过滤: trigger={trigger_source}, "
+                f"created_after={created_after.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
         records = TicketSyncNotifyService.query_bitable_records(pull_config)
+        queried_count = len(records)
+        records = cls._filter_bitable_pull_records_by_created_after(records, created_after=created_after)
         summary = {
             "triggerSource": trigger_source,
             "skipped": False,
             "recordCount": len(records),
+            "queriedRecordCount": queried_count,
+            "createdAfter": created_after.strftime("%Y-%m-%d %H:%M:%S") if created_after else "",
             "syncedCount": 0,
             "skippedCount": 0,
             "failedCount": 0,
@@ -3578,7 +3655,10 @@ class TicketSyncService:
         if isinstance(value, dict):
             for key in ("text", "name", "value", "email", "link", "title"):
                 if key in value:
-                    normalized_value = cls._normalize_bitable_record_scalar(value.get(key), join_separator=join_separator)
+                    normalized_value = cls._normalize_bitable_record_scalar(
+                        value.get(key),
+                        join_separator=join_separator,
+                    )
                     if normalized_value not in (None, ""):
                         return normalized_value
             return json.dumps(value, ensure_ascii=False, sort_keys=True)
@@ -3693,7 +3773,11 @@ class TicketSyncService:
         fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
         record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
         record_url = str(
-            record.get("record_url") or record.get("recordUrl") or record.get("shared_url") or record.get("sharedUrl") or ""
+            record.get("record_url")
+            or record.get("recordUrl")
+            or record.get("shared_url")
+            or record.get("sharedUrl")
+            or ""
         ).strip()
         payload = cls._build_bitable_pull_field_mapping_from_record(fields, field_mappings=field_mappings)
         if not payload:
@@ -3768,7 +3852,9 @@ class TicketSyncService:
         bitable_pull_meta = existing_ticket.extra_data.get("bitable_pull")
         if not isinstance(bitable_pull_meta, dict):
             return False, ""
-        current_pull_meta = sync_object.extra_data.get("bitable_pull") if isinstance(sync_object.extra_data, dict) else {}
+        current_pull_meta = (
+            sync_object.extra_data.get("bitable_pull") if isinstance(sync_object.extra_data, dict) else {}
+        )
         existing_hash = str(bitable_pull_meta.get("snapshotHash") or "").strip()
         current_hash = str((current_pull_meta or {}).get("snapshotHash") or "").strip()
         existing_record_id = str(bitable_pull_meta.get("recordId") or "").strip()
