@@ -48,6 +48,19 @@ export const constantRoutes = [
     hidden: true,
   },
   {
+    path: '/ticket',
+    component: Layout,
+    hidden: true,
+    children: [
+      {
+        path: 'detail/:ticketId(\\d+)',
+        component: () => import('@/views/ticket/index.vue'),
+        name: 'TicketDetail',
+        meta: { title: '工单详情', activeMenu: '/ticket/ticket' },
+      },
+    ],
+  },
+  {
     path: '/:pathMatch(.*)*',
     component: () => import('@/views/error/404'),
     hidden: true,

@@ -1,5 +1,9 @@
 ## 2026-06-22
 
+1. 工单详情页“相似工单”新增“系统详情”和“飞书详情”跳转入口，便于直接查看相似工单完整内容。
+2. 新增隐藏路由 `#/ticket/detail/:ticketId`，支持通过 URL 拼接系统工单 ID 独立打开工单详情弹窗。
+3. 新增说明文档：`web/public/docs/2026-06-22-ticket-similar-detail-links.md`。
+
 1. 多维表格主动拉取定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync` 增加创建时间窗口：默认处理当前时间前 1 小时之后创建的记录，指定 `createdAfter/created_after/startTime/beginTime` 时按指定时间过滤。
 2. 主动拉取结果新增 `queriedRecordCount`、`createdAfter`，便于确认飞书原始查询数量和实际过滤窗口。
 3. 新增说明文档：`web/public/docs/2026-06-22-ticket-bitable-pull-created-after.md`。

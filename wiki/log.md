@@ -8,6 +8,15 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-22] INGEST-CODE | 相似工单支持详情跳转
+- 触发：用户要求工单详情页中的相似工单可跳转查看，支持原飞书详情 URL 和当前系统详情页；当前系统详情原为弹窗，需要通过 URL 拼接工单号独立打开。
+- 架构层：工单域 / Web 控制台 / 工单详情弹窗 / 相似工单
+- 创建的页面：`web/public/docs/2026-06-22-ticket-similar-detail-links.md`
+- 更新的页面：`web/src/router/index.js`、`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：相似工单卡片 -> `openSystemTicketDetail` 生成 `#/ticket/detail/:ticketId` -> 隐藏路由复用工单页并自动打开详情弹窗；外部链接继续走 `resolveTicketDetailUrl` -> `openTicketLink`
+- 总共涉及页面：5
+
 ## [2026-06-22] INGEST-CODE | 多维表格主动拉取创建时间窗口
 - 触发：用户要求定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync` 默认查询当前时间前 1 小时之后的数据，指定时间时按指定时间之后的数据查询。
 - 架构层：工单域 / 飞书多维表格主动拉取 / 任务调度

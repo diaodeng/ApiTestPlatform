@@ -1,5 +1,6 @@
 <template>
   <div class="app-container ticket-page">
+    <template v-if="!standaloneDetailMode">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
       <el-form-item label="关键字" prop="keyword">
         <el-input
@@ -234,6 +235,7 @@
       v-model:limit="queryParams.pageSize"
       @pagination="getList"
     />
+    </template>
 
     <el-dialog :title="title" v-model="open" width="980px" append-to-body @closed="reset">
       <el-form ref="ticketRef" :model="form" :rules="rules" label-width="100px">
@@ -716,6 +718,17 @@
                       <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
                       <span>{{ item.rootCause || '-' }}</span>
                     </div>
+                    <div class="similar-actions">
+                      <el-link type="primary" :underline="false" @click="openSystemTicketDetail(item)">系统详情</el-link>
+                      <el-link
+                        v-if="resolveTicketDetailUrl(item)"
+                        type="info"
+                        :underline="false"
+                        @click="openTicketLink(item)"
+                      >
+                        飞书详情
+                      </el-link>
+                    </div>
                   </div>
                 </el-card>
               </el-col>
@@ -1005,6 +1018,17 @@
                     <div class="similar-meta">
                       <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
                       <span>{{ item.rootCause || '-' }}</span>
+                    </div>
+                    <div class="similar-actions">
+                      <el-link type="primary" :underline="false" @click="openSystemTicketDetail(item)">系统详情</el-link>
+                      <el-link
+                        v-if="resolveTicketDetailUrl(item)"
+                        type="info"
+                        :underline="false"
+                        @click="openTicketLink(item)"
+                      >
+                        飞书详情
+                      </el-link>
                     </div>
                   </div>
                 </el-card>
@@ -1865,8 +1889,11 @@ import {
 } from './logPull.shared'
 import UserSelect from './components/UserSelect.vue'
 import { blobValidate } from '@/utils/ruoyi'
+import { useRoute, useRouter } from 'vue-router'
 
 const { proxy } = getCurrentInstance()
+const route = useRoute()
+const router = useRouter()
 
 const loading = ref(false)
 const showSearch = ref(true)
@@ -2008,6 +2035,11 @@ let logPullRefreshTimer = null
 let suppressProjectWatcher = false
 
 const activeLogPullStatuses = ['created', 'submitting', 'polling', 'downloading', 'processing']
+const standaloneDetailMode = computed(() => route.name === 'TicketDetail')
+const standaloneRouteTicketId = computed(() => {
+  const ticketId = Number(route.params.ticketId)
+  return Number.isFinite(ticketId) && ticketId > 0 ? ticketId : undefined
+})
 
 function createDefaultLogPullForm() {
   return {
@@ -2707,6 +2739,27 @@ function openTicketLink(ticketRow) {
     return
   }
   window.open(ticketUrl, '_blank', 'noopener')
+}
+
+function buildSystemTicketDetailUrl(ticketRow) {
+  const ticketId = Number(ticketRow?.ticketId || ticketRow?.ticket_id)
+  if (!Number.isFinite(ticketId) || ticketId <= 0) {
+    return ''
+  }
+  const resolved = router.resolve({
+    name: 'TicketDetail',
+    params: { ticketId }
+  })
+  return resolved.href
+}
+
+function openSystemTicketDetail(ticketRow) {
+  const detailUrl = buildSystemTicketDetailUrl(ticketRow)
+  if (!detailUrl) {
+    proxy.$modal.msgWarning('当前相似工单缺少系统工单ID')
+    return
+  }
+  window.open(detailUrl, '_blank', 'noopener')
 }
 
 function reset() {
@@ -3505,7 +3558,12 @@ function deleteAiRepoMapping(row) {
 }
 
 function openDetail(row) {
-  currentTicketId.value = row.ticketId
+  const ticketId = Number(row?.ticketId || row?.ticket_id || row)
+  if (!Number.isFinite(ticketId) || ticketId <= 0) {
+    proxy.$modal.msgWarning('工单ID无效，无法打开详情')
+    return Promise.resolve()
+  }
+  currentTicketId.value = ticketId
   detailOpen.value = true
   detailMainTab.value = 'overview'
   historyActiveTab.value = 'timeline'
@@ -3532,7 +3590,7 @@ function openDetail(row) {
   logPullQuery.value.pageNum = 1
   resetLogPullForm()
   resetMessageForm()
-  getTicket(row.ticketId).then(response => {
+  return getTicket(ticketId).then(response => {
     syncDetailBundle(response.data || {})
     loadDetailVersionOptions(detail.value.projectId)
     aiAnalysisTaskForm.value.mappingId = detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId
@@ -4261,8 +4319,21 @@ function formatSeconds(seconds) {
 watch(detailOpen, value => {
   if (!value) {
     resetDetailDialog()
+    if (standaloneDetailMode.value) {
+      router.replace('/ticket/ticket')
+    }
   }
 })
+
+watch(
+  standaloneRouteTicketId,
+  ticketId => {
+    if (!standaloneDetailMode.value || !ticketId || ticketId === currentTicketId.value) {
+      return
+    }
+    openDetail({ ticketId })
+  }
+)
 
 watch(
   () => queryParams.value.projectId,
@@ -4304,6 +4375,10 @@ loadAnalysisPromptOptions()
 loadPushOptions()
 loadQueryModuleOptions()
 loadWorkflowConfig().finally(() => {
+  if (standaloneDetailMode.value && standaloneRouteTicketId.value) {
+    openDetail({ ticketId: standaloneRouteTicketId.value })
+    return
+  }
   getList()
 })
 </script>
@@ -4474,6 +4549,13 @@ loadWorkflowConfig().finally(() => {
   display: flex;
   gap: 10px;
   color: #606266;
+  font-size: 12px;
+}
+
+.similar-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
   font-size: 12px;
 }
 
