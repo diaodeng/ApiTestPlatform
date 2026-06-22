@@ -1757,6 +1757,8 @@
           <el-button type="primary" :loading="logViewerSearching" @click="searchLogViewerKeyword">搜索</el-button>
           <el-text>上下文</el-text>
           <el-input-number v-model="logViewerForm.contextLines" :min="0" :max="500" controls-position="right" />
+          <el-text>结果上限</el-text>
+          <el-input-number v-model="logViewerForm.limit" :min="1" :max="5000" :step="100" controls-position="right" />
           <el-switch
             v-model="logPullWrapEnabled"
             inline-prompt
@@ -1784,28 +1786,58 @@
           class="mb16"
           :title="`异常命中 ${logViewerErrorSummary.total || 0} 条`"
         />
-        <el-table
+        <div
           v-if="logViewerHits.length"
-          :data="logViewerHits"
-          row-key="hitKey"
-          size="small"
-          class="mb16"
-          max-height="320"
-          @row-click="selectLogViewerHit"
+          :class="['log-view-panel', 'mb16', {
+            'log-view-panel-fullscreen': logViewerResultViewMode === 'fullscreen',
+            'log-view-panel-minimized': logViewerResultViewMode === 'minimized'
+          }]"
         >
-          <el-table-column label="文件" prop="file" min-width="220" show-overflow-tooltip />
-          <el-table-column label="行号" prop="line" width="90" />
-          <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip />
-        </el-table>
-        <div v-if="logViewerContext" class="log-context-panel mb16">
-          <div class="panel-header mb8">
+          <div class="panel-header mb8 log-view-panel-header">
+            <span>搜索结果：{{ logViewerHits.length }} 条（当前上限 {{ logViewerForm.limit }} 条）</span>
+            <div class="panel-inline">
+              <el-button link type="primary" :icon="logViewerResultViewMode === 'minimized' ? 'Plus' : 'Minus'" @click="setLogViewerPanelMode('result', logViewerResultViewMode === 'minimized' ? 'normal' : 'minimized')">
+                {{ logViewerResultViewMode === 'minimized' ? '展开' : '最小化' }}
+              </el-button>
+              <el-button link type="primary" :icon="logViewerResultViewMode === 'fullscreen' ? 'FullScreen' : 'Rank'" @click="setLogViewerPanelMode('result', logViewerResultViewMode === 'fullscreen' ? 'normal' : 'fullscreen')">
+                {{ logViewerResultViewMode === 'fullscreen' ? '还原' : '放大全屏' }}
+              </el-button>
+            </div>
+          </div>
+          <el-table
+            v-show="logViewerResultViewMode !== 'minimized'"
+            :data="logViewerHits"
+            row-key="hitKey"
+            size="small"
+            :max-height="logViewerResultTableHeight"
+            @row-click="selectLogViewerHit"
+          >
+            <el-table-column label="文件" prop="file" min-width="220" show-overflow-tooltip />
+            <el-table-column label="行号" prop="line" width="90" />
+            <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip />
+          </el-table>
+        </div>
+        <div
+          v-if="logViewerContext"
+          :class="['log-context-panel', 'log-view-panel', 'mb16', {
+            'log-view-panel-fullscreen': logViewerContextViewMode === 'fullscreen',
+            'log-view-panel-minimized': logViewerContextViewMode === 'minimized'
+          }]"
+        >
+          <div class="panel-header mb8 log-view-panel-header">
             <span>{{ logViewerContext.file }}:{{ logViewerContext.line }}（{{ logViewerContext.start }}-{{ logViewerContext.end }}/{{ logViewerContext.totalLines }}）</span>
             <div class="panel-inline">
               <el-button link type="primary" :disabled="!logViewerContext.hasPrev || logViewerSearching" @click="pageLogViewerContext(-1)">上一段</el-button>
               <el-button link type="primary" :disabled="!logViewerContext.hasNext || logViewerSearching" @click="pageLogViewerContext(1)">下一段</el-button>
+              <el-button link type="primary" :icon="logViewerContextViewMode === 'minimized' ? 'Plus' : 'Minus'" @click="setLogViewerPanelMode('context', logViewerContextViewMode === 'minimized' ? 'normal' : 'minimized')">
+                {{ logViewerContextViewMode === 'minimized' ? '展开' : '最小化' }}
+              </el-button>
+              <el-button link type="primary" :icon="logViewerContextViewMode === 'fullscreen' ? 'FullScreen' : 'Rank'" @click="setLogViewerPanelMode('context', logViewerContextViewMode === 'fullscreen' ? 'normal' : 'fullscreen')">
+                {{ logViewerContextViewMode === 'fullscreen' ? '还原' : '放大全屏' }}
+              </el-button>
             </div>
           </div>
-          <pre :class="['log-content-block', 'log-context-block', { 'log-content-wrap': logPullWrapEnabled }]">{{ logViewerContextText }}</pre>
+          <pre v-show="logViewerContextViewMode !== 'minimized'" :class="['log-content-block', 'log-context-block', { 'log-content-wrap': logPullWrapEnabled }]">{{ logViewerContextText }}</pre>
         </div>
       </div>
     </el-dialog>
@@ -1970,10 +2002,13 @@ const logViewerSearching = ref(false)
 const logViewerHits = ref([])
 const logViewerContext = ref(null)
 const logViewerErrorSummary = ref(null)
+const logViewerResultViewMode = ref('normal')
+const logViewerContextViewMode = ref('normal')
 const logViewerForm = ref({
   ticketId: undefined,
   keyword: '',
-  contextLines: 20
+  contextLines: 20,
+  limit: 500
 })
 const aiAnalysisLoading = ref(false)
 const aiAnalysisSubmitting = ref(false)
@@ -2469,6 +2504,7 @@ const logViewerContextText = computed(() => {
   const lines = logViewerContext.value?.lines || []
   return lines.map(item => `${String(item.line).padStart(6, ' ')}  ${item.content || ''}`).join('\n')
 })
+const logViewerResultTableHeight = computed(() => (logViewerResultViewMode.value === 'fullscreen' ? 'calc(100vh - 170px)' : 320))
 const logViewerDialogTitle = computed(() => {
   const ticketNo = String(logViewerTicketMeta.value?.ticketNo || '').trim()
   const ticketTitle = String(logViewerTicketMeta.value?.title || '').trim()
@@ -4158,30 +4194,44 @@ function handleLogPullDialogClosed() {
   logViewerHits.value = []
   logViewerContext.value = null
   logViewerErrorSummary.value = null
+  logViewerResultViewMode.value = 'normal'
+  logViewerContextViewMode.value = 'normal'
 }
 
 function resetLogViewerState(ticketId = currentTicketId.value) {
   logViewerForm.value = {
     ticketId,
     keyword: '',
-    contextLines: 20
+    contextLines: 20,
+    limit: 500
   }
   logViewerHits.value = []
   logViewerContext.value = null
   logViewerErrorSummary.value = null
+  logViewerResultViewMode.value = 'normal'
+  logViewerContextViewMode.value = 'normal'
 }
 
 function buildLogViewerPayload(keywordField = 'keyword') {
   const contextLines = Number(logViewerForm.value.contextLines || 0)
+  const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000)
   const payload = {
     ticketId: currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId,
     contextBefore: contextLines,
     contextAfter: contextLines,
-    limit: 100,
-    withContext: true
+    limit,
+    withContext: false
   }
   payload[keywordField] = logViewerForm.value[keywordField]
   return payload
+}
+
+function setLogViewerPanelMode(panel, mode) {
+  if (panel === 'result') {
+    logViewerResultViewMode.value = mode
+    return
+  }
+  logViewerContextViewMode.value = mode
 }
 
 function searchLogViewerKeyword() {
@@ -4204,8 +4254,9 @@ function loadLogViewerErrors() {
   if (!ticketId) {
     return
   }
+  const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000)
   logViewerSearching.value = true
-  getTicketLogErrors({ ticketId, limit: 100 }).then(response => {
+  getTicketLogErrors({ ticketId, limit }).then(response => {
     logViewerErrorSummary.value = response?.data || null
     setLogViewerHits(logViewerErrorSummary.value?.samples || [])
   }).finally(() => {
@@ -4218,7 +4269,10 @@ function setLogViewerHits(rows = []) {
     ...item,
     hitKey: `${item.file || ''}:${item.line || 0}:${index}`
   }))
-  logViewerContext.value = logViewerHits.value[0]?.context || null
+  logViewerContext.value = null
+  if (logViewerHits.value.length === 1) {
+    selectLogViewerHit(logViewerHits.value[0])
+  }
 }
 
 function selectLogViewerHit(row) {
@@ -4238,10 +4292,10 @@ function pageLogViewerContext(direction) {
     return
   }
   if (direction > 0) {
-    loadLogViewerContext(context.nextFile || context.file, context.nextLine || context.end + 1)
+    loadLogViewerContext(context.nextFile, context.nextLine)
     return
   }
-  loadLogViewerContext(context.prevFile || context.file, context.prevLine || Math.max(context.start - 1, 1))
+  loadLogViewerContext(context.prevFile, context.prevLine)
 }
 
 function loadLogViewerContext(file, line) {
@@ -4558,6 +4612,8 @@ loadWorkflowConfig().finally(() => {
 }
 
 .log-view-controls {
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .log-view-time-picker {
@@ -4568,6 +4624,43 @@ loadWorkflowConfig().finally(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.log-view-panel {
+  padding: 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.log-view-panel-header {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.log-view-panel-fullscreen {
+  position: fixed;
+  inset: 16px;
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.log-view-panel-fullscreen :deep(.el-table) {
+  flex: 1;
+}
+
+.log-view-panel-fullscreen .log-content-block {
+  flex: 1;
+  max-height: none;
+}
+
+.log-view-panel-minimized {
+  padding-bottom: 6px;
 }
 
 .detail-main-tabs :deep(.el-tabs__header) {
@@ -4598,7 +4691,7 @@ loadWorkflowConfig().finally(() => {
 }
 
 .log-content-block {
-  max-height: 420px;
+  max-height: 52vh;
   padding: 12px;
   margin: 0;
   overflow: auto;

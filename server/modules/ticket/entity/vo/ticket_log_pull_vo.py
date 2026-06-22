@@ -437,7 +437,7 @@ class TicketLogSearchRequestModel(TicketLogPullBaseModel):
     keyword: str = Field(description="搜索关键字")
     context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
     context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
-    limit: int = Field(default=100, ge=1, le=500, description="最大返回命中数量")
+    limit: int = Field(default=500, ge=1, le=5000, description="最大返回命中数量")
     with_context: bool = Field(default=True, description="是否直接返回上下文")
 
 
@@ -450,7 +450,7 @@ class TicketLogSearchTimeRequestModel(TicketLogPullBaseModel):
     time: str = Field(description="时间关键字，例如 14:32")
     context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
     context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
-    limit: int = Field(default=100, ge=1, le=500, description="最大返回命中数量")
+    limit: int = Field(default=500, ge=1, le=5000, description="最大返回命中数量")
     with_context: bool = Field(default=True, description="是否直接返回上下文")
 
 
@@ -460,7 +460,7 @@ class TicketLogErrorsRequestModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int = Field(description="工单ID")
-    limit: int = Field(default=100, ge=1, le=500, description="最大扫描命中数量")
+    limit: int = Field(default=500, ge=1, le=5000, description="最大扫描命中数量")
 
 
 class TicketLogErrorSummaryModel(TicketLogPullBaseModel):

@@ -45,6 +45,7 @@ class LogService:
     ERROR_KEYWORDS = ("ERROR", "Exception", "Traceback", "timeout", "failed")
     MAX_RECURSIVE_EXTRACT_ROUNDS = 20
     LINE_INDEX_SUFFIX = ".lineidx"
+    LINE_INDEX_ENCODING_VERSION = 2
     SEARCH_MODE_ENV = "TICKET_LOG_SEARCH_MODE"
     CONTEXT_MODE_ENV = "TICKET_LOG_CONTEXT_MODE"
 
@@ -188,6 +189,11 @@ class LogService:
         extract_dir = cls._extract_dir(ticket_id)
         if not extract_dir.exists():
             return []
+        if not keyword.isascii():
+            logger.info(
+                f"日志搜索包含非 ASCII 关键字，使用 Python 编码兼容模式，ticket_id={ticket_id}，keyword={keyword}"
+            )
+            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
         search_mode = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
         if search_mode == "python":
             logger.info(f"日志搜索使用 Python 降级模式，ticket_id={ticket_id}，keyword={keyword}")
@@ -622,7 +628,11 @@ class LogService:
             try:
                 with index_path.open("r", encoding="utf-8") as file_obj:
                     meta = json.loads(file_obj.readline() or "{}")
-                if meta.get("size") == stat.st_size and meta.get("mtime_ns") == stat.st_mtime_ns:
+                if (
+                    meta.get("size") == stat.st_size
+                    and meta.get("mtime_ns") == stat.st_mtime_ns
+                    and meta.get("encoding_version") == cls.LINE_INDEX_ENCODING_VERSION
+                ):
                     return meta
             except Exception as exc:
                 logger.warning(f"读取日志行索引失败，将重建索引，path={path}，reason={exc}")
@@ -645,6 +655,7 @@ class LogService:
             "mtime_ns": stat.st_mtime_ns,
             "line_count": line_count,
             "encoding": encoding,
+            "encoding_version": cls.LINE_INDEX_ENCODING_VERSION,
             "created_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
         }
         with index_path.open("w", encoding="utf-8", newline="\n") as index_file:
@@ -714,10 +725,10 @@ class LogService:
         has_prev = start > 1 or cls._adjacent_log_file(ticket_id, file_path, direction="previous") is not None
         has_next = end < total or cls._adjacent_log_file(ticket_id, file_path, direction="next") is not None
         prev_file, prev_line = cls._build_context_page_pointer(
-            ticket_id, file_path, start, end, total, direction="previous"
+            ticket_id, file_path, start, end, total, before_count, after_count, direction="previous"
         )
         next_file, next_line = cls._build_context_page_pointer(
-            ticket_id, file_path, start, end, total, direction="next"
+            ticket_id, file_path, start, end, total, before_count, after_count, direction="next"
         )
         return TicketLogContextModel(
             ticket_id=ticket_id,
@@ -843,14 +854,37 @@ class LogService:
     @classmethod
     def _detect_file_encoding(cls, path: Path) -> str:
         """
-        读取文件头部样本并探测编码。
+        读取文件头部样本并探测编码，优先兼容 UTF-8 和常见中文日志编码。
         :param path: 文件路径
         :return: 编码名称
         """
         with path.open("rb") as file_obj:
             sample = file_obj.read(65536)
+        if not sample:
+            return "utf-8"
+        if sample.startswith(b"\xef\xbb\xbf"):
+            return "utf-8-sig"
+        try:
+            sample.decode("utf-8")
+            return "utf-8"
+        except UnicodeDecodeError:
+            pass
+        for fallback_encoding in ("gb18030", "gbk", "big5"):
+            try:
+                sample.decode(fallback_encoding)
+                return fallback_encoding
+            except UnicodeDecodeError:
+                continue
         detected = from_bytes(sample).best()
-        return detected.encoding if detected and detected.encoding else "utf-8"
+        detected_encoding = str(detected.encoding or "").strip() if detected else ""
+        if detected_encoding:
+            return detected_encoding
+        try:
+            sample.decode("latin-1")
+            return "latin-1"
+        except UnicodeDecodeError:
+            pass
+        return "utf-8"
 
     @classmethod
     def _parse_rg_line(cls, raw_line: str) -> TicketLogSearchHitModel | None:
@@ -934,6 +968,8 @@ class LogService:
         start: int,
         end: int,
         total: int,
+        before_count: int,
+        after_count: int,
         direction: str,
     ) -> tuple[str | None, int | None]:
         """
@@ -943,23 +979,32 @@ class LogService:
         :param start: 当前上下文开始行
         :param end: 当前上下文结束行
         :param total: 当前文件总行数
+        :param before_count: 前置上下文行数
+        :param after_count: 后置上下文行数
         :param direction: previous/next
         :return: 建议文件和中心行
         """
+        page_size = max(before_count + after_count + 1, 1)
         if direction == "previous":
             if start > 1:
-                return file_path, max(start - 1, 1)
+                previous_start = max(start - page_size, 1)
+                previous_end = start - 1
+                return file_path, min(previous_start + before_count, previous_end)
             previous_file = cls._adjacent_log_file(ticket_id, file_path, direction="previous")
             if previous_file:
                 previous_path = cls._resolve_log_file(ticket_id, previous_file)
                 previous_total = int(cls._ensure_line_index(previous_path).get("line_count") or 0)
-                return previous_file, max(previous_total, 1)
+                previous_start = max(previous_total - page_size + 1, 1)
+                return previous_file, min(previous_start + before_count, max(previous_total, 1))
             return None, None
         if end < total:
-            return file_path, min(end + 1, total)
+            next_start = end + 1
+            return file_path, min(next_start + before_count, total)
         next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next")
         if next_file:
-            return next_file, 1
+            next_path = cls._resolve_log_file(ticket_id, next_file)
+            next_total = int(cls._ensure_line_index(next_path).get("line_count") or 0)
+            return next_file, min(1 + before_count, max(next_total, 1))
         return None, None
 
     @classmethod

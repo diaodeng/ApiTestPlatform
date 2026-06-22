@@ -8,6 +8,16 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-22] INGEST-CODE | 工单日志查看器交互与编码兼容优化
+- 触发：用户要求工单日志搜索结果和上下文窗口支持全屏/最小化，修复上下文翻页重复、搜索结果数量受限、中文乱码和上下文滚动查看问题。
+- 架构层：工单域 / 日志查看 / Web 控制台 / 日志服务
+- 创建的页面：`web/public/docs/2026-06-22-ticket-log-viewer-usability.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`server/modules/ticket/service/ticket_log_service.py`、`server/modules/ticket/entity/vo/ticket_log_pull_vo.py`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：日志查看弹窗 -> 搜索结果上限与面板状态 -> 点击命中按需加载上下文 -> 后端非重叠翻页指针 -> 编码兼容读取与中文关键字搜索
+- 验证：`uv run ruff check modules/ticket/service/ticket_log_service.py modules/ticket/entity/vo/ticket_log_pull_vo.py`、GB18030 中文日志上下文/搜索小样本、`npm run build:prod` 均通过。
+- 总共涉及页面：7
+
 ## [2026-06-22] INGEST-CODE | 工单入库原文保留与 AI 分析版本号兜底
 - 触发：用户要求项目、模块匹配失败时保留原文；后续数据无版本号时不清空已有版本；手动发起 AI 分析可选版本号，未选时从日志提取并回写后发起分析。
 - 架构层：工单域 / 外部同步入库 / 工单编辑 / 日志拉取 / AI 分析任务提交
