@@ -1209,7 +1209,7 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="更新时间字段">
-                    <el-input v-model="form.bitablePull.updatedAtField" placeholder="如 更新时间；用于 pushedAt/去重辅助" />
+                    <el-input v-model="form.bitablePull.updatedAtField" placeholder="如 更新时间；默认时间窗口过滤字段之一" />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">

@@ -1,25 +1,27 @@
-# 2026-06-22 多维表格主动拉取创建时间窗口
+# 2026-06-22 多维表格主动拉取时间窗口
 
 ## 结论
 
-- 定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync` 新增创建时间窗口控制。
-- 任务未指定时间时，默认只处理当前时间前 1 小时之后创建的飞书多维表格记录。
-- 任务指定 `createdAfter`、`created_after`、`startTime`、`start_time`、`beginTime`、`begin_time` 任一参数时，使用指定时间作为创建时间下限。
+- `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync` 默认使用当前时间前 1 小时作为主动拉取窗口下限。
+- 2026-06-24 起，时间窗口下推到飞书 `records/search` 请求参数中的 `filter`，不再先拉取全量记录后本地过滤。
+- 默认过滤语义为：更新时间字段或创建时间字段大于等于窗口下限。
+- `createdAfter`、`created_after`、`startTime`、`start_time`、`beginTime`、`begin_time` 仍可作为任务参数传入，用于覆盖默认窗口下限。
 
 ## 实现说明
 
-1. 定时任务入口提取主动拉取覆盖配置后补齐 `createdAfter`。
-2. `TicketSyncService.run_bitable_pull_services` 查询飞书记录后，按记录级 `created_time/createdTime/created_at/createdAt` 做本地过滤。
-3. 返回结果新增：
-   - `queriedRecordCount`：飞书接口查询到的原始记录数。
-   - `recordCount`：创建时间过滤后的处理记录数。
-   - `createdAfter`：本次实际使用的创建时间下限。
+1. `TicketSyncService.run_bitable_pull_services` 解析主动拉取运行时配置。
+2. 服务在请求飞书前把时间窗口合并进 `filterFormula`。
+3. 默认 OR 时间字段：
+   - `updatedAtField`，未配置时使用 `更新时间`；
+   - 字段映射中 `targetField=createTime` 对应的多维字段，未配置时使用 `创建时间`。
+4. 如果现有 `filterFormula` 中上述时间字段的比较条件缺少 `value`，服务会自动填入窗口下限的 13 位毫秒时间戳。
+5. 返回结果中的 `queriedRecordCount` 是飞书按 filter 返回后的数量，不再代表全量表扫描数量。
 
 ## 参数示例
 
 ```json
 {
-  "createdAfter": "2026-06-22 10:48:00"
+  "createdAfter": "2026-06-24 00:59:00"
 }
 ```
 
@@ -28,12 +30,13 @@
 ```json
 {
   "bitablePull": {
-    "createdAfter": "2026-06-22 10:48:00"
+    "createdAfter": "2026-06-24 00:59:00"
   }
 }
 ```
 
-## 风险说明
+## 说明
 
-- 当前过滤使用飞书记录元数据创建时间，不依赖多维表格中的自定义“创建时间”字段。
-- 如果飞书接口未返回记录创建时间，该记录会被跳过，并输出跳过日志。
+- `createdAfter` 仍保留为兼容入参，作用是覆盖默认时间窗口下限；它不再代表本地过滤步骤。
+- 若需要自定义字段名，优先配置 `updatedAtField` 和字段映射中的 `targetField=createTime`。
+- 日期/时间字段过滤值使用 13 位毫秒时间戳传给飞书。

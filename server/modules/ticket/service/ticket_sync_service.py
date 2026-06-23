@@ -1740,6 +1740,36 @@ class TicketSyncService:
         return str(value or "").strip()
 
     @classmethod
+    def _parse_bitable_filter_config(cls, value: Any) -> dict[str, Any]:
+        """
+        将飞书多维表格过滤配置解析为条件对象。
+
+        :param value: JSON 字符串或字典。
+        :return: 可传给飞书 records/search 的 filter 对象；无效时返回空字典。
+        """
+        if isinstance(value, dict):
+            return dict(value)
+        if value in (None, ""):
+            return {}
+        try:
+            parsed = json.loads(str(value or "").strip())
+        except Exception as exc:
+            raise ValueError("过滤条件格式错误，请填写飞书 records/search filter JSON") from exc
+        return dict(parsed) if isinstance(parsed, dict) else {}
+
+    @classmethod
+    def _format_bitable_filter_config(cls, value: Any) -> str | dict[str, Any]:
+        """
+        按原输入形态输出过滤配置，兼容页面保存字符串和任务参数对象。
+
+        :param value: 过滤条件对象。
+        :return: JSON 字符串或对象。
+        """
+        if isinstance(value, dict):
+            return value
+        return ""
+
+    @classmethod
     def _normalize_bitable_common_config(cls, value: Any, *, feishu_auth: dict[str, Any]) -> dict[str, Any]:
         """
         归一化飞书多维表格公共配置。
@@ -1936,40 +1966,182 @@ class TicketSyncService:
         return cls._parse_datetime_value(value)
 
     @classmethod
-    def _filter_bitable_pull_records_by_created_after(
+    def _datetime_to_bitable_filter_millis(cls, value: datetime) -> int:
+        """
+        将 datetime 转换为飞书多维表格日期过滤使用的毫秒时间戳。
+
+        :param value: 时间对象；无时区时按本地时间解释。
+        :return: 13 位毫秒时间戳。
+        """
+        return int(value.timestamp() * 1000)
+
+    @classmethod
+    def _resolve_bitable_pull_create_time_field(cls, field_mappings: list[dict[str, Any]]) -> str:
+        """
+        从主动拉取字段映射中解析外部创建时间对应的多维字段名。
+
+        :param field_mappings: 字段映射配置。
+        :return: 多维表格创建时间字段名。
+        """
+        for item in field_mappings or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("targetField") or "").strip() == "createTime":
+                source_field = str(item.get("sourceField") or "").strip()
+                if source_field:
+                    return source_field
+        return "创建时间"
+
+    @classmethod
+    def _condition_needs_dynamic_time_value(
         cls,
-        records: list[dict[str, Any]],
+        condition: dict[str, Any],
         *,
-        created_after: datetime | None,
+        time_field_names: set[str],
+    ) -> bool:
+        """
+        判断过滤条件是否需要补齐动态时间值。
+
+        :param condition: 飞书 filter 条件。
+        :param time_field_names: 可识别为时间字段的字段名集合。
+        :return: 时间比较条件 value 为空时返回 True。
+        """
+        if not isinstance(condition, dict):
+            return False
+        operator = str(condition.get("operator") or "").strip()
+        if operator not in {"isGreater", "isGreaterEqual", "isLess", "isLessEqual"}:
+            return False
+        field_name = str(condition.get("field_name") or "").strip()
+        if field_name not in time_field_names:
+            return False
+        return condition.get("value") in (None, "", [])
+
+    @classmethod
+    def _fill_dynamic_time_filter_values(
+        cls,
+        conditions: list[Any],
+        *,
+        time_field_names: set[str],
+        filter_millis: int,
     ) -> list[dict[str, Any]]:
         """
-        按飞书记录创建时间过滤主动拉取记录。
+        补齐时间过滤条件中的动态 value。
 
-        :param records: 飞书多维表格记录列表。
-        :param created_after: 创建时间下限，记录创建时间必须大于等于该值。
-        :return: 过滤后的记录列表。
+        :param conditions: 飞书 filter 条件列表。
+        :param time_field_names: 可识别为时间字段的字段名集合。
+        :param filter_millis: 时间窗口下限毫秒时间戳。
+        :return: 补齐后的扁平条件列表。
         """
+        normalized_conditions: list[dict[str, Any]] = []
+        for condition in conditions:
+            if not isinstance(condition, dict):
+                continue
+            normalized_condition = dict(condition)
+            if isinstance(normalized_condition.get("conditions"), list):
+                raise ValueError("过滤条件暂不支持嵌套条件组，请使用飞书 records/search 扁平 filter JSON")
+            if cls._condition_needs_dynamic_time_value(
+                normalized_condition,
+                time_field_names=time_field_names,
+            ):
+                normalized_condition["value"] = filter_millis
+            normalized_conditions.append(normalized_condition)
+        return normalized_conditions
+
+    @classmethod
+    def _build_bitable_pull_time_filters(
+        cls,
+        *,
+        filter_formula: Any,
+        created_after: datetime | None,
+        updated_at_field: str,
+        create_time_field: str,
+    ) -> list[dict[str, Any]]:
+        """
+        构建主动拉取时间窗口对应的飞书 records/search filter 列表。
+
+        :param filter_formula: 用户配置的 filter 条件。
+        :param created_after: 时间窗口下限。
+        :param updated_at_field: 多维表格更新时间字段名。
+        :param create_time_field: 多维表格创建时间字段名。
+        :return: 一个或多个 filter 条件对象；多个对象表示需要分别请求飞书后按 record_id 合并。
+        """
+        parsed_filter = cls._parse_bitable_filter_config(filter_formula)
         if not created_after:
-            return records
-        filtered_records: list[dict[str, Any]] = []
-        for record in records:
-            if not isinstance(record, dict):
+            return [parsed_filter] if parsed_filter else []
+
+        filter_millis = cls._datetime_to_bitable_filter_millis(created_after)
+        conditions = parsed_filter.get("conditions") if isinstance(parsed_filter.get("conditions"), list) else []
+        time_field_names = {str(updated_at_field or "").strip(), str(create_time_field or "").strip()}
+        time_field_names = {item for item in time_field_names if item}
+        normalized_conditions = cls._fill_dynamic_time_filter_values(
+            conditions,
+            time_field_names=time_field_names,
+            filter_millis=filter_millis,
+        )
+
+        time_conditions = []
+        for field_name in (updated_at_field, create_time_field):
+            normalized_field = str(field_name or "").strip()
+            if not normalized_field:
                 continue
-            record_created_at = cls._parse_datetime_value(
-                record.get("created_time")
-                or record.get("createdTime")
-                or record.get("created_at")
-                or record.get("createdAt")
+            time_conditions.append(
+                {
+                    "field_name": normalized_field,
+                    "operator": "isGreaterEqual",
+                    "value": filter_millis,
+                }
             )
-            if not record_created_at:
-                logger.info(
-                    f"飞书多维表格主动拉取记录跳过: reason=创建时间为空, "
-                    f"record_id={record.get('record_id') or record.get('recordId') or '-'}"
-                )
-                continue
-            if record_created_at >= created_after:
-                filtered_records.append(record)
-        return filtered_records
+
+        if not time_conditions:
+            return [{"conjunction": parsed_filter.get("conjunction") or "and", "conditions": normalized_conditions}]
+        if not normalized_conditions:
+            return [{"conjunction": "or", "conditions": time_conditions}]
+
+        base_conjunction = str(parsed_filter.get("conjunction") or "and").lower()
+        if base_conjunction == "or":
+            base_condition_groups = [[condition] for condition in normalized_conditions]
+        else:
+            base_condition_groups = [normalized_conditions]
+        return [
+            {
+                "conjunction": "and",
+                "conditions": [*base_group, time_condition],
+            }
+            for base_group in base_condition_groups
+            for time_condition in time_conditions
+        ]
+
+    @classmethod
+    def _query_bitable_pull_records(
+        cls,
+        pull_config: dict[str, Any],
+        filters: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        按一个或多个飞书 filter 查询主动拉取记录，并按 record_id 去重。
+
+        :param pull_config: 主动拉取配置。
+        :param filters: 过滤条件列表。
+        :return: 去重后的飞书记录。
+        """
+        if not filters:
+            return TicketSyncNotifyService.query_bitable_records(pull_config)
+        merged_records: list[dict[str, Any]] = []
+        seen_record_ids: set[str] = set()
+        for filter_item in filters:
+            query_config = dict(pull_config)
+            query_config["filterFormula"] = filter_item
+            page_records = TicketSyncNotifyService.query_bitable_records(query_config)
+            for record in page_records:
+                if not isinstance(record, dict):
+                    continue
+                record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
+                unique_key = record_id or cls._text_sha256(json.dumps(record, ensure_ascii=False, sort_keys=True))
+                if unique_key in seen_record_ids:
+                    continue
+                seen_record_ids.add(unique_key)
+                merged_records.append(record)
+        return merged_records
 
     @classmethod
     def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
@@ -2525,17 +2697,51 @@ class TicketSyncService:
                 "configErrors": ["createdAfter"],
                 "createdAfter": raw_created_after,
             }
-        if not created_after and trigger_source == "scheduler":
+        if not created_after:
             created_after = datetime.now() - timedelta(hours=1)
             pull_config["createdAfter"] = created_after.strftime("%Y-%m-%d %H:%M:%S")
+        pull_filters: list[dict[str, Any]] = []
         if created_after:
+            create_time_field = cls._resolve_bitable_pull_create_time_field(pull_config.get("fieldMappings") or [])
+            updated_at_field = str(pull_config.get("updatedAtField") or "").strip() or "更新时间"
+            try:
+                pull_filters = cls._build_bitable_pull_time_filters(
+                    filter_formula=pull_config.get("filterFormula"),
+                    created_after=created_after,
+                    updated_at_field=updated_at_field,
+                    create_time_field=create_time_field,
+                )
+            except ValueError as exc:
+                return {
+                    "triggerSource": trigger_source,
+                    "skipped": True,
+                    "skipReason": str(exc),
+                    "configErrors": ["filterFormula"],
+                    "createdAfter": created_after.strftime("%Y-%m-%d %H:%M:%S"),
+                }
             logger.info(
-                f"飞书多维表格主动拉取创建时间过滤: trigger={trigger_source}, "
-                f"created_after={created_after.strftime('%Y-%m-%d %H:%M:%S')}"
+                f"飞书多维表格主动拉取云端时间过滤: trigger={trigger_source}, "
+                f"created_after={created_after.strftime('%Y-%m-%d %H:%M:%S')}, "
+                f"updated_at_field={updated_at_field}, create_time_field={create_time_field}"
             )
-        records = TicketSyncNotifyService.query_bitable_records(pull_config)
+        else:
+            try:
+                pull_filters = cls._build_bitable_pull_time_filters(
+                    filter_formula=pull_config.get("filterFormula"),
+                    created_after=None,
+                    updated_at_field="",
+                    create_time_field="",
+                )
+            except ValueError as exc:
+                return {
+                    "triggerSource": trigger_source,
+                    "skipped": True,
+                    "skipReason": str(exc),
+                    "configErrors": ["filterFormula"],
+                    "createdAfter": "",
+                }
+        records = cls._query_bitable_pull_records(pull_config, pull_filters)
         queried_count = len(records)
-        records = cls._filter_bitable_pull_records_by_created_after(records, created_after=created_after)
         required_fields = [
             str(item or "").strip()
             for item in config.get("externalSyncRequiredFields", cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)

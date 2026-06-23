@@ -1,6 +1,5 @@
 import asyncio
 import json
-from datetime import datetime, timedelta
 from typing import Any
 
 from config.database import SessionLocal
@@ -136,20 +135,6 @@ def _build_bitable_pull_config_override(kwargs: dict[str, Any]) -> dict[str, Any
     return override
 
 
-def _ensure_bitable_pull_created_after(override: dict[str, Any]) -> dict[str, Any]:
-    """
-    为飞书多维表格主动拉取补齐创建时间下限。
-
-    :param override: 定时任务提取出的主动拉取覆盖配置。
-    :return: 带 createdAfter 的覆盖配置；调用方未指定时默认取当前时间前 1 小时。
-    """
-    normalized_override = dict(override or {})
-    if str(normalized_override.get("createdAfter") or "").strip():
-        return normalized_override
-    normalized_override["createdAfter"] = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
-    return normalized_override
-
-
 @register_job("module_task.scheduler_maintenance.cleanup_test_reports")
 def cleanup_test_reports(
     *args,
@@ -261,7 +246,7 @@ def pull_feishu_bitable_ticket_sync(
     task_id = int(kwargs.pop("_task_id", 0) or 0)
     if task_id and is_task_stop_requested(task_id):
         raise TaskStopRequestedError("任务已手动终止")
-    override = _ensure_bitable_pull_created_after(_build_bitable_pull_config_override(kwargs))
+    override = _build_bitable_pull_config_override(kwargs)
     with SessionLocal() as db:
         result = TicketSyncService.run_bitable_pull_services(
             db,

@@ -79,7 +79,7 @@ graph TD
 - 飞书多维表格公共配置已下沉到 `ticket.sync.automation.bitableCommon`；工单汇总统计、按人催办、外部推送邮箱补全和主动拉取默认继承该配置，局部配置非空时覆盖公共配置。
 - 外部字段枚举已抽成 `ticket.sync.automation.externalFieldModel`；同步配置页的必填字段下拉与主动拉取字段映射目标字段统一读取该模型。
 - `externalFieldModel` 现在同时承担“字段全集”和“必填标记”职责；页面不再建议单独维护另一份必填字段配置，服务端仅保留 `externalSyncRequiredFields` 作为历史兼容输出。
-- 新增主动拉取配置 `ticket.sync.automation.bitablePull` 与定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync`：任务按条件搜索飞书多维表格记录，经字段映射转换后复用外部同步入库链路。
+- 新增主动拉取配置 `ticket.sync.automation.bitablePull` 与定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync`：任务按条件搜索飞书多维表格记录，经字段映射转换后复用外部同步入库链路；默认时间窗口会下推到飞书 `records/search` filter，按更新时间字段或创建时间字段大于等于当前时间前 1 小时查询，`createdAfter` 仅用于覆盖窗口下限。
 - 主动拉取记录会把 `recordId/snapshotHash/fieldMappings/sourceSystem/pulledAt` 落到 `ticket.extra_data.bitable_pull`；同一记录内容未变化时直接跳过，避免定时任务反复递增同步 revision。
 - 飞书多维表格搜索结果中的 `record_id` 不能直接拼成可访问详情链接；当前环境下 `records/search` 实际可能不返回 `record_url/shared_url`，因此服务会继续按缺失记录的 `record_id` 调用 `records/batch_get(with_shared_url=true)` 批量补齐 `shared_url`，再写入 `ticket_url/source.recordUrl/detailUrl`；若补查后仍为空，则保持空字符串，不再伪造 `...?record=record_id` 假链接。
 - 主动拉取映射中的“多维字段”支持按当前配置实时预览一条表格记录字段名，作为下拉选项；同时保留手动输入，兼容字段尚未出现在样本记录中的场景。

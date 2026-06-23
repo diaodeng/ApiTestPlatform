@@ -2,7 +2,8 @@
 
 1. 多维表格查询条件文案统一为 `records/search` filter JSON，不再提示填写 `CurrentValue.[字段]` 公式文本。
 2. 修正主动拉取配置示例和后端过滤条件错误提示，避免配置人员按旧公式口径填写。
-3. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-filter-json-doc-fix.md`。
+3. 多维表格主动拉取默认时间窗口改为下推到飞书 `records/search` filter：更新时间字段或创建时间字段大于等于当前时间前 1 小时；`createdAfter` 仅作为覆盖窗口下限的兼容入参保留。
+4. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-filter-json-doc-fix.md`。
 
 ## 2026-06-23
 
