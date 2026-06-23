@@ -3,10 +3,20 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-06-23
 ---
 
 # 操作日志
+
+## [2026-06-23] INGEST-CODE | 工单多维表格配置保存态与运行态拆分
+- 触发：用户反馈填写“多维表格公共配置”后，“飞书多维表格主动拉取”的对应配置项也会被自动填上，要求多维主动拉取有独立配置时用独立配置，没有才用表格公共配置，并梳理外部推送、内部拉取、主动拉取、手动新增/编辑的配置边界和翻译配置关系。
+- 架构层：工单域 / 同步自动化配置 / 飞书多维表格集成 / 翻译自动化
+- 创建的页面：`web/public/docs/2026-06-23-ticket-bitable-config-scope.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-06-23-ticket-bitable-config-scope.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：`ticket.sync.automation.bitableCommon` -> 运行时多维查询配置解析 -> 外部推送邮箱补齐 / 飞书多维表格主动拉取 / 按人催办 / 汇总统计；页面回显不再被公共配置污染。
+- 追加：翻译配置边界已写入文档；外部推送、内部拉取、主动拉取、手动新增/编辑分别有自己的场景开关，但共用 AI 配置中心的翻译总开关、Provider 和 Prompt。
+- 风险：历史库中已经被旧逻辑写入独立配置段的公共值不会自动清理，避免误删用户真实独立配置；需在页面手动清空一次后保存。
 
 ## [2026-06-23] INGEST-CODE | 工单 AI Agent 异常反馈修复
 - 触发：用户反馈发起工单 AI 分析时 Agent 未连接或连接异常，服务端已有报错但 Web 页面只显示 `{}` 或没有真实失败原因。

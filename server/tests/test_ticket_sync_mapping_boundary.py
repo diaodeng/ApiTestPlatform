@@ -614,8 +614,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             "https://duodian.feishu.cn/record/RotorqQTyeb46qc3BzPcrcvSnSh",
         )
 
-    def test_sync_config_inherits_bitable_common_for_person_and_summary(self):
-        """多维表格公共配置应被人员催办、汇总统计和外部邮箱补全继承。"""
+    def test_sync_config_keeps_bitable_common_independent_from_scene_sections(self):
+        """保存态配置不应把多维表格公共配置写入各独立业务配置段。"""
         config = TicketSyncService._normalize_sync_config(
             {
                 "feishuAuth": {"appId": "app_a", "appSecret": "secret_a"},
@@ -629,18 +629,56 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "personReminder": {"enabled": True, "personField": "处理人", "timeField": "更新时间"},
                 "summaryReport": {"enabled": True, "dataSource": "bitable"},
                 "externalSyncBitable": {"enabled": True},
+                "bitablePull": {"enabled": True},
             }
         )
 
-        self.assertEqual(config["personReminder"]["appToken"], "common_token")
-        self.assertEqual(config["personReminder"]["tableId"], "common_table")
-        self.assertEqual(config["personReminder"]["viewId"], "common_view")
-        self.assertEqual(config["personReminder"]["pageSize"], 123)
-        self.assertEqual(config["summaryReport"]["appToken"], "common_token")
-        self.assertEqual(config["summaryReport"]["filterFormula"], "CurrentValue.[状态] != \"已关闭\"")
-        self.assertEqual(config["externalSyncBitable"]["appToken"], "common_token")
-        self.assertEqual(config["externalSyncBitable"]["appId"], "app_a")
-        self.assertEqual(config["externalSyncBitable"]["appSecret"], "secret_a")
+        self.assertEqual(config["personReminder"]["appToken"], "")
+        self.assertEqual(config["personReminder"]["tableId"], "")
+        self.assertEqual(config["personReminder"]["viewId"], "")
+        self.assertEqual(config["personReminder"]["pageSize"], 500)
+        self.assertEqual(config["summaryReport"]["appToken"], "")
+        self.assertEqual(config["summaryReport"]["filterFormula"], "")
+        self.assertEqual(config["externalSyncBitable"]["appToken"], "")
+        self.assertEqual(config["externalSyncBitable"]["appId"], "")
+        self.assertEqual(config["externalSyncBitable"]["appSecret"], "")
+        self.assertEqual(config["bitablePull"]["appToken"], "")
+        self.assertEqual(config["bitablePull"]["tableId"], "")
+        self.assertEqual(config["bitablePull"]["viewId"], "")
+        self.assertEqual(config["bitablePull"]["filterFormula"], "")
+
+    def test_bitable_runtime_config_inherits_common_without_polluting_saved_config(self):
+        """运行时多维表格配置应独立配置优先，独立为空时才继承公共配置。"""
+        config = TicketSyncService._normalize_sync_config(
+            {
+                "feishuAuth": {"appId": "app_a", "appSecret": "secret_a"},
+                "bitableCommon": {
+                    "appToken": "common_token",
+                    "tableId": "common_table",
+                    "viewId": "common_view",
+                    "pageSize": 123,
+                    "filterFormula": "CurrentValue.[状态] != \"已关闭\"",
+                },
+                "bitablePull": {
+                    "enabled": True,
+                    "appToken": "pull_token",
+                    "fieldMappings": [{"sourceField": "工单号", "targetField": "ticketNo"}],
+                },
+            }
+        )
+
+        runtime_config = TicketSyncService._resolve_bitable_runtime_config(
+            config,
+            "bitablePull",
+            TicketSyncService._default_bitable_pull_config(),
+        )
+
+        self.assertEqual(runtime_config["appId"], "app_a")
+        self.assertEqual(runtime_config["appSecret"], "secret_a")
+        self.assertEqual(runtime_config["appToken"], "pull_token")
+        self.assertEqual(runtime_config["tableId"], "common_table")
+        self.assertEqual(runtime_config["viewId"], "common_view")
+        self.assertEqual(runtime_config["filterFormula"], "CurrentValue.[状态] != \"已关闭\"")
 
     def test_bitable_pull_record_skips_when_snapshot_not_changed(self):
         """主动拉取记录快照未变化时应跳过，避免每次任务都递增 revision。"""

@@ -1736,10 +1736,8 @@ class TicketSyncService:
         """
         source = value if isinstance(value, dict) else {}
         config = {**cls._default_bitable_common_config(), **source}
-        config["appId"] = str(config.get("appId") or "").strip() or str(feishu_auth.get("appId") or "").strip()
-        config["appSecret"] = (
-            str(config.get("appSecret") or "").strip() or str(feishu_auth.get("appSecret") or "").strip()
-        )
+        config["appId"] = str(config.get("appId") or "").strip()
+        config["appSecret"] = str(config.get("appSecret") or "").strip()
         config["appToken"] = str(config.get("appToken") or "").strip()
         config["tableId"] = str(config.get("tableId") or "").strip()
         config["viewId"] = str(config.get("viewId") or "").strip()
@@ -1775,6 +1773,63 @@ class TicketSyncService:
         if keep_filter_formula and not str(source.get("filterFormula") or "").strip():
             source["filterFormula"] = bitable_common.get("filterFormula")
         return source
+
+    @classmethod
+    def _resolve_bitable_runtime_config(
+        cls,
+        config: dict[str, Any],
+        section_key: str,
+        default_config: dict[str, Any],
+        *,
+        keep_filter_formula: bool = True,
+    ) -> dict[str, Any]:
+        """
+        解析运行时多维表格配置，只在真正执行飞书查询前继承公共配置。
+
+        :param config: 完整同步配置。
+        :param section_key: 业务配置段名称。
+        :param default_config: 业务配置默认值。
+        :param keep_filter_formula: 是否允许公共过滤公式兜底。
+        :return: 已按“独立配置优先，公共配置兜底”合并后的运行时配置。
+        """
+        feishu_auth = config.get("feishuAuth") if isinstance(config.get("feishuAuth"), dict) else {}
+        bitable_common = config.get("bitableCommon") if isinstance(config.get("bitableCommon"), dict) else {}
+        section_config = config.get(section_key) if isinstance(config.get(section_key), dict) else {}
+        runtime_config = {**default_config, **section_config}
+        runtime_config = cls._apply_bitable_common_defaults(
+            runtime_config,
+            bitable_common=bitable_common,
+            keep_filter_formula=keep_filter_formula,
+        )
+        if not str(runtime_config.get("appId") or "").strip():
+            runtime_config["appId"] = str(feishu_auth.get("appId") or "").strip()
+        if not str(runtime_config.get("appSecret") or "").strip():
+            runtime_config["appSecret"] = str(feishu_auth.get("appSecret") or "").strip()
+        return runtime_config
+
+    @classmethod
+    def _merge_non_empty_runtime_override(
+        cls,
+        base_config: dict[str, Any],
+        override_config: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """
+        合并运行时覆盖配置，空字符串不覆盖已继承的公共配置。
+
+        :param base_config: 已解析的基础运行时配置。
+        :param override_config: 页面预览或定时任务传入的覆盖配置。
+        :return: 合并后的运行时配置。
+        """
+        merged_config = dict(base_config or {})
+        if not isinstance(override_config, dict):
+            return merged_config
+        for key, value in override_config.items():
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            merged_config[key] = value
+        return merged_config
 
     @classmethod
     def _normalize_bitable_field_mappings(cls, value: Any) -> list[dict[str, Any]]:
@@ -1852,7 +1907,6 @@ class TicketSyncService:
             "autoAiAnalysis": bool(automation.get("autoAiAnalysis", False)),
             "autoTranslate": bool(automation.get("autoTranslate", True)),
         }
-        config = cls._apply_bitable_common_defaults(config, bitable_common=bitable_common)
         return config
 
     @classmethod
@@ -1934,19 +1988,11 @@ class TicketSyncService:
             **external_sync_bitable,
         }
         external_sync_bitable["enabled"] = bool(external_sync_bitable.get("enabled"))
-        external_sync_bitable = cls._apply_bitable_common_defaults(
-            external_sync_bitable,
-            bitable_common=merged["bitableCommon"],
-        )
         external_sync_bitable["appId"] = str(external_sync_bitable.get("appId") or "").strip()
         external_sync_bitable["appSecret"] = str(external_sync_bitable.get("appSecret") or "").strip()
         external_sync_bitable["appToken"] = str(external_sync_bitable.get("appToken") or "").strip()
         external_sync_bitable["tableId"] = str(external_sync_bitable.get("tableId") or "").strip()
         external_sync_bitable["viewId"] = str(external_sync_bitable.get("viewId") or "").strip()
-        if not external_sync_bitable["appId"]:
-            external_sync_bitable["appId"] = feishu_auth["appId"]
-        if not external_sync_bitable["appSecret"]:
-            external_sync_bitable["appSecret"] = feishu_auth["appSecret"]
         merged["externalSyncBitable"] = external_sync_bitable
         merged["bitablePull"] = cls._normalize_bitable_pull_config(
             merged.get("bitablePull"),
@@ -2065,11 +2111,10 @@ class TicketSyncService:
         person_reminder["rowsMarkdownTemplate"] = str(person_reminder.get("rowsMarkdownTemplate") or "").strip()
         person_reminder["maxRowsPerPerson"] = max(cls._safe_int(person_reminder.get("maxRowsPerPerson")) or 20, 1)
         person_reminder["pageSize"] = min(max(cls._safe_int(person_reminder.get("pageSize")) or 500, 1), 500)
-        person_reminder = cls._apply_bitable_common_defaults(person_reminder, bitable_common=merged["bitableCommon"])
         if not person_reminder["appId"]:
-            person_reminder["appId"] = person_reminder["feishuAppId"] or feishu_auth["appId"]
+            person_reminder["appId"] = person_reminder["feishuAppId"]
         if not person_reminder["appSecret"]:
-            person_reminder["appSecret"] = person_reminder["feishuAppSecret"] or feishu_auth["appSecret"]
+            person_reminder["appSecret"] = person_reminder["feishuAppSecret"]
         person_reminder["feishuAppId"] = person_reminder["appId"]
         person_reminder["feishuAppSecret"] = person_reminder["appSecret"]
         merged["personReminder"] = person_reminder
@@ -2084,8 +2129,8 @@ class TicketSyncService:
         )
         summary_report["pushIds"] = TicketSyncNotifyService._normalize_push_ids(summary_report.get("pushIds"))
         summary_report["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(summary_report.get("appChatIds"))
-        summary_report["appId"] = str(summary_report.get("appId") or "").strip() or feishu_auth["appId"]
-        summary_report["appSecret"] = str(summary_report.get("appSecret") or "").strip() or feishu_auth["appSecret"]
+        summary_report["appId"] = str(summary_report.get("appId") or "").strip()
+        summary_report["appSecret"] = str(summary_report.get("appSecret") or "").strip()
         summary_report["timeField"] = TicketSyncNotifyService._resolve_summary_time_field(
             summary_report.get("timeField")
         )
@@ -2107,7 +2152,6 @@ class TicketSyncService:
         summary_report["endTime"] = str(summary_report.get("endTime") or "").strip()
         summary_report["includeClosed"] = bool(summary_report.get("includeClosed", True))
         summary_report["messageTemplate"] = str(summary_report.get("messageTemplate") or "").strip()
-        summary_report = cls._apply_bitable_common_defaults(summary_report, bitable_common=merged["bitableCommon"])
         merged["summaryReport"] = summary_report
         if not isinstance(merged.get("projectMappings"), list):
             merged["projectMappings"] = []
@@ -2188,14 +2232,18 @@ class TicketSyncService:
         :return: 字段名预览结果。
         """
         config = cls._load_sync_config(db)
-        pull_config = dict(config.get("bitablePull") or cls._default_bitable_pull_config())
+        pull_config = cls._resolve_bitable_runtime_config(
+            config,
+            "bitablePull",
+            cls._default_bitable_pull_config(),
+        )
         if isinstance(bitable_pull_override, dict):
             nested_override = (
                 bitable_pull_override.get("bitablePull")
                 if isinstance(bitable_pull_override.get("bitablePull"), dict)
                 else bitable_pull_override
             )
-            pull_config.update(nested_override)
+            pull_config = cls._merge_non_empty_runtime_override(pull_config, nested_override)
         pull_config = cls._normalize_bitable_pull_config(
             pull_config,
             feishu_auth=config.get("feishuAuth") or cls._default_feishu_auth_config(),
@@ -2287,7 +2335,11 @@ class TicketSyncService:
         :return: 统计结果。
         """
         config = cls._load_sync_config(db)
-        person_config = config.get("personReminder") if isinstance(config.get("personReminder"), dict) else {}
+        person_config = cls._resolve_bitable_runtime_config(
+            config,
+            "personReminder",
+            cls._default_person_reminder_config(),
+        )
         return TicketSyncNotifyService.preview_person_overdue_statistics(
             db,
             config=person_config,
@@ -2318,7 +2370,11 @@ class TicketSyncService:
         :return: 执行结果摘要。
         """
         config = cls._load_sync_config(db)
-        person_config = config.get("personReminder") if isinstance(config.get("personReminder"), dict) else {}
+        person_config = cls._resolve_bitable_runtime_config(
+            config,
+            "personReminder",
+            cls._default_person_reminder_config(),
+        )
         if isinstance(person_config_override, dict):
             normalized_override = {
                 str(key): value
@@ -2359,7 +2415,11 @@ class TicketSyncService:
         :return: 执行结果摘要。
         """
         config = cls._load_sync_config(db)
-        summary_config = config.get("summaryReport") if isinstance(config.get("summaryReport"), dict) else {}
+        summary_config = cls._resolve_bitable_runtime_config(
+            config,
+            "summaryReport",
+            cls._default_summary_report_config(),
+        )
         parsed_start_time = TicketSyncNotifyService._parse_datetime_value(start_time)
         parsed_end_time = TicketSyncNotifyService._parse_datetime_value(end_time)
         return TicketSyncNotifyService.run_ticket_summary_report(
@@ -2389,14 +2449,18 @@ class TicketSyncService:
         :return: 执行结果摘要。
         """
         config = cls._load_sync_config(db)
-        pull_config = dict(config.get("bitablePull") or cls._default_bitable_pull_config())
+        pull_config = cls._resolve_bitable_runtime_config(
+            config,
+            "bitablePull",
+            cls._default_bitable_pull_config(),
+        )
         if isinstance(bitable_pull_override, dict):
             nested_override = (
                 bitable_pull_override.get("bitablePull")
                 if isinstance(bitable_pull_override.get("bitablePull"), dict)
                 else bitable_pull_override
             )
-            pull_config.update(nested_override)
+            pull_config = cls._merge_non_empty_runtime_override(pull_config, nested_override)
         pull_config = cls._normalize_bitable_pull_config(
             pull_config,
             feishu_auth=config.get("feishuAuth") or cls._default_feishu_auth_config(),
@@ -3876,10 +3940,11 @@ class TicketSyncService:
         :param record_id: 飞书多维表格记录 ID
         :return: 记录 fields 字典，查询失败返回空字典
         """
-        bitable_config = (
-            config.get("externalSyncBitable")
-            if isinstance(config.get("externalSyncBitable"), dict)
-            else {}
+        bitable_config = cls._resolve_bitable_runtime_config(
+            config,
+            "externalSyncBitable",
+            cls._default_external_sync_bitable_config(),
+            keep_filter_formula=False,
         )
         if not bool(bitable_config.get("enabled")):
             logger.info("外部同步多维表格邮箱查询跳过: reason=externalSyncBitable 未启用")
@@ -3901,17 +3966,14 @@ class TicketSyncService:
             if not normalized_record_id:
                 missing_items.append("recordId")
             logger.info(
-                "外部同步多维表格邮箱查询跳过: reason=配置不完整, missing=%s, record_id=%s",
-                missing_items,
-                normalized_record_id or "-",
+                f"外部同步多维表格邮箱查询跳过: reason=配置不完整, "
+                f"missing={missing_items}, record_id={normalized_record_id or '-'}"
             )
             return {}
         try:
             logger.info(
-                "外部同步多维表格邮箱查询开始: record_id=%s, app_token_configured=%s, table_id=%s",
-                normalized_record_id,
-                bool(app_token),
-                table_id,
+                f"外部同步多维表格邮箱查询开始: record_id={normalized_record_id}, "
+                f"app_token_configured={bool(app_token)}, table_id={table_id}"
             )
             token = TicketSyncNotifyService._get_tenant_access_token(app_id, app_secret)
             url = (
@@ -3926,10 +3988,8 @@ class TicketSyncService:
             record = response_data.get("record") if isinstance(response_data.get("record"), dict) else {}
             fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
             logger.info(
-                "外部同步多维表格邮箱查询完成: record_id=%s, field_count=%s, field_names=%s",
-                normalized_record_id,
-                len(fields),
-                list(fields.keys())[:100],
+                f"外部同步多维表格邮箱查询完成: record_id={normalized_record_id}, "
+                f"field_count={len(fields)}, field_names={list(fields.keys())[:100]}"
             )
             return fields
         except Exception as exc:
@@ -3954,8 +4014,8 @@ class TicketSyncService:
         ticket_no = str(getattr(sync_object, "ticket_no", "") or "").strip()
         if not record_id:
             logger.info(
-                "外部同步多维表格邮箱补齐跳过: ticket_no=%s, reason=外部推送未携带 recordId",
-                ticket_no or "-",
+                f"外部同步多维表格邮箱补齐跳过: ticket_no={ticket_no or '-'}, "
+                f"reason=外部推送未携带 recordId"
             )
             return sync_object
         existing_extra = (
@@ -3974,23 +4034,18 @@ class TicketSyncService:
             and str(existing_bitable_sync.get("recordId") or "").strip() == record_id
         ):
             logger.info(
-                "外部同步多维表格邮箱补齐跳过: ticket_no=%s, record_id=%s, reason=已成功同步过同一 recordId",
-                ticket_no or "-",
-                record_id,
+                f"外部同步多维表格邮箱补齐跳过: ticket_no={ticket_no or '-'}, "
+                f"record_id={record_id}, reason=已成功同步过同一 recordId"
             )
             return sync_object
         logger.info(
-            "外部同步多维表格邮箱补齐开始: ticket_no=%s, record_id=%s",
-            ticket_no or "-",
-            record_id,
+            f"外部同步多维表格邮箱补齐开始: ticket_no={ticket_no or '-'}, record_id={record_id}"
         )
         fields = cls._query_external_sync_bitable_record_fields(config, record_id=record_id)
         if not fields:
             logger.info(
-                "外部同步多维表格邮箱补齐结束: ticket_no=%s, record_id=%s, "
-                "updated=false, reason=未获取到多维表格 fields",
-                ticket_no or "-",
-                record_id,
+                f"外部同步多维表格邮箱补齐结束: ticket_no={ticket_no or '-'}, "
+                f"record_id={record_id}, updated=false, reason=未获取到多维表格 fields"
             )
             return sync_object
 
@@ -4027,17 +4082,14 @@ class TicketSyncService:
                 }
             )
         logger.info(
-            "外部同步多维表格邮箱提取结果: ticket_no=%s, record_id=%s, detail=%s",
-            ticket_no or "-",
-            record_id,
-            json.dumps(extraction_logs, ensure_ascii=False),
+            f"外部同步多维表格邮箱提取结果: ticket_no={ticket_no or '-'}, "
+            f"record_id={record_id}, detail={json.dumps(extraction_logs, ensure_ascii=False)}"
         )
         email_map = {key: value for key, value in email_map.items() if value}
         if not email_map:
             logger.info(
-                "外部同步多维表格邮箱补齐结束: ticket_no=%s, record_id=%s, updated=false, reason=三类邮箱均未提取成功",
-                ticket_no or "-",
-                record_id,
+                f"外部同步多维表格邮箱补齐结束: ticket_no={ticket_no or '-'}, "
+                f"record_id={record_id}, updated=false, reason=三类邮箱均未提取成功"
             )
             return sync_object
 
@@ -4059,12 +4111,11 @@ class TicketSyncService:
             "emailKeys": list(email_map.keys()),
             "syncedAt": external_mapping["bitableEmailSyncedAt"],
         }
+        masked_emails = {key: cls._mask_email_for_log(value) for key, value in email_map.items()}
         logger.info(
-            "外部同步多维表格邮箱补齐结束: ticket_no=%s, record_id=%s, updated=true, email_keys=%s, masked_emails=%s",
-            ticket_no or "-",
-            record_id,
-            list(email_map.keys()),
-            {key: cls._mask_email_for_log(value) for key, value in email_map.items()},
+            f"外部同步多维表格邮箱补齐结束: ticket_no={ticket_no or '-'}, "
+            f"record_id={record_id}, updated=true, email_keys={list(email_map.keys())}, "
+            f"masked_emails={masked_emails}"
         )
         return sync_object.model_copy(update={"extra_data": extra_data})
 
