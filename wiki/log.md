@@ -8,6 +8,14 @@ updated: 2026-06-23
 
 # 操作日志
 
+## [2026-06-23] INGEST-CODE | 日志拉取参数示例与日期预填
+- 触发：用户要求日志拉取弹窗支持从参数示例下拉填入当前参数，并在工单提取门店、POS 编号时同步提取日期预填到 modifyTime。
+- 架构层：工单域 / 日志拉取 / 参数配置 / 工单同步 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-23-ticket-log-pull-parameter-examples.md`
+- 更新的页面：`server/modules/ticket/dao/ticket_log_pull_dao.py`、`server/modules/ticket/service/ticket_log_pull_service.py`、`server/modules/ticket/entity/vo/ticket_log_pull_vo.py`、`web/src/components/ticket/LogPullConfigFields.vue`、`web/src/views/ticket/index.vue`、`web/src/views/ticket/logPullRecord/index.vue`、`web/public/docs/update_history.md`
+- 变更传播链：`ticket.logPull.parameterExamples` -> `/ticket/log-pull/vendor-store-options.parameterExamples` -> `LogPullConfigFields` 参数示例下拉 -> 当前参数写入 `modifyTime/path`；`extra_data.log_pull_hints.modifyTime` -> 添加日志拉取弹窗预填。
+- 关键结论：参数示例配置为 `[{name,value}]` 列表；日志类型填入日期参数，数据库类型填入路径参数，工单日期只在存在有效值时覆盖预填。
+
 ## [2026-06-23] INGEST-CODE | 工单日志拉取记录独立查看
 - 触发：用户反馈同一工单有多条日志拉取记录时，点击某条记录查看日志会显示之前查看过的记录；同时要求明确日志拉取成功后的下载/解压行为，以及 AI 分析使用哪条日志记录。
 - 架构层：工单域 / 日志拉取 / 日志查看 / AI 分析任务提交

@@ -245,6 +245,7 @@
           <LogPullConfigFields
             v-model="createForm"
             :vendor-options="vendorOptions"
+            :parameter-examples="parameterExamples"
             :agent-options="agentOptions"
             :provider-options="providerOptions"
             :data-type-options="logPullDataTypeOptions"
@@ -545,6 +546,7 @@ const ticketOptions = ref([])
 const agentOptions = ref([])
 const providerOptions = ref([])
 const vendorOptions = ref([])
+const parameterExamples = ref([])
 const pushOptions = ref([])
 const selectedRecord = ref(null)
 const contentDetail = ref(null)
@@ -841,6 +843,9 @@ function buildStoreOptionLabel(store) {
 function loadVendorOptions() {
   return getTicketLogPullVendorStoreOptions().then(response => {
     vendorOptions.value = normalizeVendorOptions(response.data?.vendors || [])
+    parameterExamples.value = Array.isArray(response.data?.parameterExamples)
+      ? response.data.parameterExamples
+      : []
   })
 }
 
@@ -963,6 +968,20 @@ function resolveTicketSyncSource(detail) {
       directLogPullConfig.pos_id,
       directLogPullConfig.scoNo,
       directLogPullConfig.sco_no
+    ]),
+    modifyTime: pickFirstFilledValue([
+      logPullHints.modifyTime,
+      logPullHints.modify_time,
+      logPullHints.logDate,
+      logPullHints.log_date,
+      source.modifyTime,
+      source.modify_time,
+      source.logDate,
+      source.log_date,
+      automationLogPullConfig.modifyTime,
+      automationLogPullConfig.modify_time,
+      directLogPullConfig.modifyTime,
+      directLogPullConfig.modify_time
     ])
   }
 }
@@ -980,6 +999,10 @@ function applyTicketLogPullPrefill(ticketDetail) {
   const posNo = Number(source.posNo)
   if (Number.isFinite(posNo) && posNo > 0) {
     createForm.value.posNo = posNo
+  }
+  const modifyTime = String(source.modifyTime || '').trim()
+  if (modifyTime) {
+    createForm.value.modifyTime = modifyTime.slice(0, 10)
   }
 }
 

@@ -75,6 +75,25 @@
         <el-input v-model="model.path" placeholder="可选，按路径拉取" clearable />
       </el-form-item>
     </el-col>
+    <el-col v-if="parameterExampleOptions.length" :span="24">
+      <el-form-item label="参数示例">
+        <el-select
+          v-model="selectedParameterExample"
+          placeholder="选择示例填入当前参数"
+          clearable
+          filterable
+          style="width: 100%"
+          @change="handleParameterExampleChange"
+        >
+          <el-option
+            v-for="item in parameterExampleOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+      </el-form-item>
+    </el-col>
     <el-col :span="12">
       <el-form-item label="单文件上限" :prop="getProp('fileMaxSize')">
         <el-input-number v-model="model.fileMaxSize" :min="1" controls-position="right" style="width: 100%" />
@@ -241,6 +260,10 @@ const props = defineProps({
   storeOptions: {
     type: Array,
     default: () => []
+  },
+  parameterExamples: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -249,12 +272,26 @@ const model = defineModel({
   default: () => ({})
 })
 
+const selectedParameterExample = ref('')
 const fetchedStoreOptions = ref([])
 const activeStoreVendorId = ref(null)
 let storeOptionsRequestSeq = 0
 
 const isDatabaseDataType = computed(() => Number(model.value?.commandDataType) === 2)
 const isLogDataType = computed(() => !isDatabaseDataType.value)
+const parameterExampleOptions = computed(() => props.parameterExamples
+  .map(item => {
+    const value = String(item?.value || '').trim()
+    const name = String(item?.name || item?.label || '').trim()
+    return value
+      ? {
+          label: name ? `${name}：${value}` : value,
+          value
+        }
+      : null
+  })
+  .filter(Boolean)
+)
 
 const resolvedStoreOptions = computed(() => {
   const vendorId = Number(model.value?.vendorId)
@@ -333,6 +370,18 @@ function handleVendorChange() {
   model.value.storeId = undefined
 }
 
+function handleParameterExampleChange(value) {
+  const resolvedValue = String(value || '').trim()
+  if (!resolvedValue) {
+    return
+  }
+  if (isDatabaseDataType.value) {
+    model.value.path = resolvedValue
+  } else {
+    model.value.modifyTime = resolvedValue
+  }
+}
+
 function clearLogTimeRange() {
   model.value.logBeginTime = undefined
   model.value.logEndTime = undefined
@@ -397,6 +446,7 @@ watch(
 watch(
   () => model.value?.commandDataType,
   commandDataType => {
+    selectedParameterExample.value = ''
     if (Number(commandDataType) === 2) {
       model.value.modifyTime = undefined
     } else {

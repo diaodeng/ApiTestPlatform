@@ -30,6 +30,8 @@ class TicketLogPullDao:
     CONFIG_KEY = "ticket.logPull.storage"
     CONFIG_NAME = "工单日志拉取存储配置"
     EXTERNAL_CONFIG_KEY = "ticket.logPull.external"
+    PARAM_EXAMPLE_CONFIG_KEY = "ticket.logPull.parameterExamples"
+    PARAM_EXAMPLE_CONFIG_NAME = "工单日志拉取参数示例配置"
     EXTERNAL_CONFIG_NAME = "工单日志拉取外部接口配置"
 
     @classmethod
@@ -226,6 +228,15 @@ class TicketLogPullDao:
         :return: 系统参数记录
         """
         return cls.get_config_row(db, cls.EXTERNAL_CONFIG_KEY)
+
+    @classmethod
+    def get_param_example_config_row(cls, db: Session) -> SysConfig | None:
+        """
+        获取日志拉取参数示例配置记录。
+        :param db: 数据库会话
+        :return: 系统参数记录
+        """
+        return cls.get_config_row(db, cls.PARAM_EXAMPLE_CONFIG_KEY)
 
     @classmethod
     def get_config_row(cls, db: Session, config_key: str) -> SysConfig | None:

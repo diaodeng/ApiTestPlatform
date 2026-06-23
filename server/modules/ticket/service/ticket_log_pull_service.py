@@ -364,6 +364,17 @@ class TicketLogPullService:
         }
 
     @classmethod
+    def _default_parameter_examples(cls) -> list[dict[str, str]]:
+        """
+        构建日志拉取参数示例的默认配置。
+        :return: 参数示例列表，元素包含 name/value
+        """
+        return [
+            {"name": "modifyTime 日期示例", "value": "2026-06-23"},
+            {"name": "path 路径示例", "value": "/path/to/log_or_database"},
+        ]
+
+    @classmethod
     def _resolve_local_dir(cls, raw_path: str | None = None) -> Path:
         """
         解析本地归档目录。
@@ -478,6 +489,28 @@ class TicketLogPullService:
                 }
             )
         return normalized_vendors
+
+    @classmethod
+    def _normalize_parameter_examples(cls, raw_examples: Any) -> list[dict[str, str]]:
+        """
+        归一化日志拉取参数示例配置。
+        :param raw_examples: 参数配置原始值，期望为 name/value 字典列表
+        :return: 过滤空值并去重后的示例列表
+        """
+        if not isinstance(raw_examples, list):
+            return []
+        normalized_examples: list[dict[str, str]] = []
+        seen_values: set[str] = set()
+        for item in raw_examples:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("label") or "").strip()
+            value = str(item.get("value") or "").strip()
+            if not value or value in seen_values:
+                continue
+            seen_values.add(value)
+            normalized_examples.append({"name": name or value, "value": value})
+        return normalized_examples
 
     @staticmethod
     def _extract_option_id(*values: Any) -> int | None:
@@ -596,8 +629,14 @@ class TicketLogPullService:
                 for store_config in store_configs
                 if cls._extract_option_id(store_config.vender_no, store_config.id) == resolved_vendor_id
             ]
+        cls.ensure_param_config_rows(query_db)
+        config_row = TicketLogPullDao.get_param_example_config_row(query_db)
+        raw_examples = cls._json_loads(getattr(config_row, "config_value", None), [])
         vendors = cls._build_vendor_store_options_from_store_configs(store_configs)
-        return TicketLogPullVendorStoreOptionsModel(vendors=vendors)
+        return TicketLogPullVendorStoreOptionsModel(
+            vendors=vendors,
+            parameter_examples=cls._normalize_parameter_examples(raw_examples),
+        )
 
     @classmethod
     def build_store_config_import_template(cls) -> bytes:
@@ -956,6 +995,15 @@ class TicketLogPullService:
                 query_db,
                 config_value=cls._json_dumps(cls._default_external_config()),
                 user_name="system",
+            )
+        if not TicketLogPullDao.get_param_example_config_row(query_db):
+            TicketLogPullDao.save_config_row(
+                query_db,
+                config_key=TicketLogPullDao.PARAM_EXAMPLE_CONFIG_KEY,
+                config_name=TicketLogPullDao.PARAM_EXAMPLE_CONFIG_NAME,
+                config_value=cls._json_dumps(cls._default_parameter_examples()),
+                user_name="system",
+                remark="工单日志拉取 modifyTime/path 参数示例配置",
             )
 
     @classmethod

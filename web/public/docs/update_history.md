@@ -1,5 +1,10 @@
 ## 2026-06-23
 
+1. 日志拉取参数配置新增 `ticket.logPull.parameterExamples`，配置格式为 `[{ "name": "...", "value": "..." }]`。
+2. 日志拉取弹窗新增“参数示例”下拉，选择后按当前显示项写入 `modifyTime` 或 `path`。
+3. 工单详情和日志拉取管理页打开添加日志拉取弹窗时，会读取 `logPullHints.modifyTime/logDate` 并预填到 `modifyTime`。
+4. 新增说明文档：`web/public/docs/2026-06-23-ticket-log-pull-parameter-examples.md`。
+
 1. 修复同一工单多条日志拉取记录查看串记录的问题：指定拉取记录查看时，日志准备、搜索、上下文和异常摘要都按 `recordId` 使用独立目录。
 2. 单条日志记录查看目录改为 `data/logs/ticket_{ticketId}/record_{recordId}`；同一记录已准备过时复用，不再重复下载或解压。
 3. 从某条日志记录查看器发起 AI 分析时，前端会默认提交该记录的 `logPullRecordId`；未指定时后端仍按当前规则取该工单最新日志记录，版本号缺失时再用最近成功记录兜底。
