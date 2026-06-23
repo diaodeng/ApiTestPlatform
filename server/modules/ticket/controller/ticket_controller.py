@@ -1228,7 +1228,9 @@ async def prepare_ticket_logs(
     :return: 日志准备结果
     """
     try:
-        result = await run_in_threadpool(LogService.prepare, query_db, prepare_object.ticket_id)
+        result = await run_in_threadpool(
+            LogService.prepare, query_db, prepare_object.ticket_id, prepare_object.record_id
+        )
         return ResponseUtil.success(data=result) if result.prepared else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -1239,7 +1241,7 @@ async def prepare_ticket_logs(
     "/logs/files",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
 )
-async def get_ticket_log_files(request: Request, ticket_id: int):
+async def get_ticket_log_files(request: Request, ticket_id: int, record_id: int | None = None):
     """
     查询工单已准备日志文件列表接口。
     :param request: 请求对象
@@ -1247,7 +1249,7 @@ async def get_ticket_log_files(request: Request, ticket_id: int):
     :return: 日志文件列表
     """
     try:
-        result = await run_in_threadpool(LogService.files, ticket_id)
+        result = await run_in_threadpool(LogService.files, ticket_id, record_id)
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
@@ -1274,6 +1276,7 @@ async def search_ticket_logs(request: Request, search_object: TicketLogSearchReq
             search_object.context_after,
             search_object.limit,
             search_object.with_context,
+            search_object.record_id,
         )
         return ResponseUtil.success(data=result)
     except Exception as e:
@@ -1292,6 +1295,7 @@ async def get_ticket_log_context(
     line: int,
     before: int = 20,
     after: int = 20,
+    record_id: int | None = None,
 ):
     """
     获取日志命中上下文接口。
@@ -1304,7 +1308,7 @@ async def get_ticket_log_context(
     :return: 上下文内容
     """
     try:
-        result = await run_in_threadpool(LogService.context, ticket_id, file, line, before, after)
+        result = await run_in_threadpool(LogService.context, ticket_id, file, line, before, after, record_id)
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
@@ -1331,6 +1335,7 @@ async def search_ticket_logs_by_time(request: Request, search_object: TicketLogS
             search_object.context_after,
             search_object.limit,
             search_object.with_context,
+            search_object.record_id,
         )
         return ResponseUtil.success(data=result)
     except Exception as e:
@@ -1350,7 +1355,9 @@ async def get_ticket_log_errors(request: Request, errors_object: TicketLogErrors
     :return: 异常摘要
     """
     try:
-        result = await run_in_threadpool(LogService.errors, errors_object.ticket_id, errors_object.limit)
+        result = await run_in_threadpool(
+            LogService.errors, errors_object.ticket_id, errors_object.limit, errors_object.record_id
+        )
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)

@@ -2091,6 +2091,7 @@ const aiRepoMappingTotal = ref(0)
 const detailVersionOptions = ref([])
 const aiAnalysisTaskForm = ref({
   versionKey: '',
+  logPullRecordId: undefined,
   agentCode: '',
   aiProviderCode: '',
   forceRefresh: false,
@@ -3621,6 +3622,7 @@ async function notifyAiTaskSubmitResult(response, successMessage) {
 
 function resetAiAnalysisDialog() {
   aiAnalysisTaskForm.value.versionKey = detail.value.versionKey || detail.value.extraData?.versionKey || ''
+  aiAnalysisTaskForm.value.logPullRecordId = selectedLogPullRecord.value?.id || undefined
   aiAnalysisTaskForm.value.agentCode = detail.value.extraData?.ticketAutomation?.logPullConfig?.aiAgentCode
     || detail.value.extraData?.ticket_automation?.log_pull_config?.aiAgentCode
     || detail.value.latestAiAnalysis?.analysisContext?.selectedAgentCode
@@ -3687,6 +3689,7 @@ function submitAiAnalysis() {
     aiAnalysisSubmitting.value = true
     const payload = {
       versionKey: aiAnalysisTaskForm.value.versionKey || undefined,
+      logPullRecordId: aiAnalysisTaskForm.value.logPullRecordId || undefined,
       agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
       aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
       forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
@@ -4348,11 +4351,12 @@ function buildLogViewerRecord(row, ticketMeta = {}) {
 
 function openTicketLogViewer(row) {
   const ticketId = row?.ticketId
+  const recordId = row?.id
   if (!ticketId) {
     return
   }
   logViewerSearching.value = true
-  prepareTicketLogs(ticketId).then(() => {
+  prepareTicketLogs(ticketId, recordId).then(() => {
     currentTicketId.value = ticketId
     syncLogViewerTicketMeta({
       ticketId,
@@ -4427,8 +4431,10 @@ function resetLogViewerState(ticketId = currentTicketId.value) {
 function buildLogViewerPayload(keywordField = 'keyword') {
   const contextLines = Number(logViewerForm.value.contextLines || 0)
   const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000)
+  const recordId = selectedLogPullRecord.value?.id
   const payload = {
     ticketId: currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId,
+    recordId,
     contextBefore: contextLines,
     contextAfter: contextLines,
     limit,
@@ -4468,7 +4474,7 @@ function loadLogViewerErrors() {
   }
   const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000)
   logViewerSearching.value = true
-  getTicketLogErrors({ ticketId, limit }).then(response => {
+  getTicketLogErrors({ ticketId, recordId: selectedLogPullRecord.value?.id, limit }).then(response => {
     logViewerErrorSummary.value = response?.data || null
     setLogViewerHits(logViewerErrorSummary.value?.samples || [])
   }).finally(() => {
@@ -4519,6 +4525,7 @@ function loadLogViewerContext(file, line) {
   logViewerSearching.value = true
   getTicketLogContext({
     ticketId,
+    record_id: selectedLogPullRecord.value?.id,
     file,
     line,
     before: contextLines,

@@ -8,6 +8,14 @@ updated: 2026-06-23
 
 # 操作日志
 
+## [2026-06-23] INGEST-CODE | 工单日志拉取记录独立查看
+- 触发：用户反馈同一工单有多条日志拉取记录时，点击某条记录查看日志会显示之前查看过的记录；同时要求明确日志拉取成功后的下载/解压行为，以及 AI 分析使用哪条日志记录。
+- 架构层：工单域 / 日志拉取 / 日志查看 / AI 分析任务提交
+- 创建的页面：`web/public/docs/2026-06-23-ticket-log-record-isolated-view.md`、`wiki/flows/ticket-log-record-isolated-view.md`
+- 更新的页面：`server/modules/ticket/service/ticket_log_service.py`、`server/modules/ticket/controller/ticket_controller.py`、`server/modules/ticket/entity/vo/ticket_log_pull_vo.py`、`web/src/api/ticket/ticket.js`、`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`
+- 变更传播链：日志拉取记录行 -> `recordId` 传入日志准备 -> `data/logs/ticket_{ticketId}/record_{recordId}` 独立目录 -> 搜索/上下文/异常摘要继续携带 `recordId`；从记录查看器发起 AI 分析 -> 请求携带 `logPullRecordId`
+- 关键结论：日志拉取成功会下载压缩包并按记录归档；有时间范围时截取正文入库，无时间范围时只归档整包。AI 分析请求未指定记录时取工单最新日志记录，版本号缺失时再用最近成功记录兜底。
+
 ## [2026-06-23] INGEST-CODE | 工单多维表格配置保存态与运行态拆分
 - 触发：用户反馈填写“多维表格公共配置”后，“飞书多维表格主动拉取”的对应配置项也会被自动填上，要求多维主动拉取有独立配置时用独立配置，没有才用表格公共配置，并梳理外部推送、内部拉取、主动拉取、手动新增/编辑的配置边界和翻译配置关系。
 - 架构层：工单域 / 同步自动化配置 / 飞书多维表格集成 / 翻译自动化

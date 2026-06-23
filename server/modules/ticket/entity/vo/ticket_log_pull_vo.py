@@ -362,6 +362,7 @@ class TicketLogPrepareRequestModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int = Field(description="工单ID")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
 
 
 class TicketLogPrepareModel(TicketLogPullBaseModel):
@@ -370,6 +371,7 @@ class TicketLogPrepareModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int = Field(description="工单ID")
+    record_id: int | None = Field(default=None, description="本次准备使用的日志拉取记录ID")
     prepared: bool = Field(default=False, description="是否已准备完成")
     source_path: str | None = Field(default=None, description="本地缓存的原始压缩包路径")
     extract_path: str | None = Field(default=None, description="日志解压目录")
@@ -403,6 +405,7 @@ class TicketLogContextModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int = Field(description="工单ID")
+    record_id: int | None = Field(default=None, description="日志拉取记录ID")
     file: str = Field(description="相对日志文件路径")
     line: int = Field(description="命中行号")
     start: int = Field(description="上下文开始行")
@@ -434,6 +437,7 @@ class TicketLogSearchRequestModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int = Field(description="工单ID")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     keyword: str = Field(description="搜索关键字")
     context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
     context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
@@ -447,6 +451,7 @@ class TicketLogSearchTimeRequestModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int = Field(description="工单ID")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     time: str = Field(description="时间关键字，例如 14:32")
     context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
     context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
@@ -460,6 +465,7 @@ class TicketLogErrorsRequestModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int = Field(description="工单ID")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     limit: int = Field(default=500, ge=1, le=5000, description="最大扫描命中数量")
 
 

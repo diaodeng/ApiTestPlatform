@@ -50,7 +50,7 @@ class LogService:
     CONTEXT_MODE_ENV = "TICKET_LOG_CONTEXT_MODE"
 
     @classmethod
-    def prepare(cls, db: Session, ticket_id: int) -> TicketLogPrepareModel:
+    def prepare(cls, db: Session, ticket_id: int, record_id: int | None = None) -> TicketLogPrepareModel:
         """
         准备指定工单的日志目录：复用最新日志拉取归档，下载或复制到 source 后递归解压到 extract。
         :param db: 数据库会话
@@ -58,15 +58,16 @@ class LogService:
         :return: 准备结果
         """
         logger.info(f"开始准备工单日志查看目录，ticket_id={ticket_id}")
-        ticket_dir = cls._ticket_dir(ticket_id)
+        ticket_dir = cls._ticket_dir(ticket_id, record_id)
         source_dir = ticket_dir / "source"
         extract_dir = ticket_dir / "extract"
         meta_path = ticket_dir / cls.META_FILE_NAME
         if extract_dir.exists() and any(extract_dir.iterdir()):
-            files = cls.files(ticket_id)
+            files = cls.files(ticket_id, record_id)
             logger.info(f"工单日志已存在解压目录，跳过重复准备，ticket_id={ticket_id}，file_count={len(files)}")
             return TicketLogPrepareModel(
                 ticket_id=ticket_id,
+                record_id=record_id,
                 prepared=True,
                 source_path=str(cls._find_source_archive(source_dir) or source_dir / cls.SOURCE_FILE_NAME),
                 extract_path=str(extract_dir),
@@ -74,14 +75,28 @@ class LogService:
                 message="日志已准备完成",
             )
 
-        record = cls._latest_record(db, ticket_id)
+        record = cls._resolve_record(db, ticket_id, record_id)
         if not record:
             logger.warning(f"未找到工单日志拉取记录，无法准备日志，ticket_id={ticket_id}")
             return TicketLogPrepareModel(
                 ticket_id=ticket_id,
+                record_id=record_id,
                 prepared=False,
                 file_count=0,
                 message="未找到日志文件，且未配置下载地址",
+            )
+
+        if record_id and int(record.ticket_id or 0) != int(ticket_id):
+            logger.warning(
+                f"日志拉取记录不属于当前工单，拒绝准备，ticket_id={ticket_id}, "
+                f"record_id={record_id}, record_ticket_id={record.ticket_id}"
+            )
+            return TicketLogPrepareModel(
+                ticket_id=ticket_id,
+                record_id=record_id,
+                prepared=False,
+                file_count=0,
+                message="日志拉取记录不属于当前工单",
             )
 
         archive_path, should_cleanup = TicketLogPullService._resolve_archive_source_for_view(record, db)
@@ -89,6 +104,7 @@ class LogService:
             logger.warning(f"未解析到可用日志归档文件，ticket_id={ticket_id}，record_id={record.id}")
             return TicketLogPrepareModel(
                 ticket_id=ticket_id,
+                record_id=record.id,
                 prepared=False,
                 file_count=0,
                 message="未找到日志文件，且未配置下载地址",
@@ -102,7 +118,7 @@ class LogService:
             if should_cleanup:
                 archive_path.unlink(missing_ok=True)
             cls._extract_recursive(source_path, extract_dir)
-            files = cls.files(ticket_id)
+            files = cls.files(ticket_id, record.id if record_id else None)
             cls._write_meta(
                 meta_path,
                 {
@@ -117,6 +133,7 @@ class LogService:
             logger.info(f"工单日志准备完成，ticket_id={ticket_id}，record_id={record.id}，file_count={len(files)}")
             return TicketLogPrepareModel(
                 ticket_id=ticket_id,
+                record_id=record.id,
                 prepared=True,
                 source_path=str(source_path),
                 extract_path=str(extract_dir),
@@ -127,6 +144,7 @@ class LogService:
             logger.exception(exc)
             return TicketLogPrepareModel(
                 ticket_id=ticket_id,
+                record_id=record.id,
                 prepared=False,
                 source_path=str(cls._find_source_archive(source_dir) or source_dir / cls.SOURCE_FILE_NAME),
                 extract_path=str(extract_dir),
@@ -135,13 +153,13 @@ class LogService:
             )
 
     @classmethod
-    def files(cls, ticket_id: int) -> list[TicketLogFileModel]:
+    def files(cls, ticket_id: int, record_id: int | None = None) -> list[TicketLogFileModel]:
         """
         查询指定工单已准备目录中的可读日志文本文件。
         :param ticket_id: 工单ID
         :return: 日志文件列表
         """
-        extract_dir = cls._extract_dir(ticket_id)
+        extract_dir = cls._extract_dir(ticket_id, record_id)
         if not extract_dir.exists():
             return []
         result: list[TicketLogFileModel] = []
@@ -156,7 +174,7 @@ class LogService:
                 continue
             result.append(
                 TicketLogFileModel(
-                    file=cls._relative_log_path(ticket_id, path),
+                    file=cls._relative_log_path(ticket_id, path, record_id),
                     size=path.stat().st_size,
                     modified_at=datetime.fromtimestamp(path.stat().st_mtime),
                 )
@@ -172,6 +190,7 @@ class LogService:
         context_after: int = 20,
         limit: int = 100,
         with_context: bool = True,
+        record_id: int | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         使用 ripgrep 搜索工单日志，并按需返回每个命中的上下文。
@@ -186,18 +205,22 @@ class LogService:
         keyword = str(keyword or "").strip()
         if not keyword:
             return []
-        extract_dir = cls._extract_dir(ticket_id)
+        extract_dir = cls._extract_dir(ticket_id, record_id)
         if not extract_dir.exists():
             return []
         if not keyword.isascii():
             logger.info(
                 f"日志搜索包含非 ASCII 关键字，使用 Python 编码兼容模式，ticket_id={ticket_id}，keyword={keyword}"
             )
-            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
+            return cls._search_by_python(
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+            )
         search_mode = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
         if search_mode == "python":
             logger.info(f"日志搜索使用 Python 降级模式，ticket_id={ticket_id}，keyword={keyword}")
-            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
+            return cls._search_by_python(
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+            )
 
         executable = (
             shutil.which("rg")
@@ -207,7 +230,9 @@ class LogService:
         )
         if not executable:
             logger.warning(f"未找到 rg/ripgrep，日志搜索降级为 Python，ticket_id={ticket_id}，keyword={keyword}")
-            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
+            return cls._search_by_python(
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+            )
 
         command = [executable, "-n", "--no-heading", "--color", "never", "--fixed-strings", keyword, "."]
         try:
@@ -221,13 +246,17 @@ class LogService:
             )
         except FileNotFoundError as exc:
             logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
-            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
+            return cls._search_by_python(
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+            )
         if process.returncode not in (0, 1):
             logger.warning(
                 f"rg 搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，"
                 f"reason={process.stderr.strip() or process.stdout.strip()}"
             )
-            return cls._search_by_python(ticket_id, keyword, context_before, context_after, limit, with_context)
+            return cls._search_by_python(
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+            )
 
         hits: list[TicketLogSearchHitModel] = []
         for raw_line in process.stdout.splitlines():
@@ -237,12 +266,20 @@ class LogService:
             if not hit:
                 continue
             if with_context:
-                hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after)
+                hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
             hits.append(hit)
         return hits
 
     @classmethod
-    def context(cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int) -> TicketLogContextModel:
+    def context(
+        cls,
+        ticket_id: int,
+        file_path: str,
+        line_no: int,
+        before: int,
+        after: int,
+        record_id: int | None = None,
+    ) -> TicketLogContextModel:
         """
         按行号索引读取指定日志文件在某行附近的上下文，必要时跨轮转文件补足前后文。
         :param ticket_id: 工单ID
@@ -255,16 +292,16 @@ class LogService:
         context_mode = cls._resolve_mode(cls.CONTEXT_MODE_ENV, default="auto")
         if context_mode == "native":
             try:
-                return cls._context_by_native(ticket_id, file_path, line_no, before, after)
+                return cls._context_by_native(ticket_id, file_path, line_no, before, after, record_id)
             except Exception as exc:
                 logger.warning(f"原生命令读取日志上下文失败，降级为 Python 行索引，ticket_id={ticket_id}，reason={exc}")
         elif context_mode == "auto":
             logger.debug(f"日志上下文读取使用 Python 行索引模式，ticket_id={ticket_id}，file={file_path}")
-        return cls._context_by_python(ticket_id, file_path, line_no, before, after)
+        return cls._context_by_python(ticket_id, file_path, line_no, before, after, record_id)
 
     @classmethod
     def _context_by_python(
-        cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int
+        cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int, record_id: int | None = None
     ) -> TicketLogContextModel:
         """
         使用 Python 行偏移索引读取日志上下文。
@@ -276,7 +313,7 @@ class LogService:
         :return: 上下文内容
         """
         normalized_file = cls._normalize_relative_path(file_path)
-        target_path = cls._resolve_log_file(ticket_id, normalized_file)
+        target_path = cls._resolve_log_file(ticket_id, normalized_file, record_id)
         center = max(int(line_no or 1), 1)
         before_count = max(int(before or 0), 0)
         after_count = max(int(after or 0), 0)
@@ -296,6 +333,7 @@ class LogService:
             before_count=before_count,
             after_count=after_count,
             current_lines=current_lines,
+            record_id=record_id,
         )
 
     @classmethod
@@ -307,6 +345,7 @@ class LogService:
         context_after: int = 20,
         limit: int = 100,
         with_context: bool = True,
+        record_id: int | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         按时间文本搜索日志，典型输入为 14:32。
@@ -318,7 +357,7 @@ class LogService:
         :param with_context: 是否直接返回上下文
         :return: 搜索命中列表
         """
-        return cls.search(ticket_id, time_keyword, context_before, context_after, limit, with_context)
+        return cls.search(ticket_id, time_keyword, context_before, context_after, limit, with_context, record_id)
 
     @classmethod
     def _search_by_python(
@@ -329,6 +368,7 @@ class LogService:
         context_after: int,
         limit: int,
         with_context: bool,
+        record_id: int | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         Python 降级搜索实现，在没有 rg/ripgrep 时使用。
@@ -341,10 +381,10 @@ class LogService:
         :return: 搜索命中列表
         """
         hits: list[TicketLogSearchHitModel] = []
-        for file_item in cls.files(ticket_id):
+        for file_item in cls.files(ticket_id, record_id):
             if len(hits) >= limit:
                 break
-            path = cls._resolve_log_file(ticket_id, file_item.file)
+            path = cls._resolve_log_file(ticket_id, file_item.file, record_id)
             encoding = cls._detect_file_encoding(path)
             with path.open("r", encoding=encoding, errors="replace") as file_obj:
                 for line_no, content in enumerate(file_obj, start=1):
@@ -356,7 +396,9 @@ class LogService:
                         content=content.rstrip("\r\n"),
                     )
                     if with_context:
-                        hit.context = cls.context(ticket_id, file_item.file, line_no, context_before, context_after)
+                        hit.context = cls.context(
+                            ticket_id, file_item.file, line_no, context_before, context_after, record_id
+                        )
                     hits.append(hit)
                     if len(hits) >= limit:
                         break
@@ -364,7 +406,7 @@ class LogService:
 
     @classmethod
     def _context_by_native(
-        cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int
+        cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int, record_id: int | None = None
     ) -> TicketLogContextModel:
         """
         使用系统命令读取当前文件上下文，再复用 Python 索引补跨文件边界。
@@ -376,7 +418,7 @@ class LogService:
         :return: 上下文内容
         """
         normalized_file = cls._normalize_relative_path(file_path)
-        target_path = cls._resolve_log_file(ticket_id, normalized_file)
+        target_path = cls._resolve_log_file(ticket_id, normalized_file, record_id)
         center = max(int(line_no or 1), 1)
         before_count = max(int(before or 0), 0)
         after_count = max(int(after or 0), 0)
@@ -395,10 +437,11 @@ class LogService:
             before_count=before_count,
             after_count=after_count,
             current_lines=current_lines,
+            record_id=record_id,
         )
 
     @classmethod
-    def errors(cls, ticket_id: int, limit: int = 100) -> TicketLogErrorSummaryModel:
+    def errors(cls, ticket_id: int, limit: int = 100, record_id: int | None = None) -> TicketLogErrorSummaryModel:
         """
         提取常见异常关键字并聚合计数。
         :param ticket_id: 工单ID
@@ -411,7 +454,7 @@ class LogService:
             remain = max(limit - len(samples), 0)
             if remain <= 0:
                 break
-            for hit in cls.search(ticket_id, keyword, 0, 0, remain, with_context=False):
+            for hit in cls.search(ticket_id, keyword, 0, 0, remain, with_context=False, record_id=record_id):
                 summary = cls._normalize_error_summary(hit.content)
                 if not summary:
                     continue
@@ -436,6 +479,19 @@ class LogService:
         """
         rows = TicketLogPullDao.list_latest_records_by_ticket_ids(db, [ticket_id])
         return rows.get(ticket_id)
+
+    @classmethod
+    def _resolve_record(cls, db: Session, ticket_id: int, record_id: int | None = None) -> TicketLogPullRecord | None:
+        """
+        解析本次日志查看使用的拉取记录。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param record_id: 指定日志拉取记录ID
+        :return: 日志拉取记录
+        """
+        if record_id:
+            return TicketLogPullDao.get_record_by_id(db, record_id)
+        return cls._latest_record(db, ticket_id)
 
     @classmethod
     def _extract_recursive(cls, archive_path: Path, target_dir: Path) -> None:
@@ -678,6 +734,7 @@ class LogService:
         before_count: int,
         after_count: int,
         current_lines: list[tuple[int, str]],
+        record_id: int | None = None,
     ) -> TicketLogContextModel:
         """
         统一组装上下文响应，并在当前文件边界不足时跨轮转文件补齐上下文。
@@ -696,9 +753,9 @@ class LogService:
         missing_before = max(before_count - (center - start), 0)
         missing_after = max(after_count - (end - center), 0)
         if missing_before > 0:
-            previous_file = cls._adjacent_log_file(ticket_id, file_path, direction="previous")
+            previous_file = cls._adjacent_log_file(ticket_id, file_path, direction="previous", record_id=record_id)
             if previous_file:
-                previous_path = cls._resolve_log_file(ticket_id, previous_file)
+                previous_path = cls._resolve_log_file(ticket_id, previous_file, record_id)
                 previous_index = cls._ensure_line_index(previous_path)
                 previous_total = int(previous_index.get("line_count") or 0)
                 previous_start = max(previous_total - missing_before + 1, 1)
@@ -710,9 +767,9 @@ class LogService:
         context_parts.extend((file_path, line, content) for line, content in current_lines)
 
         if missing_after > 0:
-            next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next")
+            next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next", record_id=record_id)
             if next_file:
-                next_path = cls._resolve_log_file(ticket_id, next_file)
+                next_path = cls._resolve_log_file(ticket_id, next_file, record_id)
                 context_parts.extend(
                     (next_file, line, content)
                     for line, content in cls._read_lines_by_index(next_path, 1, missing_after)
@@ -722,16 +779,31 @@ class LogService:
             TicketLogContextLineModel(file=line_file, line=index, content=content.rstrip("\r\n"))
             for line_file, index, content in context_parts
         ]
-        has_prev = start > 1 or cls._adjacent_log_file(ticket_id, file_path, direction="previous") is not None
-        has_next = end < total or cls._adjacent_log_file(ticket_id, file_path, direction="next") is not None
+        has_prev = (
+            start > 1
+            or cls._adjacent_log_file(ticket_id, file_path, direction="previous", record_id=record_id) is not None
+        )
+        has_next = (
+            end < total
+            or cls._adjacent_log_file(ticket_id, file_path, direction="next", record_id=record_id) is not None
+        )
         prev_file, prev_line = cls._build_context_page_pointer(
-            ticket_id, file_path, start, end, total, before_count, after_count, direction="previous"
+            ticket_id,
+            file_path,
+            start,
+            end,
+            total,
+            before_count,
+            after_count,
+            direction="previous",
+            record_id=record_id,
         )
         next_file, next_line = cls._build_context_page_pointer(
-            ticket_id, file_path, start, end, total, before_count, after_count, direction="next"
+            ticket_id, file_path, start, end, total, before_count, after_count, direction="next", record_id=record_id
         )
         return TicketLogContextModel(
             ticket_id=ticket_id,
+            record_id=record_id,
             file=file_path,
             line=center,
             start=start,
@@ -908,7 +980,9 @@ class LogService:
         )
 
     @classmethod
-    def _adjacent_log_file(cls, ticket_id: int, file_path: str, direction: str) -> str | None:
+    def _adjacent_log_file(
+        cls, ticket_id: int, file_path: str, direction: str, record_id: int | None = None
+    ) -> str | None:
         """
         按日志轮转顺序查找相邻文件。数字越大越旧，数字越小越靠近当前，无数字文件最新。
         :param ticket_id: 工单ID
@@ -916,11 +990,11 @@ class LogService:
         :param direction: previous 查更旧文件，next 查更新文件
         :return: 相邻相对日志路径
         """
-        current = cls._resolve_log_file(ticket_id, file_path)
+        current = cls._resolve_log_file(ticket_id, file_path, record_id)
         current_key = cls._rotation_key(current.name)
         candidates: list[tuple[int, str]] = []
-        for item in cls.files(ticket_id):
-            candidate_path = cls._resolve_log_file(ticket_id, item.file)
+        for item in cls.files(ticket_id, record_id):
+            candidate_path = cls._resolve_log_file(ticket_id, item.file, record_id)
             if candidate_path.parent != current.parent:
                 continue
             candidate_key = cls._rotation_key(candidate_path.name)
@@ -971,6 +1045,7 @@ class LogService:
         before_count: int,
         after_count: int,
         direction: str,
+        record_id: int | None = None,
     ) -> tuple[str | None, int | None]:
         """
         生成上下文翻页建议位置，当前文件不足时跳到相邻轮转文件。
@@ -990,9 +1065,9 @@ class LogService:
                 previous_start = max(start - page_size, 1)
                 previous_end = start - 1
                 return file_path, min(previous_start + before_count, previous_end)
-            previous_file = cls._adjacent_log_file(ticket_id, file_path, direction="previous")
+            previous_file = cls._adjacent_log_file(ticket_id, file_path, direction="previous", record_id=record_id)
             if previous_file:
-                previous_path = cls._resolve_log_file(ticket_id, previous_file)
+                previous_path = cls._resolve_log_file(ticket_id, previous_file, record_id)
                 previous_total = int(cls._ensure_line_index(previous_path).get("line_count") or 0)
                 previous_start = max(previous_total - page_size + 1, 1)
                 return previous_file, min(previous_start + before_count, max(previous_total, 1))
@@ -1000,22 +1075,22 @@ class LogService:
         if end < total:
             next_start = end + 1
             return file_path, min(next_start + before_count, total)
-        next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next")
+        next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next", record_id=record_id)
         if next_file:
-            next_path = cls._resolve_log_file(ticket_id, next_file)
+            next_path = cls._resolve_log_file(ticket_id, next_file, record_id)
             next_total = int(cls._ensure_line_index(next_path).get("line_count") or 0)
             return next_file, min(1 + before_count, max(next_total, 1))
         return None, None
 
     @classmethod
-    def _resolve_log_file(cls, ticket_id: int, file_path: str) -> Path:
+    def _resolve_log_file(cls, ticket_id: int, file_path: str, record_id: int | None = None) -> Path:
         """
         将前端传入的相对日志路径解析为解压目录内的安全绝对路径。
         :param ticket_id: 工单ID
         :param file_path: 相对路径
         :return: 绝对路径
         """
-        extract_dir = cls._extract_dir(ticket_id).resolve()
+        extract_dir = cls._extract_dir(ticket_id, record_id).resolve()
         target_path = (extract_dir / cls._normalize_relative_path(file_path)).resolve()
         try:
             target_path.relative_to(extract_dir)
@@ -1026,14 +1101,14 @@ class LogService:
         return target_path
 
     @classmethod
-    def _relative_log_path(cls, ticket_id: int, path: Path) -> str:
+    def _relative_log_path(cls, ticket_id: int, path: Path, record_id: int | None = None) -> str:
         """
         生成相对日志路径。
         :param ticket_id: 工单ID
         :param path: 绝对路径
         :return: 相对路径
         """
-        return cls._normalize_relative_path(str(path.relative_to(cls._extract_dir(ticket_id))))
+        return cls._normalize_relative_path(str(path.relative_to(cls._extract_dir(ticket_id, record_id))))
 
     @classmethod
     def _normalize_relative_path(cls, path: str) -> str:
@@ -1082,19 +1157,20 @@ class LogService:
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @classmethod
-    def _ticket_dir(cls, ticket_id: int) -> Path:
+    def _ticket_dir(cls, ticket_id: int, record_id: int | None = None) -> Path:
         """
         获取工单日志根目录。
         :param ticket_id: 工单ID
         :return: 根目录
         """
-        return cls.BASE_DIR / f"ticket_{ticket_id}"
+        ticket_dir = cls.BASE_DIR / f"ticket_{ticket_id}"
+        return ticket_dir / f"record_{record_id}" if record_id else ticket_dir
 
     @classmethod
-    def _extract_dir(cls, ticket_id: int) -> Path:
+    def _extract_dir(cls, ticket_id: int, record_id: int | None = None) -> Path:
         """
         获取工单日志解压目录。
         :param ticket_id: 工单ID
         :return: 解压目录
         """
-        return cls._ticket_dir(ticket_id) / "extract"
+        return cls._ticket_dir(ticket_id, record_id) / "extract"

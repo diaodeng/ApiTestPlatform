@@ -532,21 +532,21 @@ export function getTicketLogPullContent(recordId, query) {
 }
 
 // 准备工单日志查看目录
-export function prepareTicketLogs(ticketId) {
+export function prepareTicketLogs(ticketId, recordId) {
   return request({
     url: '/ticket/logs/prepare',
     method: 'post',
-    data: { ticketId },
+    data: { ticketId, recordId },
   });
 }
 
 // 查询工单日志文件列表
-export function listTicketLogFiles(ticketId) {
+export function listTicketLogFiles(ticketId, recordId) {
   return request({
     url: '/ticket/logs/files',
     method: 'get',
     // GET 查询参数需要使用后端显式声明的 snake_case 字段名。
-    params: { ticket_id: ticketId },
+    params: { ticket_id: ticketId, record_id: recordId },
   });
 }
 
