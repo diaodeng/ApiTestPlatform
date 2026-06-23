@@ -134,7 +134,8 @@
   - `sendMode`：发送模式（`push_config` / `feishu_app` / `hybrid`）。
   - `dataSource`：统计数据源（`bitable` / `local`）。
   - `bitable` 模式：
-    - `appToken` / `tableId` / `viewId` / `filterFormula`：飞书多维表格数据源。
+    - `appToken` / `tableId` / `viewId`：飞书多维表格数据源。
+    - `filterFormula`：飞书 `records/search` 的 `filter` JSON 条件对象，支持 JSON 字符串或对象。
     - `personField` / `timeField` / `thresholdMinutes`：按人聚合与超时判定配置。
   - `local` 模式：
     - 统计来源为本地 `ticket` 表，按“当前处理人”聚合；
@@ -149,7 +150,8 @@
   - `local` 模式：
     - `timeField`：本地工单时间字段（`create_time/update_time/closed_at/resolved_at/started_at`）。
   - `bitable` 模式：
-    - `appToken` / `tableId` / `viewId` / `filterFormula`：飞书多维表格数据源。
+    - `appToken` / `tableId` / `viewId`：飞书多维表格数据源。
+    - `filterFormula`：飞书 `records/search` 的 `filter` JSON 条件对象，支持 JSON 字符串或对象。
     - `statusField` / `categoryField` / `priorityField`：统计字段名映射。
     - `bitableTimeField`：多维记录时间字段（为空时回退记录创建时间）。
     - `pageSize`：分页拉取大小，最大500。
@@ -220,7 +222,7 @@
 5. 覆盖规则：任务参数中对应字段为非空时优先使用任务值；未配置或为空字符串时继续使用“工单同步配置”里的 `personReminder` 全局配置。
 6. 覆盖参数既可平铺在任务 JSON，也可放入 `personReminder` 对象，例如：
    `{"isAll": true, "appToken": "...", "tableId": "...", "personField": "当前负责人", "timeField": "更新时间"}`
-   或 `{"isAll": true, "personReminder": {"appToken": "...", "tableId": "...", "filterFormula": "CurrentValue.[状态] != \"已关闭\""}}`。
+   或 `{"isAll": true, "personReminder": {"appToken": "...", "tableId": "...", "filterFormula": {"conjunction":"and","conditions":[{"field_name":"状态","operator":"isNot","value":"已关闭"}]}}}`。
 7. 统计数据源可选：
    - `bitable`：从飞书多维表格读取后按人聚合；
    - `local`：从本地工单表按当前处理人聚合。

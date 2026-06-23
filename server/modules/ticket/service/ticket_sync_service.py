@@ -1726,6 +1726,20 @@ class TicketSyncService:
         return required_fields or list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
 
     @classmethod
+    def _normalize_bitable_filter_config(cls, value: Any) -> str | dict[str, Any]:
+        """
+        归一化飞书多维表格查询过滤配置。
+
+        :param value: 页面保存的 JSON 字符串，或任务参数直接传入的 JSON 对象。
+        :return: 字符串或对象；空值返回空字符串。
+        """
+        if isinstance(value, dict):
+            return value
+        if value in (None, ""):
+            return ""
+        return str(value or "").strip()
+
+    @classmethod
     def _normalize_bitable_common_config(cls, value: Any, *, feishu_auth: dict[str, Any]) -> dict[str, Any]:
         """
         归一化飞书多维表格公共配置。
@@ -1742,7 +1756,7 @@ class TicketSyncService:
         config["tableId"] = str(config.get("tableId") or "").strip()
         config["viewId"] = str(config.get("viewId") or "").strip()
         config["pageSize"] = min(max(cls._safe_int(config.get("pageSize")) or 500, 1), 500)
-        config["filterFormula"] = str(config.get("filterFormula") or "").strip()
+        config["filterFormula"] = cls._normalize_bitable_filter_config(config.get("filterFormula"))
         return config
 
     @classmethod
@@ -1770,7 +1784,7 @@ class TicketSyncService:
             source["pageSize"] = bitable_common.get("pageSize")
         else:
             source["pageSize"] = min(max(page_size, 1), 500)
-        if keep_filter_formula and not str(source.get("filterFormula") or "").strip():
+        if keep_filter_formula and not cls._normalize_bitable_filter_config(source.get("filterFormula")):
             source["filterFormula"] = bitable_common.get("filterFormula")
         return source
 
@@ -1890,7 +1904,7 @@ class TicketSyncService:
         config["tableId"] = str(config.get("tableId") or "").strip()
         config["viewId"] = str(config.get("viewId") or "").strip()
         config["pageSize"] = min(max(cls._safe_int(config.get("pageSize")) or 200, 1), 500)
-        config["filterFormula"] = str(config.get("filterFormula") or "").strip()
+        config["filterFormula"] = cls._normalize_bitable_filter_config(config.get("filterFormula"))
         config["sourceSystem"] = (
             str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull"
         )
@@ -2103,7 +2117,7 @@ class TicketSyncService:
         person_reminder["appToken"] = str(person_reminder.get("appToken") or "").strip()
         person_reminder["tableId"] = str(person_reminder.get("tableId") or "").strip()
         person_reminder["viewId"] = str(person_reminder.get("viewId") or "").strip()
-        person_reminder["filterFormula"] = str(person_reminder.get("filterFormula") or "").strip()
+        person_reminder["filterFormula"] = cls._normalize_bitable_filter_config(person_reminder.get("filterFormula"))
         person_reminder["personField"] = str(person_reminder.get("personField") or "").strip()
         person_reminder["timeField"] = str(person_reminder.get("timeField") or "").strip()
         person_reminder["thresholdMinutes"] = max(cls._safe_int(person_reminder.get("thresholdMinutes")) or 30, 1)
@@ -2137,7 +2151,7 @@ class TicketSyncService:
         summary_report["appToken"] = str(summary_report.get("appToken") or "").strip()
         summary_report["tableId"] = str(summary_report.get("tableId") or "").strip()
         summary_report["viewId"] = str(summary_report.get("viewId") or "").strip()
-        summary_report["filterFormula"] = str(summary_report.get("filterFormula") or "").strip()
+        summary_report["filterFormula"] = cls._normalize_bitable_filter_config(summary_report.get("filterFormula"))
         summary_report["statusField"] = str(summary_report.get("statusField") or "状态").strip() or "状态"
         summary_report["categoryField"] = str(summary_report.get("categoryField") or "分类").strip() or "分类"
         summary_report["priorityField"] = str(summary_report.get("priorityField") or "优先级").strip() or "优先级"
@@ -2522,6 +2536,11 @@ class TicketSyncService:
         records = TicketSyncNotifyService.query_bitable_records(pull_config)
         queried_count = len(records)
         records = cls._filter_bitable_pull_records_by_created_after(records, created_after=created_after)
+        required_fields = [
+            str(item or "").strip()
+            for item in config.get("externalSyncRequiredFields", cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
+            if str(item or "").strip()
+        ] or list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
         summary = {
             "triggerSource": trigger_source,
             "skipped": False,
@@ -2546,6 +2565,7 @@ class TicketSyncService:
                 record=record,
                 config=pull_config,
                 field_mappings=pull_config.get("fieldMappings") or [],
+                required_fields=required_fields,
             )
             record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
             if not sync_object:
@@ -3825,6 +3845,7 @@ class TicketSyncService:
         record: dict[str, Any],
         config: dict[str, Any],
         field_mappings: list[dict[str, Any]],
+        required_fields: list[str] | None = None,
     ) -> TicketExternalSyncUpsertModel | None:
         """
         将飞书多维表格记录转换为外部工单同步模型。
@@ -3832,6 +3853,7 @@ class TicketSyncService:
         :param record: 飞书多维表格记录。
         :param config: 主动拉取配置。
         :param field_mappings: 字段映射关系。
+        :param required_fields: 外部同步必填字段列表，来源于外部字段模型。
         :return: 外部同步模型，缺少关键字段时返回 None。
         """
         fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
@@ -3852,6 +3874,22 @@ class TicketSyncService:
             if str(item.get("targetField") or "").strip() and str(item.get("sourceField") or "").strip()
         }
         payload["recordId"] = payload.get("recordId") or record_id
+        normalized_required_fields = [
+            str(item or "").strip()
+            for item in required_fields or cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS
+            if str(item or "").strip()
+        ]
+        missing_required_fields = [
+            field_name
+            for field_name in normalized_required_fields
+            if payload.get(field_name) in (None, "", [])
+        ]
+        if missing_required_fields:
+            logger.warning(
+                f"飞书多维表格记录转换外部同步模型失败: record_id={record_id or '-'}, "
+                f"missing_required_fields={missing_required_fields}"
+            )
+            return None
         if config.get("includeRecordUrl", True):
             payload["ticketUrl"] = payload.get("ticketUrl") or cls._build_bitable_record_url(
                 config,

@@ -121,7 +121,16 @@
     "appToken": "bascnxxxx",
     "tableId": "tblxxxx",
     "viewId": "vewxxxx",
-    "filterFormula": "CurrentValue.[是否入库] = false",
+    "filterFormula": {
+      "conjunction": "and",
+      "conditions": [
+        {
+          "field_name": "是否入库",
+          "operator": "is",
+          "value": false
+        }
+      ]
+    },
     "fieldMappings": [
       { "sourceField": "工单号", "targetField": "ticketNo" },
       { "sourceField": "标题", "targetField": "title" },
@@ -147,6 +156,6 @@
 
 ## 风险与说明
 
-- 当前主动拉取仍依赖字段映射正确配置；若缺少 `ticketNo/description/internalPriority/ticketVender/ticketModle/createTime/reporterName`，对应记录会转换失败。
+- 当前主动拉取仍依赖字段映射正确配置；若缺少“外部工单字段模型”中配置的必填字段，对应记录会转换失败。
 - `sortField` 当前仅做配置保留，尚未作为飞书 API 排序参数下发。
-- 若定时任务配置了过宽的 `filterFormula`，虽然有快照去重，但仍会增加无效扫描成本。
+- 若定时任务配置了过宽的 `filterFormula` 条件 JSON，虽然有快照去重，但仍会增加无效扫描成本。

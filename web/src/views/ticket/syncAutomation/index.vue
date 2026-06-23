@@ -77,12 +77,12 @@
                   </el-form-item>
                 </el-col>
                 <el-col :span="24">
-                  <el-form-item label="默认过滤公式">
+                  <el-form-item label="默认过滤条件JSON">
                     <el-input
                       v-model="form.bitableCommon.filterFormula"
                       type="textarea"
                       :rows="3"
-                      placeholder='可选；各模块未单独配置时继承，例如 CurrentValue.[状态] != "已关闭"'
+                      placeholder='可选；各模块未单独配置时继承，例如 {"conjunction":"and","conditions":[{"field_name":"状态","operator":"contains","value":["处理中"]}]}'
                     />
                   </el-form-item>
                 </el-col>
@@ -245,12 +245,12 @@
                   </el-form-item>
                 </el-col>
                 <el-col v-if="form.summaryReport.dataSource === 'bitable'" :span="24">
-                  <el-form-item label="过滤公式">
+                  <el-form-item label="过滤条件JSON">
                     <el-input
                       v-model="form.summaryReport.filterFormula"
                       type="textarea"
                       :rows="3"
-                      placeholder='可选，飞书 filter 公式，例如 CurrentValue.[状态] != "已关闭"'
+                      placeholder='可选，飞书 records/search filter JSON'
                     />
                   </el-form-item>
                 </el-col>
@@ -531,12 +531,12 @@
                   </el-form-item>
                 </el-col>
                 <el-col v-if="form.personReminder.dataSource === 'bitable'" :span="24">
-                  <el-form-item label="过滤公式">
+                  <el-form-item label="过滤条件JSON">
                     <el-input
                       v-model="form.personReminder.filterFormula"
                       type="textarea"
                       :rows="3"
-                      placeholder='可选，飞书 filter 公式，例如 CurrentValue.[状态] != "已关闭"'
+                      placeholder='可选，飞书 records/search filter JSON'
                     />
                   </el-form-item>
                 </el-col>
@@ -1228,12 +1228,12 @@
                   </el-form-item>
                 </el-col>
                 <el-col :span="24">
-                  <el-form-item label="过滤公式">
+                  <el-form-item label="过滤条件JSON">
                     <el-input
                       v-model="form.bitablePull.filterFormula"
                       type="textarea"
                       :rows="3"
-                      placeholder='可选；任务参数未覆盖时按此条件主动查询，如 CurrentValue.[是否入库] = false'
+                      placeholder='可选；任务参数未覆盖时按此条件主动查询，如 {"conjunction":"and","conditions":[{"field_name":"(RD)工單狀態","operator":"contains","value":["3. 待产研处理"]}]}'
                     />
                   </el-form-item>
                 </el-col>

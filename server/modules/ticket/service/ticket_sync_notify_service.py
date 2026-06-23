@@ -944,10 +944,10 @@ class TicketSyncNotifyService:
     @classmethod
     def _normalize_bitable_filter_formula(cls, value: Any) -> dict:
         """
-        归一化飞书多维表格过滤公式。
+        归一化飞书多维表格过滤条件。
 
-        :param value: 原始过滤公式，支持普通公式文本或 JSON 字符串包裹的公式文本。
-        :return: 可直接传给飞书 records 接口 filter 参数的公式文本。
+        :param value: 原始过滤条件，支持 JSON 字符串或字典。
+        :return: 可直接传给飞书 records/search 接口 filter 参数的条件对象。
         """
         if isinstance(value, str):
             filter_formula = str(value or "").strip()
@@ -958,7 +958,7 @@ class TicketSyncNotifyService:
                 return parsed
             except Exception as e:
                 logger.warning(f"参数错误：{filter_formula}, 错误：{e}")
-                raise ValueError("过滤公式格式错误，请直接填写飞书公式") from e
+                raise ValueError("过滤条件格式错误，请填写飞书 records/search filter JSON") from e
         if not value:
             return {}
         else:
@@ -1061,7 +1061,11 @@ class TicketSyncNotifyService:
             if not isinstance(record, dict):
                 continue
             current_url = str(
-                record.get("record_url") or record.get("recordUrl") or record.get("shared_url") or record.get("sharedUrl") or ""
+                record.get("record_url")
+                or record.get("recordUrl")
+                or record.get("shared_url")
+                or record.get("sharedUrl")
+                or ""
             ).strip()
             record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
             if not current_url and record_id and record_id not in missing_record_ids:
@@ -1098,7 +1102,8 @@ class TicketSyncNotifyService:
                 record["sharedUrl"] = detail_url
             hydrated_count += 1
         logger.info(
-            f"飞书多维表格记录详情链接补齐完成: hydrated_count={hydrated_count}, missing_count={len(missing_record_ids)}"
+            f"飞书多维表格记录详情链接补齐完成: hydrated_count={hydrated_count}, "
+            f"missing_count={len(missing_record_ids)}"
         )
         return records
 
@@ -1621,7 +1626,11 @@ class TicketSyncNotifyService:
                 continue
             record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
             record_url = str(
-                record.get("record_url") or record.get("recordUrl") or record.get("shared_url") or record.get("sharedUrl") or ""
+                record.get("record_url")
+                or record.get("recordUrl")
+                or record.get("shared_url")
+                or record.get("sharedUrl")
+                or ""
             ).strip()
             ticket_no = (
                 fields.get("ticketNo")

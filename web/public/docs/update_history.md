@@ -1,3 +1,9 @@
+## 2026-06-24
+
+1. 多维表格查询条件文案统一为 `records/search` filter JSON，不再提示填写 `CurrentValue.[字段]` 公式文本。
+2. 修正主动拉取配置示例和后端过滤条件错误提示，避免配置人员按旧公式口径填写。
+3. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-filter-json-doc-fix.md`。
+
 ## 2026-06-23
 
 1. 日志拉取参数配置新增 `ticket.logPull.parameterExamples`，配置格式为 `[{ "name": "...", "value": "..." }]`。

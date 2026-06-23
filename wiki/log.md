@@ -804,3 +804,9 @@ updated: 2026-06-23
 - 创建的双向链接：0 对
 - 变更传播链：`server/modules/ticket/service/ticket_light_ai_service.py` / `server/modules/ticket/service/ticket_sync_service.py` / `server/module_admin/service/ai_config_service.py` / `server/module_admin/entity/vo/ai_config_vo.py` / `web/src/views/system/aiconfig/index.vue` -> 工单域知识页
 - 总共涉及页面：5
+## [2026-06-24] INGEST-DOC | 多维表格过滤条件 JSON 文案修正
+- 触发：用户确认多维表格查询条件配置已经改为 JSON，但页面和文档仍提示填写公式文本。
+- 架构层：工单域 / 飞书多维表格集成 / 同步自动化配置
+- 创建的页面：`web/public/docs/2026-06-24-ticket-bitable-filter-json-doc-fix.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_notify_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`web/src/views/ticket/syncAutomation/index.vue`、`web/public/docs/2026-06-21-ticket-bitable-pull-and-config-unify.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`
+- 变更传播链：`ticket.sync.automation.*.filterFormula` 文案 -> 飞书 `records/search` filter JSON 配置提示 -> 后端错误提示；`externalSyncRequiredFields` -> 多维主动拉取记录级必填校验。
