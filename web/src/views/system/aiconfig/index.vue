@@ -264,6 +264,23 @@
               <el-input v-model="form.analysisAgentCode" placeholder="留空则自动选择在线 Agent" clearable />
             </el-form-item>
           </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="日志分析模式" prop="analysisLogMode">
+              <el-select v-model="form.analysisLogMode" placeholder="请选择日志分析模式">
+                <el-option label="生成摘要" value="digest" />
+                <el-option label="完整目录" value="full_directory" />
+                <el-option label="摘要 + 完整目录" value="hybrid" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="窗口缺失策略" prop="analysisLogWindowMissingStrategy">
+              <el-select v-model="form.analysisLogWindowMissingStrategy" placeholder="请选择窗口缺失策略">
+                <el-option label="Agent 本地截取" value="agent_extract" />
+                <el-option label="服务端实时截取" value="server_extract" />
+              </el-select>
+            </el-form-item>
+          </el-col>
           <el-col :span="24">
             <el-form-item label="工作区根目录" prop="analysisWorkspaceRoot">
               <el-input v-model="form.analysisWorkspaceRoot" placeholder="例如 D:/xj/api-test-platform/logs/ticket_ai_analysis" clearable />
@@ -356,7 +373,9 @@ const defaultForm = () => ({
   analysisWorkerSandbox: '',
   analysisWorkerTimeoutSec: 3600,
   analysisWorkspaceRoot: '',
-  analysisAgentCode: ''
+  analysisAgentCode: '',
+  analysisLogMode: 'digest',
+  analysisLogWindowMissingStrategy: 'agent_extract'
 })
 
 const form = reactive(defaultForm())
@@ -408,6 +427,10 @@ function applyFormData(payload) {
   form.analysisWorkerTimeoutSec = Number(timeoutValue) || 3600
   form.analysisWorkspaceRoot = payload.analysisWorkspaceRoot ?? payload.analysis_workspace_root ?? ''
   form.analysisAgentCode = payload.analysisAgentCode ?? payload.analysis_agent_code ?? ''
+  form.analysisLogMode = payload.analysisLogMode ?? payload.analysis_log_mode ?? 'digest'
+  form.analysisLogWindowMissingStrategy = payload.analysisLogWindowMissingStrategy
+    ?? payload.analysis_log_window_missing_strategy
+    ?? 'agent_extract'
 
   configRows.value = payload.configRows ?? payload.config_rows ?? []
   providerOptions.value = payload.providerOptions ?? payload.provider_options ?? []

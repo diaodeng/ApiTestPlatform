@@ -1489,6 +1489,65 @@
         <el-form-item label="强制刷新">
           <el-switch v-model="aiAnalysisTaskForm.forceRefresh" />
         </el-form-item>
+        <el-form-item label="日志模式">
+          <el-select v-model="aiAnalysisTaskForm.logAnalysisMode" placeholder="请选择日志分析模式" style="width: 100%">
+            <el-option label="生成摘要" value="digest" />
+            <el-option label="完整目录" value="full_directory" />
+            <el-option label="摘要 + 完整目录" value="hybrid" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="日志时间">
+          <el-radio-group v-model="aiAnalysisTaskForm.logTimeMode">
+            <el-radio-button label="none">不指定</el-radio-button>
+            <el-radio-button label="range">开始/结束</el-radio-button>
+            <el-radio-button label="point">时间点前后</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <template v-if="aiAnalysisTaskForm.logTimeMode === 'range'">
+          <el-form-item label="开始时间">
+            <el-date-picker
+              v-model="aiAnalysisTaskForm.logBeginTime"
+              type="datetime"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              placeholder="选择日志开始时间"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="结束时间">
+            <el-date-picker
+              v-model="aiAnalysisTaskForm.logEndTime"
+              type="datetime"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              placeholder="选择日志结束时间"
+              style="width: 100%"
+            />
+          </el-form-item>
+        </template>
+        <template v-if="aiAnalysisTaskForm.logTimeMode === 'point'">
+          <el-form-item label="问题时间点">
+            <el-date-picker
+              v-model="aiAnalysisTaskForm.logPointTime"
+              type="datetime"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              placeholder="选择问题发生时间"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="前后分钟">
+            <div class="inline-inputs">
+              <el-input-number v-model="aiAnalysisTaskForm.rangeBeforeMinutes" :min="0" :step="1" />
+              <span class="inline-separator">前</span>
+              <el-input-number v-model="aiAnalysisTaskForm.rangeAfterMinutes" :min="0" :step="1" />
+              <span class="inline-separator">后</span>
+            </div>
+          </el-form-item>
+        </template>
+        <el-form-item v-if="aiAnalysisTaskForm.logTimeMode !== 'none'" label="缺失策略">
+          <el-select v-model="aiAnalysisTaskForm.logWindowMissingStrategy" placeholder="数据库没有截取正文时怎么处理" style="width: 100%">
+            <el-option label="Agent 本地截取" value="agent_extract" />
+            <el-option label="服务端实时截取" value="server_extract" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="额外说明">
           <el-input
             v-model="aiAnalysisTaskForm.extraInstruction"
@@ -2035,6 +2094,14 @@ const aiAnalysisTaskForm = ref({
   agentCode: '',
   aiProviderCode: '',
   forceRefresh: false,
+  logAnalysisMode: 'digest',
+  logTimeMode: 'none',
+  logWindowMissingStrategy: 'agent_extract',
+  logBeginTime: '',
+  logEndTime: '',
+  logPointTime: '',
+  rangeBeforeMinutes: 5,
+  rangeAfterMinutes: 10,
   extraInstruction: '',
   promptTemplateCodes: []
 })
@@ -3462,6 +3529,14 @@ function resetAiAnalysisDialog() {
     || detail.value.latestAiAnalysis?.analysisContext?.selectedAiProviderCode
     || ''
   aiAnalysisTaskForm.value.forceRefresh = false
+  aiAnalysisTaskForm.value.logAnalysisMode = detail.value.latestAiAnalysis?.analysisContext?.logAnalysisMode || 'digest'
+  aiAnalysisTaskForm.value.logTimeMode = 'none'
+  aiAnalysisTaskForm.value.logWindowMissingStrategy = detail.value.latestAiAnalysis?.analysisContext?.logWindowMissingStrategy || 'agent_extract'
+  aiAnalysisTaskForm.value.logBeginTime = ''
+  aiAnalysisTaskForm.value.logEndTime = ''
+  aiAnalysisTaskForm.value.logPointTime = ''
+  aiAnalysisTaskForm.value.rangeBeforeMinutes = 5
+  aiAnalysisTaskForm.value.rangeAfterMinutes = 10
   aiAnalysisTaskForm.value.extraInstruction = ''
   aiAnalysisTaskForm.value.promptTemplateCodes = detail.value.latestAiAnalysis?.analysisContext?.selectedPromptTemplateCodes || []
 }
@@ -3492,17 +3567,47 @@ function openAiTaskDetail(row) {
 function submitAiAnalysis() {
   proxy.$refs.aiAnalysisRef.validate(valid => {
     if (!valid) return
+    if (aiAnalysisTaskForm.value.logTimeMode === 'range' && (!aiAnalysisTaskForm.value.logBeginTime || !aiAnalysisTaskForm.value.logEndTime)) {
+      proxy.$modal.msgWarning('请填写日志开始和结束时间')
+      return
+    }
+    if (aiAnalysisTaskForm.value.logTimeMode === 'point' && !aiAnalysisTaskForm.value.logPointTime) {
+      proxy.$modal.msgWarning('请选择问题发生时间点')
+      return
+    }
+    if (
+      aiAnalysisTaskForm.value.logTimeMode === 'point'
+      && Number(aiAnalysisTaskForm.value.rangeBeforeMinutes || 0) === 0
+      && Number(aiAnalysisTaskForm.value.rangeAfterMinutes || 0) === 0
+    ) {
+      proxy.$modal.msgWarning('时间点前后分钟至少需要一侧大于 0')
+      return
+    }
     aiAnalysisSubmitting.value = true
-    addTicketAiAnalysis(currentTicketId.value, {
+    const payload = {
       versionKey: aiAnalysisTaskForm.value.versionKey || undefined,
       agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
       aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
       forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
+      logAnalysisMode: aiAnalysisTaskForm.value.logAnalysisMode || 'digest',
       extraInstruction: aiAnalysisTaskForm.value.extraInstruction || undefined,
       promptTemplateCodes: aiAnalysisTaskForm.value.promptTemplateCodes?.length
         ? aiAnalysisTaskForm.value.promptTemplateCodes
         : undefined
-    }).then(() => {
+    }
+    if (aiAnalysisTaskForm.value.logTimeMode !== 'none') {
+      payload.logWindowMissingStrategy = aiAnalysisTaskForm.value.logWindowMissingStrategy || 'agent_extract'
+    }
+    if (aiAnalysisTaskForm.value.logTimeMode === 'range') {
+      payload.logBeginTime = aiAnalysisTaskForm.value.logBeginTime
+      payload.logEndTime = aiAnalysisTaskForm.value.logEndTime
+    }
+    if (aiAnalysisTaskForm.value.logTimeMode === 'point') {
+      payload.logPointTime = aiAnalysisTaskForm.value.logPointTime
+      payload.rangeBeforeMinutes = aiAnalysisTaskForm.value.rangeBeforeMinutes
+      payload.rangeAfterMinutes = aiAnalysisTaskForm.value.rangeAfterMinutes
+    }
+    addTicketAiAnalysis(currentTicketId.value, payload).then(() => {
       proxy.$modal.msgSuccess('AI分析任务已提交')
       aiAnalysisOpen.value = false
       refreshAiAnalysisData(true)
@@ -4625,6 +4730,23 @@ loadWorkflowConfig().finally(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.inline-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.inline-inputs :deep(.el-input-number) {
+  flex: 1;
+  min-width: 0;
+}
+
+.inline-separator {
+  color: #606266;
+  white-space: nowrap;
 }
 
 .log-view-panel {

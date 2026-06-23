@@ -181,6 +181,22 @@ class AiConfigService:
             "remark": "AI分析任务优先投递的Agent编码，留空则自动选择在线Agent",
             "section": "analysis_worker",
         },
+        {
+            "field_name": "analysis_log_mode",
+            "config_key": TicketAiAnalysisService.CONFIG_LOG_ANALYSIS_MODE,
+            "config_name": "工单AI日志分析模式",
+            "default_value": TicketAiAnalysisService.DEFAULT_LOG_ANALYSIS_MODE,
+            "remark": "AI分析日志处理模式：digest摘要、full_directory完整目录、hybrid摘要加完整目录",
+            "section": "analysis_worker",
+        },
+        {
+            "field_name": "analysis_log_window_missing_strategy",
+            "config_key": TicketAiAnalysisService.CONFIG_LOG_WINDOW_MISSING_STRATEGY,
+            "config_name": "工单AI时间窗口缺失策略",
+            "default_value": TicketAiAnalysisService.DEFAULT_LOG_WINDOW_MISSING_STRATEGY,
+            "remark": "时间窗口模式下数据库无截取正文时的处理策略：server_extract服务端截取、agent_extract由Agent截取",
+            "section": "analysis_worker",
+        },
     )
 
     QUICK_LINKS: tuple[dict[str, str], ...] = (
@@ -406,6 +422,20 @@ class AiConfigService:
             ),
             analysis_agent_code=cls._get_config_text(
                 db, TicketAiAnalysisService.CONFIG_AGENT_CODE, TicketAiAnalysisService.DEFAULT_AGENT_CODE
+            ),
+            analysis_log_mode=TicketAiAnalysisService._normalize_log_analysis_mode(
+                cls._get_config_text(
+                    db,
+                    TicketAiAnalysisService.CONFIG_LOG_ANALYSIS_MODE,
+                    TicketAiAnalysisService.DEFAULT_LOG_ANALYSIS_MODE,
+                )
+            ),
+            analysis_log_window_missing_strategy=TicketAiAnalysisService._normalize_log_window_missing_strategy(
+                cls._get_config_text(
+                    db,
+                    TicketAiAnalysisService.CONFIG_LOG_WINDOW_MISSING_STRATEGY,
+                    TicketAiAnalysisService.DEFAULT_LOG_WINDOW_MISSING_STRATEGY,
+                )
             ),
             config_rows=config_rows,
             provider_options=provider_options,

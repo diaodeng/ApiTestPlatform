@@ -339,6 +339,16 @@ class TicketAiAnalysisRequestModel(BaseModel):
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
     extra_instruction: str | None = Field(default="", description="本次分析的额外说明")
     prompt_template_codes: list[str] | None = Field(default=None, description="本次分析追加的提示词模板编码列表")
+    log_analysis_mode: str | None = Field(default=None, description="日志分析模式：digest摘要、full_directory完整目录、hybrid摘要+完整目录")
+    log_window_missing_strategy: str | None = Field(
+        default=None,
+        description="时间窗口模式下缺少已截取日志时的处理策略：server_extract服务端截取、agent_extract下发Agent截取",
+    )
+    log_begin_time: datetime | str | None = Field(default=None, description="AI分析日志窗口开始时间")
+    log_end_time: datetime | str | None = Field(default=None, description="AI分析日志窗口结束时间")
+    log_point_time: datetime | str | None = Field(default=None, description="AI分析日志时间点")
+    range_before_minutes: int | None = Field(default=None, description="AI分析时间点前回溯分钟数")
+    range_after_minutes: int | None = Field(default=None, description="AI分析时间点后延伸分钟数")
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -349,6 +359,8 @@ class TicketAiAnalysisRequestModel(BaseModel):
         self.version_key = str(self.version_key or "").strip() or None
         self.agent_code = str(self.agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
+        self.log_analysis_mode = str(self.log_analysis_mode or "").strip() or None
+        self.log_window_missing_strategy = str(self.log_window_missing_strategy or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip()
         normalized_codes: list[str] = []
         for item in self.prompt_template_codes or []:
@@ -356,6 +368,11 @@ class TicketAiAnalysisRequestModel(BaseModel):
             if template_code and template_code not in normalized_codes:
                 normalized_codes.append(template_code)
         self.prompt_template_codes = normalized_codes or None
+        for attr_name in ("range_before_minutes", "range_after_minutes"):
+            value = getattr(self, attr_name)
+            if value is None:
+                continue
+            setattr(self, attr_name, max(int(value), 0))
         return self
 
 

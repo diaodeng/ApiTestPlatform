@@ -34,6 +34,7 @@ class TicketAiAnalysisService:
     DEFAULT_LOG_DIGEST_MAX_MATCHES_PER_FILE = 80
     DEFAULT_LOG_DIGEST_CONTEXT_LINES = 3
     DEFAULT_LOG_DIGEST_MAX_LINE_CHARS = 1200
+    TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
 
     @staticmethod
     def _json_safe_value(value: Any) -> Any:
@@ -823,6 +824,106 @@ class TicketAiAnalysisService:
                 continue
         return []
 
+    @staticmethod
+    def _parse_context_datetime(value: Any) -> datetime | None:
+        """
+        解析上下文中的日志时间。
+        :param value: 时间值
+        :return: datetime，无法解析时返回 None
+        """
+        if value in (None, ""):
+            return None
+        if isinstance(value, datetime):
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(text[: len(fmt)], fmt)
+            except Exception:
+                continue
+        try:
+            return datetime.fromisoformat(text)
+        except Exception:
+            return None
+
+    @classmethod
+    def _extract_window_logs(
+        cls,
+        *,
+        extract_dir: Path,
+        extracted_files: list[str],
+        begin_time: datetime | None,
+        end_time: datetime | None,
+        max_chars: int = 800000,
+    ) -> dict[str, Any]:
+        """
+        从解压目录中按时间窗口截取日志正文。
+        :param extract_dir: 解压目录
+        :param extracted_files: 解压文件相对路径
+        :param begin_time: 开始时间
+        :param end_time: 结束时间
+        :param max_chars: 最大字符数
+        :return: 截取结果
+        """
+        content_parts: list[str] = []
+        matched_entries = 0
+        current_chars = 0
+        for relative_name in extracted_files:
+            lowered_name = str(relative_name or "").lower()
+            if ".log" not in lowered_name:
+                continue
+            file_path = extract_dir / relative_name
+            lines = cls._read_log_lines(file_path)
+            if not lines:
+                continue
+            current_lines: list[str] = []
+            current_timestamp: datetime | None = None
+
+            def flush_entry() -> None:
+                nonlocal matched_entries, current_chars
+                if not current_lines or current_timestamp is None:
+                    return
+                if begin_time and current_timestamp < begin_time:
+                    return
+                if end_time and current_timestamp > end_time:
+                    return
+                entry_text = "\n".join(current_lines)
+                if not entry_text.strip():
+                    return
+                separator_length = 2 if content_parts else 0
+                projected_length = current_chars + len(entry_text) + separator_length
+                if projected_length > max_chars:
+                    return
+                content_parts.append(entry_text)
+                matched_entries += 1
+                current_chars = projected_length
+
+            for line in lines:
+                match = cls.TIMESTAMP_PATTERN.match(line)
+                if match:
+                    flush_entry()
+                    try:
+                        current_timestamp = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S,%f")
+                    except Exception:
+                        current_timestamp = None
+                    current_lines = [f"[{Path(relative_name).name}]{line}"] if current_timestamp else []
+                    continue
+                if current_lines:
+                    current_lines.append(line)
+            flush_entry()
+        full_text = "\n\n".join(content_parts)
+        return {
+            "text": full_text,
+            "matchedEntries": matched_entries,
+            "charCount": len(full_text),
+            "truncated": bool(current_chars >= max_chars),
+            "beginTime": begin_time.isoformat() if begin_time else "",
+            "endTime": end_time.isoformat() if end_time else "",
+            "maxChars": max_chars,
+        }
+
     @classmethod
     def _build_log_digest(
         cls,
@@ -1077,10 +1178,15 @@ class TicketAiAnalysisService:
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
-3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或 {workspace_path}/logs.txt 只有说明而没有正文，请优先阅读
-   {workspace_path}/logs_ai_digest.txt；只有摘要证据不足时，才按摘要中的文件名和行号去
-   {workspace_path}/source_logs/ 目录定点读取原始日志，禁止无目标地通读整包日志。
-4. 输出严格 JSON，不要输出多余说明文本。
+3. 日志读取策略由 context.json 中的 `logAnalysisMode` 决定：
+   - `digest`：优先阅读 {workspace_path}/logs_ai_digest.txt，证据不足时按摘要中的文件名和行号去
+     {workspace_path}/source_logs/ 定点读取原始日志。
+   - `full_directory`：不要依赖摘要，直接读取 {workspace_path}/source_logs/；先用 rg 搜索错误关键词、
+     工单号、门店/POS、交易号和用户额外说明中的关键词，再打开命中文件上下文。
+   - `hybrid`：先阅读摘要，再使用 {workspace_path}/source_logs/ 完整目录复核关键证据。
+4. 如果 `sourceLogPull.agentShouldExtractWindow` 为 true，请按 `requestedBeginTime/requestedEndTime`
+   在 {workspace_path}/source_logs/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
+   OutOfMemory、out of memory、heap、GC overhead、内存不足等关键词。
 4. 工单不是一次性分析，请结合 context.json 中的 messages、snapshots 和 similarTickets：
    - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
    - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
@@ -1336,6 +1442,20 @@ class TicketAiAnalysisService:
                 command_result_url = str(source_log_pull.get("commandResultUrl") or "").strip()
                 storage_path = str(source_log_pull.get("storagePath") or "").strip()
                 whole_archive_mode = bool(source_log_pull.get("wholeArchiveMode"))
+                log_analysis_mode = str(
+                    context_payload.get("logAnalysisMode")
+                    or source_log_pull.get("analysisMode")
+                    or "digest"
+                ).strip().lower() or "digest"
+                if log_analysis_mode not in {"digest", "full_directory", "hybrid"}:
+                    log_analysis_mode = "digest"
+                agent_should_extract_window = bool(source_log_pull.get("agentShouldExtractWindow"))
+                requested_begin_time = cls._parse_context_datetime(
+                    source_log_pull.get("requestedBeginTime") or context_payload.get("logRequestedBeginTime")
+                )
+                requested_end_time = cls._parse_context_datetime(
+                    source_log_pull.get("requestedEndTime") or context_payload.get("logRequestedEndTime")
+                )
                 extracted_files: list[str] = []
                 if logs_text:
                     logs_file.write_text(logs_text, encoding="utf-8")
@@ -1347,11 +1467,13 @@ class TicketAiAnalysisService:
                             "\n".join(
                                 [
                                     "日志内容未入库，已改为整包分析模式。",
-                                    f"AI预筛选摘要: {log_digest_file}",
+                                    f"日志分析模式: {log_analysis_mode}",
+                                    f"AI预筛选摘要: {log_digest_file if log_analysis_mode in {'digest', 'hybrid'} else '<disabled>'}",
                                     f"压缩包地址: {archive_url or '<none>'}",
                                     f"压缩包本地路径: {source_logs_zip}",
                                     f"解压目录: {source_logs_dir}",
-                                    "请优先阅读 AI 预筛选摘要，摘要不足时再定点读取原始日志。",
+                                    f"请求时间窗口: {requested_begin_time or '<none>'} ~ {requested_end_time or '<none>'}",
+                                    "请按 context.json 中的 logAnalysisMode 决定读取摘要或完整目录。",
                                 ]
                             ),
                             encoding="utf-8",
@@ -1373,15 +1495,36 @@ class TicketAiAnalysisService:
                         )
                         downloaded = cls._download_archive(str(archive_url), source_logs_zip)
                         digest_payload: dict[str, Any] = {}
+                        window_payload: dict[str, Any] = {}
                         if downloaded:
                             extracted_files = cls._extract_archive(downloaded, source_logs_dir)
-                            digest_payload = cls._build_log_digest(
-                                extract_dir=source_logs_dir,
-                                extracted_files=extracted_files,
-                                ticket=ticket,
-                                context_payload=context_payload,
-                                digest_path=log_digest_file,
-                            )
+                            if agent_should_extract_window and (requested_begin_time or requested_end_time):
+                                window_payload = cls._extract_window_logs(
+                                    extract_dir=source_logs_dir,
+                                    extracted_files=extracted_files,
+                                    begin_time=requested_begin_time,
+                                    end_time=requested_end_time,
+                                )
+                                window_text = str(window_payload.get("text") or "")
+                                logs_file.write_text(
+                                    window_text
+                                    or "\n".join(
+                                        [
+                                            "Agent 已按请求时间窗口截取日志，但未命中日志条目。",
+                                            f"解压目录: {source_logs_dir}",
+                                            f"请求时间窗口: {requested_begin_time or '<none>'} ~ {requested_end_time or '<none>'}",
+                                        ]
+                                    ),
+                                    encoding="utf-8",
+                                )
+                            if log_analysis_mode in {"digest", "hybrid"}:
+                                digest_payload = cls._build_log_digest(
+                                    extract_dir=source_logs_dir,
+                                    extracted_files=extracted_files,
+                                    ticket=ticket,
+                                    context_payload=context_payload,
+                                    digest_path=log_digest_file,
+                                )
                         source_logs_manifest.write_text(
                             cls._dumps(
                                 {
@@ -1389,7 +1532,9 @@ class TicketAiAnalysisService:
                                     "archivePath": str(source_logs_zip),
                                     "extractDir": str(source_logs_dir),
                                     "extractedFiles": extracted_files,
+                                    "logAnalysisMode": log_analysis_mode,
                                     "aiDigest": digest_payload,
+                                    "windowExtract": window_payload,
                                 }
                             ),
                             encoding="utf-8",

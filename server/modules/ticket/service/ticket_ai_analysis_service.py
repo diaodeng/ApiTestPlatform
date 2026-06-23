@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -69,12 +69,18 @@ class TicketAiAnalysisService:
     CONFIG_WORKER_TIMEOUT = "ticket.ai.worker.timeoutSec"
     CONFIG_WORKSPACE_ROOT = "ticket.ai.workspace.root"
     CONFIG_AGENT_CODE = "ticket.ai.agent.code"
+    CONFIG_LOG_ANALYSIS_MODE = "ticket.ai.logAnalysis.mode"
+    CONFIG_LOG_WINDOW_MISSING_STRATEGY = "ticket.ai.logAnalysis.windowMissingStrategy"
     DEFAULT_WORKER_COMMAND = "codex exec"
     DEFAULT_WORKER_MODEL = ""
     DEFAULT_WORKER_SANDBOX = "workspace-write"
     DEFAULT_WORKER_TIMEOUT = 3600
     DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[4] / "logs" / "ticket_ai_analysis"
     DEFAULT_AGENT_CODE = ""
+    DEFAULT_LOG_ANALYSIS_MODE = "digest"
+    DEFAULT_LOG_WINDOW_MISSING_STRATEGY = "agent_extract"
+    LOG_ANALYSIS_MODES = {"digest", "full_directory", "hybrid"}
+    LOG_WINDOW_MISSING_STRATEGIES = {"server_extract", "agent_extract"}
     DEFAULT_CONTEXT_LOG_MAX_CHARS = 800_000
     ACTIVE_STATUSES = {
         TicketAiAnalysisStatus.CREATED.value,
@@ -295,7 +301,7 @@ class TicketAiAnalysisService:
                     if key and value is not None:
                         env_values[str(key)] = str(value)
             except Exception as exc:
-                logger.warning("读取 Codex .env 失败: %s", exc)
+                logger.warning(f"读取 Codex .env 失败: {exc}")
         for key, value in os.environ.items():
             env_values.setdefault(key, value)
         return env_values
@@ -374,6 +380,18 @@ class TicketAiAnalysisService:
                 "工单AI分析Agent编码",
                 cls.DEFAULT_AGENT_CODE,
                 "AI分析任务优先投递的Agent编码，留空则自动选择在线Agent",
+            ),
+            (
+                cls.CONFIG_LOG_ANALYSIS_MODE,
+                "工单AI日志分析模式",
+                cls.DEFAULT_LOG_ANALYSIS_MODE,
+                "AI分析日志处理模式：digest摘要、full_directory完整目录、hybrid摘要加完整目录",
+            ),
+            (
+                cls.CONFIG_LOG_WINDOW_MISSING_STRATEGY,
+                "工单AI时间窗口缺失策略",
+                cls.DEFAULT_LOG_WINDOW_MISSING_STRATEGY,
+                "时间窗口模式下数据库无截取正文时的处理策略：server_extract服务端截取、agent_extract由Agent截取",
             ),
         ]
         now = datetime.now()
@@ -539,6 +557,104 @@ class TicketAiAnalysisService:
         if connected_agents:
             return next(iter(connected_agents.keys()))
         return ""
+
+    @classmethod
+    def _normalize_log_analysis_mode(cls, mode: str | None) -> str:
+        """
+        归一化日志分析模式。
+        :param mode: 原始模式值
+        :return: 可识别的日志分析模式
+        """
+        normalized = str(mode or "").strip().lower()
+        return normalized if normalized in cls.LOG_ANALYSIS_MODES else cls.DEFAULT_LOG_ANALYSIS_MODE
+
+    @classmethod
+    def _normalize_log_window_missing_strategy(cls, strategy: str | None) -> str:
+        """
+        归一化时间窗口缺失策略。
+        :param strategy: 原始策略值
+        :return: 可识别的缺失策略
+        """
+        normalized = str(strategy or "").strip().lower()
+        return normalized if normalized in cls.LOG_WINDOW_MISSING_STRATEGIES else cls.DEFAULT_LOG_WINDOW_MISSING_STRATEGY
+
+    @classmethod
+    def _resolve_log_analysis_options(
+        cls,
+        db: Session,
+        request: TicketAiAnalysisRequestModel | None = None,
+    ) -> dict[str, str]:
+        """
+        解析 AI 日志分析选项，手动请求优先，系统配置兜底。
+        :param db: 数据库会话
+        :param request: AI分析请求对象
+        :return: 日志分析选项
+        """
+        configured_mode = cls._get_config_text(db, cls.CONFIG_LOG_ANALYSIS_MODE, cls.DEFAULT_LOG_ANALYSIS_MODE)
+        configured_strategy = cls._get_config_text(
+            db,
+            cls.CONFIG_LOG_WINDOW_MISSING_STRATEGY,
+            cls.DEFAULT_LOG_WINDOW_MISSING_STRATEGY,
+        )
+        return {
+            "mode": cls._normalize_log_analysis_mode(
+                request.log_analysis_mode if request and request.log_analysis_mode else configured_mode
+            ),
+            "windowMissingStrategy": cls._normalize_log_window_missing_strategy(
+                request.log_window_missing_strategy
+                if request and request.log_window_missing_strategy
+                else configured_strategy
+            ),
+        }
+
+    @staticmethod
+    def _parse_request_datetime(value: datetime | str | None) -> datetime | None:
+        """
+        解析 AI 分析请求中的时间值。
+        :param value: datetime 或字符串
+        :return: datetime，无法解析时返回 None
+        """
+        if value is None or value == "":
+            return None
+        if isinstance(value, datetime):
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(text[: len(fmt)], fmt)
+            except Exception:
+                continue
+        try:
+            return datetime.fromisoformat(text)
+        except Exception:
+            return None
+
+    @classmethod
+    def _resolve_request_log_time_range(
+        cls,
+        request: TicketAiAnalysisRequestModel | None = None,
+    ) -> tuple[datetime | None, datetime | None]:
+        """
+        解析本次 AI 分析指定的日志时间窗口。
+        :param request: AI分析请求对象
+        :return: 开始时间和结束时间
+        """
+        if not request:
+            return None, None
+        begin_time = cls._parse_request_datetime(request.log_begin_time)
+        end_time = cls._parse_request_datetime(request.log_end_time)
+        if begin_time or end_time:
+            return begin_time, end_time
+        point_time = cls._parse_request_datetime(request.log_point_time)
+        if not point_time:
+            return None, None
+        before_minutes = max(int(request.range_before_minutes or 0), 0)
+        after_minutes = max(int(request.range_after_minutes or 0), 0)
+        if before_minutes == 0 and after_minutes == 0:
+            return None, None
+        return point_time - timedelta(minutes=before_minutes), point_time + timedelta(minutes=after_minutes)
 
     @classmethod
     def _resolve_ai_provider(cls, db: Session, provider_code: str | None = None):
@@ -714,6 +830,7 @@ class TicketAiAnalysisService:
         ticket: Ticket,
         mapping: TicketAiRepoMapping,
         log_record: TicketLogPullRecord | None,
+        request: TicketAiAnalysisRequestModel | None = None,
     ) -> dict[str, Any]:
         """
         构建 AI 分析上下文快照。
@@ -721,6 +838,7 @@ class TicketAiAnalysisService:
         :param ticket: 工单对象
         :param mapping: 仓库映射对象
         :param log_record: 日志拉取记录
+        :param request: AI分析请求对象
         :return: 上下文字典
         """
         ticket_payload = CamelCaseUtil.transform_result(ticket)
@@ -748,24 +866,34 @@ class TicketAiAnalysisService:
         log_content_payload: dict[str, Any] | None = None
         source_log_view_mode = "stored"
         source_log_record_id: int | None = None
+        log_options = cls._resolve_log_analysis_options(db, request)
+        request_begin_time, request_end_time = cls._resolve_request_log_time_range(request)
+        has_request_time_window = bool(request_begin_time or request_end_time)
         if log_record:
             source_log_record_id = log_record.id
             try:
-                log_content_model = TicketLogPullService.get_log_pull_content_services(
-                    db,
-                    log_record.id,
-                    TicketLogPullContentQueryModel(view_mode="stored"),
-                )
+                log_query = TicketLogPullContentQueryModel(view_mode="stored")
+                if has_request_time_window and log_options["windowMissingStrategy"] == "server_extract":
+                    log_query = TicketLogPullContentQueryModel(
+                        view_mode="original",
+                        log_begin_time=request_begin_time,
+                        log_end_time=request_end_time,
+                    )
+                log_content_model = TicketLogPullService.get_log_pull_content_services(db, log_record.id, log_query)
                 if log_content_model:
                     log_text = cls._decode_log_text(log_content_model.text)
+                    should_agent_extract_window = bool(
+                        has_request_time_window
+                        and log_options["windowMissingStrategy"] == "agent_extract"
+                        and not log_text.strip()
+                    )
                     log_content_payload = {
                         "recordId": log_content_model.record_id,
                         "viewBeginTime": log_content_model.view_begin_time,
                         "viewEndTime": log_content_model.view_end_time,
                         "viewSource": log_content_model.view_source,
-                        "wholeArchiveMode": not bool(
-                            log_content_model.view_begin_time or log_content_model.view_end_time
-                        ),
+                        "wholeArchiveMode": should_agent_extract_window
+                        or not bool(log_content_model.view_begin_time or log_content_model.view_end_time),
                         "contentSummary": log_content_model.content_summary,
                         "matchedEntryCount": log_content_model.matched_entry_count,
                         "archiveEntryCount": log_content_model.archive_entry_count,
@@ -774,10 +902,80 @@ class TicketAiAnalysisService:
                         "text": cls._truncate_middle(log_text, cls.DEFAULT_CONTEXT_LOG_MAX_CHARS),
                         "textTruncatedForAi": len(log_text) > cls.DEFAULT_CONTEXT_LOG_MAX_CHARS,
                         "textOriginalCharCount": len(log_text),
+                        "analysisMode": log_options["mode"],
+                        "windowMissingStrategy": log_options["windowMissingStrategy"],
+                        "requestedBeginTime": request_begin_time,
+                        "requestedEndTime": request_end_time,
+                        "serverExtractedForAi": bool(has_request_time_window and log_options["windowMissingStrategy"] == "server_extract"),
+                        "agentShouldExtractWindow": should_agent_extract_window,
                     }
                     source_log_view_mode = str(log_content_model.view_source or "stored")
+                elif has_request_time_window:
+                    log_content_payload = {
+                        "recordId": log_record.id,
+                        "viewBeginTime": None,
+                        "viewEndTime": None,
+                        "viewSource": "agent_extract",
+                        "wholeArchiveMode": True,
+                        "contentSummary": "数据库无已截取正文，AI 分析将由 Agent 按时间窗口从整包日志截取。",
+                        "matchedEntryCount": 0,
+                        "archiveEntryCount": getattr(log_record, "archive_entry_count", 0) or 0,
+                        "storagePath": getattr(log_record, "storage_path", "") or "",
+                        "commandResultUrl": getattr(log_record, "command_result_url", "") or "",
+                        "text": "",
+                        "textTruncatedForAi": False,
+                        "textOriginalCharCount": 0,
+                        "analysisMode": log_options["mode"],
+                        "windowMissingStrategy": log_options["windowMissingStrategy"],
+                        "requestedBeginTime": request_begin_time,
+                        "requestedEndTime": request_end_time,
+                        "agentShouldExtractWindow": True,
+                    }
+                    source_log_view_mode = "agent_extract"
             except Exception as exc:
-                logger.warning("获取工单日志上下文失败: %s", exc)
+                logger.warning(f"获取工单日志上下文失败: {exc}")
+                if has_request_time_window:
+                    log_content_payload = {
+                        "recordId": log_record.id,
+                        "viewBeginTime": None,
+                        "viewEndTime": None,
+                        "viewSource": "agent_extract_fallback",
+                        "wholeArchiveMode": True,
+                        "contentSummary": "服务端截取日志失败，AI 分析将降级为 Agent 按时间窗口从整包日志截取。",
+                        "matchedEntryCount": 0,
+                        "archiveEntryCount": getattr(log_record, "archive_entry_count", 0) or 0,
+                        "storagePath": getattr(log_record, "storage_path", "") or "",
+                        "commandResultUrl": getattr(log_record, "command_result_url", "") or "",
+                        "text": "",
+                        "textTruncatedForAi": False,
+                        "textOriginalCharCount": 0,
+                        "analysisMode": log_options["mode"],
+                        "windowMissingStrategy": log_options["windowMissingStrategy"],
+                        "requestedBeginTime": request_begin_time,
+                        "requestedEndTime": request_end_time,
+                        "agentShouldExtractWindow": True,
+                    }
+                    source_log_view_mode = "agent_extract_fallback"
+        elif has_request_time_window:
+            log_content_payload = {
+                "recordId": None,
+                "viewBeginTime": None,
+                "viewEndTime": None,
+                "viewSource": "missing",
+                "wholeArchiveMode": False,
+                "contentSummary": "本次 AI 分析指定了日志时间窗口，但未关联日志拉取记录。",
+                "matchedEntryCount": 0,
+                "archiveEntryCount": 0,
+                "storagePath": "",
+                "commandResultUrl": "",
+                "text": "",
+                "textTruncatedForAi": False,
+                "textOriginalCharCount": 0,
+                "analysisMode": log_options["mode"],
+                "windowMissingStrategy": log_options["windowMissingStrategy"],
+                "requestedBeginTime": request_begin_time,
+                "requestedEndTime": request_end_time,
+            }
         return {
             "ticket": ticket_payload,
             "timeline": cls._json_safe_value(CamelCaseUtil.transform_result(timeline_payload)),
@@ -790,6 +988,10 @@ class TicketAiAnalysisService:
             "mapping": cls._json_safe_value(CamelCaseUtil.transform_result(mapping)),
             "sourceLogPullRecordId": source_log_record_id,
             "sourceLogViewMode": source_log_view_mode,
+            "logAnalysisMode": log_options["mode"],
+            "logWindowMissingStrategy": log_options["windowMissingStrategy"],
+            "logRequestedBeginTime": request_begin_time,
+            "logRequestedEndTime": request_end_time,
         }
 
     @classmethod
@@ -831,6 +1033,10 @@ class TicketAiAnalysisService:
             "versionKey": mapping_context.get("versionKey"),
             "sourceLogPullRecordId": context_payload.get("sourceLogPullRecordId") if is_context else None,
             "sourceLogViewMode": context_payload.get("sourceLogViewMode") if is_context else None,
+            "logAnalysisMode": context_payload.get("logAnalysisMode") if is_context else None,
+            "logWindowMissingStrategy": context_payload.get("logWindowMissingStrategy") if is_context else None,
+            "logRequestedBeginTime": context_payload.get("logRequestedBeginTime") if is_context else None,
+            "logRequestedEndTime": context_payload.get("logRequestedEndTime") if is_context else None,
             "forceRefresh": force_refresh,
             "selectedAgentCode": selected_agent_code,
             "selectedPromptTemplateCodes": selected_prompt_template_codes,
@@ -916,6 +1122,10 @@ class TicketAiAnalysisService:
                 "sourceLogPullRecordId",
                 "sourceLogViewMode",
                 "extraInstruction",
+                "logAnalysisMode",
+                "logWindowMissingStrategy",
+                "logRequestedBeginTime",
+                "logRequestedEndTime",
                 "promptLayers",
             ):
                 if key not in context_payload or context_payload.get(key) in (None, "", {}):
@@ -991,10 +1201,15 @@ class TicketAiAnalysisService:
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
-3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或
-   {workspace_path}/logs.txt 只是整包分析说明，请优先阅读 {workspace_path}/logs_ai_digest.txt；
-   只有摘要证据不足时，才按摘要中的文件名和行号去 {workspace_path}/source_logs/ 目录定点读取原始日志，
-   禁止无目标地通读整包日志。
+3. 日志读取策略由 context.json 中的 `logAnalysisMode` 决定：
+   - `digest`：优先阅读 {workspace_path}/logs_ai_digest.txt，证据不足时按摘要中的文件名和行号去
+     {workspace_path}/source_logs/ 定点读取原始日志。
+   - `full_directory`：不要依赖摘要，直接读取 {workspace_path}/source_logs/；先用 rg 搜索错误关键词、
+     工单号、门店/POS、交易号和用户额外说明中的关键词，再打开命中文件上下文。
+   - `hybrid`：先阅读摘要，再使用 {workspace_path}/source_logs/ 完整目录复核关键证据。
+4. 如果 `sourceLogPull.agentShouldExtractWindow` 为 true，请按 `requestedBeginTime/requestedEndTime`
+   在 {workspace_path}/source_logs/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
+   OutOfMemory、out of memory、heap、GC overhead、内存不足等关键词。
 4. 工单不是一次性分析，请结合 messages、snapshots 和 similarTickets：
    - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
    - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
@@ -1176,7 +1391,7 @@ class TicketAiAnalysisService:
             (workspace_dir / "worker.stdout.txt").write_text(stdout_text or "", encoding="utf-8")
             (workspace_dir / "worker.stderr.txt").write_text(stderr_text or "", encoding="utf-8")
         except Exception as exc:
-            logger.warning("写入 Worker 流文件失败: %s", exc)
+            logger.warning(f"写入 Worker 流文件失败: {exc}")
 
     @staticmethod
     def _extract_stderr_context(
@@ -1522,7 +1737,7 @@ class TicketAiAnalysisService:
         mapping = cls._resolve_mapping(db, ticket, request)
         if not mapping:
             return CrudResponseModel(is_success=False, message="未找到可用的项目版本仓库映射，请先维护映射配置")
-        context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
+        context_payload = cls._build_context_payload(db, ticket, mapping, log_record, request)
         prompt_layers = TicketPromptService.resolve_prompt_layers(db, ticket)
         selected_prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(
             db, request.prompt_template_codes
