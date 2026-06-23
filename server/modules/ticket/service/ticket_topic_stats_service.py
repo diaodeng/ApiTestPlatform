@@ -735,13 +735,13 @@ class TicketTopicStatsService:
             logger.info(f"专题工单来源消息拉取完成 | group_name={source.name} raw_count={len(messages)}")
 
             for message in messages:
-                if message.get("msg_type") != "post":
+                if message.get("msg_type") not in ("post", "text"):
                     continue
                 if not cls.is_root_message(message):
                     continue
 
                 content = cls.cell_text(message.get("content"))
-                if "Ticket:" not in content and "主题:" not in content:
+                if "Ticket:" not in content and "Ticket：" not in content and "主题:" not in content and "主题：" not in content:
                     continue
 
                 message_date = cls.get_date_only(cls.cell_text(message.get("create_time")))
@@ -756,12 +756,12 @@ class TicketTopicStatsService:
                     logger.info(f"专题工单消息跳过：重复 Ticket | ticket_key={ticket_key} group_name={source.name}")
                     continue
 
-                topic = cls.extract_topic(content)
-                category = cls.get_category_bucket(topic)
+                # topic = cls.extract_topic(content)
+                category = cls.get_category_bucket(content)
                 if category == "其他":
                     logger.info(
                         f"专题工单消息跳过：主题未命中分类 | ticket_key={ticket_key} "
-                        f"group_name={source.name} topic={topic}"
+                        f"group_name={source.name} topic={content}"
                     )
                     continue
 
@@ -774,7 +774,7 @@ class TicketTopicStatsService:
                         priority=source.priority,
                         category=category,
                         status=status,
-                        topic=topic,
+                        topic=content,
                     )
                 )
                 logger.info(

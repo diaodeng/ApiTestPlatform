@@ -8,7 +8,7 @@
 
 1. 新增服务：`server/modules/ticket/service/ticket_topic_stats_service.py`
    - 支持从定时任务参数传入飞书群来源、日期范围、`lark-cli` 路径、webhook、关键字和分页大小。
-   - 统计口径保持脚本逻辑：只处理 `post` 根消息、提取 `Ticket:` 或 INC/SCTASK 编号、按主题归类为促销/券/会员/印花、按关键字判断有结论/无结论。
+   - 统计口径保持脚本逻辑：只处理 `post`、`text` 根消息、提取 `Ticket:` 或 INC/SCTASK 编号、按主题归类为促销/券/会员/印花、按关键字判断有结论/无结论。
    - 日志覆盖每个关键步骤：任务开始、来源处理、分页拉取、命中/跳过原因、汇总结果和卡片发送返回。
 
 2. 新增定时任务入口：`module_task.scheduler_maintenance.ticket_topic_stats_report`
