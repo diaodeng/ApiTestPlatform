@@ -8,6 +8,16 @@ updated: 2026-05-20
 
 # 操作日志
 
+## [2026-06-23] INGEST-CODE | 工单 AI Agent 异常反馈修复
+- 触发：用户反馈发起工单 AI 分析时 Agent 未连接或连接异常，服务端已有报错但 Web 页面只显示 `{}` 或没有真实失败原因。
+- 架构层：工单域 / AI 分析任务 / Agent 连接校验 / Web 错误提示
+- 创建的页面：`web/public/docs/2026-06-23-ticket-ai-agent-error-feedback.md`
+- 更新的页面：`server/modules/ticket/service/ticket_ai_analysis_service.py`、`web/src/api/ticket/ticket.js`、`web/src/views/ticket/index.vue`、`web/src/utils/request.js`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`flows/ticket-automation-flow.md`、`log.md`
+- 创建的双向链接：0 对
+- 变更传播链：AI 分析提交 -> 服务端 Agent 在线校验 -> 前端响应错误归一化 -> 提交/重试短轮询任务终态 -> 失败原因弹窗展示
+- 验证：`uv run ruff check modules/ticket/service/ticket_ai_analysis_service.py`、`npm run build:prod` 均通过；前端构建仍有既有 `config.js`、`eval` 和 chunk 体积警告。
+- 总共涉及页面：8
+
 ## [2026-06-22] INGEST-CODE | 工单日志查看器交互与编码兼容优化
 - 触发：用户要求工单日志搜索结果和上下文窗口支持全屏/最小化，修复上下文翻页重复、搜索结果数量受限、中文乱码和上下文滚动查看问题。
 - 架构层：工单域 / 日志查看 / Web 控制台 / 日志服务

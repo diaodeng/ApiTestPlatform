@@ -509,6 +509,7 @@ export function addTicketAiAnalysis(ticketId, data) {
     url: `/ticket/${ticketId}/ai-analysis`,
     method: 'post',
     data,
+    showErrorMessage: false,
   });
 }
 
@@ -517,6 +518,7 @@ export function retryTicketAiAnalysis(ticketId, taskId) {
   return request({
     url: `/ticket/${ticketId}/ai-analysis/tasks/${taskId}/retry`,
     method: 'post',
+    showErrorMessage: false,
   });
 }
 

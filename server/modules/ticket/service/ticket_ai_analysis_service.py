@@ -559,6 +559,21 @@ class TicketAiAnalysisService:
         return ""
 
     @classmethod
+    def _validate_agent_connected(cls, db: Session, requested_agent_code: str | None = None) -> tuple[bool, str, str]:
+        """
+        校验 AI 分析任务提交时是否存在可用在线 Agent。
+        :param db: 数据库会话
+        :param requested_agent_code: 请求或 Provider 指定的 Agent 编码
+        :return: (是否可用, 错误信息, 实际解析到的 Agent 编码)
+        """
+        agent_code = cls._resolve_agent_code(db, requested_agent_code)
+        if not agent_code:
+            return False, "未找到可用的在线 Agent，请先启动本地 Agent 并连接到服务端", ""
+        if agent_code not in connected_agents:
+            return False, f"Agent[{agent_code}]未连接服务端，请先启动本地 Agent 并确认连接正常", agent_code
+        return True, "", agent_code
+
+    @classmethod
     def _normalize_log_analysis_mode(cls, mode: str | None) -> str:
         """
         归一化日志分析模式。
@@ -576,7 +591,11 @@ class TicketAiAnalysisService:
         :return: 可识别的缺失策略
         """
         normalized = str(strategy or "").strip().lower()
-        return normalized if normalized in cls.LOG_WINDOW_MISSING_STRATEGIES else cls.DEFAULT_LOG_WINDOW_MISSING_STRATEGY
+        return (
+            normalized
+            if normalized in cls.LOG_WINDOW_MISSING_STRATEGIES
+            else cls.DEFAULT_LOG_WINDOW_MISSING_STRATEGY
+        )
 
     @classmethod
     def _resolve_log_analysis_options(
@@ -906,7 +925,9 @@ class TicketAiAnalysisService:
                         "windowMissingStrategy": log_options["windowMissingStrategy"],
                         "requestedBeginTime": request_begin_time,
                         "requestedEndTime": request_end_time,
-                        "serverExtractedForAi": bool(has_request_time_window and log_options["windowMissingStrategy"] == "server_extract"),
+                        "serverExtractedForAi": bool(
+                            has_request_time_window and log_options["windowMissingStrategy"] == "server_extract"
+                        ),
                         "agentShouldExtractWindow": should_agent_extract_window,
                     }
                     source_log_view_mode = str(log_content_model.view_source or "stored")
@@ -1763,6 +1784,12 @@ class TicketAiAnalysisService:
                 context_payload["selectedAgentCode"] = str(selected_provider.agent_code).strip()
         if request.agent_code:
             context_payload["selectedAgentCode"] = request.agent_code
+        agent_available, agent_error_message, resolved_agent_code = cls._validate_agent_connected(
+            db, str(context_payload.get("selectedAgentCode") or "").strip()
+        )
+        if not agent_available:
+            return CrudResponseModel(is_success=False, message=agent_error_message)
+        context_payload["selectedAgentCode"] = resolved_agent_code
         if str(request.extra_instruction or "").strip():
             context_payload["extraInstruction"] = str(request.extra_instruction).strip()
         context_payload["promptLayers"] = prompt_layers

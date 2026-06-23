@@ -156,6 +156,7 @@ graph TD
 - `sceneTriggers` 当前支持 `externalSync`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge` 六类场景；外部同步延后后处理、远端拉取、手动新增/编辑、Excel 导入和关闭工单知识沉淀都会先检查开关，再调用 `vectorize_ticket_for_scene` 或 `vectorize_tickets_for_scene`。
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
+- AI 分析任务提交前会校验解析到的 Agent 是否已连接服务端；指定 Agent 离线时接口直接返回明确失败原因，不再创建必然失败的后台任务。提交或重试后若后台快速失败，前端会短轮询任务终态并弹出任务 `error_message`。
 - AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本号匹配映射，未命中时拒绝提交。
 - Agent 侧解析仓库映射时会先校验 `localRepoPath` 当前分支；如果历史映射指向普通 clone 且分支不匹配，会优先从该本地仓库创建 AI 工作区内按分支隔离的 Git worktree，复用原项目 Git 配置和凭据，避免在原项目目录中分析错误分支。
 - 版本号现在也可由日志正文自动提取，减少人工手动补录 `extra_data.version_key` 的次数。

@@ -12,6 +12,43 @@ let downloadLoadingInstance;
 export let isRelogin = { show: false };
 
 /**
+ * 将接口返回或异常对象转换为可展示的错误文本。
+ * @param {unknown} value 接口 msg、异常对象或响应数据
+ * @param {string} fallback 未提取到有效文本时使用的兜底提示
+ * @returns {string} 可直接展示给用户的错误文本
+ */
+const normalizeErrorMessage = (value, fallback = errorCode['default']) => {
+  if (value === null || value === undefined || value === '') return fallback
+  if (typeof value === 'string') return value
+  if (value instanceof Error && value.message) return value.message
+  if (typeof value === 'object') {
+    const source = value
+    const candidates = [
+      source.msg,
+      source.message,
+      source.errorMessage,
+      source.detail,
+      source.data?.msg,
+      source.data?.message,
+      source.response?.data?.msg,
+      source.response?.data?.message,
+      source.response?.data?.detail
+    ]
+    for (const candidate of candidates) {
+      const normalized = normalizeErrorMessage(candidate, '')
+      if (normalized) return normalized
+    }
+    try {
+      const text = JSON.stringify(value)
+      return text && text !== '{}' ? text : fallback
+    } catch (_error) {
+      return fallback
+    }
+  }
+  return String(value)
+}
+
+/**
  * 判断请求是否禁用全局错误提示（ElMessage）。
  * @param {import('axios').AxiosRequestConfig | undefined} config 请求配置
  * @returns {boolean} true=显示全局提示，false=静默
@@ -111,7 +148,7 @@ service.interceptors.response.use(res => {
     // 未设置状态码则默认成功状态
     const code = res.data.code || 200;
     // 获取错误信息
-    const msg = errorCode[code] || res.data.msg || errorCode['default']
+    const msg = normalizeErrorMessage(errorCode[code] || res.data.msg || res.data, errorCode['default'])
     // 二进制数据则直接返回
     if (res.request.responseType ===  'blob' || res.request.responseType ===  'arraybuffer') {
       return res.data
@@ -150,7 +187,7 @@ service.interceptors.response.use(res => {
   },
   error => {
     console.log('err' + error)
-    let { message } = error;
+    let message = normalizeErrorMessage(error, errorCode['default']);
     if (message == "Network Error") {
       message = "后端接口连接异常";
     } else if (message.includes("timeout")) {
@@ -159,7 +196,7 @@ service.interceptors.response.use(res => {
       if (!error.response){
         message = "系统接口" + message.substr(message.length - 3) + "异常";
       } else if (error.response.status == 422) {
-          message = error.response.data.msg;
+          message = normalizeErrorMessage(error.response.data, '请求参数校验失败');
       } else {
           message = "系统接口" + error.response.status + "异常";}
 

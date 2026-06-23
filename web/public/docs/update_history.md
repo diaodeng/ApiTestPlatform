@@ -1,3 +1,10 @@
+## 2026-06-23
+
+1. 发起工单 AI 分析前新增 Agent 在线校验，指定 Agent 未连接服务端时直接返回明确失败原因，不再创建必然失败的后台任务。
+2. 工单页提交或重试 AI 分析后会短轮询本次任务终态，后台快速失败时直接弹出任务 `errorMessage`。
+3. 全局请求错误提示新增对象归一化，优先读取 `msg/message/errorMessage/detail`，避免页面只显示 `{}`。
+4. 新增说明文档：`web/public/docs/2026-06-23-ticket-ai-agent-error-feedback.md`。
+
 ## 2026-06-22
 
 1. 外部同步入库时，项目匹配失败会保留 `ticketVender/projectName/merchantName` 原始文本，模块匹配失败继续保留原始模块文本，避免归属展示为空。

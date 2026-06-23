@@ -2137,6 +2137,7 @@ let logPullRefreshTimer = null
 let suppressProjectWatcher = false
 
 const activeLogPullStatuses = ['created', 'submitting', 'polling', 'downloading', 'processing']
+const aiTerminalStatuses = ['success', 'failed', 'canceled']
 const standaloneDetailMode = computed(() => route.name === 'TicketDetail')
 const standaloneRouteTicketId = computed(() => {
   const ticketId = Number(route.params.ticketId)
@@ -3485,7 +3486,7 @@ function loadAiRepoMappings(silent = false) {
 
 function loadAiAnalysisTasks(silent = false) {
   if (!currentTicketId.value) {
-    return Promise.resolve()
+    return Promise.resolve([])
   }
   if (!silent) {
     aiTaskLoading.value = true
@@ -3493,6 +3494,7 @@ function loadAiAnalysisTasks(silent = false) {
   return listTicketAiAnalysisTasks(currentTicketId.value, aiTaskQuery.value).then(response => {
     aiTaskList.value = response.rows || []
     aiTaskTotal.value = response.total || 0
+    return aiTaskList.value
   }).finally(() => {
     if (!silent) {
       aiTaskLoading.value = false
@@ -3516,6 +3518,105 @@ function refreshAiAnalysisData(refreshTicketList = false) {
 
 function canRetryAiTask(row) {
   return Boolean(row?.taskId) && ['failed', 'canceled'].includes(String(row.status || '').toLowerCase())
+}
+
+/**
+ * 等待指定毫秒数，供 AI 任务短轮询使用。
+ * @param {number} ms 等待毫秒数
+ * @returns {Promise<void>} 等待完成 Promise
+ */
+function sleep(ms) {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+/**
+ * 从接口异常对象中提取可读错误信息，避免页面显示空对象。
+ * @param {unknown} error 接口异常、字符串或响应对象
+ * @param {string} fallback 无法提取时的兜底文案
+ * @returns {string} 可直接提示给用户的错误文案
+ */
+function extractReadableError(error, fallback = '操作失败') {
+  if (!error) return fallback
+  if (typeof error === 'string') return error
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'object') {
+    const candidates = [
+      error.message,
+      error.msg,
+      error.errorMessage,
+      error.response?.data?.msg,
+      error.response?.data?.message,
+      error.response?.data?.detail,
+      error.data?.message,
+      error.data?.msg
+    ]
+    for (const candidate of candidates) {
+      const text = extractReadableError(candidate, '')
+      if (text) return text
+    }
+    try {
+      const text = JSON.stringify(error)
+      return text && text !== '{}' ? text : fallback
+    } catch (_error) {
+      return fallback
+    }
+  }
+  return String(error)
+}
+
+/**
+ * 从 AI 分析提交接口响应中提取本次提交的任务对象。
+ * @param {object} response 提交接口响应
+ * @returns {object | null} AI 分析任务对象，未找到时返回 null
+ */
+function extractSubmittedAiTask(response) {
+  const payload = response?.data || response || {}
+  const result = payload.result || payload.data?.result || {}
+  return result?.taskId ? result : null
+}
+
+/**
+ * 短轮询指定 AI 分析任务，捕获后台快速失败或成功的终态。
+ * @param {number | string} taskId AI 分析任务ID
+ * @param {object} options 轮询配置，包含 maxAttempts 和 intervalMs
+ * @returns {Promise<object | null>} 命中终态的任务对象，超时返回 null
+ */
+async function waitForAiTaskTerminal(taskId, options = {}) {
+  const maxAttempts = Number(options.maxAttempts || 6)
+  const intervalMs = Number(options.intervalMs || 1500)
+  for (let index = 0; index < maxAttempts; index += 1) {
+    if (index > 0) {
+      await sleep(intervalMs)
+    }
+    const tasks = await loadAiAnalysisTasks(true)
+    const currentTask = (tasks || []).find(item => String(item.taskId) === String(taskId))
+    const status = String(currentTask?.status || '').toLowerCase()
+    if (currentTask && aiTerminalStatuses.includes(status)) {
+      return currentTask
+    }
+  }
+  return null
+}
+
+/**
+ * 提示 AI 分析任务提交结果，并在后台快速失败时展示真实失败原因。
+ * @param {object} response 提交或重试接口响应
+ * @param {string} successMessage 提交成功提示文案
+ * @returns {Promise<void>} 提示完成 Promise
+ */
+async function notifyAiTaskSubmitResult(response, successMessage) {
+  const submittedTask = extractSubmittedAiTask(response)
+  proxy.$modal.msgSuccess(successMessage)
+  if (!submittedTask?.taskId) {
+    return
+  }
+  const terminalTask = await waitForAiTaskTerminal(submittedTask.taskId)
+  const status = String(terminalTask?.status || '').toLowerCase()
+  if (status === 'failed' || status === 'canceled') {
+    const message = terminalTask.errorMessage || terminalTask.statusDesc || 'AI分析任务执行失败，请查看任务历史'
+    proxy.$modal.msgError(message)
+    selectedAiTask.value = terminalTask
+  }
 }
 
 function resetAiAnalysisDialog() {
@@ -3607,10 +3708,12 @@ function submitAiAnalysis() {
       payload.rangeBeforeMinutes = aiAnalysisTaskForm.value.rangeBeforeMinutes
       payload.rangeAfterMinutes = aiAnalysisTaskForm.value.rangeAfterMinutes
     }
-    addTicketAiAnalysis(currentTicketId.value, payload).then(() => {
-      proxy.$modal.msgSuccess('AI分析任务已提交')
+    addTicketAiAnalysis(currentTicketId.value, payload).then(async response => {
+      await notifyAiTaskSubmitResult(response, 'AI分析任务已提交')
       aiAnalysisOpen.value = false
       refreshAiAnalysisData(true)
+    }).catch(error => {
+      proxy.$modal.msgError(extractReadableError(error, 'AI分析任务提交失败'))
     }).finally(() => {
       aiAnalysisSubmitting.value = false
     })
@@ -3624,10 +3727,14 @@ function retryAiAnalysisTask(row) {
   proxy.$modal.confirm(`是否确认重试 AI 分析任务 #${row.taskId}？`).then(() => {
     aiAnalysisRetryLoading.value = true
     return retryTicketAiAnalysis(currentTicketId.value, row.taskId)
-  }).then(() => {
-    proxy.$modal.msgSuccess('AI分析任务已重新提交')
+  }).then(async response => {
+    await notifyAiTaskSubmitResult(response, 'AI分析任务已重新提交')
     return Promise.all([loadAiAnalysisTasks(true), refreshDetail(), getList()])
-  }).catch(() => {}).finally(() => {
+  }).catch(error => {
+    if (error !== 'cancel' && error !== 'close') {
+      proxy.$modal.msgError(extractReadableError(error, 'AI分析任务重试失败'))
+    }
+  }).finally(() => {
     aiAnalysisRetryLoading.value = false
   })
 }
