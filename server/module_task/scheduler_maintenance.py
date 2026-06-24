@@ -124,6 +124,7 @@ def _build_bitable_pull_config_override(kwargs: dict[str, Any]) -> dict[str, Any
         "sortField": ("sortField", "sort_field"),
         "includeRecordUrl": ("includeRecordUrl", "include_record_url"),
         "createdAfter": ("createdAfter", "created_after", "startTime", "start_time", "beginTime", "begin_time"),
+        "forceSync": ("forceSync", "force_sync"),
         "fieldMappings": ("fieldMappings", "field_mappings"),
         "automation": ("automation",),
     }
@@ -263,7 +264,10 @@ def pull_feishu_bitable_ticket_sync(
         f"synced={result.get('syncedCount')} skipped={result.get('skippedCount')} "
         f"failed={result.get('failedCount')} override_keys={list(override.keys())}"
     )
-    logger.info(f"任务module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync执行耗时：{time.time() - start_time}")
+    logger.info(
+        f"任务module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync执行耗时："
+        f"{time.time() - start_time}"
+    )
     return result
 
 

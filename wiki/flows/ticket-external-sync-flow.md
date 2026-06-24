@@ -16,7 +16,7 @@ entry_points:
     path: /ticket/sync/ack
     trigger: 消费方可选回写处理结果
 created: 2026-05-31
-updated: 2026-06-21
+updated: 2026-06-24
 ---
 
 # 工单外部同步与内网拉取流程
@@ -67,6 +67,12 @@ sequenceDiagram
 | 5.1.3 | 主动拉取会把 `recordId + snapshotHash` 记录到 `extra_data.bitable_pull`；同一记录内容未变化时跳过，避免周期任务反复制造新 revision。 |
 | 5.1.4 | 飞书“查询记录”接口在当前环境中可能只返回 `record_id`；服务会继续按缺失记录的 `record_id` 调用 `records/batch_get(with_shared_url=true)` 批量补齐 `shared_url`，主动拉取和按人催办统一透传该真实详情地址，不再直接拼接页面 URL。 |
 | 5.1.5 | 主动拉取配置页的字段预览优先读取飞书字段元数据，不使用运行时 `filterFormula/createdAfter`；字段元数据不可用时才回退到不带过滤条件的样例记录推断字段，避免最近时间窗口无记录导致字段下拉为空。 |
+| 5.1.6 | 主动拉取定时任务没有登录用户时，会使用完整系统用户上下文投递延后后处理 Celery：`permissions=[]`、`roles=[]`、`user.userId=0`、`user.userName=system`；延后后处理入口也兼容历史只包含 `user` 的任务载荷。 |
+| 5.1.7 | 主动拉取字段映射目标字段会将 `moduleName/module_name/ticketModel/ticket_model` 归一为 `ticketModle`，避免模块别名配置被外部同步必填校验误判为缺失。 |
+| 5.1.8 | 主动拉取支持 `forceSync/force_sync`，开启后绕过本地 `recordId + snapshotHash` 跳过逻辑，重新执行入库与延后后处理；该参数不改变飞书查询范围，历史记录仍需通过 `createdAfter/filterFormula/viewId` 查到。 |
+| 5.1.9 | 主动拉取映射出的 `ticketVender/ticketModle/internalOwner` 会保存到 `extraData.external_field_mapping`，并同步为 `projectName/moduleName/internalOwnerName` 给入库识别使用；主动拉取 `automation.autoTranslate` 优先于全局 `autoTranslateOnSync`。 |
+| 5.1.10 | 主动拉取转换模型时会执行专用字段兜底：`internalPriority` 为空且 `customerPriority` 有值时使用对方优先级补齐内部优先级；`ticketAssigneeName/assigneeName` 等别名会归一为当前处理人，并写入顶层模型和 `extraData.external_field_mapping`。该逻辑只作用于主动拉取，不改变外部推送入口。 |
+| 5.1.11 | 主动拉取记录级必填校验直接使用“外部工单字段模型”中 `required=true` 的字段；字段不全时 `_build_bitable_pull_sync_object` 返回空，任务汇总计入 `failedCount`，不会进入 `sync_external_ticket`，因此不会入库或自动发群消息。 |
 | 6 | 内网消费方调用 `GET /ticket/sync/pending` 时，优先拿到 `external_sync.revision > consumers.{consumer}.delivered_revision` 且 `publish_ready=true` 的工单；若候选工单卡在 `processing_ai` 但没有活动 AI 任务，会先自动恢复发布状态再返回。 |
 | 7 | 内网将远端 pending 工单转换为本地入库模型时，会优先读取 `moduleName/module_name`，并兼容 `ticketModle/ticketModel/ticket_model` 与 `extraData.external_field_mapping.ticketModle`，避免模块文本在跨环境二次同步时丢失。 |
 | 7.1 | 远端拉取入库不会复用公网项目/模块/用户 ID，但会使用内网本地 `statusMappings` 映射远端状态文本，并通过 `assigneeMappings`、邮箱或姓名解析当前处理人、报告人和内部负责人；未命中时保留远端文本。 |

@@ -1227,6 +1227,17 @@
                     />
                   </el-form-item>
                 </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="强制同步">
+                    <el-switch
+                      v-model="form.bitablePull.forceSync"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                    <div class="switch-inline-desc__text">开启后忽略本地快照去重，重新拉取远端数据入库并触发后处理</div>
+                  </el-form-item>
+                </el-col>
                 <el-col :span="24">
                   <el-form-item label="过滤条件JSON">
                     <el-input
@@ -2261,6 +2272,7 @@
         updatedAtField: '',
         sortField: '',
         includeRecordUrl: true,
+        forceSync: false,
         fieldMappings: [],
         automation: {
           autoIdentify: true,
@@ -2601,6 +2613,7 @@
       updatedAtField: bitablePull.updatedAtField || '',
       sortField: bitablePull.sortField || '',
       includeRecordUrl: bitablePull.includeRecordUrl !== false,
+      forceSync: Boolean(bitablePull.forceSync),
       fieldMappings: Array.isArray(bitablePull.fieldMappings)
         ? bitablePull.fieldMappings.map((item) => ({
             sourceField: String(item?.sourceField || '').trim(),
@@ -2965,6 +2978,7 @@
         updatedAtField: String(payload.bitablePull?.updatedAtField || '').trim(),
         sortField: String(payload.bitablePull?.sortField || '').trim(),
         includeRecordUrl: Boolean(payload.bitablePull?.includeRecordUrl),
+        forceSync: Boolean(payload.bitablePull?.forceSync),
         fieldMappings: Array.isArray(payload.bitablePull?.fieldMappings)
           ? payload.bitablePull.fieldMappings
               .map((item) => ({

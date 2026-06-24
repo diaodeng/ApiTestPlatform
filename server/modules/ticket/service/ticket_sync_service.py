@@ -2,7 +2,6 @@ import hashlib
 import json
 import re
 from datetime import datetime, time, timedelta, timezone
-from types import SimpleNamespace
 from typing import Any
 
 import requests
@@ -138,6 +137,72 @@ class TicketSyncService:
         ],
     }
     GROUP_PUSH_LOCK_TIMEOUT_SECONDS = 300
+
+    @classmethod
+    def _to_bool(cls, value: Any, default: bool = False) -> bool:
+        """
+        将任务参数或配置值转换为布尔值。
+
+        :param value: 原始布尔、数字或字符串值。
+        :param default: 值为空或无法识别时返回的默认值。
+        :return: 归一化后的布尔值。
+        """
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        normalized_value = str(value).strip().lower()
+        if normalized_value in {"true", "1", "yes", "y", "on", "开启", "是"}:
+            return True
+        if normalized_value in {"false", "0", "no", "n", "off", "关闭", "否"}:
+            return False
+        return default
+
+    @classmethod
+    def _build_system_current_user(cls) -> CurrentUserModel:
+        """
+        构造后台任务使用的系统用户上下文。
+
+        :return: 包含空权限、空角色和 system 用户信息的当前用户模型。
+        """
+        return CurrentUserModel.model_validate(cls._build_system_current_user_payload())
+
+    @classmethod
+    def _build_system_current_user_payload(cls) -> dict[str, Any]:
+        """
+        构造可跨 Celery 序列化的系统用户载荷。
+
+        :return: 满足 CurrentUserModel 校验要求的用户字典。
+        """
+        return {
+            "permissions": [],
+            "roles": [],
+            "user": {"userId": 0, "userName": "system", "nickName": "system"},
+        }
+
+    @classmethod
+    def _normalize_current_user_payload(cls, current_user_payload: dict[str, Any] | None) -> dict[str, Any]:
+        """
+        归一化延后后处理任务的当前用户载荷。
+
+        :param current_user_payload: Celery 或本地后台任务传入的当前用户字典。
+        :return: 补齐 permissions、roles 和 user 后的当前用户字典。
+        """
+        payload = dict(current_user_payload or {})
+        payload.setdefault("permissions", [])
+        payload.setdefault("roles", [])
+        user_payload = payload.get("user")
+        if isinstance(user_payload, dict):
+            payload["user"] = {
+                "userId": user_payload.get("userId", user_payload.get("user_id")),
+                "userName": user_payload.get("userName", user_payload.get("user_name")),
+                "nickName": user_payload.get("nickName", user_payload.get("nick_name")),
+            }
+        else:
+            payload["user"] = cls._build_system_current_user_payload()["user"]
+        return payload
 
     @classmethod
     def _json_dumps(cls, value: Any) -> str:
@@ -1435,6 +1500,7 @@ class TicketSyncService:
             "sortField": "",
             "includeRecordUrl": True,
             "createdAfter": "",
+            "forceSync": False,
             "automation": {
                 "autoIdentify": True,
                 "autoLogPull": False,
@@ -1890,7 +1956,9 @@ class TicketSyncService:
             if not isinstance(row, dict):
                 continue
             source_field = str(row.get("sourceField") or row.get("from") or row.get("bitableField") or "").strip()
-            target_field = str(row.get("targetField") or row.get("to") or row.get("externalField") or "").strip()
+            target_field = cls._normalize_bitable_pull_target_field(
+                row.get("targetField") or row.get("to") or row.get("externalField")
+            )
             if not source_field or not target_field:
                 continue
             unique_key = f"{source_field}->{target_field}"
@@ -1906,6 +1974,37 @@ class TicketSyncService:
             )
             seen_targets.add(unique_key)
         return mappings
+
+    @classmethod
+    def _normalize_bitable_pull_target_field(cls, value: Any) -> str:
+        """
+        归一化主动拉取字段映射的目标字段名。
+
+        :param value: 配置中的目标字段名。
+        :return: 外部同步模型识别的规范字段名。
+        """
+        field_name = str(value or "").strip()
+        alias_map = {
+            "ticketModel": "ticketModle",
+            "ticket_model": "ticketModle",
+            "moduleName": "ticketModle",
+            "module_name": "ticketModle",
+            "projectName": "ticketVender",
+            "project_name": "ticketVender",
+            "merchantName": "ticketVender",
+            "merchant_name": "ticketVender",
+            "internalOwnerName": "internalOwner",
+            "internal_owner_name": "internalOwner",
+            "ticketAssigneeName": "ticketAssignee",
+            "ticket_assignee_name": "ticketAssignee",
+            "assigneeName": "ticketAssignee",
+            "assignee_name": "ticketAssignee",
+            "ticketAssigneeEmail": "ticketAssigneeEmail",
+            "ticket_assignee_email": "ticketAssigneeEmail",
+            "assigneeEmail": "ticketAssigneeEmail",
+            "assignee_email": "ticketAssigneeEmail",
+        }
+        return alias_map.get(field_name, field_name)
 
     @classmethod
     def _normalize_bitable_pull_config(
@@ -1925,7 +2024,7 @@ class TicketSyncService:
         """
         source = value if isinstance(value, dict) else {}
         config = {**cls._default_bitable_pull_config(), **source}
-        config["enabled"] = bool(config.get("enabled"))
+        config["enabled"] = cls._to_bool(config.get("enabled"), False)
         config["appId"] = str(config.get("appId") or "").strip() or str(feishu_auth.get("appId") or "").strip()
         config["appSecret"] = (
             str(config.get("appSecret") or "").strip() or str(feishu_auth.get("appSecret") or "").strip()
@@ -1941,15 +2040,16 @@ class TicketSyncService:
         config["ticketNoField"] = str(config.get("ticketNoField") or "ticketNo").strip() or "ticketNo"
         config["updatedAtField"] = str(config.get("updatedAtField") or "").strip()
         config["sortField"] = str(config.get("sortField") or "").strip()
-        config["includeRecordUrl"] = bool(config.get("includeRecordUrl", True))
+        config["includeRecordUrl"] = cls._to_bool(config.get("includeRecordUrl"), True)
         config["createdAfter"] = str(config.get("createdAfter") or "").strip()
+        config["forceSync"] = cls._to_bool(config.get("forceSync"), False)
         config["fieldMappings"] = cls._normalize_bitable_field_mappings(config.get("fieldMappings"))
         automation = config.get("automation") if isinstance(config.get("automation"), dict) else {}
         config["automation"] = {
-            "autoIdentify": bool(automation.get("autoIdentify", True)),
-            "autoLogPull": bool(automation.get("autoLogPull", False)),
-            "autoAiAnalysis": bool(automation.get("autoAiAnalysis", False)),
-            "autoTranslate": bool(automation.get("autoTranslate", True)),
+            "autoIdentify": cls._to_bool(automation.get("autoIdentify"), True),
+            "autoLogPull": cls._to_bool(automation.get("autoLogPull"), False),
+            "autoAiAnalysis": cls._to_bool(automation.get("autoAiAnalysis"), False),
+            "autoTranslate": cls._to_bool(automation.get("autoTranslate"), True),
         }
         return config
 
@@ -2783,27 +2883,26 @@ class TicketSyncService:
                 }
         records = cls._query_bitable_pull_records(pull_config, pull_filters)
         queried_count = len(records)
-        required_fields = [
-            str(item or "").strip()
-            for item in config.get("externalSyncRequiredFields", cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
-            if str(item or "").strip()
-        ] or list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
+        force_sync = cls._to_bool(pull_config.get("forceSync"), False)
+        required_fields = cls._derive_required_fields_from_external_field_model(config.get("externalFieldModel"))
         summary = {
             "triggerSource": trigger_source,
             "skipped": False,
             "recordCount": len(records),
             "queriedRecordCount": queried_count,
             "createdAfter": created_after.strftime("%Y-%m-%d %H:%M:%S") if created_after else "",
+            "forceSync": force_sync,
             "syncedCount": 0,
             "skippedCount": 0,
             "failedCount": 0,
             "skipReasons": {},
             "failures": [],
         }
-        fallback_user = (
-            SimpleNamespace(user=SimpleNamespace(user_id=0, user_name="system", nick_name="system"))
+        fallback_user = current_user or cls._build_system_current_user()
+        deferred_current_user_payload = (
+            cls._build_system_current_user_payload()
             if current_user is None
-            else current_user
+            else cls._normalize_current_user_payload(current_user.model_dump())
         )
         automation_override = pull_config.get("automation") if isinstance(pull_config.get("automation"), dict) else {}
 
@@ -2825,14 +2924,23 @@ class TicketSyncService:
                 }
             )
             existing_ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
-            should_skip, skip_reason = cls._should_skip_bitable_pull_record(
-                existing_ticket=existing_ticket,
-                sync_object=sync_object,
+            should_skip, skip_reason = (
+                (False, "")
+                if force_sync
+                else cls._should_skip_bitable_pull_record(
+                    existing_ticket=existing_ticket,
+                    sync_object=sync_object,
+                )
             )
             if should_skip:
                 summary["skippedCount"] += 1
                 summary["skipReasons"][skip_reason] = int(summary["skipReasons"].get(skip_reason) or 0) + 1
                 continue
+            if force_sync and existing_ticket:
+                logger.info(
+                    f"飞书多维表格主动拉取强制同步记录: ticket_no={sync_object.ticket_no}, "
+                    f"record_id={record_id or '-'}"
+                )
             try:
                 result = cls.sync_external_ticket(
                     db,
@@ -2845,17 +2953,13 @@ class TicketSyncService:
                     summary["syncedCount"] += 1
                     deferred_dispatch = cls.dispatch_deferred_sync_post_process_task(
                         sync_object.model_dump(),
-                        {"user": {"user_id": 0, "user_name": "system", "nick_name": "system"}}
-                        if current_user is None
-                        else current_user.model_dump(),
+                        deferred_current_user_payload,
                         "external_sync",
                     )
                     if deferred_dispatch.get("mode") != cls.CELERY_DISPATCH_MODE:
                         cls.run_deferred_sync_post_process(
                             sync_object.model_dump(),
-                            {"user": {"user_id": 0, "user_name": "system", "nick_name": "system"}}
-                            if current_user is None
-                            else current_user.model_dump(),
+                            deferred_current_user_payload,
                             "external_sync",
                         )
                 else:
@@ -4046,7 +4150,7 @@ class TicketSyncService:
         payload: dict[str, Any] = {}
         for mapping in field_mappings:
             source_field = str(mapping.get("sourceField") or "").strip()
-            target_field = str(mapping.get("targetField") or "").strip()
+            target_field = cls._normalize_bitable_pull_target_field(mapping.get("targetField"))
             if not source_field or not target_field:
                 continue
             raw_value = fields.get(source_field)
@@ -4115,8 +4219,50 @@ class TicketSyncService:
         payload = cls._build_bitable_pull_field_mapping_from_record(fields, field_mappings=field_mappings)
         if not payload:
             return None
+        # 主动拉取不经过外部推送 controller 的兼容层，这里补齐同等字段语义，避免优先级和人员字段丢失。
+        if payload.get("internalPriority") in (None, "", []) and payload.get("customerPriority") not in (None, "", []):
+            payload["internalPriority"] = payload.get("customerPriority")
+        if payload.get("customerPriority") in (None, "", []) and payload.get("internalPriority") not in (None, "", []):
+            payload["customerPriority"] = payload.get("internalPriority")
+        if payload.get("currentAssigneeName") in (None, "", []) and payload.get("ticketAssignee") not in (None, "", []):
+            payload["currentAssigneeName"] = payload.get("ticketAssignee")
+        if (
+            payload.get("currentAssigneeEmail") in (None, "", [])
+            and payload.get("ticketAssigneeEmail") not in (None, "", [])
+        ):
+            payload["currentAssigneeEmail"] = payload.get("ticketAssigneeEmail")
+        if payload.get("ticketAssignee") in (None, "", []) and payload.get("currentAssigneeName") not in (None, "", []):
+            payload["ticketAssignee"] = payload.get("currentAssigneeName")
+        if (
+            payload.get("ticketAssigneeEmail") in (None, "", [])
+            and payload.get("currentAssigneeEmail") not in (None, "", [])
+        ):
+            payload["ticketAssigneeEmail"] = payload.get("currentAssigneeEmail")
+        mapping_payload = dict(payload)
+        top_level_alias_map = {
+            "ticketVender": "projectName",
+            "ticketModle": "moduleName",
+            "internalOwner": "internalOwnerName",
+            "internalOwnerEmail": "internalOwnerEmail",
+            "reporterName": "reporterName",
+            "reporterEmail": "reporterEmail",
+            "currentAssigneeName": "currentAssigneeName",
+            "currentAssigneeEmail": "currentAssigneeEmail",
+            "ticketStatus": "status",
+            "ticketStore": "ticketStore",
+            "ticketPos": "ticketPos",
+            "ticketSco": "ticketSco",
+            "stepReason": "stepReason",
+            "customerPriority": "customerPriority",
+            "internalPriority": "internalPriority",
+        }
+        for source_key, target_key in top_level_alias_map.items():
+            if source_key in payload and payload.get(source_key) not in (None, "", []):
+                payload.setdefault(target_key, payload.get(source_key))
         field_mapping_snapshot = {
-            str(item.get("targetField") or "").strip(): str(item.get("sourceField") or "").strip()
+            cls._normalize_bitable_pull_target_field(item.get("targetField")): str(
+                item.get("sourceField") or ""
+            ).strip()
             for item in field_mappings
             if str(item.get("targetField") or "").strip() and str(item.get("sourceField") or "").strip()
         }
@@ -4165,6 +4311,16 @@ class TicketSyncService:
         }
         extra_data = payload.get("extraData") if isinstance(payload.get("extraData"), dict) else {}
         extra_data = dict(extra_data or {})
+        external_field_mapping = (
+            dict(extra_data.get("external_field_mapping"))
+            if isinstance(extra_data.get("external_field_mapping"), dict)
+            else {}
+        )
+        external_field_mapping.update(mapping_payload)
+        external_field_mapping["bitableRecordId"] = record_id
+        if record_url:
+            external_field_mapping["bitableRecordUrl"] = record_url
+        extra_data["external_field_mapping"] = external_field_mapping
         extra_data["bitable_pull"] = {
             "recordId": record_id,
             "snapshotHash": cls._build_bitable_pull_snapshot_hash(
@@ -6005,8 +6161,8 @@ class TicketSyncService:
         else:
             if skip_ai_analysis_due_to_update_title:
                 logger.info(
-                    "外部工单同步跳过统一提取与标题AI：更新场景且已携带标题, ticket_no=%s",
-                    sync_object.ticket_no,
+                    f"外部工单同步跳过统一提取与标题AI：更新场景且已携带标题, "
+                    f"ticket_no={sync_object.ticket_no}"
                 )
             else:
                 try:
@@ -6083,7 +6239,9 @@ class TicketSyncService:
                     else (config.get("remoteSync") or {}).get("autoTranslateOnPull", True)
                 )
             else:
-                sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
+                sync_translate_enabled = bool(
+                    automation.auto_translate if automation is not None else config.get("autoTranslateOnSync", True)
+                )
             should_translate = translation_enabled and sync_translate_enabled and not translation_already_succeeded
             logger.info(
                 f"外部工单同步翻译决策: ticket_no={sync_object.ticket_no}, scene={sync_scene}, "
@@ -6410,7 +6568,7 @@ class TicketSyncService:
         query_db = SessionLocal()
         try:
             sync_object = TicketExternalSyncUpsertModel.model_validate(sync_payload)
-            current_user = CurrentUserModel.model_validate(current_user_payload)
+            current_user = CurrentUserModel.model_validate(cls._normalize_current_user_payload(current_user_payload))
             cls._execute_deferred_sync_post_process(query_db, sync_object, current_user, sync_scene)
         except Exception as exc:
             logger.warning(
@@ -6458,8 +6616,8 @@ class TicketSyncService:
 
         if skip_ai_analysis_due_to_update_title:
             logger.info(
-                "外部工单同步延后处理跳过统一提取与分类AI：更新场景且已携带标题, ticket_no=%s",
-                sync_object.ticket_no,
+                f"外部工单同步延后处理跳过统一提取与分类AI：更新场景且已携带标题, "
+                f"ticket_no={sync_object.ticket_no}"
             )
         else:
             try:
@@ -6511,7 +6669,9 @@ class TicketSyncService:
                     else (config.get("remoteSync") or {}).get("autoTranslateOnPull", True)
                 )
             else:
-                sync_translate_enabled = bool(config.get("autoTranslateOnSync", True))
+                sync_translate_enabled = bool(
+                    automation.auto_translate if automation is not None else config.get("autoTranslateOnSync", True)
+                )
             translation_already_succeeded = cls._has_successful_ai_translation(
                 ticket,
                 source_description=sync_object.description,

@@ -3,10 +3,13 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_task.scheduler_maintenance import (
     _build_bitable_pull_config_override,
 )
+from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 
@@ -750,6 +753,182 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             sync_object.extra_data["bitable_pull"]["fieldMappings"]["ticketNo"],
             "工单号",
         )
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["ticketVender"], "示例商家")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["ticketModle"], "支付模块")
+        self.assertEqual(sync_object.project_name, "示例商家")
+        self.assertEqual(sync_object.module_name, "支付模块")
+
+    def test_bitable_pull_accepts_module_name_target_alias(self):
+        """主动拉取目标字段使用 moduleName 时，应归一为 ticketModle 满足必填校验。"""
+        record = {
+            "record_id": "rec_101",
+            "fields": {
+                "工单号": "T-101",
+                "描述": "顾客支付时报错",
+                "优先级": "P1",
+                "商家": "示例商家",
+                "模块": "支付模块",
+                "提单人": "张三",
+                "创建时间": "2026-06-21 09:59:00",
+            },
+        }
+        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+            [
+                {"sourceField": "工单号", "targetField": "ticketNo"},
+                {"sourceField": "描述", "targetField": "description"},
+                {"sourceField": "优先级", "targetField": "internalPriority"},
+                {"sourceField": "商家", "targetField": "ticketVender"},
+                {"sourceField": "模块", "targetField": "moduleName"},
+                {"sourceField": "提单人", "targetField": "reporterName"},
+                {"sourceField": "创建时间", "targetField": "createTime"},
+            ]
+        )
+
+        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+            record=record,
+            config={"sourceSystem": "feishu_bitable_pull"},
+            field_mappings=field_mappings,
+        )
+
+        self.assertIsNotNone(sync_object)
+        self.assertEqual(sync_object.ticket_no, "T-101")
+        self.assertEqual(
+            sync_object.extra_data["bitable_pull"]["fieldMappings"]["ticketModle"],
+            "模块",
+        )
+
+    def test_bitable_pull_preserves_project_module_owner_mapping_for_detection(self):
+        """主动拉取映射出的项目、模块和内部负责人应保留给入库识别阶段使用。"""
+        record = {
+            "record_id": "rec_102",
+            "fields": {
+                "工单号": "T-102",
+                "描述": "Checkout failed",
+                "优先级": "P2",
+                "项目": "海外收银",
+                "模块": "POS - 支付",
+                "内部负责人": "李四",
+                "提单人": "张三",
+                "创建时间": "2026-06-24 09:59:00",
+            },
+        }
+        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+            [
+                {"sourceField": "工单号", "targetField": "ticketNo"},
+                {"sourceField": "描述", "targetField": "description"},
+                {"sourceField": "优先级", "targetField": "internalPriority"},
+                {"sourceField": "项目", "targetField": "projectName"},
+                {"sourceField": "模块", "targetField": "moduleName"},
+                {"sourceField": "内部负责人", "targetField": "internalOwnerName"},
+                {"sourceField": "提单人", "targetField": "reporterName"},
+                {"sourceField": "创建时间", "targetField": "createTime"},
+            ]
+        )
+
+        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+            record=record,
+            config={"sourceSystem": "feishu_bitable_pull"},
+            field_mappings=field_mappings,
+        )
+
+        self.assertIsNotNone(sync_object)
+        self.assertEqual(sync_object.project_name, "海外收银")
+        self.assertEqual(sync_object.module_name, "POS - 支付")
+        self.assertEqual(sync_object.internal_owner_name, "李四")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["ticketVender"], "海外收银")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["ticketModle"], "POS - 支付")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["internalOwner"], "李四")
+
+    def test_bitable_pull_uses_customer_priority_when_internal_priority_missing(self):
+        """主动拉取内部优先级为空时，应使用对方优先级兜底，避免优先级反写或缺失。"""
+        record = {
+            "record_id": "rec_priority",
+            "fields": {
+                "工单号": "T-PRIORITY",
+                "描述": "Checkout failed",
+                "对方优先级": "P1",
+                "内部优先级": "",
+                "项目": "海外收银",
+                "模块": "POS - 支付",
+                "提单人": "张三",
+                "创建时间": "2026-06-24 09:59:00",
+            },
+        }
+        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+            [
+                {"sourceField": "工单号", "targetField": "ticketNo"},
+                {"sourceField": "描述", "targetField": "description"},
+                {"sourceField": "对方优先级", "targetField": "customerPriority"},
+                {"sourceField": "内部优先级", "targetField": "internalPriority"},
+                {"sourceField": "项目", "targetField": "projectName"},
+                {"sourceField": "模块", "targetField": "moduleName"},
+                {"sourceField": "提单人", "targetField": "reporterName"},
+                {"sourceField": "创建时间", "targetField": "createTime"},
+            ]
+        )
+
+        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+            record=record,
+            config={"sourceSystem": "feishu_bitable_pull"},
+            field_mappings=field_mappings,
+        )
+
+        self.assertIsNotNone(sync_object)
+        self.assertEqual(sync_object.customer_priority, "P1")
+        self.assertEqual(sync_object.internal_priority, "P1")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["customerPriority"], "P1")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["internalPriority"], "P1")
+
+    def test_bitable_pull_preserves_current_assignee_and_internal_owner_aliases(self):
+        """主动拉取当前处理人和内部负责人别名应进入顶层模型和外部字段快照。"""
+        record = {
+            "record_id": "rec_person",
+            "fields": {
+                "工单号": "T-PERSON",
+                "描述": "Checkout failed",
+                "内部优先级": "P2",
+                "项目": "海外收银",
+                "模块": "POS - 支付",
+                "提单人": "张三",
+                "当前负责人": "李四",
+                "当前负责人邮箱": "lisi@example.com",
+                "内部负责人": "王五",
+                "内部负责人邮箱": "wangwu@example.com",
+                "创建时间": "2026-06-24 09:59:00",
+            },
+        }
+        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+            [
+                {"sourceField": "工单号", "targetField": "ticketNo"},
+                {"sourceField": "描述", "targetField": "description"},
+                {"sourceField": "内部优先级", "targetField": "internalPriority"},
+                {"sourceField": "项目", "targetField": "projectName"},
+                {"sourceField": "模块", "targetField": "moduleName"},
+                {"sourceField": "提单人", "targetField": "reporterName"},
+                {"sourceField": "当前负责人", "targetField": "ticketAssigneeName"},
+                {"sourceField": "当前负责人邮箱", "targetField": "ticketAssigneeEmail"},
+                {"sourceField": "内部负责人", "targetField": "internalOwnerName"},
+                {"sourceField": "内部负责人邮箱", "targetField": "internalOwnerEmail"},
+                {"sourceField": "创建时间", "targetField": "createTime"},
+            ]
+        )
+
+        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+            record=record,
+            config={"sourceSystem": "feishu_bitable_pull"},
+            field_mappings=field_mappings,
+        )
+
+        self.assertIsNotNone(sync_object)
+        self.assertEqual(sync_object.current_assignee_name, "李四")
+        self.assertEqual(sync_object.internal_owner_name, "王五")
+        external_mapping = sync_object.extra_data["external_field_mapping"]
+        self.assertEqual(external_mapping["ticketAssignee"], "李四")
+        self.assertEqual(external_mapping["currentAssigneeName"], "李四")
+        self.assertEqual(external_mapping["ticketAssigneeEmail"], "lisi@example.com")
+        self.assertEqual(external_mapping["currentAssigneeEmail"], "lisi@example.com")
+        self.assertEqual(external_mapping["internalOwner"], "王五")
+        self.assertEqual(external_mapping["internalOwnerEmail"], "wangwu@example.com")
 
     def test_bitable_record_url_returns_empty_when_only_record_id_exists(self):
         """仅有 record_id 且没有飞书返回的详情 URL 时，不应伪造不可访问链接。"""
@@ -942,6 +1121,282 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         self.assertFalse(result["skipped"])
         self.assertEqual(result["createdAfter"], "2026-06-22 10:48:00")
+
+    def test_bitable_pull_force_sync_bypasses_snapshot_skip(self):
+        """强制同步时应忽略 snapshotHash 去重并重新调用外部同步入库。"""
+        config = TicketSyncService._default_sync_config()
+        config["bitablePull"].update(
+            {
+                "enabled": True,
+                "appId": "app_id",
+                "appSecret": "app_secret",
+                "appToken": "app_token",
+                "tableId": "table_id",
+                "fieldMappings": [
+                    {"sourceField": "工单号", "targetField": "ticketNo"},
+                    {"sourceField": "描述", "targetField": "description"},
+                    {"sourceField": "优先级", "targetField": "internalPriority"},
+                    {"sourceField": "项目", "targetField": "projectName"},
+                    {"sourceField": "模块", "targetField": "moduleName"},
+                    {"sourceField": "提单人", "targetField": "reporterName"},
+                    {"sourceField": "创建时间", "targetField": "createTime"},
+                ],
+                "forceSync": True,
+            }
+        )
+        record = {
+            "record_id": "rec_force",
+            "fields": {
+                "工单号": "T-FORCE",
+                "描述": "Checkout failed",
+                "优先级": "P2",
+                "项目": "海外收银",
+                "模块": "POS - 支付",
+                "提单人": "张三",
+                "创建时间": "2026-06-24 09:59:00",
+            },
+        }
+        existing_ticket = SimpleNamespace(
+            extra_data={"bitable_pull": {"recordId": "rec_force", "snapshotHash": "same"}}
+        )
+
+        with (
+            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[record]),
+            patch.object(
+                TicketSyncService,
+                "_should_skip_bitable_pull_record",
+                return_value=(True, "snapshot_not_changed"),
+            ) as skip_check,
+            patch.object(
+                TicketSyncService,
+                "dispatch_deferred_sync_post_process_task",
+                return_value={"mode": "celery"},
+            ),
+            patch.object(
+                TicketSyncService,
+                "sync_external_ticket",
+                return_value=SimpleNamespace(is_success=True),
+            ) as sync_external,
+            patch(
+                "modules.ticket.service.ticket_sync_service.TicketDao.get_ticket_by_no",
+                return_value=existing_ticket,
+            ),
+        ):
+            result = TicketSyncService.run_bitable_pull_services(
+                db=SimpleNamespace(),
+                trigger_source="test",
+                bitable_pull_override=_build_bitable_pull_config_override({"forceSync": True}),
+            )
+
+        skip_check.assert_not_called()
+        sync_external.assert_called_once()
+        self.assertTrue(result["forceSync"])
+        self.assertEqual(result["syncedCount"], 1)
+        self.assertEqual(result["skippedCount"], 0)
+
+    def test_bitable_pull_uses_external_field_model_required_fields_before_ingest(self):
+        """主动拉取应按外部工单字段模型必填项校验，字段不全时不入库也不触发后处理。"""
+        config = TicketSyncService._default_sync_config()
+        config["externalFieldModel"] = {
+            "fields": [
+                {"fieldName": "ticketNo", "label": "工单号", "required": True},
+                {"fieldName": "description", "label": "描述", "required": True},
+                {"fieldName": "internalPriority", "label": "内部优先级", "required": True},
+                {"fieldName": "ticketVender", "label": "项目", "required": True},
+                {"fieldName": "ticketModle", "label": "模块", "required": True},
+                {"fieldName": "createTime", "label": "创建时间", "required": True},
+                {"fieldName": "reporterName", "label": "提单人", "required": True},
+            ]
+        }
+        config["externalSyncRequiredFields"] = ["ticketNo", "description"]
+        config["bitablePull"].update(
+            {
+                "enabled": True,
+                "appId": "app_id",
+                "appSecret": "app_secret",
+                "appToken": "app_token",
+                "tableId": "table_id",
+                "fieldMappings": [
+                    {"sourceField": "工单号", "targetField": "ticketNo"},
+                    {"sourceField": "描述", "targetField": "description"},
+                    {"sourceField": "优先级", "targetField": "internalPriority"},
+                    {"sourceField": "项目", "targetField": "projectName"},
+                    {"sourceField": "提单人", "targetField": "reporterName"},
+                    {"sourceField": "创建时间", "targetField": "createTime"},
+                ],
+            }
+        )
+        record = {
+            "record_id": "rec_missing_module",
+            "fields": {
+                "工单号": "T-MISSING-MODULE",
+                "描述": "Checkout failed",
+                "优先级": "P2",
+                "项目": "海外收银",
+                "提单人": "张三",
+                "创建时间": "2026-06-24 09:59:00",
+            },
+        }
+
+        with (
+            patch.object(
+                TicketSyncService,
+                "_load_sync_config",
+                return_value=TicketSyncService._normalize_sync_config(config),
+            ),
+            patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[record]),
+            patch.object(TicketSyncService, "sync_external_ticket") as sync_external,
+            patch.object(TicketSyncService, "dispatch_deferred_sync_post_process_task") as dispatch_deferred,
+        ):
+            result = TicketSyncService.run_bitable_pull_services(
+                db=SimpleNamespace(),
+                trigger_source="test",
+                bitable_pull_override=_build_bitable_pull_config_override({"createdAfter": "2026-06-24 00:00:00"}),
+            )
+
+        sync_external.assert_not_called()
+        dispatch_deferred.assert_not_called()
+        self.assertEqual(result["syncedCount"], 0)
+        self.assertEqual(result["failedCount"], 1)
+        self.assertEqual(result["failures"][0]["recordId"], "rec_missing_module")
+        self.assertEqual(result["failures"][0]["reason"], "record_to_sync_object_failed")
+
+    def test_external_sync_uses_automation_translate_switch_when_present(self):
+        """外部同步传入自动化配置时，翻译开关应优先使用本次场景配置。"""
+        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+            record={
+                "record_id": "rec_translate",
+                "fields": {
+                    "工单号": "T-TRANS",
+                    "描述": "Checkout failed",
+                    "优先级": "P2",
+                    "项目": "海外收银",
+                    "模块": "POS - 支付",
+                    "提单人": "张三",
+                    "创建时间": "2026-06-24 09:59:00",
+                },
+            },
+            config={"sourceSystem": "feishu_bitable_pull"},
+            field_mappings=TicketSyncService._normalize_bitable_field_mappings(
+                [
+                    {"sourceField": "工单号", "targetField": "ticketNo"},
+                    {"sourceField": "描述", "targetField": "description"},
+                    {"sourceField": "优先级", "targetField": "internalPriority"},
+                    {"sourceField": "项目", "targetField": "projectName"},
+                    {"sourceField": "模块", "targetField": "moduleName"},
+                    {"sourceField": "提单人", "targetField": "reporterName"},
+                    {"sourceField": "创建时间", "targetField": "createTime"},
+                ]
+            ),
+        )
+        sync_object = sync_object.model_copy(
+            update={
+                "automation": TicketSyncAutomationModel.model_validate({
+                    "autoIdentify": False,
+                    "autoLogPull": False,
+                    "autoAiAnalysis": False,
+                    "autoTranslate": True,
+                })
+            }
+        )
+        current_user = CurrentUserModel.model_validate(TicketSyncService._build_system_current_user_payload())
+
+        with (
+            patch.object(
+                TicketSyncService,
+                "_load_sync_config",
+                return_value={
+                    **TicketSyncService._default_sync_config(),
+                    "autoTranslateOnSync": False,
+                    "externalSyncBitable": {"enabled": False},
+                },
+            ),
+            patch.object(TicketSyncService, "_detect_fields", return_value={}),
+            patch.object(TicketSyncService, "_translate_sync_description") as translate_description,
+            patch.object(TicketSyncService, "_build_upsert_payload", return_value=({}, {}, 1)),
+            patch.object(TicketSyncService, "sync_step_reason_comments", return_value={}),
+            patch.object(
+                TicketSyncService,
+                "_run_auto_ticket_ai_classification",
+                side_effect=lambda _db, ticket, **_kwargs: (ticket, {}),
+            ),
+            patch.object(TicketSyncService, "run_sync_automation", return_value={}),
+            patch.object(
+                TicketSyncService,
+                "_finalize_publish_state_after_post_process",
+                side_effect=lambda _db, ticket, **_kwargs: (ticket, {}, None),
+            ),
+            patch.object(TicketSyncService, "extract_sync_summary", return_value={}),
+            patch.object(TicketSyncService, "_resolve_sync_title", return_value=("T-TRANS", {"mode": "raw"})),
+            patch.object(
+                TicketSyncService,
+                "_enrich_external_person_emails_from_bitable",
+                side_effect=lambda _c, obj, _t: obj,
+            ),
+            patch.object(TicketLightAiService, "is_translation_enabled", return_value=True),
+            patch.object(TicketLightAiService, "extract_ticket_sync_fields", return_value=({}, {"skipped": True})),
+            patch("modules.ticket.service.ticket_sync_service.TicketDao.get_ticket_by_no", return_value=None),
+            patch("modules.ticket.service.ticket_sync_service.TicketDao.add_ticket") as add_ticket,
+            patch("modules.ticket.service.ticket_sync_service.TicketDao.add_status_history"),
+            patch("modules.ticket.service.ticket_sync_service.TicketDao.add_message"),
+            patch("modules.ticket.service.ticket_sync_service.TicketDao.add_event"),
+            patch("modules.ticket.service.ticket_sync_service.TicketDao.get_ticket_by_id") as get_ticket_by_id,
+            patch(
+                "modules.ticket.service.ticket_sync_service.TicketService.get_ticket_detail_services",
+                return_value={"ticketId": 1, "extraData": {}},
+            ),
+        ):
+            ticket = SimpleNamespace(
+                ticket_id=1,
+                extra_data={},
+                title="T-TRANS",
+                description="已翻译",
+                status="pending",
+            )
+            add_ticket.return_value = ticket
+            get_ticket_by_id.return_value = ticket
+            translate_description.return_value = (
+                "结账失败",
+                {"translated_text": "结账失败"},
+                "Checkout failed",
+            )
+
+            result = TicketSyncService.sync_external_ticket(
+                db=SimpleNamespace(commit=lambda: None, rollback=lambda: None),
+                sync_object=sync_object,
+                current_user=current_user,
+                sync_scene="external_sync",
+                defer_post_process=False,
+            )
+
+        self.assertTrue(result.is_success)
+        translate_description.assert_called_once()
+        self.assertTrue(translate_description.call_args.kwargs["enabled"])
+
+    def test_system_current_user_payload_matches_current_user_model(self):
+        """后台系统用户载荷应满足 CurrentUserModel 校验，避免 Celery 反序列化失败。"""
+        payload = TicketSyncService._build_system_current_user_payload()
+
+        current_user = CurrentUserModel.model_validate(payload)
+
+        self.assertEqual(current_user.permissions, [])
+        self.assertEqual(current_user.roles, [])
+        self.assertEqual(current_user.user.user_id, 0)
+        self.assertEqual(current_user.user.user_name, "system")
+
+    def test_deferred_current_user_payload_accepts_legacy_user_only_payload(self):
+        """延后后处理应兼容历史只包含 user 的任务载荷。"""
+        payload = TicketSyncService._normalize_current_user_payload(
+            {"user": {"user_id": 0, "user_name": "system", "nick_name": "system"}}
+        )
+
+        current_user = CurrentUserModel.model_validate(payload)
+
+        self.assertEqual(current_user.permissions, [])
+        self.assertEqual(current_user.roles, [])
+        self.assertEqual(current_user.user.user_id, 0)
+        self.assertEqual(current_user.user.user_name, "system")
 
     def test_bitable_pull_records_filter_builds_default_cloud_time_filter(self):
         """主动拉取应构造飞书云端创建时间和更新时间过滤条件。"""

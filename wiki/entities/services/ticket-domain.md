@@ -6,7 +6,7 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-06-18
+freshness: 2026-06-24
 created: 2026-05-20
 updated: 2026-06-21
 related_files:
@@ -84,6 +84,13 @@ graph TD
 - 主动拉取记录会把 `recordId/snapshotHash/fieldMappings/sourceSystem/pulledAt` 落到 `ticket.extra_data.bitable_pull`；同一记录内容未变化时直接跳过，避免定时任务反复递增同步 revision。
 - 飞书多维表格搜索结果中的 `record_id` 不能直接拼成可访问详情链接；当前环境下 `records/search` 实际可能不返回 `record_url/shared_url`，因此服务会继续按缺失记录的 `record_id` 调用 `records/batch_get(with_shared_url=true)` 批量补齐 `shared_url`，再写入 `ticket_url/source.recordUrl/detailUrl`；若补查后仍为空，则保持空字符串，不再伪造 `...?record=record_id` 假链接。
 - 主动拉取映射中的“多维字段”支持按当前配置读取飞书字段元数据作为下拉选项；字段元数据读取失败时才回退到不带过滤条件的样例记录推断字段，同时保留手动输入。
+- 主动拉取定时任务场景使用完整系统用户上下文执行入库和延后后处理，Celery payload 包含 `permissions/roles/userId/userName`；延后后处理入口会兼容历史只包含 `user` 且字段为 snake_case 的任务载荷，避免 `CurrentUserModel` 校验失败。
+- 主动拉取字段映射目标字段兼容 `moduleName/module_name/ticketModel/ticket_model`，统一归一为 `ticketModle` 后再执行必填校验；但如果来源多维字段本身为空，仍会按缺失必填字段跳过该记录。
+- 主动拉取新增 `forceSync` 运行参数和页面开关；开启后只绕过本地快照去重，是否拉到历史远端数据仍取决于 `createdAfter/filterFormula/viewId`。任务参数兼容 `forceSync` 和 `force_sync`。
+- 主动拉取会把映射后的 `ticketVender/ticketModle/internalOwner` 写入 `extra_data.external_field_mapping`，并同步到 `projectName/moduleName/internalOwnerName`，避免 Pydantic 模型丢弃外部字段后导致项目、模块、内部负责人为空。
+- 主动拉取不经过外部推送 controller 的入参归一化，因此 `_build_bitable_pull_sync_object` 内会补齐主动拉取专用兼容：内部优先级为空时使用对方优先级，当前处理人字段兼容 `ticketAssigneeName/assigneeName` 等别名，并同步写入顶层模型和 `extra_data.external_field_mapping`；外部推送 `/ticket/sync/external` 逻辑不变。
+- 主动拉取必填校验直接读取 `externalFieldModel.fields[].required`，不再优先使用历史兼容字段 `externalSyncRequiredFields`；缺少必填字段的记录只计入失败汇总和 `missing_required_fields` 日志，不调用入库，也不会触发延后后处理或自动群消息。
+- 主动拉取传入 `automation.autoTranslate` 时，外部同步主链路和延后后处理都会优先使用该场景开关；只有未传 automation 时才回退全局 `autoTranslateOnSync`。
 - 远端拉取由 `ticket.sync.automation.remoteSync.enabled` 控制，拉取入库不会再次查询公网多维表格；它只使用远端 payload 已携带的邮箱/姓名，并按内网本地 `assigneeMappings` 或邮箱用户匹配解析人员。
 - 工单项目/模块选项直接复用 HRM 公共项目管理，不单独维护工单项目库；后端按 HRM 的正常状态值 `QtrDataStatusEnum.normal = 2` 过滤有效项。
 - HRM 模块的 `module_code` 约束已调整为“同一项目下唯一”，不同项目允许复用同一业务 code，便于按业务域横向统计问题分布。

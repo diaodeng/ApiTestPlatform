@@ -1,5 +1,24 @@
 ## 2026-06-24
 
+1. 多维表格主动拉取必填校验改为直接读取“外部工单字段模型”中 `required=true` 的字段，避免历史 `externalSyncRequiredFields` 与字段模型漂移。
+2. 字段不全的主动拉取记录会转换失败并计入 `failedCount`，不会入库，也不会触发延后后处理和自动群消息。
+3. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-pull-required-field-model.md`。
+
+1. 修复飞书多维表格主动拉取优先级兜底：内部优先级来源字段为空、对方优先级有值时，主动拉取会用对方优先级补齐内部优先级。
+2. 主动拉取字段映射新增当前处理人别名兼容，并把当前处理人、内部负责人、优先级同步到顶层模型和 `extraData.external_field_mapping`，避免落库后人员为空。
+3. 本次只调整主动拉取转换层，不修改外部推送 `/ticket/sync/external` 的归一化逻辑。
+4. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-pull-priority-person-fallback.md`。
+
+1. 飞书多维表格主动拉取新增 `forceSync` 强制同步参数，开启后忽略本地 `recordId + snapshotHash` 去重，重新入库并触发后处理。
+2. 主动拉取字段映射会保留 `ticketVender/ticketModle/internalOwner` 到 `extraData.external_field_mapping`，并同步写入 `projectName/moduleName/internalOwnerName`，避免项目、模块、内部负责人入库为空。
+3. 主动拉取自动翻译现在优先读取 `bitablePull.automation.autoTranslate`，不再被全局 `autoTranslateOnSync=false` 误关。
+4. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-pull-force-sync-field-translate.md`。
+
+1. 修复飞书多维表格主动拉取入库成功后 Celery 延后后处理用户上下文不完整的问题：系统用户载荷补齐 `permissions/roles`，并使用 `userId/userName/nickName` alias，避免 `CurrentUserModel` 校验失败。
+2. 延后后处理入口兼容历史只包含 `user` 的任务载荷，旧的 `user_id/user_name/nick_name` 会转换成模型可识别字段。
+3. 主动拉取字段映射目标字段兼容 `moduleName/module_name/ticketModel/ticket_model`，统一归一为 `ticketModle`，避免模块字段别名被必填校验误判为缺失。
+4. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-pull-celery-user-context.md`。
+
 1. 修复“飞书多维表格主动拉取”字段映射区读取表格字段失败的问题：字段预览优先读取飞书字段元数据，不再依赖最近一小时或过滤条件下是否有记录。
 2. 字段元数据读取失败时，回退样例记录推断字段，但会清空 `filterFormula` 和 `createdAfter`，避免运行时过滤条件导致 `records=0`。
 3. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-field-preview-metadata.md`。

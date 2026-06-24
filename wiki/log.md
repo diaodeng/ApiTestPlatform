@@ -3,10 +3,42 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-06-23
+updated: 2026-06-24
 ---
 
 # 操作日志
+
+## [2026-06-24] INGEST-CODE | 多维表格主动拉取必填字段模型校验
+- 触发：用户确认主动拉取多维表格数据是否按“外部工单字段模型”做必填字段校验，并要求字段不全时不要入库或发群消息。
+- 架构层：工单域 / 飞书多维表格主动拉取 / 外部字段模型 / 群消息后处理
+- 创建的页面：`web/public/docs/2026-06-24-ticket-bitable-pull-required-field-model.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`externalFieldModel.fields[].required` -> `run_bitable_pull_services` 必填字段推导 -> `_build_bitable_pull_sync_object` 记录级校验 -> 失败记录不调用 `sync_external_ticket` / `dispatch_deferred_sync_post_process_task`。
+- 关键结论：主动拉取现在直接以外部工单字段模型为必填校验口径；字段不全只计入 `failedCount` 和 warning 日志，不入库、不触发自动群消息。
+
+## [2026-06-24] INGEST-CODE | 多维表格主动拉取优先级与人员字段兜底
+- 触发：用户反馈多维表格主动拉取中对方优先级和内部优先级反了，且部分内部负责人、当前处理人为空；要求内部优先级无值时使用外部优先级，不影响外部推送逻辑。
+- 架构层：工单域 / 飞书多维表格主动拉取 / 外部同步入库字段映射
+- 创建的页面：`web/public/docs/2026-06-24-ticket-bitable-pull-priority-person-fallback.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`bitablePull.fieldMappings` -> `_build_bitable_pull_sync_object` 主动拉取专用归一化 -> `TicketExternalSyncUpsertModel` 顶层字段与 `extraData.external_field_mapping` -> `_detect_fields/_build_upsert_payload` 入库。
+- 关键结论：问题位置不在外部推送 controller，而在主动拉取绕过 controller 归一化后直接构造同步模型；本次只补主动拉取转换层，外部推送逻辑不变。
+
+## [2026-06-24] INGEST-CODE | 多维表格主动拉取强制同步与字段保留
+- 触发：用户要求主动拉取多维表格数据支持强制同步，并反馈入库项目、模块、内部负责人为空，执行完成后未翻译。
+- 架构层：工单域 / 飞书多维表格主动拉取 / 外部同步入库 / 翻译自动化
+- 创建的页面：`web/public/docs/2026-06-24-ticket-bitable-pull-force-sync-field-translate.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/module_task/scheduler_maintenance.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/src/views/ticket/syncAutomation/index.vue`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`forceSync/force_sync` -> 主动拉取运行配置 -> 绕过 `snapshotHash` 跳过 -> 重新入库与延后后处理；字段映射 -> `extraData.external_field_mapping` + 顶层 `projectName/moduleName/internalOwnerName` -> 项目/模块/人员识别；`automation.autoTranslate` -> 外部同步翻译决策 -> 主链路与延后后处理一致执行。
+- 关键结论：强制同步只绕过去重，不扩大飞书查询范围；历史数据重拉仍需配合 `createdAfter/filterFormula/viewId`。主动拉取来源字段为空时不会凭空补出项目、模块或负责人。
+
+## [2026-06-24] INGEST-CODE | 多维表格主动拉取 Celery 用户上下文修复
+- 触发：用户反馈多维表格主动拉取任务入库后，延后后处理 Celery 报 `CurrentUserModel.permissions/roles Field required`，随后记录转换又提示缺少 `ticketModle`。
+- 架构层：工单域 / 飞书多维表格主动拉取 / Celery 延后后处理 / 用户上下文
+- 创建的页面：`web/public/docs/2026-06-24-ticket-bitable-pull-celery-user-context.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`run_bitable_pull_services` 定时任务系统用户 -> 完整 `CurrentUserModel` payload -> Celery `run_deferred_sync_post_process` -> 自动 AI、自动化识别、相似工单向量化、群推送等延后动作继续执行；字段映射目标别名 -> `ticketModle` 规范字段 -> 必填校验。
+- 关键结论：系统用户 payload 必须包含 `permissions=[]`、`roles=[]`，且用户字段要使用 Pydantic alias `userId/userName/nickName`；历史只包含 `user_id/user_name/nick_name` 的队列任务在入口处转换兼容。`moduleName/module_name/ticketModel/ticket_model` 目标字段会归一为 `ticketModle`，但来源字段为空仍会跳过记录。
 
 ## [2026-06-23] INGEST-CODE | 日志拉取参数示例与日期预填
 - 触发：用户要求日志拉取弹窗支持从参数示例下拉填入当前参数，并在工单提取门店、POS 编号时同步提取日期预填到 modifyTime。
