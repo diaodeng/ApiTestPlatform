@@ -2087,8 +2087,8 @@ class TicketSyncService:
             time_conditions.append(
                 {
                     "field_name": normalized_field,
-                    "operator": "isGreaterEqual",
-                    "value": filter_millis,
+                    "operator": "isGreater",
+                    "value": ["ExactDate",f"{filter_millis}"],
                 }
             )
 
@@ -5985,9 +5985,7 @@ class TicketSyncService:
                     )
                 except Exception as exc:
                     logger.warning(
-                        "外部工单同步统一提取执行失败，已继续后续流程: ticket_no=%s, error=%s",
-                        sync_object.ticket_no,
-                        exc,
+                        f"外部工单同步统一提取执行失败，已继续后续流程: ticket_no={sync_object.ticket_no}, error={exc}"
                     )
                     ai_extract_result = {}
                     ai_extract_meta = {"skipped": True, "error": str(exc)}
