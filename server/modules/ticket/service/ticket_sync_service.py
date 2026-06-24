@@ -2019,33 +2019,51 @@ class TicketSyncService:
     @classmethod
     def _fill_dynamic_time_filter_values(
         cls,
-        conditions: list[Any],
+        filter_item: Any,
         *,
         time_field_names: set[str],
-        filter_millis: int,
-    ) -> list[dict[str, Any]]:
+        filter_value: Any,
+    ) -> Any:
         """
-        补齐时间过滤条件中的动态 value。
+        递归补齐时间过滤条件中的动态 value。
 
-        :param conditions: 飞书 filter 条件列表。
+        :param filter_item: 飞书 filter 条件、条件组或条件列表。
         :param time_field_names: 可识别为时间字段的字段名集合。
-        :param filter_millis: 时间窗口下限毫秒时间戳。
-        :return: 补齐后的扁平条件列表。
+        :param filter_value: 时间窗口下限值。
+        :return: 补齐后的 filter 条件结构。
         """
-        normalized_conditions: list[dict[str, Any]] = []
-        for condition in conditions:
-            if not isinstance(condition, dict):
-                continue
-            normalized_condition = dict(condition)
-            if isinstance(normalized_condition.get("conditions"), list):
-                raise ValueError("过滤条件暂不支持嵌套条件组，请使用飞书 records/search 扁平 filter JSON")
-            if cls._condition_needs_dynamic_time_value(
-                normalized_condition,
+        if isinstance(filter_item, list):
+            return [
+                cls._fill_dynamic_time_filter_values(
+                    item,
+                    time_field_names=time_field_names,
+                    filter_value=filter_value,
+                )
+                for item in filter_item
+                if isinstance(item, dict)
+            ]
+        if not isinstance(filter_item, dict):
+            return filter_item
+
+        normalized_filter = dict(filter_item)
+        if isinstance(normalized_filter.get("children"), list):
+            normalized_filter["children"] = cls._fill_dynamic_time_filter_values(
+                normalized_filter.get("children"),
                 time_field_names=time_field_names,
-            ):
-                normalized_condition["value"] = filter_millis
-            normalized_conditions.append(normalized_condition)
-        return normalized_conditions
+                filter_value=filter_value,
+            )
+        if isinstance(normalized_filter.get("conditions"), list):
+            normalized_filter["conditions"] = cls._fill_dynamic_time_filter_values(
+                normalized_filter.get("conditions"),
+                time_field_names=time_field_names,
+                filter_value=filter_value,
+            )
+        if cls._condition_needs_dynamic_time_value(
+            normalized_filter,
+            time_field_names=time_field_names,
+        ):
+            normalized_filter["value"] = filter_value
+        return normalized_filter
 
     @classmethod
     def _build_bitable_pull_time_filters(
@@ -2070,14 +2088,9 @@ class TicketSyncService:
             return [parsed_filter] if parsed_filter else []
 
         filter_millis = cls._datetime_to_bitable_filter_millis(created_after)
-        conditions = parsed_filter.get("conditions") if isinstance(parsed_filter.get("conditions"), list) else []
+        filter_value = ["ExactDate", f"{filter_millis}"]
         time_field_names = {str(updated_at_field or "").strip(), str(create_time_field or "").strip()}
         time_field_names = {item for item in time_field_names if item}
-        normalized_conditions = cls._fill_dynamic_time_filter_values(
-            conditions,
-            time_field_names=time_field_names,
-            filter_millis=filter_millis,
-        )
 
         time_conditions = []
         for field_name in (updated_at_field, create_time_field):
@@ -2088,28 +2101,29 @@ class TicketSyncService:
                 {
                     "field_name": normalized_field,
                     "operator": "isGreater",
-                    "value": ["ExactDate",f"{filter_millis}"],
+                    "value": filter_value,
                 }
             )
 
-        if not time_conditions:
-            return [{"conjunction": parsed_filter.get("conjunction") or "and", "conditions": normalized_conditions}]
-        if not normalized_conditions:
+        if not parsed_filter:
             return [{"conjunction": "or", "conditions": time_conditions}]
 
-        base_conjunction = str(parsed_filter.get("conjunction") or "and").lower()
-        if base_conjunction == "or":
-            base_condition_groups = [[condition] for condition in normalized_conditions]
-        else:
-            base_condition_groups = [normalized_conditions]
-        return [
-            {
-                "conjunction": "and",
-                "conditions": [*base_group, time_condition],
-            }
-            for base_group in base_condition_groups
-            for time_condition in time_conditions
-        ]
+        normalized_filter = cls._fill_dynamic_time_filter_values(
+            parsed_filter,
+            time_field_names=time_field_names,
+            filter_value=filter_value,
+        )
+        if isinstance(normalized_filter.get("children"), list):
+            if time_conditions:
+                normalized_filter["children"].append(
+                    {
+                        "conjunction": "or",
+                        "conditions": time_conditions,
+                    }
+                )
+            return [normalized_filter]
+
+        return [normalized_filter]
 
     @classmethod
     def _query_bitable_pull_records(

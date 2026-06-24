@@ -817,3 +817,10 @@ updated: 2026-06-23
 - 创建的页面：`web/public/docs/2026-06-24-ticket-ai-analysis-dialog-defaults.md`
 - 更新的页面：`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`
 - 变更传播链：AI 分析弹窗默认值 -> Provider 绑定 Agent 前端联动 -> 提交成功立即关闭弹窗 -> 后台短轮询保留快速失败提示。
+
+## [2026-06-24] INGEST-CODE | 多维表格主动拉取嵌套时间过滤修复
+- 触发：用户反馈 `TicketSyncService._build_bitable_pull_time_filters` 支持嵌套 filter 后，内部时间字段值无法替换；期望嵌套模式在最外层 `children` 追加时间范围，同时递归补齐内部时间字段值，扁平模式只补齐已有字段。
+- 架构层：工单域 / 飞书多维表格集成 / 同步自动化配置
+- 创建的页面：`web/public/docs/2026-06-24-ticket-bitable-nested-time-filter.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-06-22-ticket-bitable-pull-created-after.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`bitablePull.filterFormula` 嵌套 filter -> `_fill_dynamic_time_filter_values` 递归补值 -> `_build_bitable_pull_time_filters` 顶层 children 追加默认时间窗口 -> 飞书 `records/search` 请求过滤。

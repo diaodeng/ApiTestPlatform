@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from module_task.scheduler_maintenance import (
     _build_bitable_pull_config_override,
-    _ensure_bitable_pull_created_after,
 )
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
@@ -708,6 +707,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "标题": "支付失败",
                 "描述": "顾客支付时报错",
                 "优先级": "P1",
+                "商家": "示例商家",
+                "模块": "支付模块",
                 "提单人": "张三",
                 "创建时间": "2026-06-21 09:59:00",
             },
@@ -725,6 +726,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             {"sourceField": "标题", "targetField": "title"},
             {"sourceField": "描述", "targetField": "description"},
             {"sourceField": "优先级", "targetField": "internalPriority"},
+            {"sourceField": "商家", "targetField": "ticketVender"},
+            {"sourceField": "模块", "targetField": "ticketModle"},
             {"sourceField": "提单人", "targetField": "reporterName"},
             {"sourceField": "创建时间", "targetField": "createTime"},
         ]
@@ -812,34 +815,163 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
     def test_bitable_pull_override_adds_default_created_after(self):
         """主动拉取任务未指定时间时，应默认查询当前时间前 1 小时后的记录。"""
         before_call = datetime.now() - timedelta(hours=1, seconds=2)
-        override = _ensure_bitable_pull_created_after(_build_bitable_pull_config_override({}))
-        after_call = datetime.now() - timedelta(hours=1) + timedelta(seconds=2)
-        created_after = datetime.strptime(override["createdAfter"], "%Y-%m-%d %H:%M:%S")
+        config = TicketSyncService._default_sync_config()
+        config["bitablePull"].update(
+            {
+                "enabled": True,
+                "appId": "app_id",
+                "appSecret": "app_secret",
+                "appToken": "app_token",
+                "tableId": "table_id",
+                "fieldMappings": [{"sourceField": "工单号", "targetField": "ticketNo"}],
+            }
+        )
 
+        with (
+            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[]),
+        ):
+            result = TicketSyncService.run_bitable_pull_services(
+                db=SimpleNamespace(),
+                trigger_source="test",
+                bitable_pull_override=_build_bitable_pull_config_override({}),
+            )
+
+        after_call = datetime.now() - timedelta(hours=1) + timedelta(seconds=2)
+        created_after = datetime.strptime(result["createdAfter"], "%Y-%m-%d %H:%M:%S")
+        self.assertFalse(result["skipped"])
         self.assertGreaterEqual(created_after, before_call.replace(microsecond=0))
         self.assertLessEqual(created_after, after_call.replace(microsecond=0))
 
     def test_bitable_pull_override_keeps_specified_created_after(self):
         """主动拉取任务指定时间时，应使用指定时间作为创建时间下限。"""
-        override = _ensure_bitable_pull_created_after(
-            _build_bitable_pull_config_override({"created_after": "2026-06-22 10:48:00"})
+        config = TicketSyncService._default_sync_config()
+        config["bitablePull"].update(
+            {
+                "enabled": True,
+                "appId": "app_id",
+                "appSecret": "app_secret",
+                "appToken": "app_token",
+                "tableId": "table_id",
+                "fieldMappings": [{"sourceField": "工单号", "targetField": "ticketNo"}],
+            }
         )
 
-        self.assertEqual(override["createdAfter"], "2026-06-22 10:48:00")
+        with (
+            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[]),
+        ):
+            result = TicketSyncService.run_bitable_pull_services(
+                db=SimpleNamespace(),
+                trigger_source="test",
+                bitable_pull_override=_build_bitable_pull_config_override({"created_after": "2026-06-22 10:48:00"}),
+            )
 
-    def test_bitable_pull_records_filter_uses_created_time(self):
-        """主动拉取应按飞书记录创建时间过滤指定时间之后的数据。"""
-        records = [
-            {"record_id": "rec_old", "created_time": "2026-06-22 10:47:59"},
-            {"record_id": "rec_new", "created_time": "2026-06-22 10:48:00"},
-            {"record_id": "rec_empty"},
-        ]
-        filtered_records = TicketSyncService._filter_bitable_pull_records_by_created_after(
-            records,
+        self.assertFalse(result["skipped"])
+        self.assertEqual(result["createdAfter"], "2026-06-22 10:48:00")
+
+    def test_bitable_pull_records_filter_builds_default_cloud_time_filter(self):
+        """主动拉取应构造飞书云端创建时间和更新时间过滤条件。"""
+        filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(datetime(2026, 6, 22, 10, 48, 0))
+
+        filters = TicketSyncService._build_bitable_pull_time_filters(
+            filter_formula="",
             created_after=datetime(2026, 6, 22, 10, 48, 0),
+            updated_at_field="更新时间",
+            create_time_field="创建时间",
         )
 
-        self.assertEqual([record["record_id"] for record in filtered_records], ["rec_new"])
+        self.assertEqual(
+            filters,
+            [
+                {
+                    "conjunction": "or",
+                    "conditions": [
+                        {
+                            "field_name": "更新时间",
+                            "operator": "isGreater",
+                            "value": ["ExactDate", f"{filter_millis}"],
+                        },
+                        {
+                            "field_name": "创建时间",
+                            "operator": "isGreater",
+                            "value": ["ExactDate", f"{filter_millis}"],
+                        },
+                    ],
+                }
+            ],
+        )
+
+    def test_bitable_pull_time_filter_nested_appends_outer_child_and_fills_inner_values(self):
+        """嵌套 filter 应在最外层 children 追加时间范围，并递归补齐内部时间字段值。"""
+        created_after = datetime(2026, 6, 24, 0, 59, 0)
+        filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(created_after)
+        filter_formula = {
+            "conjunction": "and",
+            "children": [
+                {
+                    "conjunction": "and",
+                    "conditions": [
+                        {"field_name": "更新时间", "operator": "isGreaterEqual", "value": ""},
+                        {"field_name": "状态", "operator": "contains", "value": ["待处理"]},
+                    ],
+                },
+                {
+                    "conjunction": "or",
+                    "children": [
+                        {
+                            "conjunction": "and",
+                            "conditions": [
+                                {"field_name": "创建时间", "operator": "isGreater", "value": []},
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+
+        filters = TicketSyncService._build_bitable_pull_time_filters(
+            filter_formula=filter_formula,
+            created_after=created_after,
+            updated_at_field="更新时间",
+            create_time_field="创建时间",
+        )
+
+        self.assertEqual(len(filters), 1)
+        children = filters[0]["children"]
+        self.assertEqual(len(children), 3)
+        self.assertEqual(children[0]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
+        self.assertEqual(children[1]["children"][0]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
+        self.assertEqual(children[2]["conjunction"], "or")
+        self.assertEqual(
+            [condition["field_name"] for condition in children[2]["conditions"]],
+            ["更新时间", "创建时间"],
+        )
+
+    def test_bitable_pull_time_filter_flat_only_fills_configured_time_values(self):
+        """扁平 filter 应只补齐已有时间字段值，不再追加默认时间范围。"""
+        created_after = datetime(2026, 6, 24, 0, 59, 0)
+        filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(created_after)
+        filter_formula = {
+            "conjunction": "and",
+            "conditions": [
+                {"field_name": "更新时间", "operator": "isGreaterEqual", "value": ""},
+                {"field_name": "状态", "operator": "contains", "value": ["待处理"]},
+            ],
+        }
+
+        filters = TicketSyncService._build_bitable_pull_time_filters(
+            filter_formula=filter_formula,
+            created_after=created_after,
+            updated_at_field="更新时间",
+            create_time_field="创建时间",
+        )
+
+        self.assertEqual(len(filters), 1)
+        self.assertNotIn("children", filters[0])
+        self.assertEqual(len(filters[0]["conditions"]), 2)
+        self.assertEqual(filters[0]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
+        self.assertEqual(filters[0]["conditions"][1]["value"], ["待处理"])
 
 
 class _EmptyQuery:
