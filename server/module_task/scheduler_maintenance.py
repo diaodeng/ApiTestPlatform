@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from typing import Any
 
 from config.database import SessionLocal
@@ -243,6 +244,9 @@ def pull_feishu_bitable_ticket_sync(
         filterFormula/pageSize/fieldMappings/createdAfter。
     :return: 执行结果摘要。
     """
+    start_time = time.time()
+    logger.info(f"任务module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync开始执行:{start_time}")
+
     task_id = int(kwargs.pop("_task_id", 0) or 0)
     if task_id and is_task_stop_requested(task_id):
         raise TaskStopRequestedError("任务已手动终止")
@@ -259,6 +263,7 @@ def pull_feishu_bitable_ticket_sync(
         f"synced={result.get('syncedCount')} skipped={result.get('skippedCount')} "
         f"failed={result.get('failedCount')} override_keys={list(override.keys())}"
     )
+    logger.info(f"任务module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync执行耗时：{time.time() - start_time}")
     return result
 
 
