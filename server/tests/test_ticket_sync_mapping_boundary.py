@@ -760,6 +760,79 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         self.assertEqual(record_url, "")
 
+    def test_preview_bitable_pull_fields_uses_field_metadata_without_filters(self):
+        """字段预览应读取字段元数据，且不受主动拉取过滤条件和时间窗口影响。"""
+        config = TicketSyncService._default_sync_config()
+        config["bitablePull"].update(
+            {
+                "enabled": True,
+                "appId": "app_id",
+                "appSecret": "app_secret",
+                "appToken": "app_token",
+                "tableId": "table_id",
+                "viewId": "view_id",
+                "filterFormula": {
+                    "conjunction": "and",
+                    "conditions": [{"field_name": "状态", "operator": "contains", "value": ["处理中"]}],
+                },
+                "createdAfter": "2026-06-24 18:00:00",
+            }
+        )
+        captured_config = {}
+
+        def fake_query_fields(query_config):
+            captured_config.update(query_config)
+            return [{"field_name": "工单号"}, {"field_name": "描述"}]
+
+        with (
+            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncNotifyService, "query_bitable_fields", side_effect=fake_query_fields),
+            patch.object(TicketSyncNotifyService, "query_bitable_records") as query_records,
+        ):
+            result = TicketSyncService.preview_bitable_pull_fields_services(db=SimpleNamespace())
+
+        self.assertEqual(result["source"], "fields")
+        self.assertEqual(result["fieldNames"], ["工单号", "描述"])
+        self.assertEqual(captured_config["filterFormula"], "")
+        self.assertEqual(captured_config["createdAfter"], "")
+        query_records.assert_not_called()
+
+    def test_preview_bitable_pull_fields_falls_back_to_unfiltered_sample_record(self):
+        """字段元数据读取不可用时，应清空过滤条件后用样例记录推断字段。"""
+        config = TicketSyncService._default_sync_config()
+        config["bitablePull"].update(
+            {
+                "enabled": True,
+                "appId": "app_id",
+                "appSecret": "app_secret",
+                "appToken": "app_token",
+                "tableId": "table_id",
+                "filterFormula": {
+                    "conjunction": "and",
+                    "conditions": [{"field_name": "状态", "operator": "contains", "value": ["处理中"]}],
+                },
+                "createdAfter": "2026-06-24 18:00:00",
+            }
+        )
+        captured_config = {}
+
+        def fake_query_records(query_config):
+            captured_config.update(query_config)
+            return [{"record_id": "rec_001", "fields": {"工单号": "T-001", "描述": "支付失败"}}]
+
+        with (
+            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncNotifyService, "query_bitable_fields", side_effect=RuntimeError("no scope")),
+            patch.object(TicketSyncNotifyService, "query_bitable_records", side_effect=fake_query_records),
+        ):
+            result = TicketSyncService.preview_bitable_pull_fields_services(db=SimpleNamespace())
+
+        self.assertEqual(result["source"], "sample_record")
+        self.assertEqual(result["fieldNames"], ["工单号", "描述"])
+        self.assertEqual(result["sampleRecordId"], "rec_001")
+        self.assertEqual(captured_config["filterFormula"], "")
+        self.assertEqual(captured_config["createdAfter"], "")
+
     def test_query_bitable_records_hydrates_shared_url_from_batch_get(self):
         """搜索接口未返回详情链接时，应通过 batch_get 按 record_id 补齐 shared_url。"""
         config = {

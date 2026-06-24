@@ -1033,6 +1033,61 @@ class TicketSyncNotifyService:
         return all_records
 
     @classmethod
+    def query_bitable_fields(cls, config: dict[str, Any]) -> list[dict[str, Any]]:
+        """
+        拉取飞书多维表格字段元数据。
+
+        :param config: 多维表格配置，包含 appId/appSecret/appToken/tableId/viewId。
+        :return: 字段元数据列表。
+        """
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        app_token = str(config.get("appToken") or "").strip()
+        table_id = str(config.get("tableId") or "").strip()
+        view_id = str(config.get("viewId") or "").strip()
+
+        if not app_id or not app_secret:
+            raise ValueError("飞书应用 appId/appSecret 未配置")
+        if not app_token or not table_id:
+            raise ValueError("多维表格 appToken/tableId 未配置")
+
+        token = cls._get_tenant_access_token(app_id, app_secret)
+        url = f"{cls.FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/fields"
+        page_token = ""
+        all_fields: list[dict[str, Any]] = []
+        max_pages = 100
+
+        for page_index in range(max_pages):
+            params: dict[str, Any] = {"page_size": 100}
+            if page_token:
+                params["page_token"] = page_token
+            if view_id:
+                params["view_id"] = view_id
+            logger.info(f"飞书多维表格字段查询参数: {json.dumps(params, ensure_ascii=False)}")
+            response_data = (
+                cls._request_feishu_json(
+                    method="GET",
+                    url=url,
+                    tenant_access_token=token,
+                    params=params,
+                ).get("data")
+                or {}
+            )
+            page_fields = response_data.get("items")
+            if not isinstance(page_fields, list):
+                page_fields = []
+            all_fields.extend([item for item in page_fields if isinstance(item, dict)])
+            has_more = bool(response_data.get("has_more"))
+            page_token = str(response_data.get("page_token") or "").strip()
+            if not has_more or not page_token:
+                break
+            logger.info(f"飞书多维表格字段分页拉取中: page={page_index + 1}, accumulated={len(all_fields)}")
+        logger.info(
+            f"飞书多维表格字段拉取完成: fields={len(all_fields)}, "
+            f"table_id={table_id}, view_id={view_id or '-'}"
+        )
+        return all_fields
+
+    @classmethod
     def _hydrate_bitable_record_shared_urls(
         cls,
         records: list[dict[str, Any]],

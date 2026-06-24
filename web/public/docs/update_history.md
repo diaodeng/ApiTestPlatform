@@ -1,5 +1,9 @@
 ## 2026-06-24
 
+1. 修复“飞书多维表格主动拉取”字段映射区读取表格字段失败的问题：字段预览优先读取飞书字段元数据，不再依赖最近一小时或过滤条件下是否有记录。
+2. 字段元数据读取失败时，回退样例记录推断字段，但会清空 `filterFormula` 和 `createdAfter`，避免运行时过滤条件导致 `records=0`。
+3. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-field-preview-metadata.md`。
+
 1. 修复多维表格主动拉取嵌套 filter 的时间值补齐：嵌套模式在最外层 `children` 追加默认时间窗口，同时递归补齐内部时间字段空值。
 2. 扁平 filter 只补齐已有时间字段的空 `value`，不再额外追加默认时间范围。
 3. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-nested-time-filter.md`。

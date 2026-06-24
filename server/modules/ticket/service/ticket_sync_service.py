@@ -2449,7 +2449,33 @@ class TicketSyncService:
             feishu_auth=config.get("feishuAuth") or cls._default_feishu_auth_config(),
             bitable_common=config.get("bitableCommon") or cls._default_bitable_common_config(),
         )
-        records = TicketSyncNotifyService.query_bitable_records({**pull_config, "pageSize": 1})
+        preview_config = {
+            **pull_config,
+            "pageSize": 1,
+            "filterFormula": "",
+            "createdAfter": "",
+        }
+        fields_metadata: list[dict[str, Any]] = []
+        try:
+            fields_metadata = TicketSyncNotifyService.query_bitable_fields(preview_config)
+        except Exception as exc:
+            logger.warning(f"飞书多维表格字段元数据读取失败，回退样例记录推断字段: error={exc}")
+        if fields_metadata:
+            field_names = sorted(
+                [
+                    str(item.get("field_name") or item.get("name") or "").strip()
+                    for item in fields_metadata
+                    if str(item.get("field_name") or item.get("name") or "").strip()
+                ]
+            )
+            return {
+                "recordCount": 0,
+                "fieldNames": field_names,
+                "sampleRecordId": "",
+                "source": "fields",
+            }
+
+        records = TicketSyncNotifyService.query_bitable_records(preview_config)
         first_record = records[0] if records else {}
         fields = first_record.get("fields") if isinstance(first_record.get("fields"), dict) else {}
         field_names = sorted([str(key).strip() for key in fields.keys() if str(key).strip()])
@@ -2457,6 +2483,7 @@ class TicketSyncService:
             "recordCount": len(records),
             "fieldNames": field_names,
             "sampleRecordId": str(first_record.get("record_id") or first_record.get("recordId") or "").strip(),
+            "source": "sample_record",
         }
 
     @classmethod

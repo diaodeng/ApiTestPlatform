@@ -83,7 +83,7 @@ graph TD
 - 主动拉取的 `filterFormula` 支持飞书嵌套 filter JSON：顶层存在 `children` 时，服务会递归补齐内部时间字段空值，并把默认时间窗口作为新的最外层 child 追加；顶层不是嵌套模式时只补齐已有时间字段，不额外追加默认时间范围。
 - 主动拉取记录会把 `recordId/snapshotHash/fieldMappings/sourceSystem/pulledAt` 落到 `ticket.extra_data.bitable_pull`；同一记录内容未变化时直接跳过，避免定时任务反复递增同步 revision。
 - 飞书多维表格搜索结果中的 `record_id` 不能直接拼成可访问详情链接；当前环境下 `records/search` 实际可能不返回 `record_url/shared_url`，因此服务会继续按缺失记录的 `record_id` 调用 `records/batch_get(with_shared_url=true)` 批量补齐 `shared_url`，再写入 `ticket_url/source.recordUrl/detailUrl`；若补查后仍为空，则保持空字符串，不再伪造 `...?record=record_id` 假链接。
-- 主动拉取映射中的“多维字段”支持按当前配置实时预览一条表格记录字段名，作为下拉选项；同时保留手动输入，兼容字段尚未出现在样本记录中的场景。
+- 主动拉取映射中的“多维字段”支持按当前配置读取飞书字段元数据作为下拉选项；字段元数据读取失败时才回退到不带过滤条件的样例记录推断字段，同时保留手动输入。
 - 远端拉取由 `ticket.sync.automation.remoteSync.enabled` 控制，拉取入库不会再次查询公网多维表格；它只使用远端 payload 已携带的邮箱/姓名，并按内网本地 `assigneeMappings` 或邮箱用户匹配解析人员。
 - 工单项目/模块选项直接复用 HRM 公共项目管理，不单独维护工单项目库；后端按 HRM 的正常状态值 `QtrDataStatusEnum.normal = 2` 过滤有效项。
 - HRM 模块的 `module_code` 约束已调整为“同一项目下唯一”，不同项目允许复用同一业务 code，便于按业务域横向统计问题分布。
