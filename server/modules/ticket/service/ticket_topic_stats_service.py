@@ -21,9 +21,9 @@ TICKET_PATTERNS = (
     re.compile(r"(?i)\b(SCTASK\d+)\b"),
 )
 TOPIC_BLOCK_PATTERN = re.compile(
-    r"(?ims)^\s*/?\s*主题:\s*(.*?)(?:\r?\n\s*/?\s*(?:商家|门店|1线|1\.5|当前处理人|Details)\s*:|\Z)"
+    r"(?ims)^\s*/?\s*主题[:：]\s*(.*?)(?:\r?\n\s*/?\s*(?:商家|门店|1线|1\.5|当前处理人|Details)\s*[:：]|\Z)"
 )
-TOPIC_LINE_PATTERN = re.compile(r"^\s*/?\s*主题:\s*(.*)$", re.MULTILINE)
+TOPIC_LINE_PATTERN = re.compile(r"^\s*/?\s*主题[:：]\s*(.*)$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -245,6 +245,25 @@ class TicketTopicStatsService:
         return any(needle in text for needle in needles)
 
     @classmethod
+    def text_matches_any_word(cls, text: str, words: Iterable[str]) -> bool:
+        """
+        判断文本是否命中任一英文词或英文短语，避免命中其他单词内部片段。
+
+        :param text: 已归一化的小写文本。
+        :param words: 英文词或短语列表。
+        :return: 命中任一完整词或短语时返回 True。
+        """
+        for word in words:
+            keyword = str(word or "").strip().lower()
+            if not keyword:
+                continue
+            escaped_keyword = re.escape(keyword).replace(r"\ ", r"\s+")
+            pattern = rf"(?<![a-z0-9]){escaped_keyword}(?![a-z0-9])"
+            if re.search(pattern, text):
+                return True
+        return False
+
+    @classmethod
     def extract_ticket_key(cls, content: str) -> str | None:
         """
         从根消息中提取 Ticket 编号。
@@ -287,16 +306,17 @@ class TicketTopicStatsService:
         :return: 分类结果。
         """
         text = (topic or "").lower()
-        if cls.text_contains_any(
-            text,
-            ("gv", "coupon", "voucher", "gift card", "礼物卡", "禮物卡", "礼券", "禮券", "券"),
+        if cls.text_matches_any_word(text, ("gv", "coupon", "voucher", "gift card")) or cls.text_contains_any(
+            text, ("礼物卡", "禮物卡", "礼券", "禮券", "券")
         ):
             return "券"
-        if cls.text_contains_any(text, ("stamp", "印花")):
+        if cls.text_matches_any_word(text, ("stamp",)) or cls.text_contains_any(text, ("印花",)):
             return "印花"
-        if cls.text_contains_any(text, ("member", "会员", "积分", "points", "point")):
+        if cls.text_matches_any_word(text, ("member", "points", "point")) or cls.text_contains_any(
+            text, ("会员", "积分")
+        ):
             return "会员"
-        if cls.text_contains_any(
+        if cls.text_matches_any_word(
             text,
             (
                 "promo",
@@ -304,12 +324,16 @@ class TicketTopicStatsService:
                 "offer",
                 "offers",
                 "yuu promotion",
-                "促销",
-                "优惠",
-                "折扣",
                 "normal price",
                 "20% off",
                 "discount",
+            ),
+        ) or cls.text_contains_any(
+            text,
+            (
+                "促销",
+                "优惠",
+                "折扣",
             ),
         ):
             return "促销"
@@ -338,6 +362,7 @@ class TicketTopicStatsService:
             "已解决",
             "解决了",
             "可以关闭",
+            "不是问题",
             "close",
             "closed",
             "resolved",
@@ -741,7 +766,12 @@ class TicketTopicStatsService:
                     continue
 
                 content = cls.cell_text(message.get("content"))
-                if "Ticket:" not in content and "Ticket：" not in content and "主题:" not in content and "主题：" not in content:
+                if (
+                    "Ticket:" not in content
+                    and "Ticket：" not in content
+                    and "主题:" not in content
+                    and "主题：" not in content
+                ):
                     continue
 
                 message_date = cls.get_date_only(cls.cell_text(message.get("create_time")))
@@ -756,12 +786,12 @@ class TicketTopicStatsService:
                     logger.info(f"专题工单消息跳过：重复 Ticket | ticket_key={ticket_key} group_name={source.name}")
                     continue
 
-                # topic = cls.extract_topic(content)
-                category = cls.get_category_bucket(content)
+                topic = cls.extract_topic(content)
+                category = cls.get_category_bucket(topic)
                 if category == "其他":
                     logger.info(
                         f"专题工单消息跳过：主题未命中分类 | ticket_key={ticket_key} "
-                        f"group_name={source.name} topic={content}"
+                        f"group_name={source.name} topic={topic or '-'}"
                     )
                     continue
 
@@ -774,7 +804,7 @@ class TicketTopicStatsService:
                         priority=source.priority,
                         category=category,
                         status=status,
-                        topic=content,
+                        topic=topic,
                     )
                 )
                 logger.info(
