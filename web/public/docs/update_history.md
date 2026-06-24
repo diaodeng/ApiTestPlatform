@@ -1,5 +1,10 @@
 ## 2026-06-24
 
+1. 工单“发起AI分析”弹窗会自动回填 Provider、Agent 和追加提示词；选择绑定 Agent 的 Provider 时自动填入 Agent。
+2. AI 分析日志模式默认改为“摘要 + 完整目录”，提交兜底值同步使用 `hybrid`。
+3. 手工提交 AI 分析成功后立即关闭弹窗，后台继续短轮询本次任务以保留快速失败提示，不再让弹窗等待轮询结束。
+4. 新增说明文档：`web/public/docs/2026-06-24-ticket-ai-analysis-dialog-defaults.md`。
+
 1. 多维表格查询条件文案统一为 `records/search` filter JSON，不再提示填写 `CurrentValue.[字段]` 公式文本。
 2. 修正主动拉取配置示例和后端过滤条件错误提示，避免配置人员按旧公式口径填写。
 3. 多维表格主动拉取默认时间窗口改为下推到飞书 `records/search` filter：更新时间字段或创建时间字段大于等于当前时间前 1 小时；`createdAfter` 仅作为覆盖窗口下限的兼容入参保留。

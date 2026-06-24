@@ -1468,7 +1468,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="Agent">
-          <el-select v-model="aiAnalysisTaskForm.agentCode" placeholder="可选，优先使用指定Agent" filterable clearable>
+          <el-select v-model="aiAnalysisTaskForm.agentCode" placeholder="可选，优先使用指定Agent" filterable clearable style="width: 100%">
             <el-option
               v-for="item in agentOptions"
               :key="item.agentCode"
@@ -1478,7 +1478,14 @@
           </el-select>
         </el-form-item>
         <el-form-item label="Provider">
-          <el-select v-model="aiAnalysisTaskForm.aiProviderCode" placeholder="可选，优先使用指定Provider" filterable clearable style="width: 100%">
+          <el-select
+            v-model="aiAnalysisTaskForm.aiProviderCode"
+            placeholder="可选，优先使用指定Provider"
+            filterable
+            clearable
+            style="width: 100%"
+            @change="handleAiAnalysisProviderChange"
+          >
             <el-option
               v-for="item in providerOptions"
               :key="item.providerCode"
@@ -2097,7 +2104,7 @@ const aiAnalysisTaskForm = ref({
   agentCode: '',
   aiProviderCode: '',
   forceRefresh: false,
-  logAnalysisMode: 'digest',
+  logAnalysisMode: 'hybrid',
   logTimeMode: 'none',
   logWindowMissingStrategy: 'agent_extract',
   logBeginTime: '',
@@ -2251,6 +2258,72 @@ function loadAnalysisPromptOptions() {
   }).then(response => {
     analysisPromptOptions.value = response.data || []
   })
+}
+
+/**
+ * 获取工单自动化日志拉取配置，兼容新旧 extraData 命名。
+ * @param {object} ticketData 工单详情数据
+ * @returns {object} 日志拉取配置对象
+ */
+function getTicketAutomationLogPullConfig(ticketData = {}) {
+  const extraData = ticketData.extraData || ticketData.extra_data || {}
+  const automation = extraData.ticketAutomation || extraData.ticket_automation || {}
+  return automation.logPullConfig || automation.log_pull_config || {}
+}
+
+/**
+ * 根据 Provider 编码获取 Provider 配置。
+ * @param {string} providerCode Provider 编码
+ * @returns {object | undefined} Provider 配置
+ */
+function findAiProviderOption(providerCode) {
+  const resolvedCode = String(providerCode || '').trim()
+  if (!resolvedCode) {
+    return undefined
+  }
+  return providerOptions.value.find(item => String(item.providerCode || '').trim() === resolvedCode)
+}
+
+/**
+ * 按 Provider 绑定关系自动补齐 AI 分析表单 Agent。
+ * @param {string} providerCode Provider 编码
+ * @returns {void}
+ */
+function applyAiAnalysisProviderAgent(providerCode) {
+  const provider = findAiProviderOption(providerCode)
+  const providerAgentCode = String(provider?.agentCode || '').trim()
+  if (providerAgentCode) {
+    aiAnalysisTaskForm.value.agentCode = providerAgentCode
+  }
+}
+
+/**
+ * 处理 AI 分析 Provider 变更，自动带入 Provider 绑定的 Agent。
+ * @param {string} providerCode Provider 编码
+ * @returns {void}
+ */
+function handleAiAnalysisProviderChange(providerCode) {
+  applyAiAnalysisProviderAgent(providerCode)
+}
+
+/**
+ * 解析本次 AI 分析的默认追加提示词编码。
+ * @returns {Array<string>} 追加提示词编码列表
+ */
+function resolveDefaultAiPromptTemplateCodes() {
+  const contextCodes = detail.value.latestAiAnalysis?.analysisContext?.selectedPromptTemplateCodes
+  if (Array.isArray(contextCodes) && contextCodes.length) {
+    return contextCodes
+  }
+  const config = getTicketAutomationLogPullConfig(detail.value)
+  const rawCodes = config.promptTemplateCodes || config.prompt_template_codes || config.aiPromptTemplateCodes || config.ai_prompt_template_codes
+  if (Array.isArray(rawCodes)) {
+    return rawCodes.map(item => String(item || '').trim()).filter(Boolean)
+  }
+  if (typeof rawCodes === 'string') {
+    return rawCodes.split(',').map(item => item.trim()).filter(Boolean)
+  }
+  return []
 }
 
 function loadDetailVersionOptions(projectId) {
@@ -3643,19 +3716,52 @@ async function notifyAiTaskSubmitResult(response, successMessage) {
   }
 }
 
+/**
+ * 后台短轮询 AI 分析任务终态，不阻塞提交弹窗关闭。
+ * @param {object} response 提交或重试接口响应
+ * @returns {void}
+ */
+function watchAiTaskSubmitResult(response) {
+  const submittedTask = extractSubmittedAiTask(response)
+  if (!submittedTask?.taskId) {
+    return
+  }
+  waitForAiTaskTerminal(submittedTask.taskId)
+    .then(terminalTask => {
+      const status = String(terminalTask?.status || '').toLowerCase()
+      if (status === 'failed' || status === 'canceled') {
+        const message = terminalTask.errorMessage || terminalTask.statusDesc || 'AI分析任务执行失败，请查看任务历史'
+        proxy.$modal.msgError(message)
+        selectedAiTask.value = terminalTask
+      }
+      if (terminalTask) {
+        refreshAiAnalysisData(true)
+      }
+    })
+    .catch(() => {
+      loadAiAnalysisTasks(true)
+    })
+}
+
 function resetAiAnalysisDialog() {
+  const logPullConfig = getTicketAutomationLogPullConfig(detail.value)
   aiAnalysisTaskForm.value.versionKey = detail.value.versionKey || detail.value.extraData?.versionKey || ''
   aiAnalysisTaskForm.value.logPullRecordId = selectedLogPullRecord.value?.id || undefined
-  aiAnalysisTaskForm.value.agentCode = detail.value.extraData?.ticketAutomation?.logPullConfig?.aiAgentCode
-    || detail.value.extraData?.ticket_automation?.log_pull_config?.aiAgentCode
+  aiAnalysisTaskForm.value.agentCode = logPullConfig.aiAgentCode
+    || logPullConfig.ai_agent_code
+    || detail.value.latestAiAnalysis?.agentCode
     || detail.value.latestAiAnalysis?.analysisContext?.selectedAgentCode
     || ''
-  aiAnalysisTaskForm.value.aiProviderCode = detail.value.extraData?.ticketAutomation?.logPullConfig?.aiProviderCode
-    || detail.value.extraData?.ticket_automation?.log_pull_config?.aiProviderCode
+  aiAnalysisTaskForm.value.aiProviderCode = logPullConfig.aiProviderCode
+    || logPullConfig.ai_provider_code
+    || detail.value.latestAiAnalysis?.aiProviderCode
     || detail.value.latestAiAnalysis?.analysisContext?.selectedAiProviderCode
     || ''
+  applyAiAnalysisProviderAgent(aiAnalysisTaskForm.value.aiProviderCode)
   aiAnalysisTaskForm.value.forceRefresh = false
-  aiAnalysisTaskForm.value.logAnalysisMode = detail.value.latestAiAnalysis?.analysisContext?.logAnalysisMode || 'digest'
+  aiAnalysisTaskForm.value.logAnalysisMode = logPullConfig.logAnalysisMode
+    || logPullConfig.log_analysis_mode
+    || 'hybrid'
   aiAnalysisTaskForm.value.logTimeMode = 'none'
   aiAnalysisTaskForm.value.logWindowMissingStrategy = detail.value.latestAiAnalysis?.analysisContext?.logWindowMissingStrategy || 'agent_extract'
   aiAnalysisTaskForm.value.logBeginTime = ''
@@ -3663,8 +3769,8 @@ function resetAiAnalysisDialog() {
   aiAnalysisTaskForm.value.logPointTime = ''
   aiAnalysisTaskForm.value.rangeBeforeMinutes = 5
   aiAnalysisTaskForm.value.rangeAfterMinutes = 10
-  aiAnalysisTaskForm.value.extraInstruction = ''
-  aiAnalysisTaskForm.value.promptTemplateCodes = detail.value.latestAiAnalysis?.analysisContext?.selectedPromptTemplateCodes || []
+  aiAnalysisTaskForm.value.extraInstruction = logPullConfig.extraInstruction || logPullConfig.extra_instruction || ''
+  aiAnalysisTaskForm.value.promptTemplateCodes = resolveDefaultAiPromptTemplateCodes()
 }
 
 function openAiAnalysisDialog() {
@@ -3716,7 +3822,7 @@ function submitAiAnalysis() {
       agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
       aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
       forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
-      logAnalysisMode: aiAnalysisTaskForm.value.logAnalysisMode || 'digest',
+      logAnalysisMode: aiAnalysisTaskForm.value.logAnalysisMode || 'hybrid',
       extraInstruction: aiAnalysisTaskForm.value.extraInstruction || undefined,
       promptTemplateCodes: aiAnalysisTaskForm.value.promptTemplateCodes?.length
         ? aiAnalysisTaskForm.value.promptTemplateCodes
@@ -3734,10 +3840,11 @@ function submitAiAnalysis() {
       payload.rangeBeforeMinutes = aiAnalysisTaskForm.value.rangeBeforeMinutes
       payload.rangeAfterMinutes = aiAnalysisTaskForm.value.rangeAfterMinutes
     }
-    addTicketAiAnalysis(currentTicketId.value, payload).then(async response => {
-      await notifyAiTaskSubmitResult(response, 'AI分析任务已提交')
+    addTicketAiAnalysis(currentTicketId.value, payload).then(response => {
+      proxy.$modal.msgSuccess('AI分析任务已提交')
       aiAnalysisOpen.value = false
       refreshAiAnalysisData(true)
+      watchAiTaskSubmitResult(response)
     }).catch(error => {
       proxy.$modal.msgError(extractReadableError(error, 'AI分析任务提交失败'))
     }).finally(() => {

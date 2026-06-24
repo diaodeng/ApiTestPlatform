@@ -810,3 +810,10 @@ updated: 2026-06-23
 - 创建的页面：`web/public/docs/2026-06-24-ticket-bitable-filter-json-doc-fix.md`
 - 更新的页面：`server/modules/ticket/service/ticket_sync_notify_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`web/src/views/ticket/syncAutomation/index.vue`、`web/public/docs/2026-06-21-ticket-bitable-pull-and-config-unify.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`
 - 变更传播链：`ticket.sync.automation.*.filterFormula` 文案 -> 飞书 `records/search` filter JSON 配置提示 -> 后端错误提示；`createdAfter/updatedAtField/fieldMappings.createTime` -> 主动拉取云端时间窗口 filter；`externalSyncRequiredFields` -> 多维主动拉取记录级必填校验。
+
+## [2026-06-24] INGEST-CODE | 工单 AI 分析弹窗默认值与提交体验修正
+- 触发：用户要求发起 AI 分析时自动填入 Provider、Agent、追加提示词，日志模式默认摘要 + 完整目录，并排查 2026-06-23 改动导致提交后弹窗不关闭且继续 loading 的等待点。
+- 架构层：工单域 / AI 分析 / Web 控制台
+- 创建的页面：`web/public/docs/2026-06-24-ticket-ai-analysis-dialog-defaults.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`
+- 变更传播链：AI 分析弹窗默认值 -> Provider 绑定 Agent 前端联动 -> 提交成功立即关闭弹窗 -> 后台短轮询保留快速失败提示。
