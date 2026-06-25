@@ -7,7 +7,7 @@
 ## 新增能力
 
 1. 新增服务：`server/modules/ticket/service/ticket_topic_stats_service.py`
-   - 支持从定时任务参数传入飞书群来源、日期范围、`lark-cli` 路径、webhook、关键字和分页大小。
+   - 支持从定时任务参数传入飞书群来源、日期范围、`lark-cli` 路径、webhook、关键字、分类/状态补充关键词和分页大小。
    - 统计口径保持脚本逻辑：只处理 `post`、`text` 根消息、提取 `Ticket:` 或 INC/SCTASK 编号、按主题归类为促销/券/会员/印花、按关键字判断有结论/无结论。
    - 日志覆盖每个关键步骤：任务开始、来源处理、分页拉取、命中/跳过原因、汇总结果和卡片发送返回。
 
@@ -30,6 +30,12 @@ module_task.scheduler_maintenance.ticket_topic_stats_report
   "startDate": "2026-06-15",
   "endDate": "2026-06-15",
   "keyword": "TRunner",
+  "couponKeywords": ["reward voucher", "gift credit"],
+  "stampKeywords": ["special stamp"],
+  "memberKeywords": ["loyalty member"],
+  "promoKeywords": ["campaign"],
+  "closedKeywords": ["done by ops"],
+  "conclusionKeywords": ["root cause confirmed"],
   "send": true,
   "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/0a27950f-0c61-4df6-8e4e-2e683330505e",
   "larkCliBin": "C:\\nvm4w\\nodejs\\lark-cli.cmd",
@@ -65,7 +71,7 @@ module_task.scheduler_maintenance.ticket_topic_stats_report
   "scheduleType": "crontab",
   "cronExpression": "0 18 * * *",
   "taskArgs": "[]",
-  "taskKwargs": "{\"startDate\":\"2026-06-15\",\"endDate\":\"2026-06-15\",\"keyword\":\"TRunner\",\"send\":true,\"webhook\":\"https://open.feishu.cn/open-apis/bot/v2/hook/0a27950f-0c61-4df6-8e4e-2e683330505e\",\"larkCliBin\":\"C:\\\\nvm4w\\\\nodejs\\\\lark-cli.cmd\",\"pageSize\":50,\"sources\":[{\"name\":\"RTA POS P0/P1 事故\",\"chatId\":\"oc_78ce6aaf8084d375b14946c094db3a9e\",\"priority\":\"P1\"},{\"name\":\"RTA POS P2 工单群\",\"chatId\":\"oc_fd391a88b21ebcafc3d1d69356909147\",\"priority\":\"P2\"},{\"name\":\"RTA POS P3/P4工单群\",\"chatId\":\"oc_15203ab07d26c830240fdb9caa8de501\",\"priority\":\"P3\"}]}",
+  "taskKwargs": "{\"startDate\":\"2026-06-15\",\"endDate\":\"2026-06-15\",\"keyword\":\"TRunner\",\"couponKeywords\":[\"reward voucher\",\"gift credit\"],\"stampKeywords\":[\"special stamp\"],\"memberKeywords\":[\"loyalty member\"],\"promoKeywords\":[\"campaign\"],\"closedKeywords\":[\"done by ops\"],\"conclusionKeywords\":[\"root cause confirmed\"],\"send\":true,\"webhook\":\"https://open.feishu.cn/open-apis/bot/v2/hook/0a27950f-0c61-4df6-8e4e-2e683330505e\",\"larkCliBin\":\"C:\\\\nvm4w\\\\nodejs\\\\lark-cli.cmd\",\"pageSize\":50,\"sources\":[{\"name\":\"RTA POS P0/P1 事故\",\"chatId\":\"oc_78ce6aaf8084d375b14946c094db3a9e\",\"priority\":\"P1\"},{\"name\":\"RTA POS P2 工单群\",\"chatId\":\"oc_fd391a88b21ebcafc3d1d69356909147\",\"priority\":\"P2\"},{\"name\":\"RTA POS P3/P4工单群\",\"chatId\":\"oc_15203ab07d26c830240fdb9caa8de501\",\"priority\":\"P3\"}]}",
   "enabled": true,
   "allowConcurrent": false,
   "lockTtlSeconds": 3600,
@@ -81,6 +87,12 @@ module_task.scheduler_maintenance.ticket_topic_stats_report
 - `send`：是否发送飞书卡片；为 `true` 时必须配置 `webhook`。
 - `webhook`：飞书机器人 webhook。
 - `keyword`：卡片副标题关键字，默认 `TRunner`。
+- `couponKeywords`：`券` 分类补充关键词，和代码内置关键词合并。
+- `stampKeywords`：`印花` 分类补充关键词，和代码内置关键词合并。
+- `memberKeywords`：`会员` 分类补充关键词，和代码内置关键词合并。
+- `promoKeywords`：`促销` 分类补充关键词，和代码内置关键词合并。
+- `closedKeywords`：状态判断中“已关闭/已处理”类补充关键词，和代码内置关键词合并。
+- `conclusionKeywords`：状态判断中“原因/确认/结论”类补充关键词，和代码内置关键词合并。
 - `larkCliBin`：可选，指定 `lark-cli` 路径；不传时依次尝试环境变量 `LARK_CLI_BIN`、`lark-cli.cmd`、`lark-cli` 和 Windows 默认路径。
 - `pageSize`：单页拉取消息数量，范围会被限制在 1 到 100。
 

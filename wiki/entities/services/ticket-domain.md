@@ -127,6 +127,7 @@ graph TD
 - 工单外部推送、内网 pending 拉取、ack、日志内容读取、日志列表、日志拉取提交、重新拉取、重新下载、重新截取和删除等 `async def` 接口内的同步服务调用已显式使用 `run_in_threadpool`；这样保留异步请求体/后台任务编排能力，同时避免同步数据库、`requests`、文件和 FTP 操作直接阻塞事件循环。
 - 工单同步配置页的 `GET /ticket/sync/auto-category/stats` 只统计未归类数量，不执行自动归类；批量处理必须调用 `POST /ticket/sync/auto-category/reclassify`。自动归类链路已经补充入口、筛选、逐条处理、跳过原因、AI 配置、模型执行和字段回填日志，便于从服务日志判断为什么未执行。
 - 专题工单会话状态统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 按根消息中的“主题”文本归类促销、券、会员和印花；`主题:` 与 `主题：` 都可识别，英文专题关键词按词边界匹配，详情、回复和飞书富文本元数据不再参与专题分类，避免非券类工单被隐藏字段、人员 ID 或单词内部片段误判。
+- 该任务支持通过定时任务参数补充分类和状态关键词：`couponKeywords/stampKeywords/memberKeywords/promoKeywords/closedKeywords/conclusionKeywords`，传入后会与代码内置默认关键词合并，不传则继续使用默认关键词口径。
 - 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。
 - 工单详情弹窗顶部基础信息表格不再直接承载“描述”，描述改为表格下方独立整行并自动展示全部内容；顶部表格灰色标签列禁止换行，避免长描述或标签换行撑高基础信息行。
 - 工单描述翻译继续复用轻量 AI 翻译配置 `ticket.ai.translate.provider.code` 和 `ticket.ai.translate.prompt.code`：详情页优先用 `extra_data.origin_description` 展示原文，用 `extra_data.ai_translation` 在描述下方单独展示译文；手动翻译入口会在缺少翻译总开关、Provider 或提示词时直接提示，不写入空译文。

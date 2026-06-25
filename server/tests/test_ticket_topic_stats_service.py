@@ -54,6 +54,27 @@ class TicketTopicStatsServiceTests(unittest.TestCase):
 
         self.assertEqual(category, "其他")
 
+    def test_extra_coupon_keywords_are_merged_with_defaults(self):
+        """任务参数补充关键词后，应与代码内置关键词合并而不是替换。"""
+        topic = "OPEN TICKET - reward voucher cannot be applied"
+
+        category = TicketTopicStatsService.get_category_bucket(topic, coupon_keywords=["reward voucher"])
+
+        self.assertEqual(category, "券")
+
+    def test_extra_status_keywords_are_merged_with_defaults(self):
+        """任务参数补充状态关键词后，应与代码内置关键词合并而不是替换。"""
+        content = "Ticket：INC00001660915\n主题：OPEN TICKET - reward issue"
+        replies = [{"content": "这是 reward resolved 的结果"}]
+
+        status = TicketTopicStatsService.get_session_status(
+            content,
+            replies,
+            conclusion_keywords=["reward resolved"],
+        )
+
+        self.assertEqual(status, "有结论")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -217,6 +217,8 @@
 
 ## 2026-06-15
 
+1. 专题工单会话状态统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 新增分类与状态关键词补充参数：`couponKeywords/stampKeywords/memberKeywords/promoKeywords/closedKeywords/conclusionKeywords`，任务参数未传时继续使用代码内置关键词，传入时与内置关键词合并后参与专题分类和状态判断。
+2. 补充说明文档 `web/public/docs/2026-06-15-ticket-topic-stats-scheduler.md`，新增任务参数示例和关键词合并说明。
 1. 修复内网远端拉取公网工单后状态和内部负责人未按内网配置生效的问题：`remote_pull` 入库时会使用内网 `statusMappings` 映射远端状态文本，并通过 `assigneeMappings`、邮箱或姓名解析内部负责人。
 2. 远端 pending 工单转换模型时补齐 `internalOwnerName/internalOwnerEmail`，兼容公网 `extraData.external_field_mapping` 快照，避免外部推送进入公网后的内部负责人跨环境丢失。
 3. 新增说明文档：`web/public/docs/2026-06-15-ticket-remote-pull-status-owner-mapping.md`。

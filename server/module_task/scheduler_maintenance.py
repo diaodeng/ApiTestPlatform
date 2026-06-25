@@ -137,6 +137,20 @@ def _build_bitable_pull_config_override(kwargs: dict[str, Any]) -> dict[str, Any
     return override
 
 
+def _pop_keyword_override(kwargs: dict[str, Any], *aliases: str) -> list[str] | str | None:
+    """
+    从定时任务参数中提取可合并的关键词配置。
+
+    :param kwargs: 定时任务关键字参数。
+    :param aliases: 允许的参数别名。
+    :return: 原始关键词配置；未传入时返回 None。
+    """
+    for alias in aliases:
+        if alias in kwargs:
+            return kwargs.pop(alias)
+    return None
+
+
 @register_job("module_task.scheduler_maintenance.cleanup_test_reports")
 def cleanup_test_reports(
     *args,
@@ -401,6 +415,12 @@ def ticket_topic_stats_report(
     receive_chat_ids: list[str] | str | None = None,
     send: bool | None = None,
     keyword: str = "TRunner",
+    coupon_keywords: list[str] | str | None = None,
+    stamp_keywords: list[str] | str | None = None,
+    member_keywords: list[str] | str | None = None,
+    promo_keywords: list[str] | str | None = None,
+    closed_keywords: list[str] | str | None = None,
+    conclusion_keywords: list[str] | str | None = None,
     page_size: int | None = None,
     **kwargs,
 ):
@@ -415,6 +435,12 @@ def ticket_topic_stats_report(
     :param receive_chat_ids: 发送统计卡片的群 chat_id 列表；为空时默认发到 sources 中配置的群。
     :param send: 是否发送飞书卡片。
     :param keyword: 卡片副标题关键字。
+    :param coupon_keywords: “券”分类补充关键词。
+    :param stamp_keywords: “印花”分类补充关键词。
+    :param member_keywords: “会员”分类补充关键词。
+    :param promo_keywords: “促销”分类补充关键词。
+    :param closed_keywords: “有结论”中的关闭类补充关键词。
+    :param conclusion_keywords: “有结论”中的结论类补充关键词。
     :param page_size: 单页拉取消息数量。
     :return: 统计结果摘要。
     """
@@ -432,6 +458,24 @@ def ticket_topic_stats_report(
     )
     resolved_send = bool(send if send is not None else kwargs.pop("send", False))
     resolved_keyword = keyword if keyword is not None else kwargs.pop("keyword", "TRunner")
+    resolved_coupon_keywords = coupon_keywords if coupon_keywords is not None else _pop_keyword_override(
+        kwargs, "couponKeywords", "coupon_keywords"
+    )
+    resolved_stamp_keywords = stamp_keywords if stamp_keywords is not None else _pop_keyword_override(
+        kwargs, "stampKeywords", "stamp_keywords"
+    )
+    resolved_member_keywords = member_keywords if member_keywords is not None else _pop_keyword_override(
+        kwargs, "memberKeywords", "member_keywords"
+    )
+    resolved_promo_keywords = promo_keywords if promo_keywords is not None else _pop_keyword_override(
+        kwargs, "promoKeywords", "promo_keywords"
+    )
+    resolved_closed_keywords = closed_keywords if closed_keywords is not None else _pop_keyword_override(
+        kwargs, "closedKeywords", "closed_keywords"
+    )
+    resolved_conclusion_keywords = conclusion_keywords if conclusion_keywords is not None else _pop_keyword_override(
+        kwargs, "conclusionKeywords", "conclusion_keywords"
+    )
     resolved_page_size = page_size if page_size is not None else kwargs.pop("pageSize", 50)
 
     logger.info(
@@ -448,6 +492,12 @@ def ticket_topic_stats_report(
         receive_chat_ids=resolved_receive_chat_ids,
         send=resolved_send,
         keyword=str(resolved_keyword or "TRunner"),
+        coupon_keywords=resolved_coupon_keywords,
+        stamp_keywords=resolved_stamp_keywords,
+        member_keywords=resolved_member_keywords,
+        promo_keywords=resolved_promo_keywords,
+        closed_keywords=resolved_closed_keywords,
+        conclusion_keywords=resolved_conclusion_keywords,
         page_size=int(resolved_page_size or 50),
     )
     logger.info(

@@ -14,6 +14,105 @@ from utils.log_util import logger
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 STATUS_ORDER = ("有结论", "无结论")
 CATEGORY_ORDER = ("促销", "券", "会员", "印花")
+DEFAULT_CATEGORY_KEYWORDS = {
+    "券": {
+        "word_keywords": ("gv", "coupon", "voucher", "gift card"),
+        "text_keywords": ("礼物卡", "禮物卡", "礼券", "禮券", "券"),
+    },
+    "印花": {
+        "word_keywords": ("stamp",),
+        "text_keywords": ("印花",),
+    },
+    "会员": {
+        "word_keywords": ("member", "points", "point"),
+        "text_keywords": ("会员", "积分"),
+    },
+    "促销": {
+        "word_keywords": (
+            "promo",
+            "promotion",
+            "offer",
+            "offers",
+            "yuu promotion",
+            "normal price",
+            "20% off",
+            "discount",
+        ),
+        "text_keywords": ("促销", "优惠", "折扣"),
+    },
+}
+DEFAULT_STATUS_KEYWORDS = {
+    "closed": (
+        "已关闭",
+        "关闭工单",
+        "关闭",
+        "已处理",
+        "已修正",
+        "已修复",
+        "已解决",
+        "解决了",
+        "可以关闭",
+        "不是问题",
+        "非问题",
+        "设计如此",
+        "close",
+        "closed",
+        "resolved",
+        "fixed",
+        "done",
+    ),
+    "conclusion": (
+        "因为",
+        "所以",
+        "因此",
+        "看起来",
+        "确认",
+        "结论",
+        "原因",
+        "已知问题",
+        "known issue",
+        "known issues",
+        "手误",
+        "不满足",
+        "同工单",
+        "同一个问题",
+        "历史问题",
+        "是一个问题",
+        "调用支付接口超时",
+        "超时",
+        "已经定位",
+        "已定位",
+        "已经确认",
+        "已确认",
+        "问题跟之前的问题一样",
+        "跟之前的问题一样",
+        "与之前的问题一样",
+        "是同一个问题",
+        "same issue",
+        "same as previous issue",
+        "建议",
+        "已经回复",
+        "已经回复了",
+        "已在工单中回复",
+        "导致",
+        "修复中",
+        "后续版本",
+        "三方",
+        "三方系统",
+        "第三方",
+        "vms",
+        "external system",
+        "third party",
+        "not our issue",
+        "found",
+        "no related promotion",
+        "no promotion found",
+        "cannot be applied",
+        "please assign",
+        "relevant team",
+        "indicates",
+    ),
+}
 TICKET_PATTERNS = (
     re.compile(r"(?im)^\s*/?\s*Ticket:\s*([^\r\n]+)"),
     re.compile(r"(?im)^\s*Ticket:\s*([^\r\n]+)"),
@@ -65,6 +164,12 @@ class TicketTopicStatsService:
         receive_chat_ids: list[str] | str | None = None,
         send: bool = False,
         keyword: str = "TRunner",
+        coupon_keywords: list[str] | str | None = None,
+        stamp_keywords: list[str] | str | None = None,
+        member_keywords: list[str] | str | None = None,
+        promo_keywords: list[str] | str | None = None,
+        closed_keywords: list[str] | str | None = None,
+        conclusion_keywords: list[str] | str | None = None,
         page_size: int = 50,
     ) -> dict[str, Any]:
         """
@@ -78,6 +183,12 @@ class TicketTopicStatsService:
         :param receive_chat_ids: 发送统计卡片的飞书群 chat_id 列表。
         :param send: 是否发送飞书卡片。
         :param keyword: 卡片副标题关键字。
+        :param coupon_keywords: 专题分类“券”的补充关键词。
+        :param stamp_keywords: 专题分类“印花”的补充关键词。
+        :param member_keywords: 专题分类“会员”的补充关键词。
+        :param promo_keywords: 专题分类“促销”的补充关键词。
+        :param closed_keywords: 状态判断“有结论”中的关闭类补充关键词。
+        :param conclusion_keywords: 状态判断“有结论”中的结论类补充关键词。
         :param page_size: 单页拉取消息数量。
         :return: 统计结果和发送结果摘要。
         """
@@ -111,6 +222,12 @@ class TicketTopicStatsService:
             sources=normalized_sources,
             app_id=resolved_app_id,
             app_secret=resolved_app_secret,
+            coupon_keywords=coupon_keywords,
+            stamp_keywords=stamp_keywords,
+            member_keywords=member_keywords,
+            promo_keywords=promo_keywords,
+            closed_keywords=closed_keywords,
+            conclusion_keywords=conclusion_keywords,
             page_size=page_size,
         )
         result = cls.build_result(
@@ -264,6 +381,54 @@ class TicketTopicStatsService:
         return False
 
     @classmethod
+    def normalize_keywords(cls, value: Any) -> tuple[str, ...]:
+        """
+        将任务参数中的关键词值归一化为去重后的字符串元组。
+
+        :param value: 任务参数中的关键词值，支持字符串、列表、元组或集合。
+        :return: 去重后的关键词元组。
+        """
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            raw_items = re.split(r"[,\n，；;]+", value)
+        elif isinstance(value, dict):
+            raw_items = []
+            for item in value.values():
+                raw_items.extend(cls.normalize_keywords(item))
+        elif isinstance(value, Iterable):
+            raw_items = list(value)
+        else:
+            raw_items = [value]
+
+        keywords: list[str] = []
+        for item in raw_items:
+            keyword = str(item or "").strip()
+            if keyword and keyword not in keywords:
+                keywords.append(keyword)
+        return tuple(keywords)
+
+    @classmethod
+    def merge_keywords(cls, defaults: Iterable[str], *extra_values: Any) -> tuple[str, ...]:
+        """
+        合并代码内置关键词与任务参数关键词。
+
+        :param defaults: 代码内置关键词。
+        :param extra_values: 任务参数中传入的补充关键词。
+        :return: 合并并去重后的关键词元组。
+        """
+        merged: list[str] = []
+        for keyword in defaults:
+            normalized = str(keyword or "").strip()
+            if normalized and normalized not in merged:
+                merged.append(normalized)
+        for extra_value in extra_values:
+            for keyword in cls.normalize_keywords(extra_value):
+                if keyword not in merged:
+                    merged.append(keyword)
+        return tuple(merged)
+
+    @classmethod
     def extract_ticket_key(cls, content: str) -> str | None:
         """
         从根消息中提取 Ticket 编号。
@@ -298,132 +463,71 @@ class TicketTopicStatsService:
         return ""
 
     @classmethod
-    def get_category_bucket(cls, topic: str) -> str:
+    def get_category_bucket(
+        cls,
+        topic: str,
+        *,
+        coupon_keywords: list[str] | str | None = None,
+        stamp_keywords: list[str] | str | None = None,
+        member_keywords: list[str] | str | None = None,
+        promo_keywords: list[str] | str | None = None,
+    ) -> str:
         """
         按主题归类为促销、券、会员、印花。
 
         :param topic: 工单主题文本。
+        :param coupon_keywords: “券”分类的补充关键词。
+        :param stamp_keywords: “印花”分类的补充关键词。
+        :param member_keywords: “会员”分类的补充关键词。
+        :param promo_keywords: “促销”分类的补充关键词。
         :return: 分类结果。
         """
         text = (topic or "").lower()
-        if cls.text_matches_any_word(text, ("gv", "coupon", "voucher", "gift card")) or cls.text_contains_any(
-            text, ("礼物卡", "禮物卡", "礼券", "禮券", "券")
-        ):
+        coupon_word_keywords = cls.merge_keywords(DEFAULT_CATEGORY_KEYWORDS["券"]["word_keywords"], coupon_keywords)
+        coupon_text_keywords = cls.merge_keywords(DEFAULT_CATEGORY_KEYWORDS["券"]["text_keywords"], coupon_keywords)
+        if cls.text_matches_any_word(text, coupon_word_keywords) or cls.text_contains_any(text, coupon_text_keywords):
             return "券"
-        if cls.text_matches_any_word(text, ("stamp",)) or cls.text_contains_any(text, ("印花",)):
+        stamp_word_keywords = cls.merge_keywords(DEFAULT_CATEGORY_KEYWORDS["印花"]["word_keywords"], stamp_keywords)
+        stamp_text_keywords = cls.merge_keywords(DEFAULT_CATEGORY_KEYWORDS["印花"]["text_keywords"], stamp_keywords)
+        if cls.text_matches_any_word(text, stamp_word_keywords) or cls.text_contains_any(text, stamp_text_keywords):
             return "印花"
-        if cls.text_matches_any_word(text, ("member", "points", "point")) or cls.text_contains_any(
-            text, ("会员", "积分")
-        ):
+        member_word_keywords = cls.merge_keywords(DEFAULT_CATEGORY_KEYWORDS["会员"]["word_keywords"], member_keywords)
+        member_text_keywords = cls.merge_keywords(DEFAULT_CATEGORY_KEYWORDS["会员"]["text_keywords"], member_keywords)
+        if cls.text_matches_any_word(text, member_word_keywords) or cls.text_contains_any(text, member_text_keywords):
             return "会员"
-        if cls.text_matches_any_word(
-            text,
-            (
-                "promo",
-                "promotion",
-                "offer",
-                "offers",
-                "yuu promotion",
-                "normal price",
-                "20% off",
-                "discount",
-            ),
-        ) or cls.text_contains_any(
-            text,
-            (
-                "促销",
-                "优惠",
-                "折扣",
-            ),
-        ):
+        promo_word_keywords = cls.merge_keywords(DEFAULT_CATEGORY_KEYWORDS["促销"]["word_keywords"], promo_keywords)
+        promo_text_keywords = cls.merge_keywords(DEFAULT_CATEGORY_KEYWORDS["促销"]["text_keywords"], promo_keywords)
+        if cls.text_matches_any_word(text, promo_word_keywords) or cls.text_contains_any(text, promo_text_keywords):
             return "促销"
         return "其他"
 
     @classmethod
-    def get_session_status(cls, content: str, replies: list[dict[str, Any]] | None) -> str:
+    def get_session_status(
+        cls,
+        content: str,
+        replies: list[dict[str, Any]] | None,
+        *,
+        closed_keywords: list[str] | str | None = None,
+        conclusion_keywords: list[str] | str | None = None,
+    ) -> str:
         """
         根据根消息和线程回复判断会话状态。
 
         :param content: 根消息全文。
         :param replies: 线程回复列表。
+        :param closed_keywords: “有结论”中的关闭类补充关键词。
+        :param conclusion_keywords: “有结论”中的结论类补充关键词。
         :return: 有结论或无结论。
         """
         all_text = [content or ""]
         all_text.extend(cls.cell_text(reply.get("content")) for reply in replies or [])
         joined = "\n".join(all_text).lower()
 
-        closed_keywords = (
-            "已关闭",
-            "关闭工单",
-            "关闭",
-            "已处理",
-            "已修正",
-            "已修复",
-            "已解决",
-            "解决了",
-            "可以关闭",
-            "不是问题",
-            "close",
-            "closed",
-            "resolved",
-            "fixed",
-            "done",
-        )
-        if cls.text_contains_any(joined, closed_keywords):
+        merged_closed_keywords = cls.merge_keywords(DEFAULT_STATUS_KEYWORDS["closed"], closed_keywords)
+        if cls.text_contains_any(joined, merged_closed_keywords):
             return "有结论"
-
-        conclusion_keywords = (
-            "因为",
-            "所以",
-            "因此",
-            "看起来",
-            "确认",
-            "结论",
-            "原因",
-            "已知问题",
-            "known issue",
-            "known issues",
-            "手误",
-            "不满足",
-            "同工单",
-            "同一个问题",
-            "历史问题",
-            "是一个问题",
-            "调用支付接口超时",
-            "超时",
-            "已经定位",
-            "已定位",
-            "已经确认",
-            "已确认",
-            "问题跟之前的问题一样",
-            "跟之前的问题一样",
-            "与之前的问题一样",
-            "是同一个问题",
-            "same issue",
-            "same as previous issue",
-            "建议",
-            "已经回复",
-            "已经回复了",
-            "已在工单中回复",
-            "导致",
-            "修复中",
-            "后续版本",
-            "三方",
-            "三方系统",
-            "第三方",
-            "vms",
-            "external system",
-            "third party",
-            "not our issue",
-            "found",
-            "no related promotion",
-            "no promotion found",
-            "cannot be applied",
-            "please assign",
-            "relevant team",
-            "indicates",
-        )
-        if cls.text_contains_any(joined, conclusion_keywords):
+        merged_conclusion_keywords = cls.merge_keywords(DEFAULT_STATUS_KEYWORDS["conclusion"], conclusion_keywords)
+        if cls.text_contains_any(joined, merged_conclusion_keywords):
             return "有结论"
         return "无结论"
 
@@ -729,6 +833,12 @@ class TicketTopicStatsService:
         sources: list[TopicTicketSource],
         app_id: str,
         app_secret: str,
+        coupon_keywords: list[str] | str | None = None,
+        stamp_keywords: list[str] | str | None = None,
+        member_keywords: list[str] | str | None = None,
+        promo_keywords: list[str] | str | None = None,
+        closed_keywords: list[str] | str | None = None,
+        conclusion_keywords: list[str] | str | None = None,
         page_size: int = 50,
     ) -> list[TopicTicketRecord]:
         """
@@ -739,6 +849,12 @@ class TicketTopicStatsService:
         :param sources: 飞书群来源配置。
         :param app_id: 飞书应用 app_id。
         :param app_secret: 飞书应用 app_secret。
+        :param coupon_keywords: “券”分类的补充关键词。
+        :param stamp_keywords: “印花”分类的补充关键词。
+        :param member_keywords: “会员”分类的补充关键词。
+        :param promo_keywords: “促销”分类的补充关键词。
+        :param closed_keywords: “有结论”中的关闭类补充关键词。
+        :param conclusion_keywords: “有结论”中的结论类补充关键词。
         :param page_size: 单页拉取消息数量。
         :return: 已去重、分类和状态判断的工单记录。
         """
@@ -787,7 +903,13 @@ class TicketTopicStatsService:
                     continue
 
                 topic = cls.extract_topic(content)
-                category = cls.get_category_bucket(topic)
+                category = cls.get_category_bucket(
+                    topic,
+                    coupon_keywords=coupon_keywords,
+                    stamp_keywords=stamp_keywords,
+                    member_keywords=member_keywords,
+                    promo_keywords=promo_keywords,
+                )
                 if category == "其他":
                     logger.info(
                         f"专题工单消息跳过：主题未命中分类 | ticket_key={ticket_key} "
@@ -795,7 +917,12 @@ class TicketTopicStatsService:
                     )
                     continue
 
-                status = cls.get_session_status(content, message.get("thread_replies") or [])
+                status = cls.get_session_status(
+                    content,
+                    message.get("thread_replies") or [],
+                    closed_keywords=closed_keywords,
+                    conclusion_keywords=conclusion_keywords,
+                )
                 seen_ticket_keys.add(ticket_key)
                 records.append(
                     TopicTicketRecord(
