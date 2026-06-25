@@ -831,9 +831,19 @@
               </el-table-column>
               <el-table-column label="原始压缩包" min-width="180" show-overflow-tooltip>
                 <template #default="scope">
-                  <el-link v-if="scope.row.commandResultUrl" type="primary" @click="downloadLogPullOriginal(scope.row)">
-                    下载原始包
-                  </el-link>
+                  <el-space v-if="scope.row.commandResultUrl" :size="8">
+                    <el-link
+                      type="primary"
+                      :href="getLogPullOriginalDownloadUrl(scope.row)"
+                      target="_blank"
+                      @click.prevent="downloadLogPullOriginal(scope.row)"
+                    >
+                      下载原始包
+                    </el-link>
+                    <el-link type="success" icon="CopyDocument" @click="copyLogPullOriginalDownloadUrl(scope.row)">
+                      复制链接
+                    </el-link>
+                  </el-space>
                   <span v-else>-</span>
                 </template>
               </el-table-column>
@@ -4427,6 +4437,65 @@ function openBrowserDownload(url) {
   }
   window.open(targetUrl, '_blank', 'noopener')
   return true
+}
+
+/**
+ * 读取日志拉取记录的外部原始压缩包下载地址。
+ * @param {object} row 日志拉取记录行数据
+ * @returns {string} 可用于打开或复制的原始压缩包地址
+ */
+function getLogPullOriginalDownloadUrl(row) {
+  return String(row?.commandResultUrl || '').trim()
+}
+
+/**
+ * 复制文本到系统剪贴板，优先使用 Clipboard API，不支持时回退到临时输入框。
+ * @param {string} text 需要复制的文本
+ * @returns {Promise<boolean>} 是否复制成功
+ */
+async function copyTextToClipboard(text) {
+  const copyText = String(text || '').trim()
+  if (!copyText) {
+    return false
+  }
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(copyText)
+    return true
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = copyText
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return copied
+}
+
+/**
+ * 复制工单详情页日志拉取记录的原始压缩包地址，方便粘贴到邮件或 IM。
+ * @param {object} row 日志拉取记录行数据
+ * @returns {Promise<void>}
+ */
+async function copyLogPullOriginalDownloadUrl(row) {
+  const targetUrl = getLogPullOriginalDownloadUrl(row)
+  if (!targetUrl) {
+    proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
+    return
+  }
+  try {
+    const copied = await copyTextToClipboard(targetUrl)
+    if (!copied) {
+      proxy.$modal.msgError('复制失败，请手动复制链接')
+      return
+    }
+    proxy.$modal.msgSuccess('下载链接已复制')
+  } catch (error) {
+    console.error(error)
+    proxy.$modal.msgError('复制失败，请手动复制链接')
+  }
 }
 
 function resolveLogPullDownloadFileName(row, source = 'auto') {

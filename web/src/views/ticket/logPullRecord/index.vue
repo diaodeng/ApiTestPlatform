@@ -155,6 +155,16 @@
           >
             下载日志
           </el-button>
+          <el-button
+            link
+            type="success"
+            icon="CopyDocument"
+            @click="copyLogPullDownloadUrl(scope.row)"
+            :disabled="actionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
+            v-hasPermi="['ticket:logpull:query']"
+          >
+            复制链接
+          </el-button>
           <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
             重新拉取
           </el-button>
@@ -1230,6 +1240,100 @@ function openBrowserDownload(url) {
   return true
 }
 
+/**
+ * 判断地址是否为浏览器可直接访问的 HTTP(S) 链接。
+ * @param {string} url 待判断的地址
+ * @returns {boolean} true=HTTP(S) 地址
+ */
+function isHttpDownloadUrl(url) {
+  return /^https?:\/\//i.test(String(url || '').trim())
+}
+
+/**
+ * 拼接日志拉取下载接口地址。
+ * @param {number|string} recordId 日志拉取记录ID
+ * @param {string} source 下载来源，支持 auto/service/original
+ * @returns {string} 当前站点下的后端下载接口地址
+ */
+function buildLogPullApiDownloadUrl(recordId, source = 'auto') {
+  const baseApi = String(window.BASE_API || '').replace(/\/$/, '')
+  const path = `/ticket/log-pulls/${recordId}/download?source=${encodeURIComponent(source)}`
+  return baseApi ? `${baseApi}${path}` : path
+}
+
+/**
+ * 按“下载日志”当前策略解析可复制地址。
+ * @param {object} row 日志拉取记录行数据
+ * @returns {{url: string, needLogin: boolean}} url为复制目标，needLogin表示是否依赖当前系统登录态
+ */
+function resolveLogPullCopyDownloadUrl(row) {
+  if (!row?.id) {
+    return { url: '', needLogin: false }
+  }
+  const storagePath = String(row.storagePath || '').trim()
+  const originalUrl = String(row.commandResultUrl || '').trim()
+  if (!storagePath && originalUrl) {
+    return { url: originalUrl, needLogin: false }
+  }
+  if (isHttpDownloadUrl(storagePath)) {
+    return { url: storagePath, needLogin: false }
+  }
+  if (storagePath) {
+    return { url: buildLogPullApiDownloadUrl(row.id, 'auto'), needLogin: true }
+  }
+  return { url: originalUrl, needLogin: false }
+}
+
+/**
+ * 复制文本到系统剪贴板，优先使用 Clipboard API，不支持时回退到临时输入框。
+ * @param {string} text 需要复制的文本
+ * @returns {Promise<boolean>} 是否复制成功
+ */
+async function copyTextToClipboard(text) {
+  const copyText = String(text || '').trim()
+  if (!copyText) {
+    return false
+  }
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(copyText)
+    return true
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = copyText
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return copied
+}
+
+/**
+ * 复制日志拉取管理页“下载日志”的实际下载地址，方便粘贴到邮件或 IM。
+ * @param {object} row 日志拉取记录行数据
+ * @returns {Promise<void>}
+ */
+async function copyLogPullDownloadUrl(row) {
+  const { url, needLogin } = resolveLogPullCopyDownloadUrl(row)
+  if (!url) {
+    proxy.$modal.msgWarning('当前记录缺少可下载的归档文件')
+    return
+  }
+  try {
+    const copied = await copyTextToClipboard(url)
+    if (!copied) {
+      proxy.$modal.msgError('复制失败，请手动复制链接')
+      return
+    }
+    proxy.$modal.msgSuccess(needLogin ? '下载链接已复制，访问时需要当前系统登录态' : '下载链接已复制')
+  } catch (error) {
+    console.error(error)
+    proxy.$modal.msgError('复制失败，请手动复制链接')
+  }
+}
+
 async function downloadLogPull(row) {
   if (!row?.id) {
     return
@@ -1242,7 +1346,7 @@ async function downloadLogPull(row) {
     openBrowserDownload(row.commandResultUrl)
     return
   }
-  if (/^https?:\/\//i.test(String(row.storagePath || ''))) {
+  if (isHttpDownloadUrl(row.storagePath)) {
     openBrowserDownload(row.storagePath)
     return
   }

@@ -8,6 +8,14 @@ updated: 2026-06-25
 
 # 操作日志
 
+## [2026-06-25] INGEST-CODE | 日志拉取下载链接复制
+- 触发：用户反馈工单详情页日志拉取列表“下载原始包”和日志拉取管理页“下载日志”无法复制原始日志下载链接，需要能粘贴到邮件。
+- 架构层：工单域 / 日志拉取 / Web 控制台 / 下载链接
+- 创建的页面：`web/public/docs/2026-06-25-ticket-log-pull-copy-download-link.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/logPullRecord/index.vue`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：日志拉取记录 `commandResultUrl/storagePath` -> 前端下载策略解析 -> “复制链接”入口 -> 邮件或 IM 粘贴。
+- 关键结论：原始压缩包优先复制外部 `commandResultUrl`；管理页按“下载日志”实际策略复制 HTTP 归档、原始地址或系统下载接口。本地/FTP 归档复制的是鉴权接口地址，访问者需要系统登录态。
+
 ## [2026-06-25] INGEST-CODE | 多维表格主动拉取群消息人员解析与日志
 - 触发：用户反馈 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync` 同步后推送消息有概率获取不到人员信息，并要求发送消息日志记录消息内容。
 - 架构层：工单域 / 飞书多维表格主动拉取 / 群消息通知 / 飞书人员 @ 解析
