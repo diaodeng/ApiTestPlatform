@@ -863,3 +863,7 @@ updated: 2026-06-24
 - 创建的页面：`web/public/docs/2026-06-24-ticket-bitable-nested-time-filter.md`
 - 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-06-22-ticket-bitable-pull-created-after.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
 - 变更传播链：`bitablePull.filterFormula` 嵌套 filter -> `_fill_dynamic_time_filter_values` 递归补值 -> `_build_bitable_pull_time_filters` 顶层 children 追加默认时间窗口 -> 飞书 `records/search` 请求过滤。
+## [2026-06-24] code | 工单用户配置、列表列与统计块显示
+- 更新页面：web/src/views/ticket/index.vue, web/src/views/ticket/statistics/index.vue
+- 新增后端：module_admin 用户配置模型、DAO、Service、Controller
+- 文档：web/public/docs/2026-06-24-ticket-user-config-columns-stat-blocks.md

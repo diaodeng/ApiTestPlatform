@@ -31,6 +31,7 @@ from module_admin.controller.post_controler import postController
 from module_admin.controller.role_controller import roleController
 from module_admin.controller.server_controller import serverController
 from module_admin.controller.user_controller import userController
+from module_admin.controller.user_config_controller import userConfigController
 from module_admin.perms import register as register_admin_permission_defs
 from module_hrm.controller.agent_controller import agentController as agentManagerController
 from module_hrm.controller.api_controler import hrmApiController
@@ -129,6 +130,7 @@ controller_list = [
     {'router': loginController, 'tags': ['登录模块']},
     {'router': captchaController, 'tags': ['验证码模块']},
     {'router': userController, 'tags': ['系统管理-用户管理']},
+    {'router': userConfigController, 'tags': ['系统管理-用户配置']},
     {'router': roleController, 'tags': ['系统管理-角色管理']},
     {'router': menuController, 'tags': ['系统管理-菜单管理']},
     {'router': deptController, 'tags': ['系统管理-部门管理']},

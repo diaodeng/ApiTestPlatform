@@ -71,6 +71,21 @@
           <el-option v-for="item in issueTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
+      <el-form-item label="根因分类" prop="rootCauseType">
+        <el-select v-model="queryParams.rootCauseType" placeholder="根因分类" clearable filterable style="width: 160px">
+          <el-option v-for="item in rootCauseTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="解决方式" prop="solutionType">
+        <el-select v-model="queryParams.solutionType" placeholder="解决方式" clearable filterable style="width: 160px">
+          <el-option v-for="item in solutionTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="关闭结果" prop="resolutionCode">
+        <el-select v-model="queryParams.resolutionCode" placeholder="关闭结果" clearable filterable style="width: 160px">
+          <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="是否问题" prop="isProblem">
         <el-select v-model="queryParams.isProblem" placeholder="是否问题" clearable style="width: 140px">
           <el-option label="真实问题" :value="true" />
@@ -125,20 +140,23 @@
           下载模板
         </el-button>
       </el-col>
+      <el-col :span="1.5">
+        <el-button plain icon="Setting" @click="columnConfigOpen = true">列设置</el-button>
+      </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
     </el-row>
 
     <el-table v-loading="loading" :data="ticketList" row-key="ticketId">
-      <el-table-column label="工单编号" prop="ticketNo" width="190" show-overflow-tooltip />
-      <el-table-column label="标题" prop="title" min-width="240" show-overflow-tooltip />
-      <el-table-column label="状态" prop="status" width="120" align="center">
+      <el-table-column v-if="isTicketColumnVisible('ticketNo')" label="工单编号" prop="ticketNo" width="190" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('title')" label="标题" prop="title" min-width="240" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('status')" label="状态" prop="status" width="120" align="center">
         <template #default="scope">
           <el-tag :type="getStatusTagType(scope.row.status)">
             {{ getOptionLabel(ticketStatusOptions, scope.row.status) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="处理状态" min-width="160" align="center">
+      <el-table-column v-if="isTicketColumnVisible('processStatus')" label="处理状态" min-width="160" align="center">
         <template #default="scope">
           <el-tag
             v-if="resolveTicketProcessStatus(scope.row).label"
@@ -149,32 +167,41 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column label="项目" width="160" show-overflow-tooltip>
+      <el-table-column v-if="isTicketColumnVisible('project')" label="项目" width="160" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.projectName || scope.row.merchantName || '-' }}</template>
       </el-table-column>
-      <el-table-column label="模块" prop="moduleName" width="140" show-overflow-tooltip />
-      <el-table-column label="工单类型" width="130" show-overflow-tooltip>
+      <el-table-column v-if="isTicketColumnVisible('moduleName')" label="模块" prop="moduleName" width="140" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('issueType')" label="工单类型" width="130" show-overflow-tooltip>
         <template #default="scope">{{ formatIssueType(scope.row) }}</template>
       </el-table-column>
-      <el-table-column label="问题性质" width="100" align="center">
+      <el-table-column v-if="isTicketColumnVisible('isProblem')" label="问题性质" width="100" align="center">
         <template #default="scope">
           <el-tag v-if="scope.row.isProblem === true" type="danger">真实问题</el-tag>
           <el-tag v-else-if="scope.row.isProblem === false" type="info">非问题</el-tag>
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column label="对方优先级" prop="customerPriority" width="110" align="center" />
-      <el-table-column label="内部优先级" prop="internalPriority" width="110" align="center" />
-      <el-table-column label="来源" prop="source" width="110">
+      <el-table-column v-if="isTicketColumnVisible('rootCauseType')" label="根因分类" width="130" show-overflow-tooltip>
+        <template #default="scope">{{ formatStatOption(rootCauseTypeOptions, scope.row.rootCauseType) }}</template>
+      </el-table-column>
+      <el-table-column v-if="isTicketColumnVisible('solutionType')" label="解决方式" width="130" show-overflow-tooltip>
+        <template #default="scope">{{ formatStatOption(solutionTypeOptions, scope.row.solutionType) }}</template>
+      </el-table-column>
+      <el-table-column v-if="isTicketColumnVisible('resolution')" label="关闭结果" width="130" show-overflow-tooltip>
+        <template #default="scope">{{ formatResolution(scope.row) }}</template>
+      </el-table-column>
+      <el-table-column v-if="isTicketColumnVisible('customerPriority')" label="对方优先级" prop="customerPriority" width="110" align="center" />
+      <el-table-column v-if="isTicketColumnVisible('internalPriority')" label="内部优先级" prop="internalPriority" width="110" align="center" />
+      <el-table-column v-if="isTicketColumnVisible('source')" label="来源" prop="source" width="110">
         <template #default="scope">{{ getOptionLabel(sourceOptions, scope.row.source) }}</template>
       </el-table-column>
-      <el-table-column label="1线人员" prop="firstLineAssigneeName" width="130" show-overflow-tooltip />
-      <el-table-column label="内部负责人" prop="internalOwnerName" width="130" show-overflow-tooltip />
-      <el-table-column label="当前处理人" prop="currentAssigneeName" width="130" show-overflow-tooltip />
-      <el-table-column label="工单提交时间" prop="submitTime" width="170">
+      <el-table-column v-if="isTicketColumnVisible('firstLineAssigneeName')" label="1线人员" prop="firstLineAssigneeName" width="130" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('internalOwnerName')" label="内部负责人" prop="internalOwnerName" width="130" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('currentAssigneeName')" label="当前处理人" prop="currentAssigneeName" width="130" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('submitTime')" label="工单提交时间" prop="submitTime" width="170">
         <template #default="scope">{{ parseTime(scope.row.submitTime || scope.row.externalCreateTime || scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="创建时间" prop="createTime" width="170">
+      <el-table-column v-if="isTicketColumnVisible('createTime')" label="创建时间" prop="createTime" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
       <el-table-column label="操作" align="center" width="450" fixed="right">
@@ -227,6 +254,23 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <el-dialog title="工单列表列设置" v-model="columnConfigOpen" width="560px" append-to-body>
+      <el-checkbox-group v-model="visibleTicketColumnKeys" class="ticket-column-config">
+        <el-checkbox
+          v-for="item in ticketColumnOptions"
+          :key="item.key"
+          :label="item.key"
+          :disabled="item.required"
+        >
+          {{ item.label }}
+        </el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="resetTicketColumnConfig">恢复默认</el-button>
+        <el-button type="primary" @click="saveTicketColumnConfig">保存</el-button>
+      </template>
+    </el-dialog>
 
     <pagination
       v-show="total > 0"
@@ -1989,6 +2033,7 @@ import {
 import UserSelect from './components/UserSelect.vue'
 import { blobValidate } from '@/utils/ruoyi'
 import { useRoute, useRouter } from 'vue-router'
+import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig'
 
 const { proxy } = getCurrentInstance()
 const route = useRoute()
@@ -2008,6 +2053,31 @@ const issueTypeOptions = ref([])
 const rootCauseTypeOptions = ref([])
 const solutionTypeOptions = ref([])
 const resolutionOptions = ref([])
+const columnConfigOpen = ref(false)
+const ticketColumnOptions = [
+  { key: 'ticketNo', label: '工单编号', required: true },
+  { key: 'title', label: '标题', required: true },
+  { key: 'status', label: '状态' },
+  { key: 'processStatus', label: '处理状态' },
+  { key: 'project', label: '项目' },
+  { key: 'moduleName', label: '模块' },
+  { key: 'issueType', label: '工单类型' },
+  { key: 'isProblem', label: '问题性质' },
+  { key: 'rootCauseType', label: '根因分类' },
+  { key: 'solutionType', label: '解决方式' },
+  { key: 'resolution', label: '关闭结果' },
+  { key: 'customerPriority', label: '对方优先级' },
+  { key: 'internalPriority', label: '内部优先级' },
+  { key: 'source', label: '来源' },
+  { key: 'firstLineAssigneeName', label: '1线人员' },
+  { key: 'internalOwnerName', label: '内部负责人' },
+  { key: 'currentAssigneeName', label: '当前处理人' },
+  { key: 'submitTime', label: '工单提交时间' },
+  { key: 'createTime', label: '创建时间' }
+]
+const defaultTicketColumnKeys = ticketColumnOptions.map(item => item.key)
+const requiredTicketColumnKeys = ticketColumnOptions.filter(item => item.required).map(item => item.key)
+const visibleTicketColumnKeys = ref([...defaultTicketColumnKeys])
 const agentOptions = ref([])
 const providerOptions = ref([])
 const analysisPromptOptions = ref([])
@@ -2811,6 +2881,51 @@ function loadStatClassificationOptions() {
     solutionTypeOptions.value = []
     resolutionOptions.value = []
   })
+}
+
+function normalizeTicketColumnKeys(value) {
+  const rawKeys = Array.isArray(value?.visibleColumns) ? value.visibleColumns : value
+  const validKeys = new Set(ticketColumnOptions.map(item => item.key))
+  const normalized = (Array.isArray(rawKeys) ? rawKeys : defaultTicketColumnKeys)
+    .map(item => String(item || '').trim())
+    .filter(item => validKeys.has(item))
+  requiredTicketColumnKeys.forEach(key => {
+    if (!normalized.includes(key)) {
+      normalized.push(key)
+    }
+  })
+  return normalized.length ? normalized : [...defaultTicketColumnKeys]
+}
+
+function loadTicketColumnConfig() {
+  return getCurrentUserConfig('ticket', 'ticket_list_columns').then(response => {
+    visibleTicketColumnKeys.value = normalizeTicketColumnKeys(response.data?.configValue)
+  }).catch(() => {
+    visibleTicketColumnKeys.value = [...defaultTicketColumnKeys]
+  })
+}
+
+function saveTicketColumnConfig() {
+  visibleTicketColumnKeys.value = normalizeTicketColumnKeys(visibleTicketColumnKeys.value)
+  saveCurrentUserConfig({
+    configType: 'ticket',
+    configKey: 'ticket_list_columns',
+    configValue: {
+      visibleColumns: visibleTicketColumnKeys.value
+    },
+    remark: '工单列表显示列配置'
+  }).then(() => {
+    columnConfigOpen.value = false
+    proxy.$modal.msgSuccess('保存成功')
+  })
+}
+
+function resetTicketColumnConfig() {
+  visibleTicketColumnKeys.value = [...defaultTicketColumnKeys]
+}
+
+function isTicketColumnVisible(key) {
+  return visibleTicketColumnKeys.value.includes(key)
 }
 
 const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null)
@@ -4768,6 +4883,7 @@ loadProviderOptions()
 loadVendorOptions()
 loadAnalysisPromptOptions()
 loadPushOptions()
+loadTicketColumnConfig()
 loadQueryModuleOptions()
 loadWorkflowConfig().finally(() => {
   if (standaloneDetailMode.value && standaloneRouteTicketId.value) {
@@ -4784,6 +4900,12 @@ loadWorkflowConfig().finally(() => {
   flex-direction: column;
   height: 100vh;
   margin: 0;
+}
+
+.ticket-column-config {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
 }
 
 .ticket-page :deep(.ticket-detail-dialog .el-dialog__header) {

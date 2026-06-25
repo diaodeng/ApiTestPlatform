@@ -55,6 +55,9 @@ graph TD
 - 历史 `ticket.sync.automation.aiClassification.promptContent` 不再作为新编辑入口，但保存同步配置时会保留并作为旧环境兜底，避免默认模板缺失时影响现有分类统计链路。
 - 工单列表、状态流转、RCA、外部同步入库和统计页均读取同一套枚举配置；旧 `category_name` 与 `categoryCounts` 继续保留兼容，不再承担新统计主维度。
 - 工单列表展示工单类型时只读取 `issue_type_name` 或命中配置的 `issue_type_id`，不再回退 `category_name`，避免历史分类/模块文案误显示为新工单类型。
+- 工单列表已接入根因分类、解决方式和关闭结果筛选及显示列；列表列显示配置通过当前用户配置 `ticket/ticket_list_columns` 保存。
+- 工单统计页的统计块显示配置通过当前用户配置 `ticket/ticket_statistics_blocks` 保存，用户可按关注维度隐藏不需要的统计块。
+- 用户级偏好采用通用表 `sys_user_config`，以 `user_id + config_type + config_key` 唯一定位，`config_value` 保存少量 JSON 配置；后续用户级 AI prompt/provider 等零散配置优先复用该模型。
 - 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；列表页新增按 `module_code` 下拉筛选，统计页新增按 `moduleCodes` 多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds/moduleCodes` 参数，后端所有统计维度和状态流转统计都共用该过滤条件。
 - 工单编辑弹窗回填时会抑制项目监听器误清空 `module_id`，模块下拉变更和提交前会按 `module_id` 补齐 `module_name`，保证列表模块列在编辑保存后不丢失。
 - 若工单的 `module_name` 来自外部同步或历史数据且无法匹配当前项目 HRM 模块，编辑弹窗会以可创建下拉项形式原样展示并保存文本；只有用户手动选择现有模块时才切换为标准 `module_id/module_name`。

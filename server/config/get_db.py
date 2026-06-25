@@ -69,6 +69,7 @@ async def init_create_table():
     _ensure_hrm_module_business_code_column()
     _ensure_ticket_role_columns()
     _ensure_ticket_classification_columns()
+    _ensure_user_config_unique_index()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
 
@@ -403,3 +404,57 @@ def _ensure_ticket_classification_columns():
                 connection.execute(text(f"ALTER TABLE ticket ADD COLUMN {column_name} {column_type}"))
     except Exception as exc:
         logger.warning(f"检查或升级 ticket 分类统计字段失败: {exc}")
+
+
+def _ensure_user_config_unique_index():
+    """
+    为用户配置表补齐唯一索引，兼容旧库或create_all未创建约束的环境。
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                index_row = (
+                    connection.execute(
+                        text(
+                            """
+                            SELECT INDEX_NAME
+                            FROM information_schema.STATISTICS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'sys_user_config'
+                              AND INDEX_NAME = 'uk_sys_user_config_user_type_key'
+                            """
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if index_row:
+                    return
+                logger.info("检测到 sys_user_config 缺少唯一索引，自动补齐")
+                connection.execute(
+                    text(
+                        """
+                        ALTER TABLE sys_user_config
+                        ADD UNIQUE KEY uk_sys_user_config_user_type_key (user_id, config_type, config_key)
+                        """
+                    )
+                )
+                return
+
+            indexes = connection.execute(text("PRAGMA index_list(sys_user_config)")).mappings().all()
+            if any(str(row.get("name") or "") == "uk_sys_user_config_user_type_key" for row in indexes):
+                return
+            logger.info("检测到 sqlite sys_user_config 缺少唯一索引，自动补齐")
+            connection.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX uk_sys_user_config_user_type_key
+                    ON sys_user_config (user_id, config_type, config_key)
+                    """
+                )
+            )
+    except Exception as exc:
+        logger.warning(f"检查或升级 sys_user_config 唯一索引失败: {exc}")

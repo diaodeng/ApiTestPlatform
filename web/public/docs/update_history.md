@@ -1,5 +1,10 @@
 ## 2026-06-24
 
+1. 新增通用用户配置表 `sys_user_config` 和当前用户配置接口，按 `userId + configType + configKey` 保存少量 JSON 偏好。
+2. 工单列表新增根因分类、解决方式、关闭结果筛选和表格列；表格列支持“列设置”并按用户保存。
+3. 工单统计页新增“显示配置”，可按用户决定哪些统计块展示。
+4. 新增说明文档：`web/public/docs/2026-06-24-ticket-user-config-columns-stat-blocks.md`。
+
 1. 多维表格主动拉取必填校验改为直接读取“外部工单字段模型”中 `required=true` 的字段，避免历史 `externalSyncRequiredFields` 与字段模型漂移。
 2. 字段不全的主动拉取记录会转换失败并计入 `failedCount`，不会入库，也不会触发延后后处理和自动群消息。
 3. 新增说明文档：`web/public/docs/2026-06-24-ticket-bitable-pull-required-field-model.md`。
