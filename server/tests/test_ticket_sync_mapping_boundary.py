@@ -1398,6 +1398,42 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(current_user.user.user_id, 0)
         self.assertEqual(current_user.user.user_name, "system")
 
+    def test_bitable_pull_person_mapping_extracts_name_and_email(self):
+        """主动拉取人员字段应从飞书人员对象中分别提取姓名和邮箱。"""
+        fields = {
+            "提单人": [{"name": "张三", "email": "zhangsan@example.com"}],
+            "当前负责人": [{"name": "李四", "email": "lisi@example.com"}],
+        }
+
+        payload = TicketSyncService._build_bitable_pull_field_mapping_from_record(
+            fields,
+            field_mappings=[
+                {"sourceField": "提单人", "targetField": "reporterName"},
+                {"sourceField": "提单人", "targetField": "reporterEmail"},
+                {"sourceField": "当前负责人", "targetField": "currentAssigneeName"},
+                {"sourceField": "当前负责人", "targetField": "currentAssigneeEmail"},
+            ],
+        )
+
+        self.assertEqual(payload["reporterName"], "张三")
+        self.assertEqual(payload["reporterEmail"], "zhangsan@example.com")
+        self.assertEqual(payload["currentAssigneeName"], "李四")
+        self.assertEqual(payload["currentAssigneeEmail"], "lisi@example.com")
+
+    def test_notify_email_extracts_nested_person_payload(self):
+        """群消息 @ 人邮箱解析应兼容飞书人员对象和数组。"""
+        email = TicketSyncNotifyService._extract_email_from_payload(
+            {
+                "currentAssigneeEmail": [
+                    {"name": "李四", "email": "lisi@example.com"},
+                    {"name": "王五", "email": "wangwu@example.com"},
+                ],
+            },
+            ["currentAssigneeEmail"],
+        )
+
+        self.assertEqual(email, "lisi@example.com")
+
     def test_bitable_pull_records_filter_builds_default_cloud_time_filter(self):
         """主动拉取应构造飞书云端创建时间和更新时间过滤条件。"""
         filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(datetime(2026, 6, 22, 10, 48, 0))

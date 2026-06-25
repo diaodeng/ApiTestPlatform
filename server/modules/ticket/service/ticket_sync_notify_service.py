@@ -604,15 +604,41 @@ class TicketSyncNotifyService:
             if key not in payload:
                 continue
             value = payload.get(key)
-            if isinstance(value, dict):
-                value = value.get("email") or value.get("mail") or value.get("value")
-            elif isinstance(value, list):
-                value = value[0] if value else ""
-                if isinstance(value, dict):
-                    value = value.get("email") or value.get("mail") or value.get("value")
-            normalized_email = cls._normalize_email(value)
+            normalized_email = cls._extract_email_from_value(value)
             if cls._is_valid_email(normalized_email):
                 return normalized_email
+        return ""
+
+    @classmethod
+    def _extract_email_from_value(cls, value: Any) -> str:
+        """
+        从任意人员字段值中提取邮箱。
+
+        :param value: 字段值，支持邮箱字符串、人员对象或人员数组。
+        :return: 命中的邮箱；未命中返回空字符串。
+        """
+        if value in (None, "", []):
+            return ""
+        if isinstance(value, dict):
+            for key in ("email", "mail", "value", "text", "name"):
+                if key not in value:
+                    continue
+                normalized_email = cls._extract_email_from_value(value.get(key))
+                if cls._is_valid_email(normalized_email):
+                    return normalized_email
+            return ""
+        if isinstance(value, list):
+            for item in value:
+                normalized_email = cls._extract_email_from_value(item)
+                if cls._is_valid_email(normalized_email):
+                    return normalized_email
+            return ""
+        text = str(value or "").strip()
+        if cls._is_valid_email(text):
+            return cls._normalize_email(text)
+        email_match = re.search(r"[\w.\-+%]+@[\w.\-]+\.[A-Za-z]{2,}", text)
+        if email_match:
+            return cls._normalize_email(email_match.group(0))
         return ""
 
     @classmethod
@@ -2341,6 +2367,11 @@ class TicketSyncNotifyService:
         template_variables.update(cls._build_group_mention_template_variables(mention_targets))
         content = cls._render_template(message_template, template_variables, cls.DEFAULT_GROUP_TEMPLATE)
         content_has_explicit_mentions = "<at user_id=" in content
+        logger.info(
+            f"群推送消息内容: ticket_no={ticket.ticket_no}, scene={scene}, "
+            f"send_mode={send_mode}, push_ids={push_ids}, chat_ids={chat_ids}, "
+            f"mention_targets={mention_targets}, content={content}"
+        )
         push_success_count = 0
         if enable_push_channel:
             push_success_count = cls._send_push_messages(

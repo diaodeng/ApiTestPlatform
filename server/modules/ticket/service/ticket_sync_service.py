@@ -4103,6 +4103,79 @@ class TicketSyncService:
         return text
 
     @classmethod
+    def _extract_bitable_person_text(
+        cls,
+        value: Any,
+        *,
+        preferred_keys: tuple[str, ...],
+        join_separator: str = ",",
+    ) -> str:
+        """
+        从飞书多维表格人员字段中提取指定文本。
+
+        :param value: 多维表格原始字段值，支持人员对象、数组或普通文本。
+        :param preferred_keys: 优先提取的字段键，例如 email/name/text。
+        :param join_separator: 多个人员值的拼接分隔符。
+        :return: 去重后的文本，未提取到时返回空字符串。
+        """
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            result_items: list[str] = []
+            for item in value:
+                item_text = cls._extract_bitable_person_text(
+                    item,
+                    preferred_keys=preferred_keys,
+                    join_separator=join_separator,
+                )
+                if item_text and item_text not in result_items:
+                    result_items.append(item_text)
+            return join_separator.join(result_items)
+        if isinstance(value, dict):
+            for key in preferred_keys:
+                if key not in value:
+                    continue
+                item_text = cls._extract_bitable_person_text(
+                    value.get(key),
+                    preferred_keys=preferred_keys,
+                    join_separator=join_separator,
+                )
+                if item_text:
+                    return item_text
+            return ""
+        return str(value or "").strip()
+
+    @classmethod
+    def _extract_bitable_person_email(cls, value: Any, *, join_separator: str = ",") -> str:
+        """
+        从飞书多维表格人员字段中提取邮箱。
+
+        :param value: 多维表格原始字段值。
+        :param join_separator: 多个邮箱的拼接分隔符。
+        :return: 邮箱文本，未提取到时返回空字符串。
+        """
+        return cls._extract_bitable_person_text(
+            value,
+            preferred_keys=("email", "mail"),
+            join_separator=join_separator,
+        )
+
+    @classmethod
+    def _extract_bitable_person_name(cls, value: Any, *, join_separator: str = ",") -> str:
+        """
+        从飞书多维表格人员字段中提取人员名称。
+
+        :param value: 多维表格原始字段值。
+        :param join_separator: 多个人员名的拼接分隔符。
+        :return: 人员名称文本，未提取到时返回空字符串。
+        """
+        return cls._extract_bitable_person_text(
+            value,
+            preferred_keys=("name", "text", "value", "en_name", "nickname"),
+            join_separator=join_separator,
+        )
+
+    @classmethod
     def _normalize_bitable_record_datetime_text(cls, value: Any) -> str:
         """
         将多维表格时间字段归一化为接口可消费的时间文本。
@@ -4154,10 +4227,29 @@ class TicketSyncService:
             if not source_field or not target_field:
                 continue
             raw_value = fields.get(source_field)
-            normalized_value = cls._normalize_bitable_record_scalar(
-                raw_value,
-                join_separator=str(mapping.get("joinSeparator") or ",").strip() or ",",
-            )
+            join_separator = str(mapping.get("joinSeparator") or ",").strip() or ","
+            if target_field in {
+                "reporterEmail",
+                "currentAssigneeEmail",
+                "ticketAssigneeEmail",
+                "internalOwnerEmail",
+            }:
+                normalized_value = cls._extract_bitable_person_email(raw_value, join_separator=join_separator)
+            elif target_field in {
+                "reporterName",
+                "currentAssigneeName",
+                "ticketAssignee",
+                "internalOwner",
+            }:
+                normalized_value = (
+                    cls._extract_bitable_person_name(raw_value, join_separator=join_separator)
+                    or cls._normalize_bitable_record_scalar(raw_value, join_separator=join_separator)
+                )
+            else:
+                normalized_value = cls._normalize_bitable_record_scalar(
+                    raw_value,
+                    join_separator=join_separator,
+                )
             if normalized_value in (None, "", []):
                 default_value = mapping.get("defaultValue")
                 normalized_value = default_value if default_value not in ("", None) else None

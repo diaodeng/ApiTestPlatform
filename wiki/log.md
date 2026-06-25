@@ -3,10 +3,18 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-06-24
+updated: 2026-06-25
 ---
 
 # 操作日志
+
+## [2026-06-25] INGEST-CODE | 多维表格主动拉取群消息人员解析与日志
+- 触发：用户反馈 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync` 同步后推送消息有概率获取不到人员信息，并要求发送消息日志记录消息内容。
+- 架构层：工单域 / 飞书多维表格主动拉取 / 群消息通知 / 飞书人员 @ 解析
+- 创建的页面：`web/public/docs/2026-06-25-ticket-bitable-pull-mention-log-fix.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/service/ticket_sync_notify_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`
+- 变更传播链：`bitablePull.fieldMappings` 人员字段 -> `_build_bitable_pull_field_mapping_from_record` 提取姓名/邮箱 -> `extraData.external_field_mapping` -> `_resolve_ticket_person_email` -> 飞书邮箱查 `open_id` -> 群消息渲染与发送日志。
+- 关键结论：人员信息应优先来自拉取到的数据中的人员字段邮箱；本地系统用户只作为姓名兜底。若飞书人员字段没有邮箱且本地也无用户邮箱，则无法解析 `open_id`，但现在日志会记录最终正文和解析明细。
 
 ## [2026-06-24] INGEST-CODE | 多维表格主动拉取必填字段模型校验
 - 触发：用户确认主动拉取多维表格数据是否按“外部工单字段模型”做必填字段校验，并要求字段不全时不要入库或发群消息。
