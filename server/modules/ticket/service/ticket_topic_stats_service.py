@@ -9,6 +9,13 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+import httpx
+from sqlalchemy.orm import Session
+
+from module_admin.dao.ai_provider_dao import AiProviderDao
+from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
+from module_admin.service.user_config_service import UserConfigService
+from utils.api_key_util import ApiKeyUtil
 from utils.log_util import logger
 
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -151,10 +158,34 @@ class TicketTopicStatsService:
 
     FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
     _tenant_token_cache: dict[str, dict[str, Any]] = {}
+    DEFAULT_TOPIC_CLASSIFY_PROMPT = (
+        "你是专题工单分类助手。请根据下面的飞书工单根消息，判断这张工单是否属于专题工单，并输出一个严格 JSON 对象，"
+        "不要输出 Markdown、代码块或额外解释。\n\n"
+        "分类规则：\n"
+        "1. 只在明确识别出专题时返回分类；无法判断时 category 输出 \"其他\"。\n"
+        "2. category 仅允许输出 \"促销\"、\"券\"、\"会员\"、\"印花\" 或 \"其他\"。\n"
+        "3. status 仅允许输出 \"有结论\" 或 \"无结论\"。\n"
+        "4. topic 输出根消息中的主题文本，尽量保留原始主题内容。\n"
+        "5. 如果消息里没有有效主题或 Ticket 编号，直接返回 \"其他\"。\n\n"
+        "输出 JSON 字段：\n"
+        "{\n"
+        '  "category": "促销/券/会员/印花/其他",\n'
+        '  "status": "有结论/无结论",\n'
+        '  "topic": "主题文本",\n'
+        '  "reason": "一句话说明判断依据"\n'
+        "}\n"
+    )
+    DEFAULT_TOPIC_CLASSIFY_TASK_PROVIDER_CODE = ""
+    DEFAULT_TOPIC_CLASSIFY_TASK_PROMPT_CODE = "ticket_stat_classify_default"
+    USER_CONFIG_TYPE = "ticket"
+    USER_CONFIG_KEY = "ticket_topic_stats_report"
+    TASK_MODE_KEYWORDS = "keywords"
+    TASK_MODE_AI = "ai"
 
     @classmethod
     def run_topic_stats(
         cls,
+        db: Session,
         *,
         start_date: str | None = None,
         end_date: str | None = None,
@@ -164,6 +195,10 @@ class TicketTopicStatsService:
         receive_chat_ids: list[str] | str | None = None,
         send: bool = False,
         keyword: str = "TRunner",
+        category_mode: str = "keywords",
+        ai_provider_code: str | None = None,
+        ai_prompt_code: str | None = None,
+        ai_prompt_content: str | None = None,
         coupon_keywords: list[str] | str | None = None,
         stamp_keywords: list[str] | str | None = None,
         member_keywords: list[str] | str | None = None,
@@ -183,6 +218,10 @@ class TicketTopicStatsService:
         :param receive_chat_ids: 发送统计卡片的飞书群 chat_id 列表。
         :param send: 是否发送飞书卡片。
         :param keyword: 卡片副标题关键字。
+        :param category_mode: 分类模式，keywords 表示关键词模式，ai 表示 AI 自动处理模式。
+        :param ai_provider_code: AI 分类使用的 Provider 编码，未传时回退任务参数默认或用户配置。
+        :param ai_prompt_code: AI 分类使用的提示词模板编码，未传时回退任务参数默认或用户配置。
+        :param ai_prompt_content: AI 分类使用的提示词正文，优先级高于提示词模板编码。
         :param coupon_keywords: 专题分类“券”的补充关键词。
         :param stamp_keywords: 专题分类“印花”的补充关键词。
         :param member_keywords: 专题分类“会员”的补充关键词。
@@ -211,10 +250,17 @@ class TicketTopicStatsService:
         if send and not normalized_receive_chat_ids:
             raise ValueError("send=true 时必须配置接收群列表")
 
+        resolved_category_mode = cls.normalize_category_mode(category_mode)
+        resolved_ai_provider_code, resolved_ai_prompt_code, resolved_ai_prompt_content = cls.resolve_ai_classify_config(
+            db,
+            ai_provider_code=ai_provider_code,
+            ai_prompt_code=ai_prompt_code,
+            ai_prompt_content=ai_prompt_content,
+        )
         logger.info(
             f"开始执行专题工单统计 | start_date={resolved_start_date.isoformat()} "
             f"end_date={resolved_end_date.isoformat()} source_count={len(normalized_sources)} "
-            f"send={bool(send)} keyword={keyword or '-'}"
+            f"send={bool(send)} keyword={keyword or '-'} category_mode={resolved_category_mode}"
         )
         records = cls.collect_topic_records(
             start_date=resolved_start_date,
@@ -222,6 +268,11 @@ class TicketTopicStatsService:
             sources=normalized_sources,
             app_id=resolved_app_id,
             app_secret=resolved_app_secret,
+            category_mode=resolved_category_mode,
+            db=db,
+            ai_provider_code=resolved_ai_provider_code,
+            ai_prompt_code=resolved_ai_prompt_code,
+            ai_prompt_content=resolved_ai_prompt_content,
             coupon_keywords=coupon_keywords,
             stamp_keywords=stamp_keywords,
             member_keywords=member_keywords,
@@ -307,6 +358,319 @@ class TicketTopicStatsService:
             if chat_id and chat_id not in result:
                 result.append(chat_id)
         return result
+
+    @classmethod
+    def normalize_category_mode(cls, value: str | None) -> str:
+        """
+        归一化专题分类模式。
+
+        :param value: 任务参数或用户配置中的模式值。
+        :return: keywords 或 ai。
+        """
+        normalized = str(value or "").strip().lower()
+        if normalized in {"ai", "auto", "llm", "model"}:
+            return cls.TASK_MODE_AI
+        return cls.TASK_MODE_KEYWORDS
+
+    @classmethod
+    def _normalize_prompt_content(cls, value: Any) -> str:
+        """
+        归一化提示词正文。
+
+        :param value: 原始提示词内容。
+        :return: 清理后的提示词正文。
+        """
+        return str(value or "").strip()
+
+    @classmethod
+    def _load_user_ai_classify_config(cls, db: Session, user_id: int | None) -> dict[str, Any]:
+        """
+        读取当前用户的专题统计 AI 配置。
+
+        :param db: 数据库会话。
+        :param user_id: 用户ID。
+        :return: 用户配置字典。
+        """
+        if not user_id:
+            return {}
+        config_model = UserConfigService.get_current_user_config_services(
+            db,
+            int(user_id),
+            cls.USER_CONFIG_TYPE,
+            cls.USER_CONFIG_KEY,
+        )
+        if not config_model or not isinstance(config_model.config_value, dict):
+            return {}
+        return dict(config_model.config_value)
+
+    @classmethod
+    def resolve_ai_classify_config(
+        cls,
+        db: Session,
+        *,
+        ai_provider_code: str | None = None,
+        ai_prompt_code: str | None = None,
+        ai_prompt_content: str | None = None,
+        user_id: int | None = None,
+    ) -> tuple[str, str, str]:
+        """
+        解析专题统计 AI 配置，优先使用任务参数，其次使用用户配置，最后回退系统参数默认值。
+
+        :param db: 数据库会话。
+        :param ai_provider_code: 任务参数 Provider 编码。
+        :param ai_prompt_code: 任务参数提示词编码。
+        :param ai_prompt_content: 任务参数提示词正文。
+        :param user_id: 用户ID，用于读取当前用户单独配置。
+        :return: (provider_code, prompt_code, prompt_content)。
+        """
+        user_config = cls._load_user_ai_classify_config(db, user_id)
+        config_provider_code = str(user_config.get("providerCode") or user_config.get("provider_code") or "").strip()
+        config_prompt_code = str(user_config.get("promptCode") or user_config.get("prompt_code") or "").strip()
+        config_prompt_content = cls._normalize_prompt_content(
+            user_config.get("promptContent") or user_config.get("prompt_content")
+        )
+        resolved_provider_code = str(ai_provider_code or "").strip() or config_provider_code
+        resolved_prompt_code = str(ai_prompt_code or "").strip() or config_prompt_code
+        resolved_prompt_content = cls._normalize_prompt_content(ai_prompt_content) or config_prompt_content
+        if not resolved_provider_code:
+            resolved_provider_code = cls.DEFAULT_TOPIC_CLASSIFY_TASK_PROVIDER_CODE
+        if not resolved_prompt_code:
+            resolved_prompt_code = cls.DEFAULT_TOPIC_CLASSIFY_TASK_PROMPT_CODE
+        if not resolved_prompt_content:
+            prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [resolved_prompt_code])
+            if prompt_templates:
+                resolved_prompt_content = cls._normalize_prompt_content(prompt_templates[0].get("promptContent"))
+        return resolved_provider_code, resolved_prompt_code, resolved_prompt_content
+
+    @classmethod
+    def _resolve_provider_headers(cls, provider) -> dict[str, str]:
+        """
+        构建 AI Provider 请求头。
+
+        :param provider: Provider 数据库对象。
+        :return: 请求头字典。
+        """
+        headers = {"Content-Type": "application/json"}
+        api_key = ApiKeyUtil.decrypt_api_key(getattr(provider, "api_key_cipher_text", None))
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return headers
+
+    @classmethod
+    def _resolve_provider_url(cls, provider) -> str:
+        """
+        解析 AI Provider 调用地址。
+
+        :param provider: Provider 数据库对象。
+        :return: 完整接口地址。
+        """
+        base_url = str(getattr(provider, "base_url", "") or "").strip().rstrip("/")
+        if not base_url:
+            raise ValueError("Provider基础地址不能为空")
+        if base_url.endswith("/chat/completions") or base_url.endswith("/responses"):
+            return base_url
+        return f"{base_url}/chat/completions"
+
+    @classmethod
+    def _extract_response_text(cls, response_data: dict[str, Any]) -> str:
+        """
+        从 OpenAI 兼容响应中提取正文。
+
+        :param response_data: 接口响应 JSON。
+        :return: 模型输出文本。
+        """
+        if not isinstance(response_data, dict):
+            return ""
+        output_text = str(response_data.get("output_text") or "").strip()
+        if output_text:
+            return output_text
+        choices = response_data.get("choices")
+        if isinstance(choices, list) and choices:
+            first_choice = choices[0] if isinstance(choices[0], dict) else {}
+            message = first_choice.get("message") if isinstance(first_choice, dict) else {}
+            content = message.get("content") if isinstance(message, dict) else None
+            if isinstance(content, list):
+                content_parts: list[str] = []
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    if str(item.get("type") or "").lower() == "text":
+                        text = str(item.get("text") or "").strip()
+                        if text:
+                            content_parts.append(text)
+                return "\n".join(content_parts).strip()
+            if str(content or "").strip():
+                return str(content).strip()
+        output = response_data.get("output")
+        if isinstance(output, list):
+            content_parts: list[str] = []
+            for item in output:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("type") or "").lower() != "message":
+                    continue
+                content = item.get("content")
+                if isinstance(content, list):
+                    for part in content:
+                        if not isinstance(part, dict):
+                            continue
+                        if str(part.get("type") or "").lower() == "output_text":
+                            text = str(part.get("text") or "").strip()
+                            if text:
+                                content_parts.append(text)
+                elif str(content or "").strip():
+                    content_parts.append(str(content).strip())
+            return "\n".join(content_parts).strip()
+        return ""
+
+    @classmethod
+    def _call_model_api(cls, *, provider, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> str:
+        """
+        调用兼容 OpenAI 的模型接口。
+
+        :param provider: Provider 数据库对象。
+        :param system_prompt: 系统提示词。
+        :param user_prompt: 用户提示词。
+        :param temperature: 采样温度。
+        :return: 模型返回文本。
+        """
+        url = cls._resolve_provider_url(provider)
+        model_name = str(getattr(provider, "model_name", "") or "").strip()
+        if not model_name:
+            raise ValueError("Provider模型名称不能为空")
+        is_responses_api = url.endswith("/responses")
+        if is_responses_api:
+            payload = {
+                "model": model_name,
+                "input": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature,
+            }
+        else:
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature,
+            }
+        with httpx.Client(timeout=60) as client:
+            response = client.post(url, json=payload, headers=cls._resolve_provider_headers(provider))
+            response.raise_for_status()
+            response_data = response.json()
+        content = cls._extract_response_text(response_data)
+        if not str(content or "").strip():
+            raise ValueError("AI接口未返回可解析的内容")
+        return str(content).strip()
+
+    @classmethod
+    def _build_ai_category_system_prompt(cls, prompt_content: str | None) -> str:
+        """
+        构建专题统计 AI 的系统提示词。
+
+        :param prompt_content: 手动配置的提示词正文。
+        :return: 系统提示词文本。
+        """
+        prompt_text = cls._normalize_prompt_content(prompt_content)
+        if prompt_text:
+            return prompt_text
+        return cls.DEFAULT_TOPIC_CLASSIFY_PROMPT
+
+    @classmethod
+    def _build_ai_category_user_prompt(
+        cls,
+        *,
+        content: str,
+        ticket_key: str,
+        group_name: str,
+        priority: str,
+        topic: str,
+    ) -> str:
+        """
+        构建专题统计 AI 的用户提示词。
+
+        :param content: 根消息全文。
+        :param ticket_key: Ticket 编号。
+        :param group_name: 群名称。
+        :param priority: 优先级。
+        :param topic: 主题文本。
+        :return: 用户提示词文本。
+        """
+        return (
+            "请根据下面的飞书工单消息判断专题分类和会话状态，并返回 JSON。\n"
+            f"Ticket: {ticket_key}\n"
+            f"群名称: {group_name}\n"
+            f"优先级: {priority}\n"
+            f"主题: {topic or '-'}\n"
+            f"原始消息:\n{content}"
+        )
+
+    @classmethod
+    def classify_category_with_ai(
+        cls,
+        db: Session,
+        *,
+        content: str,
+        ticket_key: str,
+        group_name: str,
+        priority: str,
+        topic: str,
+        provider_code: str | None = None,
+        prompt_code: str | None = None,
+        prompt_content: str | None = None,
+    ) -> tuple[str, str, str]:
+        """
+        使用 AI 解析专题分类和状态。
+
+        :param db: 数据库会话。
+        :param content: 根消息全文。
+        :param ticket_key: Ticket 编号。
+        :param group_name: 群名称。
+        :param priority: 优先级。
+        :param topic: 主题文本。
+        :param provider_code: Provider 编码。
+        :param prompt_code: 提示词编码。
+        :param prompt_content: 提示词正文。
+        :return: (category, status, topic)。
+        """
+        resolved_provider_code = str(provider_code or "").strip()
+        resolved_prompt_code = str(prompt_code or "").strip()
+        if not resolved_provider_code:
+            raise ValueError("AI 分类 Provider 未配置")
+        provider = AiProviderDao.get_ai_provider_by_code(db, resolved_provider_code)
+        if not provider or not bool(getattr(provider, "enabled", True)):
+            raise ValueError(f"Provider不存在或已停用: {resolved_provider_code}")
+
+        system_prompt = cls._build_ai_category_system_prompt(prompt_content)
+        user_prompt = cls._build_ai_category_user_prompt(
+            content=content,
+            ticket_key=ticket_key,
+            group_name=group_name,
+            priority=priority,
+            topic=topic,
+        )
+        response_text = cls._call_model_api(provider=provider, system_prompt=system_prompt, user_prompt=user_prompt)
+        try:
+            response_data = json.loads(response_text)
+        except Exception:
+            response_data = {}
+        if not isinstance(response_data, dict):
+            response_data = {}
+        category = str(response_data.get("category") or "其他").strip() or "其他"
+        status = str(response_data.get("status") or "无结论").strip() or "无结论"
+        topic_text = str(response_data.get("topic") or topic or "").strip()
+        if category not in CATEGORY_ORDER and category != "其他":
+            category = "其他"
+        if status not in STATUS_ORDER:
+            status = "无结论"
+        logger.info(
+            f"专题工单AI分类完成 | ticket_key={ticket_key} group_name={group_name} "
+            f"provider_code={resolved_provider_code} prompt_code={resolved_prompt_code or '-'} category={category} status={status}"
+        )
+        return category, status, topic_text
 
     @classmethod
     def cell_text(cls, value: Any) -> str:
@@ -828,11 +1192,16 @@ class TicketTopicStatsService:
     def collect_topic_records(
         cls,
         *,
+        db: Session,
         start_date: date,
         end_date: date,
         sources: list[TopicTicketSource],
         app_id: str,
         app_secret: str,
+        category_mode: str = "keywords",
+        ai_provider_code: str | None = None,
+        ai_prompt_code: str | None = None,
+        ai_prompt_content: str | None = None,
         coupon_keywords: list[str] | str | None = None,
         stamp_keywords: list[str] | str | None = None,
         member_keywords: list[str] | str | None = None,
@@ -849,6 +1218,10 @@ class TicketTopicStatsService:
         :param sources: 飞书群来源配置。
         :param app_id: 飞书应用 app_id。
         :param app_secret: 飞书应用 app_secret。
+        :param category_mode: 分类模式。
+        :param ai_provider_code: AI 分类 Provider 编码。
+        :param ai_prompt_code: AI 分类提示词编码。
+        :param ai_prompt_content: AI 分类提示词正文。
         :param coupon_keywords: “券”分类的补充关键词。
         :param stamp_keywords: “印花”分类的补充关键词。
         :param member_keywords: “会员”分类的补充关键词。
@@ -903,13 +1276,32 @@ class TicketTopicStatsService:
                     continue
 
                 topic = cls.extract_topic(content)
-                category = cls.get_category_bucket(
-                    topic,
-                    coupon_keywords=coupon_keywords,
-                    stamp_keywords=stamp_keywords,
-                    member_keywords=member_keywords,
-                    promo_keywords=promo_keywords,
-                )
+                if category_mode == cls.TASK_MODE_AI:
+                    category, status, topic = cls.classify_category_with_ai(
+                        db,
+                        content=content,
+                        ticket_key=ticket_key,
+                        group_name=source.name,
+                        priority=source.priority,
+                        topic=topic,
+                        provider_code=ai_provider_code,
+                        prompt_code=ai_prompt_code,
+                        prompt_content=ai_prompt_content,
+                    )
+                else:
+                    category = cls.get_category_bucket(
+                        topic,
+                        coupon_keywords=coupon_keywords,
+                        stamp_keywords=stamp_keywords,
+                        member_keywords=member_keywords,
+                        promo_keywords=promo_keywords,
+                    )
+                    status = cls.get_session_status(
+                        content,
+                        message.get("thread_replies") or [],
+                        closed_keywords=closed_keywords,
+                        conclusion_keywords=conclusion_keywords,
+                    )
                 if category == "其他":
                     logger.info(
                         f"专题工单消息跳过：主题未命中分类 | ticket_key={ticket_key} "
@@ -917,12 +1309,6 @@ class TicketTopicStatsService:
                     )
                     continue
 
-                status = cls.get_session_status(
-                    content,
-                    message.get("thread_replies") or [],
-                    closed_keywords=closed_keywords,
-                    conclusion_keywords=conclusion_keywords,
-                )
                 seen_ticket_keys.add(ticket_key)
                 records.append(
                     TopicTicketRecord(

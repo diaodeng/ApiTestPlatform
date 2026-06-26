@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from config.database import SessionLocal
+from module_task.celery_job_models import CeleryPeriodicTask
 from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.service.report_service import ReportService
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
@@ -415,6 +416,10 @@ def ticket_topic_stats_report(
     receive_chat_ids: list[str] | str | None = None,
     send: bool | None = None,
     keyword: str = "TRunner",
+    category_mode: str | None = None,
+    ai_provider_code: str | None = None,
+    ai_prompt_code: str | None = None,
+    ai_prompt_content: str | None = None,
     coupon_keywords: list[str] | str | None = None,
     stamp_keywords: list[str] | str | None = None,
     member_keywords: list[str] | str | None = None,
@@ -435,6 +440,10 @@ def ticket_topic_stats_report(
     :param receive_chat_ids: 发送统计卡片的群 chat_id 列表；为空时默认发到 sources 中配置的群。
     :param send: 是否发送飞书卡片。
     :param keyword: 卡片副标题关键字。
+    :param category_mode: 分类模式，keywords 保留关键词模式，ai 启用 AI 自动分类。
+    :param ai_provider_code: AI 分类 Provider 编码。
+    :param ai_prompt_code: AI 分类提示词编码。
+    :param ai_prompt_content: AI 分类提示词正文，优先级高于提示词编码。
     :param coupon_keywords: “券”分类补充关键词。
     :param stamp_keywords: “印花”分类补充关键词。
     :param member_keywords: “会员”分类补充关键词。
@@ -458,6 +467,12 @@ def ticket_topic_stats_report(
     )
     resolved_send = bool(send if send is not None else kwargs.pop("send", False))
     resolved_keyword = keyword if keyword is not None else kwargs.pop("keyword", "TRunner")
+    resolved_category_mode = category_mode if category_mode is not None else kwargs.pop("categoryMode", None)
+    resolved_ai_provider_code = ai_provider_code if ai_provider_code is not None else kwargs.pop("aiProviderCode", None)
+    resolved_ai_prompt_code = ai_prompt_code if ai_prompt_code is not None else kwargs.pop("aiPromptCode", None)
+    resolved_ai_prompt_content = (
+        ai_prompt_content if ai_prompt_content is not None else kwargs.pop("aiPromptContent", None)
+    )
     resolved_coupon_keywords = coupon_keywords if coupon_keywords is not None else _pop_keyword_override(
         kwargs, "couponKeywords", "coupon_keywords"
     )
@@ -481,25 +496,48 @@ def ticket_topic_stats_report(
     logger.info(
         f"专题工单会话状态统计任务开始 | start_date={resolved_start_date or '-'} "
         f"end_date={resolved_end_date or '-'} source_count={len(resolved_sources or [])} "
-        f"send={resolved_send} keyword={resolved_keyword or '-'}"
+        f"send={resolved_send} keyword={resolved_keyword or '-'} category_mode={resolved_category_mode or 'keywords'}"
     )
-    result = TicketTopicStatsService.run_topic_stats(
-        start_date=resolved_start_date,
-        end_date=resolved_end_date,
-        sources=resolved_sources,
-        app_id=resolved_app_id,
-        app_secret=resolved_app_secret,
-        receive_chat_ids=resolved_receive_chat_ids,
-        send=resolved_send,
-        keyword=str(resolved_keyword or "TRunner"),
-        coupon_keywords=resolved_coupon_keywords,
-        stamp_keywords=resolved_stamp_keywords,
-        member_keywords=resolved_member_keywords,
-        promo_keywords=resolved_promo_keywords,
-        closed_keywords=resolved_closed_keywords,
-        conclusion_keywords=resolved_conclusion_keywords,
-        page_size=int(resolved_page_size or 50),
-    )
+    owner_user_id = None
+    try:
+        with SessionLocal() as db:
+            if task_id:
+                task_row = db.query(CeleryPeriodicTask).filter(CeleryPeriodicTask.task_id == task_id).first()
+                owner_user_id = int(getattr(task_row, "owner_user_id", 0) or 0) or None
+            resolved_ai_provider_code, resolved_ai_prompt_code, resolved_ai_prompt_content = (
+                TicketTopicStatsService.resolve_ai_classify_config(
+                    db,
+                    ai_provider_code=resolved_ai_provider_code,
+                    ai_prompt_code=resolved_ai_prompt_code,
+                    ai_prompt_content=resolved_ai_prompt_content,
+                    user_id=owner_user_id,
+                )
+            )
+            result = TicketTopicStatsService.run_topic_stats(
+                db=db,
+                start_date=resolved_start_date,
+                end_date=resolved_end_date,
+                sources=resolved_sources,
+                app_id=resolved_app_id,
+                app_secret=resolved_app_secret,
+                receive_chat_ids=resolved_receive_chat_ids,
+                send=resolved_send,
+                keyword=str(resolved_keyword or "TRunner"),
+                category_mode=str(resolved_category_mode or "keywords"),
+                ai_provider_code=resolved_ai_provider_code,
+                ai_prompt_code=resolved_ai_prompt_code,
+                ai_prompt_content=resolved_ai_prompt_content,
+                coupon_keywords=resolved_coupon_keywords,
+                stamp_keywords=resolved_stamp_keywords,
+                member_keywords=resolved_member_keywords,
+                promo_keywords=resolved_promo_keywords,
+                closed_keywords=resolved_closed_keywords,
+                conclusion_keywords=resolved_conclusion_keywords,
+                page_size=int(resolved_page_size or 50),
+            )
+    except Exception as exc:
+        logger.exception(f"专题工单会话状态统计任务执行失败: error={exc}")
+        raise
     logger.info(
         f"专题工单会话状态统计任务完成 | total={result['summary']['total']} "
         f"status={result['summary']['status']} category={result['summary']['category']}"
