@@ -8,6 +8,14 @@ updated: 2026-06-25
 
 # 操作日志
 
+## [2026-06-26] INGEST-CODE | 多维表格主动拉取富文本换行保留
+- 触发：用户反馈主动拉取多维表格数据时，换行符被处理成 `{"text": "\n", "type": "text"}` 或空文本片段，导致内容格式丢失、描述挤在一起、排查过程评论分割不正确。
+- 架构层：工单域 / 飞书多维表格主动拉取 / 字段映射 / 同步评论
+- 创建的页面：`web/public/docs/2026-06-26-ticket-bitable-pull-rich-text-newline.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：飞书富文本片段数组 -> `_normalize_bitable_record_scalar` 富文本识别 -> 描述/排查过程保留真实换行 -> `parse_step_reason_segments` 按日期行拆分评论。
+- 关键结论：富文本片段数组必须按片段顺序拼接，换行片段保留为真实 `\n`，空文本片段不落为 JSON 文本；普通多选和人员数组继续走原分隔符拼接逻辑。
+
 ## [2026-06-25] INGEST-CODE | 日志拉取下载链接复制
 - 触发：用户反馈工单详情页日志拉取列表“下载原始包”和日志拉取管理页“下载日志”无法复制原始日志下载链接，需要能粘贴到邮件。
 - 架构层：工单域 / 日志拉取 / Web 控制台 / 下载链接

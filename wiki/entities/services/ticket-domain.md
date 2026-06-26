@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-06-24
+freshness: 2026-06-26
 created: 2026-05-20
-updated: 2026-06-21
+updated: 2026-06-26
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
@@ -93,6 +93,7 @@ graph TD
 - 主动拉取会把映射后的 `ticketVender/ticketModle/internalOwner` 写入 `extra_data.external_field_mapping`，并同步到 `projectName/moduleName/internalOwnerName`，避免 Pydantic 模型丢弃外部字段后导致项目、模块、内部负责人为空。
 - 主动拉取不经过外部推送 controller 的入参归一化，因此 `_build_bitable_pull_sync_object` 内会补齐主动拉取专用兼容：内部优先级为空时使用对方优先级，当前处理人字段兼容 `ticketAssigneeName/assigneeName` 等别名，并同步写入顶层模型和 `extra_data.external_field_mapping`；外部推送 `/ticket/sync/external` 逻辑不变。
 - 主动拉取必填校验直接读取 `externalFieldModel.fields[].required`，不再优先使用历史兼容字段 `externalSyncRequiredFields`；缺少必填字段的记录只计入失败汇总和 `missing_required_fields` 日志，不调用入库，也不会触发延后后处理或自动群消息。
+- 主动拉取会识别飞书长文本富文本片段数组，按片段顺序拼接并保留 `\n` 为真实换行；空文本片段不会被 JSON 化，避免描述内容挤在一起，也保证 `stepReason` 仍可按日期行拆分同步评论。
 - 主动拉取传入 `automation.autoTranslate` 时，外部同步主链路和延后后处理都会优先使用该场景开关；只有未传 automation 时才回退全局 `autoTranslateOnSync`。
 - 远端拉取由 `ticket.sync.automation.remoteSync.enabled` 控制，拉取入库不会再次查询公网多维表格；它只使用远端 payload 已携带的邮箱/姓名，并按内网本地 `assigneeMappings` 或邮箱用户匹配解析人员。
 - 工单项目/模块选项直接复用 HRM 公共项目管理，不单独维护工单项目库；后端按 HRM 的正常状态值 `QtrDataStatusEnum.normal = 2` 过滤有效项。

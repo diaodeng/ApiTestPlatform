@@ -16,7 +16,7 @@ entry_points:
     path: /ticket/sync/ack
     trigger: 消费方可选回写处理结果
 created: 2026-05-31
-updated: 2026-06-24
+updated: 2026-06-26
 ---
 
 # 工单外部同步与内网拉取流程
@@ -73,6 +73,7 @@ sequenceDiagram
 | 5.1.9 | 主动拉取映射出的 `ticketVender/ticketModle/internalOwner` 会保存到 `extraData.external_field_mapping`，并同步为 `projectName/moduleName/internalOwnerName` 给入库识别使用；主动拉取 `automation.autoTranslate` 优先于全局 `autoTranslateOnSync`。 |
 | 5.1.10 | 主动拉取转换模型时会执行专用字段兜底：`internalPriority` 为空且 `customerPriority` 有值时使用对方优先级补齐内部优先级；`ticketAssigneeName/assigneeName` 等别名会归一为当前处理人，并写入顶层模型和 `extraData.external_field_mapping`。该逻辑只作用于主动拉取，不改变外部推送入口。 |
 | 5.1.11 | 主动拉取记录级必填校验直接使用“外部工单字段模型”中 `required=true` 的字段；字段不全时 `_build_bitable_pull_sync_object` 返回空，任务汇总计入 `failedCount`，不会进入 `sync_external_ticket`，因此不会入库或自动发群消息。 |
+| 5.1.12 | 主动拉取识别飞书长文本富文本片段数组，按片段顺序拼接并保留 `"\n"` 为真实换行；空文本片段自然忽略，不再把换行或空片段 JSON 化为普通文本，保证描述格式和 `stepReason` 评论日期行分割不丢失。 |
 | 6 | 内网消费方调用 `GET /ticket/sync/pending` 时，优先拿到 `external_sync.revision > consumers.{consumer}.delivered_revision` 且 `publish_ready=true` 的工单；若候选工单卡在 `processing_ai` 但没有活动 AI 任务，会先自动恢复发布状态再返回。 |
 | 7 | 内网将远端 pending 工单转换为本地入库模型时，会优先读取 `moduleName/module_name`，并兼容 `ticketModle/ticketModel/ticket_model` 与 `extraData.external_field_mapping.ticketModle`，避免模块文本在跨环境二次同步时丢失。 |
 | 7.1 | 远端拉取入库不会复用公网项目/模块/用户 ID，但会使用内网本地 `statusMappings` 映射远端状态文本，并通过 `assigneeMappings`、邮箱或姓名解析当前处理人、报告人和内部负责人；未命中时保留远端文本。 |

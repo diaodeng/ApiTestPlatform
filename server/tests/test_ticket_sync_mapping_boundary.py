@@ -758,6 +758,62 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(sync_object.project_name, "示例商家")
         self.assertEqual(sync_object.module_name, "支付模块")
 
+    def test_bitable_pull_preserves_rich_text_newline_segments(self):
+        """主动拉取富文本字段应保留真实换行，避免描述和评论内容挤在一起。"""
+        record = {
+            "record_id": "rec_rich_text",
+            "fields": {
+                "工单号": "T-RICH",
+                "描述": [
+                    {"text": "第一行", "type": "text"},
+                    {"text": "\n", "type": "text"},
+                    {"text": "", "type": "text"},
+                    {"text": "第二行", "type": "text"},
+                ],
+                "排查过程": [
+                    {"text": "20260624 张三：已确认门店网络正常", "type": "text"},
+                    {"text": "\n", "type": "text"},
+                    {"text": "20260625 李四：等待研发排查支付链路", "type": "text"},
+                ],
+                "优先级": "P1",
+                "商家": "示例商家",
+                "模块": "支付模块",
+                "提单人": "张三",
+                "创建时间": "2026-06-24 09:59:00",
+            },
+        }
+        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+            [
+                {"sourceField": "工单号", "targetField": "ticketNo"},
+                {"sourceField": "描述", "targetField": "description"},
+                {"sourceField": "排查过程", "targetField": "stepReason"},
+                {"sourceField": "优先级", "targetField": "internalPriority"},
+                {"sourceField": "商家", "targetField": "ticketVender"},
+                {"sourceField": "模块", "targetField": "ticketModle"},
+                {"sourceField": "提单人", "targetField": "reporterName"},
+                {"sourceField": "创建时间", "targetField": "createTime"},
+            ]
+        )
+
+        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+            record=record,
+            config={"sourceSystem": "feishu_bitable_pull"},
+            field_mappings=field_mappings,
+        )
+
+        self.assertIsNotNone(sync_object)
+        self.assertEqual(sync_object.description, "第一行\n第二行")
+        self.assertEqual(
+            sync_object.extra_data["external_field_mapping"]["stepReason"],
+            "20260624 张三：已确认门店网络正常\n20260625 李四：等待研发排查支付链路",
+        )
+        segments = TicketSyncService.parse_step_reason_segments(
+            sync_object.extra_data["external_field_mapping"]["stepReason"]
+        )
+        self.assertEqual(len(segments), 2)
+        self.assertEqual(segments[0]["personName"], "张三")
+        self.assertEqual(segments[1]["personName"], "李四")
+
     def test_bitable_pull_accepts_module_name_target_alias(self):
         """主动拉取目标字段使用 moduleName 时，应归一为 ticketModle 满足必填校验。"""
         record = {

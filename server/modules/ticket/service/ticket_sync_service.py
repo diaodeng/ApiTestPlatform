@@ -4080,6 +4080,10 @@ class TicketSyncService:
         if value is None:
             return None
         if isinstance(value, list):
+            if cls._is_bitable_rich_text_list(value):
+                return "".join(
+                    cls._normalize_bitable_rich_text_segment(item, join_separator=join_separator) for item in value
+                )
             normalized_items: list[str] = []
             for item in value:
                 normalized_item = cls._normalize_bitable_record_scalar(item, join_separator=join_separator)
@@ -4088,6 +4092,8 @@ class TicketSyncService:
                     normalized_items.append(text)
             return join_separator.join(normalized_items)
         if isinstance(value, dict):
+            if cls._is_bitable_rich_text_segment(value):
+                return cls._normalize_bitable_rich_text_segment(value, join_separator=join_separator)
             for key in ("text", "name", "value", "email", "link", "title"):
                 if key in value:
                     normalized_value = cls._normalize_bitable_record_scalar(
@@ -4101,6 +4107,56 @@ class TicketSyncService:
             return value
         text = str(value).strip()
         return text
+
+    @classmethod
+    def _is_bitable_rich_text_segment(cls, value: Any) -> bool:
+        """
+        判断字段值是否为飞书多维表格富文本片段。
+
+        :param value: 多维表格字段中的单个值。
+        :return: 是富文本片段返回 True，否则返回 False。
+        """
+        return isinstance(value, dict) and "text" in value and (
+            "type" in value or "link" in value or "mention_user_id" in value
+        )
+
+    @classmethod
+    def _is_bitable_rich_text_list(cls, value: Any) -> bool:
+        """
+        判断字段值是否为飞书多维表格富文本片段数组。
+
+        :param value: 多维表格字段值。
+        :return: 是富文本片段数组返回 True，否则返回 False。
+        """
+        return (
+            isinstance(value, list)
+            and bool(value)
+            and all(cls._is_bitable_rich_text_segment(item) for item in value)
+        )
+
+    @classmethod
+    def _normalize_bitable_rich_text_segment(
+        cls,
+        value: Any,
+        *,
+        join_separator: str = ",",
+    ) -> str:
+        """
+        将飞书富文本片段归一化为原始文本，保留换行等排版字符。
+
+        :param value: 单个富文本片段，通常包含 text/type/link 等字段。
+        :param join_separator: 嵌套列表值的拼接分隔符。
+        :return: 片段文本，空片段返回空字符串。
+        """
+        if not isinstance(value, dict):
+            return str(value or "")
+        raw_text = value.get("text")
+        if raw_text is None:
+            raw_text = value.get("name") or value.get("value") or value.get("title") or value.get("link")
+        if isinstance(raw_text, str):
+            return raw_text
+        normalized_text = cls._normalize_bitable_record_scalar(raw_text, join_separator=join_separator)
+        return str(normalized_text or "")
 
     @classmethod
     def _extract_bitable_person_text(
