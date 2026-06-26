@@ -595,6 +595,51 @@ class TicketSyncService:
         return meta
 
     @classmethod
+    def _append_group_push_message_refs(
+        cls,
+        meta: dict[str, Any],
+        message_refs: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        """
+        记录群推送成功发送后的飞书消息 ID，供后续评论回帖定位话题。
+        :param meta: 同步元数据
+        :param message_refs: 飞书发送返回的消息明细
+        :return: 更新后的同步元数据
+        """
+        if not isinstance(message_refs, list) or not message_refs:
+            return meta
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        existing_refs = sync_state.get("group_push_message_refs")
+        if not isinstance(existing_refs, list):
+            existing_refs = []
+        existing_message_ids = {
+            str(item.get("messageId") or item.get("message_id") or "").strip()
+            for item in existing_refs
+            if isinstance(item, dict)
+        }
+        for item in message_refs:
+            if not isinstance(item, dict):
+                continue
+            message_id = str(item.get("messageId") or item.get("message_id") or "").strip()
+            if not message_id or message_id in existing_message_ids:
+                continue
+            existing_refs.append(
+                {
+                    "messageId": message_id,
+                    "rootId": str(item.get("rootId") or item.get("root_id") or message_id).strip(),
+                    "threadId": str(item.get("threadId") or item.get("thread_id") or "").strip(),
+                    "chatId": str(item.get("chatId") or item.get("chat_id") or item.get("receiveId") or "").strip(),
+                    "receiveId": str(item.get("receiveId") or item.get("receive_id") or "").strip(),
+                    "receiveIdType": str(item.get("receiveIdType") or item.get("receive_id_type") or "").strip(),
+                    "sentAt": cls._now_iso(),
+                }
+            )
+            existing_message_ids.add(message_id)
+        sync_state["group_push_message_refs"] = existing_refs[-20:]
+        meta["sync_state"] = sync_state
+        return meta
+
+    @classmethod
     def _mark_group_push_processing(
         cls,
         meta: dict[str, Any],
@@ -661,6 +706,7 @@ class TicketSyncService:
         acquire_lock: bool = False,
         clear_lock: bool = False,
         mark_sent_once: bool = False,
+        message_refs: list[dict[str, Any]] | None = None,
     ) -> tuple[bool, Ticket | None, dict[str, Any], str]:
         """
         在数据库行级锁内更新群推送状态，保障并发下的去重一致性。
@@ -671,6 +717,7 @@ class TicketSyncService:
         :param acquire_lock: 是否抢占群推送处理锁
         :param clear_lock: 是否清理群推送处理锁
         :param mark_sent_once: 是否标记已发送过
+        :param message_refs: 飞书应用发送返回的消息明细
         :return: (是否更新成功, 工单对象, 最新元数据, 结果原因)
         """
         try:
@@ -707,7 +754,8 @@ class TicketSyncService:
                     scene=scene,
                     revision=int(meta.get("revision") or 0),
                 )
-            if acquire_lock or clear_lock or mark_sent_once:
+            meta = cls._append_group_push_message_refs(meta, message_refs)
+            if acquire_lock or clear_lock or mark_sent_once or message_refs:
                 refreshed_extra_data = cls._attach_meta(extra_data, meta)
                 TicketDao.update_ticket(
                     db,
@@ -943,6 +991,11 @@ class TicketSyncService:
                     f"push_success_count={push_success_count}, app_success_count={app_success_count}"
                 )
         finally:
+            message_refs = (
+                result.get("feishuMessageRefs")
+                if isinstance(result.get("feishuMessageRefs"), list)
+                else None
+            )
             state_updated, refreshed_ticket, refreshed_meta, _ = cls._persist_group_push_meta_state(
                 db,
                 ticket_id=ticket.ticket_id,
@@ -950,6 +1003,7 @@ class TicketSyncService:
                 scene=scene,
                 clear_lock=True,
                 mark_sent_once=mark_sent_once,
+                message_refs=message_refs,
             )
             if state_updated:
                 if refreshed_ticket:
@@ -1389,6 +1443,7 @@ class TicketSyncService:
             "remoteSync": cls._default_remote_sync_config(),
             "bitablePull": cls._default_bitable_pull_config(),
             "groupPush": cls._default_group_push_config(),
+            "messageSync": cls._default_message_sync_config(),
             "personReminder": cls._default_person_reminder_config(),
             "summaryReport": cls._default_summary_report_config(),
             "statClassification": cls._default_stat_classification_config(),
@@ -1528,6 +1583,31 @@ class TicketSyncService:
             "autoSendAfterTime": "",
             "template": "",
             "manualTemplate": "",
+        }
+
+    @classmethod
+    def _default_message_sync_config(cls) -> dict[str, Any]:
+        """
+        构建工单评论多端同步默认配置。
+
+        :return: 评论同步配置默认值。
+        """
+        return {
+            "enabled": False,
+            "feishuEventEnabled": False,
+            "feishuWsEnabled": False,
+            "feishuWsEncryptKey": "",
+            "feishuWsVerificationToken": "",
+            "allowedChatIds": [],
+            "ignoreBotOpenIds": [],
+            "syncFeishuCommentToTicket": True,
+            "syncFeishuCommentToBitable": False,
+            "syncTicketCommentToBitable": False,
+            "syncTicketCommentToFeishuThread": False,
+            "syncBitableNewStepToFeishuThread": False,
+            "bitableStepReasonField": "stepReason",
+            "bitableTicketNoField": "ticketNo",
+            "appendStepReasonFormat": "{date} {user}：{content}",
         }
 
     @classmethod
@@ -2387,6 +2467,60 @@ class TicketSyncService:
             group_push["appSecret"] = feishu_auth["appSecret"]
         merged["groupPush"] = group_push
 
+        message_sync = merged.get("messageSync") if isinstance(merged.get("messageSync"), dict) else {}
+        default_message_sync = cls._default_message_sync_config()
+        message_sync = {**default_message_sync, **message_sync}
+        message_sync["enabled"] = cls._to_bool(message_sync.get("enabled"), False)
+        message_sync["feishuEventEnabled"] = cls._to_bool(message_sync.get("feishuEventEnabled"), False)
+        message_sync["feishuWsEnabled"] = cls._to_bool(message_sync.get("feishuWsEnabled"), False)
+        message_sync["feishuWsEncryptKey"] = str(message_sync.get("feishuWsEncryptKey") or "").strip()
+        message_sync["feishuWsVerificationToken"] = str(
+            message_sync.get("feishuWsVerificationToken") or ""
+        ).strip()
+        message_sync["allowedChatIds"] = TicketSyncNotifyService._normalize_chat_ids(
+            message_sync.get("allowedChatIds")
+        )
+        message_sync["ignoreBotOpenIds"] = [
+            str(item or "").strip()
+            for item in (
+                message_sync.get("ignoreBotOpenIds")
+                if isinstance(message_sync.get("ignoreBotOpenIds"), list)
+                else str(message_sync.get("ignoreBotOpenIds") or "").split(",")
+            )
+            if str(item or "").strip()
+        ]
+        message_sync["syncFeishuCommentToTicket"] = cls._to_bool(
+            message_sync.get("syncFeishuCommentToTicket"),
+            True,
+        )
+        message_sync["syncFeishuCommentToBitable"] = cls._to_bool(
+            message_sync.get("syncFeishuCommentToBitable"),
+            False,
+        )
+        message_sync["syncTicketCommentToBitable"] = cls._to_bool(
+            message_sync.get("syncTicketCommentToBitable"),
+            False,
+        )
+        message_sync["syncTicketCommentToFeishuThread"] = cls._to_bool(
+            message_sync.get("syncTicketCommentToFeishuThread"),
+            False,
+        )
+        message_sync["syncBitableNewStepToFeishuThread"] = cls._to_bool(
+            message_sync.get("syncBitableNewStepToFeishuThread"),
+            False,
+        )
+        message_sync["bitableStepReasonField"] = (
+            str(message_sync.get("bitableStepReasonField") or "stepReason").strip() or "stepReason"
+        )
+        message_sync["bitableTicketNoField"] = (
+            str(message_sync.get("bitableTicketNoField") or "ticketNo").strip() or "ticketNo"
+        )
+        message_sync["appendStepReasonFormat"] = (
+            str(message_sync.get("appendStepReasonFormat") or "{date} {user}：{content}").strip()
+            or "{date} {user}：{content}"
+        )
+        merged["messageSync"] = message_sync
+
         person_reminder = merged.get("personReminder") if isinstance(merged.get("personReminder"), dict) else {}
         default_person_reminder = cls._default_person_reminder_config()
         person_reminder = {**default_person_reminder, **person_reminder}
@@ -3044,6 +3178,10 @@ class TicketSyncService:
                 meta,
                 scene=manual_scene,
                 revision=int(meta.get("revision") or 0),
+            )
+            meta = cls._append_group_push_message_refs(
+                meta,
+                result.get("feishuMessageRefs") if isinstance(result.get("feishuMessageRefs"), list) else None,
             )
             ticket = cls._persist_sync_meta(
                 db,
@@ -4475,6 +4613,7 @@ class TicketSyncService:
                 source_payload=payload,
                 field_mapping_snapshot=field_mapping_snapshot,
             ),
+            "stepReasonHash": cls._text_sha256(payload.get("stepReason")),
             "fieldMappings": field_mapping_snapshot,
             "sourceSystem": payload["source"]["system"],
             "pulledAt": cls._now_iso(),

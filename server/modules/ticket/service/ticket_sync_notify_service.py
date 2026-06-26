@@ -349,9 +349,42 @@ class TicketSyncNotifyService:
         :param mention_open_ids: 需要在消息中 @ 的 open_id 列表，仅 chat_id 场景生效。
         :return: 发送成功条数。
         """
+        return len(
+            cls._send_feishu_text_messages_with_details(
+                app_id=app_id,
+                app_secret=app_secret,
+                receive_id_type=receive_id_type,
+                receive_ids=receive_ids,
+                content=content,
+                mention_open_ids=mention_open_ids,
+            )
+        )
+
+    @classmethod
+    def _send_feishu_text_messages_with_details(
+        cls,
+        *,
+        app_id: str,
+        app_secret: str,
+        receive_id_type: str,
+        receive_ids: list[str],
+        content: str,
+        mention_open_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        通过飞书应用身份发送文本消息并返回飞书消息明细。
+
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :param receive_id_type: 接收ID类型（chat_id/email）。
+        :param receive_ids: 接收ID列表。
+        :param content: 消息正文。
+        :param mention_open_ids: 需要在消息中 @ 的 open_id 列表，仅 chat_id 场景生效。
+        :return: 发送成功的消息明细列表，包含 receiveId/messageId/rootId/threadId。
+        """
         normalized_ids = [str(item or "").strip() for item in receive_ids if str(item or "").strip()]
         if not normalized_ids:
-            return 0
+            return []
         mention_text = ""
         message_text = str(content or "").strip()
         if receive_id_type == "chat_id" and isinstance(mention_open_ids, list) and "<at user_id=" not in message_text:
@@ -359,11 +392,11 @@ class TicketSyncNotifyService:
         if mention_text:
             message_text = f"{mention_text}\n{message_text}" if message_text else mention_text
         token = cls._get_tenant_access_token(app_id, app_secret)
-        sent_count = 0
+        sent_messages: list[dict[str, Any]] = []
         for receive_id in normalized_ids:
             try:
                 url = f"{cls.FEISHU_BASE_URL}/im/v1/messages"
-                cls._request_feishu_json(
+                response_data = cls._request_feishu_json(
                     method="POST",
                     url=url,
                     tenant_access_token=token,
@@ -374,12 +407,148 @@ class TicketSyncNotifyService:
                         "content": json.dumps({"text": message_text}, ensure_ascii=False),
                     },
                 )
-                sent_count += 1
+                message_data = response_data.get("data") if isinstance(response_data.get("data"), dict) else {}
+                sent_messages.append(
+                    {
+                        "receiveId": receive_id,
+                        "receiveIdType": receive_id_type,
+                        "messageId": str(message_data.get("message_id") or message_data.get("messageId") or "").strip(),
+                        "rootId": str(message_data.get("root_id") or message_data.get("rootId") or "").strip(),
+                        "threadId": str(message_data.get("thread_id") or message_data.get("threadId") or "").strip(),
+                        "chatId": str(message_data.get("chat_id") or message_data.get("chatId") or "").strip(),
+                    }
+                )
             except Exception as exc:
                 logger.warning(
                     f"飞书应用消息发送失败: receive_id_type={receive_id_type}, receive_id={receive_id}, error={exc}"
                 )
-        return sent_count
+        return sent_messages
+
+    @classmethod
+    def send_feishu_thread_reply(
+        cls,
+        *,
+        app_id: str,
+        app_secret: str,
+        message_id: str,
+        content: str,
+        reply_in_thread: bool = True,
+    ) -> dict[str, Any]:
+        """
+        通过飞书应用身份回复指定消息或话题。
+
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :param message_id: 根消息、父消息或话题内消息 ID。
+        :param content: 回复正文。
+        :param reply_in_thread: 是否按话题内回复发送。
+        :return: 飞书响应中的消息明细。
+        """
+        normalized_message_id = str(message_id or "").strip()
+        message_text = str(content or "").strip()
+        if not normalized_message_id:
+            raise ValueError("飞书回复 message_id 不能为空")
+        if not message_text:
+            raise ValueError("飞书回复内容不能为空")
+        token = cls._get_tenant_access_token(app_id, app_secret)
+        url = f"{cls.FEISHU_BASE_URL}/im/v1/messages/{normalized_message_id}/reply"
+        response_data = cls._request_feishu_json(
+            method="POST",
+            url=url,
+            tenant_access_token=token,
+            json_body={
+                "msg_type": "text",
+                "content": json.dumps({"text": message_text}, ensure_ascii=False),
+                "reply_in_thread": bool(reply_in_thread),
+            },
+        )
+        message_data = response_data.get("data") if isinstance(response_data.get("data"), dict) else {}
+        return {
+            "messageId": str(message_data.get("message_id") or message_data.get("messageId") or "").strip(),
+            "rootId": str(message_data.get("root_id") or message_data.get("rootId") or "").strip(),
+            "threadId": str(message_data.get("thread_id") or message_data.get("threadId") or "").strip(),
+            "chatId": str(message_data.get("chat_id") or message_data.get("chatId") or "").strip(),
+        }
+
+    @classmethod
+    def update_bitable_record_fields(
+        cls,
+        *,
+        config: dict[str, Any],
+        record_id: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        更新飞书多维表格指定记录字段。
+
+        :param config: 多维表格配置，包含 appId/appSecret/appToken/tableId。
+        :param record_id: 飞书多维表格记录 ID。
+        :param fields: 待更新字段字典。
+        :return: 飞书接口响应数据。
+        """
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        app_token = str(config.get("appToken") or "").strip()
+        table_id = str(config.get("tableId") or "").strip()
+        normalized_record_id = str(record_id or "").strip()
+        if not app_id or not app_secret:
+            raise ValueError("飞书应用 appId/appSecret 未配置")
+        if not app_token or not table_id:
+            raise ValueError("多维表格 appToken/tableId 未配置")
+        if not normalized_record_id:
+            raise ValueError("多维表格 record_id 不能为空")
+        if not isinstance(fields, dict) or not fields:
+            raise ValueError("多维表格更新字段不能为空")
+        token = cls._get_tenant_access_token(app_id, app_secret)
+        url = (
+            f"{cls.FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/"
+            f"{table_id}/records/{normalized_record_id}"
+        )
+        return cls._request_feishu_json(
+            method="PUT",
+            url=url,
+            tenant_access_token=token,
+            json_body={"fields": fields},
+        )
+
+    @classmethod
+    def get_bitable_record_fields(
+        cls,
+        *,
+        config: dict[str, Any],
+        record_id: str,
+    ) -> dict[str, Any]:
+        """
+        查询飞书多维表格指定记录字段。
+
+        :param config: 多维表格配置，包含 appId/appSecret/appToken/tableId。
+        :param record_id: 飞书多维表格记录 ID。
+        :return: 记录字段字典。
+        """
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        app_token = str(config.get("appToken") or "").strip()
+        table_id = str(config.get("tableId") or "").strip()
+        normalized_record_id = str(record_id or "").strip()
+        if not app_id or not app_secret:
+            raise ValueError("飞书应用 appId/appSecret 未配置")
+        if not app_token or not table_id:
+            raise ValueError("多维表格 appToken/tableId 未配置")
+        if not normalized_record_id:
+            raise ValueError("多维表格 record_id 不能为空")
+        token = cls._get_tenant_access_token(app_id, app_secret)
+        url = (
+            f"{cls.FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/"
+            f"{table_id}/records/{normalized_record_id}"
+        )
+        response_data = cls._request_feishu_json(
+            method="GET",
+            url=url,
+            tenant_access_token=token,
+            params={"with_shared_url": "true"},
+        )
+        data = response_data.get("data") if isinstance(response_data.get("data"), dict) else {}
+        record = data.get("record") if isinstance(data.get("record"), dict) else data
+        fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+        return fields
 
     @classmethod
     def _resolve_group_route_targets(
@@ -2381,8 +2550,9 @@ class TicketSyncNotifyService:
                 at_user_ids=None if content_has_explicit_mentions else mention_open_ids or None,
             )
         app_success_count = 0
+        feishu_message_refs: list[dict[str, Any]] = []
         if enable_feishu_app:
-            app_success_count = cls._send_feishu_text_messages(
+            feishu_message_refs = cls._send_feishu_text_messages_with_details(
                 app_id=app_id,
                 app_secret=app_secret,
                 receive_id_type="chat_id",
@@ -2390,6 +2560,7 @@ class TicketSyncNotifyService:
                 content=content,
                 mention_open_ids=None if content_has_explicit_mentions else mention_open_ids,
             )
+            app_success_count = len(feishu_message_refs)
         logger.info(
             f"群推送发送完成: ticket_no={ticket.ticket_no}, scene={scene}, "
             f"ticket_priority={ticket_priority or '-'}, push_success_count={push_success_count}, "
@@ -2407,6 +2578,7 @@ class TicketSyncNotifyService:
             "pushSuccessCount": push_success_count,
             "chatCount": len(chat_ids),
             "chatSuccessCount": app_success_count,
+            "feishuMessageRefs": feishu_message_refs,
             "mentionOpenIds": mention_open_ids,
             "mentionTargets": mention_targets,
             "templateVariables": template_variables,

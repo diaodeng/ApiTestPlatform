@@ -58,9 +58,10 @@ from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
-from modules.ticket.controller.ticket_controller import ticketController
+from modules.ticket.controller.ticket_controller import ticketController, ticketWebhookController
 from modules.ticket.perms import register as register_ticket_permission_defs
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ticket_feishu_event_listener_service import TicketFeishuEventListenerService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService
 from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
@@ -94,6 +95,7 @@ async def lifespan(app: FastAPI):
         await RedisUtil.init_sys_dict(app.state.redis)
         await RedisUtil.init_sys_config(app.state.redis)
         await startup_handler()
+        TicketFeishuEventListenerService.start_from_config()
         metrics_thread = PushMetrics()
         metrics_thread.start()
         logger.info(f"{AppConfig.app_name}启动成功")
@@ -102,6 +104,10 @@ async def lifespan(app: FastAPI):
             metrics_thread.stop()
         except Exception:
             pass
+        try:
+            TicketFeishuEventListenerService.stop()
+        except Exception as exc:
+            logger.warning(f"飞书长连接监听停止失败: error={exc}")
         await RedisUtil.close_redis_pool(app)
 
     except Exception:
@@ -172,6 +178,7 @@ controller_list = [
     {'router': desktopCaseAssetController, 'tags': ['HRM-桌面测试资源']},
     {'router': desktopCaseController, 'tags': ['HRM-桌面测试管理']},
     {'router': ticketController, 'tags': ['工单管理']},
+    {'router': ticketWebhookController, 'tags': ['工单消息回调']},
 ]
 
 for controller in controller_list:

@@ -563,6 +563,33 @@ class TicketDao:
         )
 
     @classmethod
+    def get_comment_by_source_content_hash(
+        cls,
+        db: Session,
+        *,
+        ticket_id: int,
+        source_content_hash: str,
+    ) -> TicketComment | None:
+        """
+        根据外部评论内容哈希查询评论，用于跨来源回流去重。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param source_content_hash: 外部评论内容哈希
+        :return: 评论对象或 None
+        """
+        normalized_hash = str(source_content_hash or "").strip()
+        if not normalized_hash:
+            return None
+        return (
+            db.query(TicketComment)
+            .filter(
+                TicketComment.ticket_id == ticket_id,
+                TicketComment.source_content_hash == normalized_hash,
+            )
+            .first()
+        )
+
+    @classmethod
     def update_comment(cls, db: Session, comment_id: int, data: dict[str, Any]) -> None:
         """
         更新评论字段。

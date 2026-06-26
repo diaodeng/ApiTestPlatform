@@ -1668,11 +1668,29 @@ class TicketService:
                     },
                 ),
             )
+            outbound_summary = {"skipped": True, "reason": "not_attempted"}
+            try:
+                from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
+
+                ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+                if ticket:
+                    outbound_summary = TicketMessageSyncService.sync_local_comment_outbound(
+                        query_db,
+                        ticket=ticket,
+                        content=comment_object.content,
+                        user_name=_user_name(current_user),
+                        created_at=comment.create_time,
+                    )
+            except Exception as exc:
+                logger.warning(f"工单[{ticket_id}]评论出站同步失败: {exc}")
             query_db.commit()
             return CrudResponseModel(
                 is_success=True,
                 message="评论成功",
-                result=CamelCaseUtil.transform_result(comment),
+                result={
+                    **CamelCaseUtil.transform_result(comment),
+                    "outboundSync": outbound_summary,
+                },
             )
         except Exception:
             query_db.rollback()
@@ -1792,6 +1810,15 @@ class TicketService:
                 source_segment_key=normalized_key,
             )
             return refreshed or existing, "updated"
+
+        if source_payload["source_content_hash"]:
+            hash_existing = TicketDao.get_comment_by_source_content_hash(
+                query_db,
+                ticket_id=ticket_id,
+                source_content_hash=source_payload["source_content_hash"],
+            )
+            if hash_existing and str(hash_existing.content or "").strip() == normalized_content:
+                return hash_existing, "skipped"
 
         comment = TicketDao.add_comment(
             query_db,

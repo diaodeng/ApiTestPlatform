@@ -1030,6 +1030,114 @@
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
+                <span>工单评论同步</span>
+                <el-tag type="warning" effect="plain">默认关闭</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.messageSync" label-width="170px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用评论同步">
+                    <el-switch v-model="form.messageSync.enabled" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Webhook 入站">
+                    <el-switch v-model="form.messageSync.feishuEventEnabled" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="长连接入站">
+                    <el-switch v-model="form.messageSync.feishuWsEnabled" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="长连接 Token">
+                    <el-input v-model="form.messageSync.feishuWsVerificationToken" placeholder="飞书事件订阅 Verification Token，可空" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="长连接 Encrypt Key">
+                    <el-input v-model="form.messageSync.feishuWsEncryptKey" placeholder="飞书事件订阅 Encrypt Key，可空" show-password />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="允许群 chat_id">
+                    <el-select
+                      v-model="form.messageSync.allowedChatIds"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      placeholder="留空表示不限制群"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="忽略机器人 open_id">
+                    <el-select
+                      v-model="form.messageSync.ignoreBotOpenIds"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      placeholder="用于避免机器人自发消息回流"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书评论写入工单">
+                    <el-switch v-model="form.messageSync.syncFeishuCommentToTicket" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="飞书评论写入多维">
+                    <el-switch v-model="form.messageSync.syncFeishuCommentToBitable" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="系统评论写入多维">
+                    <el-switch v-model="form.messageSync.syncTicketCommentToBitable" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="系统评论发到话题">
+                    <el-switch v-model="form.messageSync.syncTicketCommentToFeishuThread" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维新增同步话题">
+                    <el-switch v-model="form.messageSync.syncBitableNewStepToFeishuThread" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="排查过程字段">
+                    <el-input v-model="form.messageSync.bitableStepReasonField" placeholder="默认 stepReason" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="工单号字段">
+                    <el-input v-model="form.messageSync.bitableTicketNoField" placeholder="默认 ticketNo" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="追加格式">
+                    <el-input
+                      v-model="form.messageSync.appendStepReasonFormat"
+                      placeholder="{date} {user}：{content}"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
                 <span>外部工单字段模型</span>
                 <el-tag type="info" effect="plain">必填枚举来源</el-tag>
               </div>
@@ -2250,6 +2358,23 @@
         template: '',
         manualTemplate: '',
       },
+      messageSync: {
+        enabled: false,
+        feishuEventEnabled: false,
+        feishuWsEnabled: false,
+        feishuWsEncryptKey: '',
+        feishuWsVerificationToken: '',
+        allowedChatIds: [],
+        ignoreBotOpenIds: [],
+        syncFeishuCommentToTicket: true,
+        syncFeishuCommentToBitable: false,
+        syncTicketCommentToBitable: false,
+        syncTicketCommentToFeishuThread: false,
+        syncBitableNewStepToFeishuThread: false,
+        bitableStepReasonField: 'stepReason',
+        bitableTicketNoField: 'ticketNo',
+        appendStepReasonFormat: '{date} {user}：{content}',
+      },
       externalSyncBitable: {
         enabled: false,
         appId: '',
@@ -2672,6 +2797,29 @@
       ];
     }
 
+    const messageSync = payload.messageSync || {};
+    form.messageSync = {
+      enabled: Boolean(messageSync.enabled),
+      feishuEventEnabled: Boolean(messageSync.feishuEventEnabled),
+      feishuWsEnabled: Boolean(messageSync.feishuWsEnabled),
+      feishuWsEncryptKey: messageSync.feishuWsEncryptKey || '',
+      feishuWsVerificationToken: messageSync.feishuWsVerificationToken || '',
+      allowedChatIds: Array.isArray(messageSync.allowedChatIds)
+        ? messageSync.allowedChatIds.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      ignoreBotOpenIds: Array.isArray(messageSync.ignoreBotOpenIds)
+        ? messageSync.ignoreBotOpenIds.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      syncFeishuCommentToTicket: messageSync.syncFeishuCommentToTicket !== false,
+      syncFeishuCommentToBitable: Boolean(messageSync.syncFeishuCommentToBitable),
+      syncTicketCommentToBitable: Boolean(messageSync.syncTicketCommentToBitable),
+      syncTicketCommentToFeishuThread: Boolean(messageSync.syncTicketCommentToFeishuThread),
+      syncBitableNewStepToFeishuThread: Boolean(messageSync.syncBitableNewStepToFeishuThread),
+      bitableStepReasonField: messageSync.bitableStepReasonField || 'stepReason',
+      bitableTicketNoField: messageSync.bitableTicketNoField || 'ticketNo',
+      appendStepReasonFormat: messageSync.appendStepReasonFormat || '{date} {user}：{content}',
+    };
+
     const personReminder = payload.personReminder || {};
     form.personReminder = {
       enabled: Boolean(personReminder.enabled),
@@ -2956,6 +3104,29 @@
             }))
             .filter((route) => route.priorities.length > 0)
         : [];
+      payload.messageSync = {
+        enabled: Boolean(payload.messageSync?.enabled),
+        feishuEventEnabled: Boolean(payload.messageSync?.feishuEventEnabled),
+        feishuWsEnabled: Boolean(payload.messageSync?.feishuWsEnabled),
+        feishuWsEncryptKey: String(payload.messageSync?.feishuWsEncryptKey || '').trim(),
+        feishuWsVerificationToken: String(payload.messageSync?.feishuWsVerificationToken || '').trim(),
+        allowedChatIds: Array.isArray(payload.messageSync?.allowedChatIds)
+          ? payload.messageSync.allowedChatIds.map((item) => String(item || '').trim()).filter(Boolean)
+          : [],
+        ignoreBotOpenIds: Array.isArray(payload.messageSync?.ignoreBotOpenIds)
+          ? payload.messageSync.ignoreBotOpenIds.map((item) => String(item || '').trim()).filter(Boolean)
+          : [],
+        syncFeishuCommentToTicket: payload.messageSync?.syncFeishuCommentToTicket !== false,
+        syncFeishuCommentToBitable: Boolean(payload.messageSync?.syncFeishuCommentToBitable),
+        syncTicketCommentToBitable: Boolean(payload.messageSync?.syncTicketCommentToBitable),
+        syncTicketCommentToFeishuThread: Boolean(payload.messageSync?.syncTicketCommentToFeishuThread),
+        syncBitableNewStepToFeishuThread: Boolean(payload.messageSync?.syncBitableNewStepToFeishuThread),
+        bitableStepReasonField: String(payload.messageSync?.bitableStepReasonField || 'stepReason').trim(),
+        bitableTicketNoField: String(payload.messageSync?.bitableTicketNoField || 'ticketNo').trim(),
+        appendStepReasonFormat: String(
+          payload.messageSync?.appendStepReasonFormat || '{date} {user}：{content}'
+        ).trim(),
+      };
       payload.externalSyncBitable = {
         enabled: Boolean(payload.externalSyncBitable?.enabled),
         appId: String(payload.externalSyncBitable?.appId || '').trim(),
