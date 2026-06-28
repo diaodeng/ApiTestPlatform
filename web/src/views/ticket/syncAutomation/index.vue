@@ -782,6 +782,45 @@
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
+                  <el-form-item label="状态变更执行">
+                    <el-switch
+                      v-model="form.aiClassification.runOnStatusChange"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="状态变更强制覆盖">
+                    <el-switch
+                      v-model="form.aiClassification.statusChangeForceReclassify"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="状态触发条件">
+                    <el-select
+                      v-model="form.aiClassification.statusChangeTriggerStatuses"
+                      placeholder="选择变更到哪些状态后重新归类，可多选"
+                      multiple
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in workflowStatusOptions"
+                        :key="item.value"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
                   <el-form-item label="Provider 编码">
                     <el-select
                       v-model="form.aiClassification.providerCode"
@@ -1977,6 +2016,14 @@
                     />
                   </el-form-item>
                 </el-col>
+                <el-col :span="24">
+                  <el-form-item label="指定工单ID">
+                    <el-input
+                      v-model="autoCategoryForm.ticketIdsText"
+                      placeholder="可选，多个 ID 用逗号、空格或换行分隔；填写后优先按指定工单执行"
+                    />
+                  </el-form-item>
+                </el-col>
                 <el-col v-if="!autoCategoryForm.allTickets" :xs="24" :md="12">
                   <el-form-item label="分页页码">
                     <el-input-number
@@ -2058,6 +2105,7 @@
     batchReclassifyTicketSync,
     getTicketSyncAutoCategoryStats,
     getTicketSyncAutomationConfig,
+    getTicketWorkflow,
     listTicketSyncNotifyPushOptions,
     previewTicketSyncBitablePullFields,
     previewTicketSyncPersonReminder,
@@ -2077,6 +2125,7 @@
   const pushOptions = ref([]);
   const providerOptions = ref([]);
   const promptOptions = ref([]);
+  const workflowStatusOptions = ref([]);
   const groupSendLoading = ref(false);
   const personPreviewLoading = ref(false);
   const personRunLoading = ref(false);
@@ -2109,6 +2158,7 @@
     forceReclassify: true,
     pageNum: 1,
     pageSize: 100,
+    ticketIdsText: '',
   });
 
   const mappingTexts = reactive({
@@ -2483,6 +2533,9 @@
         runOnExternalSync: false,
         runOnRemotePull: false,
         runOnManualCreate: false,
+        runOnStatusChange: false,
+        statusChangeTriggerStatuses: [],
+        statusChangeForceReclassify: false,
         providerCode: '',
         promptCode: 'ticket_stat_classify_default',
         promptContent: '',
@@ -2513,6 +2566,19 @@
     const code = item.promptCode || item.templateCode || item.value || '';
     const name = item.promptName || item.templateName || item.label || code || '-';
     return `${name}${code && name !== code ? ` [${code}]` : ''}`;
+  }
+
+  function normalizeWorkflowStatusOptions(statuses = []) {
+    if (!Array.isArray(statuses)) {
+      return [];
+    }
+    return statuses
+      .map((item) => {
+        const value = String(item.code || item.value || '').trim();
+        const label = String(item.name || item.label || value).trim();
+        return value ? { value, label: label || value } : null;
+      })
+      .filter(Boolean);
   }
 
   function normalizeArray(value, fallback = []) {
@@ -2899,6 +2965,11 @@
       runOnExternalSync: Boolean(aiClassification.runOnExternalSync),
       runOnRemotePull: Boolean(aiClassification.runOnRemotePull),
       runOnManualCreate: Boolean(aiClassification.runOnManualCreate),
+      runOnStatusChange: Boolean(aiClassification.runOnStatusChange),
+      statusChangeTriggerStatuses: Array.isArray(aiClassification.statusChangeTriggerStatuses)
+        ? aiClassification.statusChangeTriggerStatuses.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      statusChangeForceReclassify: Boolean(aiClassification.statusChangeForceReclassify),
       providerCode: aiClassification.providerCode || '',
       promptCode: aiClassification.promptCode || 'ticket_stat_classify_default',
       promptContent: aiClassification.promptContent || '',
@@ -3226,6 +3297,17 @@
         runOnExternalSync: Boolean(payload.aiClassification?.runOnExternalSync),
         runOnRemotePull: Boolean(payload.aiClassification?.runOnRemotePull),
         runOnManualCreate: Boolean(payload.aiClassification?.runOnManualCreate),
+        runOnStatusChange: Boolean(payload.aiClassification?.runOnStatusChange),
+        statusChangeTriggerStatuses: Array.isArray(payload.aiClassification?.statusChangeTriggerStatuses)
+          ? Array.from(
+              new Set(
+                payload.aiClassification.statusChangeTriggerStatuses
+                  .map((item) => String(item || '').trim())
+                  .filter(Boolean)
+              )
+            )
+          : [],
+        statusChangeForceReclassify: Boolean(payload.aiClassification?.statusChangeForceReclassify),
         providerCode: String(payload.aiClassification?.providerCode || '').trim(),
         promptCode:
           String(payload.aiClassification?.promptCode || '').trim() ||
@@ -3273,6 +3355,16 @@
       })
       .catch(() => {
         promptOptions.value = [];
+      });
+  }
+
+  function loadWorkflowStatuses() {
+    getTicketWorkflow()
+      .then((response) => {
+        workflowStatusOptions.value = normalizeWorkflowStatusOptions(response.data?.statuses || []);
+      })
+      .catch(() => {
+        workflowStatusOptions.value = [];
       });
   }
 
@@ -3452,8 +3544,29 @@
     }
   }
 
+  function parseAutoCategoryTicketIds() {
+    const text = String(autoCategoryForm.ticketIdsText || '').trim();
+    if (!text) {
+      return null;
+    }
+    const ids = Array.from(
+      new Set(
+        text
+          .split(/[\s,，;；]+/)
+          .map((item) => Number(item))
+          .filter((item) => Number.isInteger(item) && item > 0)
+      )
+    );
+    if (!ids.length) {
+      throw new Error('指定工单ID格式错误');
+    }
+    return ids;
+  }
+
   function buildAutoCategoryPayload(overrides = {}) {
+    const ticketIds = parseAutoCategoryTicketIds();
     const payload = {
+      ticketIds,
       strategy: autoCategoryForm.strategy,
       aiPromptCode:
         String(autoCategoryForm.aiPromptCode || form.aiClassification.promptCode || '').trim() ||
@@ -3559,6 +3672,7 @@
     loadConfig();
     loadPushOptions();
     loadAiOptions();
+    loadWorkflowStatuses();
     handleLoadAutoCategoryStats();
   });
 </script>

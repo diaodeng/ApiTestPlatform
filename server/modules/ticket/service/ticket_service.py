@@ -1605,10 +1605,102 @@ class TicketService:
                 except Exception as exc:
                     logger.warning(f"工单[{ticket_id}]关闭后自动提炼知识库失败: {exc}")
             query_db.commit()
+            cls._run_status_change_ai_classification(
+                query_db,
+                ticket_id=ticket_id,
+                from_status=str(ticket.status or "").strip(),
+                to_status=str(status_object.to_status or "").strip(),
+                current_user=current_user,
+            )
             return CrudResponseModel(is_success=True, message="状态流转成功")
         except Exception:
             query_db.rollback()
             raise
+
+    @classmethod
+    def _run_status_change_ai_classification(
+        cls,
+        query_db: Session,
+        *,
+        ticket_id: int,
+        from_status: str,
+        to_status: str,
+        current_user: CurrentUserModel,
+    ) -> None:
+        """
+        状态流转完成后按配置触发 AI 分类统计。
+
+        状态流转可能补充根因、解决方案和关闭结果，这些信息会提升分类准确性。该方法只在
+        `ticket.sync.automation.aiClassification` 明确开启状态变更触发且目标状态命中配置列表时执行；
+        已基于相同标题、描述和评论成功归类过的工单会由分类服务自动跳过，避免重复调用模型。
+        :param query_db: 数据库会话。
+        :param ticket_id: 工单ID。
+        :param from_status: 原状态。
+        :param to_status: 目标状态。
+        :param current_user: 当前登录用户。
+        :return: 无。
+        """
+        try:
+            from modules.ticket.service.ticket_sync_service import TicketSyncService
+
+            config = TicketSyncService._load_sync_config(query_db)
+            ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
+            if not bool(ai_config.get("enabled")) or not bool(ai_config.get("runOnStatusChange")):
+                logger.info(
+                    f"工单[{ticket_id}]状态变更AI分类跳过: reason=状态变更触发未开启, "
+                    f"from_status={from_status or '-'}, to_status={to_status or '-'}"
+                )
+                return
+            trigger_statuses = [
+                str(item or "").strip()
+                for item in (ai_config.get("statusChangeTriggerStatuses") or [])
+                if str(item or "").strip()
+            ]
+            if not trigger_statuses:
+                logger.info(
+                    f"工单[{ticket_id}]状态变更AI分类跳过: reason=未配置触发状态, "
+                    f"from_status={from_status or '-'}, to_status={to_status or '-'}"
+                )
+                return
+            if str(to_status or "").strip() not in trigger_statuses:
+                logger.info(
+                    f"工单[{ticket_id}]状态变更AI分类跳过: reason=目标状态未命中配置, "
+                    f"from_status={from_status or '-'}, to_status={to_status or '-'}, "
+                    f"trigger_statuses={','.join(trigger_statuses)}"
+                )
+                return
+            ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+            if not ticket:
+                logger.info(f"工单[{ticket_id}]状态变更AI分类跳过: reason=工单不存在")
+                return
+            _, summary = TicketSyncService._run_auto_ticket_ai_classification(
+                query_db,
+                ticket=ticket,
+                title=str(ticket.title or "").strip(),
+                description=str(ticket.description or "").strip(),
+                current_user_name=_user_name(current_user),
+                source_type="ticket_status_change_auto_category",
+                source_ref=f"{ticket.ticket_no}:{from_status}->{to_status}",
+                force_reclassify=bool(ai_config.get("statusChangeForceReclassify")),
+                enabled_by_scene=True,
+            )
+            if summary.get("skipped"):
+                logger.info(
+                    f"工单[{ticket_id}]状态变更AI分类跳过: reason={summary.get('skipReason') or '-'}, "
+                    f"from_status={from_status or '-'}, to_status={to_status or '-'}"
+                )
+            else:
+                logger.info(
+                    f"工单[{ticket_id}]状态变更AI分类完成: from_status={from_status or '-'}, "
+                    f"to_status={to_status or '-'}, category={summary.get('categoryName') or '-'}, "
+                    f"issue_type={summary.get('issueTypeName') or '-'}"
+                )
+        except Exception as exc:
+            query_db.rollback()
+            logger.warning(
+                f"工单[{ticket_id}]状态变更AI分类失败: from_status={from_status or '-'}, "
+                f"to_status={to_status or '-'}, error={exc}"
+            )
 
     @classmethod
     def add_comment(

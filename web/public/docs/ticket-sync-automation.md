@@ -101,6 +101,7 @@
 - `ticket.sync.automation.aiClassification`
   - 控制分类统计是否启用，以及外部同步、远端拉取、手动创建场景是否执行。
   - 只保存 Provider 编码和提示词编码选择；提示词正文统一在 AI 提示词管理维护。
+  - 可配置状态变更后是否执行 AI 分类统计，并通过 `statusChangeTriggerStatuses` 指定一个或多个目标状态。
   - 历史 `promptContent` 会保留作为旧配置兜底，但不再作为新编辑入口。
 - `ticket.sync.automation.statClassification`
   - 维护工单类型、根因分类、解决方式、关闭结果枚举；它是业务枚举配置，不属于 AI Provider/Prompt 底座配置。
@@ -108,7 +109,8 @@
 ### 5.6 分类统计回填
 
 - 自动处理数据：标题、描述、最近评论、当前字段和统计枚举。
-- 自动触发场景：外部同步入库、远端拉取入库、手动创建工单、批量重归类。
+- 自动触发场景：外部同步入库、远端拉取入库、手动创建工单、命中配置的状态变更、批量重归类。
+- 防重复规则：非强制场景下，工单已有分类统计字段或已有相同文本成功 AI 分类结果时会跳过。
 - 回填字段：`category_name`、`issue_type_id`、`issue_type_name`、`module_name`、`severity`、`root_cause_type`、`solution_type`、`resolution_code`、`resolution_name`、`root_cause`、`solution`、`is_problem`。
 - 执行摘要写入 `extra_data.ai_classification`，保留来源 hash、Provider、Prompt、置信度和模型原始结果。
 
@@ -167,6 +169,7 @@
   - 返回总工单数、已归类数、未归类数、未归类占比。
   - 该接口只统计，不执行自动归类；需要处理未归类工单时调用批量重归类接口。
 - 批量重归类：`POST /ticket/sync/auto-category/reclassify`
+  - `ticketIds`：指定要重归类的工单 ID 列表，填写后优先按指定工单执行
   - `strategy`：`ai` / `regex`
   - `aiPromptCode`：AI 归类提示词编码（可选，空则走当前分类统计配置）
   - `regexRules`：正则规则数组（元素含 `pattern/category/flags`）

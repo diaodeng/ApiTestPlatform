@@ -1792,6 +1792,9 @@ class TicketSyncService:
             "runOnExternalSync": False,
             "runOnRemotePull": False,
             "runOnManualCreate": False,
+            "runOnStatusChange": False,
+            "statusChangeTriggerStatuses": [],
+            "statusChangeForceReclassify": False,
             "providerCode": "",
             "promptCode": "ticket_stat_classify_default",
             "promptContent": "",
@@ -1876,6 +1879,13 @@ class TicketSyncService:
             "runOnExternalSync": bool(source.get("runOnExternalSync", source.get("run_on_external_sync", False))),
             "runOnRemotePull": bool(source.get("runOnRemotePull", source.get("run_on_remote_pull", False))),
             "runOnManualCreate": bool(source.get("runOnManualCreate", source.get("run_on_manual_create", False))),
+            "runOnStatusChange": bool(source.get("runOnStatusChange", source.get("run_on_status_change", False))),
+            "statusChangeTriggerStatuses": cls._normalize_ai_classification_status_triggers(
+                source.get("statusChangeTriggerStatuses", source.get("status_change_trigger_statuses"))
+            ),
+            "statusChangeForceReclassify": bool(
+                source.get("statusChangeForceReclassify", source.get("status_change_force_reclassify", False))
+            ),
             "providerCode": str(source.get("providerCode") or source.get("provider_code") or "").strip(),
             "promptCode": str(
                 source.get("promptCode")
@@ -1885,6 +1895,23 @@ class TicketSyncService:
             ).strip(),
             "promptContent": str(source.get("promptContent") or source.get("prompt_content") or "").strip(),
         }
+
+    @classmethod
+    def _normalize_ai_classification_status_triggers(cls, value: Any) -> list[str]:
+        """
+        归一化状态变更触发 AI 分类统计的目标状态列表。
+
+        :param value: 前端或历史配置提交的状态编码列表。
+        :return: 去重后的状态编码列表。
+        """
+        if not isinstance(value, list):
+            return []
+        normalized: list[str] = []
+        for item in value:
+            status = str(item or "").strip()
+            if status and status not in normalized:
+                normalized.append(status)
+        return normalized
 
     @classmethod
     def _normalize_external_field_model_config(cls, value: Any) -> dict[str, Any]:
@@ -5542,6 +5569,12 @@ class TicketSyncService:
                 f"reason=同步配置未开启当前场景AI分类统计, source_type={source_type}"
             )
             return ticket, {"skipped": True, "skipReason": "当前场景未开启AI分类统计"}
+        if not force_reclassify and cls._has_existing_ticket_classification_fields(ticket):
+            logger.info(
+                f"工单AI分类统计跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=工单已有分类统计字段且未强制重归类, source_type={source_type}"
+            )
+            return ticket, {"skipped": True, "skipReason": "工单已有分类统计字段，跳过自动分类"}
         title_text = str(title or "").strip()
         description_text = str(description or "").strip()
         comment_context = cls._build_ticket_comment_context(db, ticket_id=ticket.ticket_id)
@@ -5796,12 +5829,35 @@ class TicketSyncService:
         return bool(ai_meta.get("success")) and str(ai_meta.get("sourceHash") or "") == source_hash
 
     @classmethod
+    def _has_existing_ticket_classification_fields(cls, ticket: Ticket) -> bool:
+        """
+        判断工单是否已经具备主表分类统计结果。
+
+        入库场景可能携带外部系统已归类字段，或历史工单已被人工/批量工具归类。非强制场景下
+        直接跳过，避免再次调用 AI 覆盖已有业务判断。
+        :param ticket: 工单对象。
+        :return: 存在任一分类统计核心字段时返回 True。
+        """
+        return any(
+            [
+                str(getattr(ticket, "category_name", "") or "").strip(),
+                str(getattr(ticket, "issue_type_id", "") or "").strip(),
+                str(getattr(ticket, "issue_type_name", "") or "").strip(),
+                str(getattr(ticket, "root_cause_type", "") or "").strip(),
+                str(getattr(ticket, "solution_type", "") or "").strip(),
+                str(getattr(ticket, "resolution_code", "") or "").strip(),
+                str(getattr(ticket, "resolution_name", "") or "").strip(),
+                getattr(ticket, "is_problem", None) is not None,
+            ]
+        )
+
+    @classmethod
     def _should_run_ai_classification_for_scene(cls, config: dict[str, Any], scene: str) -> bool:
         """
         判断指定入库场景是否启用 AI 分类统计。
 
         :param config: 同步自动化配置。
-        :param scene: 场景 external_sync/remote_pull/manual_create/batch_reclassify。
+        :param scene: 场景 external_sync/remote_pull/manual_create/status_change/batch_reclassify。
         :return: 是否启用。
         """
         ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
@@ -5814,6 +5870,8 @@ class TicketSyncService:
             return bool(ai_config.get("runOnRemotePull"))
         if normalized_scene == "manual_create" or normalized_scene.startswith("ticket_manual_create"):
             return bool(ai_config.get("runOnManualCreate"))
+        if normalized_scene == "status_change" or normalized_scene.startswith("ticket_status_change"):
+            return bool(ai_config.get("runOnStatusChange"))
         if normalized_scene == "batch_reclassify" or normalized_scene.startswith("ticket_batch_reclassify"):
             return True
         return False
