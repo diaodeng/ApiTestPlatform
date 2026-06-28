@@ -8,6 +8,14 @@ updated: 2026-06-25
 
 # 操作日志
 
+## [2026-06-28] INGEST-CODE | 帮助中心文档自动索引
+- 触发：用户反馈 `web/src/views/about/about.vue` 只能查看手写菜单中的少量帮助文档，后续自动增加的业务说明和配置说明无法方便查看。
+- 架构层：Web 控制台 / 帮助文档 / 前端构建插件
+- 创建的页面：`web/public/docs/2026-06-28-help-docs-auto-index.md`
+- 更新的页面：`web/src/views/about/about.vue`、`web/vite/plugins/docs-index.js`、`web/vite/plugins/index.js`、`web/public/docs/update_history.md`、`wiki/entities/components/frontend-bootstrap.md`、`wiki/entities/services/web-feature-domains.md`
+- 变更传播链：`web/public/docs/*.md` -> Vite 启动/构建扫描 -> `docs-index.json` -> 帮助中心搜索与分类菜单 -> Markdown 渲染组件展示。
+- 关键结论：浏览器不能直接枚举 `public/docs` 目录，因此自动发现必须放在构建期或后端接口；本次选择前端 Vite 插件，避免增加后端接口。后续新增 Markdown 文档只需放入 `web/public/docs`，重新启动开发服务或执行生产构建后即可在帮助中心查看。
+
 ## [2026-06-27] INGEST-CODE | 工单排查过程消息同步用户名解析
 - 触发：用户反馈最近实现的工单排查过程消息同步中，飞书会话跟帖消息同步到当前系统和飞书多维表格时，用户记录成飞书内部 ID，希望通过飞书接口查询用户名。
 - 架构层：工单域 / 飞书话题评论入站 / 工单评论 / 多维表格排查过程

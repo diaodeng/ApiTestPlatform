@@ -8,11 +8,12 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-05-20
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-06-28
 related_files:
   - web/src/main.js
   - web/src/App.vue
   - web/vite.config.js
+  - web/vite/plugins/docs-index.js
 ---
 
 # 前端启动骨架
@@ -35,6 +36,7 @@ graph TD
 - 注册通用组件、权限指令和工具方法。
 - 挂载路由、状态管理、国际化和 UI 库。
 - 在根组件中恢复主题样式。
+- 在 Vite 启动和构建时通过 `web/vite/plugins/docs-index.js` 扫描 `web/public/docs`，生成 `docs-index.json` 供帮助中心自动展示文档。
 
 ## 依赖关系
 
@@ -44,6 +46,7 @@ graph TD
 | `web/src/store` | 负责全局状态。 |
 | `web/src/permission.js` | 负责页面权限守卫。 |
 | `web/vite.config.js` | 提供开发代理和构建配置。 |
+| `web/vite/plugins/docs-index.js` | 生成帮助文档索引，避免帮助中心菜单手工维护。 |
 
 ## 参见
 

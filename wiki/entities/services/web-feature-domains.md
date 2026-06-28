@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-05-20
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-06-28
 related_files:
   - web/src/views/system/user/index.vue
   - web/src/views/system/role/index.vue
@@ -21,11 +21,13 @@ related_files:
   - web/src/views/ticket/knowledge/index.vue
   - web/src/views/tool/swagger/index.vue
   - web/src/views/tool/gen/index.vue
+  - web/src/views/about/about.vue
+  - web/public/docs
 ---
 
 # Web 功能模块
 
-Web 功能模块按业务域拆分为系统管理、系统监控、HRM 测试、QTR 调度、工单和工具六大板块。
+Web 功能模块按业务域拆分为系统管理、系统监控、HRM 测试、QTR 调度、工单、工具和帮助文档七大板块。
 
 ```mermaid
 graph TD
@@ -35,6 +37,7 @@ graph TD
   D[QTR] --> D1[计划/套件]
   E[工单] --> E1[工单/知识库/统计]
   F[工具] --> F1[Swagger/代码生成]
+  G[帮助文档] --> G1[自动索引/搜索/Markdown展示]
 ```
 
 ## 主要职责
@@ -42,6 +45,7 @@ graph TD
 - 面向管理端用户提供业务操作界面。
 - 通过页面、组件和 API 封装连接后端服务。
 - 与后端模块一一对应，方便按域维护。
+- 帮助中心读取 `web/public/docs/docs-index.json` 自动展示 Markdown 文档，业务说明和配置说明只要写入 `web/public/docs` 并重新启动或构建前端即可出现在页面中。
 
 ## 参见
 
