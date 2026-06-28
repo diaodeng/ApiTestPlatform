@@ -94,6 +94,8 @@ graph TD
 - 主动拉取不经过外部推送 controller 的入参归一化，因此 `_build_bitable_pull_sync_object` 内会补齐主动拉取专用兼容：内部优先级为空时使用对方优先级，当前处理人字段兼容 `ticketAssigneeName/assigneeName` 等别名，并同步写入顶层模型和 `extra_data.external_field_mapping`；外部推送 `/ticket/sync/external` 逻辑不变。
 - 主动拉取必填校验直接读取 `externalFieldModel.fields[].required`，不再优先使用历史兼容字段 `externalSyncRequiredFields`；缺少必填字段的记录只计入失败汇总和 `missing_required_fields` 日志，不调用入库，也不会触发延后后处理或自动群消息。
 - 主动拉取会识别飞书长文本富文本片段数组，按片段顺序拼接并保留 `\n` 为真实换行；空文本片段不会被 JSON 化，避免描述内容挤在一起，也保证 `stepReason` 仍可按日期行拆分同步评论。
+- 飞书话题评论入站同步会使用 `sender.open_id` 查询飞书通讯录用户详情，工单评论 `user_name` 和多维表格排查过程 `{user}` 都写入解析后的用户名；飞书凭证缺失或查询失败时才回退事件自带名称或 ID。
+- 飞书话题正文中的 `@_user_1` 会根据 `message.mentions` 映射为 `@用户名` 保存到工单评论，评论附件保存 `mentions/content_segments`；多维表格 Text 字段富文本片段中的 `mention_user_id` 同样会归一为 `@用户名` 并保留片段，后续写回飞书群或多维表格时恢复真实 @ 人员样式。
 - 主动拉取传入 `automation.autoTranslate` 时，外部同步主链路和延后后处理都会优先使用该场景开关；只有未传 automation 时才回退全局 `autoTranslateOnSync`。
 - 远端拉取由 `ticket.sync.automation.remoteSync.enabled` 控制，拉取入库不会再次查询公网多维表格；它只使用远端 payload 已携带的邮箱/姓名，并按内网本地 `assigneeMappings` 或邮箱用户匹配解析人员。
 - 工单项目/模块选项直接复用 HRM 公共项目管理，不单独维护工单项目库；后端按 HRM 的正常状态值 `QtrDataStatusEnum.normal = 2` 过滤有效项。

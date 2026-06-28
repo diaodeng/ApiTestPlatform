@@ -8,6 +8,14 @@ updated: 2026-06-25
 
 # 操作日志
 
+## [2026-06-27] INGEST-CODE | 工单排查过程消息同步用户名解析
+- 触发：用户反馈最近实现的工单排查过程消息同步中，飞书会话跟帖消息同步到当前系统和飞书多维表格时，用户记录成飞书内部 ID，希望通过飞书接口查询用户名。
+- 架构层：工单域 / 飞书话题评论入站 / 工单评论 / 多维表格排查过程
+- 创建的页面：`web/public/docs/2026-06-27-ticket-message-sync-user-name.md`
+- 更新的页面：`server/modules/ticket/service/ticket_message_sync_service.py`、`server/modules/ticket/service/ticket_sync_notify_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/service/ticket_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-06-26-ticket-message-sync.md`、`web/public/docs/2026-06-27-ticket-message-sync-user-name.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：飞书消息事件 `sender.open_id` -> 飞书通讯录用户详情查询 -> `sender_display_name` -> `ticket_comment.user_name` 与多维表格 `stepReason` 追加 `{user}`。
+- 关键结论：评论同步不是工单主体同步；入站跟帖消息需要在落库和写回多维前统一解析发送人展示名。凭证优先使用 `feishuAuth`，群推送和多维配置只作为兜底；查询失败不阻断同步，只回退事件自带名称或 ID。飞书正文 `@_user_1` 必须结合 `mentions` 解析，系统显示 `@用户名`，附件保留人员 ID；多维 Text 富文本片段中的 `mention_user_id` 也要带入评论附件，才能在系统、飞书群和多维表格之间恢复真实 @ 样式。
+
 ## [2026-06-26] INGEST-CODE | 多维表格主动拉取富文本换行保留
 - 触发：用户反馈主动拉取多维表格数据时，换行符被处理成 `{"text": "\n", "type": "text"}` 或空文本片段，导致内容格式丢失、描述挤在一起、排查过程评论分割不正确。
 - 架构层：工单域 / 飞书多维表格主动拉取 / 字段映射 / 同步评论

@@ -1680,6 +1680,7 @@ class TicketService:
                         content=comment_object.content,
                         user_name=_user_name(current_user),
                         created_at=comment.create_time,
+                        attachments=comment_object.attachments,
                     )
             except Exception as exc:
                 logger.warning(f"工单[{ticket_id}]评论出站同步失败: {exc}")

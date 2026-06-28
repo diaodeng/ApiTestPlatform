@@ -10,6 +10,7 @@ from module_task.scheduler_maintenance import (
 from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
+from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 
@@ -773,7 +774,9 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "排查过程": [
                     {"text": "20260624 张三：已确认门店网络正常", "type": "text"},
                     {"text": "\n", "type": "text"},
-                    {"text": "20260625 李四：等待研发排查支付链路", "type": "text"},
+                    {"text": "20260625 李四：等待研发排查", "type": "text"},
+                    {"text": "王五", "type": "mention", "mention_user_id": "ou_wangwu"},
+                    {"text": "支付链路", "type": "text"},
                 ],
                 "优先级": "P1",
                 "商家": "示例商家",
@@ -805,7 +808,11 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(sync_object.description, "第一行\n第二行")
         self.assertEqual(
             sync_object.extra_data["external_field_mapping"]["stepReason"],
-            "20260624 张三：已确认门店网络正常\n20260625 李四：等待研发排查支付链路",
+            "20260624 张三：已确认门店网络正常\n20260625 李四：等待研发排查@王五支付链路",
+        )
+        self.assertEqual(
+            sync_object.extra_data["_bitable_field_segments"]["stepReason"][3]["openId"],
+            "ou_wangwu",
         )
         segments = TicketSyncService.parse_step_reason_segments(
             sync_object.extra_data["external_field_mapping"]["stepReason"]
@@ -813,6 +820,19 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(len(segments), 2)
         self.assertEqual(segments[0]["personName"], "张三")
         self.assertEqual(segments[1]["personName"], "李四")
+        with (
+            patch("modules.ticket.service.ticket_sync_service.TicketService.upsert_synced_comment") as upsert,
+        ):
+            upsert.return_value = (SimpleNamespace(id=1), "created")
+            TicketSyncService.sync_step_reason_comments(
+                SimpleNamespace(),
+                ticket=SimpleNamespace(ticket_id=1),
+                sync_object=sync_object,
+            )
+        self.assertEqual(
+            upsert.call_args_list[1].kwargs["attachments"]["content_segments"][1]["openId"],
+            "ou_wangwu",
+        )
 
     def test_bitable_pull_accepts_module_name_target_alias(self):
         """主动拉取目标字段使用 moduleName 时，应归一为 ticketModle 满足必填校验。"""
@@ -1592,6 +1612,94 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(len(filters[0]["conditions"]), 2)
         self.assertEqual(filters[0]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
         self.assertEqual(filters[0]["conditions"][1]["value"], ["待处理"])
+
+    def test_feishu_message_sync_resolves_sender_open_id_to_user_name(self):
+        """飞书消息同步应把发送人 open_id 查询成用户名后再写入评论和多维排查过程。"""
+        config = TicketSyncService._default_sync_config()
+        config["feishuAuth"].update({"appId": "app_id", "appSecret": "app_secret"})
+        config["bitablePull"].update({"appId": "bitable_app_id", "appSecret": "bitable_app_secret"})
+        config["groupPush"].update({"appId": "group_app_id", "appSecret": "group_app_secret"})
+        config["messageSync"].update(
+            {
+                "enabled": True,
+                "feishuEventEnabled": True,
+                "syncFeishuCommentToTicket": True,
+                "syncFeishuCommentToBitable": True,
+            }
+        )
+        ticket = SimpleNamespace(
+            ticket_id=1001,
+            ticket_no="TK1001",
+            extra_data={
+                TicketSyncService.META_KEY: {
+                    "sync_state": {
+                        "group_push_message_refs": [
+                            {
+                                "chatId": "oc_chat",
+                                "messageId": "om_root",
+                                "rootId": "om_root",
+                                "threadId": "omt_thread",
+                            }
+                        ]
+                    }
+                },
+                "bitable_pull": {"recordId": "rec_001"},
+            },
+        )
+        payload = {
+            "header": {"event_id": "evt_001", "create_time": "1790000000000"},
+            "event": {
+                "sender": {
+                    "sender_id": {
+                        "open_id": "ou_sender",
+                        "union_id": "on_union",
+                    }
+                },
+                "message": {
+                    "message_id": "om_comment",
+                    "root_id": "om_root",
+                    "thread_id": "omt_thread",
+                    "parent_id": "om_root",
+                    "chat_id": "oc_chat",
+                    "message_type": "text",
+                    "content": '{"text":"请 @_user_1 协助排查"}',
+                    "mentions": [
+                        {
+                            "key": "@_user_1",
+                            "id": {"open_id": "ou_ken", "union_id": "on_ken", "user_id": "u_ken"},
+                            "name": "Ken Pong",
+                        }
+                    ],
+                },
+            },
+        }
+
+        with (
+            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketMessageSyncService, "_match_ticket_by_message_context", return_value=ticket),
+            patch.object(
+                TicketSyncNotifyService,
+                "query_feishu_user_by_open_id",
+                return_value={"openId": "ou_sender", "name": "张三"},
+            ) as query_user,
+            patch.object(TicketMessageSyncService, "append_comment_to_bitable_step_reason") as append_bitable,
+            patch("modules.ticket.service.ticket_message_sync_service.TicketService.upsert_synced_comment") as upsert,
+        ):
+            upsert.return_value = (SimpleNamespace(id=88), "created")
+            append_bitable.return_value = {"skipped": False, "recordId": "rec_001"}
+            result = TicketMessageSyncService.handle_feishu_message_event(
+                SimpleNamespace(commit=lambda: None),
+                payload,
+            )
+
+        self.assertFalse(result["skipped"])
+        query_user.assert_called_once_with(app_id="app_id", app_secret="app_secret", open_id="ou_sender")
+        self.assertEqual(upsert.call_args.kwargs["user_name"], "张三")
+        self.assertEqual(upsert.call_args.kwargs["content"], "请 @Ken Pong 协助排查")
+        self.assertEqual(upsert.call_args.kwargs["attachments"]["mentions"][0]["openId"], "ou_ken")
+        self.assertEqual(upsert.call_args.kwargs["attachments"]["content_segments"][1]["openId"], "ou_ken")
+        self.assertEqual(append_bitable.call_args.kwargs["user_name"], "张三")
+        self.assertEqual(append_bitable.call_args.kwargs["content_segments"][1]["openId"], "ou_ken")
 
 
 class _EmptyQuery:

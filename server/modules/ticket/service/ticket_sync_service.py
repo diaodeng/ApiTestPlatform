@@ -334,6 +334,66 @@ class TicketSyncService:
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     @classmethod
+    def _get_step_reason_content_segments(cls, sync_object: TicketExternalSyncUpsertModel) -> list[dict[str, Any]]:
+        """
+        从同步模型中读取 stepReason 对应的富文本片段。
+
+        :param sync_object: 外部同步入参。
+        :return: text/mention 片段列表。
+        """
+        extra_data = sync_object.extra_data if isinstance(sync_object.extra_data, dict) else {}
+        field_segments = (
+            extra_data.get("_bitable_field_segments")
+            if isinstance(extra_data.get("_bitable_field_segments"), dict)
+            else {}
+        )
+        for key in ("stepReason", "step_reason"):
+            segments = field_segments.get(key)
+            if isinstance(segments, list):
+                return [item for item in segments if isinstance(item, dict)]
+        return []
+
+    @classmethod
+    def _slice_content_segments_for_text(
+        cls,
+        *,
+        full_text: str,
+        content: str,
+        content_segments: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        从完整富文本片段中截取某段评论对应的片段。
+
+        :param full_text: 完整 stepReason 文本。
+        :param content: 当前评论正文。
+        :param content_segments: 完整 stepReason 的 text/mention 片段。
+        :return: 当前评论正文对应片段。
+        """
+        if not content or not content_segments:
+            return []
+        start = str(full_text or "").find(content)
+        if start < 0:
+            return []
+        end = start + len(content)
+        cursor = 0
+        result: list[dict[str, Any]] = []
+        for item in content_segments:
+            text = str(item.get("text") or "")
+            if not text:
+                continue
+            item_start = cursor
+            item_end = cursor + len(text)
+            cursor = item_end
+            overlap_start = max(start, item_start)
+            overlap_end = min(end, item_end)
+            if overlap_start >= overlap_end:
+                continue
+            sliced = dict(item)
+            sliced["text"] = text[overlap_start - item_start : overlap_end - item_start]
+            result.append(sliced)
+        return result
+
+    @classmethod
     def sync_step_reason_comments(
         cls,
         db: Session,
@@ -364,18 +424,25 @@ class TicketSyncService:
             sync_object.ticket_no or ""
         ).strip()
         segments = cls.parse_step_reason_segments(step_reason)
+        rich_text_segments = cls._get_step_reason_content_segments(sync_object)
         summary = {"skipped": False, "total": len(segments), "created": 0, "updated": 0, "skippedCount": 0}
         for segment in segments:
             segment_index = int(segment.get("segmentIndex") or 0)
+            content = str(segment.get("content") or "").strip()
             segment_key = cls._build_step_reason_segment_key(
                 source_system=source_system,
                 source_record_id=source_record_id,
                 segment_index=segment_index,
             )
+            comment_segments = cls._slice_content_segments_for_text(
+                full_text=step_reason,
+                content=content,
+                content_segments=rich_text_segments,
+            )
             _, action = TicketService.upsert_synced_comment(
                 db,
                 ticket_id=ticket.ticket_id,
-                content=str(segment.get("content") or "").strip(),
+                content=content,
                 user_name=str(segment.get("personName") or "").strip() or "外部同步",
                 source_type="feishu_bitable",
                 source_system=source_system,
@@ -385,7 +452,7 @@ class TicketSyncService:
                 source_segment_index=segment_index,
                 source_content_hash=str(segment.get("contentHash") or "").strip(),
                 external_created_at=segment.get("externalCreatedAt"),
-                attachments=None,
+                attachments={"content_segments": comment_segments} if comment_segments else None,
                 is_internal=False,
             )
             if action == "created":
@@ -4288,13 +4355,51 @@ class TicketSyncService:
         """
         if not isinstance(value, dict):
             return str(value or "")
+        mention_user_id = str(value.get("mention_user_id") or value.get("mentionUserId") or "").strip()
         raw_text = value.get("text")
         if raw_text is None:
             raw_text = value.get("name") or value.get("value") or value.get("title") or value.get("link")
         if isinstance(raw_text, str):
+            if mention_user_id and raw_text and not raw_text.startswith("@"):
+                return f"@{raw_text}"
             return raw_text
         normalized_text = cls._normalize_bitable_record_scalar(raw_text, join_separator=join_separator)
-        return str(normalized_text or "")
+        text = str(normalized_text or "")
+        if mention_user_id and text and not text.startswith("@"):
+            return f"@{text}"
+        return text
+
+    @classmethod
+    def _normalize_bitable_rich_text_segments_for_comment(cls, value: Any) -> list[dict[str, Any]]:
+        """
+        将多维表格富文本片段转换为评论附件可保存的内部片段。
+
+        :param value: 多维表格字段原始值。
+        :return: text/mention 片段列表。
+        """
+        if not isinstance(value, list) or not cls._is_bitable_rich_text_list(value):
+            return []
+        segments: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            text = cls._normalize_bitable_rich_text_segment(item, join_separator="\n")
+            if not text:
+                continue
+            mention_user_id = str(item.get("mention_user_id") or item.get("mentionUserId") or "").strip()
+            if mention_user_id:
+                segments.append(
+                    {
+                        "type": "mention",
+                        "text": text,
+                        "name": text[1:] if text.startswith("@") else text,
+                        "openId": mention_user_id,
+                        "userId": mention_user_id,
+                    }
+                )
+            else:
+                segments.append({"type": "text", "text": text})
+        return segments
 
     @classmethod
     def _extract_bitable_person_text(
@@ -4415,6 +4520,7 @@ class TicketSyncService:
         :return: 同步字段字典。
         """
         payload: dict[str, Any] = {}
+        field_segments: dict[str, list[dict[str, Any]]] = {}
         for mapping in field_mappings:
             source_field = str(mapping.get("sourceField") or "").strip()
             target_field = cls._normalize_bitable_pull_target_field(mapping.get("targetField"))
@@ -4453,6 +4559,16 @@ class TicketSyncService:
                 payload[target_field] = cls._normalize_bitable_record_datetime_text(normalized_value)
             else:
                 payload[target_field] = normalized_value
+            if target_field == "stepReason":
+                segments = cls._normalize_bitable_rich_text_segments_for_comment(raw_value)
+                if segments:
+                    field_segments[target_field] = segments
+                    field_segments[source_field] = segments
+        if field_segments:
+            extra_data = payload.get("extraData") if isinstance(payload.get("extraData"), dict) else {}
+            extra_data = dict(extra_data or {})
+            extra_data["_bitable_field_segments"] = field_segments
+            payload["extraData"] = extra_data
         return payload
 
     @classmethod

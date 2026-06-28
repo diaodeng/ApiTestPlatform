@@ -46,6 +46,7 @@ class TicketMessageSyncService:
         sender = cls._safe_getattr(event_data, "sender", None)
         sender_id = cls._safe_getattr(sender, "sender_id", None)
         message = cls._safe_getattr(event_data, "message", None)
+        message_mentions = cls._safe_getattr(message, "mentions", [])
         return {
             "schema": cls._safe_getattr(sdk_event, "schema", ""),
             "header": {
@@ -77,6 +78,7 @@ class TicketMessageSyncService:
                     "chat_type": cls._safe_getattr(message, "chat_type", ""),
                     "message_type": cls._safe_getattr(message, "message_type", ""),
                     "content": cls._safe_getattr(message, "content", ""),
+                    "mentions": message_mentions if isinstance(message_mentions, list) else [],
                 },
             },
         }
@@ -103,6 +105,246 @@ class TicketMessageSyncService:
         if not normalized:
             return ""
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _extract_mention_key(cls, value: Any) -> str:
+        """
+        从飞书 mention 对象中提取正文占位符 key。
+        :param value: mention 原始对象
+        :return: `@_user_1` 这类占位符；缺失返回空字符串
+        """
+        if not isinstance(value, dict):
+            return ""
+        return str(value.get("key") or value.get("mention_key") or value.get("mentionKey") or "").strip()
+
+    @classmethod
+    def _extract_mention_name(cls, value: Any) -> str:
+        """
+        从飞书 mention 对象中提取展示名称。
+        :param value: mention 原始对象
+        :return: 用户展示名称；缺失返回空字符串
+        """
+        if not isinstance(value, dict):
+            return ""
+        raw_id = value.get("id") if isinstance(value.get("id"), dict) else {}
+        for item in (
+            value.get("name"),
+            value.get("user_name"),
+            value.get("userName"),
+            raw_id.get("name"),
+            raw_id.get("user_name"),
+            raw_id.get("userName"),
+        ):
+            text = str(item or "").strip()
+            if text:
+                return text
+        return ""
+
+    @classmethod
+    def _extract_mention_open_id(cls, value: Any) -> str:
+        """
+        从飞书 mention 对象中提取 open_id。
+        :param value: mention 原始对象
+        :return: open_id；缺失返回空字符串
+        """
+        if not isinstance(value, dict):
+            return ""
+        raw_id = value.get("id") if isinstance(value.get("id"), dict) else {}
+        return str(
+            value.get("open_id")
+            or value.get("openId")
+            or raw_id.get("open_id")
+            or raw_id.get("openId")
+            or ""
+        ).strip()
+
+    @classmethod
+    def _extract_mention_user_id(cls, value: Any) -> str:
+        """
+        从飞书 mention 对象中提取 user_id。
+        :param value: mention 原始对象
+        :return: user_id；缺失返回空字符串
+        """
+        if not isinstance(value, dict):
+            return ""
+        raw_id = value.get("id") if isinstance(value.get("id"), dict) else {}
+        return str(
+            value.get("user_id")
+            or value.get("userId")
+            or raw_id.get("user_id")
+            or raw_id.get("userId")
+            or ""
+        ).strip()
+
+    @classmethod
+    def _extract_mention_union_id(cls, value: Any) -> str:
+        """
+        从飞书 mention 对象中提取 union_id。
+        :param value: mention 原始对象
+        :return: union_id；缺失返回空字符串
+        """
+        if not isinstance(value, dict):
+            return ""
+        raw_id = value.get("id") if isinstance(value.get("id"), dict) else {}
+        return str(
+            value.get("union_id")
+            or value.get("unionId")
+            or raw_id.get("union_id")
+            or raw_id.get("unionId")
+            or ""
+        ).strip()
+
+    @classmethod
+    def _normalize_message_mentions(cls, mentions: Any) -> list[dict[str, Any]]:
+        """
+        归一化飞书消息 mentions，建立正文占位符到用户信息的映射。
+        :param mentions: 飞书 message.mentions 原始值
+        :return: 归一化后的 mention 列表
+        """
+        if not isinstance(mentions, list):
+            return []
+        result: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for item in mentions:
+            if not isinstance(item, dict):
+                continue
+            key = cls._extract_mention_key(item)
+            if not key or key in seen_keys:
+                continue
+            open_id = cls._extract_mention_open_id(item)
+            name = cls._extract_mention_name(item) or open_id or key
+            result.append(
+                {
+                    "key": key,
+                    "name": name,
+                    "openId": open_id,
+                    "userId": cls._extract_mention_user_id(item),
+                    "unionId": cls._extract_mention_union_id(item),
+                }
+            )
+            seen_keys.add(key)
+        return result
+
+    @classmethod
+    def _replace_mention_keys_with_names(cls, text: str, mentions: list[dict[str, Any]]) -> str:
+        """
+        将飞书正文里的 `@_user_1` 占位符替换为 `@用户名`。
+        :param text: 原始消息文本
+        :param mentions: 归一化 mention 列表
+        :return: 可读文本
+        """
+        result = str(text or "")
+        for mention in mentions:
+            key = str(mention.get("key") or "").strip()
+            name = str(mention.get("name") or "").strip()
+            if key and name:
+                result = result.replace(key, f"@{name}")
+        return result.strip()
+
+    @classmethod
+    def _build_text_segments_from_mentions(cls, text: str, mentions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        根据可读文本和 mention 元数据构建内部片段，便于外发时恢复 @。
+        :param text: 可读文本
+        :param mentions: 归一化 mention 列表
+        :return: text/mention 片段列表
+        """
+        source = str(text or "")
+        if not source:
+            return []
+        segments: list[dict[str, Any]] = []
+        position = 0
+        while position < len(source):
+            next_match: tuple[int, dict[str, Any], str] | None = None
+            for mention in mentions:
+                name = str(mention.get("name") or "").strip()
+                if not name:
+                    continue
+                token = f"@{name}"
+                index = source.find(token, position)
+                if index >= 0 and (next_match is None or index < next_match[0]):
+                    next_match = (index, mention, token)
+            if next_match is None:
+                segments.append({"type": "text", "text": source[position:]})
+                break
+            index, mention, token = next_match
+            if index > position:
+                segments.append({"type": "text", "text": source[position:index]})
+            segments.append(
+                {
+                    "type": "mention",
+                    "text": token,
+                    "name": mention.get("name"),
+                    "openId": mention.get("openId"),
+                    "userId": mention.get("userId"),
+                    "unionId": mention.get("unionId"),
+                    "key": mention.get("key"),
+                }
+            )
+            position = index + len(token)
+        return [item for item in segments if str(item.get("text") or "")]
+
+    @classmethod
+    def _build_bitable_text_value_from_segments(cls, segments: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+        """
+        将内部片段转换为多维表格文本字段值。
+        :param segments: text/mention 片段列表
+        :return: 含 mention_user_id 的富文本片段数组；无 mention 时返回纯文本
+        """
+        if not segments:
+            return ""
+        has_mentions = any(item.get("type") == "mention" for item in segments)
+        if not has_mentions:
+            return "".join(str(item.get("text") or "") for item in segments)
+        result: list[dict[str, Any]] = []
+        for item in segments:
+            text = str(item.get("text") or "")
+            if not text:
+                continue
+            if item.get("type") == "mention":
+                segment = {"type": "mention", "text": text}
+                mention_user_id = str(item.get("openId") or item.get("userId") or "").strip()
+                if mention_user_id:
+                    segment["mention_user_id"] = mention_user_id
+                result.append(segment)
+            else:
+                result.append({"type": "text", "text": text})
+        return result
+
+    @classmethod
+    def _build_feishu_text_from_segments(cls, segments: list[dict[str, Any]]) -> str:
+        """
+        将内部片段转换为飞书文本消息正文。
+        :param segments: text/mention 片段列表
+        :return: 包含 `<at user_id="..."></at>` 的飞书文本
+        """
+        parts: list[str] = []
+        for item in segments:
+            text = str(item.get("text") or "")
+            if item.get("type") == "mention":
+                open_id = str(item.get("openId") or "").strip()
+                parts.append(f'<at user_id="{open_id}"></at>' if open_id else text)
+            else:
+                parts.append(text)
+        return "".join(parts).strip()
+
+    @classmethod
+    def _extract_content_segments_from_attachments(cls, attachments: Any) -> list[dict[str, Any]]:
+        """
+        从评论附件或消息附件中读取正文片段。
+        :param attachments: 评论 attachments 字段
+        :return: text/mention 片段列表
+        """
+        if not isinstance(attachments, dict):
+            return []
+        for key in ("content_segments", "contentSegments"):
+            value = attachments.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        comment_attachments = attachments.get("comment_attachments")
+        if isinstance(comment_attachments, dict):
+            return cls._extract_content_segments_from_attachments(comment_attachments)
+        return []
 
     @classmethod
     def _parse_datetime_value(cls, value: Any) -> datetime | None:
@@ -160,6 +402,49 @@ class TicketMessageSyncService:
         ).strip()
 
     @classmethod
+    def _resolve_sender_display_name(
+        cls,
+        *,
+        sync_config: dict[str, Any],
+        event: dict[str, Any],
+        sender_open_id: str,
+    ) -> str:
+        """
+        将飞书消息发送人解析为可读用户名，避免把 open_id/union_id 直接写入评论。
+
+        :param sync_config: 工单同步配置。
+        :param event: 飞书消息事件。
+        :param sender_open_id: 发送人 open_id。
+        :return: 可读用户名；查询失败时返回事件自带名称或 ID 兜底。
+        """
+        event_name = cls._extract_sender_name(event)
+        if not sender_open_id:
+            return event_name
+
+        feishu_auth = sync_config.get("feishuAuth") if isinstance(sync_config.get("feishuAuth"), dict) else {}
+        group_config = sync_config.get("groupPush") if isinstance(sync_config.get("groupPush"), dict) else {}
+        bitable_config = TicketSyncService._resolve_bitable_runtime_config(
+            sync_config,
+            "bitablePull",
+            TicketSyncService._default_bitable_pull_config(),
+        )
+        app_id, app_secret = TicketSyncNotifyService._resolve_feishu_auth(
+            {**bitable_config, **group_config, **feishu_auth}
+        )
+        if not app_id or not app_secret:
+            return event_name
+
+        feishu_user = TicketSyncNotifyService.query_feishu_user_by_open_id(
+            app_id=app_id,
+            app_secret=app_secret,
+            open_id=sender_open_id,
+        )
+        resolved_name = str((feishu_user or {}).get("name") or "").strip()
+        if resolved_name:
+            return resolved_name
+        return event_name
+
+    @classmethod
     def _extract_message_text(cls, message: dict[str, Any]) -> str:
         """
         从飞书 text/post 消息中提取纯文本内容。
@@ -181,6 +466,23 @@ class TicketMessageSyncService:
         if isinstance(content, dict):
             return json.dumps(content, ensure_ascii=False)
         return str(content or "").strip()
+
+    @classmethod
+    def _extract_message_text_bundle(cls, message: dict[str, Any]) -> dict[str, Any]:
+        """
+        提取飞书消息正文和 mentions，生成系统展示与外部写回共用的文本结构。
+        :param message: 飞书 message 对象
+        :return: 包含 text/rawText/mentions/segments 的消息文本包
+        """
+        raw_text = cls._extract_message_text(message)
+        mentions = cls._normalize_message_mentions(message.get("mentions"))
+        display_text = cls._replace_mention_keys_with_names(raw_text, mentions)
+        return {
+            "text": display_text,
+            "rawText": raw_text,
+            "mentions": mentions,
+            "segments": cls._build_text_segments_from_mentions(display_text, mentions),
+        }
 
     @classmethod
     def _parse_post_text(cls, post: dict[str, Any]) -> str:
@@ -340,6 +642,36 @@ class TicketMessageSyncService:
             return f"{date_text} {user_name or '飞书用户'}：{content}"
 
     @classmethod
+    def _build_step_reason_segments(
+        cls,
+        *,
+        line_text: str,
+        content: str,
+        content_segments: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """
+        将排查过程追加行拆成多维表格可写片段，保留正文中的 @ 人员信息。
+        :param line_text: 已格式化的完整追加行
+        :param content: 评论正文
+        :param content_segments: 评论正文的 text/mention 片段
+        :return: 完整追加行片段
+        """
+        normalized_content = str(content or "")
+        segments = content_segments if isinstance(content_segments, list) else []
+        if not normalized_content or not segments:
+            return [{"type": "text", "text": line_text}]
+        prefix, matched, suffix = str(line_text or "").partition(normalized_content)
+        if not matched:
+            return [{"type": "text", "text": line_text}]
+        result: list[dict[str, Any]] = []
+        if prefix:
+            result.append({"type": "text", "text": prefix})
+        result.extend(segments)
+        if suffix:
+            result.append({"type": "text", "text": suffix})
+        return result
+
+    @classmethod
     def append_comment_to_bitable_step_reason(
         cls,
         db: Session,
@@ -348,6 +680,7 @@ class TicketMessageSyncService:
         content: str,
         user_name: str,
         created_at: datetime | None,
+        content_segments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """
         将评论追加写回飞书多维表格排查过程字段。
@@ -356,6 +689,7 @@ class TicketMessageSyncService:
         :param content: 评论内容
         :param user_name: 评论人
         :param created_at: 评论时间
+        :param content_segments: 评论正文片段，用于恢复多维表格 @ 人员样式
         :return: 写回结果摘要
         """
         sync_config = TicketSyncService._load_sync_config(db)
@@ -388,7 +722,19 @@ class TicketMessageSyncService:
             )
             if append_line and append_line in old_text:
                 return {"skipped": True, "reason": "line_already_exists", "recordId": record_id}
-            new_text = f"{old_text.rstrip()}\n{append_line}".strip() if old_text else append_line
+            if content_segments:
+                append_segments = cls._build_step_reason_segments(
+                    line_text=append_line,
+                    content=content,
+                    content_segments=content_segments,
+                )
+                merged_segments: list[dict[str, Any]] = []
+                if old_text:
+                    merged_segments.append({"type": "text", "text": f"{old_text.rstrip()}\n"})
+                merged_segments.extend(append_segments)
+                new_text = cls._build_bitable_text_value_from_segments(merged_segments)
+            else:
+                new_text = f"{old_text.rstrip()}\n{append_line}".strip() if old_text else append_line
             TicketSyncNotifyService.update_bitable_record_fields(
                 config=bitable_config,
                 record_id=record_id,
@@ -427,6 +773,7 @@ class TicketMessageSyncService:
         content: str,
         user_name: str,
         created_at: datetime | None = None,
+        attachments: dict[str, Any] | list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """
         本地工单评论创建后，按配置同步到多维表格和飞书话题。
@@ -435,6 +782,7 @@ class TicketMessageSyncService:
         :param content: 评论内容
         :param user_name: 评论人
         :param created_at: 评论创建时间
+        :param attachments: 评论附件或引用信息
         :return: 出站同步结果摘要
         """
         sync_config = TicketSyncService._load_sync_config(db)
@@ -462,7 +810,9 @@ class TicketMessageSyncService:
             elif not app_id or not app_secret:
                 feishu_result = {"skipped": True, "reason": "missing_feishu_app_config"}
             else:
-                reply_content = f"{user_name or '系统用户'}：{content}"
+                content_segments = cls._extract_content_segments_from_attachments(attachments)
+                feishu_content = cls._build_feishu_text_from_segments(content_segments) if content_segments else content
+                reply_content = f"{user_name or '系统用户'}：{feishu_content}"
                 try:
                     feishu_result = TicketSyncNotifyService.send_feishu_thread_reply(
                         app_id=app_id,
@@ -524,7 +874,8 @@ class TicketMessageSyncService:
         root_id = str(message.get("root_id") or message.get("rootId") or "").strip()
         thread_id = str(message.get("thread_id") or message.get("threadId") or "").strip()
         parent_id = str(message.get("parent_id") or message.get("parentId") or "").strip()
-        text = cls._extract_message_text(message)
+        text_bundle = cls._extract_message_text_bundle(message)
+        text = str(text_bundle.get("text") or "").strip()
         if not message_id or not text:
             return {"skipped": True, "reason": "empty_message_id_or_text"}
 
@@ -546,12 +897,18 @@ class TicketMessageSyncService:
             or header.get("create_time")
             or header.get("createTime")
         )
+        sender_display_name = ""
         if bool(message_config.get("syncFeishuCommentToTicket", True)):
+            sender_display_name = cls._resolve_sender_display_name(
+                sync_config=sync_config,
+                event=event,
+                sender_open_id=sender_open_id,
+            )
             comment, comment_action = TicketService.upsert_synced_comment(
                 db,
                 ticket_id=ticket.ticket_id,
                 content=text,
-                user_name=cls._extract_sender_name(event),
+                user_name=sender_display_name,
                 source_type=cls.SOURCE_TYPE_FEISHU_THREAD,
                 source_system="feishu_im",
                 source_record_id=message_id,
@@ -568,6 +925,9 @@ class TicketMessageSyncService:
                     "parent_id": parent_id,
                     "sender_open_id": sender_open_id,
                     "event_id": header.get("event_id") or header.get("eventId"),
+                    "mentions": text_bundle.get("mentions") or [],
+                    "content_segments": text_bundle.get("segments") or [],
+                    "raw_content_text": text_bundle.get("rawText") or "",
                 },
                 is_internal=False,
             )
@@ -575,12 +935,19 @@ class TicketMessageSyncService:
 
         bitable_result = {"skipped": True, "reason": "syncFeishuCommentToBitable=false"}
         if bool(message_config.get("syncFeishuCommentToBitable")) and comment_action in {"created", "updated"}:
+            if not sender_display_name:
+                sender_display_name = cls._resolve_sender_display_name(
+                    sync_config=sync_config,
+                    event=event,
+                    sender_open_id=sender_open_id,
+                )
             bitable_result = cls.append_comment_to_bitable_step_reason(
                 db,
                 ticket=ticket,
                 content=text,
-                user_name=cls._extract_sender_name(event),
+                user_name=sender_display_name,
                 created_at=external_created_at,
+                content_segments=text_bundle.get("segments") or [],
             )
 
         db.commit()

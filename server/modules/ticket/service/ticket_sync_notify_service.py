@@ -274,7 +274,7 @@ class TicketSyncNotifyService:
                 timeout=(10, timeout_sec),
             )
             if response.status_code != 200:
-                logger.info(
+                logger.error(
                     "Request failed with status code: "
                     f"{response.status_code}, {url} - {json.dumps(response.json(), ensure_ascii=False)}"
                 )
@@ -1072,6 +1072,48 @@ class TicketSyncNotifyService:
             }
         except Exception as exc:
             logger.warning(f"飞书用户查询失败，email={normalized_email}, error={exc}")
+            return None
+
+    @classmethod
+    def query_feishu_user_by_open_id(cls, *, app_id: str, app_secret: str, open_id: str) -> dict[str, Any] | None:
+        """
+        根据 open_id 查询飞书用户信息，用于把消息事件里的内部 ID 转为可读用户名。
+
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :param open_id: 飞书用户 open_id。
+        :return: 飞书用户信息，失败返回 None。
+        """
+        normalized_open_id = str(open_id or "").strip()
+        if not normalized_open_id:
+            return None
+        try:
+            token = cls._get_tenant_access_token(app_id, app_secret)
+            user_detail_url = f"{cls.FEISHU_BASE_URL}/contact/v3/users/{normalized_open_id}"
+            user_detail_data = (
+                cls._request_feishu_json(
+                    method="GET",
+                    url=user_detail_url,
+                    tenant_access_token=token,
+                    params={"user_id_type": "open_id"},
+                ).get("data")
+                or {}
+            )
+            user_payload = user_detail_data.get("user") if isinstance(user_detail_data.get("user"), dict) else {}
+            display_name = str(
+                user_payload.get("name")
+                or user_payload.get("nickname")
+                or user_payload.get("en_name")
+                or user_payload.get("email")
+                or ""
+            ).strip()
+            return {
+                "openId": normalized_open_id,
+                "name": display_name,
+                "email": str(user_payload.get("email") or "").strip(),
+            }
+        except Exception as exc:
+            logger.warning(f"飞书用户查询失败，open_id={normalized_open_id}, error={exc}")
             return None
 
     @classmethod

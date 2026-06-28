@@ -87,7 +87,7 @@ sequenceDiagram
 | 9 | 如果消费方还需要把“已处理”“处理失败”“部分成功”等结果反馈回公网环境，可调用可选接口 `POST /ticket/sync/ack`；只有成功状态会推进 `delivered_revision`，失败状态只记录错误，保留同一 revision 下次重试。 |
 | 10 | 同一工单后续只要再次从外部系统同步进入，`revision` 会继续递增，内网消费方下次仍可拉到新的版本。 |
 | 11 | 自动群推送采用“仅一次成功发送”标记：`group_push_sent_once=true` 后，即使后续是同工单更新也不会重复自动发群消息；手动发群不受此标记限制。 |
-| 12 | 飞书话题评论同步由 `ticket.sync.automation.messageSync` 控制，默认关闭；公网 webhook 由 `feishuEventEnabled` 控制并继续通过 `POST /ticket/webhook/feishu/message` 接收飞书消息事件；无公网长连接由 `feishuWsEnabled` 控制，服务启动时通过 `lark_oapi` 的 `lark.ws.Client` 监听 `im.message.receive_v1`。两种入站方式都按 `message_id` 生成评论幂等键写入 `ticket_comment`，并可按配置追加写回多维表格排查过程字段。 |
+| 12 | 飞书话题评论同步由 `ticket.sync.automation.messageSync` 控制，默认关闭；公网 webhook 由 `feishuEventEnabled` 控制并继续通过 `POST /ticket/webhook/feishu/message` 接收飞书消息事件；无公网长连接由 `feishuWsEnabled` 控制，服务启动时通过 `lark_oapi` 的 `lark.ws.Client` 监听 `im.message.receive_v1`。两种入站方式都按 `message_id` 生成评论幂等键写入 `ticket_comment`，并可按配置追加写回多维表格排查过程字段；入站发送人会优先用 `sender.open_id` 查询飞书用户详情并写入用户名，避免把 `open_id/union_id` 直接展示给用户；正文中的 `@_user_1` 会按 `mentions` 替换为 `@用户名`，并在 `attachments.content_segments` 保留人员 ID，供写回多维表格或飞书群时恢复真实 @。 |
 | 13 | 群推送应用发送成功后会把飞书 `messageId/rootId/threadId/chatId` 写入 `ticket.extra_data.external_sync.sync_state.group_push_message_refs`，后续飞书事件优先按这些锚点匹配工单；历史无锚点消息会回退从文本识别工单号。 |
 | 14 | 为避免“飞书评论写回多维表格后又被主动拉取”造成重复评论，评论同步会同时使用 `source_segment_key` 与 `source_content_hash` 去重；同一工单同一内容哈希已存在时跳过新增。 |
 | 15 | 长连接监听使用后台守护线程运行，每条事件创建独立数据库会话；当前 SDK 只提供 `start()`，应用关闭时只能标记停止并等待进程退出释放连接。 |

@@ -16,6 +16,7 @@
   - `allowedChatIds` 非空时只处理指定群。
   - `ignoreBotOpenIds` 用于跳过机器人自己的消息，避免回环。
   - 优先按已记录的群推送 `messageId/rootId/threadId` 匹配工单；匹配不到再从文本提取工单号。
+  - 入站消息会用 `sender.open_id` 查询飞书用户详情，把评论人解析为用户名后再写入工单评论和多维表格排查过程。
   - 使用飞书 `message_id` 生成 `source_segment_key` 写入 `ticket_comment`，保证事件重试不重复。
   - webhook 和长连接会转换为同一内部事件结构，复用同一套匹配、过滤、去重和写回逻辑。
 - 群推送现在会记录飞书应用发送返回的 `messageId/rootId/threadId/chatId` 到 `ticket.extra_data.external_sync.sync_state.group_push_message_refs`，用于后续评论回帖定位话题。
