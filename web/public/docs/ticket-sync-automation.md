@@ -110,7 +110,8 @@
 
 - 自动处理数据：标题、描述、最近评论、当前字段和统计枚举。
 - 自动触发场景：外部同步入库、远端拉取入库、手动创建工单、命中配置的状态变更、批量重归类。
-- 防重复规则：非强制场景下，工单已有分类统计字段或已有相同文本成功 AI 分类结果时会跳过。
+- 防重复规则：非强制场景下，只有核心分类字段完整且内容未变化时才跳过；内容变化或任一核心分类字段缺失时会继续归类。
+- 核心分类字段不包含 `module_name` 和 `severity`：前者来自项目/模块映射，后者是工单自身严重程度属性。
 - 回填字段：`category_name`、`issue_type_id`、`issue_type_name`、`module_name`、`severity`、`root_cause_type`、`solution_type`、`resolution_code`、`resolution_name`、`root_cause`、`solution`、`is_problem`。
 - 执行摘要写入 `extra_data.ai_classification`，保留来源 hash、Provider、Prompt、置信度和模型原始结果。
 

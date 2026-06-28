@@ -5569,12 +5569,6 @@ class TicketSyncService:
                 f"reason=同步配置未开启当前场景AI分类统计, source_type={source_type}"
             )
             return ticket, {"skipped": True, "skipReason": "当前场景未开启AI分类统计"}
-        if not force_reclassify and cls._has_existing_ticket_classification_fields(ticket):
-            logger.info(
-                f"工单AI分类统计跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
-                f"reason=工单已有分类统计字段且未强制重归类, source_type={source_type}"
-            )
-            return ticket, {"skipped": True, "skipReason": "工单已有分类统计字段，跳过自动分类"}
         title_text = str(title or "").strip()
         description_text = str(description or "").strip()
         comment_context = cls._build_ticket_comment_context(db, ticket_id=ticket.ticket_id)
@@ -5583,18 +5577,27 @@ class TicketSyncService:
             f"title_len={len(title_text)}, description_len={len(description_text)}, "
             f"comment_count={len(comment_context)}"
         )
-        if not force_reclassify and cls._has_successful_ai_classification(
-            ticket,
-            title=title_text,
-            description=description_text,
-            comments=comment_context,
-        ):
+        if not force_reclassify and cls._has_complete_ticket_classification_fields(ticket):
+            if cls._has_successful_ai_classification(
+                ticket,
+                title=title_text,
+                description=description_text,
+                comments=comment_context,
+            ):
+                logger.info(
+                    f"工单AI分类统计跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                    f"reason=核心分类字段完整且内容未变化, source_type={source_type}"
+                )
+                return ticket, {"skipped": True, "skipReason": "核心分类字段完整且内容未变化"}
             logger.info(
-                f"工单AI分类统计跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
-                f"reason=已有相同标题描述评论的成功AI分类结果"
+                f"工单AI分类统计继续执行: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=核心分类字段完整但内容已变化, source_type={source_type}"
             )
-            return ticket, {"skipped": True, "skipReason": "已有相同文本的成功AI分类结果"}
-
+        elif not force_reclassify:
+            logger.info(
+                f"工单AI分类统计继续执行: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=存在核心分类字段缺失, source_type={source_type}"
+            )
         ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
         stat_options = config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
         logger.info(
@@ -5637,6 +5640,8 @@ class TicketSyncService:
             title=title_text,
             description=description_text,
             comments=comment_context,
+            root_cause=str(getattr(ticket, "root_cause", "") or "").strip(),
+            solution=str(getattr(ticket, "solution", "") or "").strip(),
         )
         next_extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
         next_extra_data["ai_classification"] = {
@@ -5789,6 +5794,8 @@ class TicketSyncService:
         title: str,
         description: str,
         comments: list[str] | None = None,
+        root_cause: str | None = None,
+        solution: str | None = None,
     ) -> str:
         """
         构建 AI 分类防重用来源摘要。
@@ -5796,10 +5803,22 @@ class TicketSyncService:
         :param title: 工单标题。
         :param description: 工单描述。
         :param comments: 工单评论上下文。
+        :param root_cause: 当前根因。
+        :param solution: 当前解决方案。
         :return: 来源内容 SHA256。
         """
         comment_text = "\n".join(str(item or "").strip() for item in comments or [] if str(item or "").strip())
-        return cls._text_sha256("\n\n".join([str(title or "").strip(), str(description or "").strip(), comment_text]))
+        return cls._text_sha256(
+            "\n\n".join(
+                [
+                    str(title or "").strip(),
+                    str(description or "").strip(),
+                    comment_text,
+                    str(root_cause or "").strip(),
+                    str(solution or "").strip(),
+                ]
+            )
+        )
 
     @classmethod
     def _has_successful_ai_classification(
@@ -5825,20 +5844,22 @@ class TicketSyncService:
             title=title,
             description=description,
             comments=comments,
+            root_cause=str(getattr(ticket, "root_cause", "") or "").strip(),
+            solution=str(getattr(ticket, "solution", "") or "").strip(),
         )
         return bool(ai_meta.get("success")) and str(ai_meta.get("sourceHash") or "") == source_hash
 
     @classmethod
-    def _has_existing_ticket_classification_fields(cls, ticket: Ticket) -> bool:
+    def _has_complete_ticket_classification_fields(cls, ticket: Ticket) -> bool:
         """
-        判断工单是否已经具备主表分类统计结果。
+        判断工单是否已经具备完整的核心分类统计结果。
 
-        入库场景可能携带外部系统已归类字段，或历史工单已被人工/批量工具归类。非强制场景下
-        直接跳过，避免再次调用 AI 覆盖已有业务判断。
+        `module_name` 来自项目/模块映射，`severity` 是工单自身严重程度属性，二者不作为
+        自动归类完整性的判断条件。任一核心字段缺失时允许继续调用 AI 补齐。
         :param ticket: 工单对象。
-        :return: 存在任一分类统计核心字段时返回 True。
+        :return: 核心分类字段均有值时返回 True。
         """
-        return any(
+        return all(
             [
                 str(getattr(ticket, "category_name", "") or "").strip(),
                 str(getattr(ticket, "issue_type_id", "") or "").strip(),
@@ -5849,6 +5870,54 @@ class TicketSyncService:
                 str(getattr(ticket, "resolution_name", "") or "").strip(),
                 getattr(ticket, "is_problem", None) is not None,
             ]
+        )
+
+    @classmethod
+    def _resolve_ai_classification_scene_for_sync_status(
+        cls,
+        config: dict[str, Any],
+        *,
+        sync_scene: str,
+        previous_status: str,
+        current_status: str,
+    ) -> tuple[str, bool, bool, str]:
+        """
+        解析同步入库后应使用的 AI 分类场景。
+
+        外部同步和远端入库也可能带来状态变更。若目标状态命中状态变更自动归类配置，则优先
+        使用状态变更场景；否则继续按原入库场景执行。
+        :param config: 同步自动化配置。
+        :param sync_scene: 原始入库场景。
+        :param previous_status: 入库前状态。
+        :param current_status: 入库后状态。
+        :return: (source_type, enabled_by_scene, force_reclassify, reason)。
+        """
+        ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
+        old_status = str(previous_status or "").strip()
+        new_status = str(current_status or "").strip()
+        trigger_statuses = [
+            str(item or "").strip()
+            for item in (ai_config.get("statusChangeTriggerStatuses") or [])
+            if str(item or "").strip()
+        ]
+        if (
+            old_status
+            and new_status
+            and old_status != new_status
+            and bool(ai_config.get("runOnStatusChange"))
+            and new_status in trigger_statuses
+        ):
+            return (
+                f"{sync_scene}_status_change_auto_category",
+                True,
+                bool(ai_config.get("statusChangeForceReclassify")),
+                f"status_changed:{old_status}->{new_status}",
+            )
+        return (
+            f"{sync_scene}_auto_category",
+            cls._should_run_ai_classification_for_scene(config, sync_scene),
+            False,
+            "sync_scene",
         )
 
     @classmethod
@@ -5864,14 +5933,18 @@ class TicketSyncService:
         if not bool(ai_config.get("enabled")):
             return False
         normalized_scene = str(scene or "").strip()
+        if (
+            normalized_scene == "status_change"
+            or normalized_scene.startswith("ticket_status_change")
+            or "_status_change" in normalized_scene
+        ):
+            return bool(ai_config.get("runOnStatusChange"))
         if normalized_scene == "external_sync" or normalized_scene.startswith("external_sync"):
             return bool(ai_config.get("runOnExternalSync"))
         if normalized_scene == "remote_pull" or normalized_scene.startswith("remote_pull"):
             return bool(ai_config.get("runOnRemotePull"))
         if normalized_scene == "manual_create" or normalized_scene.startswith("ticket_manual_create"):
             return bool(ai_config.get("runOnManualCreate"))
-        if normalized_scene == "status_change" or normalized_scene.startswith("ticket_status_change"):
-            return bool(ai_config.get("runOnStatusChange"))
         if normalized_scene == "batch_reclassify" or normalized_scene.startswith("ticket_batch_reclassify"):
             return True
         return False
@@ -6729,6 +6802,7 @@ class TicketSyncService:
                 origin_description = str(sync_object.description or "").strip()
             if should_translate:
                 sync_object = sync_object.model_copy(update={"description": translated_description})
+        previous_status = str(getattr(ticket, "status", "") or "").strip() if ticket else ""
         payload, meta, revision = cls._build_upsert_payload(
             db,
             ticket,
@@ -6738,6 +6812,7 @@ class TicketSyncService:
             sync_scene=sync_scene,
         )
         if defer_post_process:
+            meta["sourceStatusBefore"] = previous_status
             meta = cls._set_publish_state(
                 meta,
                 ready=False,
@@ -6870,24 +6945,41 @@ class TicketSyncService:
             )
 
         category_summary = None
-        if skip_ai_analysis_due_to_update_title:
-            category_summary = {"skipped": True, "skipReason": "更新场景且已携带标题，跳过AI分类"}
-        else:
-            try:
-                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+        try:
+            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            source_type, enabled_by_scene, force_reclassify, classify_reason = (
+                cls._resolve_ai_classification_scene_for_sync_status(
+                    config,
+                    sync_scene=sync_scene,
+                    previous_status=previous_status,
+                    current_status=str(ticket.status or "").strip(),
+                )
+            )
+            if skip_ai_analysis_due_to_update_title and not classify_reason.startswith("status_changed:"):
+                category_summary = {"skipped": True, "skipReason": "更新场景且已携带标题，跳过AI分类"}
+                logger.info(
+                    f"外部工单同步自动分类跳过: ticket_no={sync_object.ticket_no}, "
+                    f"reason=更新场景且已携带标题，未命中状态变更分类"
+                )
+            else:
+                logger.info(
+                    f"外部工单同步自动分类场景: ticket_no={sync_object.ticket_no}, "
+                    f"source_type={source_type}, enabled_by_scene={enabled_by_scene}, "
+                    f"force_reclassify={force_reclassify}, reason={classify_reason}"
+                )
                 ticket, category_summary = cls._run_auto_ticket_ai_classification(
                     db,
                     ticket=ticket,
                     title=str(sync_object.title or ticket.title or "").strip(),
                     description=str(sync_object.description or ticket.description or "").strip(),
                     current_user_name=_user_name(current_user),
-                    source_type=f"{sync_scene}_auto_category",
+                    source_type=source_type,
                     source_ref=sync_object.ticket_no,
-                    force_reclassify=False,
-                    enabled_by_scene=cls._should_run_ai_classification_for_scene(config, sync_scene),
+                    force_reclassify=force_reclassify,
+                    enabled_by_scene=enabled_by_scene,
                 )
-            except Exception as exc:
-                logger.warning(f"外部工单同步自动分类执行失败: ticket_no={sync_object.ticket_no}, error={exc}")
+        except Exception as exc:
+            logger.warning(f"外部工单同步自动分类执行失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
         should_run_automation = bool(
             (
@@ -7187,9 +7279,29 @@ class TicketSyncService:
                 db.rollback()
                 logger.warning(f"外部工单同步延后更新工单失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
-        if not skip_ai_analysis_due_to_update_title:
-            try:
-                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+        try:
+            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            meta = cls._build_meta(ticket.extra_data if isinstance(ticket.extra_data, dict) else {})
+            previous_status = str(meta.get("sourceStatusBefore") or "").strip()
+            source_type, enabled_by_scene, force_reclassify, classify_reason = (
+                cls._resolve_ai_classification_scene_for_sync_status(
+                    config,
+                    sync_scene=sync_scene,
+                    previous_status=previous_status,
+                    current_status=str(ticket.status or "").strip(),
+                )
+            )
+            if skip_ai_analysis_due_to_update_title and not classify_reason.startswith("status_changed:"):
+                logger.info(
+                    f"外部工单同步延后自动分类跳过: ticket_no={sync_object.ticket_no}, "
+                    f"reason=更新场景且已携带标题，未命中状态变更分类"
+                )
+            else:
+                logger.info(
+                    f"外部工单同步延后自动分类场景: ticket_no={sync_object.ticket_no}, "
+                    f"source_type={source_type}, enabled_by_scene={enabled_by_scene}, "
+                    f"force_reclassify={force_reclassify}, reason={classify_reason}"
+                )
                 cls._run_auto_ticket_ai_classification(
                     db,
                     ticket=ticket,
@@ -7201,13 +7313,13 @@ class TicketSyncService:
                         or ""
                     ).strip(),
                     current_user_name=_user_name(current_user),
-                    source_type=f"{sync_scene}_auto_category",
+                    source_type=source_type,
                     source_ref=sync_object.ticket_no,
-                    force_reclassify=False,
-                    enabled_by_scene=cls._should_run_ai_classification_for_scene(config, sync_scene),
+                    force_reclassify=force_reclassify,
+                    enabled_by_scene=enabled_by_scene,
                 )
-            except Exception as exc:
-                logger.warning(f"外部工单同步延后自动分类失败: ticket_no={sync_object.ticket_no}, error={exc}")
+        except Exception as exc:
+            logger.warning(f"外部工单同步延后自动分类失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
         apply_external_mappings = sync_scene != "remote_pull"
         detected = cls._detect_fields(

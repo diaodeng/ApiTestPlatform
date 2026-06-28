@@ -15,9 +15,10 @@
    - `runOnExternalSync`
    - `runOnRemotePull`
    - `runOnManualCreate`
-4. 已有 `category_name`、`issue_type_*`、`is_problem`、`root_cause_type`、`solution_type` 或 `resolution_*` 等分类统计字段的工单，非强制场景下不会重复调用 AI。
-5. 已经基于相同标题、描述和评论成功分类过的工单，默认不会重复调用 AI；状态变更场景只有开启 `statusChangeForceReclassify` 时才覆盖防重逻辑。
-6. 同步配置页“自动分类管理”支持输入指定工单 ID，复用批量重归类接口只处理目标工单。
+4. 命中状态变更自动归类配置时，若标题、描述、评论、根因或解决方案有变化，或任一核心分类字段缺失，都会重新调用 AI。
+5. 核心分类字段包括 `category_name`、`issue_type_id`、`issue_type_name`、`is_problem`、`root_cause_type`、`solution_type`、`resolution_code`、`resolution_name`。`module_name` 来自项目/模块映射，`severity` 是工单自身严重程度属性，二者不作为缺失判断条件。
+6. 只有核心分类字段完整且内容未变化时，非强制场景才跳过；状态变更场景开启 `statusChangeForceReclassify` 时会强制覆盖。
+7. 同步配置页“自动分类管理”支持输入指定工单 ID，复用批量重归类接口只处理目标工单。
 
 ## 处理流程
 
@@ -30,7 +31,7 @@ flowchart TD
   C -- 是 --> D{目标状态命中配置列表?}
   D -- 否 --> Z
   D -- 是 --> E[读取工单标题/描述/评论/当前字段]
-  E --> F{已有相同文本成功分类且未强制覆盖?}
+  E --> F{核心字段完整且内容未变化?}
   F -- 是 --> Z
   F -- 否 --> G[调用轻量AI分类统计]
   G --> H[回填结构化统计字段和extra_data.ai_classification]
@@ -51,8 +52,9 @@ flowchart TD
 - 状态变更触发未开启。
 - 未配置触发状态。
 - 目标状态未命中配置。
-- 工单已有分类统计字段且未强制重归类。
-- 已有相同文本成功 AI 分类结果。
+- 核心分类字段完整且内容未变化。
+- 存在核心分类字段缺失。
+- 核心分类字段完整但内容已变化。
 - Provider/Prompt 未配置。
 - AI 分类统计回填完成或失败。
 
