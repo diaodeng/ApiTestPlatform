@@ -3,7 +3,7 @@
 1. 工单分类统计新增“细分问题类型”固定枚举 `problemPatterns`，用于统计内存泄露、280开头券为纸质券规则说明等长期治理问题模式。
 2. 工单主表新增 `problem_pattern_*` 字段，AI 分类只从启用的固定细分问题枚举中选择，人工确认后的细分问题不会被 AI 覆盖。
 3. 工单列表、编辑、状态流转和详情页接入细分问题筛选、展示和人工确认。
-4. 工单统计页新增细分问题分布和趋势统计曲线，新增接口 `GET /ticket/statistics/trend`。
+4. 工单统计页新增细分问题分布、趋势统计曲线和趋势明细表，显示配置可单独控制趋势图和趋势表，新增接口 `GET /ticket/statistics/trend`。
 5. 新增说明文档：`web/public/docs/2026-07-01-ticket-problem-pattern-trend-statistics.md`。
 
 ## 2026-06-30

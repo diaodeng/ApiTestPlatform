@@ -134,26 +134,26 @@
       </el-col>
     </el-row>
 
-    <el-row :gutter="16" class="trend-chart-grid mt16">
-      <el-col :xs="24" :lg="12" class="trend-chart-col">
+    <el-row v-show="hasVisibleTrendCharts" :gutter="16" class="trend-chart-grid mt16">
+      <el-col v-show="isTrendBlockVisible('overallTrend')" :xs="24" :lg="12" class="trend-chart-col">
         <el-card shadow="never">
           <template #header>整体趋势</template>
           <div ref="overallTrendChartRef" class="trend-chart" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :lg="12" class="trend-chart-col">
+      <el-col v-show="isTrendBlockVisible('problemTrend')" :xs="24" :lg="12" class="trend-chart-col">
         <el-card shadow="never">
           <template #header>问题性质趋势</template>
           <div ref="problemTrendChartRef" class="trend-chart" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :lg="12" class="trend-chart-col">
+      <el-col v-show="isTrendBlockVisible('moduleTrend')" :xs="24" :lg="12" class="trend-chart-col">
         <el-card shadow="never">
           <template #header>Top模块趋势</template>
           <div ref="moduleTrendChartRef" class="trend-chart" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :lg="12" class="trend-chart-col">
+      <el-col v-show="isTrendBlockVisible('problemPatternTrend')" :xs="24" :lg="12" class="trend-chart-col">
         <el-card shadow="never">
           <template #header>Top细分问题趋势</template>
           <div ref="problemPatternTrendChartRef" class="trend-chart" />
@@ -161,7 +161,7 @@
       </el-col>
     </el-row>
 
-    <el-card shadow="never" class="mt16">
+    <el-card v-show="isTrendBlockVisible('trendDetail')" shadow="never" class="mt16">
       <template #header>趋势明细</template>
       <el-table v-loading="loading" :data="trend.series || []">
         <el-table-column label="周期" prop="bucket" width="120" />
@@ -182,8 +182,16 @@
     </el-card>
 
     <el-dialog title="统计块显示配置" v-model="blockConfigOpen" width="560px" append-to-body>
+      <div class="config-section-title">汇总统计块</div>
       <el-checkbox-group v-model="visibleStatisticsBlockKeys" class="statistics-block-config">
         <el-checkbox v-for="item in statisticsBlockOptions" :key="item.key" :label="item.key">
+          {{ item.title }}
+        </el-checkbox>
+      </el-checkbox-group>
+      <el-divider />
+      <div class="config-section-title">趋势展示</div>
+      <el-checkbox-group v-model="visibleTrendBlockKeys" class="statistics-block-config">
+        <el-checkbox v-for="item in trendBlockOptions" :key="item.key" :label="item.key">
           {{ item.title }}
         </el-checkbox>
       </el-checkbox-group>
@@ -239,6 +247,13 @@ const trendGranularityOptions = [
   { label: '日', value: 'day' },
   { label: '周', value: 'week' },
   { label: '月', value: 'month' }
+]
+const trendBlockOptions = [
+  { key: 'overallTrend', title: '整体趋势曲线' },
+  { key: 'problemTrend', title: '问题性质趋势曲线' },
+  { key: 'moduleTrend', title: 'Top模块趋势曲线' },
+  { key: 'problemPatternTrend', title: 'Top细分问题趋势曲线' },
+  { key: 'trendDetail', title: '趋势明细表格' }
 ]
 
 const statisticsBlockOptions = [
@@ -370,11 +385,20 @@ const statisticsBlockOptions = [
   }
 ]
 const defaultStatisticsBlockKeys = statisticsBlockOptions.map(item => item.key)
+const defaultTrendBlockKeys = trendBlockOptions.map(item => item.key)
 const visibleStatisticsBlockKeys = ref([...defaultStatisticsBlockKeys])
+const visibleTrendBlockKeys = ref([...defaultTrendBlockKeys])
 const visibleStatisticsBlocks = computed(() => {
   const visibleKeys = new Set(visibleStatisticsBlockKeys.value)
   return statisticsBlockOptions.filter(item => visibleKeys.has(item.key))
 })
+const visibleTrendBlockKeySet = computed(() => new Set(visibleTrendBlockKeys.value))
+const hasVisibleTrendCharts = computed(() => (
+  isTrendBlockVisible('overallTrend') ||
+  isTrendBlockVisible('problemTrend') ||
+  isTrendBlockVisible('moduleTrend') ||
+  isTrendBlockVisible('problemPatternTrend')
+))
 
 function getStatistics() {
   loading.value = true
@@ -431,31 +455,54 @@ function normalizeStatisticsBlockKeys(value) {
   return normalized.length ? normalized : [...defaultStatisticsBlockKeys]
 }
 
+function normalizeTrendBlockKeys(value) {
+  const rawKeys = Array.isArray(value?.visibleTrendBlocks) ? value.visibleTrendBlocks : value
+  const validKeys = new Set(trendBlockOptions.map(item => item.key))
+  const normalized = (Array.isArray(rawKeys) ? rawKeys : defaultTrendBlockKeys)
+    .map(item => String(item || '').trim())
+    .filter(item => validKeys.has(item))
+  return normalized.length ? normalized : [...defaultTrendBlockKeys]
+}
+
 function loadStatisticsBlockConfig() {
   return getCurrentUserConfig('ticket', 'ticket_statistics_blocks').then(response => {
-    visibleStatisticsBlockKeys.value = normalizeStatisticsBlockKeys(response.data?.configValue)
+    const configValue = response.data?.configValue
+    visibleStatisticsBlockKeys.value = normalizeStatisticsBlockKeys(configValue)
+    visibleTrendBlockKeys.value = normalizeTrendBlockKeys(configValue)
   }).catch(() => {
     visibleStatisticsBlockKeys.value = [...defaultStatisticsBlockKeys]
+    visibleTrendBlockKeys.value = [...defaultTrendBlockKeys]
   })
 }
 
 function saveStatisticsBlockConfig() {
   visibleStatisticsBlockKeys.value = normalizeStatisticsBlockKeys(visibleStatisticsBlockKeys.value)
+  visibleTrendBlockKeys.value = normalizeTrendBlockKeys(visibleTrendBlockKeys.value)
   saveCurrentUserConfig({
     configType: 'ticket',
     configKey: 'ticket_statistics_blocks',
     configValue: {
-      visibleBlocks: visibleStatisticsBlockKeys.value
+      visibleBlocks: visibleStatisticsBlockKeys.value,
+      visibleTrendBlocks: visibleTrendBlockKeys.value
     },
     remark: '工单统计页面显示块配置'
   }).then(() => {
     blockConfigOpen.value = false
+    nextTick(() => {
+      renderTrendCharts()
+      resizeTrendCharts()
+    })
     proxy.$modal.msgSuccess('保存成功')
   })
 }
 
 function resetStatisticsBlockConfig() {
   visibleStatisticsBlockKeys.value = [...defaultStatisticsBlockKeys]
+  visibleTrendBlockKeys.value = [...defaultTrendBlockKeys]
+  nextTick(() => {
+    renderTrendCharts()
+    resizeTrendCharts()
+  })
 }
 
 function loadProjectOptions() {
@@ -582,6 +629,10 @@ function buildModuleCodeOptions(moduleItems = []) {
 function formatTransition(row) {
   const fromStatus = row.fromStatus === '创建' ? '创建' : getOptionLabel(ticketStatusOptions, row.fromStatus)
   return `${fromStatus} -> ${getOptionLabel(ticketStatusOptions, row.toStatus)}`
+}
+
+function isTrendBlockVisible(key) {
+  return visibleTrendBlockKeySet.value.has(key)
 }
 
 function getTrendSeries() {
@@ -729,6 +780,13 @@ loadStatClassificationOptions()
 loadStatisticsBlockConfig()
 getStatistics()
 
+watch(visibleTrendBlockKeys, () => {
+  nextTick(() => {
+    renderTrendCharts()
+    resizeTrendCharts()
+  })
+}, { deep: true })
+
 onMounted(() => {
   window.addEventListener('resize', resizeTrendCharts)
   nextTick(() => renderTrendCharts())
@@ -774,6 +832,13 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px 16px;
+}
+
+.config-section-title {
+  margin-bottom: 12px;
+  color: #303133;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .metric-label {
