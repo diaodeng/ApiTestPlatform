@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from config.celery_app import celery_app
 from config.env import RedisConfig
+from context.request_context import get_current_trace_id
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_task.celery_contract import (
     CELERY_EXECUTE_JOB_TASK,
@@ -780,6 +781,7 @@ class CeleryJobService:
             return CrudResponseModel(is_success=False, message="任务正在执行中，请先终止后再手动执行")
 
         payload = build_task_payload(task_row=task, trigger_type="manual")
+        payload["trace_id"] = get_current_trace_id(default="")
         celery_app.send_task(
             CELERY_EXECUTE_JOB_TASK,
             args=[payload],

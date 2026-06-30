@@ -10,6 +10,7 @@ from starlette.background import BackgroundTask
 
 from config.database import SessionLocal
 from config.get_db import get_db
+from context.request_context import get_current_trace_id, trace_context
 from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
@@ -103,12 +104,21 @@ def _update_ticket_with_independent_session(
         return TicketService.update_ticket(db, ticket_object, current_user)
 
 
-def _rebuild_ticket_embeddings_with_independent_session(payload: TicketEmbeddingRebuildRequestModel) -> None:
+def _rebuild_ticket_embeddings_with_independent_session(
+    payload: TicketEmbeddingRebuildRequestModel,
+    trace_id: str | None = None,
+) -> None:
     """
     在后台任务中使用独立数据库会话重建工单向量，避免复用请求会话。
     :param payload: 工单向量重建请求参数
+    :param trace_id: 日志追踪ID，用于串联提交请求与后台重建过程
     :return: 无
     """
+    if trace_id:
+        with trace_context(trace_id):
+            _rebuild_ticket_embeddings_with_independent_session(payload)
+        return
+
     with SessionLocal() as db:
         result = TicketEmbeddingService.rebuild_ticket_embeddings(
             db,
@@ -624,7 +634,8 @@ async def rebuild_ticket_similarity_embeddings(
     """
     try:
         if rebuild_object.run_in_background:
-            background_tasks.add_task(_rebuild_ticket_embeddings_with_independent_session, rebuild_object)
+            trace_id = get_current_trace_id()
+            background_tasks.add_task(_rebuild_ticket_embeddings_with_independent_session, rebuild_object, trace_id)
             return ResponseUtil.success(
                 data={
                     "mode": "background",
@@ -783,6 +794,7 @@ async def sync_external_ticket(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
+        trace_id = get_current_trace_id()
         result = await run_in_threadpool(
             TicketSyncService.sync_external_ticket,
             query_db,
@@ -797,6 +809,7 @@ async def sync_external_ticket(
                 sync_object.model_dump(),
                 current_user.model_dump(),
                 "external_sync",
+                trace_id,
             )
             if deferred_dispatch.get("mode") != TicketSyncService.CELERY_DISPATCH_MODE:
                 background_tasks.add_task(
@@ -804,6 +817,7 @@ async def sync_external_ticket(
                     sync_object.model_dump(),
                     current_user.model_dump(),
                     "external_sync",
+                    trace_id,
                 )
 
             result_data = dict(result.result or {}) if isinstance(result.result, dict) else {"rawResult": result.result}

@@ -9,6 +9,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
+from context.request_context import get_current_trace_id, trace_context
 from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.do.module_do import HrmModule
@@ -7053,6 +7054,7 @@ class TicketSyncService:
         sync_payload: dict[str, Any],
         current_user_payload: dict[str, Any],
         sync_scene: str = "external_sync",
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         """
         分发外部工单延后后处理任务。
@@ -7062,9 +7064,11 @@ class TicketSyncService:
         :param sync_payload: 外部同步入参字典。
         :param current_user_payload: 当前用户字典。
         :param sync_scene: 同步触发场景。
+        :param trace_id: 日志追踪ID，用于串联入库请求与延后后处理。
         :return: 分发结果摘要。
         """
         ticket_no = str(sync_payload.get("ticketNo") or sync_payload.get("ticket_no") or "").strip()
+        resolved_trace_id = str(trace_id or "").strip() or get_current_trace_id(default="")
         if not cls._is_celery_worker_available():
             return {
                 "mode": cls.BACKGROUND_DISPATCH_MODE,
@@ -7078,7 +7082,7 @@ class TicketSyncService:
 
             async_result = celery_app.send_task(
                 CELERY_TICKET_SYNC_DEFERRED_POST_PROCESS_TASK,
-                args=[sync_payload, current_user_payload, sync_scene],
+                args=[sync_payload, current_user_payload, sync_scene, resolved_trace_id],
             )
             task_id = str(getattr(async_result, "id", "") or "").strip()
             logger.info(
@@ -7110,14 +7114,21 @@ class TicketSyncService:
         sync_payload: dict[str, Any],
         current_user_payload: dict[str, Any],
         sync_scene: str = "external_sync",
+        trace_id: str | None = None,
     ) -> None:
         """
         执行外部工单同步的延后后处理任务（AI、自动化、群推送）。
         :param sync_payload: 外部同步入参字典。
         :param current_user_payload: 当前用户字典。
         :param sync_scene: 同步触发场景。
+        :param trace_id: 日志追踪ID，用于本地后台任务日志串联。
         :return: 无。
         """
+        if trace_id:
+            with trace_context(trace_id):
+                cls.run_deferred_sync_post_process(sync_payload, current_user_payload, sync_scene)
+            return
+
         query_db = SessionLocal()
         try:
             sync_object = TicketExternalSyncUpsertModel.model_validate(sync_payload)

@@ -3,10 +3,18 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-06-25
+updated: 2026-06-30
 ---
 
 # 操作日志
+
+## [2026-06-30] INGEST-CODE | 后台任务与定时任务日志 tid 补齐
+- 触发：用户反馈 HTTP 请求已有日志 tid，但定时任务触发执行、工单同步延后后台过程仍显示 `[-]`，无法串联一次执行。
+- 架构层：日志上下文 / Celery 调度 / 工单同步自动化
+- 创建的页面：`web/public/docs/2026-06-30-background-task-trace-id.md`
+- 更新的页面：`server/context/request_context.py`、`server/middlewares/cors_middleware.py`、`server/module_task/celery_tasks.py`、`server/module_task/celery_job_service.py`、`server/modules/ticket/controller/ticket_controller.py`、`server/modules/ticket/service/ticket_sync_service.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：HTTP `X-Request-Id` / Celery Worker 自动生成 `job-xxxxxxxx` -> `context.request_context` -> loguru patcher -> 定时任务、工单延后后处理、本地后台任务日志统一输出 tid。
+- 关键结论：非 HTTP 入口必须显式设置 contextvars；定时任务在 Worker 执行时生成 tid，避免 Beat 同步时生成后被周期复用。工单外部同步延后任务投递 Celery 或回退本地后台时都传递当前 tid，发布后需重启 Celery Worker 以加载新任务签名。
 
 ## [2026-06-28] INGEST-CODE | 帮助中心文档自动索引
 - 触发：用户反馈 `web/src/views/about/about.vue` 只能查看手写菜单中的少量帮助文档，后续自动增加的业务说明和配置说明无法方便查看。

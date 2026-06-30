@@ -15,6 +15,7 @@ from sqlalchemy import update
 from config.celery_app import celery_app
 from config.database import SessionLocal
 from config.env import RedisConfig
+from context.request_context import generate_trace_id, request_id_var
 from module_task import scheduler_maintenance, scheduler_promo, scheduler_qtr, scheduler_test  # noqa: F401
 from module_task.celery_contract import (
     CELERY_EXECUTE_JOB_TASK,
@@ -178,6 +179,7 @@ def _serialize_task_state(
             "task_key": payload.get("task_key") or "",
             "queue_name": payload.get("queue_name") or "celery",
             "trigger_type": payload.get("trigger_type") or "scheduler",
+            "trace_id": payload.get("trace_id") or "",
             "worker_boot_id": WORKER_BOOT_ID,
             "started_at": started_at.isoformat(),
             "heartbeat_at": datetime.now().isoformat(),
@@ -194,6 +196,7 @@ def _refresh_task_runtime_state(
     payload: dict,
     started_at: datetime,
     stop_event: threading.Event,
+    trace_id: str | None = None,
 ):
     """
     维护运行态心跳，用于状态可见性与失联恢复。
@@ -204,27 +207,32 @@ def _refresh_task_runtime_state(
     :param payload: 执行载荷。
     :param started_at: 开始时间。
     :param stop_event: 停止事件。
+    :param trace_id: 日志追踪ID，用于心跳线程日志串联。
     :return: 无返回值。
     """
+    token = request_id_var.set(str(trace_id or payload.get("trace_id") or "").strip() or generate_trace_id("job"))
     state_key = _build_task_state_key(task_id)
     heartbeat_seconds = max(10, min(TASK_HEARTBEAT_SECONDS, max(int(payload.get("lock_ttl_seconds") or 30) // 3, 10)))
     state_ttl_seconds = max(TASK_STATE_TTL_SECONDS, heartbeat_seconds * 3)
 
-    while not stop_event.wait(heartbeat_seconds):
-        try:
-            lock_client.set(
-                state_key,
-                _serialize_task_state(
-                    task_id=task_id,
-                    celery_task_id=celery_task_id,
-                    status="running",
-                    payload=payload,
-                    started_at=started_at,
-                ),
-                ex=state_ttl_seconds,
-            )
-        except Exception as exc:
-            logger.warning(f"刷新任务心跳失败[{task_id}]：{exc}")
+    try:
+        while not stop_event.wait(heartbeat_seconds):
+            try:
+                lock_client.set(
+                    state_key,
+                    _serialize_task_state(
+                        task_id=task_id,
+                        celery_task_id=celery_task_id,
+                        status="running",
+                        payload=payload,
+                        started_at=started_at,
+                    ),
+                    ex=state_ttl_seconds,
+                )
+            except Exception as exc:
+                logger.warning(f"刷新任务心跳失败[{task_id}]：{exc}")
+    finally:
+        request_id_var.reset(token)
 
 
 def _execute_job_function(task_key: str, args: list, kwargs: dict):
@@ -282,6 +290,7 @@ def _execute_job_inline(payload: dict, started_at: datetime) -> dict:
                 "payload": payload,
                 "started_at": started_at,
                 "stop_event": stop_event,
+                "trace_id": payload.get("trace_id"),
             },
             daemon=True,
         )
@@ -533,6 +542,9 @@ def execute_registered_job(self, payload: dict):
     :param payload: 任务执行载荷。
     :return: 执行结果摘要。
     """
+    payload = dict(payload or {})
+    trace_id = str(payload.get("trace_id") or "").strip() or generate_trace_id("job")
+    token = request_id_var.set(trace_id)
     task_id = int(payload.get("task_id") or 0)
     allow_concurrent = bool(payload.get("allow_concurrent"))
     lock_ttl_seconds = int(payload.get("lock_ttl_seconds") or 3600)
@@ -546,6 +558,7 @@ def execute_registered_job(self, payload: dict):
 
     try:
         payload = dict(payload)
+        payload["trace_id"] = trace_id
         payload["celery_task_id"] = self.request.id
 
         if not allow_concurrent:
@@ -671,6 +684,8 @@ def execute_registered_job(self, payload: dict):
                 runtime_client.delete(state_key, stop_key)
         except Exception as exc:
             logger.warning(f"释放任务锁失败[{task_id}]：{exc}")
+        finally:
+            request_id_var.reset(token)
 
 
 @celery_app.task(name=CELERY_TICKET_SYNC_DEFERRED_POST_PROCESS_TASK, bind=True, ignore_result=True)
@@ -679,6 +694,7 @@ def run_ticket_sync_deferred_post_process_task(
     sync_payload: dict[str, Any],
     current_user_payload: dict[str, Any],
     sync_scene: str = "external_sync",
+    trace_id: str | None = None,
 ):
     """
     执行工单外部同步延后后处理任务（AI、自动化、群推送）。
@@ -687,8 +703,11 @@ def run_ticket_sync_deferred_post_process_task(
     :param sync_payload: 外部同步请求载荷字典。
     :param current_user_payload: 当前用户字典。
     :param sync_scene: 同步触发场景，支持 external_sync/remote_pull。
+    :param trace_id: 日志追踪ID，用于串联入库请求与延后后处理。
     :return: 执行摘要。
     """
+    resolved_trace_id = str(trace_id or "").strip() or generate_trace_id("ticket-sync")
+    token = request_id_var.set(resolved_trace_id)
     ticket_no = str(sync_payload.get("ticketNo") or sync_payload.get("ticket_no") or "").strip()
     try:
         from modules.ticket.service.ticket_sync_service import TicketSyncService
@@ -705,6 +724,8 @@ def run_ticket_sync_deferred_post_process_task(
             f"ticket_no={ticket_no or '-'}, sync_scene={sync_scene}, error={exc}"
         )
         return {"status": "failed", "ticketNo": ticket_no or None, "error": str(exc)}
+    finally:
+        request_id_var.reset(token)
 
 
 @worker_ready.connect

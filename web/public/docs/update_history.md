@@ -1,3 +1,9 @@
+## 2026-06-30
+
+1. 补齐非 HTTP 执行链路日志 tid：Celery 定时任务每次执行会生成 `job-xxxxxxxx`，手动执行任务会继承提交请求的 `X-Request-Id`。
+2. 工单外部同步延后后处理无论走 Celery 还是 FastAPI 本地后台任务，都会沿用入库请求 tid，便于串联入库、自动化、AI、群推送日志。
+3. 工单相似度向量后台重建也继承提交请求 tid；新增说明文档：`web/public/docs/2026-06-30-background-task-trace-id.md`。
+
 ## 2026-06-28
 
 1. 帮助中心改为自动读取 `web/public/docs/docs-index.json` 生成菜单，新增 Markdown 文档不再需要手工修改 `about.vue` 才能查看。
