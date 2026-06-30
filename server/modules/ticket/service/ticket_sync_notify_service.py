@@ -1237,6 +1237,7 @@ class TicketSyncNotifyService:
             if filter_formula:
                 params["filter"] = filter_formula
             params["with_shared_url"] = True
+            params["view_type"] = "raw"
             query_data = {"with_shared_url": "true"}
             logger.info(f"飞书多维表格查询参数: {json.dumps(params, ensure_ascii=False)}")
             response_data = (
