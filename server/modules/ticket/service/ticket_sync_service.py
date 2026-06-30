@@ -136,6 +136,34 @@ class TicketSyncService:
             {"value": "as_designed", "label": "需求如此", "isProblem": False},
             {"value": "transferred", "label": "已转其他团队", "isProblem": None},
         ],
+        "problemPatterns": [
+            {
+                "value": "memory_leak",
+                "label": "内存泄露",
+                "moduleCode": "",
+                "issueTypeId": "performance_issue",
+                "isProblem": True,
+                "rootCauseType": "code_defect",
+                "resolutionCode": "fixed",
+                "description": "进程内存持续增长、未释放或最终 OOM 的问题模式。",
+                "positiveExamples": ["内存泄露", "内存泄漏", "memory leak", "OOM"],
+                "negativeExamples": ["单次内存高峰", "磁盘空间不足"],
+                "enabled": True,
+            },
+            {
+                "value": "coupon_280_paper_rule",
+                "label": "280开头券为纸质券规则说明",
+                "moduleCode": "coupon",
+                "issueTypeId": "support_consulting",
+                "isProblem": False,
+                "rootCauseType": "requirement_design",
+                "resolutionCode": "as_designed",
+                "description": "用户反馈 280 开头券不能按电子券处理，实际业务规则定义为纸质券。",
+                "positiveExamples": ["280开头券", "纸质券", "券规则说明"],
+                "negativeExamples": ["电子券接口报错", "券配置错误"],
+                "enabled": True,
+            },
+        ],
     }
     GROUP_PUSH_LOCK_TIMEOUT_SECONDS = 300
 
@@ -1779,6 +1807,7 @@ class TicketSyncService:
             "rootCauseTypes": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["rootCauseTypes"]],
             "solutionTypes": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["solutionTypes"]],
             "resolutions": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["resolutions"]],
+            "problemPatterns": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["problemPatterns"]],
         }
 
     @classmethod
@@ -1832,6 +1861,28 @@ class TicketSyncService:
                 normalized_row["isProblem"] = raw_is_problem if isinstance(raw_is_problem, bool) else None
             if str(row.get("remark") or "").strip():
                 normalized_row["remark"] = str(row.get("remark") or "").strip()
+            for extra_key in (
+                "moduleCode",
+                "issueTypeId",
+                "rootCauseType",
+                "resolutionCode",
+                "description",
+                "positiveExamples",
+                "negativeExamples",
+                "enabled",
+            ):
+                if extra_key in row:
+                    normalized_row[extra_key] = row.get(extra_key)
+            for snake_key, camel_key in (
+                ("module_code", "moduleCode"),
+                ("issue_type_id", "issueTypeId"),
+                ("root_cause_type", "rootCauseType"),
+                ("resolution_code", "resolutionCode"),
+                ("positive_examples", "positiveExamples"),
+                ("negative_examples", "negativeExamples"),
+            ):
+                if snake_key in row and camel_key not in normalized_row:
+                    normalized_row[camel_key] = row.get(snake_key)
             result.append(normalized_row)
             seen_values.add(option_value)
         return result or [dict(item) for item in default_rows]
@@ -1862,6 +1913,10 @@ class TicketSyncService:
             "resolutions": cls._normalize_stat_option_rows(
                 source.get("resolutions"),
                 defaults["resolutions"],
+            ),
+            "problemPatterns": cls._normalize_stat_option_rows(
+                source.get("problemPatterns") or source.get("problem_patterns"),
+                defaults["problemPatterns"],
             ),
         }
 
@@ -5601,6 +5656,13 @@ class TicketSyncService:
             )
         ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
         stat_options = config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
+        if isinstance(stat_options.get("problemPatterns"), list):
+            stat_options = dict(stat_options)
+            stat_options["problemPatterns"] = [
+                item
+                for item in stat_options["problemPatterns"]
+                if not isinstance(item, dict) or item.get("enabled") is not False
+            ]
         logger.info(
             f"工单AI分类统计调用轻量AI: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
             f"provider_code={str(ai_config.get('providerCode') or '').strip() or '-'}, "
@@ -5677,15 +5739,31 @@ class TicketSyncService:
             "solutionType": "solution_type",
             "resolutionCode": "resolution_code",
             "resolutionName": "resolution_name",
+            "problemPatternCode": "problem_pattern_code",
+            "problemPatternName": "problem_pattern_name",
             "rootCause": "root_cause",
             "solution": "solution",
         }
         for result_key, db_field in field_map.items():
+            if db_field.startswith("problem_pattern_") and getattr(ticket, "problem_pattern_verified", None) is True:
+                continue
             value = result_payload.get(result_key)
             if value not in (None, ""):
                 update_data[db_field] = value
         if result_payload.get("isProblem") is not None:
             update_data["is_problem"] = bool(result_payload.get("isProblem"))
+        if (
+            result_payload.get("problemPatternConfidence") is not None
+            and getattr(ticket, "problem_pattern_verified", None) is not True
+        ):
+            pattern_confidence = float(result_payload.get("problemPatternConfidence") or 0)
+            update_data["problem_pattern_confidence"] = int(
+                min(max(pattern_confidence * 100 if pattern_confidence <= 1 else pattern_confidence, 0), 100)
+            )
+        if result_payload.get("problemPatternCode") and getattr(ticket, "problem_pattern_verified", None) is not True:
+            update_data["problem_pattern_source"] = "ai"
+            if getattr(ticket, "problem_pattern_verified", None) is None:
+                update_data["problem_pattern_verified"] = False
 
         TicketDao.update_ticket(db, ticket.ticket_id, update_data)
         db.commit()
@@ -5696,7 +5774,8 @@ class TicketSyncService:
             f"issue_type={result_payload.get('issueTypeName') or '-'}, "
             f"is_problem={result_payload.get('isProblem')}, "
             f"root_cause_type={result_payload.get('rootCauseType') or '-'}, "
-            f"solution_type={result_payload.get('solutionType') or '-'}"
+            f"solution_type={result_payload.get('solutionType') or '-'}, "
+            f"problem_pattern={result_payload.get('problemPatternName') or '-'}"
         )
         return ticket, {
             "skipped": False,
@@ -5706,6 +5785,7 @@ class TicketSyncService:
             "rootCauseType": result_payload.get("rootCauseType"),
             "solutionType": result_payload.get("solutionType"),
             "resolutionName": result_payload.get("resolutionName"),
+            "problemPatternName": result_payload.get("problemPatternName"),
             "meta": meta,
         }
 
@@ -5753,6 +5833,9 @@ class TicketSyncService:
             "solutionType": ticket.solution_type,
             "resolutionCode": ticket.resolution_code,
             "resolutionName": ticket.resolution_name,
+            "problemPatternCode": ticket.problem_pattern_code,
+            "problemPatternName": ticket.problem_pattern_name,
+            "problemPatternVerified": ticket.problem_pattern_verified,
             "severity": ticket.severity,
             "rootCause": ticket.root_cause,
             "solution": ticket.solution,
@@ -5869,6 +5952,8 @@ class TicketSyncService:
                 str(getattr(ticket, "solution_type", "") or "").strip(),
                 str(getattr(ticket, "resolution_code", "") or "").strip(),
                 str(getattr(ticket, "resolution_name", "") or "").strip(),
+                str(getattr(ticket, "problem_pattern_code", "") or "").strip(),
+                str(getattr(ticket, "problem_pattern_name", "") or "").strip(),
                 getattr(ticket, "is_problem", None) is not None,
             ]
         )
@@ -6509,6 +6594,18 @@ class TicketSyncService:
             or (ticket.resolution_code if ticket else ""),
             "resolution_name": getattr(sync_object, "resolution_name", None)
             or (ticket.resolution_name if ticket else ""),
+            "problem_pattern_code": getattr(sync_object, "problem_pattern_code", None)
+            or (ticket.problem_pattern_code if ticket else ""),
+            "problem_pattern_name": getattr(sync_object, "problem_pattern_name", None)
+            or (ticket.problem_pattern_name if ticket else ""),
+            "problem_pattern_confidence": getattr(sync_object, "problem_pattern_confidence", None)
+            if getattr(sync_object, "problem_pattern_confidence", None) is not None
+            else (ticket.problem_pattern_confidence if ticket else None),
+            "problem_pattern_source": getattr(sync_object, "problem_pattern_source", None)
+            or (ticket.problem_pattern_source if ticket else ""),
+            "problem_pattern_verified": getattr(sync_object, "problem_pattern_verified", None)
+            if getattr(sync_object, "problem_pattern_verified", None) is not None
+            else (ticket.problem_pattern_verified if ticket else None),
             "root_cause": sync_object.root_cause or (ticket.root_cause if ticket else None),
             "solution": sync_object.solution or (ticket.solution if ticket else None),
             "tags": sync_object.tags or (ticket.tags if ticket else None),

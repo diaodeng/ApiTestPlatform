@@ -53,6 +53,27 @@ class Ticket(Base):
     solution_type: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="解决方式")
     resolution_code: Mapped[str | None] = mapped_column(String(64), nullable=True, default="", comment="关闭结果编码")
     resolution_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="关闭结果名称")
+    problem_pattern_code: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, default="", comment="细分问题类型编码"
+    )
+    problem_pattern_name: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default="", comment="细分问题类型名称"
+    )
+    problem_pattern_confidence: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="细分问题类型置信度，0-100"
+    )
+    problem_pattern_source: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, default="", comment="细分问题类型来源"
+    )
+    problem_pattern_verified: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, comment="细分问题类型是否人工确认"
+    )
+    problem_pattern_verified_by: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, default="", comment="细分问题类型确认人"
+    )
+    problem_pattern_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, comment="细分问题类型确认时间"
+    )
     root_cause: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终根因")
     solution: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终解决方案")
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="开始处理时间")

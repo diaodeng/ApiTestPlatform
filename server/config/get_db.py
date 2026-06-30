@@ -339,7 +339,7 @@ def _ensure_ticket_role_columns():
             for column_name, column_type, _comment, _ in column_specs:
                 if column_name in existing_columns:
                     continue
-                logger.info("检测到 sqlite ticket.%s 缺少，自动补齐", column_name)
+                logger.info(f"检测到 sqlite ticket.{column_name} 缺少，自动补齐")
                 connection.execute(text(f"ALTER TABLE ticket ADD COLUMN {column_name} {column_type}"))
     except Exception as exc:
         logger.warning(f"检查或升级 ticket 角色字段失败: {exc}")
@@ -359,6 +359,13 @@ def _ensure_ticket_classification_columns():
         ("solution_type", "VARCHAR(128)", "解决方式", "root_cause_type"),
         ("resolution_code", "VARCHAR(64)", "关闭结果编码", "solution_type"),
         ("resolution_name", "VARCHAR(128)", "关闭结果名称", "resolution_code"),
+        ("problem_pattern_code", "VARCHAR(128)", "细分问题类型编码", "resolution_name"),
+        ("problem_pattern_name", "VARCHAR(256)", "细分问题类型名称", "problem_pattern_code"),
+        ("problem_pattern_confidence", "INT", "细分问题类型置信度，0-100", "problem_pattern_name"),
+        ("problem_pattern_source", "VARCHAR(32)", "细分问题类型来源", "problem_pattern_confidence"),
+        ("problem_pattern_verified", "TINYINT(1)", "细分问题类型是否人工确认", "problem_pattern_source"),
+        ("problem_pattern_verified_by", "VARCHAR(100)", "细分问题类型确认人", "problem_pattern_verified"),
+        ("problem_pattern_verified_at", "DATETIME", "细分问题类型确认时间", "problem_pattern_verified_by"),
     ]
 
     try:
@@ -382,7 +389,7 @@ def _ensure_ticket_classification_columns():
                 for column_name, column_type, _comment, after_column in column_specs:
                     if column_name in existing_columns:
                         continue
-                    logger.info("检测到 ticket.%s 缺少，自动补齐", column_name)
+                    logger.info(f"检测到 ticket.{column_name} 缺少，自动补齐")
                     after_clause = f" AFTER {after_column}" if after_column and after_column in existing_columns else ""
                     connection.execute(
                         text(
@@ -400,7 +407,7 @@ def _ensure_ticket_classification_columns():
             for column_name, column_type, _comment, _ in column_specs:
                 if column_name in existing_columns:
                     continue
-                logger.info("检测到 sqlite ticket.%s 缺少，自动补齐", column_name)
+                logger.info(f"检测到 sqlite ticket.{column_name} 缺少，自动补齐")
                 connection.execute(text(f"ALTER TABLE ticket ADD COLUMN {column_name} {column_type}"))
     except Exception as exc:
         logger.warning(f"检查或升级 ticket 分类统计字段失败: {exc}")

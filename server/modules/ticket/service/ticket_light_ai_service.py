@@ -94,6 +94,9 @@ class TicketLightAiService:
         '  "solutionType": "候选解决方式名称或编码",\n'
         '  "resolutionCode": "候选关闭结果编码",\n'
         '  "resolutionName": "候选关闭结果名称",\n'
+        '  "problemPatternCode": "候选细分问题类型编码",\n'
+        '  "problemPatternName": "候选细分问题类型名称",\n'
+        '  "problemPatternConfidence": 0.0,\n'
         '  "rootCause": "简短根因，关闭或已有排查信息时填写",\n'
         '  "solution": "简短解决方案，关闭或已有排查信息时填写",\n'
         '  "needRnd": false,\n'
@@ -105,6 +108,7 @@ class TicketLightAiService:
         "判定规则：\n"
         "- 用户咨询、操作问题、需求如此、重复工单通常不是系统真实问题。\n"
         "- 代码缺陷、配置错误、数据异常、接口异常、性能问题通常是真实问题。\n"
+        "- 细分问题类型只能从 problemPatterns 候选中选择；没有明确匹配时留空。\n"
         "- 工单未关闭或没有处理结论时，rootCauseType、solutionType、resolutionCode 可以留空。\n"
         "- confidence 使用 0 到 1 的小数。"
     )
@@ -339,6 +343,9 @@ class TicketLightAiService:
         resolution_options = (
             stat_options.get("resolutions") if isinstance(stat_options.get("resolutions"), list) else []
         )
+        problem_pattern_options = (
+            stat_options.get("problemPatterns") if isinstance(stat_options.get("problemPatterns"), list) else []
+        )
 
         issue_option = cls._find_option_by_value_or_label(
             issue_options,
@@ -355,6 +362,13 @@ class TicketLightAiService:
         resolution_option = cls._find_option_by_value_or_label(
             resolution_options,
             payload.get("resolutionCode") or payload.get("resolution_code") or payload.get("resolutionName"),
+        )
+        problem_pattern_option = cls._find_option_by_value_or_label(
+            problem_pattern_options,
+            payload.get("problemPatternCode")
+            or payload.get("problem_pattern_code")
+            or payload.get("problemPatternName")
+            or payload.get("problem_pattern_name"),
         )
 
         raw_category = str(
@@ -378,6 +392,15 @@ class TicketLightAiService:
             "resolutionName": str(
                 (resolution_option or {}).get("label") or payload.get("resolutionName") or ""
             ).strip(),
+            "problemPatternCode": str(
+                (problem_pattern_option or {}).get("value") or payload.get("problemPatternCode") or ""
+            ).strip(),
+            "problemPatternName": str(
+                (problem_pattern_option or {}).get("label") or payload.get("problemPatternName") or ""
+            ).strip(),
+            "problemPatternConfidence": cls._normalize_float(
+                payload.get("problemPatternConfidence") or payload.get("problem_pattern_confidence")
+            ),
             "rootCause": str(payload.get("rootCause") or payload.get("root_cause") or "").strip(),
             "solution": str(payload.get("solution") or "").strip(),
             "needRnd": cls._normalize_bool_or_none(payload.get("needRnd") or payload.get("need_rnd")),

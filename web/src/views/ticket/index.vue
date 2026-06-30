@@ -86,6 +86,11 @@
           <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
+      <el-form-item label="细分问题" prop="problemPatternCode">
+        <el-select v-model="queryParams.problemPatternCode" placeholder="细分问题" clearable filterable style="width: 180px">
+          <el-option v-for="item in problemPatternOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="是否问题" prop="isProblem">
         <el-select v-model="queryParams.isProblem" placeholder="是否问题" clearable style="width: 140px">
           <el-option label="真实问题" :value="true" />
@@ -189,6 +194,9 @@
       </el-table-column>
       <el-table-column v-if="isTicketColumnVisible('resolution')" label="关闭结果" width="130" show-overflow-tooltip>
         <template #default="scope">{{ formatResolution(scope.row) }}</template>
+      </el-table-column>
+      <el-table-column v-if="isTicketColumnVisible('problemPattern')" label="细分问题" width="160" show-overflow-tooltip>
+        <template #default="scope">{{ formatProblemPattern(scope.row) }}</template>
       </el-table-column>
       <el-table-column v-if="isTicketColumnVisible('customerPriority')" label="对方优先级" prop="customerPriority" width="110" align="center" />
       <el-table-column v-if="isTicketColumnVisible('internalPriority')" label="内部优先级" prop="internalPriority" width="110" align="center" />
@@ -429,6 +437,18 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
+            <el-form-item label="细分问题">
+              <el-select v-model="form.problemPatternCode" placeholder="请选择细分问题" clearable filterable @change="handleProblemPatternChange">
+                <el-option v-for="item in problemPatternOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="细分确认">
+              <el-switch v-model="form.problemPatternVerified" inline-prompt active-text="已确认" inactive-text="待确认" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
             <el-form-item label="根因">
               <el-input v-model="form.rootCause" type="textarea" :rows="3" placeholder="最终根因，可后续RCA同步" />
             </el-form-item>
@@ -532,6 +552,14 @@
             <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
+        <el-form-item label="细分问题">
+          <el-select v-model="statusForm.problemPatternCode" placeholder="请选择细分问题" clearable filterable @change="handleStatusProblemPatternChange">
+            <el-option v-for="item in problemPatternOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="细分确认">
+          <el-switch v-model="statusForm.problemPatternVerified" inline-prompt active-text="已确认" inactive-text="待确认" />
+        </el-form-item>
         <el-form-item label="说明">
           <el-input v-model="statusForm.comment" type="textarea" :rows="3" placeholder="请输入状态流转说明" />
         </el-form-item>
@@ -621,6 +649,12 @@
           <el-descriptions-item label="根因分类">{{ formatStatOption(rootCauseTypeOptions, detail.rootCauseType) }}</el-descriptions-item>
           <el-descriptions-item label="解决方式">{{ formatStatOption(solutionTypeOptions, detail.solutionType) }}</el-descriptions-item>
           <el-descriptions-item label="关闭结果">{{ formatResolution(detail) }}</el-descriptions-item>
+          <el-descriptions-item label="细分问题">{{ formatProblemPattern(detail) }}</el-descriptions-item>
+          <el-descriptions-item label="细分确认">
+            <el-tag v-if="detail.problemPatternVerified === true" type="success">已确认</el-tag>
+            <el-tag v-else-if="detail.problemPatternVerified === false" type="warning">待确认</el-tag>
+            <span v-else>-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="版本号">{{ detail.versionKey || detail.extraData?.versionKey || '-' }}</el-descriptions-item>
           <el-descriptions-item label="日志拉取状态">
             <el-tag
@@ -2063,6 +2097,7 @@ const issueTypeOptions = ref([])
 const rootCauseTypeOptions = ref([])
 const solutionTypeOptions = ref([])
 const resolutionOptions = ref([])
+const problemPatternOptions = ref([])
 const columnConfigOpen = ref(false)
 const ticketColumnOptions = [
   { key: 'ticketNo', label: '工单编号', required: true },
@@ -2076,6 +2111,7 @@ const ticketColumnOptions = [
   { key: 'rootCauseType', label: '根因分类' },
   { key: 'solutionType', label: '解决方式' },
   { key: 'resolution', label: '关闭结果' },
+  { key: 'problemPattern', label: '细分问题' },
   { key: 'customerPriority', label: '对方优先级' },
   { key: 'internalPriority', label: '内部优先级' },
   { key: 'source', label: '来源' },
@@ -2613,6 +2649,9 @@ function createDefaultTicketForm() {
     solutionType: '',
     resolutionCode: '',
     resolutionName: '',
+    problemPatternCode: '',
+    problemPatternName: '',
+    problemPatternVerified: false,
     rootCause: undefined,
     solution: undefined,
     needLogPull: false,
@@ -2637,6 +2676,7 @@ const data = reactive({
     rootCauseType: undefined,
     solutionType: undefined,
     resolutionCode: undefined,
+    problemPatternCode: undefined,
     internalPriority: undefined,
     currentAssigneeId: undefined,
     firstLineAssigneeId: undefined,
@@ -2806,6 +2846,15 @@ function formatResolution(row) {
   return resolutionCode ? getStatOptionLabel(resolutionOptions.value, resolutionCode) : '-'
 }
 
+function formatProblemPattern(row) {
+  const patternName = row?.problemPatternName || row?.problem_pattern_name || ''
+  if (patternName) {
+    return patternName
+  }
+  const patternCode = row?.problemPatternCode || row?.problem_pattern_code || ''
+  return patternCode ? getStatOptionLabel(problemPatternOptions.value, patternCode) : '-'
+}
+
 function resolveTicketProcessStatus(row) {
   const latestAi = row?.latestAiAnalysis || row?.latest_ai_analysis || null
   const latestLog = row?.latestLogPull || row?.latest_log_pull || null
@@ -2885,11 +2934,13 @@ function loadStatClassificationOptions() {
     rootCauseTypeOptions.value = normalizeStatOptions(config.rootCauseTypes)
     solutionTypeOptions.value = normalizeStatOptions(config.solutionTypes)
     resolutionOptions.value = normalizeStatOptions(config.resolutions)
+    problemPatternOptions.value = normalizeStatOptions(config.problemPatterns)
   }).catch(() => {
     issueTypeOptions.value = []
     rootCauseTypeOptions.value = []
     solutionTypeOptions.value = []
     resolutionOptions.value = []
+    problemPatternOptions.value = []
   })
 }
 
@@ -3106,6 +3157,16 @@ function handleIssueTypeChange(value) {
   }
 }
 
+function handleProblemPatternChange(value) {
+  const option = problemPatternOptions.value.find(item => item.value === value)
+  form.value.problemPatternName = option?.label || ''
+}
+
+function handleStatusProblemPatternChange(value) {
+  const option = problemPatternOptions.value.find(item => item.value === value)
+  statusForm.value.problemPatternName = option?.label || ''
+}
+
 function syncFormModuleValueFromForm() {
   if (form.value.moduleId) {
     formModuleValue.value = String(form.value.moduleId)
@@ -3289,6 +3350,9 @@ function handleUpdate(row) {
     form.value.solutionType = ticketData.solutionType || ticketData.solution_type || ''
     form.value.resolutionCode = ticketData.resolutionCode || ticketData.resolution_code || ''
     form.value.resolutionName = ticketData.resolutionName || ticketData.resolution_name || ''
+    form.value.problemPatternCode = ticketData.problemPatternCode || ticketData.problem_pattern_code || ''
+    form.value.problemPatternName = ticketData.problemPatternName || ticketData.problem_pattern_name || ''
+    form.value.problemPatternVerified = Boolean(ticketData.problemPatternVerified ?? ticketData.problem_pattern_verified ?? false)
     syncFormModuleValueFromForm()
     tagText.value = Array.isArray(form.value.tags) ? form.value.tags.join(',') : ''
     applyTicketAutomationConfig(form.value)
@@ -3400,6 +3464,10 @@ function submitForm() {
     if (payload.resolutionCode) {
       payload.resolutionName = payload.resolutionName || getStatOptionLabel(resolutionOptions.value, payload.resolutionCode)
     }
+    if (payload.problemPatternCode) {
+      payload.problemPatternName = payload.problemPatternName || getStatOptionLabel(problemPatternOptions.value, payload.problemPatternCode)
+      payload.problemPatternSource = payload.problemPatternVerified ? 'manual' : payload.problemPatternSource
+    }
     const request = payload.ticketId ? updateTicket(payload) : addTicket(payload)
     request.then(() => {
       proxy.$modal.msgSuccess(payload.ticketId ? '修改成功' : '新增成功')
@@ -3509,7 +3577,10 @@ function openStatus(row) {
     rootCauseType: row.rootCauseType || row.root_cause_type || '',
     solutionType: row.solutionType || row.solution_type || '',
     resolutionCode: row.resolutionCode || row.resolution_code || '',
-    resolutionName: row.resolutionName || row.resolution_name || ''
+    resolutionName: row.resolutionName || row.resolution_name || '',
+    problemPatternCode: row.problemPatternCode || row.problem_pattern_code || '',
+    problemPatternName: row.problemPatternName || row.problem_pattern_name || '',
+    problemPatternVerified: Boolean(row.problemPatternVerified ?? row.problem_pattern_verified ?? false)
   }
   if (!statusTransitionOptions.value.length) {
     proxy.$modal.msgWarning('当前状态未配置可用流转规则，请先在工单工作流中配置流转规则')

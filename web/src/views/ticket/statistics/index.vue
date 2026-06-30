@@ -69,6 +69,23 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item label="细分问题">
+        <el-select
+          v-model="selectedProblemPatternCodes"
+          multiple
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          filterable
+          placeholder="细分问题类型"
+          style="width: 260px"
+        >
+          <el-option v-for="item in problemPatternOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="趋势粒度">
+        <el-segmented v-model="trendGranularity" :options="trendGranularityOptions" />
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">查询</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -117,6 +134,53 @@
       </el-col>
     </el-row>
 
+    <el-row :gutter="16" class="trend-chart-grid mt16">
+      <el-col :xs="24" :lg="12" class="trend-chart-col">
+        <el-card shadow="never">
+          <template #header>整体趋势</template>
+          <div ref="overallTrendChartRef" class="trend-chart" />
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :lg="12" class="trend-chart-col">
+        <el-card shadow="never">
+          <template #header>问题性质趋势</template>
+          <div ref="problemTrendChartRef" class="trend-chart" />
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :lg="12" class="trend-chart-col">
+        <el-card shadow="never">
+          <template #header>Top模块趋势</template>
+          <div ref="moduleTrendChartRef" class="trend-chart" />
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :lg="12" class="trend-chart-col">
+        <el-card shadow="never">
+          <template #header>Top细分问题趋势</template>
+          <div ref="problemPatternTrendChartRef" class="trend-chart" />
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-card shadow="never" class="mt16">
+      <template #header>趋势明细</template>
+      <el-table v-loading="loading" :data="trend.series || []">
+        <el-table-column label="周期" prop="bucket" width="120" />
+        <el-table-column label="新增" prop="newCount" width="90" align="center" />
+        <el-table-column label="关闭" prop="closedCount" width="90" align="center" />
+        <el-table-column label="净增" prop="netIncrease" width="90" align="center" />
+        <el-table-column label="估算存量" prop="openBacklog" width="100" align="center" />
+        <el-table-column label="Bug" prop="problemCount" width="90" align="center" />
+        <el-table-column label="非Bug" prop="nonProblemCount" width="90" align="center" />
+        <el-table-column label="支持类" prop="supportCount" width="90" align="center" />
+        <el-table-column label="Top细分问题" min-width="220" show-overflow-tooltip>
+          <template #default="scope">{{ formatTopRows(scope.row.problemPatternCounts) }}</template>
+        </el-table-column>
+        <el-table-column label="Top模块" min-width="180" show-overflow-tooltip>
+          <template #default="scope">{{ formatTopRows(scope.row.moduleCounts) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <el-dialog title="统计块显示配置" v-model="blockConfigOpen" width="560px" append-to-body>
       <el-checkbox-group v-model="visibleStatisticsBlockKeys" class="statistics-block-config">
         <el-checkbox v-for="item in statisticsBlockOptions" :key="item.key" :label="item.key">
@@ -135,31 +199,47 @@
 import {
   getTicketStatClassificationOptions,
   getTicketStatistics,
+  getTicketStatisticsTrend,
   listTicketModuleOptions,
   listTicketProjectOptions
 } from '@/api/ticket/ticket'
 import { getOptionLabel, sourceOptions, ticketStatusOptions } from '../constants'
 import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig'
+import * as echarts from 'echarts'
 
 const { proxy } = getCurrentInstance()
 const loading = ref(false)
 const dateRange = ref([])
 const overview = ref({})
+const trend = ref({ series: [] })
 const projectOptions = ref([])
 const moduleOptions = ref([])
 const moduleCodeOptions = ref([])
 const selectedProjectIds = ref([])
 const selectedModuleIds = ref([])
 const selectedModuleCodes = ref([])
+const selectedProblemPatternCodes = ref([])
+const trendGranularity = ref('week')
 const issueTypeOptions = ref([])
 const rootCauseTypeOptions = ref([])
 const solutionTypeOptions = ref([])
 const resolutionOptions = ref([])
+const problemPatternOptions = ref([])
 const blockConfigOpen = ref(false)
+const overallTrendChartRef = ref(null)
+const problemTrendChartRef = ref(null)
+const moduleTrendChartRef = ref(null)
+const problemPatternTrendChartRef = ref(null)
+const trendChartInstances = {}
 const queryParams = ref({
   beginTime: undefined,
   endTime: undefined
 })
+const trendGranularityOptions = [
+  { label: '日', value: 'day' },
+  { label: '周', value: 'week' },
+  { label: '月', value: 'month' }
+]
 
 const statisticsBlockOptions = [
   {
@@ -278,6 +358,15 @@ const statisticsBlockOptions = [
     countLabel: '数量',
     span: 12,
     format: row => formatResolution(row)
+  },
+  {
+    key: 'problemPattern',
+    title: '细分问题',
+    dataKey: 'problemPatternCounts',
+    label: '细分问题',
+    countLabel: '数量',
+    span: 12,
+    format: row => formatProblemPattern(row)
   }
 ]
 const defaultStatisticsBlockKeys = statisticsBlockOptions.map(item => item.key)
@@ -289,8 +378,14 @@ const visibleStatisticsBlocks = computed(() => {
 
 function getStatistics() {
   loading.value = true
-  getTicketStatistics(buildQueryParams()).then(response => {
-    overview.value = response.data || {}
+  const params = buildQueryParams()
+  Promise.all([
+    getTicketStatistics(params),
+    getTicketStatisticsTrend(params)
+  ]).then(([overviewResponse, trendResponse]) => {
+    overview.value = overviewResponse.data || {}
+    trend.value = trendResponse.data || { series: [] }
+    nextTick(() => renderTrendCharts())
   }).finally(() => {
     loading.value = false
   })
@@ -299,9 +394,11 @@ function getStatistics() {
 function buildQueryParams() {
   return {
     ...queryParams.value,
+    granularity: trendGranularity.value,
     projectIds: selectedProjectIds.value.length ? selectedProjectIds.value.join(',') : undefined,
     moduleIds: selectedModuleIds.value.length ? selectedModuleIds.value.join(',') : undefined,
-    moduleCodes: selectedModuleCodes.value.length ? selectedModuleCodes.value.join(',') : undefined
+    moduleCodes: selectedModuleCodes.value.length ? selectedModuleCodes.value.join(',') : undefined,
+    problemPatternCodes: selectedProblemPatternCodes.value.length ? selectedProblemPatternCodes.value.join(',') : undefined
   }
 }
 
@@ -321,6 +418,7 @@ function loadStatClassificationOptions() {
     rootCauseTypeOptions.value = normalizeStatOptions(config.rootCauseTypes)
     solutionTypeOptions.value = normalizeStatOptions(config.solutionTypes)
     resolutionOptions.value = normalizeStatOptions(config.resolutions)
+    problemPatternOptions.value = normalizeStatOptions(config.problemPatterns)
   })
 }
 
@@ -404,6 +502,8 @@ function resetQuery() {
   selectedProjectIds.value = []
   selectedModuleIds.value = []
   selectedModuleCodes.value = []
+  selectedProblemPatternCodes.value = []
+  trendGranularity.value = 'week'
   queryParams.value = { beginTime: undefined, endTime: undefined }
   loadModuleOptions([])
   getStatistics()
@@ -446,6 +546,19 @@ function formatResolution(row) {
   return getStatOptionLabel(resolutionOptions, row.resolutionCode)
 }
 
+function formatProblemPattern(row) {
+  const code = row.problemPatternCode || row.problem_pattern_code || ''
+  const name = row.problemPatternName || row.problem_pattern_name || code
+  return getStatOptionLabel(problemPatternOptions, code) || name || '未填写'
+}
+
+function formatTopRows(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .slice(0, 3)
+    .map(item => `${item.name || item.problemPatternName || item.module || '-'} ${item.count || 0}`)
+    .join('，') || '-'
+}
+
 function formatModuleOptionLabel(item) {
   const project = projectOptions.value.find(projectItem => projectItem.projectId === item.projectId)
   return project?.projectName ? `${project.projectName} / ${item.moduleName}` : item.moduleName
@@ -471,10 +584,160 @@ function formatTransition(row) {
   return `${fromStatus} -> ${getOptionLabel(ticketStatusOptions, row.toStatus)}`
 }
 
+function getTrendSeries() {
+  return Array.isArray(trend.value?.series) ? trend.value.series : []
+}
+
+function getTrendBuckets() {
+  return getTrendSeries().map(item => item.bucket || item.bucketStart || '-')
+}
+
+function getCounterRowName(item = {}) {
+  return String(
+    item.name ||
+    item.problemPatternName ||
+    item.module ||
+    item.issueTypeName ||
+    item.rootCauseType ||
+    item.resolutionName ||
+    '未填写'
+  ).trim() || '未填写'
+}
+
+function getTopCounterNames(dataKey, limit = 6) {
+  const totals = new Map()
+  getTrendSeries().forEach(bucket => {
+    ;(Array.isArray(bucket[dataKey]) ? bucket[dataKey] : []).forEach(item => {
+      const name = getCounterRowName(item)
+      totals.set(name, Number(totals.get(name) || 0) + Number(item.count || 0))
+    })
+  })
+  return Array.from(totals.entries())
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, limit)
+    .map(([name]) => name)
+}
+
+function buildCounterTrendSeries(dataKey, names) {
+  return names.map(name => ({
+    name,
+    type: 'line',
+    smooth: true,
+    symbolSize: 6,
+    data: getTrendSeries().map(bucket => {
+      const rows = Array.isArray(bucket[dataKey]) ? bucket[dataKey] : []
+      const matched = rows.find(item => getCounterRowName(item) === name)
+      return Number(matched?.count || 0)
+    })
+  }))
+}
+
+function buildLineChartOption(series, options = {}) {
+  const buckets = getTrendBuckets()
+  const hasData = buckets.length > 0 && series.some(item => item.data.some(value => Number(value || 0) !== 0))
+  return {
+    color: ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#0891b2', '#7c3aed', '#db2777', '#65a30d'],
+    tooltip: {
+      trigger: 'axis'
+    },
+    legend: {
+      type: 'scroll',
+      top: 0
+    },
+    grid: {
+      left: 44,
+      right: 24,
+      top: 54,
+      bottom: 36
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: buckets
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1
+    },
+    series,
+    graphic: hasData ? undefined : {
+      type: 'text',
+      left: 'center',
+      top: 'middle',
+      style: {
+        text: '暂无趋势数据',
+        fill: '#909399',
+        fontSize: 14
+      }
+    },
+    ...options
+  }
+}
+
+function getTrendChart(key, chartRef) {
+  if (!chartRef.value) {
+    return null
+  }
+  if (!trendChartInstances[key]) {
+    trendChartInstances[key] = echarts.init(chartRef.value)
+  }
+  return trendChartInstances[key]
+}
+
+function renderTrendCharts() {
+  const overallChart = getTrendChart('overall', overallTrendChartRef)
+  const problemChart = getTrendChart('problem', problemTrendChartRef)
+  const moduleChart = getTrendChart('module', moduleTrendChartRef)
+  const problemPatternChart = getTrendChart('problemPattern', problemPatternTrendChartRef)
+  const seriesRows = getTrendSeries()
+  const moduleNames = getTopCounterNames('moduleCounts')
+  const problemPatternNames = getTopCounterNames('problemPatternCounts')
+
+  overallChart?.setOption(buildLineChartOption([
+    { name: '新增', type: 'line', smooth: true, symbolSize: 6, data: seriesRows.map(item => Number(item.newCount || 0)) },
+    { name: '关闭', type: 'line', smooth: true, symbolSize: 6, data: seriesRows.map(item => Number(item.closedCount || 0)) },
+    { name: '净增', type: 'line', smooth: true, symbolSize: 6, data: seriesRows.map(item => Number(item.netIncrease || 0)) },
+    {
+      name: '周期末未关闭存量',
+      type: 'line',
+      smooth: true,
+      symbolSize: 6,
+      areaStyle: { opacity: 0.12 },
+      data: seriesRows.map(item => Number(item.openBacklog || 0))
+    }
+  ]), true)
+  problemChart?.setOption(buildLineChartOption([
+    { name: 'Bug', type: 'line', smooth: true, symbolSize: 6, data: seriesRows.map(item => Number(item.problemCount || 0)) },
+    { name: '非Bug', type: 'line', smooth: true, symbolSize: 6, data: seriesRows.map(item => Number(item.nonProblemCount || 0)) },
+    { name: '未判断', type: 'line', smooth: true, symbolSize: 6, data: seriesRows.map(item => Number(item.unknownProblemCount || 0)) },
+    { name: '支持类', type: 'line', smooth: true, symbolSize: 6, data: seriesRows.map(item => Number(item.supportCount || 0)) }
+  ]), true)
+  moduleChart?.setOption(buildLineChartOption(buildCounterTrendSeries('moduleCounts', moduleNames)), true)
+  problemPatternChart?.setOption(buildLineChartOption(buildCounterTrendSeries('problemPatternCounts', problemPatternNames)), true)
+}
+
+function resizeTrendCharts() {
+  Object.values(trendChartInstances).forEach(instance => instance?.resize())
+}
+
+function disposeTrendCharts() {
+  Object.values(trendChartInstances).forEach(instance => instance?.dispose())
+}
+
 loadProjectOptions().then(() => loadModuleOptions([]))
 loadStatClassificationOptions()
 loadStatisticsBlockConfig()
 getStatistics()
+
+onMounted(() => {
+  window.addEventListener('resize', resizeTrendCharts)
+  nextTick(() => renderTrendCharts())
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeTrendCharts)
+  disposeTrendCharts()
+})
 </script>
 
 <style scoped>
@@ -492,6 +755,19 @@ getStatistics()
 
 .stats-block-col {
   margin-bottom: 16px;
+}
+
+.trend-chart-grid {
+  row-gap: 16px;
+}
+
+.trend-chart-col {
+  margin-bottom: 16px;
+}
+
+.trend-chart {
+  width: 100%;
+  height: 360px;
 }
 
 .statistics-block-config {

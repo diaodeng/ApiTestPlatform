@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-06-18
+freshness: 2026-07-01
 created: 2026-05-20
-updated: 2026-06-18
+updated: 2026-07-01
 related_files:
   - server/modules/ticket/enums/ticket_enums.py
   - web/src/views/ticket/constants.js
@@ -55,7 +55,8 @@ mindmap
 - `TicketLogPullStatus` 继续覆盖 `created -> success/failed/exception` 全链路状态，供工单列表和详情页直接展示。
 - 前端 `ticketProcessStatusOptions` 在 AI 状态外新增日志拉取过程状态：`log_pull_created`、`log_pull_running`、`log_pull_submitting`、`log_pull_polling`、`log_pull_downloading`、`log_pull_processing`，后端列表查询按这些编码过滤最新日志拉取状态。
 - `TicketAiAnalysisStatus` 用于 AI 分析任务流转，覆盖 `created -> running -> success/failed/canceled`。
-- 统计枚举不再写死为 Python Enum，而是通过 `ticket.sync.automation.statClassification` 配置：`issueTypes`、`rootCauseTypes`、`solutionTypes`、`resolutions`。前端同步配置页负责可视化维护，后端负责归一化和默认值兜底。
+- 统计枚举不再写死为 Python Enum，而是通过 `ticket.sync.automation.statClassification` 配置：`issueTypes`、`rootCauseTypes`、`solutionTypes`、`resolutions`、`problemPatterns`。前端同步配置页负责可视化维护，后端负责归一化和默认值兜底。
+- `problemPatterns` 是细分问题类型固定枚举，支持 `moduleCode`、`issueTypeId`、`rootCauseType`、`resolutionCode`、`description`、正反示例和 `enabled`。AI 自动分类只从启用候选中选择，不再自由生成统计用标签。
 
 ## 参见
 

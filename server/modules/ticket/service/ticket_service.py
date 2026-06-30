@@ -1040,6 +1040,10 @@ class TicketService:
                 TicketLogPullCreateModel.model_validate(log_pull_config)
             data.update(relation_fields)
             data["ticket_no"] = str(data.get("ticket_no") or "").strip()
+            if data.get("problem_pattern_verified") is True:
+                data["problem_pattern_source"] = data.get("problem_pattern_source") or "manual"
+                data["problem_pattern_verified_by"] = _user_name(current_user)
+                data["problem_pattern_verified_at"] = now
             data["status"] = data.get("status") or TicketStatus.PENDING.value
             data["reporter_id"] = data.get("reporter_id") or _user_id(current_user)
             data["reporter_name"] = data.get("reporter_name") or _user_name(current_user)
@@ -1280,6 +1284,10 @@ class TicketService:
             data.update(relation_fields)
             data["update_by"] = _user_name(current_user)
             data["update_time"] = datetime.now()
+            if data.get("problem_pattern_verified") is True:
+                data["problem_pattern_source"] = data.get("problem_pattern_source") or "manual"
+                data["problem_pattern_verified_by"] = _user_name(current_user)
+                data["problem_pattern_verified_at"] = data["update_time"]
             data["ticket_no"] = ticket_no
             TicketDao.update_ticket(query_db, ticket.ticket_id, data)
             refreshed_ticket = TicketDao.get_ticket_by_id(query_db, ticket.ticket_id) or ticket
@@ -1544,6 +1552,16 @@ class TicketService:
                 update_data["resolution_code"] = status_object.resolution_code
             if status_object.resolution_name is not None:
                 update_data["resolution_name"] = status_object.resolution_name
+            if status_object.problem_pattern_code is not None:
+                update_data["problem_pattern_code"] = status_object.problem_pattern_code
+                update_data["problem_pattern_source"] = "manual"
+            if status_object.problem_pattern_name is not None:
+                update_data["problem_pattern_name"] = status_object.problem_pattern_name
+            if status_object.problem_pattern_verified is not None:
+                update_data["problem_pattern_verified"] = status_object.problem_pattern_verified
+                if status_object.problem_pattern_verified:
+                    update_data["problem_pattern_verified_by"] = _user_name(current_user)
+                    update_data["problem_pattern_verified_at"] = now
             if not ticket.started_at and status_object.to_status == TicketStatus.PROCESSING.value:
                 update_data["started_at"] = now
             if _is_end_status(status_object.to_status):
@@ -1579,6 +1597,9 @@ class TicketService:
                         "solution_type": status_object.solution_type,
                         "resolution_code": status_object.resolution_code,
                         "resolution_name": status_object.resolution_name,
+                        "problem_pattern_code": status_object.problem_pattern_code,
+                        "problem_pattern_name": status_object.problem_pattern_name,
+                        "problem_pattern_verified": status_object.problem_pattern_verified,
                         "target_assignee_id": transition_extension.get("target_assignee_id"),
                         "target_assignee_name": transition_extension.get("target_assignee_name"),
                         "notify_enabled": transition_extension.get("notify_enabled"),
@@ -2751,5 +2772,41 @@ class TicketService:
             _normalize_int_list(project_ids),
             _normalize_int_list(module_ids),
             _normalize_text_list(module_codes),
+        )
+        return _camelize(statistics)
+
+    @classmethod
+    def get_statistics_trend_services(
+        cls,
+        query_db: Session,
+        begin_time=None,
+        end_time=None,
+        project_ids: Any = None,
+        module_ids: Any = None,
+        module_codes: Any = None,
+        granularity: str | None = "week",
+        problem_pattern_codes: Any = None,
+    ) -> dict:
+        """
+        获取工单趋势统计数据。
+        :param query_db: 数据库会话
+        :param begin_time: 开始时间
+        :param end_time: 结束时间
+        :param project_ids: 项目ID多选过滤
+        :param module_ids: 模块ID多选过滤
+        :param module_codes: 模块业务码多选过滤
+        :param granularity: 统计粒度，day/week/month
+        :param problem_pattern_codes: 细分问题类型编码多选过滤
+        :return: 趋势统计结果
+        """
+        statistics = TicketDao.get_statistics_trend(
+            query_db,
+            _date_start(begin_time),
+            _date_end(end_time),
+            _normalize_int_list(project_ids),
+            _normalize_int_list(module_ids),
+            _normalize_text_list(module_codes),
+            granularity,
+            _normalize_text_list(problem_pattern_codes),
         )
         return _camelize(statistics)

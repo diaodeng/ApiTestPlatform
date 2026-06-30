@@ -669,6 +669,15 @@ export function getTicketStatistics(query) {
   });
 }
 
+// 查询工单趋势统计
+export function getTicketStatisticsTrend(query) {
+  return request({
+    url: '/ticket/statistics/trend',
+    method: 'get',
+    params: query,
+  });
+}
+
 // 查询知识库列表
 export function listKnowledge(query) {
   return request({

@@ -42,6 +42,13 @@ class TicketBaseModel(BaseModel):
     solution_type: str | None = Field(default=None, description="解决方式")
     resolution_code: str | None = Field(default=None, description="关闭结果编码")
     resolution_name: str | None = Field(default=None, description="关闭结果名称")
+    problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
+    problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
+    problem_pattern_confidence: int | None = Field(default=None, description="细分问题类型置信度，0-100")
+    problem_pattern_source: str | None = Field(default=None, description="细分问题类型来源")
+    problem_pattern_verified: bool | None = Field(default=None, description="细分问题类型是否人工确认")
+    problem_pattern_verified_by: str | None = Field(default=None, description="细分问题类型确认人")
+    problem_pattern_verified_at: datetime | None = Field(default=None, description="细分问题类型确认时间")
     customer_priority: str | None = Field(default="P3", description="对方优先级")
     internal_priority: str | None = Field(default="P3", description="内部优先级")
     severity: str | None = Field(default=None, description="严重等级")
@@ -108,6 +115,8 @@ class TicketQueryModel(QueryModel):
     solution_type: str | None = Field(default=None, description="解决方式")
     resolution_code: str | None = Field(default=None, description="关闭结果编码")
     resolution_name: str | None = Field(default=None, description="关闭结果名称")
+    problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
+    problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
     customer_priority: str | None = Field(default=None, description="对方优先级")
     internal_priority: str | None = Field(default=None, description="内部优先级")
     source: str | None = Field(default=None, description="工单来源")
@@ -153,6 +162,9 @@ class TicketStatusChangeModel(BaseModel):
     solution_type: str | None = Field(default=None, description="解决方式")
     resolution_code: str | None = Field(default=None, description="关闭结果编码")
     resolution_name: str | None = Field(default=None, description="关闭结果名称")
+    problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
+    problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
+    problem_pattern_verified: bool | None = Field(default=None, description="细分问题类型是否人工确认")
 
 
 class TicketCommentCreateModel(BaseModel):
@@ -339,7 +351,10 @@ class TicketAiAnalysisRequestModel(BaseModel):
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
     extra_instruction: str | None = Field(default="", description="本次分析的额外说明")
     prompt_template_codes: list[str] | None = Field(default=None, description="本次分析追加的提示词模板编码列表")
-    log_analysis_mode: str | None = Field(default=None, description="日志分析模式：digest摘要、full_directory完整目录、hybrid摘要+完整目录")
+    log_analysis_mode: str | None = Field(
+        default=None,
+        description="日志分析模式：digest摘要、full_directory完整目录、hybrid摘要+完整目录",
+    )
     log_window_missing_strategy: str | None = Field(
         default=None,
         description="时间窗口模式下缺少已截取日志时的处理策略：server_extract服务端截取、agent_extract下发Agent截取",
@@ -867,3 +882,7 @@ class TicketStatisticsQueryModel(QueryModel):
     project_ids: str | list[int] | None = Field(default=None, description="项目ID多选，支持逗号分隔或数组")
     module_ids: str | list[int] | None = Field(default=None, description="模块ID多选，支持逗号分隔或数组")
     module_codes: str | list[str] | None = Field(default=None, description="模块业务码多选，支持逗号分隔或数组")
+    granularity: str | None = Field(default="week", description="趋势粒度：day/week/month")
+    problem_pattern_codes: str | list[str] | None = Field(
+        default=None, description="细分问题类型编码多选，支持逗号分隔或数组"
+    )

@@ -1854,6 +1854,67 @@
                   </el-table-column>
                 </el-table>
               </section>
+
+              <section class="stat-config-section stat-config-section--wide">
+                <div class="stat-config-section__head">
+                  <span>细分问题类型</span>
+                  <el-button link type="primary" icon="Plus" @click="addStatOption('problemPatterns')"
+                    >新增</el-button
+                  >
+                </div>
+                <el-table :data="form.statClassification.problemPatterns" border size="small">
+                  <el-table-column label="编码" min-width="170">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.value" placeholder="如 memory_leak" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="名称" min-width="190">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.label" placeholder="如 内存泄露" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="模块Code" min-width="130">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.moduleCode" placeholder="可选，如 coupon" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="工单类型" min-width="150">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.issueTypeId" placeholder="如 system_bug" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="根因" min-width="150">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.rootCauseType" placeholder="如 code_defect" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="关闭结果" min-width="150">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.resolutionCode" placeholder="如 fixed" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="说明" min-width="240">
+                    <template #default="scope">
+                      <el-input v-model="scope.row.description" placeholder="用于AI判定的业务定义" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="启用" width="90" align="center">
+                    <template #default="scope">
+                      <el-switch v-model="scope.row.enabled" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="80" align="center">
+                    <template #default="scope">
+                      <el-button
+                        link
+                        type="danger"
+                        icon="Delete"
+                        @click="removeStatOption('problemPatterns', scope.$index)"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </section>
             </div>
           </el-card>
 
@@ -2346,6 +2407,34 @@
       { value: 'as_designed', label: '需求如此', isProblem: false },
       { value: 'transferred', label: '已转其他团队', isProblem: null },
     ],
+    problemPatterns: [
+      {
+        value: 'memory_leak',
+        label: '内存泄露',
+        moduleCode: '',
+        issueTypeId: 'performance_issue',
+        isProblem: true,
+        rootCauseType: 'code_defect',
+        resolutionCode: 'fixed',
+        description: '进程内存持续增长、未释放或最终 OOM 的问题模式。',
+        positiveExamples: ['内存泄露', '内存泄漏', 'memory leak', 'OOM'],
+        negativeExamples: ['单次内存高峰', '磁盘空间不足'],
+        enabled: true,
+      },
+      {
+        value: 'coupon_280_paper_rule',
+        label: '280开头券为纸质券规则说明',
+        moduleCode: 'coupon',
+        issueTypeId: 'support_consulting',
+        isProblem: false,
+        rootCauseType: 'requirement_design',
+        resolutionCode: 'as_designed',
+        description: '用户反馈280开头券不能按电子券处理，实际业务规则定义为纸质券。',
+        positiveExamples: ['280开头券', '纸质券', '券规则说明'],
+        negativeExamples: ['电子券接口报错', '券配置错误'],
+        enabled: true,
+      },
+    ],
   };
 
   function createDefaultForm() {
@@ -2617,6 +2706,20 @@
       if (remark) {
         row.remark = remark;
       }
+      ;[
+        'moduleCode',
+        'issueTypeId',
+        'rootCauseType',
+        'resolutionCode',
+        'description',
+        'positiveExamples',
+        'negativeExamples',
+        'enabled',
+      ].forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(item || {}, key)) {
+          row[key] = item[key];
+        }
+      });
       rows.push(row);
       seenValues.add(optionValue);
     });
@@ -2644,6 +2747,11 @@
         defaultStatClassification.resolutions,
         true
       ),
+      problemPatterns: normalizeStatOptionRows(
+        source.problemPatterns,
+        defaultStatClassification.problemPatterns,
+        true
+      ),
     };
   }
 
@@ -2654,7 +2762,19 @@
     form.statClassification[groupKey].push({
       value: '',
       label: '',
-      ...(groupKey === 'issueTypes' || groupKey === 'resolutions' ? { isProblem: null } : {}),
+      ...(groupKey === 'issueTypes' || groupKey === 'resolutions' || groupKey === 'problemPatterns' ? { isProblem: null } : {}),
+      ...(groupKey === 'problemPatterns'
+        ? {
+            moduleCode: '',
+            issueTypeId: '',
+            rootCauseType: '',
+            resolutionCode: '',
+            description: '',
+            positiveExamples: [],
+            negativeExamples: [],
+            enabled: true,
+          }
+        : {}),
     });
   }
 

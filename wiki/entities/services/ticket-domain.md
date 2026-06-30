@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-06-30
+freshness: 2026-07-01
 created: 2026-05-20
-updated: 2026-06-30
+updated: 2026-07-01
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
@@ -51,12 +51,15 @@ graph TD
 
 - 工单统计现在拆分为独立维度：`status` 表示流程状态，`module_id/module_name` 表示业务域，`issue_type_id/issue_type_name` 表示工单类型，`is_problem` 表示是否真实问题，`root_cause_type` 表示根因分类，`solution_type` 表示解决方式，`resolution_code/resolution_name` 表示关闭结果。
 - 统计枚举配置统一保存在系统参数 `ticket.sync.automation.statClassification`，由工单同步自动化页面可视化维护；默认枚举来自 `TicketSyncService.DEFAULT_TICKET_STAT_CLASSIFICATIONS`。
+- 2026-07-01 起，细分问题类型也进入同一套统计枚举：`problemPatterns`，工单主表落点为 `problem_pattern_code/problem_pattern_name/problem_pattern_confidence/problem_pattern_source/problem_pattern_verified*`。该字段用于统计“内存泄露”“280开头券为纸质券规则说明”等可治理问题模式，`tags` 仅作为辅助检索，不作为领导看板主统计口径。
 - 工单分类 AI 的 Provider 与提示词正文统一由系统管理中的 AI Provider / AI 提示词维护；`ticket.sync.automation.aiClassification` 只保存场景开关、Provider 编码和提示词编码选择。
 - 历史 `ticket.sync.automation.aiClassification.promptContent` 不再作为新编辑入口，但保存同步配置时会保留并作为旧环境兜底，避免默认模板缺失时影响现有分类统计链路。
 - 工单列表、状态流转、RCA、外部同步入库和统计页均读取同一套枚举配置；旧 `category_name` 与 `categoryCounts` 继续保留兼容，不再承担新统计主维度。
+- AI 分类统计只允许从启用的固定枚举候选中选择细分问题类型；人工确认的细分问题不会被后续 AI 分类覆盖。
 - 工单列表展示工单类型时只读取 `issue_type_name` 或命中配置的 `issue_type_id`，不再回退 `category_name`，避免历史分类/模块文案误显示为新工单类型。
 - 工单列表已接入根因分类、解决方式和关闭结果筛选及显示列；列表列显示配置通过当前用户配置 `ticket/ticket_list_columns` 保存。
 - 工单统计页的统计块显示配置通过当前用户配置 `ticket/ticket_statistics_blocks` 保存，用户可按关注维度隐藏不需要的统计块。
+- 工单统计页新增趋势统计，接口 `GET /ticket/statistics/trend` 按 `day/week/month` 返回新增、关闭、净增、周期末未关闭存量、Bug、非 Bug、支持类、Top 模块和 Top 细分问题。当前趋势按事件时间实时计算当前分类，正式周报如需历史口径冻结，后续应增加统计快照。
 - 用户级偏好采用通用表 `sys_user_config`，以 `user_id + config_type + config_key` 唯一定位，`config_value` 保存少量 JSON 配置；后续用户级 AI prompt/provider 等零散配置优先复用该模型。
 - 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；列表页新增按 `module_code` 下拉筛选，统计页新增按 `moduleCodes` 多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds/moduleCodes` 参数，后端所有统计维度和状态流转统计都共用该过滤条件。
 - 工单编辑弹窗回填时会抑制项目监听器误清空 `module_id`，模块下拉变更和提交前会按 `module_id` 补齐 `module_name`，保证列表模块列在编辑保存后不丢失。

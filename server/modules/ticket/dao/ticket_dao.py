@@ -1,4 +1,4 @@
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import DateTime as SqlDateTime
@@ -73,6 +73,62 @@ def _parse_sync_time(value: Any) -> datetime | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
     except Exception:
         return None
+
+
+def _normalize_granularity(value: str | None) -> str:
+    """
+    归一化趋势统计粒度。
+    :param value: 原始粒度
+    :return: day/week/month
+    """
+    text = str(value or "").strip().lower()
+    return text if text in {"day", "week", "month"} else "week"
+
+
+def _bucket_start(value: datetime, granularity: str) -> date:
+    """
+    根据时间粒度计算时间桶开始日期。
+    :param value: 原始时间
+    :param granularity: day/week/month
+    :return: 时间桶开始日期
+    """
+    current_date = value.date()
+    if granularity == "month":
+        return current_date.replace(day=1)
+    if granularity == "week":
+        return current_date - timedelta(days=current_date.weekday())
+    return current_date
+
+
+def _bucket_label(bucket_date: date, granularity: str) -> str:
+    """
+    格式化趋势统计时间桶标签。
+    :param bucket_date: 时间桶开始日期
+    :param granularity: day/week/month
+    :return: 展示标签
+    """
+    if granularity == "month":
+        return bucket_date.strftime("%Y-%m")
+    if granularity == "week":
+        iso_year, iso_week, _ = bucket_date.isocalendar()
+        return f"{iso_year}-W{iso_week:02d}"
+    return bucket_date.strftime("%Y-%m-%d")
+
+
+def _next_bucket_start(bucket_date: date, granularity: str) -> date:
+    """
+    计算下一个时间桶开始日期。
+    :param bucket_date: 当前时间桶开始日期
+    :param granularity: day/week/month
+    :return: 下一个时间桶开始日期
+    """
+    if granularity == "month":
+        year = bucket_date.year + (1 if bucket_date.month == 12 else 0)
+        month = 1 if bucket_date.month == 12 else bucket_date.month + 1
+        return date(year, month, 1)
+    if granularity == "week":
+        return bucket_date + timedelta(days=7)
+    return bucket_date + timedelta(days=1)
 
 
 def _json_safe_value(value: Any) -> Any:
@@ -298,6 +354,10 @@ class TicketDao:
                 Ticket.solution_type == query.solution_type if query.solution_type else True,
                 Ticket.resolution_code == query.resolution_code if query.resolution_code else True,
                 Ticket.resolution_name.like(f"%{query.resolution_name}%") if query.resolution_name else True,
+                Ticket.problem_pattern_code == query.problem_pattern_code if query.problem_pattern_code else True,
+                Ticket.problem_pattern_name.like(f"%{query.problem_pattern_name}%")
+                if query.problem_pattern_name
+                else True,
                 Ticket.customer_priority == query.customer_priority if query.customer_priority else True,
                 Ticket.internal_priority == query.internal_priority if query.internal_priority else True,
                 Ticket.source == query.source if query.source else True,
@@ -1107,6 +1167,12 @@ class TicketDao:
             .group_by(Ticket.resolution_code, Ticket.resolution_name)
             .all()
         )
+        problem_pattern_rows = (
+            db.query(Ticket.problem_pattern_code, Ticket.problem_pattern_name, func.count(Ticket.ticket_id))
+            .filter(base_filter)
+            .group_by(Ticket.problem_pattern_code, Ticket.problem_pattern_name)
+            .all()
+        )
         module_rows = (
             db.query(Ticket.module_name, func.count(Ticket.ticket_id))
             .filter(base_filter)
@@ -1209,6 +1275,14 @@ class TicketDao:
                 }
                 for row in resolution_rows
             ],
+            "problem_pattern_counts": [
+                {
+                    "problem_pattern_code": row[0] or "",
+                    "problem_pattern_name": row[1] or row[0] or "未填写",
+                    "count": row[2],
+                }
+                for row in problem_pattern_rows
+            ],
             "transition_counts": [
                 {"from_status": row[0] or "创建", "to_status": row[1], "count": row[2]} for row in transition_rows
             ],
@@ -1216,6 +1290,195 @@ class TicketDao:
                 {"user_id": row[0], "user_name": row[1] or "未指派", "count": row[2]} for row in assignee_rows
             ],
         }
+
+    @classmethod
+    def get_statistics_trend(
+        cls,
+        db: Session,
+        begin_time: datetime | None,
+        end_time: datetime | None,
+        project_ids: list[int] | None = None,
+        module_ids: list[int] | None = None,
+        module_codes: list[str] | None = None,
+        granularity: str | None = "week",
+        problem_pattern_codes: list[str] | None = None,
+    ) -> dict:
+        """
+        实时计算工单趋势，面向治理看板展示新增、关闭、存量和关键分类变化。
+        :param db: 数据库会话
+        :param begin_time: 开始时间
+        :param end_time: 结束时间
+        :param project_ids: 项目ID多选过滤
+        :param module_ids: 模块ID多选过滤
+        :param module_codes: 模块业务码多选过滤
+        :param granularity: 趋势粒度，day/week/month
+        :param problem_pattern_codes: 细分问题类型编码过滤
+        :return: 趋势统计结果
+        """
+        normalized_granularity = _normalize_granularity(granularity)
+        matched_module_ids_by_code = (
+            _resolve_module_ids_by_codes(db, module_codes or [], project_ids or None)
+            if module_codes
+            else []
+        )
+        filters = [Ticket.del_flag == "0"]
+        if project_ids:
+            filters.append(Ticket.project_id.in_(project_ids))
+        if module_ids:
+            filters.append(Ticket.module_id.in_(module_ids))
+        if module_codes:
+            if matched_module_ids_by_code:
+                filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
+            else:
+                filters.append(Ticket.ticket_id == -1)
+        if problem_pattern_codes:
+            filters.append(Ticket.problem_pattern_code.in_(problem_pattern_codes))
+        if end_time:
+            filters.append(Ticket.create_time <= end_time)
+
+        rows = (
+            db.query(Ticket)
+            .filter(and_(*filters))
+            .order_by(Ticket.create_time.asc(), Ticket.ticket_id.asc())
+            .all()
+        )
+        bucket_map: dict[date, dict[str, Any]] = {}
+        event_times = [
+            item
+            for ticket in rows
+            for item in (ticket.create_time, ticket.closed_at, ticket.resolved_at)
+            if isinstance(item, datetime)
+        ]
+        if not event_times:
+            return {"granularity": normalized_granularity, "series": []}
+        start_time = begin_time or min(event_times)
+        finish_time = end_time or max(event_times)
+        start_bucket = _bucket_start(start_time, normalized_granularity)
+        finish_bucket = _bucket_start(finish_time, normalized_granularity)
+        current_bucket = start_bucket
+        while current_bucket <= finish_bucket:
+            bucket_map[current_bucket] = {
+                "bucket": _bucket_label(current_bucket, normalized_granularity),
+                "bucket_start": current_bucket.isoformat(),
+                "new_count": 0,
+                "closed_count": 0,
+                "resolved_count": 0,
+                "problem_count": 0,
+                "non_problem_count": 0,
+                "unknown_problem_count": 0,
+                "support_count": 0,
+                "module_counts": {},
+                "issue_type_counts": {},
+                "root_cause_type_counts": {},
+                "resolution_counts": {},
+                "problem_pattern_counts": {},
+            }
+            current_bucket = _next_bucket_start(current_bucket, normalized_granularity)
+
+        def get_bucket_for_time(value: datetime | None) -> dict[str, Any] | None:
+            """
+            获取指定时间所属的趋势桶，超出查询窗口时返回 None。
+            :param value: 事件时间
+            :return: 趋势桶
+            """
+            if not isinstance(value, datetime):
+                return None
+            if begin_time and value < begin_time:
+                return None
+            if end_time and value > end_time:
+                return None
+            return bucket_map.get(_bucket_start(value, normalized_granularity))
+
+        for ticket in rows:
+            create_bucket = get_bucket_for_time(getattr(ticket, "create_time", None))
+            if create_bucket:
+                create_bucket["new_count"] += 1
+                if ticket.is_problem is True:
+                    create_bucket["problem_count"] += 1
+                elif ticket.is_problem is False:
+                    create_bucket["non_problem_count"] += 1
+                else:
+                    create_bucket["unknown_problem_count"] += 1
+                if str(ticket.issue_type_id or "").strip() == "support_consulting":
+                    create_bucket["support_count"] += 1
+                cls._increase_counter(
+                    create_bucket["module_counts"],
+                    str(ticket.module_name or "未填写").strip() or "未填写",
+                )
+                cls._increase_counter(
+                    create_bucket["issue_type_counts"],
+                    str(ticket.issue_type_name or ticket.issue_type_id or "未填写").strip() or "未填写",
+                )
+                cls._increase_counter(
+                    create_bucket["root_cause_type_counts"],
+                    str(ticket.root_cause_type or "未填写").strip() or "未填写",
+                )
+                cls._increase_counter(
+                    create_bucket["resolution_counts"],
+                    str(ticket.resolution_name or ticket.resolution_code or "未填写").strip() or "未填写",
+                )
+                cls._increase_counter(
+                    create_bucket["problem_pattern_counts"],
+                    str(ticket.problem_pattern_name or ticket.problem_pattern_code or "未填写").strip()
+                    or "未填写",
+                )
+            closed_bucket = get_bucket_for_time(getattr(ticket, "closed_at", None))
+            if closed_bucket:
+                closed_bucket["closed_count"] += 1
+            resolved_bucket = get_bucket_for_time(getattr(ticket, "resolved_at", None))
+            if resolved_bucket:
+                resolved_bucket["resolved_count"] += 1
+
+        series = []
+        for bucket_date in sorted(bucket_map):
+            bucket = bucket_map[bucket_date]
+            next_bucket = _next_bucket_start(bucket_date, normalized_granularity)
+            next_bucket_time = datetime.combine(next_bucket, time.min)
+            backlog_count = sum(
+                1
+                for ticket in rows
+                if isinstance(ticket.create_time, datetime)
+                and ticket.create_time < next_bucket_time
+                and (not isinstance(ticket.closed_at, datetime) or ticket.closed_at >= next_bucket_time)
+            )
+            series.append(
+                {
+                    **bucket,
+                    "net_increase": bucket["new_count"] - bucket["closed_count"],
+                    "open_backlog": backlog_count,
+                    "module_counts": cls._counter_to_rows(bucket["module_counts"], "name"),
+                    "issue_type_counts": cls._counter_to_rows(bucket["issue_type_counts"], "name"),
+                    "root_cause_type_counts": cls._counter_to_rows(bucket["root_cause_type_counts"], "name"),
+                    "resolution_counts": cls._counter_to_rows(bucket["resolution_counts"], "name"),
+                    "problem_pattern_counts": cls._counter_to_rows(bucket["problem_pattern_counts"], "name"),
+                }
+            )
+        return {
+            "granularity": normalized_granularity,
+            "series": series,
+        }
+
+    @staticmethod
+    def _increase_counter(counter: dict[str, int], key: str):
+        """
+        递增内存计数器。
+        :param counter: 计数字典
+        :param key: 计数键
+        """
+        counter[key] = int(counter.get(key) or 0) + 1
+
+    @staticmethod
+    def _counter_to_rows(counter: dict[str, int], key_name: str) -> list[dict[str, Any]]:
+        """
+        将内存计数字典转换为前端可展示数组。
+        :param counter: 计数字典
+        :param key_name: 名称字段
+        :return: 按数量倒序的数组
+        """
+        return [
+            {key_name: key, "count": count}
+            for key, count in sorted(counter.items(), key=lambda item: item[1], reverse=True)
+        ]
 
     @classmethod
     def upsert_embedding_record(cls, db: Session, record: EmbeddingRecord) -> EmbeddingRecord:

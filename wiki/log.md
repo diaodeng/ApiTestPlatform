@@ -3,10 +3,18 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # 操作日志
+
+## [2026-07-01] INGEST-CODE | 工单细分问题类型与趋势统计
+- 触发：用户希望固定枚举化“内存泄露”“280开头券为纸质券规则说明”等细分原因，并按时间趋势展示支持类、Bug、非 Bug、模块和具体问题变化。
+- 架构层：工单域 / 分类统计 / 轻量 AI 自动分类 / Web 统计页
+- 创建的页面：`web/public/docs/2026-07-01-ticket-problem-pattern-trend-statistics.md`、`server/sql/20260701_ticket_problem_pattern_columns.sql`
+- 更新的页面：`server/modules/ticket/entity/do/ticket_do.py`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/dao/ticket_dao.py`、`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/service/ticket_light_ai_service.py`、`server/modules/ticket/controller/ticket_controller.py`、`server/config/get_db.py`、`web/src/api/ticket/ticket.js`、`web/src/views/ticket/index.vue`、`web/src/views/ticket/statistics/index.vue`、`web/src/views/ticket/syncAutomation/index.vue`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`、`wiki/entities/enums/ticket-enums.md`
+- 变更传播链：`ticket.sync.automation.statClassification.problemPatterns` -> AI 分类候选枚举 -> `ticket.problem_pattern_*` 主表字段 -> 工单列表/编辑/状态流转 -> 汇总统计与趋势统计。
+- 关键结论：细分原因不再使用自由标签作为主统计口径；AI 只允许从启用的固定 `problemPatterns` 候选中选择。人工确认的细分问题不被后续 AI 覆盖。趋势接口按事件时间实时计算当前分类和周期末未关闭存量，正式周报如需历史不变更，应后续增加统计快照。
 
 ## [2026-06-30] INGEST-CODE | 后台任务与定时任务日志 tid 补齐
 - 触发：用户反馈 HTTP 请求已有日志 tid，但定时任务触发执行、工单同步延后后台过程仍显示 `[-]`，无法串联一次执行。

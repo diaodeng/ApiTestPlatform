@@ -2547,6 +2547,37 @@ async def get_ticket_statistics(
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketController.get("/statistics/trend", dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))])
+async def get_ticket_statistics_trend(
+    request: Request,
+    query: TicketStatisticsQueryModel = Depends(TicketStatisticsQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    获取工单趋势统计接口。
+    :param request: 请求对象
+    :param query: 时间范围、项目、模块、粒度和细分问题筛选参数
+    :param query_db: 数据库会话
+    :return: 按天、周或月分桶的新增、关闭、存量和分类趋势
+    """
+    try:
+        statistics = await run_in_threadpool(
+            TicketService.get_statistics_trend_services,
+            query_db,
+            query.begin_time,
+            query.end_time,
+            query.project_ids,
+            query.module_ids,
+            query.module_codes,
+            query.granularity,
+            query.problem_pattern_codes,
+        )
+        return ResponseUtil.success(data=statistics)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketController.get("/knowledge/list", dependencies=[Depends(CheckUserInterfaceAuth("ticket:knowledge:list"))])
 async def get_knowledge_list(
     request: Request,
