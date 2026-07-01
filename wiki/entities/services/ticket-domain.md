@@ -13,6 +13,7 @@ related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
   - server/modules/ticket/service/ticket_sync_service.py
+  - server/modules/ticket/service/ticket_light_ai_service.py
   - server/modules/ticket/service/ticket_log_pull_service.py
   - server/modules/ticket/service/ticket_ai_analysis_service.py
   - server/modules/ticket/service/ticket_notify_service.py
@@ -53,7 +54,7 @@ graph TD
 - 统计枚举配置统一保存在系统参数 `ticket.sync.automation.statClassification`，由工单同步自动化页面可视化维护；默认枚举来自 `TicketSyncService.DEFAULT_TICKET_STAT_CLASSIFICATIONS`。
 - 2026-07-01 起，细分问题类型也进入同一套统计枚举：`problemPatterns`，工单主表落点为 `problem_pattern_code/problem_pattern_name/problem_pattern_confidence/problem_pattern_source/problem_pattern_verified*`。该字段用于统计“内存泄露”“280开头券为纸质券规则说明”等可治理问题模式，`tags` 仅作为辅助检索，不作为领导看板主统计口径。
 - 工单分类 AI 的 Provider 与提示词正文统一由系统管理中的 AI Provider / AI 提示词维护；`ticket.sync.automation.aiClassification` 只保存场景开关、Provider 编码和提示词编码选择。
-- 历史 `ticket.sync.automation.aiClassification.promptContent` 不再作为新编辑入口，但保存同步配置时会保留并作为旧环境兜底，避免默认模板缺失时影响现有分类统计链路。
+- 2026-07-01 修正提示词优先级：`classify_ticket_statistics` 现优先使用 DB 模板表 `SysAiPromptTemplate` 中的提示词，同步配置中的旧版 `promptContent` 仅作为 DB 模板为空时的兜底，不再覆盖已维护好的新版模板。同步配置保存时若前端显式提交了 `promptContent` 字段（含空字符串），以提交值为准而不再强制恢复旧值；仅在前端未提交该字段时才保留历史值防止数据丢失。
 - 工单列表、状态流转、RCA、外部同步入库和统计页均读取同一套枚举配置；旧 `category_name` 与 `categoryCounts` 继续保留兼容，不再承担新统计主维度。
 - AI 分类统计只允许从启用的固定枚举候选中选择细分问题类型；人工确认的细分问题不会被后续 AI 分类覆盖。
 - 工单列表展示工单类型时只读取 `issue_type_name` 或命中配置的 `issue_type_id`，不再回退 `category_name`，避免历史分类/模块文案误显示为新工单类型。

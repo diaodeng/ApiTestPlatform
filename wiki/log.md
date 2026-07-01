@@ -8,6 +8,16 @@ updated: 2026-07-01
 
 # 操作日志
 
+## [2026-07-01] INGEST-CODE | 修正工单AI分类提示词优先级：DB模板优先于旧版内联提示词
+- 触发：生产环境手动强制重新归类始终使用旧提示词，DB 模板表 `SysAiPromptTemplate` 中的新版提示词不生效。
+- 架构层：工单域 / 轻量 AI 分类统计 / 提示词解析
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/ticket_light_ai_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`wiki/entities/services/ticket-domain.md`、`wiki/log.md`
+- 创建的双向链接：0 对（本次仅更新已有页面内容）
+- 变更传播链：`classify_ticket_statistics` 提示词优先级（override > DB模板 > 默认）→ 改为（DB模板 > override兜底 > 默认）→ 生产环境旧 `promptContent` 不再覆盖新版模板；`_merge_legacy_ai_classification_prompt_content` 保存时改为检查字段是否显式提交，前端提交空字符串时不再强制恢复旧值。
+- 关键结论：根因不是缓存，而是同步配置 JSON 中残留的旧版 `promptContent` 优先级高于 DB 模板表；修正后 DB 模板始终优先，旧版仅作兜底。
+- 总共涉及页面：4
+
 ## [2026-07-01] INGEST-CODE | 工单统计页趋势明细滚动截断修复
 - 触发：用户反馈工单统计页只能滚动到趋势图，趋势明细表虽然存在但无法继续滚动显示。
 - 架构层：Web 控制台 / 工单统计页 / 页面布局滚动容器
