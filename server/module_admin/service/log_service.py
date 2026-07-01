@@ -19,6 +19,7 @@ from module_admin.entity.vo.log_vo import (
 )
 from module_admin.service.dict_service import DictDataService, Request
 from utils.common_util import export_list2excel
+from utils.log_util import get_loguru_level, set_log_level
 
 
 class OperationLogService:
@@ -276,10 +277,15 @@ class LoggerService:
         :return: 所有日志信息列表
         """
         all_logger_list = []
-        # all_logger_list = logging.Logger.manager.loggerDict.keys()
-        # print(all_logger_list)
+
+        # 首先添加 loguru 主日志器（应用实际使用的日志系统）
+        all_logger_list.append({
+            "loggerName": "loguru (主日志)",
+            "level": get_loguru_level(),
+            "handlers": ["loguru sinks (app.log / error.log / mock.log)"],
+        })
+
         root_logger = logging.getLogger()
-        print(root_logger.name)
         all_logger_list.append({
             "loggerName": "ROOT",
             "level": logging.getLevelName(root_logger.level),
@@ -317,5 +323,10 @@ class LoggerService:
             if name == 'ROOT':
                 root_logger = logging.getLogger()
                 root_logger.setLevel(level)
+                # 同步修改 loguru 的日志级别（应用实际使用的日志系统）
+                set_log_level(level)
+            elif name == 'loguru (主日志)':
+                # 直接修改 loguru 级别
+                set_log_level(level)
             else:
                 logging.getLogger(name).setLevel(level)

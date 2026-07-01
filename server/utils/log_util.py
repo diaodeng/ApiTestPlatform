@@ -20,6 +20,13 @@ log_to_console = environ.get("LOG_TO_CONSOLE", "false").lower() == "true"
 level_name = "DEBUG" if env_debug else "INFO"
 use_enqueue = os.name != "nt"
 
+# 存储 sink ID 用于动态修改日志级别
+_main_sink_id = None
+_error_sink_id = None
+_console_sink_id = None
+_current_level = level_name
+
+
 def get_log_path(name="app"):
     date = datetime.now().strftime("%Y-%m-%d")
     day_dir = os.path.join(log_dir, date)
@@ -36,8 +43,9 @@ logger.remove()
 logger.configure(patcher=inject_context)
 
 if log_to_console:
-    logger.add(sys.stderr, format=log_formate)
-logger.add(
+    _console_sink_id = logger.add(sys.stderr, format=log_formate)
+
+_main_sink_id = logger.add(
     get_log_path(),
     format=log_formate,
     level=level_name,
@@ -49,7 +57,7 @@ logger.add(
     enqueue=use_enqueue,
     filter=lambda record: record["extra"].get("name", "") != "mock_request",
 )
-logger.add(
+_error_sink_id = logger.add(
     get_log_path(name="error"),
     format=log_formate,
     level=level_name,
@@ -64,7 +72,7 @@ logger.add(
 
 
 logger_mock = logger.bind(name="mock_request")
-logger_mock.add(
+_mock_sink_id = logger_mock.add(
     get_log_path(name="mock"),
     format=log_formate,
     level=level_name,
@@ -76,6 +84,79 @@ logger_mock.add(
     enqueue=use_enqueue,
     filter=lambda record: record["extra"].get("name", "") == "mock_request",
 )
+
+
+def set_log_level(level: str):
+    """
+    动态修改 loguru 日志级别，支持运行时在 DEBUG/INFO/WARNING/ERROR/CRITICAL 之间切换。
+    主要用于生产环境排查问题时临时开启 DEBUG 日志。
+    """
+    global _current_level, _main_sink_id, _error_sink_id, _console_sink_id, _mock_sink_id
+
+    level = level.upper()
+    if level == _current_level:
+        return
+
+    _current_level = level
+
+    # --- 重建主日志 sink ---
+    if _main_sink_id is not None:
+        logger.remove(_main_sink_id)
+    _main_sink_id = logger.add(
+        get_log_path(),
+        format=log_formate,
+        level=level,
+        rotation="500 MB",
+        diagnose=False,
+        backtrace=False,
+        encoding="utf-8",
+        retention="7 days",
+        enqueue=use_enqueue,
+        filter=lambda record: record["extra"].get("name", "") != "mock_request",
+    )
+
+    # --- 重建错误日志 sink ---
+    if _error_sink_id is not None:
+        logger.remove(_error_sink_id)
+    _error_sink_id = logger.add(
+        get_log_path(name="error"),
+        format=log_formate,
+        level=level,
+        rotation="500 MB",
+        diagnose=False,
+        backtrace=False,
+        encoding="utf-8",
+        retention="30 days",
+        enqueue=use_enqueue,
+        filter=lambda record: record["level"].no >= logging.ERROR,
+    )
+
+    # --- 重建 mock 日志 sink ---
+    if _mock_sink_id is not None:
+        logger_mock.remove(_mock_sink_id)
+    _mock_sink_id = logger_mock.add(
+        get_log_path(name="mock"),
+        format=log_formate,
+        level=level,
+        rotation="500 MB",
+        diagnose=False,
+        backtrace=False,
+        encoding="utf-8",
+        retention="7 days",
+        enqueue=use_enqueue,
+        filter=lambda record: record["extra"].get("name", "") == "mock_request",
+    )
+
+    # --- 同步更新标准 logging 根级别 + InterceptHandler 重定向 ---
+    log_level_num = getattr(logging, level, logging.INFO)
+    logging.root.setLevel(log_level_num)
+
+    logger.info(f"日志级别已动态切换为: {level}")
+
+
+def get_loguru_level() -> str:
+    """获取当前 loguru 日志级别"""
+    return _current_level
 
 
 # 拦截标准 logging 日志，交给 loguru
