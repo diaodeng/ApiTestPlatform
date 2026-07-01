@@ -1140,6 +1140,93 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             "https://duodian.feishu.cn/record/FUY1rD5Cte98g0cx6qYcEOTYnBh",
         )
 
+    def test_query_bitable_records_sends_pagination_in_query_params(self):
+        """查询多维表格记录时，分页参数应放在 URL 查询参数中，避免飞书忽略分页设置。"""
+        config = {
+            "appId": "app_id",
+            "appSecret": "app_secret",
+            "appToken": "app_token",
+            "tableId": "tbl_token",
+            "viewId": "vew_token",
+            "pageSize": 200,
+            "filterFormula": {"conjunction": "and", "conditions": []},
+        }
+        first_response = {
+            "data": {
+                "items": [{"record_id": "rec_001", "fields": {}, "shared_url": "https://example.com/rec_001"}],
+                "has_more": True,
+                "page_token": "token_200",
+            }
+        }
+        second_response = {
+            "data": {
+                "items": [{"record_id": "rec_002", "fields": {}, "shared_url": "https://example.com/rec_002"}],
+                "has_more": False,
+                "page_token": "",
+            }
+        }
+
+        with (
+            patch.object(TicketSyncNotifyService, "_resolve_feishu_auth", return_value=("app_id", "app_secret")),
+            patch.object(TicketSyncNotifyService, "_get_tenant_access_token", return_value="tenant_token"),
+            patch.object(
+                TicketSyncNotifyService,
+                "_request_feishu_json",
+                side_effect=[first_response, second_response],
+            ) as request_json,
+        ):
+            records = TicketSyncNotifyService.query_bitable_records(config)
+
+        self.assertEqual([item["record_id"] for item in records], ["rec_001", "rec_002"])
+        first_call = request_json.call_args_list[0].kwargs
+        second_call = request_json.call_args_list[1].kwargs
+        self.assertEqual(first_call["params"]["page_size"], 200)
+        self.assertNotIn("page_size", first_call["json_body"])
+        self.assertNotIn("page_token", first_call["json_body"])
+        self.assertEqual(second_call["params"]["page_size"], 200)
+        self.assertEqual(second_call["params"]["page_token"], "token_200")
+        self.assertNotIn("page_token", second_call["json_body"])
+
+    def test_query_bitable_records_stops_on_repeated_page_token(self):
+        """飞书返回重复分页令牌时，应停止拉取避免同一页无限循环。"""
+        config = {
+            "appId": "app_id",
+            "appSecret": "app_secret",
+            "appToken": "app_token",
+            "tableId": "tbl_token",
+            "viewId": "vew_token",
+            "pageSize": 200,
+            "filterFormula": "",
+        }
+        first_response = {
+            "data": {
+                "items": [{"record_id": "rec_001", "fields": {}, "shared_url": "https://example.com/rec_001"}],
+                "has_more": True,
+                "page_token": "same_token",
+            }
+        }
+        repeated_response = {
+            "data": {
+                "items": [{"record_id": "rec_001_dup", "fields": {}, "shared_url": "https://example.com/rec_001_dup"}],
+                "has_more": True,
+                "page_token": "same_token",
+            }
+        }
+
+        with (
+            patch.object(TicketSyncNotifyService, "_resolve_feishu_auth", return_value=("app_id", "app_secret")),
+            patch.object(TicketSyncNotifyService, "_get_tenant_access_token", return_value="tenant_token"),
+            patch.object(
+                TicketSyncNotifyService,
+                "_request_feishu_json",
+                side_effect=[first_response, repeated_response, repeated_response],
+            ) as request_json,
+        ):
+            records = TicketSyncNotifyService.query_bitable_records(config)
+
+        self.assertEqual([item["record_id"] for item in records], ["rec_001", "rec_001_dup"])
+        self.assertEqual(request_json.call_count, 2)
+
     def test_bitable_pull_override_adds_default_created_after(self):
         """主动拉取任务未指定时间时，应默认查询当前时间前 1 小时后的记录。"""
         before_call = datetime.now() - timedelta(hours=1, seconds=2)

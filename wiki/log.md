@@ -939,3 +939,12 @@ updated: 2026-07-01
 - 更新页面：web/src/views/ticket/index.vue, web/src/views/ticket/statistics/index.vue
 - 新增后端：module_admin 用户配置模型、DAO、Service、Controller
 - 文档：web/public/docs/2026-06-24-ticket-user-config-columns-stat-blocks.md
+
+## [2026-07-01] INGEST-CODE | 飞书多维表格主动拉取分页循环修复
+- 触发：用户反馈主动拉取实际 4K 多记录但分页日志超过 100 页，且 `page_token` 固定不变，存在无限循环风险。
+- 架构层：工单域 / 飞书多维表格集成 / 同步自动化配置
+- 创建的页面：`web/public/docs/2026-07-01-ticket-bitable-pagination-loop-fix.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_notify_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketSyncNotifyService.query_bitable_records` -> 飞书 `records/search` 分页参数位置 -> 主动拉取 / 按人催办 / 汇总统计多维表格数据源。
+- 总共涉及页面：6

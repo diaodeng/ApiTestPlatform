@@ -1225,21 +1225,24 @@ class TicketSyncNotifyService:
         token = cls._get_tenant_access_token(app_id, app_secret)
         url = f"{cls.FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/records/search"
         page_token = ""
+        seen_page_tokens: set[str] = set()
         all_records: list[dict[str, Any]] = []
         max_pages = 200
 
         for page_index in range(max_pages):
-            params: dict[str, Any] = {"page_size": page_size}
+            query_data: dict[str, Any] = {"page_size": page_size, "with_shared_url": "true"}
             if page_token:
-                params["page_token"] = page_token
+                query_data["page_token"] = page_token
+                seen_page_tokens.add(page_token)
+            params: dict[str, Any] = {}
             if view_id:
                 params["view_id"] = view_id
             if filter_formula:
                 params["filter"] = filter_formula
             params["with_shared_url"] = True
             params["view_type"] = "raw"
-            query_data = {"with_shared_url": "true"}
-            logger.info(f"飞书多维表格查询参数: {json.dumps(params, ensure_ascii=False)}")
+            log_params = {**params, **query_data}
+            logger.info(f"飞书多维表格查询参数: {json.dumps(log_params, ensure_ascii=False)}")
             response_data = (
                 cls._request_feishu_json(
                     method="POST",
@@ -1258,10 +1261,20 @@ class TicketSyncNotifyService:
                 page_records = []
             all_records.extend([item for item in page_records if isinstance(item, dict)])
             has_more = bool(response_data.get("has_more"))
-            page_token = str(response_data.get("page_token") or "").strip()
-            if not has_more or not page_token:
+            next_page_token = str(response_data.get("page_token") or "").strip()
+            if not has_more or not next_page_token:
                 break
-            logger.info(f"飞书多维表格分页拉取中: page={page_index + 1}, accumulated={len(all_records)}")
+            if next_page_token in seen_page_tokens:
+                logger.warning(
+                    f"飞书多维表格分页令牌重复，停止继续拉取避免死循环: "
+                    f"page={page_index + 1}, page_token={next_page_token}, accumulated={len(all_records)}"
+                )
+                break
+            page_token = next_page_token
+            logger.info(
+                f"飞书多维表格分页拉取中: page={page_index + 1}, "
+                f"page_size={page_size}, page_records={len(page_records)}, accumulated={len(all_records)}"
+            )
         all_records = cls._hydrate_bitable_record_shared_urls(
             all_records,
             config=config,
