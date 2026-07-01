@@ -2078,10 +2078,10 @@
                   </el-form-item>
                 </el-col>
                 <el-col :span="24">
-                  <el-form-item label="指定工单ID">
+                  <el-form-item label="指定工单号">
                     <el-input
                       v-model="autoCategoryForm.ticketIdsText"
-                      placeholder="可选，多个 ID 用逗号、空格或换行分隔；填写后优先按指定工单执行"
+                      placeholder="可选，多个 ticketNo 用逗号、空格或换行分隔；填写后优先按指定工单执行"
                     />
                   </el-form-item>
                 </el-col>
@@ -3664,29 +3664,29 @@
     }
   }
 
-  function parseAutoCategoryTicketIds() {
+  function parseAutoCategoryTicketNos() {
     const text = String(autoCategoryForm.ticketIdsText || '').trim();
     if (!text) {
       return null;
     }
-    const ids = Array.from(
+    const nos = Array.from(
       new Set(
         text
           .split(/[\s,，;；]+/)
-          .map((item) => Number(item))
-          .filter((item) => Number.isInteger(item) && item > 0)
+          .map((item) => String(item).trim())
+          .filter((item) => item.length > 0)
       )
     );
-    if (!ids.length) {
-      throw new Error('指定工单ID格式错误');
+    if (!nos.length) {
+      throw new Error('指定工单号格式错误');
     }
-    return ids;
+    return nos;
   }
 
   function buildAutoCategoryPayload(overrides = {}) {
-    const ticketIds = parseAutoCategoryTicketIds();
+    const ticketNos = parseAutoCategoryTicketNos();
     const payload = {
-      ticketIds,
+      ticketNos,
       strategy: autoCategoryForm.strategy,
       aiPromptCode:
         String(autoCategoryForm.aiPromptCode || form.aiClassification.promptCode || '').trim() ||

@@ -686,11 +686,11 @@ class TicketBatchReclassifyRequestModel(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    ticket_ids: list[int] | None = Field(default=None, description="指定重归类的工单ID列表，留空时按分页扫描")
+    ticket_nos: list[str] | None = Field(default=None, description="指定重归类的工单号列表(ticketNo)，留空时按分页扫描")
     all_tickets: bool = Field(default=False, description="是否忽略分页直接扫描全部工单")
     only_uncategorized: bool = Field(default=False, description="是否仅处理未归类工单")
-    page_num: int = Field(default=1, description="分页页码，ticketIds 为空时生效")
-    page_size: int = Field(default=100, description="分页大小，ticketIds 为空时生效")
+    page_num: int = Field(default=1, description="分页页码，ticketNos 为空时生效")
+    page_size: int = Field(default=100, description="分页大小，ticketNos 为空时生效")
     strategy: str = Field(default="ai", description="归类策略：ai/regex")
     ai_prompt_code: str | None = Field(default=None, description="AI归类提示词编码，留空走系统配置")
     regex_rules: list[dict[str, Any]] | None = Field(
@@ -705,15 +705,12 @@ class TicketBatchReclassifyRequestModel(BaseModel):
         校验批量重归类请求参数。
         :return: 当前模型。
         """
-        normalized_ids: list[int] = []
-        for item in self.ticket_ids or []:
-            try:
-                ticket_id = int(item)
-            except Exception:
-                continue
-            if ticket_id > 0 and ticket_id not in normalized_ids:
-                normalized_ids.append(ticket_id)
-        self.ticket_ids = normalized_ids or None
+        normalized_nos: list[str] = []
+        for item in self.ticket_nos or []:
+            item_str = str(item).strip()
+            if item_str and item_str not in normalized_nos:
+                normalized_nos.append(item_str)
+        self.ticket_nos = normalized_nos or None
         self.all_tickets = bool(self.all_tickets)
         self.only_uncategorized = bool(self.only_uncategorized)
         self.page_num = max(int(self.page_num or 1), 1)

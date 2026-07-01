@@ -7801,7 +7801,7 @@ class TicketSyncService:
             f"force_reclassify={bool(getattr(request, 'force_reclassify', False))}, "
             f"page_num={int(getattr(request, 'page_num', 1) or 1)}, "
             f"page_size={int(getattr(request, 'page_size', 100) or 100)}, "
-            f"ticket_ids_count={len(getattr(request, 'ticket_ids', None) or [])}, "
+            f"ticket_nos_count={len(getattr(request, 'ticket_nos', None) or [])}, "
             f"regex_rules_count={len(regex_rules or [])}, "
             f"ai_prompt_code={ai_prompt_code or '-'}"
         )
@@ -7815,8 +7815,8 @@ class TicketSyncService:
             )
         base_query = base_query.order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc())
 
-        if getattr(request, "ticket_ids", None):
-            query = base_query.filter(Ticket.ticket_id.in_(request.ticket_ids))
+        if getattr(request, "ticket_nos", None):
+            query = base_query.filter(Ticket.ticket_no.in_(request.ticket_nos))
             total = query.count()
             tickets = query.all()
         else:

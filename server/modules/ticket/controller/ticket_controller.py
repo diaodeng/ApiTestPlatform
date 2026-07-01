@@ -1084,7 +1084,7 @@ def batch_reclassify_sync_tickets(
     """
     批量重跑工单自动分类。
     :param request: 请求对象。
-    :param query_object: 批量重归类参数，支持指定 ticketIds 或按分页扫描。
+    :param query_object: 批量重归类参数，支持指定 ticketNos（ticketNo 列表）或按分页扫描。
     :param query_db: 数据库会话。
     :param current_user: 当前登录用户。
     :return: 批量重归类执行结果。
