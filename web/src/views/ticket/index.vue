@@ -2661,7 +2661,7 @@ function createDefaultTicketForm() {
     rootCause: undefined,
     solution: undefined,
     needLogPull: false,
-    autoTranslate: true,
+    autoTranslate: false,
     logPullConfig: createDefaultLogPullForm()
   }
 }
@@ -3376,7 +3376,7 @@ function handleUpdate(row) {
       ?? ticketData.extraData?.manual_automation?.auto_translate
       ?? ticketData.autoTranslate
       ?? ticketData.auto_translate
-      ?? true
+      ?? false
     form.value.issueTypeId = ticketData.issueTypeId || ticketData.issue_type_id || ''
     form.value.issueTypeName = ticketData.issueTypeName || ticketData.issue_type_name || ''
     form.value.isProblem = ticketData.isProblem ?? ticketData.is_problem ?? undefined
