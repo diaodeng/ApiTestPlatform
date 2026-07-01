@@ -968,6 +968,20 @@ class TicketSyncService:
         :param update_by: 更新人
         :return: (推送结果, 刷新后的工单, 最新元数据)
         """
+        # 检查主动拉取任务级群消息开关（bitable_pull.sendGroupMessage）
+        ticket_extra = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+        bitable_pull_meta = ticket_extra.get("bitable_pull") if isinstance(ticket_extra.get("bitable_pull"), dict) else {}
+        if bitable_pull_meta.get("sendGroupMessage") is False:
+            logger.info(
+                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
+                f"reason=主动拉取任务级参数关闭了群消息推送"
+            )
+            return (
+                {"skipped": True, "skipReason": "主动拉取任务级参数关闭了群消息推送", "scene": scene},
+                ticket,
+                meta,
+            )
+
         skip_by_status, status_skip_reason = cls._should_skip_auto_group_push_by_status(
             ticket=ticket,
             group_config=group_config,
@@ -1651,7 +1665,10 @@ class TicketSyncService:
             "sortField": "",
             "includeRecordUrl": True,
             "createdAfter": "",
+            "createdBefore": "",
             "forceSync": False,
+            "sendGroupMessage": None,
+            "autoAppendTimeFilter": True,
             "automation": {
                 "autoIdentify": True,
                 "autoLogPull": False,
@@ -2272,7 +2289,14 @@ class TicketSyncService:
         config["sortField"] = str(config.get("sortField") or "").strip()
         config["includeRecordUrl"] = cls._to_bool(config.get("includeRecordUrl"), True)
         config["createdAfter"] = str(config.get("createdAfter") or "").strip()
+        config["createdBefore"] = str(config.get("createdBefore") or "").strip()
         config["forceSync"] = cls._to_bool(config.get("forceSync"), False)
+        raw_send_group = config.get("sendGroupMessage")
+        if raw_send_group is None or (isinstance(raw_send_group, str) and str(raw_send_group).strip() == ""):
+            config["sendGroupMessage"] = None
+        else:
+            config["sendGroupMessage"] = cls._to_bool(raw_send_group)
+        config["autoAppendTimeFilter"] = cls._to_bool(config.get("autoAppendTimeFilter"), True)
         config["fieldMappings"] = cls._normalize_bitable_field_mappings(config.get("fieldMappings"))
         automation = config.get("automation") if isinstance(config.get("automation"), dict) else {}
         config["automation"] = {
@@ -2401,59 +2425,62 @@ class TicketSyncService:
         *,
         filter_formula: Any,
         created_after: datetime | None,
-        updated_at_field: str,
-        create_time_field: str,
+        created_before: datetime | None = None,
+        updated_at_field: str = "",
+        auto_append_time_filter: bool = True,
     ) -> list[dict[str, Any]]:
         """
         构建主动拉取时间窗口对应的飞书 records/search filter 列表。
 
         :param filter_formula: 用户配置的 filter 条件。
         :param created_after: 时间窗口下限。
+        :param created_before: 时间窗口上限。
         :param updated_at_field: 多维表格更新时间字段名。
-        :param create_time_field: 多维表格创建时间字段名。
+        :param auto_append_time_filter: True 时保持现有行为（自动追加过去1小时窗口）；
+            False 时使用精确时间比较（isGreater / isLess）。
         :return: 一个或多个 filter 条件对象；多个对象表示需要分别请求飞书后按 record_id 合并。
         """
         parsed_filter = cls._parse_bitable_filter_config(filter_formula)
-        if not created_after:
+
+        if auto_append_time_filter and not created_after:
             return [parsed_filter] if parsed_filter else []
 
-        filter_millis = cls._datetime_to_bitable_filter_millis(created_after)
-        filter_value = ["ExactDate", f"{filter_millis}"]
-        time_field_names = {str(updated_at_field or "").strip(), str(create_time_field or "").strip()}
-        time_field_names = {item for item in time_field_names if item}
-
+        time_field = str(updated_at_field or "").strip()
         time_conditions = []
-        for field_name in (updated_at_field, create_time_field):
-            normalized_field = str(field_name or "").strip()
-            if not normalized_field:
-                continue
+        if created_after:
+            start_millis = cls._datetime_to_bitable_filter_millis(created_after)
             time_conditions.append(
                 {
-                    "field_name": normalized_field,
+                    "field_name": time_field,
                     "operator": "isGreater",
-                    "value": filter_value,
+                    "value": ["ExactDate", f"{start_millis}"],
+                }
+            )
+        if created_before:
+            end_millis = cls._datetime_to_bitable_filter_millis(created_before)
+            time_conditions.append(
+                {
+                    "field_name": time_field,
+                    "operator": "isLess",
+                    "value": ["ExactDate", f"{end_millis}"],
                 }
             )
 
         if not parsed_filter:
-            return [{"conjunction": "or", "conditions": time_conditions}]
+            return [{"conjunction": "and", "conditions": time_conditions}] if time_conditions else []
 
-        normalized_filter = cls._fill_dynamic_time_filter_values(
-            parsed_filter,
-            time_field_names=time_field_names,
-            filter_value=filter_value,
-        )
-        if isinstance(normalized_filter.get("children"), list):
+        if isinstance(parsed_filter.get("children"), list):
             if time_conditions:
-                normalized_filter["children"].append(
+                parsed_filter["children"].append(
                     {
-                        "conjunction": "or",
+                        "conjunction": "and",
                         "conditions": time_conditions,
                     }
                 )
-            return [normalized_filter]
+            return [parsed_filter]
 
-        return [normalized_filter]
+        return [parsed_filter]
+
 
     @classmethod
     def _query_bitable_pull_records(
@@ -3112,29 +3139,50 @@ class TicketSyncService:
                 "configErrors": required_missing,
             }
 
-        raw_created_after = str(pull_config.get("createdAfter") or "").strip()
-        created_after = cls._resolve_bitable_pull_created_after(raw_created_after)
+        auto_append = cls._to_bool(pull_config.get("autoAppendTimeFilter"), True)
+        raw_created_after = str(pull_config.get("createdAfter") or "").strip() if not auto_append else None
+        raw_created_before = str(pull_config.get("createdBefore") or "").strip() if not auto_append else None
+
+        created_after = cls._resolve_bitable_pull_created_after(raw_created_after) if raw_created_after else None
+        created_before = cls._resolve_bitable_pull_created_after(raw_created_before) if raw_created_before else None
+
         if raw_created_after and not created_after:
             return {
                 "triggerSource": trigger_source,
                 "skipped": True,
-                "skipReason": "主动拉取创建时间格式错误",
+                "skipReason": "主动拉取开始时间格式错误",
                 "configErrors": ["createdAfter"],
                 "createdAfter": raw_created_after,
             }
-        if not created_after:
-            created_after = datetime.now() - timedelta(hours=1)
-            pull_config["createdAfter"] = created_after.strftime("%Y-%m-%d %H:%M:%S")
+        if raw_created_before and not created_before:
+            return {
+                "triggerSource": trigger_source,
+                "skipped": True,
+                "skipReason": "主动拉取结束时间格式错误",
+                "configErrors": ["createdBefore"],
+                "createdBefore": raw_created_before,
+            }
+
+        if auto_append:
+            # 现有行为：无显式时间时默认过滤过去 1 小时
+            if not created_after and not created_before:
+                created_after = datetime.now() - timedelta(hours=1)
+                pull_config["createdAfter"] = created_after.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            # 精确模式：不自动追加，仅使用显式传入的时间参数
+            if not created_after and not created_before:
+                created_after = None
+
         pull_filters: list[dict[str, Any]] = []
-        if created_after:
-            create_time_field = cls._resolve_bitable_pull_create_time_field(pull_config.get("fieldMappings") or [])
+        if created_after or created_before:
             updated_at_field = str(pull_config.get("updatedAtField") or "").strip() or "更新时间"
             try:
                 pull_filters = cls._build_bitable_pull_time_filters(
                     filter_formula=pull_config.get("filterFormula"),
                     created_after=created_after,
+                    created_before=created_before,
                     updated_at_field=updated_at_field,
-                    create_time_field=create_time_field,
+                    auto_append_time_filter=auto_append,
                 )
             except ValueError as exc:
                 return {
@@ -3142,20 +3190,27 @@ class TicketSyncService:
                     "skipped": True,
                     "skipReason": str(exc),
                     "configErrors": ["filterFormula"],
-                    "createdAfter": created_after.strftime("%Y-%m-%d %H:%M:%S"),
+                    "createdAfter": created_after.strftime("%Y-%m-%d %H:%M:%S") if created_after else "",
+                    "createdBefore": created_before.strftime("%Y-%m-%d %H:%M:%S") if created_before else "",
                 }
+            time_info_parts = []
+            if created_after:
+                time_info_parts.append(f"created_after={created_after.strftime('%Y-%m-%d %H:%M:%S')}")
+            if created_before:
+                time_info_parts.append(f"created_before={created_before.strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info(
                 f"飞书多维表格主动拉取云端时间过滤: trigger={trigger_source}, "
-                f"created_after={created_after.strftime('%Y-%m-%d %H:%M:%S')}, "
-                f"updated_at_field={updated_at_field}, create_time_field={create_time_field}"
+                f"{', '.join(time_info_parts)}, auto_append={auto_append}, "
+                f"updated_at_field={updated_at_field}"
             )
         else:
             try:
                 pull_filters = cls._build_bitable_pull_time_filters(
                     filter_formula=pull_config.get("filterFormula"),
                     created_after=None,
+                    created_before=None,
                     updated_at_field="",
-                    create_time_field="",
+                    auto_append_time_filter=auto_append,
                 )
             except ValueError as exc:
                 return {
@@ -3164,7 +3219,11 @@ class TicketSyncService:
                     "skipReason": str(exc),
                     "configErrors": ["filterFormula"],
                     "createdAfter": "",
+                    "createdBefore": "",
                 }
+            logger.info(
+                f"飞书多维表格主动拉取无时间过滤: trigger={trigger_source}, auto_append={auto_append}"
+            )
         records = cls._query_bitable_pull_records(pull_config, pull_filters)
         queried_count = len(records)
         force_sync = cls._to_bool(pull_config.get("forceSync"), False)
@@ -4806,7 +4865,7 @@ class TicketSyncService:
         if record_url:
             external_field_mapping["bitableRecordUrl"] = record_url
         extra_data["external_field_mapping"] = external_field_mapping
-        extra_data["bitable_pull"] = {
+        bitable_pull_meta: dict[str, Any] = {
             "recordId": record_id,
             "snapshotHash": cls._build_bitable_pull_snapshot_hash(
                 source_payload=payload,
@@ -4817,6 +4876,10 @@ class TicketSyncService:
             "sourceSystem": payload["source"]["system"],
             "pulledAt": cls._now_iso(),
         }
+        send_group_override = config.get("sendGroupMessage") if isinstance(config, dict) else None
+        if send_group_override is not None:
+            bitable_pull_meta["sendGroupMessage"] = bool(send_group_override)
+        extra_data["bitable_pull"] = bitable_pull_meta
         payload["extraData"] = extra_data
         try:
             return TicketExternalSyncUpsertModel.model_validate(payload)

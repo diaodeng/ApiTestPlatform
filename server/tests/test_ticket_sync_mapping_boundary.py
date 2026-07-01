@@ -1598,14 +1598,13 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(email, "lisi@example.com")
 
     def test_bitable_pull_records_filter_builds_default_cloud_time_filter(self):
-        """主动拉取应构造飞书云端创建时间和更新时间过滤条件。"""
+        """主动拉取应构造飞书云端更新时间过滤条件（仅更新时间字段）。"""
         filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(datetime(2026, 6, 22, 10, 48, 0))
 
         filters = TicketSyncService._build_bitable_pull_time_filters(
             filter_formula="",
             created_after=datetime(2026, 6, 22, 10, 48, 0),
             updated_at_field="更新时间",
-            create_time_field="创建时间",
         )
 
         self.assertEqual(
@@ -1619,18 +1618,13 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                             "operator": "isGreater",
                             "value": ["ExactDate", f"{filter_millis}"],
                         },
-                        {
-                            "field_name": "创建时间",
-                            "operator": "isGreater",
-                            "value": ["ExactDate", f"{filter_millis}"],
-                        },
                     ],
                 }
             ],
         )
 
     def test_bitable_pull_time_filter_nested_appends_outer_child_and_fills_inner_values(self):
-        """嵌套 filter 应在最外层 children 追加时间范围，并递归补齐内部时间字段值。"""
+        """嵌套 filter 应在最外层 children 追加时间范围，并递归补齐内部时间字段值（仅更新时间）。"""
         created_after = datetime(2026, 6, 24, 0, 59, 0)
         filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(created_after)
         filter_formula = {
@@ -1661,18 +1655,16 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             filter_formula=filter_formula,
             created_after=created_after,
             updated_at_field="更新时间",
-            create_time_field="创建时间",
         )
 
         self.assertEqual(len(filters), 1)
         children = filters[0]["children"]
         self.assertEqual(len(children), 3)
         self.assertEqual(children[0]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
-        self.assertEqual(children[1]["children"][0]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
         self.assertEqual(children[2]["conjunction"], "or")
         self.assertEqual(
             [condition["field_name"] for condition in children[2]["conditions"]],
-            ["更新时间", "创建时间"],
+            ["更新时间"],
         )
 
     def test_bitable_pull_time_filter_flat_only_fills_configured_time_values(self):
@@ -1691,7 +1683,6 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             filter_formula=filter_formula,
             created_after=created_after,
             updated_at_field="更新时间",
-            create_time_field="创建时间",
         )
 
         self.assertEqual(len(filters), 1)
