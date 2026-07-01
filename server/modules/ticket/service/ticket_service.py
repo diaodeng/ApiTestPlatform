@@ -2756,10 +2756,10 @@ class TicketService:
         module_codes: Any = None,
     ) -> dict:
         """
-        获取工单实时统计数据。
+        获取工单实时统计数据，时间范围按工单提交时间过滤。
         :param query_db: 数据库会话
-        :param begin_time: 开始时间
-        :param end_time: 结束时间
+        :param begin_time: 提交开始时间
+        :param end_time: 提交结束时间
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤
@@ -2788,10 +2788,10 @@ class TicketService:
         problem_pattern_codes: Any = None,
     ) -> dict:
         """
-        获取工单趋势统计数据。
+        获取工单趋势统计数据，新增与存量按工单提交时间计算。
         :param query_db: 数据库会话
-        :param begin_time: 开始时间
-        :param end_time: 结束时间
+        :param begin_time: 提交开始时间
+        :param end_time: 提交结束时间
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤

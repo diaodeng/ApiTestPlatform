@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <el-form :model="queryParams" ref="queryRef" :inline="true">
-      <el-form-item label="时间范围">
+      <el-form-item label="提交时间范围">
         <el-date-picker
           v-model="dateRange"
           value-format="YYYY-MM-DD"

@@ -16,6 +16,14 @@ updated: 2026-07-01
 - 变更传播链：`AppMain` 滚动容器 + 统计页根节点继承全局 `app-container flex: 1` -> 页面内容被压缩为一屏高度 -> 趋势明细表不可达；本次改为统计页局部按内容自然撑高。
 - 关键结论：问题是页面布局样式冲突，不是趋势接口或表格数据异常；统计页作为长内容页面不应继续继承全局 `flex: 1` 高度占位。
 
+## [2026-07-01] INGEST-CODE | 工单统计时间口径改为提交时间
+- 触发：用户确认工单统计应关注用户提交时间，外部同步工单的提交时间可能早于本地入库时间。
+- 架构层：Ticket 统计 DAO / 统计服务接口 / Web 统计页
+- 创建的页面：`web/public/docs/2026-07-01-ticket-statistics-submit-time.md`
+- 更新的页面：`server/modules/ticket/dao/ticket_dao.py`、`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/controller/ticket_controller.py`、`web/src/views/ticket/statistics/index.vue`、`web/public/docs/update_history.md`、`wiki/log.md`
+- 变更传播链：统计概览时间过滤和趋势新增/存量分桶统一使用工单提交时间，优先 `extra_data.external_sync.externalCreateTime`，其次 `extra_data.external_sync.source.externalCreateTime`，最后回退 `ticket.create_time`；关闭/解决趋势仍使用 `closed_at`、`resolved_at`。
+- 关键结论：当前统计页原口径确实使用本地 `Ticket.create_time`；本次改为用户提交时间后，外部同步历史工单会归属到真实提交日期。
+
 ## [2026-07-01] INGEST-CODE | 工单细分问题类型与趋势统计
 - 触发：用户希望固定枚举化“内存泄露”“280开头券为纸质券规则说明”等细分原因，并按时间趋势展示支持类、Bug、非 Bug、模块和具体问题变化。
 - 架构层：工单域 / 分类统计 / 轻量 AI 自动分类 / Web 统计页

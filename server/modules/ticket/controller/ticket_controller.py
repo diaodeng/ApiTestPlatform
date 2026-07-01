@@ -2525,9 +2525,9 @@ async def get_ticket_statistics(
     query_db: Session = Depends(get_db),
 ):
     """
-    获取工单统计接口。
+    获取工单统计接口，时间范围按工单提交时间统计。
     :param request: 请求对象
-    :param query: 时间范围、项目ID、模块ID和模块业务码筛选参数
+    :param query: 提交时间范围、项目ID、模块ID和模块业务码筛选参数
     :param query_db: 数据库会话
     :return: 总量、平均处理耗时、状态分布、分类分布和人员处理量
     """
@@ -2554,9 +2554,9 @@ async def get_ticket_statistics_trend(
     query_db: Session = Depends(get_db),
 ):
     """
-    获取工单趋势统计接口。
+    获取工单趋势统计接口，新增和存量按工单提交时间归属趋势桶。
     :param request: 请求对象
-    :param query: 时间范围、项目、模块、粒度和细分问题筛选参数
+    :param query: 提交时间范围、项目、模块、粒度和细分问题筛选参数
     :param query_db: 数据库会话
     :return: 按天、周或月分桶的新增、关闭、存量和分类趋势
     """

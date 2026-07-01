@@ -6,6 +6,7 @@
 4. 工单统计页新增细分问题分布、趋势统计曲线和趋势明细表，显示配置可单独控制趋势图和趋势表，新增接口 `GET /ticket/statistics/trend`。
 5. 新增说明文档：`web/public/docs/2026-07-01-ticket-problem-pattern-trend-statistics.md`。
 6. 修复工单统计页趋势区域滚动截断：统计页根容器改为按内容自然撑高，趋势明细表可继续向下滚动查看。
+7. 工单统计页时间范围和趋势新增/存量口径改为工单提交时间：外部 `externalCreateTime` 优先，缺失时回退本地 `create_time`；新增说明文档 `web/public/docs/2026-07-01-ticket-statistics-submit-time.md`。
 
 ## 2026-06-30
 

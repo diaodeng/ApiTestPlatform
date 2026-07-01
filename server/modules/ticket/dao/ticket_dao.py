@@ -206,6 +206,19 @@ def _ticket_submit_time_expr():
     return func.coalesce(cast(resolved_external_create_time_expr, SqlDateTime), Ticket.create_time)
 
 
+def _resolve_ticket_submit_time(ticket: Ticket) -> datetime | None:
+    """
+    解析单条工单的提交时间（外部 createTime 优先，缺失时回退本地 create_time）。
+    :param ticket: 工单实体
+    :return: 工单提交时间
+    """
+    extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+    external_sync = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
+    source = external_sync.get("source") if isinstance(external_sync.get("source"), dict) else {}
+    external_create_time = external_sync.get("externalCreateTime") or source.get("externalCreateTime")
+    return _parse_sync_time(external_create_time) or ticket.create_time
+
+
 def _build_ticket_process_status_filter(latest_log_status, latest_ai_status, process_status: str):
     """
     根据工单处理状态构造过滤条件。
@@ -1097,10 +1110,10 @@ class TicketDao:
         module_codes: list[str] | None = None,
     ) -> dict:
         """
-        实时统计指定时间范围内的工单数量、分类和人员处理量。
+        实时统计指定提交时间范围内的工单数量、分类和人员处理量。
         :param db: 数据库会话
-        :param begin_time: 开始时间
-        :param end_time: 结束时间
+        :param begin_time: 提交开始时间，优先匹配外部同步提交时间
+        :param end_time: 提交结束时间，优先匹配外部同步提交时间
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤
@@ -1112,10 +1125,11 @@ class TicketDao:
             if module_codes
             else []
         )
+        submit_time_expr = _ticket_submit_time_expr()
         if begin_time:
-            filters.append(Ticket.create_time >= begin_time)
+            filters.append(submit_time_expr >= begin_time)
         if end_time:
-            filters.append(Ticket.create_time <= end_time)
+            filters.append(submit_time_expr <= end_time)
         if project_ids:
             filters.append(Ticket.project_id.in_(project_ids))
         if module_ids:
@@ -1304,10 +1318,10 @@ class TicketDao:
         problem_pattern_codes: list[str] | None = None,
     ) -> dict:
         """
-        实时计算工单趋势，面向治理看板展示新增、关闭、存量和关键分类变化。
+        实时计算工单趋势，面向治理看板展示按提交时间归属的新增、关闭、存量和关键分类变化。
         :param db: 数据库会话
-        :param begin_time: 开始时间
-        :param end_time: 结束时间
+        :param begin_time: 提交开始时间，优先匹配外部同步提交时间
+        :param end_time: 提交结束时间，优先匹配外部同步提交时间
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤
@@ -1333,20 +1347,22 @@ class TicketDao:
                 filters.append(Ticket.ticket_id == -1)
         if problem_pattern_codes:
             filters.append(Ticket.problem_pattern_code.in_(problem_pattern_codes))
+        submit_time_expr = _ticket_submit_time_expr()
         if end_time:
-            filters.append(Ticket.create_time <= end_time)
+            filters.append(submit_time_expr <= end_time)
 
         rows = (
             db.query(Ticket)
             .filter(and_(*filters))
-            .order_by(Ticket.create_time.asc(), Ticket.ticket_id.asc())
+            .order_by(submit_time_expr.asc(), Ticket.ticket_id.asc())
             .all()
         )
+        submit_time_map = {ticket.ticket_id: _resolve_ticket_submit_time(ticket) for ticket in rows}
         bucket_map: dict[date, dict[str, Any]] = {}
         event_times = [
             item
             for ticket in rows
-            for item in (ticket.create_time, ticket.closed_at, ticket.resolved_at)
+            for item in (submit_time_map.get(ticket.ticket_id), ticket.closed_at, ticket.resolved_at)
             if isinstance(item, datetime)
         ]
         if not event_times:
@@ -1390,7 +1406,7 @@ class TicketDao:
             return bucket_map.get(_bucket_start(value, normalized_granularity))
 
         for ticket in rows:
-            create_bucket = get_bucket_for_time(getattr(ticket, "create_time", None))
+            create_bucket = get_bucket_for_time(submit_time_map.get(ticket.ticket_id))
             if create_bucket:
                 create_bucket["new_count"] += 1
                 if ticket.is_problem is True:
@@ -1437,8 +1453,8 @@ class TicketDao:
             backlog_count = sum(
                 1
                 for ticket in rows
-                if isinstance(ticket.create_time, datetime)
-                and ticket.create_time < next_bucket_time
+                if isinstance(submit_time_map.get(ticket.ticket_id), datetime)
+                and submit_time_map[ticket.ticket_id] < next_bucket_time
                 and (not isinstance(ticket.closed_at, datetime) or ticket.closed_at >= next_bucket_time)
             )
             series.append(
