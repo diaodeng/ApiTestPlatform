@@ -1086,6 +1086,7 @@ class TicketLightAiService:
             response.raise_for_status()
             response_data = response.json()
         content = cls._extract_response_text(response_data)
+        logger.debug(f"调用AI返回结果：{content}")
         if not str(content or "").strip():
             raise ValueError("AI接口未返回可解析的内容")
         return str(content).strip()
@@ -1663,11 +1664,13 @@ class TicketLightAiService:
             f"prompt_code={prompt_code}, model_name={str(getattr(provider, 'model_name', '') or '').strip() or '-'}, "
             f"source_type={source_type}, source_ref={source_ref}"
         )
+        logger.debug(f"工单AI分类统计参数：system_prompt： {system_prompt}, user_prompt: {user_prompt}")
         try:
             response_text = str(
                 cls._call_model_api(provider=provider, system_prompt=system_prompt, user_prompt=user_prompt)
                 or ""
             ).strip()
+
             parsed_payload = cls._extract_json_object(response_text)
             normalized_result = cls._normalize_structured_classification_result(
                 parsed_payload,
@@ -1681,9 +1684,10 @@ class TicketLightAiService:
                 response_text=response_text,
                 response_payload=normalized_result,
             )
+
             logger.info(
                 f"工单AI分类统计完成: execution_id={execution_id}, source_type={source_type}, "
-                f"source_ref={source_ref}, result_keys={list(normalized_result.keys())}"
+                f"source_ref={source_ref}, result={json.dumps(parsed_payload, ensure_ascii=False, default=str)}"
             )
             return normalized_result, {
                 "provider_code": provider_code,
