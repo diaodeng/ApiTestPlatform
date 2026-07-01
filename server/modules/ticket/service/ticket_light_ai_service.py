@@ -1617,13 +1617,11 @@ class TicketLightAiService:
             cls._finish_execution_record(db, execution_id, status="skipped", error_message="Provider不存在或已停用")
             return empty_result, {"provider_code": provider_code, "prompt_code": prompt_code, "skipped": True}
 
-        prompt_content = str(override_prompt_content or "").strip()
-        prompt_templates = []
-        if not prompt_content:
-            prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
-        if prompt_content:
-            system_prompt = prompt_content
-        elif prompt_templates:
+        # 优先使用 DB 模板表（SysAiPromptTemplate）中的新版提示词；
+        # override_prompt_content（同步配置中的旧版内联 promptContent）仅作为 DB 模板为空时的兜底。
+        prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
+        legacy_prompt_content = str(override_prompt_content or "").strip()
+        if prompt_templates:
             prompt_template = prompt_templates[0]
             system_prompt = AiPromptTemplateService.render_prompt_text(
                 prompt_template["promptContent"],
@@ -1634,6 +1632,8 @@ class TicketLightAiService:
                     "stat_options": json.dumps(options, ensure_ascii=False, default=str),
                 },
             )
+        elif legacy_prompt_content:
+            system_prompt = legacy_prompt_content
         else:
             system_prompt = cls.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT
         user_prompt = cls._build_structured_classification_prompt(
