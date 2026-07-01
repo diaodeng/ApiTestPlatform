@@ -2,7 +2,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import DateTime as SqlDateTime
-from sqlalchemy import and_, cast, func, or_, select
+from sqlalchemy import and_, case, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from module_admin.entity.do.user_do import SysUser
@@ -254,6 +254,127 @@ def _build_ticket_process_status_filter(latest_log_status, latest_ai_status, pro
     return True
 
 
+def _normalize_ticket_sort_order(value: str | None) -> str:
+    """
+    归一化工单列表排序方向。
+    :param value: 前端传入的排序方向，兼容 Element Plus 的 ascending/descending
+    :return: asc 或 desc，默认 desc
+    """
+    text = str(value or "").strip().lower()
+    if text in {"asc", "ascending"}:
+        return "asc"
+    if text in {"desc", "descending"}:
+        return "desc"
+    return "desc"
+
+
+def _ticket_process_status_sort_expr(latest_log_status, latest_ai_status):
+    """
+    构造工单处理状态排序表达式，与列表展示的 AI 优先、日志次之规则保持一致。
+    :param latest_log_status: 最新日志拉取状态表达式
+    :param latest_ai_status: 最新 AI 分析状态表达式
+    :return: 可排序的处理状态表达式
+    """
+    return case(
+        (latest_ai_status.in_(["created", "running"]), "ai_running"),
+        (latest_ai_status == "success", "ai_success"),
+        (latest_ai_status.in_(["failed", "canceled"]), "ai_failed"),
+        (latest_log_status.is_(None), "no_log_pull"),
+        (latest_log_status == "success", "ai_not_analyzed"),
+        (latest_log_status.in_(["failed", "exception"]), "log_pull_failed"),
+        else_=latest_log_status,
+    )
+
+
+def _ticket_sort_expression_map(submit_time_expr, latest_log_status, latest_ai_status):
+    """
+    构造工单列表允许排序字段白名单。
+    :param submit_time_expr: 提交时间 SQL 表达式
+    :param latest_log_status: 最新日志拉取状态表达式
+    :param latest_ai_status: 最新 AI 分析状态表达式
+    :return: 排序字段到 SQLAlchemy 表达式的映射
+    """
+    process_status_expr = _ticket_process_status_sort_expr(latest_log_status, latest_ai_status)
+    return {
+        "ticketNo": Ticket.ticket_no,
+        "ticket_no": Ticket.ticket_no,
+        "title": Ticket.title,
+        "status": Ticket.status,
+        "processStatus": process_status_expr,
+        "process_status": process_status_expr,
+        "project": Ticket.merchant_name,
+        "projectName": Ticket.merchant_name,
+        "project_name": Ticket.merchant_name,
+        "moduleName": Ticket.module_name,
+        "module_name": Ticket.module_name,
+        "issueType": Ticket.issue_type_name,
+        "issueTypeId": Ticket.issue_type_id,
+        "issue_type_id": Ticket.issue_type_id,
+        "issueTypeName": Ticket.issue_type_name,
+        "issue_type_name": Ticket.issue_type_name,
+        "isProblem": Ticket.is_problem,
+        "is_problem": Ticket.is_problem,
+        "rootCauseType": Ticket.root_cause_type,
+        "root_cause_type": Ticket.root_cause_type,
+        "solutionType": Ticket.solution_type,
+        "solution_type": Ticket.solution_type,
+        "resolution": Ticket.resolution_name,
+        "resolutionCode": Ticket.resolution_code,
+        "resolution_code": Ticket.resolution_code,
+        "resolutionName": Ticket.resolution_name,
+        "resolution_name": Ticket.resolution_name,
+        "problemPattern": Ticket.problem_pattern_name,
+        "problemPatternCode": Ticket.problem_pattern_code,
+        "problem_pattern_code": Ticket.problem_pattern_code,
+        "problemPatternName": Ticket.problem_pattern_name,
+        "problem_pattern_name": Ticket.problem_pattern_name,
+        "customerPriority": Ticket.customer_priority,
+        "customer_priority": Ticket.customer_priority,
+        "internalPriority": Ticket.internal_priority,
+        "internal_priority": Ticket.internal_priority,
+        "source": Ticket.source,
+        "reporterName": Ticket.reporter_name,
+        "reporter_name": Ticket.reporter_name,
+        "firstLineAssigneeName": Ticket.first_line_assignee_name,
+        "first_line_assignee_name": Ticket.first_line_assignee_name,
+        "internalOwnerName": Ticket.internal_owner_name,
+        "internal_owner_name": Ticket.internal_owner_name,
+        "currentAssigneeName": Ticket.current_assignee_name,
+        "current_assignee_name": Ticket.current_assignee_name,
+        "submitTime": submit_time_expr,
+        "submit_time": submit_time_expr,
+        "createTime": Ticket.create_time,
+        "create_time": Ticket.create_time,
+        "updateTime": Ticket.update_time,
+        "update_time": Ticket.update_time,
+        "closedAt": Ticket.closed_at,
+        "closed_at": Ticket.closed_at,
+        "resolvedAt": Ticket.resolved_at,
+        "resolved_at": Ticket.resolved_at,
+        "totalProcessSeconds": Ticket.total_process_seconds,
+        "total_process_seconds": Ticket.total_process_seconds,
+    }
+
+
+def _build_ticket_order_by(query: TicketQueryModel, submit_time_expr, latest_log_status, latest_ai_status) -> list:
+    """
+    根据查询参数构造工单列表排序表达式。
+    :param query: 工单查询参数
+    :param submit_time_expr: 提交时间 SQL 表达式
+    :param latest_log_status: 最新日志拉取状态表达式
+    :param latest_ai_status: 最新 AI 分析状态表达式
+    :return: SQLAlchemy order_by 表达式列表
+    """
+    sort_map = _ticket_sort_expression_map(submit_time_expr, latest_log_status, latest_ai_status)
+    sort_field = str(query.sort_field or "submitTime").strip() or "submitTime"
+    sort_expr = sort_map.get(sort_field)
+    if sort_expr is None:
+        sort_expr = sort_map["submitTime"]
+    sort_order = _normalize_ticket_sort_order(query.sort_order)
+    primary_order = sort_expr.asc() if sort_order == "asc" else sort_expr.desc()
+    return [primary_order, Ticket.ticket_id.desc()]
+
+
 def _resolve_module_ids_by_codes(
     db: Session,
     module_codes: list[str],
@@ -405,7 +526,7 @@ class TicketDao:
                 if query.keyword
                 else True
             )
-            .order_by(Ticket.create_time.desc())
+            .order_by(*_build_ticket_order_by(query, submit_time_expr, latest_log_status, latest_ai_status))
         )
         return PageUtil.paginate(ticket_query, query.page_num, query.page_size, query.is_page)
 

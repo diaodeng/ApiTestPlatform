@@ -151,17 +151,23 @@
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
     </el-row>
 
-    <el-table v-loading="loading" :data="ticketList" row-key="ticketId">
-      <el-table-column v-if="isTicketColumnVisible('ticketNo')" label="工单编号" prop="ticketNo" width="190" show-overflow-tooltip />
-      <el-table-column v-if="isTicketColumnVisible('title')" label="标题" prop="title" min-width="240" show-overflow-tooltip />
-      <el-table-column v-if="isTicketColumnVisible('status')" label="状态" prop="status" width="120" align="center">
+    <el-table
+      v-loading="loading"
+      :data="ticketList"
+      row-key="ticketId"
+      :default-sort="{ prop: queryParams.sortField, order: toElementSortOrder(queryParams.sortOrder) }"
+      @sort-change="handleTicketSortChange"
+    >
+      <el-table-column v-if="isTicketColumnVisible('ticketNo')" label="工单编号" prop="ticketNo" width="190" sortable="custom" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('title')" label="标题" prop="title" min-width="240" sortable="custom" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('status')" label="状态" prop="status" width="120" align="center" sortable="custom">
         <template #default="scope">
           <el-tag :type="getStatusTagType(scope.row.status)">
             {{ getOptionLabel(ticketStatusOptions, scope.row.status) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('processStatus')" label="处理状态" min-width="160" align="center">
+      <el-table-column v-if="isTicketColumnVisible('processStatus')" label="处理状态" prop="processStatus" min-width="160" align="center" sortable="custom">
         <template #default="scope">
           <el-tag
             v-if="resolveTicketProcessStatus(scope.row).label"
@@ -172,44 +178,44 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('project')" label="项目" width="160" show-overflow-tooltip>
+      <el-table-column v-if="isTicketColumnVisible('project')" label="项目" prop="project" width="160" sortable="custom" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.projectName || scope.row.merchantName || '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('moduleName')" label="模块" prop="moduleName" width="140" show-overflow-tooltip />
-      <el-table-column v-if="isTicketColumnVisible('issueType')" label="工单类型" width="130" show-overflow-tooltip>
+      <el-table-column v-if="isTicketColumnVisible('moduleName')" label="模块" prop="moduleName" width="140" sortable="custom" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('issueType')" label="工单类型" prop="issueType" width="130" sortable="custom" show-overflow-tooltip>
         <template #default="scope">{{ formatIssueType(scope.row) }}</template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('isProblem')" label="问题性质" width="100" align="center">
+      <el-table-column v-if="isTicketColumnVisible('isProblem')" label="问题性质" prop="isProblem" width="100" align="center" sortable="custom">
         <template #default="scope">
           <el-tag v-if="scope.row.isProblem === true" type="danger">真实问题</el-tag>
           <el-tag v-else-if="scope.row.isProblem === false" type="info">非问题</el-tag>
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('rootCauseType')" label="根因分类" width="130" show-overflow-tooltip>
+      <el-table-column v-if="isTicketColumnVisible('rootCauseType')" label="根因分类" prop="rootCauseType" width="130" sortable="custom" show-overflow-tooltip>
         <template #default="scope">{{ formatStatOption(rootCauseTypeOptions, scope.row.rootCauseType) }}</template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('solutionType')" label="解决方式" width="130" show-overflow-tooltip>
+      <el-table-column v-if="isTicketColumnVisible('solutionType')" label="解决方式" prop="solutionType" width="130" sortable="custom" show-overflow-tooltip>
         <template #default="scope">{{ formatStatOption(solutionTypeOptions, scope.row.solutionType) }}</template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('resolution')" label="关闭结果" width="130" show-overflow-tooltip>
+      <el-table-column v-if="isTicketColumnVisible('resolution')" label="关闭结果" prop="resolution" width="130" sortable="custom" show-overflow-tooltip>
         <template #default="scope">{{ formatResolution(scope.row) }}</template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('problemPattern')" label="细分问题" width="160" show-overflow-tooltip>
+      <el-table-column v-if="isTicketColumnVisible('problemPattern')" label="细分问题" prop="problemPattern" width="160" sortable="custom" show-overflow-tooltip>
         <template #default="scope">{{ formatProblemPattern(scope.row) }}</template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('customerPriority')" label="对方优先级" prop="customerPriority" width="110" align="center" />
-      <el-table-column v-if="isTicketColumnVisible('internalPriority')" label="内部优先级" prop="internalPriority" width="110" align="center" />
-      <el-table-column v-if="isTicketColumnVisible('source')" label="来源" prop="source" width="110">
+      <el-table-column v-if="isTicketColumnVisible('customerPriority')" label="对方优先级" prop="customerPriority" width="110" align="center" sortable="custom" />
+      <el-table-column v-if="isTicketColumnVisible('internalPriority')" label="内部优先级" prop="internalPriority" width="110" align="center" sortable="custom" />
+      <el-table-column v-if="isTicketColumnVisible('source')" label="来源" prop="source" width="110" sortable="custom">
         <template #default="scope">{{ getOptionLabel(sourceOptions, scope.row.source) }}</template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('firstLineAssigneeName')" label="1线人员" prop="firstLineAssigneeName" width="130" show-overflow-tooltip />
-      <el-table-column v-if="isTicketColumnVisible('internalOwnerName')" label="内部负责人" prop="internalOwnerName" width="130" show-overflow-tooltip />
-      <el-table-column v-if="isTicketColumnVisible('currentAssigneeName')" label="当前处理人" prop="currentAssigneeName" width="130" show-overflow-tooltip />
-      <el-table-column v-if="isTicketColumnVisible('submitTime')" label="工单提交时间" prop="submitTime" width="170">
+      <el-table-column v-if="isTicketColumnVisible('firstLineAssigneeName')" label="1线人员" prop="firstLineAssigneeName" width="130" sortable="custom" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('internalOwnerName')" label="内部负责人" prop="internalOwnerName" width="130" sortable="custom" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('currentAssigneeName')" label="当前处理人" prop="currentAssigneeName" width="130" sortable="custom" show-overflow-tooltip />
+      <el-table-column v-if="isTicketColumnVisible('submitTime')" label="工单提交时间" prop="submitTime" width="170" sortable="custom">
         <template #default="scope">{{ parseTime(scope.row.submitTime || scope.row.externalCreateTime || scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column v-if="isTicketColumnVisible('createTime')" label="创建时间" prop="createTime" width="170">
+      <el-table-column v-if="isTicketColumnVisible('createTime')" label="创建时间" prop="createTime" width="170" sortable="custom">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
       <el-table-column label="操作" align="center" width="450" fixed="right">
@@ -2682,7 +2688,9 @@ const data = reactive({
     firstLineAssigneeId: undefined,
     internalOwnerId: undefined,
     submitBeginTime: undefined,
-    submitEndTime: undefined
+    submitEndTime: undefined,
+    sortField: 'submitTime',
+    sortOrder: 'desc'
   },
   form: createDefaultTicketForm(),
   assignForm: {},
@@ -3084,6 +3092,32 @@ function getList() {
   }).finally(() => {
     loading.value = false
   })
+}
+
+function toElementSortOrder(sortOrder) {
+  const value = String(sortOrder || '').trim().toLowerCase()
+  if (value === 'asc' || value === 'ascending') {
+    return 'ascending'
+  }
+  return 'descending'
+}
+
+function normalizeTicketSortOrder(sortOrder) {
+  const value = String(sortOrder || '').trim().toLowerCase()
+  if (value === 'ascending' || value === 'asc') {
+    return 'asc'
+  }
+  if (value === 'descending' || value === 'desc') {
+    return 'desc'
+  }
+  return 'desc'
+}
+
+function handleTicketSortChange({ prop, order }) {
+  queryParams.value.sortField = order ? (prop || 'submitTime') : 'submitTime'
+  queryParams.value.sortOrder = order ? normalizeTicketSortOrder(order) : 'desc'
+  queryParams.value.pageNum = 1
+  getList()
 }
 
 function resolveTicketDetailUrl(ticketRow) {

@@ -227,6 +227,13 @@
 
 3. 新增说明文档：`web/public/docs/2026-06-16-ticket-step-reason-comment-sync.md`，新增迁移 SQL：`server/sql/20260616_ticket_comment_sync_source.sql`。
 
+## 2026-07-01
+
+1. 修复工单列表排序接口报错 `Boolean value of this clause is not defined`：后端排序表达式不再使用 Python `or` 判断 SQLAlchemy 表达式，改为显式 `None` 判断。
+1. 工单列表新增表头排序：点击表头会按对应字段做服务端分页排序，默认按工单提交时间倒序。
+2. 当前列表展示列均可排序：工单编号、标题、状态、处理状态、项目、模块、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、优先级、来源、三类负责人、提交时间、创建时间。
+3. 新增说明文档：`web/public/docs/2026-07-01-ticket-list-header-sort.md`。
+
 1. 修复工单同步在服务重启后可能卡在 `processing_ai/publish_ready=false` 导致内网拉不到新版本的问题：pending 拉取前会在无活动 AI 任务时自动恢复发布状态。
 2. 修复内网远端拉取失败后远端 revision 被永久标记已交付的问题：failed 回执不再推进 `delivered_revision`，下次拉取可继续重试同一版本。
 3. 新增说明文档：`web/public/docs/2026-06-16-ticket-sync-restart-retry-fix.md`。

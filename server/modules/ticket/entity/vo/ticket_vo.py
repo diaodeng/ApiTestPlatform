@@ -130,6 +130,8 @@ class TicketQueryModel(QueryModel):
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
     submit_begin_time: datetime | None = Field(default=None, description="提交时间筛选开始，优先使用外部createTime")
     submit_end_time: datetime | None = Field(default=None, description="提交时间筛选结束，优先使用外部createTime")
+    sort_field: str | None = Field(default="submitTime", description="排序字段，默认按提交时间排序")
+    sort_order: str | None = Field(default="desc", description="排序方向，支持 asc/desc 或 ascending/descending")
 
     sync_consumer: str | None = Field(default=None, description="同步消费者标识，用于筛选未同步数据")
 

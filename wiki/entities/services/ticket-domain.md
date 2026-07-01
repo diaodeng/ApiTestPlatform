@@ -62,6 +62,7 @@ graph TD
 - 工单统计页新增趋势统计，接口 `GET /ticket/statistics/trend` 按 `day/week/month` 返回新增、关闭、净增、周期末未关闭存量、Bug、非 Bug、支持类、Top 模块和 Top 细分问题。当前趋势按事件时间实时计算当前分类，正式周报如需历史口径冻结，后续应增加统计快照。
 - 用户级偏好采用通用表 `sys_user_config`，以 `user_id + config_type + config_key` 唯一定位，`config_value` 保存少量 JSON 配置；后续用户级 AI prompt/provider 等零散配置优先复用该模型。
 - 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；列表页新增按 `module_code` 下拉筛选，统计页新增按 `moduleCodes` 多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds/moduleCodes` 参数，后端所有统计维度和状态流转统计都共用该过滤条件。
+- 工单列表页支持服务端表头排序，默认 `submitTime desc`；点击表头会传 `sortField/sortOrder` 重新分页查询。当前可排序列覆盖列表展示字段：工单编号、标题、状态、处理状态、项目、模块、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、优先级、来源、1线人员、内部负责人、当前处理人、提交时间和创建时间。
 - 工单编辑弹窗回填时会抑制项目监听器误清空 `module_id`，模块下拉变更和提交前会按 `module_id` 补齐 `module_name`，保证列表模块列在编辑保存后不丢失。
 - 若工单的 `module_name` 来自外部同步或历史数据且无法匹配当前项目 HRM 模块，编辑弹窗会以可创建下拉项形式原样展示并保存文本；只有用户手动选择现有模块时才切换为标准 `module_id/module_name`。
 - `first_line_assignee_name` 与 `internal_owner_name` 允许在对应用户 ID 为空时作为原始名称保留，编辑页通过同一个人员选择控件显示，匹配不到现有用户时不强制清空名称。

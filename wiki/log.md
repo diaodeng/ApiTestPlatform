@@ -816,6 +816,16 @@ updated: 2026-07-01
 - 创建的页面：无
 - 更新的页面：`entities/services/ticket-domain.md`、`docs/2026-05-22-ticket-form-and-ai-flow-update.md`
 - 创建的双向链接：0 对
+## [2026-07-01] INGEST-CODE | 工单列表表头排序
+- 触发：用户要求工单列表从创建时间排序改为默认按提交时间倒序，并在表头增加按字段排序能力，同时确认当前可排序字段范围。
+- 架构层：工单域 / Web 控制台 / 列表分页查询
+- 创建的页面：`web/public/docs/2026-07-01-ticket-list-header-sort.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/dao/ticket_dao.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 创建的双向链接：0 对
+- 变更传播链：工单列表表头 `sort-change` -> `sortField/sortOrder` 查询参数 -> DAO 排序白名单 -> 服务端分页排序。
+- 热修：排序表达式选择改为显式 `None` 判断，避免 SQLAlchemy 表达式进入 Python 布尔判断时报 `Boolean value of this clause is not defined`。
+- 总共涉及页面：6
+
 - 变更传播链：`server/modules/ticket/service/ticket_ai_analysis_service.py` -> 工单域知识页
 - 总共涉及页面：2
 
