@@ -5,6 +5,9 @@
     remote
     clearable
     reserve-keyword
+    :multiple="multiple"
+    :collapse-tags="multiple"
+    :collapse-tags-tooltip="multiple"
     :remote-method="remoteSearch"
     :loading="loading"
     placeholder="输入用户名/昵称/手机号搜索"
@@ -30,16 +33,20 @@ import { listTicketUserOptions } from '@/api/ticket/ticket'
 
 const props = defineProps({
   modelValue: {
-    type: [Number, String],
+    type: [Number, String, Array],
     default: undefined
   },
   initialOption: {
-    type: Object,
+    type: [Object, Array],
     default: null
   },
   rawLabel: {
     type: String,
     default: ''
+  },
+  multiple: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -47,13 +54,13 @@ const emit = defineEmits(['update:modelValue', 'change'])
 
 const loading = ref(false)
 const options = ref([])
-const selectedValue = ref(props.modelValue)
+const selectedValue = ref(props.multiple ? normalizeModelValues(props.modelValue) : props.modelValue)
 const rawOptionValue = '__ticket_raw_user_label__'
 
 watch(
   () => props.modelValue,
   value => {
-    selectedValue.value = value
+    selectedValue.value = props.multiple ? normalizeModelValues(value) : value
     syncInitialOption()
   }
 )
@@ -90,9 +97,21 @@ function upsertOption(option) {
   }
 }
 
+// 将单选或多选 v-model 统一转成数组，便于多选场景回显和变更处理。
+function normalizeModelValues(value) {
+  if (Array.isArray(value)) {
+    return value.filter(item => item !== undefined && item !== null && item !== '')
+  }
+  if (value === undefined || value === null || value === '') {
+    return []
+  }
+  return [value]
+}
+
 function syncInitialOption() {
   const rawLabel = String(props.rawLabel || '').trim()
-  if (props.modelValue === undefined || props.modelValue === null || props.modelValue === '') {
+  const modelValues = normalizeModelValues(props.modelValue)
+  if (!modelValues.length) {
     if (rawLabel) {
       selectedValue.value = rawOptionValue
       upsertOption({
@@ -105,10 +124,11 @@ function syncInitialOption() {
     }
     return
   }
-  const option = normalizeOption(props.initialOption)
-  if (option && String(option.userId) === String(props.modelValue)) {
-    upsertOption(option)
-  }
+  const initialOptions = Array.isArray(props.initialOption) ? props.initialOption : [props.initialOption]
+  initialOptions
+    .map(option => normalizeOption(option))
+    .filter(option => option && modelValues.some(value => String(value) === String(option.userId)))
+    .forEach(option => upsertOption(option))
 }
 
 function remoteSearch(keyword) {
@@ -122,6 +142,13 @@ function remoteSearch(keyword) {
 }
 
 function handleChange(value) {
+  if (props.multiple) {
+    const values = normalizeModelValues(value).filter(item => item !== rawOptionValue)
+    const selectedItems = options.value.filter(item => values.some(userId => String(userId) === String(item.userId)))
+    emit('update:modelValue', values)
+    emit('change', selectedItems)
+    return
+  }
   const selected = options.value.find(item => String(item.userId) === String(value))
   emit('update:modelValue', value === rawOptionValue ? undefined : value)
   emit('change', selected || null)

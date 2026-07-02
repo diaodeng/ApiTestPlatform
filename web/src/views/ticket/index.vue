@@ -20,8 +20,8 @@
           @keyup.enter="handleNaturalSearch"
         />
       </el-form-item>
-      <el-form-item label="状态" prop="status">
-        <el-select v-model="queryParams.status" placeholder="工单状态" clearable style="width: 160px">
+      <el-form-item label="状态" prop="statuses">
+        <el-select v-model="queryParams.statuses" placeholder="工单状态" multiple clearable collapse-tags collapse-tags-tooltip style="width: 180px">
           <el-option v-for="item in ticketStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
@@ -34,8 +34,8 @@
           @keyup.enter="handleQuery"
         />
       </el-form-item>
-      <el-form-item label="处理状态" prop="processStatus">
-        <el-select v-model="queryParams.processStatus" placeholder="处理状态" clearable style="width: 180px">
+      <el-form-item label="处理状态" prop="processStatuses">
+        <el-select v-model="queryParams.processStatuses" placeholder="处理状态" multiple clearable collapse-tags collapse-tags-tooltip style="width: 200px">
           <el-option v-for="item in ticketProcessStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
@@ -51,75 +51,78 @@
           style="width: 360px"
         />
       </el-form-item>
-      <el-form-item label="项目" prop="projectId">
-        <el-select v-model="queryParams.projectId" placeholder="所属项目" clearable filterable style="width: 180px">
+      <el-form-item label="项目" prop="projectIds">
+        <el-select v-model="queryParams.projectIds" placeholder="所属项目" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 220px">
           <el-option v-for="item in projectOptions" :key="item.projectId" :label="item.projectName" :value="item.projectId" />
         </el-select>
       </el-form-item>
-      <el-form-item label="模块" prop="moduleId">
-        <el-select v-model="queryParams.moduleId" placeholder="所属模块" clearable filterable style="width: 180px">
+      <el-form-item label="模块" prop="moduleIds">
+        <el-select v-model="queryParams.moduleIds" placeholder="所属模块" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 220px">
           <el-option v-for="item in queryModuleOptions" :key="item.moduleId" :label="item.moduleName" :value="item.moduleId" />
         </el-select>
       </el-form-item>
-      <el-form-item label="模块Code" prop="moduleCode">
-        <el-select v-model="queryParams.moduleCode" placeholder="模块Code" clearable filterable style="width: 180px">
+      <el-form-item label="模块Code" prop="moduleCodes">
+        <el-select v-model="queryParams.moduleCodes" placeholder="模块Code" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 200px">
           <el-option v-for="item in queryModuleCodeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="工单类型" prop="issueTypeId">
-        <el-select v-model="queryParams.issueTypeId" placeholder="工单类型" clearable filterable style="width: 160px">
+      <el-form-item label="工单类型" prop="issueTypeIds">
+        <el-select v-model="queryParams.issueTypeIds" placeholder="工单类型" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 180px">
           <el-option v-for="item in issueTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="根因分类" prop="rootCauseType">
-        <el-select v-model="queryParams.rootCauseType" placeholder="根因分类" clearable filterable style="width: 160px">
+      <el-form-item label="根因分类" prop="rootCauseTypes">
+        <el-select v-model="queryParams.rootCauseTypes" placeholder="根因分类" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 180px">
           <el-option v-for="item in rootCauseTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="解决方式" prop="solutionType">
-        <el-select v-model="queryParams.solutionType" placeholder="解决方式" clearable filterable style="width: 160px">
+      <el-form-item label="解决方式" prop="solutionTypes">
+        <el-select v-model="queryParams.solutionTypes" placeholder="解决方式" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 180px">
           <el-option v-for="item in solutionTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="关闭结果" prop="resolutionCode">
-        <el-select v-model="queryParams.resolutionCode" placeholder="关闭结果" clearable filterable style="width: 160px">
+      <el-form-item label="关闭结果" prop="resolutionCodes">
+        <el-select v-model="queryParams.resolutionCodes" placeholder="关闭结果" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 180px">
           <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="细分问题" prop="problemPatternCode">
-        <el-select v-model="queryParams.problemPatternCode" placeholder="细分问题" clearable filterable style="width: 180px">
+      <el-form-item label="细分问题" prop="problemPatternCodes">
+        <el-select v-model="queryParams.problemPatternCodes" placeholder="细分问题" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 220px">
           <el-option v-for="item in problemPatternOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="是否问题" prop="isProblem">
-        <el-select v-model="queryParams.isProblem" placeholder="是否问题" clearable style="width: 140px">
+      <el-form-item label="是否问题" prop="isProblems">
+        <el-select v-model="queryParams.isProblems" placeholder="是否问题" multiple clearable collapse-tags collapse-tags-tooltip style="width: 160px">
           <el-option label="真实问题" :value="true" />
           <el-option label="非问题" :value="false" />
         </el-select>
       </el-form-item>
-      <el-form-item label="内部优先级" prop="internalPriority">
-        <el-select v-model="queryParams.internalPriority" placeholder="内部优先级" clearable style="width: 140px">
+      <el-form-item label="内部优先级" prop="internalPriorities">
+        <el-select v-model="queryParams.internalPriorities" placeholder="内部优先级" multiple clearable collapse-tags collapse-tags-tooltip style="width: 160px">
           <el-option v-for="item in priorityOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="当前处理人" prop="currentAssigneeId">
+      <el-form-item label="当前处理人" prop="currentAssigneeIds">
         <UserSelect
-          v-model="queryParams.currentAssigneeId"
-          :initial-option="currentAssigneeOption"
+          v-model="queryParams.currentAssigneeIds"
+          multiple
+          :initial-option="queryCurrentAssigneeOption"
           @change="handleQueryCurrentAssigneeChange"
         />
       </el-form-item>
-      <el-form-item label="1线人员" prop="firstLineAssigneeId">
+      <el-form-item label="1线人员" prop="firstLineAssigneeIds">
         <UserSelect
-          v-model="queryParams.firstLineAssigneeId"
-          :initial-option="firstLineQueryAssigneeOption"
+          v-model="queryParams.firstLineAssigneeIds"
+          multiple
+          :initial-option="queryFirstLineAssigneeOption"
           @change="handleQueryFirstLineAssigneeChange"
         />
       </el-form-item>
-      <el-form-item label="内部负责人" prop="internalOwnerId">
+      <el-form-item label="内部负责人" prop="internalOwnerIds">
         <UserSelect
-          v-model="queryParams.internalOwnerId"
-          :initial-option="internalOwnerQueryOption"
+          v-model="queryParams.internalOwnerIds"
+          multiple
+          :initial-option="queryInternalOwnerOption"
           @change="handleQueryInternalOwnerChange"
         />
       </el-form-item>
@@ -2156,9 +2159,9 @@ const historyActiveTab = ref('timeline')
 const title = ref('')
 const currentTicketId = ref()
 const currentAssigneeOption = ref(null)
-const queryCurrentAssigneeOption = ref(null)
-const queryFirstLineAssigneeOption = ref(null)
-const queryInternalOwnerOption = ref(null)
+const queryCurrentAssigneeOption = ref([])
+const queryFirstLineAssigneeOption = ref([])
+const queryInternalOwnerOption = ref([])
 const firstLineAssigneeOption = ref(null)
 const internalOwnerOption = ref(null)
 const formModuleValue = ref('')
@@ -2671,22 +2674,22 @@ const data = reactive({
     pageNum: 1,
     pageSize: 10,
     keyword: undefined,
-    status: undefined,
+    statuses: [],
     ticketNo: undefined,
-    processStatus: undefined,
-    projectId: undefined,
-    moduleId: undefined,
-    moduleCode: undefined,
-    issueTypeId: undefined,
-    isProblem: undefined,
-    rootCauseType: undefined,
-    solutionType: undefined,
-    resolutionCode: undefined,
-    problemPatternCode: undefined,
-    internalPriority: undefined,
-    currentAssigneeId: undefined,
-    firstLineAssigneeId: undefined,
-    internalOwnerId: undefined,
+    processStatuses: [],
+    projectIds: [],
+    moduleIds: [],
+    moduleCodes: [],
+    issueTypeIds: [],
+    isProblems: [],
+    rootCauseTypes: [],
+    solutionTypes: [],
+    resolutionCodes: [],
+    problemPatternCodes: [],
+    internalPriorities: [],
+    currentAssigneeIds: [],
+    firstLineAssigneeIds: [],
+    internalOwnerIds: [],
     submitBeginTime: undefined,
     submitEndTime: undefined,
     sortField: 'submitTime',
@@ -3080,13 +3083,55 @@ const messageItems = computed(() => {
   }))
 })
 
+// 将查询栏中的单值或多选数组统一转成数组，便于后续拼接查询参数。
+function normalizeQueryList(value) {
+  if (Array.isArray(value)) {
+    return value.filter(item => item !== undefined && item !== null && item !== '')
+  }
+  if (value === undefined || value === null || value === '') {
+    return []
+  }
+  return [value]
+}
+
+// 将多选数组拼成后端约定的逗号分隔查询参数。
+function joinQueryList(value) {
+  const items = normalizeQueryList(value)
+  return items.length ? items.join(',') : undefined
+}
+
+// 构造工单列表查询参数，避免全局 GET 序列化把数组转成 field[0] 形式。
+function buildTicketListQueryParams() {
+  const params = {
+    ...queryParams.value,
+    statuses: joinQueryList(queryParams.value.statuses),
+    processStatuses: joinQueryList(queryParams.value.processStatuses),
+    projectIds: joinQueryList(queryParams.value.projectIds),
+    moduleIds: joinQueryList(queryParams.value.moduleIds),
+    moduleCodes: joinQueryList(queryParams.value.moduleCodes),
+    issueTypeIds: joinQueryList(queryParams.value.issueTypeIds),
+    isProblems: joinQueryList(queryParams.value.isProblems),
+    rootCauseTypes: joinQueryList(queryParams.value.rootCauseTypes),
+    solutionTypes: joinQueryList(queryParams.value.solutionTypes),
+    resolutionCodes: joinQueryList(queryParams.value.resolutionCodes),
+    problemPatternCodes: joinQueryList(queryParams.value.problemPatternCodes),
+    internalPriorities: joinQueryList(queryParams.value.internalPriorities),
+    currentAssigneeIds: joinQueryList(queryParams.value.currentAssigneeIds),
+    firstLineAssigneeIds: joinQueryList(queryParams.value.firstLineAssigneeIds),
+    internalOwnerIds: joinQueryList(queryParams.value.internalOwnerIds)
+  }
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  )
+}
+
 function getList() {
   const rangeValues = Array.isArray(submitTimeRange.value) ? submitTimeRange.value : []
   const [submitBeginTime, submitEndTime] = rangeValues
   queryParams.value.submitBeginTime = submitBeginTime || undefined
   queryParams.value.submitEndTime = submitEndTime || undefined
   loading.value = true
-  listTicket(queryParams.value).then(response => {
+  listTicket(buildTicketListQueryParams()).then(response => {
     ticketList.value = response.rows || []
     total.value = response.total || 0
   }).finally(() => {
@@ -3297,9 +3342,9 @@ function resetQuery() {
   submitTimeRange.value = []
   queryParams.value.submitBeginTime = undefined
   queryParams.value.submitEndTime = undefined
-  queryCurrentAssigneeOption.value = null
-  queryFirstLineAssigneeOption.value = null
-  queryInternalOwnerOption.value = null
+  queryCurrentAssigneeOption.value = []
+  queryFirstLineAssigneeOption.value = []
+  queryInternalOwnerOption.value = []
   handleQuery()
 }
 
@@ -3555,15 +3600,15 @@ function handleAssigneeChange(user) {
 }
 
 function handleQueryCurrentAssigneeChange(user) {
-  queryCurrentAssigneeOption.value = user || null
+  queryCurrentAssigneeOption.value = Array.isArray(user) ? user : (user ? [user] : [])
 }
 
 function handleQueryFirstLineAssigneeChange(user) {
-  queryFirstLineAssigneeOption.value = user || null
+  queryFirstLineAssigneeOption.value = Array.isArray(user) ? user : (user ? [user] : [])
 }
 
 function handleQueryInternalOwnerChange(user) {
-  queryInternalOwnerOption.value = user || null
+  queryInternalOwnerOption.value = Array.isArray(user) ? user : (user ? [user] : [])
 }
 
 function buildTicketUserOption(userId, userName) {
@@ -4686,16 +4731,29 @@ function loadAgentOptions() {
   })
 }
 
-function loadQueryModuleOptions(projectId) {
-  return listTicketModuleOptions(projectId ? { projectId } : {}).then(response => {
-    queryModuleOptions.value = response.data || []
+// 过滤掉项目变更后已经不在模块候选范围内的模块和模块 Code。
+function filterInvalidQueryValues(values, validValues) {
+  const validSet = new Set((validValues || []).map(item => String(item)))
+  return normalizeQueryList(values).filter(item => validSet.has(String(item)))
+}
+
+// 加载列表筛选用模块选项，多项目筛选时在前端按项目 ID 收敛候选。
+function loadQueryModuleOptions(projectIds) {
+  const selectedProjectIds = normalizeQueryList(projectIds).map(item => String(item))
+  return listTicketModuleOptions({}).then(response => {
+    const allModules = response.data || []
+    queryModuleOptions.value = selectedProjectIds.length
+      ? allModules.filter(item => selectedProjectIds.includes(String(item.projectId)))
+      : allModules
     queryModuleCodeOptions.value = buildModuleCodeOptions(queryModuleOptions.value)
-    if (
-      queryParams.value.moduleCode
-      && !queryModuleCodeOptions.value.some(item => item.value === queryParams.value.moduleCode)
-    ) {
-      queryParams.value.moduleCode = undefined
-    }
+    queryParams.value.moduleIds = filterInvalidQueryValues(
+      queryParams.value.moduleIds,
+      queryModuleOptions.value.map(item => item.moduleId)
+    )
+    queryParams.value.moduleCodes = filterInvalidQueryValues(
+      queryParams.value.moduleCodes,
+      queryModuleCodeOptions.value.map(item => item.value)
+    )
   })
 }
 
@@ -5020,12 +5078,13 @@ watch(
 )
 
 watch(
-  () => queryParams.value.projectId,
+  () => queryParams.value.projectIds,
   value => {
-    queryParams.value.moduleId = undefined
-    queryParams.value.moduleCode = undefined
+    queryParams.value.moduleIds = []
+    queryParams.value.moduleCodes = []
     loadQueryModuleOptions(value)
-  }
+  },
+  { deep: true }
 )
 
 watch(

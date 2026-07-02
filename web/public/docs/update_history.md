@@ -3,6 +3,8 @@
 1. 修复工单外部推送、内网拉取、多维表格主动拉取复用入库时项目/模块变更未覆盖旧内部归属的问题：本次外部数据携带项目或模块字段时，按本次解析结果更新；解析不到本地 ID 时清空旧 ID 并保留外部文本。
 2. 本次项目字段变化但无法解析商家 ID 时，不再沿用旧 `extra_data.log_pull_hints.vendorId`，避免后续自动拉日志继续使用旧商家。
 3. 新增说明文档：`web/public/docs/2026-07-02-ticket-sync-project-module-overwrite.md`。
+4. 工单列表页下拉筛选改为多选，后端新增多值查询参数并使用 `IN` 条件过滤；`Ticket` 模型补齐常用筛选组合索引声明。
+5. 新增说明文档：`web/public/docs/2026-07-02-ticket-list-multi-filter.md`。
 
 ## 2026-07-01
 

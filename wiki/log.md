@@ -8,6 +8,24 @@ updated: 2026-07-02
 
 # 操作日志
 
+## [2026-07-02] INGEST-CODE | 修复工单列表多选查询类型导致查不到数据和报错
+
+- 触发：用户反馈多选单个选项正常，选多个就查不到数据，人员多选直接报 Pydantic 验证错误 `Input should be a valid string` / `unable to parse string as an integer`，input 为 `['3,2']`。
+- 架构层：Web 控制台 / 工单列表 / VO 查询模型 / DAO 归一化
+- 更新的页面：`server/modules/ticket/entity/vo/ticket_vo.py`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：`TicketQueryModel` / `TicketStatisticsQueryModel` 多选字段类型 `str | list[X] | None` → `str | None`；FastAPI `Query()` 检测到类型含 `list[...]` 会自动包装标量值 → Pydantic 收到 `["3,2"]` 而非 `"3,2"` → DAO 的 `_normalize_*_list` 判断已是 list 不拆分 → `.in_(["open,closed"])` 查不到数据 / `.in_([int("3,2")])` 报错。
+- 关键结论：DAO 的三类归一化函数（`_normalize_text_list` / `_normalize_int_list` / `_normalize_bool_list`）已支持逗号分隔字符串拆分，VO 层只需声明 `str | None` 接收逗号分隔字符串即可，不需要联合 `list[...]` 类型。
+- 总共涉及页面：2
+
+## [2026-07-02] INGEST-CODE | 工单列表多选筛选与索引模型同步
+- 触发：用户要求工单列表页面各种下拉筛选项改为多选，并结合数据库结构和索引评估性能；数据库索引已手动创建，要求同步落到数据库模型。
+- 架构层：Web 控制台 / 工单列表 / Ticket 查询 DAO / Ticket 数据模型
+- 创建的页面：`web/public/docs/2026-07-02-ticket-list-multi-filter.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/components/UserSelect.vue`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/dao/ticket_dao.py`、`server/modules/ticket/entity/do/ticket_do.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：列表多选控件 -> 逗号分隔查询参数 -> `TicketQueryModel` 多值字段 -> DAO 归一化 -> `IN` / OR 过滤 -> `Ticket.__table_args__` 索引声明。
+- 关键结论：多选使用单次分页查询，不拆分多次请求；主要性能风险仍在关键字模糊查询、JSON 提交时间表达式和最新状态子查询。后续如数据量继续增长，应考虑将提交时间落为实体列并建立 `(del_flag, submit_time, ticket_id)` 索引。
+- 总共涉及页面：8
+
 ## [2026-07-02] INGEST-CODE | 工单同步项目模块变更覆盖修复
 - 触发：用户反馈工单系统中外部推送、内部拉取、多维表格自动拉取入库或更新时，外部项目变化会导致映射项目和商家变化，但内部数据没有同步更新；要求外部给的数据任何变化都要同步到内部数据。
 - 架构层：工单域 / 外部同步 / 飞书多维表格主动拉取 / 内网拉取

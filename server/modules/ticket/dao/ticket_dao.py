@@ -162,6 +162,74 @@ def _json_safe_value(value: Any) -> Any:
     return str(value)
 
 
+def _normalize_int_list(value: Any) -> list[int]:
+    """
+    将列表查询参数归一化为整数列表。
+    :param value: 逗号分隔字符串、数组或单个值
+    :return: 去重后的整数列表
+    """
+    if value is None or value == "":
+        return []
+    raw_items = value if isinstance(value, (list, tuple, set)) else str(value).split(",")
+    normalized: list[int] = []
+    for item in raw_items:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        try:
+            item_id = int(text)
+        except ValueError:
+            continue
+        if item_id not in normalized:
+            normalized.append(item_id)
+    return normalized
+
+
+def _normalize_text_list(value: Any) -> list[str]:
+    """
+    将列表查询参数归一化为非空字符串列表。
+    :param value: 逗号分隔字符串、数组或单个值
+    :return: 去重后的字符串列表
+    """
+    if value is None or value == "":
+        return []
+    raw_items = value if isinstance(value, (list, tuple, set)) else str(value).split(",")
+    normalized: list[str] = []
+    for item in raw_items:
+        text = str(item or "").strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def _normalize_bool_list(value: Any) -> list[bool]:
+    """
+    将列表查询参数归一化为布尔列表。
+    :param value: true/false、1/0、yes/no 的逗号分隔字符串、数组或单个值
+    :return: 去重后的布尔列表
+    """
+    if value is None or value == "":
+        return []
+    raw_items = value if isinstance(value, (list, tuple, set)) else str(value).split(",")
+    normalized: list[bool] = []
+    true_values = {"true", "1", "yes", "y", "on"}
+    false_values = {"false", "0", "no", "n", "off"}
+    for item in raw_items:
+        if isinstance(item, bool):
+            bool_value = item
+        else:
+            text = str(item or "").strip().lower()
+            if text in true_values:
+                bool_value = True
+            elif text in false_values:
+                bool_value = False
+            else:
+                continue
+        if bool_value not in normalized:
+            normalized.append(bool_value)
+    return normalized
+
+
 def _latest_log_pull_status_expr(ticket_id_column):
     """
     构造工单最新日志拉取状态的关联子查询表达式。
@@ -252,6 +320,24 @@ def _build_ticket_process_status_filter(latest_log_status, latest_ai_status, pro
     if process_status == "ai_failed":
         return latest_ai_status.in_(["failed", "canceled"])
     return True
+
+
+def _build_ticket_process_statuses_filter(latest_log_status, latest_ai_status, process_statuses: list[str]):
+    """
+    根据多个工单处理状态构造 OR 过滤条件。
+    :param latest_log_status: 最新日志拉取状态表达式
+    :param latest_ai_status: 最新 AI 分析状态表达式
+    :param process_statuses: 处理状态编码列表
+    :return: 过滤条件表达式
+    """
+    filters = []
+    for process_status in process_statuses:
+        filter_expr = _build_ticket_process_status_filter(latest_log_status, latest_ai_status, process_status)
+        if filter_expr is not True:
+            filters.append(filter_expr)
+    if not filters:
+        return True
+    return or_(*filters)
 
 
 def _normalize_ticket_sort_order(value: str | None) -> str:
@@ -454,18 +540,45 @@ class TicketDao:
         submit_begin_time = _date_start(query.submit_begin_time)
         submit_end_time = _date_end(query.submit_end_time)
         ticket_no = str(query.ticket_no or "").strip()
-        process_status = str(query.process_status or "").strip()
-        module_code = str(query.module_code or "").strip()
+        status_values = _normalize_text_list(query.statuses) or _normalize_text_list(query.status)
+        process_status_values = _normalize_text_list(query.process_statuses) or _normalize_text_list(
+            query.process_status
+        )
+        project_ids = _normalize_int_list(query.project_ids) or _normalize_int_list(query.project_id)
+        module_ids = _normalize_int_list(query.module_ids) or _normalize_int_list(query.module_id)
+        module_codes = _normalize_text_list(query.module_codes) or _normalize_text_list(query.module_code)
+        issue_type_ids = _normalize_text_list(query.issue_type_ids) or _normalize_text_list(query.issue_type_id)
+        is_problem_values = _normalize_bool_list(query.is_problems)
+        if not is_problem_values and query.is_problem is not None:
+            is_problem_values = [query.is_problem]
+        root_cause_types = _normalize_text_list(query.root_cause_types) or _normalize_text_list(query.root_cause_type)
+        solution_types = _normalize_text_list(query.solution_types) or _normalize_text_list(query.solution_type)
+        resolution_codes = _normalize_text_list(query.resolution_codes) or _normalize_text_list(query.resolution_code)
+        problem_pattern_codes = _normalize_text_list(query.problem_pattern_codes) or _normalize_text_list(
+            query.problem_pattern_code
+        )
+        internal_priorities = _normalize_text_list(query.internal_priorities) or _normalize_text_list(
+            query.internal_priority
+        )
+        current_assignee_ids = _normalize_int_list(query.current_assignee_ids) or _normalize_int_list(
+            query.current_assignee_id
+        )
+        first_line_assignee_ids = _normalize_int_list(query.first_line_assignee_ids) or _normalize_int_list(
+            query.first_line_assignee_id
+        )
+        internal_owner_ids = _normalize_int_list(query.internal_owner_ids) or _normalize_int_list(
+            query.internal_owner_id
+        )
         latest_log_status = _latest_log_pull_status_expr(Ticket.ticket_id)
         latest_ai_status = _latest_ai_status_expr(Ticket.ticket_id)
         submit_time_expr = _ticket_submit_time_expr()
         matched_module_ids_by_code = (
             _resolve_module_ids_by_codes(
                 db,
-                [module_code],
-                [query.project_id] if query.project_id else None,
+                module_codes,
+                project_ids or None,
             )
-            if module_code
+            if module_codes
             else []
         )
         ticket_query = (
@@ -474,38 +587,36 @@ class TicketDao:
                 Ticket.del_flag == "0",
                 Ticket.ticket_no.like(f"%{ticket_no}%") if ticket_no else True,
                 Ticket.title.like(f"%{query.title}%") if query.title else True,
-                Ticket.status == query.status if query.status else True,
-                Ticket.project_id == query.project_id if query.project_id else True,
-                Ticket.module_id == query.module_id if query.module_id else True,
-                Ticket.module_id.in_(matched_module_ids_by_code) if module_code and matched_module_ids_by_code else (
-                    Ticket.ticket_id == -1 if module_code else True
+                Ticket.status.in_(status_values) if status_values else True,
+                Ticket.project_id.in_(project_ids) if project_ids else True,
+                Ticket.module_id.in_(module_ids) if module_ids else True,
+                Ticket.module_id.in_(matched_module_ids_by_code) if module_codes and matched_module_ids_by_code else (
+                    Ticket.ticket_id == -1 if module_codes else True
                 ),
                 Ticket.category_id == query.category_id if query.category_id else True,
-                Ticket.issue_type_id == query.issue_type_id if query.issue_type_id else True,
+                Ticket.issue_type_id.in_(issue_type_ids) if issue_type_ids else True,
                 Ticket.issue_type_name.like(f"%{query.issue_type_name}%") if query.issue_type_name else True,
-                Ticket.is_problem == query.is_problem if query.is_problem is not None else True,
-                Ticket.root_cause_type == query.root_cause_type if query.root_cause_type else True,
-                Ticket.solution_type == query.solution_type if query.solution_type else True,
-                Ticket.resolution_code == query.resolution_code if query.resolution_code else True,
+                Ticket.is_problem.in_(is_problem_values) if is_problem_values else True,
+                Ticket.root_cause_type.in_(root_cause_types) if root_cause_types else True,
+                Ticket.solution_type.in_(solution_types) if solution_types else True,
+                Ticket.resolution_code.in_(resolution_codes) if resolution_codes else True,
                 Ticket.resolution_name.like(f"%{query.resolution_name}%") if query.resolution_name else True,
-                Ticket.problem_pattern_code == query.problem_pattern_code if query.problem_pattern_code else True,
+                Ticket.problem_pattern_code.in_(problem_pattern_codes) if problem_pattern_codes else True,
                 Ticket.problem_pattern_name.like(f"%{query.problem_pattern_name}%")
                 if query.problem_pattern_name
                 else True,
                 Ticket.customer_priority == query.customer_priority if query.customer_priority else True,
-                Ticket.internal_priority == query.internal_priority if query.internal_priority else True,
+                Ticket.internal_priority.in_(internal_priorities) if internal_priorities else True,
                 Ticket.source == query.source if query.source else True,
-                Ticket.current_assignee_id == query.current_assignee_id if query.current_assignee_id else True,
+                Ticket.current_assignee_id.in_(current_assignee_ids) if current_assignee_ids else True,
                 Ticket.current_assignee_name.like(f"%{query.current_assignee_name}%")
                 if query.current_assignee_name
                 else True,
-                Ticket.first_line_assignee_id == query.first_line_assignee_id
-                if query.first_line_assignee_id
-                else True,
+                Ticket.first_line_assignee_id.in_(first_line_assignee_ids) if first_line_assignee_ids else True,
                 Ticket.first_line_assignee_name.like(f"%{query.first_line_assignee_name}%")
                 if query.first_line_assignee_name
                 else True,
-                Ticket.internal_owner_id == query.internal_owner_id if query.internal_owner_id else True,
+                Ticket.internal_owner_id.in_(internal_owner_ids) if internal_owner_ids else True,
                 Ticket.internal_owner_name.like(f"%{query.internal_owner_name}%")
                 if query.internal_owner_name
                 else True,
@@ -515,7 +626,7 @@ class TicketDao:
                 submit_time_expr >= submit_begin_time if submit_begin_time else True,
                 submit_time_expr <= submit_end_time if submit_end_time else True,
             )
-            .filter(_build_ticket_process_status_filter(latest_log_status, latest_ai_status, process_status))
+            .filter(_build_ticket_process_statuses_filter(latest_log_status, latest_ai_status, process_status_values))
             .filter(
                 or_(
                     Ticket.title.like(f"%{query.keyword}%"),

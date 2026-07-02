@@ -15,6 +15,25 @@ class Ticket(Base):
     """
 
     __tablename__ = "ticket"
+    __table_args__ = (
+        Index("idx_ticket_del_status_create", "del_flag", "status", "create_time", "ticket_id"),
+        Index(
+            "idx_ticket_del_project_module_create",
+            "del_flag",
+            "project_id",
+            "module_id",
+            "create_time",
+            "ticket_id",
+        ),
+        Index("idx_ticket_del_current_assignee_create", "del_flag", "current_assignee_id", "create_time", "ticket_id"),
+        Index("idx_ticket_del_internal_owner_create", "del_flag", "internal_owner_id", "create_time", "ticket_id"),
+        Index("idx_ticket_del_first_line_create", "del_flag", "first_line_assignee_id", "create_time", "ticket_id"),
+        Index("idx_ticket_del_issue_type_create", "del_flag", "issue_type_id", "create_time", "ticket_id"),
+        Index("idx_ticket_del_problem_pattern_create", "del_flag", "problem_pattern_code", "create_time", "ticket_id"),
+        Index("idx_ticket_del_root_cause_create", "del_flag", "root_cause_type", "create_time", "ticket_id"),
+        Index("idx_ticket_del_solution_create", "del_flag", "solution_type", "create_time", "ticket_id"),
+        Index("idx_ticket_del_resolution_create", "del_flag", "resolution_code", "create_time", "ticket_id"),
+    )
 
     ticket_id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment="工单ID"

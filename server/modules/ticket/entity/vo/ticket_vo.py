@@ -103,28 +103,53 @@ class TicketQueryModel(QueryModel):
     ticket_no: str | None = Field(default=None, description="工单编号")
     title: str | None = Field(default=None, description="工单标题")
     status: str | None = Field(default=None, description="当前状态")
+    statuses: str | None = Field(default=None, description="当前状态多选，逗号分隔字符串")
     process_status: str | None = Field(default=None, description="工单处理状态")
+    process_statuses: str | None = Field(default=None, description="工单处理状态多选，逗号分隔字符串")
     project_id: int | None = Field(default=None, description="所属项目ID")
+    project_ids: str | None = Field(default=None, description="所属项目ID多选，逗号分隔字符串")
     module_id: int | None = Field(default=None, description="所属模块ID")
+    module_ids: str | None = Field(default=None, description="所属模块ID多选，逗号分隔字符串")
     module_code: str | None = Field(default=None, description="所属模块业务码")
+    module_codes: str | None = Field(default=None, description="所属模块业务码多选，逗号分隔字符串")
     category_id: int | None = Field(default=None, description="问题分类ID")
     issue_type_id: str | None = Field(default=None, description="工单类型编码")
+    issue_type_ids: str | None = Field(default=None, description="工单类型编码多选，逗号分隔字符串")
     issue_type_name: str | None = Field(default=None, description="工单类型名称")
     is_problem: bool | None = Field(default=None, description="是否真实问题")
+    is_problems: str | None = Field(
+        default=None, description="是否真实问题多选，true/false 逗号分隔字符串"
+    )
     root_cause_type: str | None = Field(default=None, description="根因分类")
+    root_cause_types: str | None = Field(default=None, description="根因分类多选，逗号分隔字符串")
     solution_type: str | None = Field(default=None, description="解决方式")
+    solution_types: str | None = Field(default=None, description="解决方式多选，逗号分隔字符串")
     resolution_code: str | None = Field(default=None, description="关闭结果编码")
+    resolution_codes: str | None = Field(default=None, description="关闭结果编码多选，逗号分隔字符串")
     resolution_name: str | None = Field(default=None, description="关闭结果名称")
     problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
+    problem_pattern_codes: str | None = Field(
+        default=None, description="细分问题类型编码多选，逗号分隔字符串"
+    )
     problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
     customer_priority: str | None = Field(default=None, description="对方优先级")
     internal_priority: str | None = Field(default=None, description="内部优先级")
+    internal_priorities: str | None = Field(default=None, description="内部优先级多选，逗号分隔字符串")
     source: str | None = Field(default=None, description="工单来源")
     current_assignee_id: int | None = Field(default=None, description="当前处理人ID")
+    current_assignee_ids: str | None = Field(
+        default=None, description="当前处理人ID多选，逗号分隔字符串"
+    )
     current_assignee_name: str | None = Field(default=None, description="当前处理人名称")
     first_line_assignee_id: int | None = Field(default=None, description="1线人员ID")
+    first_line_assignee_ids: str | None = Field(
+        default=None, description="1线人员ID多选，逗号分隔字符串"
+    )
     first_line_assignee_name: str | None = Field(default=None, description="1线人员名称")
     internal_owner_id: int | None = Field(default=None, description="内部工单负责人ID")
+    internal_owner_ids: str | None = Field(
+        default=None, description="内部工单负责人ID多选，逗号分隔字符串"
+    )
     internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     reporter_id: int | None = Field(default=None, description="提单人ID")
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
@@ -878,10 +903,10 @@ class TicketStatisticsQueryModel(QueryModel):
 
     begin_time: date | datetime | str | None = Field(default=None, description="开始时间")
     end_time: date | datetime | str | None = Field(default=None, description="结束时间")
-    project_ids: str | list[int] | None = Field(default=None, description="项目ID多选，支持逗号分隔或数组")
-    module_ids: str | list[int] | None = Field(default=None, description="模块ID多选，支持逗号分隔或数组")
-    module_codes: str | list[str] | None = Field(default=None, description="模块业务码多选，支持逗号分隔或数组")
+    project_ids: str | None = Field(default=None, description="项目ID多选，逗号分隔字符串")
+    module_ids: str | None = Field(default=None, description="模块ID多选，逗号分隔字符串")
+    module_codes: str | None = Field(default=None, description="模块业务码多选，逗号分隔字符串")
     granularity: str | None = Field(default="week", description="趋势粒度：day/week/month")
-    problem_pattern_codes: str | list[str] | None = Field(
-        default=None, description="细分问题类型编码多选，支持逗号分隔或数组"
+    problem_pattern_codes: str | None = Field(
+        default=None, description="细分问题类型编码多选，逗号分隔字符串"
     )
