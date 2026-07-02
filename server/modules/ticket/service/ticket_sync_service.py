@@ -36,6 +36,7 @@ from modules.ticket.service.ticket_embedding_service import TicketEmbeddingServi
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService, _extract_ticket_version_key, _user_id, _user_name
+from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
 from utils.common_util import CamelCaseUtil
@@ -46,6 +47,11 @@ from utils.log_util import logger
 class TicketSyncService:
     """
     工单外部同步服务，统一处理外部推送、内网拉取和同步后自动化状态追踪。
+
+    已提取的子服务（见对应文件，本类中保留原方法以保证向后兼容）：
+    - TicketSyncConfigService (ticket_sync_config_service.py): 配置管理
+    - SyncUtil (util/sync_util.py): 通用工具方法
+    TODO: 后续提取 bitable / mapping / ai / publish 子服务
     """
 
     CONFIG_KEY = "ticket.sync.automation"

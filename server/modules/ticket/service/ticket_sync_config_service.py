@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from module_admin.dao.config_dao import ConfigDao
 from module_admin.entity.do.config_do import SysConfig
+from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
 from utils.log_util import logger
 
