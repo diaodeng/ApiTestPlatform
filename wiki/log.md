@@ -3,10 +3,18 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-01
+updated: 2026-07-02
 ---
 
 # 操作日志
+
+## [2026-07-02] INGEST-CODE | 工单同步项目模块变更覆盖修复
+- 触发：用户反馈工单系统中外部推送、内部拉取、多维表格自动拉取入库或更新时，外部项目变化会导致映射项目和商家变化，但内部数据没有同步更新；要求外部给的数据任何变化都要同步到内部数据。
+- 架构层：工单域 / 外部同步 / 飞书多维表格主动拉取 / 内网拉取
+- 创建的页面：`web/public/docs/2026-07-02-ticket-sync-project-module-overwrite.md`
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：外部字段 `ticketVender/projectName/merchantName/ticketModle/moduleName` -> `_detect_fields` -> `_build_upsert_payload` -> `ticket.project_id/merchant_name/module_id/module_name` 与 `extra_data.log_pull_hints.vendorId`。
+- 总共涉及页面：5
 
 ## [2026-07-01] INGEST-CODE | 修正工单AI分类提示词优先级：DB模板优先于旧版内联提示词
 - 触发：生产环境手动强制重新归类始终使用旧提示词，DB 模板表 `SysAiPromptTemplate` 中的新版提示词不生效。

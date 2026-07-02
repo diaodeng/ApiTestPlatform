@@ -338,6 +338,11 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             solution_type="",
             resolution_code="",
             resolution_name="",
+            problem_pattern_code="",
+            problem_pattern_name="",
+            problem_pattern_confidence=None,
+            problem_pattern_source="",
+            problem_pattern_verified=None,
             root_cause=None,
             solution=None,
             tags=None,
@@ -358,10 +363,98 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             sync_scene="external_sync",
         )
 
-        self.assertNotIn("module_id", payload)
+        self.assertIsNone(payload["module_id"])
         self.assertEqual(payload["module_name"], "POS - 客户端")
         source_snapshot = payload["extra_data"][TicketSyncService.META_KEY]["source"]
         self.assertEqual(source_snapshot["moduleName"], "POS - 客户端")
+
+    def test_external_upsert_overwrites_old_project_module_when_mapping_misses(self):
+        """已有工单再次同步时，外部项目/模块变化应覆盖旧ID并保留本次外部文本。"""
+        sync_object = SimpleNamespace(
+            source=SimpleNamespace(system="external", record_id="EXT-CHANGE", record_url="", pushed_at=None),
+            extra_data={},
+            raw_payload={"ticketVender": "新外部项目", "ticketModle": "新外部模块"},
+            ticket_no="EXT-CHANGE",
+            ticket_url=None,
+            title="外部工单",
+            description="外部描述",
+            customer_priority="P3",
+            internal_priority="P2",
+            severity="",
+            reporter_id=None,
+            reporter_name="外部报告人",
+            current_assignee_id=None,
+            current_assignee_name="",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            status="processing",
+            root_cause=None,
+            solution=None,
+            tags=None,
+            project_id=None,
+            project_code="",
+            project_name="",
+            merchant_name="",
+            module_id=None,
+            module_code="",
+            module_name="",
+            version_key="",
+            log_pull_config={},
+            create_time=None,
+        )
+        ticket = SimpleNamespace(
+            extra_data={"log_pull_hints": {"vendorId": 1001, "storeId": "S001"}},
+            customer_priority="P3",
+            internal_priority="P2",
+            severity="",
+            reporter_id=1,
+            reporter_name="tester",
+            current_assignee_id=None,
+            current_assignee_name="",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            status="pending",
+            issue_type_id="",
+            issue_type_name="",
+            is_problem=None,
+            root_cause_type="",
+            solution_type="",
+            resolution_code="",
+            resolution_name="",
+            problem_pattern_code="",
+            problem_pattern_name="",
+            problem_pattern_confidence=None,
+            problem_pattern_source="",
+            problem_pattern_verified=None,
+            root_cause=None,
+            solution=None,
+            tags=None,
+            ticket_url=None,
+            project_id=10,
+            merchant_name="旧内部项目",
+            module_id=20,
+            module_name="旧内部模块",
+        )
+        current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
+
+        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+            db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
+            ticket=ticket,
+            sync_object=sync_object,
+            detected={"projectId": None, "projectName": "新外部项目", "moduleId": None, "moduleName": "新外部模块"},
+            current_user=current_user,
+            sync_scene="external_sync",
+        )
+
+        self.assertIsNone(payload["project_id"])
+        self.assertEqual(payload["merchant_name"], "新外部项目")
+        self.assertIsNone(payload["module_id"])
+        self.assertEqual(payload["module_name"], "新外部模块")
+        self.assertNotIn("vendorId", payload["extra_data"].get("log_pull_hints", {}))
 
     def test_external_detection_maps_three_person_roles(self):
         """外部推送应分别解析报告人、当前处理人和内部负责人。"""
@@ -481,12 +574,99 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             sync_scene="remote_pull",
         )
 
-        self.assertNotIn("project_id", payload)
-        self.assertNotIn("module_id", payload)
+        self.assertIsNone(payload["project_id"])
+        self.assertIsNone(payload["module_id"])
         self.assertEqual(payload["merchant_name"], "远端项目")
         self.assertEqual(payload["module_name"], "远端模块")
         self.assertIsNone(payload["current_assignee_id"])
         self.assertEqual(payload["current_assignee_name"], "远端处理人")
+
+    def test_remote_pull_upsert_overwrites_old_project_module_text(self):
+        """远端拉取更新已有工单时，应清空远端ID并同步远端最新项目/模块文本。"""
+        sync_object = SimpleNamespace(
+            source=SimpleNamespace(system="public", record_id="REMOTE-CHANGE", record_url="", pushed_at=None),
+            extra_data={},
+            raw_payload={"projectId": 88, "moduleId": 99},
+            ticket_no="REMOTE-CHANGE",
+            ticket_url=None,
+            title="远端工单",
+            description="远端描述",
+            customer_priority="P3",
+            internal_priority="P2",
+            severity="",
+            reporter_id=None,
+            reporter_name="远端提单人",
+            current_assignee_id=66,
+            current_assignee_name="远端处理人",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            status="processing",
+            root_cause=None,
+            solution=None,
+            tags=None,
+            project_id=88,
+            project_code="",
+            project_name="新远端项目",
+            merchant_name="新远端项目",
+            module_id=99,
+            module_code="",
+            module_name="新远端模块",
+            version_key="",
+            log_pull_config={},
+            create_time=None,
+        )
+        ticket = SimpleNamespace(
+            extra_data={},
+            customer_priority="P3",
+            internal_priority="P2",
+            severity="",
+            reporter_id=1,
+            reporter_name="tester",
+            current_assignee_id=None,
+            current_assignee_name="",
+            first_line_assignee_id=None,
+            first_line_assignee_name="",
+            internal_owner_id=None,
+            internal_owner_name="",
+            status="pending",
+            issue_type_id="",
+            issue_type_name="",
+            is_problem=None,
+            root_cause_type="",
+            solution_type="",
+            resolution_code="",
+            resolution_name="",
+            problem_pattern_code="",
+            problem_pattern_name="",
+            problem_pattern_confidence=None,
+            problem_pattern_source="",
+            problem_pattern_verified=None,
+            root_cause=None,
+            solution=None,
+            tags=None,
+            ticket_url=None,
+            project_id=10,
+            merchant_name="旧内网项目",
+            module_id=20,
+            module_name="旧内网模块",
+        )
+        current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
+
+        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+            db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
+            ticket=ticket,
+            sync_object=sync_object,
+            detected={"assigneeId": None, "assigneeName": "远端处理人"},
+            current_user=current_user,
+            sync_scene="remote_pull",
+        )
+
+        self.assertIsNone(payload["project_id"])
+        self.assertEqual(payload["merchant_name"], "新远端项目")
+        self.assertIsNone(payload["module_id"])
+        self.assertEqual(payload["module_name"], "新远端模块")
 
     def test_bitable_email_enrich_skips_when_record_already_success(self):
         """同一 recordId 已成功补齐过邮箱时，不应再次请求多维表格。"""

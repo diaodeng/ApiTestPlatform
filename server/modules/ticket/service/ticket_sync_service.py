@@ -970,7 +970,11 @@ class TicketSyncService:
         """
         # 检查主动拉取任务级群消息开关（bitable_pull.sendGroupMessage）
         ticket_extra = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-        bitable_pull_meta = ticket_extra.get("bitable_pull") if isinstance(ticket_extra.get("bitable_pull"), dict) else {}
+        bitable_pull_meta = (
+            ticket_extra.get("bitable_pull")
+            if isinstance(ticket_extra.get("bitable_pull"), dict)
+            else {}
+        )
         if bitable_pull_meta.get("sendGroupMessage") is False:
             logger.info(
                 f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
@@ -3784,6 +3788,57 @@ class TicketSyncService:
             "ticketPos": ticket_pos,
             "ticketSco": ticket_sco,
         }
+
+    @classmethod
+    def _has_incoming_project_value(
+        cls,
+        sync_object: TicketExternalSyncUpsertModel,
+        detected: dict[str, Any] | None,
+    ) -> bool:
+        """
+        判断本次同步是否携带项目归属字段，用于决定更新场景是否允许覆盖旧项目。
+        :param sync_object: 外部同步模型
+        :param detected: 字段识别结果
+        :return: 本次同步存在项目ID或项目文本时返回 True
+        """
+        external_fields = cls._extract_external_mapping_fields(sync_object)
+        return any(
+            str(value or "").strip()
+            for value in (
+                (detected or {}).get("projectId"),
+                (detected or {}).get("projectName"),
+                getattr(sync_object, "project_id", None),
+                getattr(sync_object, "project_code", None),
+                getattr(sync_object, "project_name", None),
+                getattr(sync_object, "merchant_name", None),
+                external_fields.get("ticketVender"),
+            )
+        )
+
+    @classmethod
+    def _has_incoming_module_value(
+        cls,
+        sync_object: TicketExternalSyncUpsertModel,
+        detected: dict[str, Any] | None,
+    ) -> bool:
+        """
+        判断本次同步是否携带模块归属字段，用于决定更新场景是否允许覆盖旧模块。
+        :param sync_object: 外部同步模型
+        :param detected: 字段识别结果
+        :return: 本次同步存在模块ID或模块文本时返回 True
+        """
+        external_fields = cls._extract_external_mapping_fields(sync_object)
+        return any(
+            str(value or "").strip()
+            for value in (
+                (detected or {}).get("moduleId"),
+                (detected or {}).get("moduleName"),
+                getattr(sync_object, "module_id", None),
+                getattr(sync_object, "module_code", None),
+                getattr(sync_object, "module_name", None),
+                external_fields.get("ticketModle"),
+            )
+        )
 
     @classmethod
     def _match_mapping_exact(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
@@ -6684,12 +6739,23 @@ class TicketSyncService:
         module_id = cls._safe_int((detected or {}).get("moduleId")) or (
             None if is_remote_pull else sync_object.module_id
         )
+        external_fields = cls._extract_external_mapping_fields(sync_object)
         raw_project_name = str(
             sync_object.project_name
             or sync_object.merchant_name
             or str((detected or {}).get("projectName") or "").strip()
+            or external_fields.get("ticketVender")
             or ""
         ).strip()
+        incoming_project_name = (
+            str((detected or {}).get("projectName") or "").strip()
+            or str(sync_object.project_name or "").strip()
+            or str(sync_object.merchant_name or "").strip()
+            or str(external_fields.get("ticketVender") or "").strip()
+        )
+        incoming_project_value = cls._has_incoming_project_value(sync_object, detected)
+        if is_remote_pull and not (incoming_project_name or raw_project_name):
+            incoming_project_value = False
         if project_id:
             project = (
                 db.query(HrmProject)
@@ -6705,24 +6771,20 @@ class TicketSyncService:
                 payload["merchant_name"] = project.project_name
             else:
                 project_id = None
-        elif ticket:
+        if not project_id and incoming_project_value:
+            # 本次同步携带了项目归属但未解析到有效本地项目时，清空旧ID并保留本次文本。
+            payload["project_id"] = None
+            payload["merchant_name"] = incoming_project_name or raw_project_name
+        elif not project_id and ticket:
             payload["project_id"] = ticket.project_id
             payload["merchant_name"] = ticket.merchant_name
-        else:
+        elif not project_id:
             payload["merchant_name"] = (
                 sync_object.project_name
                 or sync_object.merchant_name
                 or str((detected or {}).get("projectName") or "").strip()
                 or ""
             )
-        incoming_project_name = (
-            str((detected or {}).get("projectName") or "").strip()
-            or str(sync_object.project_name or "").strip()
-            or str(sync_object.merchant_name or "").strip()
-        )
-        if incoming_project_name and not project_id and not is_remote_pull:
-            payload["project_id"] = None
-            payload["merchant_name"] = incoming_project_name
         if raw_project_name and not str(payload.get("merchant_name") or "").strip():
             payload["merchant_name"] = raw_project_name
         if module_id:
@@ -6736,27 +6798,34 @@ class TicketSyncService:
             if module:
                 payload["module_id"] = module.module_id
                 payload["module_name"] = module.module_name
-        elif ticket:
-            payload["module_id"] = ticket.module_id
-            payload["module_name"] = ticket.module_name
-        else:
-            payload["module_name"] = (
-                sync_object.module_name
-                or str((detected or {}).get("moduleName") or "").strip()
-                or ""
-            )
+            else:
+                module_id = None
         module_name_fallback = (
             str((detected or {}).get("moduleName") or "").strip()
             or str(sync_object.module_name or "").strip()
+            or str(external_fields.get("ticketModle") or "").strip()
             or (str(ticket.module_name or "").strip() if ticket else "")
         )
         incoming_module_name = (
             str((detected or {}).get("moduleName") or "").strip()
             or str(sync_object.module_name or "").strip()
+            or str(external_fields.get("ticketModle") or "").strip()
         )
-        if incoming_module_name and not module_id and not is_remote_pull:
+        incoming_module_value = cls._has_incoming_module_value(sync_object, detected)
+        if is_remote_pull and not incoming_module_name:
+            incoming_module_value = False
+        if not module_id and incoming_module_value:
             payload["module_id"] = None
             payload["module_name"] = incoming_module_name
+        elif not module_id and ticket:
+            payload["module_id"] = ticket.module_id
+            payload["module_name"] = ticket.module_name
+        elif not module_id:
+            payload["module_name"] = (
+                sync_object.module_name
+                or str((detected or {}).get("moduleName") or "").strip()
+                or ""
+            )
         if module_name_fallback and not str(payload.get("module_name") or "").strip():
             payload["module_name"] = module_name_fallback
         if module_name_fallback:
@@ -6783,6 +6852,9 @@ class TicketSyncService:
         )
         if vendor_id_hint:
             log_pull_hints["vendorId"] = vendor_id_hint
+        elif incoming_project_value:
+            log_pull_hints.pop("vendorId", None)
+            log_pull_hints.pop("vendor_id", None)
         if store_id_hint:
             log_pull_hints["storeId"] = store_id_hint
         if pos_no_hint:
