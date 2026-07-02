@@ -8,6 +8,8 @@ from typing import Any
 import requests
 from sqlalchemy.orm import Session
 
+from config.database import SessionLocal
+from context.request_context import get_current_trace_id, trace_context
 from module_admin.dao.config_dao import ConfigDao
 from module_admin.entity.do.config_do import SysConfig
 from modules.ticket.dao.ticket_dao import TicketDao
@@ -911,3 +913,46 @@ class TicketEmbeddingService:
         except Exception:
             parsed = default
         return min(max(parsed, min_value), max_value)
+
+    @classmethod
+    def rebuild_with_independent_session(
+        cls,
+        payload,
+        trace_id: str | None = None,
+    ) -> None:
+        """
+        在后台任务中使用独立数据库会话重建工单向量，避免复用请求会话。
+        :param payload: 工单向量重建请求参数
+        :param trace_id: 日志追踪ID，用于串联提交请求与后台重建过程
+        :return: 无
+        """
+        if trace_id:
+            with trace_context(trace_id):
+                cls.rebuild_with_independent_session(payload)
+            return
+
+        with SessionLocal() as db:
+            result = cls.rebuild_ticket_embeddings(
+                db,
+                ticket_ids=payload.ticket_ids,
+                page_size=payload.page_size,
+                provider=payload.provider,
+                include_qdrant=payload.include_qdrant,
+            )
+            logger.info(f"工单向量后台重建完成: result={result}")
+
+    @classmethod
+    def rebuild_result_with_independent_session(cls, payload) -> dict:
+        """
+        在线程池中使用独立数据库会话重建工单向量并返回结果。
+        :param payload: 工单向量重建请求参数
+        :return: 重建结果摘要
+        """
+        with SessionLocal() as db:
+            return cls.rebuild_ticket_embeddings(
+                db,
+                ticket_ids=payload.ticket_ids,
+                page_size=payload.page_size,
+                provider=payload.provider,
+                include_qdrant=payload.include_qdrant,
+            )

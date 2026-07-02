@@ -58,7 +58,12 @@ from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
-from modules.ticket.controller.ticket_controller import ticketController, ticketWebhookController
+from modules.ticket.controller.ticket_ai_controller import ticketAiController
+from modules.ticket.controller.ticket_config_controller import ticketConfigController
+from modules.ticket.controller.ticket_controller import ticketWebhookController
+from modules.ticket.controller.ticket_crud_controller import ticketCrudController
+from modules.ticket.controller.ticket_log_pull_controller import ticketLogPullController
+from modules.ticket.controller.ticket_sync_controller import ticketSyncController
 from modules.ticket.perms import register as register_ticket_permission_defs
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_feishu_event_listener_service import TicketFeishuEventListenerService
@@ -177,7 +182,11 @@ controller_list = [
     {'router': webCaseController, 'tags': ['HRM-Web测试管理']},
     {'router': desktopCaseAssetController, 'tags': ['HRM-桌面测试资源']},
     {'router': desktopCaseController, 'tags': ['HRM-桌面测试管理']},
-    {'router': ticketController, 'tags': ['工单管理']},
+    {'router': ticketCrudController, 'tags': ['工单管理']},
+    {'router': ticketSyncController, 'tags': ['工单同步']},
+    {'router': ticketLogPullController, 'tags': ['工单日志拉取']},
+    {'router': ticketAiController, 'tags': ['工单AI分析']},
+    {'router': ticketConfigController, 'tags': ['工单配置']},
     {'router': ticketWebhookController, 'tags': ['工单消息回调']},
 ]
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
@@ -2810,3 +2811,33 @@ class TicketService:
             _normalize_text_list(problem_pattern_codes),
         )
         return _camelize(statistics)
+
+    @classmethod
+    def create_ticket_with_independent_session(
+        cls,
+        ticket_object,
+        current_user: CurrentUserModel,
+    ):
+        """
+        在线程池中使用独立数据库会话创建工单，避免同步 AI、日志拉取等保存链路阻塞 FastAPI 事件循环。
+        :param ticket_object: 新增工单请求体，包含标题、描述、项目、模块和自动化配置。
+        :param current_user: 当前登录用户，用于写入创建人、更新人和审计字段。
+        :return: 工单创建服务返回结果。
+        """
+        with SessionLocal() as db:
+            return cls.create_ticket(db, ticket_object, current_user)
+
+    @classmethod
+    def update_ticket_with_independent_session(
+        cls,
+        ticket_object,
+        current_user: CurrentUserModel,
+    ):
+        """
+        在线程池中使用独立数据库会话更新工单，避免同步翻译等耗时保存链路阻塞其他接口。
+        :param ticket_object: 编辑工单请求体，包含工单ID、基础字段、人员、标签和自动化配置。
+        :param current_user: 当前登录用户，用于写入更新人和事件操作者。
+        :return: 工单更新服务返回结果。
+        """
+        with SessionLocal() as db:
+            return cls.update_ticket(db, ticket_object, current_user)

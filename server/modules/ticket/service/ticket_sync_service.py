@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 import requests
+from fastapi import HTTPException, Request
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -36,7 +37,9 @@ from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService, _extract_ticket_version_key, _user_id, _user_name
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.util.sync_util import SyncUtil
 from utils.common_util import CamelCaseUtil
+from utils.field_util import compatible_field_value, extract_person_name_email, normalize_email_text
 from utils.log_util import logger
 
 
@@ -294,7 +297,7 @@ class TicketSyncService:
         matches = list(pattern.finditer(text))
         segments: list[dict[str, Any]] = []
         if not matches:
-            content_hash = cls._text_sha256(text)
+            content_hash = SyncUtil.text_sha256(text)
             return [
                 {
                     "segmentIndex": 0,
@@ -313,7 +316,7 @@ class TicketSyncService:
                     "dateText": "",
                     "personName": "",
                     "content": prefix,
-                    "contentHash": cls._text_sha256(prefix),
+                    "contentHash": SyncUtil.text_sha256(prefix),
                     "externalCreatedAt": None,
                 }
             )
@@ -331,7 +334,7 @@ class TicketSyncService:
                     "dateText": date_text,
                     "personName": person_name,
                     "content": content,
-                    "contentHash": cls._text_sha256(content),
+                    "contentHash": SyncUtil.text_sha256(content),
                     "externalCreatedAt": cls._parse_step_reason_date(date_text),
                 }
             )
@@ -524,7 +527,7 @@ class TicketSyncService:
             if not source_segment_key or not content:
                 continue
             summary["total"] += 1
-            external_created_at = cls._parse_datetime_value(
+            external_created_at = SyncUtil.parse_datetime_value(
                 item.get("externalCreatedAt")
                 or item.get("external_created_at")
                 or item.get("createTime")
@@ -542,7 +545,7 @@ class TicketSyncService:
                 source_segment_key=source_segment_key,
                 source_segment_index=int(item.get("sourceSegmentIndex") or item.get("source_segment_index") or 0),
                 source_content_hash=str(item.get("sourceContentHash") or item.get("source_content_hash") or "").strip()
-                or cls._text_sha256(content),
+                or SyncUtil.text_sha256(content),
                 external_created_at=external_created_at,
                 attachments=item.get("attachments"),
                 is_internal=bool(item.get("isInternal") if "isInternal" in item else item.get("is_internal", False)),
@@ -578,7 +581,7 @@ class TicketSyncService:
         sync_state["publish_ready"] = bool(ready)
         sync_state["publish_status"] = str(status or "").strip() or cls.PUBLISH_STATUS_READY
         sync_state["publish_reason"] = str(reason or "").strip()
-        sync_state["publish_updated_at"] = cls._now_iso()
+        sync_state["publish_updated_at"] = SyncUtil.now_iso()
         if ai_task_status is not None:
             sync_state["ai_task_status"] = str(ai_task_status or "").strip()
         meta["sync_state"] = sync_state
@@ -684,7 +687,7 @@ class TicketSyncService:
         """
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
         sync_state["group_push_sent_once"] = True
-        sync_state["group_push_sent_at"] = cls._now_iso()
+        sync_state["group_push_sent_at"] = SyncUtil.now_iso()
         sync_state["group_push_scene"] = str(scene or "").strip() or "external_sync"
         sync_state["group_push_revision"] = int(revision or 0)
         meta["sync_state"] = sync_state
@@ -727,7 +730,7 @@ class TicketSyncService:
                     "chatId": str(item.get("chatId") or item.get("chat_id") or item.get("receiveId") or "").strip(),
                     "receiveId": str(item.get("receiveId") or item.get("receive_id") or "").strip(),
                     "receiveIdType": str(item.get("receiveIdType") or item.get("receive_id_type") or "").strip(),
-                    "sentAt": cls._now_iso(),
+                    "sentAt": SyncUtil.now_iso(),
                 }
             )
             existing_message_ids.add(message_id)
@@ -752,7 +755,7 @@ class TicketSyncService:
         """
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
         sync_state["group_push_processing"] = True
-        sync_state["group_push_processing_at"] = cls._now_iso()
+        sync_state["group_push_processing_at"] = SyncUtil.now_iso()
         sync_state["group_push_processing_scene"] = str(scene or "").strip() or "external_sync"
         sync_state["group_push_processing_revision"] = int(revision or 0)
         meta["sync_state"] = sync_state
@@ -783,7 +786,7 @@ class TicketSyncService:
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
         if not bool(sync_state.get("group_push_processing")):
             return False, ""
-        lock_time = cls._parse_datetime_value(sync_state.get("group_push_processing_at"))
+        lock_time = SyncUtil.parse_datetime_value(sync_state.get("group_push_processing_at"))
         if lock_time is None:
             return True, "群推送处理中（锁时间缺失）"
         elapsed_seconds = (datetime.now() - lock_time).total_seconds()
@@ -1333,18 +1336,18 @@ class TicketSyncService:
             current_meta.get("externalCreateTime")
             or source_snapshot.get("externalCreateTime")
         )
-        parsed_existing = cls._parse_datetime_value(existing_external_time)
+        parsed_existing = SyncUtil.parse_datetime_value(existing_external_time)
         if parsed_existing:
             return parsed_existing.isoformat()
 
         raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
         parsed_candidate = (
-            cls._parse_datetime_value(sync_object.create_time)
-            or cls._parse_datetime_value(raw_payload.get("externalCreateTime"))
-            or cls._parse_datetime_value(raw_payload.get("external_create_time"))
-            or cls._parse_datetime_value(raw_payload.get("createTime"))
-            or cls._parse_datetime_value(raw_payload.get("create_time"))
-            or cls._parse_datetime_value(sync_object.source.pushed_at)
+            SyncUtil.parse_datetime_value(sync_object.create_time)
+            or SyncUtil.parse_datetime_value(raw_payload.get("externalCreateTime"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("external_create_time"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("createTime"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("create_time"))
+            or SyncUtil.parse_datetime_value(sync_object.source.pushed_at)
             or datetime.now()
         )
         return parsed_candidate.isoformat()
@@ -1364,10 +1367,10 @@ class TicketSyncService:
             sync_meta.get("externalCreateTime")
             or source_snapshot.get("externalCreateTime")
         )
-        parsed_external_time = cls._parse_datetime_value(external_create_time)
+        parsed_external_time = SyncUtil.parse_datetime_value(external_create_time)
         if parsed_external_time:
             return parsed_external_time
-        return cls._parse_datetime_value(getattr(ticket, "create_time", None))
+        return SyncUtil.parse_datetime_value(getattr(ticket, "create_time", None))
 
     @classmethod
     def _resolve_group_push_auto_send_after_time(cls, group_config: dict[str, Any] | None) -> datetime | None:
@@ -1378,7 +1381,7 @@ class TicketSyncService:
         :return: 起始时间，未配置或解析失败时返回 None。
         """
         config = group_config if isinstance(group_config, dict) else {}
-        return cls._parse_datetime_value(
+        return SyncUtil.parse_datetime_value(
             config.get("autoSendAfterTime")
             or config.get("auto_send_after_time")
         )
@@ -1485,16 +1488,16 @@ class TicketSyncService:
         normalized_source = str(source_description or "").strip()
         if not normalized_source:
             return True
-        source_hash = cls._text_sha256(normalized_source)
+        source_hash = SyncUtil.text_sha256(normalized_source)
         stored_source_hash = str(extra_data.get("ai_translation_source_hash") or "").strip()
         if stored_source_hash:
             return stored_source_hash == source_hash
         origin_description = str(extra_data.get("origin_description") or "").strip()
         if origin_description:
-            return cls._text_sha256(origin_description) == source_hash
+            return SyncUtil.text_sha256(origin_description) == source_hash
         legacy_source_description = str(extra_data.get("ai_translation_source_description") or "").strip()
         if legacy_source_description:
-            return cls._text_sha256(legacy_source_description) == source_hash
+            return SyncUtil.text_sha256(legacy_source_description) == source_hash
         return False
 
     @classmethod
@@ -1516,7 +1519,7 @@ class TicketSyncService:
             return True, "local_missing"
         extra_data = local_ticket.extra_data if isinstance(local_ticket.extra_data, dict) else {}
         local_meta = cls._build_meta(extra_data)
-        local_source_revision = cls._safe_int(local_meta.get("sourceRevision"))
+        local_source_revision = SyncUtil.safe_int(local_meta.get("sourceRevision"))
         if remote_sync_revision > 0 and local_source_revision is not None:
             if remote_sync_revision <= local_source_revision:
                 return (
@@ -1532,8 +1535,8 @@ class TicketSyncService:
             local_source.get("pushedAt")
             or local_meta.get("lastImportedAt")
         )
-        parsed_remote_time = cls._parse_datetime_value(remote_pushed_at)
-        parsed_local_time = cls._parse_datetime_value(local_pushed_at)
+        parsed_remote_time = SyncUtil.parse_datetime_value(remote_pushed_at)
+        parsed_local_time = SyncUtil.parse_datetime_value(local_pushed_at)
         if parsed_remote_time and parsed_local_time and parsed_remote_time <= parsed_local_time:
             return (
                 False,
@@ -2102,7 +2105,7 @@ class TicketSyncService:
         config["appToken"] = str(config.get("appToken") or "").strip()
         config["tableId"] = str(config.get("tableId") or "").strip()
         config["viewId"] = str(config.get("viewId") or "").strip()
-        config["pageSize"] = min(max(cls._safe_int(config.get("pageSize")) or 500, 1), 500)
+        config["pageSize"] = min(max(SyncUtil.safe_int(config.get("pageSize")) or 500, 1), 500)
         config["filterFormula"] = cls._normalize_bitable_filter_config(config.get("filterFormula"))
         return config
 
@@ -2126,7 +2129,7 @@ class TicketSyncService:
         for key in ("appId", "appSecret", "appToken", "tableId", "viewId"):
             if not str(source.get(key) or "").strip():
                 source[key] = bitable_common.get(key)
-        page_size = cls._safe_int(source.get("pageSize"))
+        page_size = SyncUtil.safe_int(source.get("pageSize"))
         if page_size is None:
             source["pageSize"] = bitable_common.get("pageSize")
         else:
@@ -2275,7 +2278,7 @@ class TicketSyncService:
         """
         source = value if isinstance(value, dict) else {}
         config = {**cls._default_bitable_pull_config(), **source}
-        config["enabled"] = cls._to_bool(config.get("enabled"), False)
+        config["enabled"] = SyncUtil.to_bool(config.get("enabled"), False)
         config["appId"] = str(config.get("appId") or "").strip() or str(feishu_auth.get("appId") or "").strip()
         config["appSecret"] = (
             str(config.get("appSecret") or "").strip() or str(feishu_auth.get("appSecret") or "").strip()
@@ -2283,7 +2286,7 @@ class TicketSyncService:
         config["appToken"] = str(config.get("appToken") or "").strip()
         config["tableId"] = str(config.get("tableId") or "").strip()
         config["viewId"] = str(config.get("viewId") or "").strip()
-        config["pageSize"] = min(max(cls._safe_int(config.get("pageSize")) or 200, 1), 500)
+        config["pageSize"] = min(max(SyncUtil.safe_int(config.get("pageSize")) or 200, 1), 500)
         config["filterFormula"] = cls._normalize_bitable_filter_config(config.get("filterFormula"))
         config["sourceSystem"] = (
             str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull"
@@ -2291,23 +2294,23 @@ class TicketSyncService:
         config["ticketNoField"] = str(config.get("ticketNoField") or "ticketNo").strip() or "ticketNo"
         config["updatedAtField"] = str(config.get("updatedAtField") or "").strip()
         config["sortField"] = str(config.get("sortField") or "").strip()
-        config["includeRecordUrl"] = cls._to_bool(config.get("includeRecordUrl"), True)
+        config["includeRecordUrl"] = SyncUtil.to_bool(config.get("includeRecordUrl"), True)
         config["createdAfter"] = str(config.get("createdAfter") or "").strip()
         config["createdBefore"] = str(config.get("createdBefore") or "").strip()
-        config["forceSync"] = cls._to_bool(config.get("forceSync"), False)
+        config["forceSync"] = SyncUtil.to_bool(config.get("forceSync"), False)
         raw_send_group = config.get("sendGroupMessage")
         if raw_send_group is None or (isinstance(raw_send_group, str) and str(raw_send_group).strip() == ""):
             config["sendGroupMessage"] = None
         else:
-            config["sendGroupMessage"] = cls._to_bool(raw_send_group)
-        config["autoAppendTimeFilter"] = cls._to_bool(config.get("autoAppendTimeFilter"), True)
+            config["sendGroupMessage"] = SyncUtil.to_bool(raw_send_group)
+        config["autoAppendTimeFilter"] = SyncUtil.to_bool(config.get("autoAppendTimeFilter"), True)
         config["fieldMappings"] = cls._normalize_bitable_field_mappings(config.get("fieldMappings"))
         automation = config.get("automation") if isinstance(config.get("automation"), dict) else {}
         config["automation"] = {
-            "autoIdentify": cls._to_bool(automation.get("autoIdentify"), True),
-            "autoLogPull": cls._to_bool(automation.get("autoLogPull"), False),
-            "autoAiAnalysis": cls._to_bool(automation.get("autoAiAnalysis"), False),
-            "autoTranslate": cls._to_bool(automation.get("autoTranslate"), True),
+            "autoIdentify": SyncUtil.to_bool(automation.get("autoIdentify"), True),
+            "autoLogPull": SyncUtil.to_bool(automation.get("autoLogPull"), False),
+            "autoAiAnalysis": SyncUtil.to_bool(automation.get("autoAiAnalysis"), False),
+            "autoTranslate": SyncUtil.to_bool(automation.get("autoTranslate"), True),
         }
         return config
 
@@ -2321,7 +2324,7 @@ class TicketSyncService:
         """
         if value in (None, ""):
             return None
-        return cls._parse_datetime_value(value)
+        return SyncUtil.parse_datetime_value(value)
 
     @classmethod
     def _datetime_to_bitable_filter_millis(cls, value: datetime) -> int:
@@ -2511,7 +2514,7 @@ class TicketSyncService:
                 if not isinstance(record, dict):
                     continue
                 record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
-                unique_key = record_id or cls._text_sha256(json.dumps(record, ensure_ascii=False, sort_keys=True))
+                unique_key = record_id or SyncUtil.text_sha256(json.dumps(record, ensure_ascii=False, sort_keys=True))
                 if unique_key in seen_record_ids:
                     continue
                 seen_record_ids.add(unique_key)
@@ -2604,7 +2607,7 @@ class TicketSyncService:
             group_push.get("autoPushStatuses", group_push.get("auto_push_statuses")),
             fallback=default_group_push.get("autoPushStatuses"),
         )
-        parsed_group_push_auto_send_after = cls._parse_datetime_value(
+        parsed_group_push_auto_send_after = SyncUtil.parse_datetime_value(
             group_push.get("autoSendAfterTime")
             or group_push.get("auto_send_after_time")
         )
@@ -2651,9 +2654,9 @@ class TicketSyncService:
         message_sync = merged.get("messageSync") if isinstance(merged.get("messageSync"), dict) else {}
         default_message_sync = cls._default_message_sync_config()
         message_sync = {**default_message_sync, **message_sync}
-        message_sync["enabled"] = cls._to_bool(message_sync.get("enabled"), False)
-        message_sync["feishuEventEnabled"] = cls._to_bool(message_sync.get("feishuEventEnabled"), False)
-        message_sync["feishuWsEnabled"] = cls._to_bool(message_sync.get("feishuWsEnabled"), False)
+        message_sync["enabled"] = SyncUtil.to_bool(message_sync.get("enabled"), False)
+        message_sync["feishuEventEnabled"] = SyncUtil.to_bool(message_sync.get("feishuEventEnabled"), False)
+        message_sync["feishuWsEnabled"] = SyncUtil.to_bool(message_sync.get("feishuWsEnabled"), False)
         message_sync["feishuWsEncryptKey"] = str(message_sync.get("feishuWsEncryptKey") or "").strip()
         message_sync["feishuWsVerificationToken"] = str(
             message_sync.get("feishuWsVerificationToken") or ""
@@ -2670,23 +2673,23 @@ class TicketSyncService:
             )
             if str(item or "").strip()
         ]
-        message_sync["syncFeishuCommentToTicket"] = cls._to_bool(
+        message_sync["syncFeishuCommentToTicket"] = SyncUtil.to_bool(
             message_sync.get("syncFeishuCommentToTicket"),
             True,
         )
-        message_sync["syncFeishuCommentToBitable"] = cls._to_bool(
+        message_sync["syncFeishuCommentToBitable"] = SyncUtil.to_bool(
             message_sync.get("syncFeishuCommentToBitable"),
             False,
         )
-        message_sync["syncTicketCommentToBitable"] = cls._to_bool(
+        message_sync["syncTicketCommentToBitable"] = SyncUtil.to_bool(
             message_sync.get("syncTicketCommentToBitable"),
             False,
         )
-        message_sync["syncTicketCommentToFeishuThread"] = cls._to_bool(
+        message_sync["syncTicketCommentToFeishuThread"] = SyncUtil.to_bool(
             message_sync.get("syncTicketCommentToFeishuThread"),
             False,
         )
-        message_sync["syncBitableNewStepToFeishuThread"] = cls._to_bool(
+        message_sync["syncBitableNewStepToFeishuThread"] = SyncUtil.to_bool(
             message_sync.get("syncBitableNewStepToFeishuThread"),
             False,
         )
@@ -2721,11 +2724,11 @@ class TicketSyncService:
         person_reminder["filterFormula"] = cls._normalize_bitable_filter_config(person_reminder.get("filterFormula"))
         person_reminder["personField"] = str(person_reminder.get("personField") or "").strip()
         person_reminder["timeField"] = str(person_reminder.get("timeField") or "").strip()
-        person_reminder["thresholdMinutes"] = max(cls._safe_int(person_reminder.get("thresholdMinutes")) or 30, 1)
+        person_reminder["thresholdMinutes"] = max(SyncUtil.safe_int(person_reminder.get("thresholdMinutes")) or 30, 1)
         person_reminder["messageTemplate"] = str(person_reminder.get("messageTemplate") or "").strip()
         person_reminder["rowsMarkdownTemplate"] = str(person_reminder.get("rowsMarkdownTemplate") or "").strip()
-        person_reminder["maxRowsPerPerson"] = max(cls._safe_int(person_reminder.get("maxRowsPerPerson")) or 20, 1)
-        person_reminder["pageSize"] = min(max(cls._safe_int(person_reminder.get("pageSize")) or 500, 1), 500)
+        person_reminder["maxRowsPerPerson"] = max(SyncUtil.safe_int(person_reminder.get("maxRowsPerPerson")) or 20, 1)
+        person_reminder["pageSize"] = min(max(SyncUtil.safe_int(person_reminder.get("pageSize")) or 500, 1), 500)
         if not person_reminder["appId"]:
             person_reminder["appId"] = person_reminder["feishuAppId"]
         if not person_reminder["appSecret"]:
@@ -2757,12 +2760,12 @@ class TicketSyncService:
         summary_report["categoryField"] = str(summary_report.get("categoryField") or "分类").strip() or "分类"
         summary_report["priorityField"] = str(summary_report.get("priorityField") or "优先级").strip() or "优先级"
         summary_report["bitableTimeField"] = str(summary_report.get("bitableTimeField") or "").strip()
-        summary_report["pageSize"] = min(max(cls._safe_int(summary_report.get("pageSize")) or 500, 1), 500)
+        summary_report["pageSize"] = min(max(SyncUtil.safe_int(summary_report.get("pageSize")) or 500, 1), 500)
         summary_report["aiEnabled"] = bool(summary_report.get("aiEnabled"))
         summary_report["aiProviderCode"] = str(summary_report.get("aiProviderCode") or "").strip()
         summary_report["aiPromptCode"] = str(summary_report.get("aiPromptCode") or "").strip()
-        summary_report["windowMinutes"] = max(cls._safe_int(summary_report.get("windowMinutes")) or 60, 1)
-        summary_report["endDelayMinutes"] = max(cls._safe_int(summary_report.get("endDelayMinutes")) or 0, 0)
+        summary_report["windowMinutes"] = max(SyncUtil.safe_int(summary_report.get("windowMinutes")) or 60, 1)
+        summary_report["endDelayMinutes"] = max(SyncUtil.safe_int(summary_report.get("endDelayMinutes")) or 0, 0)
         summary_report["startTime"] = str(summary_report.get("startTime") or "").strip()
         summary_report["endTime"] = str(summary_report.get("endTime") or "").strip()
         summary_report["includeClosed"] = bool(summary_report.get("includeClosed", True))
@@ -2801,7 +2804,7 @@ class TicketSyncService:
             SysConfig(
                 config_name="工单同步自动化配置",
                 config_key=cls.CONFIG_KEY,
-                config_value=cls._json_dumps(cls._default_sync_config()),
+                config_value=SyncUtil.json_dumps(cls._default_sync_config()),
                 config_type="Y",
                 create_by="system",
                 update_by="system",
@@ -2816,7 +2819,7 @@ class TicketSyncService:
     def _load_sync_config(cls, db: Session) -> dict[str, Any]:
         cls.ensure_param_config_rows(db)
         row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
-        config = cls._json_loads(getattr(row, "config_value", None), cls._default_sync_config())
+        config = SyncUtil.json_loads(getattr(row, "config_value", None), cls._default_sync_config())
         if not isinstance(config, dict):
             return cls._default_sync_config()
         return cls._normalize_sync_config(config)
@@ -2926,7 +2929,7 @@ class TicketSyncService:
             row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
             if row:
                 row.config_name = "宸ュ崟鍚屾鑷姩鍖栭厤缃?"
-                row.config_value = cls._json_dumps(merged)
+                row.config_value = SyncUtil.json_dumps(merged)
                 row.config_type = "Y"
                 row.update_by = current_user_name
                 row.update_time = now
@@ -2935,7 +2938,7 @@ class TicketSyncService:
                     SysConfig(
                         config_name="宸ュ崟鍚屾鑷姩鍖栭厤缃?",
                         config_key=cls.CONFIG_KEY,
-                        config_value=cls._json_dumps(merged),
+                        config_value=SyncUtil.json_dumps(merged),
                         config_type="Y",
                         create_by=current_user_name,
                         update_by=current_user_name,
@@ -3143,7 +3146,7 @@ class TicketSyncService:
                 "configErrors": required_missing,
             }
 
-        auto_append = cls._to_bool(pull_config.get("autoAppendTimeFilter"), True)
+        auto_append = SyncUtil.to_bool(pull_config.get("autoAppendTimeFilter"), True)
         raw_created_after = str(pull_config.get("createdAfter") or "").strip() if not auto_append else None
         raw_created_before = str(pull_config.get("createdBefore") or "").strip() if not auto_append else None
 
@@ -3230,7 +3233,7 @@ class TicketSyncService:
             )
         records = cls._query_bitable_pull_records(pull_config, pull_filters)
         queried_count = len(records)
-        force_sync = cls._to_bool(pull_config.get("forceSync"), False)
+        force_sync = SyncUtil.to_bool(pull_config.get("forceSync"), False)
         required_fields = cls._derive_required_fields_from_external_field_model(config.get("externalFieldModel"))
         summary = {
             "triggerSource": trigger_source,
@@ -3494,7 +3497,7 @@ class TicketSyncService:
                 or meta.get("sourceRecordUrl")
                 or (meta.get("source", {}) or {}).get("recordUrl")
             ),
-            "sourceRevision": cls._safe_int(meta.get("sourceRevision")) or 0,
+            "sourceRevision": SyncUtil.safe_int(meta.get("sourceRevision")) or 0,
             "externalCreateTime": (
                 meta.get("externalCreateTime")
                 or (meta.get("source") or {}).get("externalCreateTime")
@@ -3572,57 +3575,57 @@ class TicketSyncService:
             else {}
         )
         ticket_vender = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "ticketVender",
                 "ticket_vender",
-                default=cls._payload_field_value(mapping_payload, "ticketVender", "ticket_vender", default=""),
+                default=SyncUtil.payload_field_value(mapping_payload, "ticketVender", "ticket_vender", default=""),
             )
             or ""
         ).strip()
         ticket_modle = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "ticketModle",
                 "ticket_modle",
-                default=cls._payload_field_value(mapping_payload, "ticketModle", "ticket_modle", default=""),
+                default=SyncUtil.payload_field_value(mapping_payload, "ticketModle", "ticket_modle", default=""),
             )
             or ""
         ).strip()
         ticket_status = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "ticketStatus",
                 "ticket_status",
-                default=cls._payload_field_value(raw_payload, "status", "status", default=""),
+                default=SyncUtil.payload_field_value(raw_payload, "status", "status", default=""),
             )
             or ""
         ).strip()
         ticket_store = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "ticketStore",
                 "ticket_store",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     raw_payload,
                     "storeInfo",
                     "store_info",
-                    default=cls._payload_field_value(
+                    default=SyncUtil.payload_field_value(
                         raw_payload,
                         "storeId",
                         "store_id",
-                        default=cls._payload_field_value(mapping_payload, "ticketStore", "ticket_store", default=""),
+                        default=SyncUtil.payload_field_value(mapping_payload, "ticketStore", "ticket_store", default=""),
                     ),
                 ),
             )
             or ""
         ).strip()
         ticket_assignee = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "ticketAssignee",
                 "ticket_assignee",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     raw_payload,
                     "currentAssigneeName",
                     "current_assignee_name",
@@ -3632,11 +3635,11 @@ class TicketSyncService:
             or ""
         ).strip()
         current_assignee = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "currentAssigneeName",
                 "current_assignee_name",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     mapping_payload,
                     "currentAssigneeName",
                     "current_assignee_name",
@@ -3646,19 +3649,19 @@ class TicketSyncService:
             or ""
         ).strip()
         ticket_assignee_email = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "ticketAssigneeEmail",
                 "ticket_assignee_email",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     raw_payload,
                     "currentAssigneeEmail",
                     "current_assignee_email",
-                    default=cls._payload_field_value(
+                    default=SyncUtil.payload_field_value(
                         raw_payload,
                         "assigneeEmail",
                         "assignee_email",
-                        default=cls._payload_field_value(
+                        default=SyncUtil.payload_field_value(
                             mapping_payload,
                             "ticketAssigneeEmail",
                             "ticket_assignee_email",
@@ -3670,11 +3673,11 @@ class TicketSyncService:
             or ""
         ).strip()
         current_assignee_email = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "currentAssigneeEmail",
                 "current_assignee_email",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     mapping_payload,
                     "currentAssigneeEmail",
                     "current_assignee_email",
@@ -3684,11 +3687,11 @@ class TicketSyncService:
             or ""
         ).strip()
         reporter_email = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "reporterEmail",
                 "reporter_email",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     mapping_payload,
                     "reporterEmail",
                     "reporter_email",
@@ -3698,19 +3701,19 @@ class TicketSyncService:
             or ""
         ).strip()
         internal_owner = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "internalOwner",
                 "internal_owner",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     raw_payload,
                     "internalOwnerName",
                     "internal_owner_name",
-                    default=cls._payload_field_value(
+                    default=SyncUtil.payload_field_value(
                         mapping_payload,
                         "internalOwner",
                         "internal_owner",
-                        default=cls._payload_field_value(
+                        default=SyncUtil.payload_field_value(
                             mapping_payload,
                             "internalOwnerName",
                             "internal_owner_name",
@@ -3722,11 +3725,11 @@ class TicketSyncService:
             or ""
         ).strip()
         internal_owner_email = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "internalOwnerEmail",
                 "internal_owner_email",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     mapping_payload,
                     "internalOwnerEmail",
                     "internal_owner_email",
@@ -3736,38 +3739,38 @@ class TicketSyncService:
             or ""
         ).strip()
         ticket_pos = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "ticketPos",
                 "ticket_pos",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     raw_payload,
                     "posNo",
                     "pos_no",
-                    default=cls._payload_field_value(
+                    default=SyncUtil.payload_field_value(
                         raw_payload,
                         "posId",
                         "pos_id",
-                        default=cls._payload_field_value(mapping_payload, "ticketPos", "ticket_pos", default=""),
+                        default=SyncUtil.payload_field_value(mapping_payload, "ticketPos", "ticket_pos", default=""),
                     ),
                 ),
             )
             or ""
         ).strip()
         ticket_sco = str(
-            cls._payload_field_value(
+            SyncUtil.payload_field_value(
                 raw_payload,
                 "ticketSco",
                 "ticket_sco",
-                default=cls._payload_field_value(
+                default=SyncUtil.payload_field_value(
                     raw_payload,
                     "scoNo",
                     "sco_no",
-                    default=cls._payload_field_value(
+                    default=SyncUtil.payload_field_value(
                         raw_payload,
                         "scoId",
                         "sco_id",
-                        default=cls._payload_field_value(mapping_payload, "ticketSco", "ticket_sco", default=""),
+                        default=SyncUtil.payload_field_value(mapping_payload, "ticketSco", "ticket_sco", default=""),
                     ),
                 ),
             )
@@ -3898,7 +3901,7 @@ class TicketSyncService:
             return None, ""
         matched_mapping = cls._match_mapping_contains(vendor_text, project_mappings)
         if isinstance(matched_mapping, dict):
-            project_id = cls._safe_int(
+            project_id = SyncUtil.safe_int(
                 matched_mapping.get("projectId")
                 or matched_mapping.get("project_id")
                 or matched_mapping.get("id")
@@ -3974,7 +3977,7 @@ class TicketSyncService:
         if not module_text:
             return None
         matched_mapping = cls._match_mapping_contains(module_text, module_mappings)
-        module_id = cls._safe_int((matched_mapping or {}).get("moduleId") or (matched_mapping or {}).get("module_id"))
+        module_id = SyncUtil.safe_int((matched_mapping or {}).get("moduleId") or (matched_mapping or {}).get("module_id"))
         module_code = str(
             (matched_mapping or {}).get("moduleCode")
             or (matched_mapping or {}).get("module_code")
@@ -4066,7 +4069,7 @@ class TicketSyncService:
             return None, ""
         matched_mapping = cls._match_mapping_contains(vendor_text, vendor_mappings)
         if isinstance(matched_mapping, dict):
-            vendor_id = cls._safe_int(
+            vendor_id = SyncUtil.safe_int(
                 matched_mapping.get("vendorId")
                 or matched_mapping.get("vendor_id")
                 or matched_mapping.get("id")
@@ -4094,7 +4097,7 @@ class TicketSyncService:
         )
         if not row:
             return None
-        return cls._safe_int(getattr(row, "vender_no", None))
+        return SyncUtil.safe_int(getattr(row, "vender_no", None))
 
     @classmethod
     def _resolve_store_by_external_value(
@@ -4141,7 +4144,7 @@ class TicketSyncService:
                 continue
             candidates = cls._mapping_keywords(mapping)
             candidates.extend(
-                cls._normalize_keywords(
+                SyncUtil.normalize_keywords(
                     [
                         mapping.get("userName"),
                         mapping.get("user_name"),
@@ -4173,7 +4176,7 @@ class TicketSyncService:
 
         source_text = str(assignee_text or "").strip()
         matched_mapping = cls._match_assignee_mapping_exact(source_text, assignee_mappings)
-        mapped_user_id = cls._safe_int(
+        mapped_user_id = SyncUtil.safe_int(
             (matched_mapping or {}).get("userId")
             or (matched_mapping or {}).get("user_id")
             or (matched_mapping or {}).get("assigneeId")
@@ -4283,7 +4286,7 @@ class TicketSyncService:
 
         source_text = str(person_text or "").strip()
         matched_mapping = cls._match_assignee_mapping_exact(source_text, assignee_mappings)
-        mapped_user_id = cls._safe_int(
+        mapped_user_id = SyncUtil.safe_int(
             (matched_mapping or {}).get("userId")
             or (matched_mapping or {}).get("user_id")
             or (matched_mapping or {}).get("assigneeId")
@@ -4679,7 +4682,7 @@ class TicketSyncService:
         :param value: 原始时间字段值。
         :return: `YYYY-MM-DD HH:MM:SS` 格式文本，失败时返回原始文本。
         """
-        parsed = cls._parse_datetime_value(value)
+        parsed = SyncUtil.parse_datetime_value(value)
         if parsed:
             return parsed.strftime("%Y-%m-%d %H:%M:%S")
         return str(value or "").strip()
@@ -4926,10 +4929,10 @@ class TicketSyncService:
                 source_payload=payload,
                 field_mapping_snapshot=field_mapping_snapshot,
             ),
-            "stepReasonHash": cls._text_sha256(payload.get("stepReason")),
+            "stepReasonHash": SyncUtil.text_sha256(payload.get("stepReason")),
             "fieldMappings": field_mapping_snapshot,
             "sourceSystem": payload["source"]["system"],
-            "pulledAt": cls._now_iso(),
+            "pulledAt": SyncUtil.now_iso(),
         }
         send_group_override = config.get("sendGroupMessage") if isinstance(config, dict) else None
         if send_group_override is not None:
@@ -5147,7 +5150,7 @@ class TicketSyncService:
         external_mapping.update(email_map)
         external_mapping["bitableRecordId"] = record_id
         external_mapping["bitableEmailFields"] = email_field_map
-        external_mapping["bitableEmailSyncedAt"] = cls._now_iso()
+        external_mapping["bitableEmailSyncedAt"] = SyncUtil.now_iso()
         external_mapping["bitableEmailSyncStatus"] = "success"
         extra_data["external_field_mapping"] = external_mapping
         extra_data["_bitable_email_sync"] = {
@@ -5220,7 +5223,7 @@ class TicketSyncService:
             return False
         if not str(incoming_title or "").strip():
             return False
-        revision = cls._safe_int((meta or {}).get("revision"))
+        revision = SyncUtil.safe_int((meta or {}).get("revision"))
         if revision is None:
             return True
         return revision > 1
@@ -5238,8 +5241,8 @@ class TicketSyncService:
         :return: (回填后的同步对象, 回填摘要)
         """
         result = extract_result if isinstance(extract_result, dict) else {}
-        pos_no = cls._safe_int(result.get("posNo"))
-        sco_no = cls._safe_int(result.get("scoNo"))
+        pos_no = SyncUtil.safe_int(result.get("posNo"))
+        sco_no = SyncUtil.safe_int(result.get("scoNo"))
         log_date = cls._normalize_auto_log_pull_date_text(result.get("logDate"))
 
         log_pull_payload = (
@@ -5249,11 +5252,11 @@ class TicketSyncService:
         )
         changed = False
         if pos_no:
-            if cls._safe_int(log_pull_payload.get("posNo")) != pos_no:
+            if SyncUtil.safe_int(log_pull_payload.get("posNo")) != pos_no:
                 log_pull_payload["posNo"] = pos_no
                 changed = True
         elif sco_no:
-            if cls._safe_int(log_pull_payload.get("scoNo")) != sco_no:
+            if SyncUtil.safe_int(log_pull_payload.get("scoNo")) != sco_no:
                 log_pull_payload["scoNo"] = sco_no
                 changed = True
         if log_date:
@@ -5270,8 +5273,8 @@ class TicketSyncService:
         return updated_sync_object, {
             "updated": True,
             "logPullConfig": {
-                "posNo": cls._safe_int(log_pull_payload.get("posNo")),
-                "scoNo": cls._safe_int(log_pull_payload.get("scoNo")),
+                "posNo": SyncUtil.safe_int(log_pull_payload.get("posNo")),
+                "scoNo": SyncUtil.safe_int(log_pull_payload.get("scoNo")),
                 "modifyTime": cls._normalize_auto_log_pull_date_text(log_pull_payload.get("modifyTime")),
             },
         }
@@ -5297,7 +5300,7 @@ class TicketSyncService:
         if not isinstance(extract_meta, dict):
             return payload
         payload["ai_sync_extract"] = {
-            "executedAt": cls._now_iso(),
+            "executedAt": SyncUtil.now_iso(),
             "result": extract_result if isinstance(extract_result, dict) else {},
             "meta": extract_meta,
             "applied": applied_meta if isinstance(applied_meta, dict) else {},
@@ -5317,7 +5320,7 @@ class TicketSyncService:
                 payload.module_name,
                 payload.root_cause,
                 payload.solution,
-                cls._json_dumps(raw_payload) if isinstance(raw_payload, dict) else "",
+                SyncUtil.json_dumps(raw_payload) if isinstance(raw_payload, dict) else "",
             ]
         else:
             parts = [
@@ -5329,16 +5332,16 @@ class TicketSyncService:
                 payload.module_name,
                 payload.root_cause,
                 payload.solution,
-                cls._json_dumps(payload.raw_payload) if isinstance(payload.raw_payload, dict) else "",
-                cls._json_dumps(payload.extra_data) if isinstance(payload.extra_data, dict) else "",
+                SyncUtil.json_dumps(payload.raw_payload) if isinstance(payload.raw_payload, dict) else "",
+                SyncUtil.json_dumps(payload.extra_data) if isinstance(payload.extra_data, dict) else "",
             ]
         return "\n".join(str(item).strip() for item in parts if str(item or "").strip())
 
     @classmethod
     def _mapping_keywords(cls, mapping: dict[str, Any]) -> list[str]:
-        keywords = cls._normalize_keywords(mapping.get("keywords") or mapping.get("aliases"))
+        keywords = SyncUtil.normalize_keywords(mapping.get("keywords") or mapping.get("aliases"))
         if mapping.get("matchText"):
-            keywords.extend(cls._normalize_keywords([mapping.get("matchText")]))
+            keywords.extend(SyncUtil.normalize_keywords([mapping.get("matchText")]))
         return [keyword for keyword in keywords if keyword]
 
     @classmethod
@@ -5350,11 +5353,11 @@ class TicketSyncService:
     ) -> dict[str, Any]:
         merged = dict(base_data)
         status_value = str(detected.get("status") or "").strip()
-        assignee_id = cls._safe_int(detected.get("assigneeId"))
+        assignee_id = SyncUtil.safe_int(detected.get("assigneeId"))
         assignee_name = str(detected.get("assigneeName") or "").strip()
-        first_line_assignee_id = cls._safe_int(detected.get("firstLineAssigneeId"))
+        first_line_assignee_id = SyncUtil.safe_int(detected.get("firstLineAssigneeId"))
         first_line_assignee_name = str(detected.get("firstLineAssigneeName") or "").strip()
-        internal_owner_id = cls._safe_int(detected.get("internalOwnerId"))
+        internal_owner_id = SyncUtil.safe_int(detected.get("internalOwnerId"))
         internal_owner_name = str(detected.get("internalOwnerName") or "").strip()
         detected_module_name = str(detected.get("moduleName") or "").strip()
         if status_value:
@@ -5391,12 +5394,12 @@ class TicketSyncService:
                 "moduleName": str(sync_object.module_name or "").strip()
                 or detected_module_name
                 or source_snapshot.get("moduleName"),
-                "vendorId": cls._safe_int(detected.get("vendorId")) or source_snapshot.get("vendorId"),
+                "vendorId": SyncUtil.safe_int(detected.get("vendorId")) or source_snapshot.get("vendorId"),
                 "vendorName": str(detected.get("vendorName") or "").strip() or source_snapshot.get("vendorName"),
                 "storeId": str(detected.get("storeId") or "").strip() or source_snapshot.get("storeId"),
                 "storeName": str(detected.get("storeName") or "").strip() or source_snapshot.get("storeName"),
-                "posNo": cls._safe_int(detected.get("posNo")) or source_snapshot.get("posNo"),
-                "scoNo": cls._safe_int(detected.get("scoNo")) or source_snapshot.get("scoNo"),
+                "posNo": SyncUtil.safe_int(detected.get("posNo")) or source_snapshot.get("posNo"),
+                "scoNo": SyncUtil.safe_int(detected.get("scoNo")) or source_snapshot.get("scoNo"),
             }
         )
         external_sync["source"] = source_snapshot
@@ -5443,7 +5446,7 @@ class TicketSyncService:
         """
         if value in (None, "", []):
             return ""
-        parsed = cls._parse_datetime_value(value)
+        parsed = SyncUtil.parse_datetime_value(value)
         if parsed:
             return parsed.strftime("%Y-%m-%d")
         value_text = str(value).strip()
@@ -5468,9 +5471,9 @@ class TicketSyncService:
         """
         payload = log_pull_payload if isinstance(log_pull_payload, dict) else {}
         payload_candidate = (
-            cls._payload_field_value(payload, "modifyTime", "modify_time", default="")
-            or cls._payload_field_value(payload, "logDate", "log_date", default="")
-            or cls._payload_field_value(payload, "ticketDate", "ticket_date", default="")
+            SyncUtil.payload_field_value(payload, "modifyTime", "modify_time", default="")
+            or SyncUtil.payload_field_value(payload, "logDate", "log_date", default="")
+            or SyncUtil.payload_field_value(payload, "ticketDate", "ticket_date", default="")
         )
         normalized_payload_date = cls._normalize_auto_log_pull_date_text(payload_candidate)
         if normalized_payload_date:
@@ -5486,7 +5489,7 @@ class TicketSyncService:
             ("date", "date"),
             ("createTime", "create_time"),
         ):
-            candidate = cls._payload_field_value(raw_payload, camel_key, snake_key, default="")
+            candidate = SyncUtil.payload_field_value(raw_payload, camel_key, snake_key, default="")
             normalized_date = cls._normalize_auto_log_pull_date_text(candidate)
             if normalized_date:
                 return normalized_date
@@ -5629,7 +5632,7 @@ class TicketSyncService:
             "rawCategory": category_meta.get("raw_category"),
             "strategy": category_meta.get("strategy") or normalized_strategy,
             "matchedPattern": category_meta.get("matchedPattern"),
-            "classifiedAt": cls._now_iso(),
+            "classifiedAt": SyncUtil.now_iso(),
             "forceReclassify": bool(force_reclassify),
         }
         if normalized_category == existing_category and ticket.extra_data == next_extra_data:
@@ -5835,7 +5838,7 @@ class TicketSyncService:
             "commentCount": len(comment_context),
             "providerCode": meta.get("provider_code"),
             "promptCode": meta.get("prompt_code"),
-            "classifiedAt": cls._now_iso(),
+            "classifiedAt": SyncUtil.now_iso(),
             "forceReclassify": bool(force_reclassify),
             "confidence": result_payload.get("confidence"),
             "reason": result_payload.get("reason"),
@@ -6012,7 +6015,7 @@ class TicketSyncService:
         :return: 来源内容 SHA256。
         """
         comment_text = "\n".join(str(item or "").strip() for item in comments or [] if str(item or "").strip())
-        return cls._text_sha256(
+        return SyncUtil.text_sha256(
             "\n\n".join(
                 [
                     str(title or "").strip(),
@@ -6349,9 +6352,9 @@ class TicketSyncService:
         if apply_external_mappings and not vendor_id:
             vendor_id = cls._resolve_vendor_by_project(db, project_id=getattr(project, "project_id", None))
         if not vendor_id:
-            vendor_id = cls._safe_int(log_pull_hints.get("vendorId") or log_pull_hints.get("vendor_id"))
+            vendor_id = SyncUtil.safe_int(log_pull_hints.get("vendorId") or log_pull_hints.get("vendor_id"))
         if not vendor_id:
-            vendor_id = cls._safe_int((sync_object.log_pull_config or {}).get("vendorId"))
+            vendor_id = SyncUtil.safe_int((sync_object.log_pull_config or {}).get("vendorId"))
         if vendor_id and not vendor_name:
             vendor_name = (
                 ticket_vender
@@ -6402,19 +6405,19 @@ class TicketSyncService:
                 status_mappings=config.get("statusMappings") or [],
             )
             assignee_email = str(
-                current_assignee_email or cls._payload_field_value(
+                current_assignee_email or SyncUtil.payload_field_value(
                     raw_payload,
                     "currentAssigneeEmail",
                     "current_assignee_email",
-                    default=cls._payload_field_value(
+                    default=SyncUtil.payload_field_value(
                         raw_payload,
                         "ticketAssigneeEmail",
                         "ticket_assignee_email",
-                        default=cls._payload_field_value(
+                        default=SyncUtil.payload_field_value(
                             raw_payload,
                             "assigneeEmail",
                             "assignee_email",
-                            default=cls._payload_field_value(
+                            default=SyncUtil.payload_field_value(
                                 mapping_payload,
                                 "ticketAssigneeEmail",
                                 "ticket_assignee_email",
@@ -6445,11 +6448,11 @@ class TicketSyncService:
                 assignee_mappings=config.get("assigneeMappings") or [],
             )
         if apply_external_mappings and not assignee_id:
-            assignee_id = cls._safe_int(sync_object.current_assignee_id)
+            assignee_id = SyncUtil.safe_int(sync_object.current_assignee_id)
         if not assignee_name:
             assignee_name = str(sync_object.current_assignee_name or "").strip()
         if apply_external_mappings and not first_line_assignee_id:
-            first_line_assignee_id = cls._safe_int(getattr(sync_object, "first_line_assignee_id", None))
+            first_line_assignee_id = SyncUtil.safe_int(getattr(sync_object, "first_line_assignee_id", None))
         if not first_line_assignee_name:
             first_line_assignee_name = str(
                 getattr(sync_object, "first_line_assignee_name", "")
@@ -6457,7 +6460,7 @@ class TicketSyncService:
                 or ""
             ).strip()
         if apply_external_mappings and not internal_owner_id:
-            internal_owner_id = cls._safe_int(getattr(sync_object, "internal_owner_id", None))
+            internal_owner_id = SyncUtil.safe_int(getattr(sync_object, "internal_owner_id", None))
         if not internal_owner_name:
             internal_owner_name = str(getattr(sync_object, "internal_owner_name", "") or "").strip()
         version_key = (
@@ -6497,21 +6500,21 @@ class TicketSyncService:
             "firstLineAssigneeName": first_line_assignee_name,
             "internalOwnerId": internal_owner_id,
             "internalOwnerName": internal_owner_name,
-            "posNo": cls._safe_int(ticket_pos)
-            or cls._safe_int(log_pull_hints.get("posNo"))
-            or cls._safe_int(log_pull_hints.get("pos_no"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("posNo"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("pos_id"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("posId"))
-            or cls._safe_int(cls._extract_pattern(text, config.get("posPatterns"))),
-            "scoNo": cls._safe_int(ticket_sco)
-            or cls._safe_int(log_pull_hints.get("scoNo"))
-            or cls._safe_int(log_pull_hints.get("sco_no"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("scoNo"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("sco_no"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("scoId"))
-            or cls._safe_int((sync_object.log_pull_config or {}).get("sco_id"))
-            or cls._safe_int(cls._extract_pattern(text, config.get("scoPatterns"))),
+            "posNo": SyncUtil.safe_int(ticket_pos)
+            or SyncUtil.safe_int(log_pull_hints.get("posNo"))
+            or SyncUtil.safe_int(log_pull_hints.get("pos_no"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("posNo"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("pos_id"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("posId"))
+            or SyncUtil.safe_int(cls._extract_pattern(text, config.get("posPatterns"))),
+            "scoNo": SyncUtil.safe_int(ticket_sco)
+            or SyncUtil.safe_int(log_pull_hints.get("scoNo"))
+            or SyncUtil.safe_int(log_pull_hints.get("sco_no"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("scoNo"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("sco_no"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("scoId"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("sco_id"))
+            or SyncUtil.safe_int(cls._extract_pattern(text, config.get("scoPatterns"))),
             "versionKey": version_key,
             "rawTextLength": len(text),
         }
@@ -6552,7 +6555,7 @@ class TicketSyncService:
             "status": status,
             "delivered_revision": delivered_revision,
             "last_revision": int(revision or 0),
-            "delivered_at": cls._now_iso(),
+            "delivered_at": SyncUtil.now_iso(),
             "batch_id": batch_id,
             "message": message,
             "detail": detail,
@@ -6560,7 +6563,7 @@ class TicketSyncService:
         sync_state.update(
             {
                 "status": status,
-                "last_pulled_at": cls._now_iso(),
+                "last_pulled_at": SyncUtil.now_iso(),
                 "last_consumer": consumer,
                 "last_batch_id": batch_id,
                 "consumers": consumers,
@@ -6586,7 +6589,7 @@ class TicketSyncService:
         steps[step] = {
             **previous,
             "status": status,
-            "updated_at": cls._now_iso(),
+            "updated_at": SyncUtil.now_iso(),
             "detail": detail,
             "error": error,
         }
@@ -6630,9 +6633,9 @@ class TicketSyncService:
         meta = cls._build_meta(extra_data)
         revision = int(meta.get("revision") or 0) + 1
         external_create_time = cls._resolve_external_create_time(sync_object=sync_object, existing_meta=meta)
-        remote_source_revision = cls._safe_int((sync_object.extra_data or {}).get("_remote_sync_revision"))
+        remote_source_revision = SyncUtil.safe_int((sync_object.extra_data or {}).get("_remote_sync_revision"))
         if remote_source_revision is None:
-            remote_source_revision = cls._safe_int(meta.get("sourceRevision"))
+            remote_source_revision = SyncUtil.safe_int(meta.get("sourceRevision"))
         resolved_ticket_url = (
             str(sync_object.ticket_url or "").strip()
             or str(sync_object.source.record_url or "").strip()
@@ -6643,7 +6646,7 @@ class TicketSyncService:
             "recordId": sync_object.source.record_id,
             "recordUrl": sync_object.source.record_url,
             "ticketUrl": resolved_ticket_url or None,
-            "pushedAt": sync_object.source.pushed_at.isoformat() if sync_object.source.pushed_at else cls._now_iso(),
+            "pushedAt": sync_object.source.pushed_at.isoformat() if sync_object.source.pushed_at else SyncUtil.now_iso(),
             "externalCreateTime": external_create_time,
         }
         meta.update(
@@ -6653,7 +6656,7 @@ class TicketSyncService:
                 "sourceRecordId": sync_object.source.record_id,
                 "sourceRecordUrl": sync_object.source.record_url,
                 "ticketUrl": resolved_ticket_url or None,
-                "lastImportedAt": cls._now_iso(),
+                "lastImportedAt": SyncUtil.now_iso(),
                 "externalCreateTime": external_create_time,
                 "source": source_snapshot,
             }
@@ -6665,7 +6668,7 @@ class TicketSyncService:
         sync_state.setdefault("automation", {})
         meta["sync_state"] = sync_state
         is_remote_pull = sync_scene == "remote_pull"
-        resolved_assignee_id = cls._safe_int((detected or {}).get("assigneeId"))
+        resolved_assignee_id = SyncUtil.safe_int((detected or {}).get("assigneeId"))
         resolved_assignee_name = str((detected or {}).get("assigneeName") or "").strip()
         sync_is_problem = getattr(sync_object, "is_problem", None)
         payload: dict[str, Any] = {
@@ -6733,10 +6736,10 @@ class TicketSyncService:
             "update_by": _user_name(current_user),
             "update_time": now,
         }
-        project_id = cls._safe_int((detected or {}).get("projectId")) or (
+        project_id = SyncUtil.safe_int((detected or {}).get("projectId")) or (
             None if is_remote_pull else sync_object.project_id
         )
-        module_id = cls._safe_int((detected or {}).get("moduleId")) or (
+        module_id = SyncUtil.safe_int((detected or {}).get("moduleId")) or (
             None if is_remote_pull else sync_object.module_id
         )
         external_fields = cls._extract_external_mapping_fields(sync_object)
@@ -6843,9 +6846,9 @@ class TicketSyncService:
             if isinstance(extra_data.get("log_pull_hints"), dict)
             else {}
         )
-        vendor_id_hint = cls._safe_int((detected or {}).get("vendorId"))
+        vendor_id_hint = SyncUtil.safe_int((detected or {}).get("vendorId"))
         store_id_hint = str((detected or {}).get("storeId") or "").strip()
-        pos_no_hint = cls._safe_int((detected or {}).get("posNo")) or cls._safe_int((detected or {}).get("scoNo"))
+        pos_no_hint = SyncUtil.safe_int((detected or {}).get("posNo")) or SyncUtil.safe_int((detected or {}).get("scoNo"))
         modify_time_hint = cls._resolve_auto_log_pull_modify_time(
             sync_object=sync_object,
             log_pull_payload=sync_object.log_pull_config,
@@ -7066,7 +7069,7 @@ class TicketSyncService:
             extra_data = dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
             extra_data["origin_description"] = origin_description
             extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
-            extra_data["ai_translation_source_hash"] = cls._text_sha256(origin_description)
+            extra_data["ai_translation_source_hash"] = SyncUtil.text_sha256(origin_description)
             if translation_meta.get("provider_code"):
                 extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
             if translation_meta.get("prompt_code"):
@@ -7495,7 +7498,7 @@ class TicketSyncService:
             if should_translate and origin_description and str(translation_meta.get("translated_text") or "").strip():
                 extra_data["origin_description"] = origin_description
                 extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
-                extra_data["ai_translation_source_hash"] = cls._text_sha256(origin_description)
+                extra_data["ai_translation_source_hash"] = SyncUtil.text_sha256(origin_description)
                 if translation_meta.get("provider_code"):
                     extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
                 if translation_meta.get("prompt_code"):
@@ -7635,8 +7638,8 @@ class TicketSyncService:
         try:
             cls._mark_automation_step(meta, step="identify", status="success", detail=detected)
             update_data: dict[str, Any] = {}
-            detected_project_id = cls._safe_int(detected.get("projectId"))
-            detected_module_id = cls._safe_int(detected.get("moduleId"))
+            detected_project_id = SyncUtil.safe_int(detected.get("projectId"))
+            detected_module_id = SyncUtil.safe_int(detected.get("moduleId"))
             detected_project_name = str(detected.get("projectName") or "").strip()
             detected_module_name = str(detected.get("moduleName") or "").strip()
 
@@ -7679,9 +7682,9 @@ class TicketSyncService:
                     log_pull_payload.update(automation.log_pull_config)
                 if isinstance(sync_object.log_pull_config, dict):
                     log_pull_payload.update(sync_object.log_pull_config)
-                resolved_vendor_id = cls._safe_int(detected.get("vendorId") or log_pull_payload.get("vendorId"))
+                resolved_vendor_id = SyncUtil.safe_int(detected.get("vendorId") or log_pull_payload.get("vendorId"))
                 resolved_store_id = str(detected.get("storeId") or log_pull_payload.get("storeId") or "").strip()
-                resolved_pos_no = cls._safe_int(
+                resolved_pos_no = SyncUtil.safe_int(
                     detected.get("posNo") or detected.get("scoNo") or log_pull_payload.get("posNo")
                 )
                 resolved_modify_time = cls._resolve_auto_log_pull_modify_time(
@@ -8506,3 +8509,230 @@ class TicketSyncService:
             summary["ackedCount"] = len(ack_items)
 
         return summary
+
+    @classmethod
+    def normalize_external_sync_payload(cls, payload: dict, required_fields: list[str] | None = None) -> dict:
+        """
+        将外部同步请求体归一化为内部同步模型入参。
+        :param payload: 外部请求体，仅支持约定字段的驼峰/下划线写法
+        :param required_fields: 必填字段列表，未传时使用默认外部同步契约
+        :return: 可用于 TicketExternalSyncUpsertModel 校验的字典
+        """
+        data = dict(payload or {})
+        raw_payload = dict(data)
+
+        source = data.get("source") if isinstance(data.get("source"), dict) else {}
+        ticket_no = str(compatible_field_value(data, "ticketNo", "ticket_no", default="") or "").strip()
+        description = str(compatible_field_value(data, "description", "description", default="") or "").strip()
+        internal_priority = str(
+            compatible_field_value(data, "internalPriority", "internal_priority", default="")
+            or ""
+        ).strip()
+        customer_priority = str(
+            compatible_field_value(
+                data,
+                "customerPriority",
+                "customer_priority",
+                default=internal_priority,
+            )
+            or ""
+        ).strip()
+        ticket_vender = str(compatible_field_value(data, "ticketVender", "ticket_vender", default="") or "").strip()
+        ticket_modle = str(compatible_field_value(data, "ticketModle", "ticket_modle", default="") or "").strip()
+        create_time = compatible_field_value(data, "createTime", "create_time")
+        reporter_raw = compatible_field_value(data, "reporterName", "reporter_name", default="")
+        reporter_name, reporter_email_from_name = extract_person_name_email(reporter_raw)
+        reporter_email = normalize_email_text(
+            compatible_field_value(data, "reporterEmail", "reporter_email", default="")
+        ) or reporter_email_from_name
+        current_assignee_raw = compatible_field_value(
+            data,
+            "currentAssigneeName",
+            "current_assignee_name",
+            default=compatible_field_value(data, "ticketAssignee", "ticket_assignee", default=""),
+        )
+        current_assignee_name, current_assignee_email_from_name = extract_person_name_email(current_assignee_raw)
+        current_assignee_email = normalize_email_text(
+            compatible_field_value(
+                data,
+                "currentAssigneeEmail",
+                "current_assignee_email",
+                default=compatible_field_value(data, "ticketAssigneeEmail", "ticket_assignee_email", default=""),
+            )
+        ) or current_assignee_email_from_name
+        internal_owner_raw = compatible_field_value(
+            data,
+            "internalOwner",
+            "internal_owner",
+            default=compatible_field_value(data, "internalOwnerName", "internal_owner_name", default=""),
+        )
+        internal_owner_name, internal_owner_email_from_name = extract_person_name_email(internal_owner_raw)
+        internal_owner_email = normalize_email_text(
+            compatible_field_value(data, "internalOwnerEmail", "internal_owner_email", default="")
+        ) or internal_owner_email_from_name
+        title = str(compatible_field_value(data, "title", "title", default="") or "").strip()
+        reason = str(compatible_field_value(data, "reason", "reason", default="") or "").strip()
+        step_reason = str(compatible_field_value(data, "stepReason", "step_reason", default="") or "").strip()
+        ticket_url = str(
+            compatible_field_value(
+                data,
+                "ticketUrl",
+                "ticket_url",
+            )
+            or ""
+        ).strip() or None
+
+        field_value_map = {
+            "ticketNo": ticket_no,
+            "description": description,
+            "title": title,
+            "customerPriority": customer_priority,
+            "internalPriority": internal_priority,
+            "ticketVender": ticket_vender,
+            "ticketModle": ticket_modle,
+            "ticketStatus": str(compatible_field_value(data, "ticketStatus", "ticket_status", default="") or "").strip(),
+            "ticketStore": compatible_field_value(data, "ticketStore", "ticket_store", default=""),
+            "ticketPos": str(compatible_field_value(data, "ticketPos", "ticket_pos", default="") or "").strip(),
+            "ticketSco": str(compatible_field_value(data, "ticketSco", "ticket_sco", default="") or "").strip(),
+            "createTime": create_time,
+            "reporterName": reporter_name,
+            "reporterEmail": reporter_email,
+            "currentAssigneeName": current_assignee_name,
+            "currentAssigneeEmail": current_assignee_email,
+            "internalOwner": internal_owner_name,
+            "internalOwnerEmail": internal_owner_email,
+            "ticketUrl": ticket_url,
+            "recordId": str(compatible_field_value(data, "recordId", "record_id", default="") or "").strip(),
+            "reason": reason,
+            "stepReason": step_reason,
+        }
+        default_required_fields = [
+            "ticketNo",
+            "description",
+            "internalPriority",
+            "ticketVender",
+            "ticketModle",
+            "createTime",
+            "reporterName",
+        ]
+        normalized_required_fields: list[str] = []
+        for item in required_fields or default_required_fields:
+            field_name = str(item or "").strip()
+            if field_name and field_name not in normalized_required_fields:
+                normalized_required_fields.append(field_name)
+        missing_fields = [field for field in normalized_required_fields if field_value_map.get(field) in (None, "", [])]
+        if missing_fields:
+            raise ValueError(f"外部同步缺少必填字段: {', '.join(missing_fields)}")
+
+        record_id = str(
+            compatible_field_value(data, "recordId", "record_id", default=ticket_no) or ""
+        ).strip()
+        if not record_id:
+            record_id = ticket_no
+        record_url = str(
+            compatible_field_value(
+                data,
+                "ticketUrl",
+                "ticket_url",
+            )
+            or ""
+        ).strip() or None
+
+        source_system = compatible_field_value(source, "system", "system", default="")
+        if not source_system:
+            source_system = ticket_vender or "external"
+
+        assignee_raw = current_assignee_raw
+        assignee_name, assignee_email_from_name = extract_person_name_email(assignee_raw)
+        assignee_email = current_assignee_email or assignee_email_from_name
+
+        external_field_mapping = {
+            "ticketVender": ticket_vender,
+            "ticketModle": ticket_modle,
+            "ticketStatus": str(compatible_field_value(data, "ticketStatus", "ticket_status", default="") or "").strip(),
+            "ticketStore": str(compatible_field_value(data, "ticketStore", "ticket_store", default="") or "").strip(),
+            "ticketAssignee": assignee_name,
+            "ticketAssigneeEmail": assignee_email,
+            "currentAssigneeName": current_assignee_name,
+            "currentAssigneeEmail": current_assignee_email,
+            "internalOwner": internal_owner_name,
+            "internalOwnerEmail": internal_owner_email,
+            "reporterName": reporter_name,
+            "reporterEmail": reporter_email,
+            "ticketPos": str(compatible_field_value(data, "ticketPos", "ticket_pos", default="") or "").strip(),
+            "ticketSco": str(compatible_field_value(data, "ticketSco", "ticket_sco", default="") or "").strip(),
+            "stepReason": step_reason,
+        }
+        external_field_mapping = {
+            key: value
+            for key, value in external_field_mapping.items()
+            if value not in (None, "", [])
+        }
+
+        extra_data = data.get("extraData") if isinstance(data.get("extraData"), dict) else {}
+        if not extra_data and isinstance(data.get("extra_data"), dict):
+            extra_data = data.get("extra_data")
+        extra_data = dict(extra_data or {})
+        if external_field_mapping:
+            extra_data["external_field_mapping"] = external_field_mapping
+        if step_reason:
+            extra_data["step_reason"] = step_reason
+
+        data["source"] = {
+            "system": str(source_system or "").strip() or "external",
+            "recordId": record_id,
+            "recordUrl": record_url,
+            "pushedAt": compatible_field_value(source, "pushedAt", "pushed_at", default=None),
+        }
+        data["ticketNo"] = ticket_no
+        data["description"] = description
+        data["internalPriority"] = internal_priority
+        data["customerPriority"] = customer_priority or internal_priority
+        data["ticketVender"] = ticket_vender
+        data["ticketModle"] = ticket_modle
+        data["createTime"] = create_time
+        data["reporterName"] = reporter_name
+        data["reporterEmail"] = reporter_email
+        data["firstLineAssigneeName"] = reporter_name
+        data["currentAssigneeName"] = current_assignee_name
+        data["internalOwnerName"] = internal_owner_name
+        data["title"] = title
+        data["reason"] = reason
+        data["stepReason"] = step_reason
+        data["ticketUrl"] = ticket_url
+        data["extraData"] = extra_data
+        if raw_payload:
+            data["raw_payload"] = raw_payload
+        return data
+
+    @staticmethod
+    async def load_external_sync_payload(request: Request) -> dict:
+        """
+        读取外部工单同步请求体，兼容 JSON 和表单提交。
+        :param request: 当前请求对象。
+        :return: 原始请求数据字典。
+        """
+        content_type = (request.headers.get("content-type") or "").lower()
+        raw_payload: dict | None = None
+        if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+            form_data = await request.form()
+            raw_payload = dict(form_data.multi_items())
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                body = None
+            if isinstance(body, dict):
+                raw_payload = body
+            else:
+                try:
+                    body_bytes = await request.body()
+                    if body_bytes:
+                        raw_payload = json.loads(body_bytes.decode("utf-8"))
+                except Exception:
+                    raw_payload = None
+
+        if not isinstance(raw_payload, dict):
+            raise HTTPException(status_code=422, detail="请求体必须是 JSON 或表单数据")
+        logger.info(f"请求参数:{json.dumps(raw_payload, ensure_ascii=False)}")
+        return raw_payload
