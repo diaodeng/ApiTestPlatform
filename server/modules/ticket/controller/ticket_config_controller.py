@@ -178,7 +178,10 @@ async def delete_workflow_status(request: Request, status_id: int, query_db: Ses
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketConfigController.post("/workflow/transition", dependencies=[Depends(CheckUserInterfaceAuth("ticket:workflow:edit"))])
+@ticketConfigController.post(
+    "/workflow/transition",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:workflow:edit"))],
+)
 async def save_workflow_transition(
     request: Request, transition_object: WorkflowTransitionModel, query_db: Session = Depends(get_db)
 ):
@@ -235,7 +238,11 @@ async def get_ticket_stat_classification_options(request: Request, query_db: Ses
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
-@ticketConfigController.get("/statistics/overview", dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))])
+
+@ticketConfigController.get(
+    "/statistics/overview",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))],
+)
 async def get_ticket_statistics(
     request: Request,
     query: TicketStatisticsQueryModel = Depends(TicketStatisticsQueryModel.as_query),
@@ -264,7 +271,10 @@ async def get_ticket_statistics(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketConfigController.get("/statistics/trend", dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))])
+@ticketConfigController.get(
+    "/statistics/trend",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))],
+)
 async def get_ticket_statistics_trend(
     request: Request,
     query: TicketStatisticsQueryModel = Depends(TicketStatisticsQueryModel.as_query),

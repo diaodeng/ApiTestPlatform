@@ -44,35 +44,26 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ticket_auto_classification_service import TicketAutoClassificationService
+from modules.ticket.service.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.ticket_prompt_service import TicketPromptService
-from modules.ticket.service.ticket_sync_service import TicketSyncConfigService, TicketSyncService
+from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.util.ticket_common_util import (
+    extract_ticket_version_key as _extract_ticket_version_key,
+)
+from modules.ticket.util.ticket_common_util import (
+    user_id as _user_id,
+)
+from modules.ticket.util.ticket_common_util import (
+    user_name as _user_name,
+)
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.snowflake import snowIdWorker
-
-
-def _user_id(current_user: CurrentUserModel) -> int | None:
-    """
-    获取当前登录用户ID。
-    :param current_user: 当前登录用户
-    :return: 用户ID
-    """
-    return current_user.user.user_id if current_user and current_user.user else None
-
-
-def _user_name(current_user: CurrentUserModel) -> str:
-    """
-    获取当前登录用户名。
-    :param current_user: 当前登录用户
-    :return: 用户名
-    """
-    if not current_user or not current_user.user:
-        return ""
-    return current_user.user.user_name or current_user.user.nick_name or ""
 
 
 def _dump_model(model, *, exclude_none: bool = True) -> dict[str, Any]:
@@ -153,21 +144,6 @@ def _text_sha256(value: Any) -> str:
     :return: SHA256 摘要
     """
     return hashlib.sha256(str(value or "").strip().encode("utf-8")).hexdigest()
-
-
-def _extract_ticket_version_key(extra_data: Any) -> str:
-    """
-    从工单扩展信息中提取版本号。
-    :param extra_data: 工单扩展字段
-    :return: 版本号
-    """
-    if not isinstance(extra_data, dict):
-        return ""
-    for key in ("versionKey", "version_key", "version", "deployVersion", "deploy_version", "appVersion"):
-        value = extra_data.get(key)
-        if str(value or "").strip():
-            return str(value).strip()
-    return ""
 
 
 def _extract_ticket_origin_description(extra_data: Any) -> str:
@@ -707,20 +683,18 @@ class TicketService:
         :param create_time: 创建时间
         :return: 消息对象
         """
-        return TicketDao.add_message(
+        return TicketCommentCoreService.add_message(
             query_db,
-            TicketMessage(
-                ticket_id=ticket_id,
-                role=str(role or "user").strip() or "user",
-                message_type=str(message_type or "comment").strip() or "comment",
-                content=content,
-                attachments=attachments,
-                reference_type=reference_type,
-                reference_id=reference_id,
-                created_by_id=_user_id(current_user) if current_user else None,
-                created_by_name=created_by_name if created_by_name is not None else _user_name(current_user),
-                create_time=create_time or datetime.now(),
-            ),
+            ticket_id=ticket_id,
+            role=str(role or "user").strip() or "user",
+            message_type=str(message_type or "comment").strip() or "comment",
+            content=content,
+            created_by_id=_user_id(current_user) if current_user else None,
+            created_by_name=created_by_name if created_by_name is not None else _user_name(current_user),
+            attachments=attachments,
+            reference_type=reference_type,
+            reference_id=reference_id,
+            create_time=create_time,
         )
 
     @classmethod
@@ -1097,8 +1071,7 @@ class TicketService:
             )
             query_db.commit()
             try:
-
-                ticket, ai_stat_summary = TicketSyncService._run_auto_ticket_ai_classification(
+                ticket, ai_stat_summary = TicketAutoClassificationService.run_auto_ticket_ai_classification(
                     query_db,
                     ticket=ticket,
                     title=str(ticket.title or "").strip(),
@@ -1664,7 +1637,6 @@ class TicketService:
         :return: 无。
         """
         try:
-
             config = TicketSyncConfigService.load_sync_config(query_db)
             ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
             if not bool(ai_config.get("enabled")) or not bool(ai_config.get("runOnStatusChange")):
@@ -1695,7 +1667,7 @@ class TicketService:
             if not ticket:
                 logger.info(f"工单[{ticket_id}]状态变更AI分类跳过: reason=工单不存在")
                 return
-            _, summary = TicketSyncService._run_auto_ticket_ai_classification(
+            _, summary = TicketAutoClassificationService.run_auto_ticket_ai_classification(
                 query_db,
                 ticket=ticket,
                 title=str(ticket.title or "").strip(),
@@ -1858,133 +1830,22 @@ class TicketService:
         :param is_internal: 是否内部评论
         :return: (评论对象, 动作 created/updated/skipped)
         """
-        normalized_content = str(content or "").strip()
-        normalized_key = str(source_segment_key or "").strip()
-        if not normalized_content or not normalized_key:
-            return None, "skipped"
-        existing = TicketDao.get_comment_by_source_segment_key(
+        return TicketCommentCoreService.upsert_synced_comment(
             query_db,
             ticket_id=ticket_id,
-            source_segment_key=normalized_key,
+            content=content,
+            user_name=user_name,
+            source_type=source_type,
+            source_system=source_system,
+            source_record_id=source_record_id,
+            source_field=source_field,
+            source_segment_key=source_segment_key,
+            source_segment_index=source_segment_index,
+            source_content_hash=source_content_hash,
+            external_created_at=external_created_at,
+            attachments=attachments,
+            is_internal=is_internal,
         )
-        now = datetime.now()
-        source_payload = {
-            "source_type": str(source_type or "external").strip() or "external",
-            "source_system": str(source_system or "").strip(),
-            "source_record_id": str(source_record_id or "").strip(),
-            "source_field": str(source_field or "").strip(),
-            "source_segment_key": normalized_key,
-            "source_segment_index": int(source_segment_index or 0),
-            "source_content_hash": str(source_content_hash or "").strip(),
-            "external_created_at": external_created_at,
-            "attachments": attachments,
-            "is_internal": bool(is_internal),
-        }
-        if existing:
-            if (
-                str(existing.source_content_hash or "") == source_payload["source_content_hash"]
-                and str(existing.content or "").strip() == normalized_content
-                and (existing.attachments or None) == (attachments or None)
-            ):
-                return existing, "skipped"
-            TicketDao.update_comment(
-                query_db,
-                existing.id,
-                {
-                    "user_name": str(user_name or "").strip() or existing.user_name or "外部同步",
-                    "content": normalized_content,
-                    **source_payload,
-                },
-            )
-            TicketDao.update_message_by_reference(
-                query_db,
-                reference_type="comment",
-                reference_id=existing.id,
-                data={
-                    "content": normalized_content,
-                    "attachments": {
-                        "is_internal": bool(is_internal),
-                        "source_type": source_payload["source_type"],
-                        "source_system": source_payload["source_system"],
-                        "source_record_id": source_payload["source_record_id"],
-                        "source_field": source_payload["source_field"],
-                        "source_segment_key": normalized_key,
-                        "source_segment_index": source_payload["source_segment_index"],
-                        "source_content_hash": source_payload["source_content_hash"],
-                        "comment_attachments": attachments,
-                    },
-                    "created_by_name": str(user_name or "").strip() or existing.user_name or "外部同步",
-                },
-            )
-            query_db.flush()
-            refreshed = TicketDao.get_comment_by_source_segment_key(
-                query_db,
-                ticket_id=ticket_id,
-                source_segment_key=normalized_key,
-            )
-            return refreshed or existing, "updated"
-
-        if source_payload["source_content_hash"]:
-            hash_existing = TicketDao.get_comment_by_source_content_hash(
-                query_db,
-                ticket_id=ticket_id,
-                source_content_hash=source_payload["source_content_hash"],
-            )
-            if hash_existing and str(hash_existing.content or "").strip() == normalized_content:
-                return hash_existing, "skipped"
-
-        comment = TicketDao.add_comment(
-            query_db,
-            TicketComment(
-                ticket_id=ticket_id,
-                user_id=None,
-                user_name=str(user_name or "").strip() or "外部同步",
-                content=normalized_content,
-                create_time=external_created_at or now,
-                **source_payload,
-            ),
-        )
-        cls._add_message(
-            query_db,
-            ticket_id=ticket_id,
-            role="user",
-            message_type="external_comment",
-            content=normalized_content,
-            current_user=None,
-            attachments={
-                "is_internal": bool(is_internal),
-                "source_type": source_payload["source_type"],
-                "source_system": source_payload["source_system"],
-                "source_record_id": source_payload["source_record_id"],
-                "source_field": source_payload["source_field"],
-                "source_segment_key": normalized_key,
-                "source_segment_index": source_payload["source_segment_index"],
-                "source_content_hash": source_payload["source_content_hash"],
-                "comment_attachments": attachments,
-            },
-            reference_type="comment",
-            reference_id=comment.id,
-            create_time=comment.create_time,
-        )
-        TicketDao.add_event(
-            query_db,
-            TicketEvent(
-                ticket_id=ticket_id,
-                event_type=TicketEventType.COMMENTED.value,
-                operator_id=None,
-                operator_name=str(user_name or "").strip() or "外部同步",
-                content=normalized_content,
-                event_data={
-                    "comment_id": comment.id,
-                    "is_internal": bool(is_internal),
-                    "source_type": source_payload["source_type"],
-                    "source_record_id": source_payload["source_record_id"],
-                    "source_segment_key": normalized_key,
-                },
-                create_time=comment.create_time,
-            ),
-        )
-        return comment, "created"
 
     @classmethod
     def add_event(

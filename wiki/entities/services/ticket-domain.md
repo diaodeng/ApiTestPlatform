@@ -6,13 +6,15 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-02
+freshness: 2026-07-04
 created: 2026-05-20
-updated: 2026-07-02
+updated: 2026-07-04
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
   - server/modules/ticket/service/ticket_sync_service.py
+  - server/modules/ticket/service/ticket_auto_classification_service.py
+  - server/modules/ticket/service/ticket_comment_core_service.py
   - server/modules/ticket/service/ticket_light_ai_service.py
   - server/modules/ticket/service/ticket_log_pull_service.py
   - server/modules/ticket/service/ticket_ai_analysis_service.py
@@ -27,6 +29,7 @@ related_files:
   - server/modules/ticket/entity/vo/ticket_vo.py
   - server/modules/ticket/entity/vo/ticket_log_pull_vo.py
   - server/modules/ticket/enums/ticket_enums.py
+  - server/modules/ticket/util/ticket_common_util.py
   - server/modules/ticket/perms.py
 ---
 
@@ -72,6 +75,9 @@ graph TD
 
 ## 当前关键约束
 
+- 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 仍保留拆分前私有入口兼容门面，避免历史调用和边界测试失效，实际逻辑委托到 `TicketSyncConfigService`、`TicketSyncCommentService`、`TicketSyncGroupPushService`、`TicketAutoClassificationService` 等子服务。
+- 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入或延迟代理规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
+- 工单控制器拆分后必须保持备份分支接口兼容；当前路由包含 `PUT /ticket/{ticket_id:int}/rca`，前端保存 RCA 依赖该接口。
 - 工单所属维度复用 HRM 测试管理中的项目/模块，前端通过工单域选项接口拉取有效项目与模块。
 - 工单新增/编辑时项目和模块联动，模块必须属于当前项目；工单号作为外部系统唯一编号手动录入，不再自动生成。
 - 工单责任人拆分为三类：`current_assignee` 表示当前处理人，`first_line_assignee` 表示一线接单人员，`internal_owner` 表示内部模块/工单负责人；其中当前处理人继续承接指派、流转和时间线语义，另外两类用于真实业务分工展示和后续路由扩展。

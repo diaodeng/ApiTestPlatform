@@ -8,10 +8,9 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
-from modules.ticket.service.ticket_service import TicketService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
-from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.log_util import logger
 
@@ -22,6 +21,7 @@ class TicketMessageSyncService:
     """
 
     SOURCE_TYPE_FEISHU_THREAD = "feishu_thread"
+    META_KEY = "external_sync"
 
     @classmethod
     def _safe_getattr(cls, target: Any, name: str, default: Any = None) -> Any:
@@ -531,7 +531,7 @@ class TicketMessageSyncService:
         :return: 消息锚点列表
         """
         extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-        raw_meta = extra_data.get(TicketSyncService.META_KEY)
+        raw_meta = extra_data.get(cls.META_KEY)
         meta = raw_meta if isinstance(raw_meta, dict) else {}
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
         raw_refs = sync_state.get("group_push_message_refs")
@@ -614,7 +614,7 @@ class TicketMessageSyncService:
             ).strip()
             if record_id:
                 return record_id
-        raw_meta = extra_data.get(TicketSyncService.META_KEY)
+        raw_meta = extra_data.get(cls.META_KEY)
         meta = raw_meta if isinstance(raw_meta, dict) else {}
         source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
         return str(source.get("recordId") or source.get("record_id") or "").strip()
@@ -906,7 +906,7 @@ class TicketMessageSyncService:
                 event=event,
                 sender_open_id=sender_open_id,
             )
-            comment, comment_action = TicketService.upsert_synced_comment(
+            comment, comment_action = TicketCommentCoreService.upsert_synced_comment(
                 db,
                 ticket_id=ticket.ticket_id,
                 content=text,

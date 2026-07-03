@@ -14,8 +14,8 @@ from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
-from modules.ticket.service.ticket_service import _user_name
 from modules.ticket.util.sync_util import SyncUtil
+from modules.ticket.util.ticket_common_util import user_name as _user_name
 from utils.log_util import logger
 
 
@@ -188,10 +188,8 @@ class TicketSyncGroupPushService:
         if not recoverable:
             return ticket, meta, False
         logger.warning(
-            "工单同步发布状态自愈: ticket_no=%s, revision=%s, reason=%s",
-            ticket.ticket_no,
-            meta.get("revision"),
-            recover_reason,
+            f"工单同步发布状态自愈: ticket_no={ticket.ticket_no}, "
+            f"revision={meta.get('revision')}, reason={recover_reason}"
         )
         meta = cls.set_publish_state(
             meta,

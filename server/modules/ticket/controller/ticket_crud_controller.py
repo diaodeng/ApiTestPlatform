@@ -19,6 +19,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketEventCreateModel,
     TicketMessageCreateModel,
     TicketQueryModel,
+    TicketRcaModel,
     TicketSnapshotModel,
     TicketStatusChangeModel,
     TicketUpdateModel,
@@ -103,7 +104,10 @@ async def import_ticket_excel(
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketCrudController.get("/search/natural-language", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
+@ticketCrudController.get(
+    "/search/natural-language",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))],
+)
 async def search_ticket_natural_language(
     request: Request,
     keyword: str,
@@ -141,7 +145,11 @@ async def add_ticket(
     """
     try:
         _ = query_db
-        result = await run_in_threadpool(TicketService.create_ticket_with_independent_session, add_ticket_object, current_user)
+        result = await run_in_threadpool(
+            TicketService.create_ticket_with_independent_session,
+            add_ticket_object,
+            current_user,
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -165,7 +173,11 @@ async def edit_ticket(
     """
     try:
         _ = query_db
-        result = await run_in_threadpool(TicketService.update_ticket_with_independent_session, edit_ticket_object, current_user)
+        result = await run_in_threadpool(
+            TicketService.update_ticket_with_independent_session,
+            edit_ticket_object,
+            current_user,
+        )
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -350,7 +362,10 @@ async def list_ticket_comments(request: Request, ticket_id: int, query_db: Sessi
         return ResponseUtil.error(msg=str(e))
 
 
-@ticketCrudController.post("/{ticket_id:int}/events", dependencies=[Depends(CheckUserInterfaceAuth("ticket:event:add"))])
+@ticketCrudController.post(
+    "/{ticket_id:int}/events",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:event:add"))],
+)
 async def add_ticket_event(
     request: Request,
     ticket_id: int,
@@ -389,6 +404,34 @@ async def get_ticket_timeline(request: Request, ticket_id: int, query_db: Sessio
     try:
         result = TicketService.get_timeline_services(query_db, ticket_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.put(
+    "/{ticket_id:int}/rca",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:rca:edit"))],
+)
+async def upsert_ticket_rca(
+    request: Request,
+    ticket_id: int,
+    rca_object: TicketRcaModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    保存工单 RCA 接口。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param rca_object: 现象、影响范围、复现步骤、排查过程、根因、修复方案、验证方式和预防方案
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入创建人
+    :return: RCA 保存结果
+    """
+    try:
+        result = TicketService.upsert_rca(query_db, ticket_id, rca_object, current_user)
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

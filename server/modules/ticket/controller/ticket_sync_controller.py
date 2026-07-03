@@ -20,9 +20,9 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketSyncPullQueryModel,
     TicketSyncSummaryRunModel,
 )
-from modules.ticket.service.ticket_sync_service import TicketSyncService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
+from modules.ticket.service.ticket_sync_service import TicketSyncService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 

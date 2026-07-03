@@ -73,7 +73,12 @@ class TicketSyncFieldMappingService:
                         raw_payload,
                         "storeId",
                         "store_id",
-                        default=SyncUtil.payload_field_value(mapping_payload, "ticketStore", "ticket_store", default=""),
+                        default=SyncUtil.payload_field_value(
+                            mapping_payload,
+                            "ticketStore",
+                            "ticket_store",
+                            default="",
+                        ),
                     ),
                 ),
             )
@@ -436,7 +441,10 @@ class TicketSyncFieldMappingService:
         if not module_text:
             return None
         matched_mapping = cls.match_mapping_contains(module_text, module_mappings)
-        module_id = SyncUtil.safe_int((matched_mapping or {}).get("moduleId") or (matched_mapping or {}).get("module_id"))
+        module_id = SyncUtil.safe_int(
+            (matched_mapping or {}).get("moduleId")
+            or (matched_mapping or {}).get("module_id")
+        )
         module_code = str(
             (matched_mapping or {}).get("moduleCode")
             or (matched_mapping or {}).get("module_code")

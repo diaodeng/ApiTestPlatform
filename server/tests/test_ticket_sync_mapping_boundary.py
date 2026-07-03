@@ -1,4 +1,3 @@
-from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -12,11 +11,12 @@ from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_comment_service import TicketSyncCommentService
-from modules.ticket.service.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
-from modules.ticket.service.ticket_sync_service import TicketSyncService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
+from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 
 
 class TicketSyncMappingBoundaryTests(unittest.TestCase):
@@ -1005,7 +1005,10 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(segments[0]["personName"], "张三")
         self.assertEqual(segments[1]["personName"], "李四")
         with (
-            patch("modules.ticket.service.ticket_sync_comment_service.TicketService.upsert_synced_comment") as upsert,
+            patch(
+                "modules.ticket.service.ticket_sync_comment_service."
+                "TicketCommentCoreService.upsert_synced_comment"
+            ) as upsert,
         ):
             upsert.return_value = (SimpleNamespace(id=1), "created")
             TicketSyncCommentService.sync_step_reason_comments(
@@ -1224,7 +1227,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             return [{"field_name": "工单号"}, {"field_name": "描述"}]
 
         with (
-            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
             patch.object(TicketSyncNotifyService, "query_bitable_fields", side_effect=fake_query_fields),
             patch.object(TicketSyncNotifyService, "query_bitable_records") as query_records,
         ):
@@ -1260,7 +1263,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             return [{"record_id": "rec_001", "fields": {"工单号": "T-001", "描述": "支付失败"}}]
 
         with (
-            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
             patch.object(TicketSyncNotifyService, "query_bitable_fields", side_effect=RuntimeError("no scope")),
             patch.object(TicketSyncNotifyService, "query_bitable_records", side_effect=fake_query_records),
         ):
@@ -1427,7 +1430,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
 
         with (
-            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
             patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[]),
         ):
             result = TicketSyncService.run_bitable_pull_services(
@@ -1937,7 +1940,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         }
 
         with (
-            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
+            patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
             patch.object(TicketMessageSyncService, "_match_ticket_by_message_context", return_value=ticket),
             patch.object(
                 TicketSyncNotifyService,
@@ -1945,7 +1948,10 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 return_value={"openId": "ou_sender", "name": "张三"},
             ) as query_user,
             patch.object(TicketMessageSyncService, "append_comment_to_bitable_step_reason") as append_bitable,
-            patch("modules.ticket.service.ticket_message_sync_service.TicketService.upsert_synced_comment") as upsert,
+            patch(
+                "modules.ticket.service.ticket_message_sync_service."
+                "TicketCommentCoreService.upsert_synced_comment"
+            ) as upsert,
         ):
             upsert.return_value = (SimpleNamespace(id=88), "created")
             append_bitable.return_value = {"skipped": False, "recordId": "rec_001"}

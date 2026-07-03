@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
-from modules.ticket.service.ticket_service import TicketService
+from modules.ticket.service.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.util.sync_util import SyncUtil
 
 
@@ -223,7 +223,7 @@ class TicketSyncCommentService:
                 content=content,
                 content_segments=rich_text_segments,
             )
-            _, action = TicketService.upsert_synced_comment(
+            _, action = TicketCommentCoreService.upsert_synced_comment(
                 db,
                 ticket_id=ticket.ticket_id,
                 content=content,
@@ -285,7 +285,7 @@ class TicketSyncCommentService:
                 or item.get("createTime")
                 or item.get("create_time")
             )
-            _, action = TicketService.upsert_synced_comment(
+            _, action = TicketCommentCoreService.upsert_synced_comment(
                 db,
                 ticket_id=ticket.ticket_id,
                 content=content,
