@@ -344,6 +344,41 @@ class TicketSyncService:
         return TicketSyncGroupPushService.finalize_sync_after_ai(db, ticket_id, ai_task_status, sync_scene)
 
     @classmethod
+    def _resolve_external_create_time(
+        cls,
+        *,
+        sync_object,
+        existing_meta,
+    ) -> str:
+        """
+        解析并固定外部工单创建时间。
+        :param sync_object: 外部同步模型
+        :param existing_meta: 已存在的同步元数据
+        :return: ISO 格式创建时间文本
+        """
+        current_meta = existing_meta if isinstance(existing_meta, dict) else {}
+        source_snapshot = current_meta.get("source") if isinstance(current_meta.get("source"), dict) else {}
+        existing_external_time = (
+            current_meta.get("externalCreateTime")
+            or source_snapshot.get("externalCreateTime")
+        )
+        parsed_existing = SyncUtil.parse_datetime_value(existing_external_time)
+        if parsed_existing:
+            return parsed_existing.isoformat()
+
+        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
+        parsed_candidate = (
+            SyncUtil.parse_datetime_value(sync_object.create_time)
+            or SyncUtil.parse_datetime_value(raw_payload.get("externalCreateTime"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("external_create_time"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("createTime"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("create_time"))
+            or SyncUtil.parse_datetime_value(sync_object.source.pushed_at)
+            or datetime.now()
+        )
+        return parsed_candidate.isoformat()
+
+    @classmethod
     def _resolve_ticket_submit_time(cls, *, ticket, meta):
         """委托到 TicketSyncGroupPushService。"""
         return TicketSyncGroupPushService._resolve_ticket_submit_time(ticket=ticket, meta=meta)
@@ -399,7 +434,6 @@ class TicketSyncService:
         return False
 
     @classmethod
-    @classmethod
     def _should_apply_remote_sync_item(
         cls,
         *,
@@ -452,6 +486,7 @@ class TicketSyncService:
         return TicketSyncConfigService._default_sync_config()
 
 
+    @classmethod
     def _default_feishu_auth_config(cls) -> dict[str, Any]:
         """委托到 TicketSyncConfigService。"""
         return TicketSyncConfigService._default_feishu_auth_config()
@@ -576,11 +611,29 @@ class TicketSyncService:
         return TicketSyncConfigService._build_bitable_pull_time_filters(filter_formula=filter_formula, created_after=created_after, created_before=created_before, updated_at_field=updated_at_field, auto_append_time_filter=auto_append_time_filter)
 
     @classmethod
-    @classmethod
     def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
         """委托到 TicketSyncConfigService._normalize_sync_config。"""
         return TicketSyncConfigService._normalize_sync_config(config)
 
+    @classmethod
+    def _resolve_bitable_runtime_config(cls, config, section_key, default_config, *, keep_filter_formula=True):
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._resolve_bitable_runtime_config(config, section_key, default_config, keep_filter_formula=keep_filter_formula)
+
+    @classmethod
+    def _resolve_bitable_pull_created_after(cls, value):
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._resolve_bitable_pull_created_after(value)
+
+    @classmethod
+    def _query_bitable_pull_records(cls, pull_config, filters):
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._query_bitable_pull_records(pull_config, filters)
+
+    @classmethod
+    def _derive_required_fields_from_external_field_model(cls, value):
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._derive_required_fields_from_external_field_model(value)
 
     @classmethod
     def ensure_param_config_rows(cls, db: Session):
@@ -598,6 +651,7 @@ class TicketSyncService:
         return TicketSyncConfigService.get_sync_automation_config_services(db)
 
 
+    @classmethod
     def preview_bitable_pull_fields_services(
         cls,
         db: Session,
@@ -672,43 +726,15 @@ class TicketSyncService:
         return TicketSyncConfigService.get_ticket_stat_classification_options(db)
 
 
+    @classmethod
     def update_sync_automation_config_services(
         cls,
         db: Session,
         config_value: dict[str, Any],
         current_user_name: str,
     ) -> CrudResponseModel:
-        try:
-            current_config = cls._load_sync_config(db)
-            merged = cls._normalize_sync_config(config_value)
-            merged = cls._merge_legacy_ai_classification_prompt_content(current_config, merged)
-            now = datetime.now()
-            row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
-            if row:
-                row.config_name = "宸ュ崟鍚屾鑷姩鍖栭厤缃?"
-                row.config_value = SyncUtil.json_dumps(merged)
-                row.config_type = "Y"
-                row.update_by = current_user_name
-                row.update_time = now
-            else:
-                db.add(
-                    SysConfig(
-                        config_name="宸ュ崟鍚屾鑷姩鍖栭厤缃?",
-                        config_key=cls.CONFIG_KEY,
-                        config_value=SyncUtil.json_dumps(merged),
-                        config_type="Y",
-                        create_by=current_user_name,
-                        update_by=current_user_name,
-                        create_time=now,
-                        update_time=now,
-                        remark="澶栭儴宸ュ崟鍚屾銆佸唴缃戞媺鍙栥€佽鍒欒瘑鍒拰鑷姩鍖栭摼璺厤缃?JSON",
-                    )
-                )
-            db.commit()
-            return CrudResponseModel(is_success=True, message="淇濆瓨鎴愬姛", result=merged)
-        except Exception as exc:
-            db.rollback()
-            raise exc
+        """委托到 TicketSyncConfigService.update_sync_automation_config_services。"""
+        return TicketSyncConfigService.update_sync_automation_config_services(db, config_value, current_user_name)
 
     @classmethod
     def get_sync_notify_push_options_services(cls, db: Session):
@@ -716,6 +742,7 @@ class TicketSyncService:
         return TicketSyncConfigService.get_sync_notify_push_options_services(db)
 
 
+    @classmethod
     def preview_person_reminder_services(
         cls,
         db: Session,
@@ -1083,7 +1110,6 @@ class TicketSyncService:
         return TicketSyncGroupPushService.send_group_push_by_ticket_no_services(db, ticket_no=ticket_no, push_ids=push_ids, message_template=message_template, force_push=force_push, update_by=update_by)
 
     @classmethod
-    @classmethod
     def _build_remote_sync_request_headers(cls, remote_sync: dict[str, Any]) -> dict[str, str]:
         """
         构建远端工单同步请求头。
@@ -1176,7 +1202,6 @@ class TicketSyncService:
         }
 
     @classmethod
-    @classmethod
     def _extract_external_mapping_fields(cls, sync_object):
         """委托到 TicketSyncFieldMappingService。"""
         return TicketSyncFieldMappingService._extract_external_mapping_fields(sync_object)
@@ -1266,6 +1291,16 @@ class TicketSyncService:
     def _describe_bitable_field_value_for_log(cls, value: Any) -> dict[str, Any]:
         """委托到 FeishuBitableUtil.describe_field_value_for_log。"""
         return FeishuBitableUtil.describe_field_value_for_log(value)
+
+    @classmethod
+    def _extract_email_from_bitable_value(cls, value):
+        """委托到 FeishuBitableUtil.extract_email。"""
+        return FeishuBitableUtil.extract_email(value)
+
+    @classmethod
+    def _mask_email_for_log(cls, email):
+        """委托到 FeishuBitableUtil.mask_email_for_log。"""
+        return FeishuBitableUtil.mask_email_for_log(email)
 
     @classmethod
     def _normalize_bitable_record_scalar(
@@ -1912,7 +1947,6 @@ class TicketSyncService:
             ]
         return "\n".join(str(item).strip() for item in parts if str(item or "").strip())
 
-    @classmethod
     @classmethod
     def _mapping_keywords(cls, mapping):
         """委托到 TicketSyncFieldMappingService._mapping_keywords。"""
@@ -4384,7 +4418,6 @@ class TicketSyncService:
         return summary
 
     @classmethod
-    @classmethod
     def pull_pending_tickets(
         cls,
         db: Session,
@@ -4448,7 +4481,6 @@ class TicketSyncService:
             "items": payload_rows,
         }
 
-    @classmethod
     @classmethod
     def ack_sync_delivery(
         cls,
@@ -4692,7 +4724,6 @@ class TicketSyncService:
         }
 
     @classmethod
-    @classmethod
     def _build_remote_sync_upsert_model(
         cls,
         item: dict[str, Any],
@@ -4863,7 +4894,6 @@ class TicketSyncService:
             logger.warning(f"转换远端工单同步模型失败，ticket_no={ticket_no}, error={exc}")
             return None
 
-    @classmethod
     @classmethod
     def sync_remote_pending_tickets(
         cls,

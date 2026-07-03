@@ -3086,7 +3086,6 @@
     addTicketComment,
     addTicketEvent,
     addTicketAiAnalysis,
-    addTicketAiRepoMapping,
     assignTicket,
     changeTicketStatus,
     delTicket,
@@ -3103,14 +3102,12 @@
     getTicketLogPullProjectVendorMap,
     saveTicketLogPullProjectVendorMap,
     translateTicketDescription,
-    updateTicketAiRepoMapping,
     updateTicket,
   } from '@/api/ticket/ticket';
   import {
     eventTypeOptions,
     getLogPullStatusTagType,
     getOptionLabel,
-    getStatusTagType as getDefaultStatusTagType,
     logPullDataTypeOptions,
     logPullStatusOptions,
     logPullStorageModeOptions,
@@ -3118,19 +3115,14 @@
     ticketProcessStatusOptions,
     severityOptions,
     sourceOptions,
-    ticketStatusOptions as defaultTicketStatusOptions,
   } from './constants';
   import {
-    buildOptionalLogPullTimeRangePayload,
-    createDefaultLogPullNotifyConfig,
     getOptionalLogPullTimeRangeError,
     hasLogPullTimeRange,
     normalizeLogPullNotifyConfig,
   } from './logPull.shared';
   import UserSelect from './components/UserSelect.vue';
-  import { blobValidate } from '@/utils/ruoyi';
   import { useRoute, useRouter } from 'vue-router';
-  import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig';
   import { useWorkflow } from './hooks/useWorkflow';
   import { useAiRepoMapping } from './hooks/useAiRepoMapping';
   import { useOptions } from './hooks/useOptions';
@@ -3167,7 +3159,6 @@
     handleTicketSortChange,
     resolveTicketDetailUrl,
     openTicketLink,
-    buildSystemTicketDetailUrl,
     openSystemTicketDetail,
     handleQuery,
     handleSearch,
@@ -3181,7 +3172,6 @@
   // 选项数据 + 格式化函数 已提取到 hooks/useOptions.js
   const {
     projectOptions,
-    projectVendorMapOptions,
     formModuleOptions,
     formVersionOptions,
     queryModuleOptions,
@@ -3198,16 +3188,12 @@
     parameterExamples,
     pushOptions,
     detailVersionOptions,
-    normalizeVendorOptions,
     loadVendorOptions,
     loadProjectVendorMapOptions,
-    getProjectVendorNo,
-    applyProjectVendorMapping,
     getVendorStoreOptions,
     loadProviderOptions,
     loadAnalysisPromptOptions,
     getTicketAutomationLogPullConfig,
-    findAiProviderOption,
     applyAiAnalysisProviderAgent,
     handleAiAnalysisProviderChange,
     resolveDefaultAiPromptTemplateCodes,
@@ -3224,20 +3210,14 @@
     formatIssueType,
     formatResolution,
     formatProblemPattern,
-    normalizeStatOptions,
     loadStatClassificationOptions,
   } = useOptions();
   // ticketColumnOptions / defaultTicketColumnKeys / requiredTicketColumnKeys 已通过 useTicketList() 提供
   // agentOptions / providerOptions / analysisPromptOptions / vendorOptions / parameterExamples / pushOptions 已通过 useOptions() 提供
   // 已提取到 hooks/useWorkflow.js — workflowConfig / ticketStatusOptions / statusTransitionOptions / getStatusTagType / loadWorkflowConfig
   const currentTicketStatus = ref('');
-  const {
-    workflowConfig,
-    ticketStatusOptions,
-    statusTransitionOptions,
-    getStatusTagType,
-    loadWorkflowConfig,
-  } = useWorkflow(currentTicketStatus);
+  const { ticketStatusOptions, statusTransitionOptions, getStatusTagType, loadWorkflowConfig } =
+    useWorkflow(currentTicketStatus);
 
   const open = ref(false);
   const formSubmitting = ref(false);
@@ -3297,36 +3277,24 @@
     resetLogPullForm,
     openLogPullSubmitDialog,
     stopLogPullAutoRefresh,
-    scheduleLogPullAutoRefresh,
     loadLogPullList,
     submitLogPull,
     deleteLogPull,
     retryLogPull,
     redownloadLogPull,
-    openBrowserDownload,
     getLogPullOriginalDownloadUrl,
-    copyTextToClipboard,
     copyLogPullOriginalDownloadUrl,
-    resolveLogPullDownloadFileName,
-    downloadLogPullFile,
     downloadLogPullArchive,
     downloadLogPullOriginal,
-    syncLogViewerTicketMeta,
-    buildLogViewerRecord,
     openTicketLogViewer,
     openLogViewerFromPullRecord,
     handleLogPullDialogClosed,
-    resetLogViewerState,
-    buildLogViewerPayload,
     setLogViewerPanelMode,
     searchLogViewerKeyword,
     loadLogViewerErrors,
-    setLogViewerHits,
     selectLogViewerHit,
     pageLogViewerContext,
-    loadLogViewerContext,
   } = useLogViewer(proxy, currentTicketId);
-  const aiAnalysisLoading = ref(false);
   const aiAnalysisSubmitting = ref(false);
   const aiAnalysisRetryLoading = ref(false);
   const aiAnalysisRefreshLoading = ref(false);
@@ -3337,17 +3305,14 @@
   // aiRepoMapping* 已提取到 hooks/useAiRepoMapping.js
   const {
     aiRepoMappingOpen,
-    aiRepoMappingLoading,
     aiRepoMappingSubmitting,
     aiRepoMappingList,
     aiRepoMappingTotal,
     aiRepoMappingForm,
     aiRepoMappingRules,
     resetAiRepoMappingForm,
-    loadAiRepoMappings,
     openAiRepoMappingDialog,
     submitAiRepoMapping,
-    deleteAiRepoMapping,
   } = useAiRepoMapping(detail, proxy);
   const projectVendorMapOpen = ref(false);
   const projectVendorMapLoading = ref(false);
@@ -3420,34 +3385,6 @@
    * 解析本次 AI 分析的默认追加提示词编码。
    * @returns {Array<string>} 追加提示词编码列表
    */
-
-  function resetStoreSelection(target, vendorId) {
-    const storeId = String(target.storeId || '').trim();
-    if (!storeId) {
-      target.storeId = undefined;
-      return;
-    }
-    const storeOptions = getVendorStoreOptions(vendorId);
-    if (
-      storeOptions.length &&
-      !storeOptions.some((item) => String(item.storeId || '').trim() === storeId)
-    ) {
-      target.storeId = storeId;
-    }
-  }
-
-  function pickFirstFilledValue(candidates = []) {
-    for (const candidate of candidates) {
-      if (candidate === null || candidate === undefined) {
-        continue;
-      }
-      if (typeof candidate === 'string' && !candidate.trim()) {
-        continue;
-      }
-      return candidate;
-    }
-    return undefined;
-  }
 
   function createDefaultTicketForm() {
     return {

@@ -14,6 +14,7 @@ from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.ticket_service import _user_name
 from modules.ticket.util.sync_util import SyncUtil
 from utils.log_util import logger
 
@@ -32,7 +33,6 @@ class TicketSyncGroupPushService:
     SOURCE_CODE = "external_sync"
     META_KEY = "external_sync"
 
-    @classmethod
     @classmethod
     def _build_meta(cls, extra_data: dict[str, Any] | None) -> dict[str, Any]:
         source = extra_data if isinstance(extra_data, dict) else {}
@@ -105,9 +105,6 @@ class TicketSyncGroupPushService:
             "automationStep": automation.get("current_step"),
             "automationError": automation.get("last_error"),
         }
-
-    @classmethod
-
 
     @classmethod
     def _set_publish_state(

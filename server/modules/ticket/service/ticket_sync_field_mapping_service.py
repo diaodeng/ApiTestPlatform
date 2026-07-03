@@ -16,12 +16,12 @@ from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullProjectVend
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.enums.ticket_enums import TicketStatus
 from modules.ticket.util.sync_util import SyncUtil
-from utils.field_util import compatible_field_value, extract_person_name_email, normalize_email_text
 
 
 class TicketSyncFieldMappingService:
     """工单外部字段映射与人员解析。"""
 
+    @classmethod
     def _extract_external_mapping_fields(cls, sync_object: TicketExternalSyncUpsertModel) -> dict[str, str]:
         """
         提取外部同步字段映射上下文。
