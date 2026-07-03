@@ -58,10 +58,10 @@ class TicketSyncService:
     """
     工单外部同步服务，统一处理外部推送、内网拉取和同步后自动化状态追踪。
 
-    已提取的子服务（见对应文件，本类中保留原方法以保证向后兼容）：
+    已提取的子服务（见对应文件，调用方应直接依赖对应子服务）：
     - TicketSyncConfigService (ticket_sync_config_service.py): 配置管理
     - SyncUtil (util/sync_util.py): 通用工具方法
-    TODO: 后续提取 bitable / mapping / ai / publish 子服务
+    TODO: 后续提取 bitable / payload / remote 子服务，继续压缩本编排类职责。
     """
 
     CONFIG_KEY = "ticket.sync.automation"
@@ -231,190 +231,6 @@ class TicketSyncService:
         return payload
 
     @classmethod
-    def _load_sync_config(cls, db: Session) -> dict[str, Any]:
-        """
-        兼容拆分前的同步配置加载入口。
-
-        :param db: 数据库会话。
-        :return: 归一化后的工单同步配置。
-        """
-        return TicketSyncConfigService.load_sync_config(db)
-
-    @classmethod
-    def _normalize_bitable_field_mappings(cls, value: Any) -> list[dict[str, Any]]:
-        """
-        兼容拆分前的多维表格字段映射归一化入口。
-
-        :param value: 原始映射配置。
-        :return: 归一化后的字段映射。
-        """
-        return TicketSyncConfigService.normalize_bitable_field_mappings(value)
-
-    @classmethod
-    def _normalize_bitable_pull_target_field(cls, value: Any) -> str:
-        """
-        兼容拆分前的主动拉取目标字段归一化入口。
-
-        :param value: 原始目标字段。
-        :return: 规范化后的外部同步字段名。
-        """
-        return TicketSyncConfigService.normalize_bitable_pull_target_field(value)
-
-    @classmethod
-    def _resolve_bitable_pull_created_after(cls, value: Any) -> datetime | None:
-        """
-        兼容拆分前的主动拉取时间解析入口。
-
-        :param value: 时间文本、时间戳或 datetime。
-        :return: 解析后的时间对象。
-        """
-        return TicketSyncConfigService.resolve_bitable_pull_created_after(value)
-
-    @classmethod
-    def _datetime_to_bitable_filter_millis(cls, value: datetime) -> int:
-        """
-        兼容拆分前的飞书日期过滤毫秒时间戳转换入口。
-
-        :param value: 时间对象。
-        :return: 毫秒时间戳。
-        """
-        return TicketSyncConfigService.datetime_to_bitable_filter_millis(value)
-
-    @classmethod
-    def _fill_dynamic_time_filter_values(
-        cls,
-        filter_item: Any,
-        *,
-        time_field_names: set[str],
-        filter_value: Any,
-    ) -> Any:
-        """
-        兼容拆分前的飞书时间过滤动态值补齐入口。
-
-        :param filter_item: filter 条件或条件组。
-        :param time_field_names: 需要补值的时间字段集合。
-        :param filter_value: 飞书 ExactDate 值。
-        :return: 补齐后的 filter。
-        """
-        return TicketSyncConfigService.fill_dynamic_time_filter_values(
-            filter_item,
-            time_field_names=time_field_names,
-            filter_value=filter_value,
-        )
-
-    @classmethod
-    def _build_bitable_pull_time_filters(
-        cls,
-        *,
-        filter_formula: Any,
-        created_after: datetime | None,
-        created_before: datetime | None = None,
-        updated_at_field: str = "",
-        auto_append_time_filter: bool = True,
-    ) -> list[dict[str, Any]]:
-        """
-        兼容拆分前的主动拉取飞书时间过滤构造入口。
-
-        :param filter_formula: 用户配置的 filter。
-        :param created_after: 时间窗口下限。
-        :param created_before: 时间窗口上限。
-        :param updated_at_field: 更新时间字段名。
-        :param auto_append_time_filter: 是否自动追加时间过滤。
-        :return: 飞书 records/search filter 列表。
-        """
-        return TicketSyncConfigService.build_bitable_pull_time_filters(
-            filter_formula=filter_formula,
-            created_after=created_after,
-            created_before=created_before,
-            updated_at_field=updated_at_field,
-            auto_append_time_filter=auto_append_time_filter,
-        )
-
-    @classmethod
-    def _query_bitable_pull_records(
-        cls,
-        pull_config: dict[str, Any],
-        filters: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """
-        兼容拆分前的主动拉取记录查询入口。
-
-        :param pull_config: 主动拉取配置。
-        :param filters: 飞书 filter 列表。
-        :return: 去重后的记录列表。
-        """
-        return TicketSyncConfigService.query_bitable_pull_records(pull_config, filters)
-
-    @classmethod
-    def sync_step_reason_comments(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        sync_object: TicketExternalSyncUpsertModel,
-    ) -> dict[str, Any]:
-        """
-        兼容拆分前的 stepReason 评论同步入口。
-
-        :param db: 数据库会话。
-        :param ticket: 工单对象。
-        :param sync_object: 外部同步模型。
-        :return: 评论同步摘要。
-        """
-        return TicketSyncCommentService.sync_step_reason_comments(
-            db,
-            ticket=ticket,
-            sync_object=sync_object,
-        )
-
-    @classmethod
-    def sync_remote_payload_comments(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        sync_object: TicketExternalSyncUpsertModel,
-    ) -> dict[str, Any]:
-        """
-        兼容拆分前的远端 payload 评论同步入口。
-
-        :param db: 数据库会话。
-        :param ticket: 工单对象。
-        :param sync_object: 外部同步模型。
-        :return: 评论同步摘要。
-        """
-        return TicketSyncCommentService.sync_remote_payload_comments(
-            db,
-            ticket=ticket,
-            sync_object=sync_object,
-        )
-
-    @classmethod
-    def _finalize_publish_state_after_post_process(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        sync_scene: str,
-        update_by: str,
-    ) -> tuple[Ticket, dict[str, Any], dict[str, Any] | None]:
-        """
-        兼容拆分前的发布状态收敛入口。
-
-        :param db: 数据库会话。
-        :param ticket: 工单对象。
-        :param sync_scene: 同步场景。
-        :param update_by: 更新人。
-        :return: 刷新后的工单、同步元数据和群推送结果。
-        """
-        return TicketSyncGroupPushService.finalize_publish_state_after_post_process(
-            db,
-            ticket=ticket,
-            sync_scene=sync_scene,
-            update_by=update_by,
-        )
-
-    @classmethod
     def _resolve_external_create_time(
         cls,
         *,
@@ -540,7 +356,7 @@ class TicketSyncService:
         :param bitable_pull_override: 页面当前临时配置覆盖。
         :return: 字段名预览结果。
         """
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         pull_config = TicketSyncConfigService.resolve_bitable_runtime_config(
             config,
             "bitablePull",
@@ -612,7 +428,7 @@ class TicketSyncService:
         :param email: 可选邮箱。
         :return: 统计结果。
         """
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         person_config = TicketSyncConfigService.resolve_bitable_runtime_config(
             config,
             "personReminder",
@@ -647,7 +463,7 @@ class TicketSyncService:
         :param person_config_override: 定时任务传入的人员催办配置覆盖项，非空字段优先于全局参数配置。
         :return: 执行结果摘要。
         """
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         person_config = TicketSyncConfigService.resolve_bitable_runtime_config(
             config,
             "personReminder",
@@ -692,7 +508,7 @@ class TicketSyncService:
         :param end_time: 可选统计结束时间。
         :return: 执行结果摘要。
         """
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         summary_config = TicketSyncConfigService.resolve_bitable_runtime_config(
             config,
             "summaryReport",
@@ -726,7 +542,7 @@ class TicketSyncService:
         :param bitable_pull_override: 任务级覆盖配置。
         :return: 执行结果摘要。
         """
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         pull_config = TicketSyncConfigService.resolve_bitable_runtime_config(
             config,
             "bitablePull",
@@ -874,7 +690,7 @@ class TicketSyncService:
             logger.info(
                 f"飞书多维表格主动拉取无时间过滤: trigger={trigger_source}, auto_append={auto_append}"
             )
-        records = cls._query_bitable_pull_records(pull_config, pull_filters)
+        records = TicketSyncConfigService.query_bitable_pull_records(pull_config, pull_filters)
         queried_count = len(records)
         force_sync = SyncUtil.to_bool(pull_config.get("forceSync"), False)
         required_fields = TicketSyncConfigService.derive_required_fields_from_external_field_model(
@@ -1845,12 +1661,12 @@ class TicketSyncService:
                     "categoryName": existing_category,
                     "meta": category_meta,
                 }
-            config = cls._load_sync_config(db)
+            config = TicketSyncConfigService.load_sync_config(db)
             ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
             stat_options = (
                 config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
             )
-            legacy_prompt_content = cls._resolve_legacy_ai_classification_prompt_content(
+            legacy_prompt_content = TicketAutoClassificationService.resolve_legacy_ai_classification_prompt_content(
                 ai_config,
                 prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
             )
@@ -1864,8 +1680,8 @@ class TicketSyncService:
                 db,
                 title=title,
                 description=description,
-                comments=cls._build_ticket_comment_context(db, ticket_id=ticket.ticket_id),
-                current_fields=cls._build_ticket_stat_current_fields(ticket),
+                comments=TicketAutoClassificationService.build_ticket_comment_context(db, ticket_id=ticket.ticket_id),
+                current_fields=TicketAutoClassificationService.build_ticket_stat_current_fields(ticket),
                 stat_options=stat_options,
                 override_provider_code=str(ai_config.get("providerCode") or "").strip() or None,
                 override_prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
@@ -1967,163 +1783,6 @@ class TicketSyncService:
         return next_config
 
     @classmethod
-    def _run_auto_ticket_ai_classification(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        title: str,
-        description: str,
-        current_user_name: str,
-        source_type: str,
-        source_ref: str,
-        force_reclassify: bool = False,
-        ai_prompt_code: str | None = None,
-        enabled_by_scene: bool = True,
-    ) -> tuple[Ticket, dict[str, Any]]:
-        """
-        执行工单 AI 分类统计并回填统计字段。
-
-        :param db: 数据库会话。
-        :param ticket: 工单对象。
-        :param title: 工单标题。
-        :param description: 工单描述。
-        :param current_user_name: 当前用户名。
-        :param source_type: 分类来源类型。
-        :param source_ref: 分类来源引用。
-        :param force_reclassify: 是否强制重新分类。
-        :param ai_prompt_code: 可选覆盖提示词编码。
-        :param enabled_by_scene: 当前场景是否启用。
-        :return: (最新工单对象, 分类摘要)。
-        """
-        return TicketAutoClassificationService.run_auto_ticket_ai_classification(
-            db,
-            ticket=ticket,
-            title=title,
-            description=description,
-            current_user_name=current_user_name,
-            source_type=source_type,
-            source_ref=source_ref,
-            force_reclassify=force_reclassify,
-            ai_prompt_code=ai_prompt_code,
-            enabled_by_scene=enabled_by_scene,
-        )
-
-    @classmethod
-    def _resolve_legacy_ai_classification_prompt_content(
-        cls,
-        ai_config: dict[str, Any],
-        *,
-        prompt_code: str | None,
-    ) -> str | None:
-        """
-        解析旧版同步配置内联提示词正文，仅作为历史兼容兜底。
-
-        新版配置统一在 AI 提示词模板中维护正文，同步配置只保存模板编码。为避免旧环境中
-        `ticket_stat_classify_default` 模板为空导致现有业务异常，历史 `promptContent` 仍在模板缺失或为空时可参与兜底。
-        :param ai_config: 同步配置中的 AI 分类配置。
-        :param prompt_code: 本次选择的提示词编码。
-        :return: 需要覆盖的提示词正文；不需要覆盖时返回 None。
-        """
-        legacy_content = str((ai_config or {}).get("promptContent") or "").strip()
-        if not legacy_content:
-            return None
-        normalized_prompt_code = str(prompt_code or "").strip()
-        if normalized_prompt_code and normalized_prompt_code != "ticket_stat_classify_default":
-            return None
-        return TicketAutoClassificationService.resolve_legacy_ai_classification_prompt_content(
-            ai_config,
-            prompt_code=prompt_code,
-        )
-
-    @classmethod
-    def _build_ticket_stat_current_fields(cls, ticket: Ticket) -> dict[str, Any]:
-        """
-        构建 AI 分类统计需要的当前工单字段。
-
-        :param ticket: 工单对象。
-        :return: 当前字段字典。
-        """
-        return TicketAutoClassificationService.build_ticket_stat_current_fields(ticket)
-
-    @classmethod
-    def _build_ticket_comment_context(cls, db: Session, *, ticket_id: int, limit: int = 30) -> list[str]:
-        """
-        构建 AI 分类统计使用的评论上下文。
-
-        :param db: 数据库会话。
-        :param ticket_id: 工单ID。
-        :param limit: 最多取最近评论数量。
-        :return: 按时间升序排列的评论文本。
-        """
-        return TicketAutoClassificationService.build_ticket_comment_context(db, ticket_id=ticket_id, limit=limit)
-
-    @classmethod
-    def _build_ai_classification_source_hash(
-        cls,
-        *,
-        title: str,
-        description: str,
-        comments: list[str] | None = None,
-        root_cause: str | None = None,
-        solution: str | None = None,
-    ) -> str:
-        """
-        构建 AI 分类防重用来源摘要。
-
-        :param title: 工单标题。
-        :param description: 工单描述。
-        :param comments: 工单评论上下文。
-        :param root_cause: 当前根因。
-        :param solution: 当前解决方案。
-        :return: 来源内容 SHA256。
-        """
-        return TicketAutoClassificationService.build_ai_classification_source_hash(
-            title=title,
-            description=description,
-            comments=comments,
-            root_cause=root_cause,
-            solution=solution,
-        )
-
-    @classmethod
-    def _has_successful_ai_classification(
-        cls,
-        ticket: Ticket,
-        *,
-        title: str,
-        description: str,
-        comments: list[str] | None = None,
-    ) -> bool:
-        """
-        判断工单是否已经基于相同文本完成过 AI 分类统计。
-
-        :param ticket: 工单对象。
-        :param title: 当前标题。
-        :param description: 当前描述。
-        :param comments: 当前评论上下文。
-        :return: 已成功分类且文本未变化时返回 True。
-        """
-        return TicketAutoClassificationService.has_successful_ai_classification(
-            ticket,
-            title=title,
-            description=description,
-            comments=comments,
-        )
-
-    @classmethod
-    def _has_complete_ticket_classification_fields(cls, ticket: Ticket) -> bool:
-        """
-        判断工单是否已经具备完整的核心分类统计结果。
-
-        `module_name` 来自项目/模块映射，`severity` 是工单自身严重程度属性，二者不作为
-        自动归类完整性的判断条件。任一核心字段缺失时允许继续调用 AI 补齐。
-        :param ticket: 工单对象。
-        :return: 核心分类字段均有值时返回 True。
-        """
-        return TicketAutoClassificationService.has_complete_ticket_classification_fields(ticket)
-
-    @classmethod
     def _resolve_ai_classification_scene_for_sync_status(
         cls,
         config: dict[str, Any],
@@ -2166,21 +1825,10 @@ class TicketSyncService:
             )
         return (
             f"{sync_scene}_auto_category",
-            cls._should_run_ai_classification_for_scene(config, sync_scene),
+            TicketAutoClassificationService.should_run_ai_classification_for_scene(config, sync_scene),
             False,
             "sync_scene",
         )
-
-    @classmethod
-    def _should_run_ai_classification_for_scene(cls, config: dict[str, Any], scene: str) -> bool:
-        """
-        判断指定入库场景是否启用 AI 分类统计。
-
-        :param config: 同步自动化配置。
-        :param scene: 场景 external_sync/remote_pull/manual_create/status_change/batch_reclassify。
-        :return: 是否启用。
-        """
-        return TicketAutoClassificationService.should_run_ai_classification_for_scene(config, scene)
 
     @classmethod
     def _extract_pattern(cls, text: str, patterns: Any) -> str | None:
@@ -2950,7 +2598,7 @@ class TicketSyncService:
         :return: 同步结果。
         """
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         automation = sync_object.automation
         if sync_scene == "external_sync":
             sync_object = cls._enrich_external_person_emails_from_bitable(config, sync_object, ticket)
@@ -3198,19 +2846,19 @@ class TicketSyncService:
         try:
             ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
             if sync_scene == "remote_pull":
-                step_reason_summary = cls.sync_remote_payload_comments(
+                step_reason_summary = TicketSyncCommentService.sync_remote_payload_comments(
                     db,
                     ticket=ticket,
                     sync_object=sync_object,
                 )
                 if step_reason_summary.get("skipped"):
-                    step_reason_summary = cls.sync_step_reason_comments(
+                    step_reason_summary = TicketSyncCommentService.sync_step_reason_comments(
                         db,
                         ticket=ticket,
                         sync_object=sync_object,
                     )
             else:
-                step_reason_summary = cls.sync_step_reason_comments(
+                step_reason_summary = TicketSyncCommentService.sync_step_reason_comments(
                     db,
                     ticket=ticket,
                     sync_object=sync_object,
@@ -3262,7 +2910,7 @@ class TicketSyncService:
                     f"source_type={source_type}, enabled_by_scene={enabled_by_scene}, "
                     f"force_reclassify={force_reclassify}, reason={classify_reason}"
                 )
-                ticket, category_summary = cls._run_auto_ticket_ai_classification(
+                ticket, category_summary = TicketAutoClassificationService.run_auto_ticket_ai_classification(
                     db,
                     ticket=ticket,
                     title=str(sync_object.title or ticket.title or "").strip(),
@@ -3294,7 +2942,7 @@ class TicketSyncService:
         group_push_summary = None
         try:
             ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
-            ticket, _, group_push_summary = cls._finalize_publish_state_after_post_process(
+            ticket, _, group_push_summary = TicketSyncGroupPushService.finalize_publish_state_after_post_process(
                 db,
                 ticket=ticket,
                 sync_scene=sync_scene,
@@ -3456,7 +3104,7 @@ class TicketSyncService:
         if not ticket:
             logger.warning(f"外部工单同步延后后处理跳过: 未找到工单 ticket_no={sync_object.ticket_no}")
             return
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         automation = sync_object.automation
         update_data: dict[str, Any] = {}
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
@@ -3607,7 +3255,7 @@ class TicketSyncService:
                     f"source_type={source_type}, enabled_by_scene={enabled_by_scene}, "
                     f"force_reclassify={force_reclassify}, reason={classify_reason}"
                 )
-                cls._run_auto_ticket_ai_classification(
+                TicketAutoClassificationService.run_auto_ticket_ai_classification(
                     db,
                     ticket=ticket,
                     title=str(update_data.get("title") or ticket.title or "").strip(),
@@ -3663,7 +3311,7 @@ class TicketSyncService:
             )
             ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
         try:
-            cls._finalize_publish_state_after_post_process(
+            TicketSyncGroupPushService.finalize_publish_state_after_post_process(
                 db,
                 ticket=ticket,
                 sync_scene=sync_scene,
@@ -3687,7 +3335,7 @@ class TicketSyncService:
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
         if not ticket:
             return {}
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         automation = sync_object.automation
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
         meta = cls._build_meta(extra_data)
@@ -4084,7 +3732,7 @@ class TicketSyncService:
                         ai_prompt_code=ai_prompt_code,
                     )
                 else:
-                    _, category_result = cls._run_auto_ticket_ai_classification(
+                    _, category_result = TicketAutoClassificationService.run_auto_ticket_ai_classification(
                         db,
                         ticket=ticket,
                         title=str(ticket.title or "").strip(),
@@ -4361,7 +4009,7 @@ class TicketSyncService:
         :param remote_sync_override: 可选远端同步覆盖配置。
         :return: 同步汇总结果。
         """
-        config = cls._load_sync_config(db)
+        config = TicketSyncConfigService.load_sync_config(db)
         remote_sync = dict(config.get("remoteSync") or TicketSyncConfigService.default_remote_sync_config())
         if remote_sync_override:
             override_remote_sync = (

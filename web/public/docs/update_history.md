@@ -2,10 +2,11 @@
 
 1. 修复工单大文件拆分后的启动期循环引用：`TicketService`、`TicketMessageSyncService` 和 `TicketSyncService` 不再互相顶层导入。
 2. 补回拆分遗漏的 `PUT /ticket/{ticket_id:int}/rca` 接口，恢复前端保存 RCA 功能。
-3. `TicketSyncService` 保留拆分前私有入口兼容门面，旧测试和旧调用仍可访问 `_load_sync_config`、`_normalize_bitable_field_mappings`、`_build_bitable_pull_time_filters` 等入口，实际逻辑委托到拆分后的子服务。
+3. 清理 `TicketSyncService` 中仅为拆分兼容存在的私有入口门面，配置、主动拉取查询、评论同步、发布状态收敛和 AI 分类统计均由调用方直接依赖对应子服务。
 4. 修复主动拉取显式 `createdAfter/created_after` 被默认 1 小时时间窗口覆盖的问题，并恢复飞书多维表格时间过滤旧口径。
 5. 将函数内导入和延迟代理改为独立子模块：新增 `TicketCommentCoreService`、`TicketAutoClassificationService` 和 `ticket_common_util`，评论幂等、消息流、AI 分类与用户工具均从主服务中下沉，避免重新形成相互依赖。
-6. 新增说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
+6. 删除源码目录中的 `.bak/.bak2` 历史备份文件，避免后续检索和 AI 分析误判仍存在旧私有入口；拆分前逻辑统一以 `master_params_ticket_new` 分支为准。
+7. 新增说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
 
 ## 2026-07-02
 

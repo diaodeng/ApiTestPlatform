@@ -9,11 +9,13 @@ from module_task.scheduler_maintenance import (
 )
 from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ticket_auto_classification_service import TicketAutoClassificationService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.ticket_sync_comment_service import TicketSyncCommentService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
+from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
@@ -969,7 +971,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "创建时间": "2026-06-24 09:59:00",
             },
         }
-        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+        field_mappings = TicketSyncConfigService.normalize_bitable_field_mappings(
             [
                 {"sourceField": "工单号", "targetField": "ticketNo"},
                 {"sourceField": "描述", "targetField": "description"},
@@ -1035,7 +1037,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "创建时间": "2026-06-21 09:59:00",
             },
         }
-        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+        field_mappings = TicketSyncConfigService.normalize_bitable_field_mappings(
             [
                 {"sourceField": "工单号", "targetField": "ticketNo"},
                 {"sourceField": "描述", "targetField": "description"},
@@ -1075,7 +1077,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "创建时间": "2026-06-24 09:59:00",
             },
         }
-        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+        field_mappings = TicketSyncConfigService.normalize_bitable_field_mappings(
             [
                 {"sourceField": "工单号", "targetField": "ticketNo"},
                 {"sourceField": "描述", "targetField": "description"},
@@ -1117,7 +1119,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "创建时间": "2026-06-24 09:59:00",
             },
         }
-        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+        field_mappings = TicketSyncConfigService.normalize_bitable_field_mappings(
             [
                 {"sourceField": "工单号", "targetField": "ticketNo"},
                 {"sourceField": "描述", "targetField": "description"},
@@ -1160,7 +1162,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "创建时间": "2026-06-24 09:59:00",
             },
         }
-        field_mappings = TicketSyncService._normalize_bitable_field_mappings(
+        field_mappings = TicketSyncConfigService.normalize_bitable_field_mappings(
             [
                 {"sourceField": "工单号", "targetField": "ticketNo"},
                 {"sourceField": "描述", "targetField": "description"},
@@ -1431,7 +1433,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         with (
             patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
-            patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[]),
+            patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[]),
         ):
             result = TicketSyncService.run_bitable_pull_services(
                 db=SimpleNamespace(),
@@ -1460,8 +1462,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
 
         with (
-            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
-            patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[]),
+            patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
+            patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[]),
         ):
             result = TicketSyncService.run_bitable_pull_services(
                 db=SimpleNamespace(),
@@ -1511,8 +1513,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
 
         with (
-            patch.object(TicketSyncService, "_load_sync_config", return_value=config),
-            patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[record]),
+            patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
+            patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[record]),
             patch.object(
                 TicketSyncService,
                 "_should_skip_bitable_pull_record",
@@ -1591,11 +1593,11 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         with (
             patch.object(
-                TicketSyncService,
-                "_load_sync_config",
+                TicketSyncConfigService,
+                "load_sync_config",
                 return_value=TicketSyncConfigService.normalize_sync_config(config),
             ),
-            patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[record]),
+            patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[record]),
             patch.object(TicketSyncService, "sync_external_ticket") as sync_external,
             patch.object(TicketSyncService, "dispatch_deferred_sync_post_process_task") as dispatch_deferred,
         ):
@@ -1628,7 +1630,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 },
             },
             config={"sourceSystem": "feishu_bitable_pull"},
-            field_mappings=TicketSyncService._normalize_bitable_field_mappings(
+            field_mappings=TicketSyncConfigService.normalize_bitable_field_mappings(
                 [
                     {"sourceField": "工单号", "targetField": "ticketNo"},
                     {"sourceField": "描述", "targetField": "description"},
@@ -1654,8 +1656,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         with (
             patch.object(
-                TicketSyncService,
-                "_load_sync_config",
+                TicketSyncConfigService,
+                "load_sync_config",
                 return_value={
                     **TicketSyncConfigService.default_sync_config(),
                     "autoTranslateOnSync": False,
@@ -1665,16 +1667,16 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncService, "_detect_fields", return_value={}),
             patch.object(TicketSyncService, "_translate_sync_description") as translate_description,
             patch.object(TicketSyncService, "_build_upsert_payload", return_value=({}, {}, 1)),
-            patch.object(TicketSyncService, "sync_step_reason_comments", return_value={}),
+            patch.object(TicketSyncCommentService, "sync_step_reason_comments", return_value={}),
             patch.object(
-                TicketSyncService,
-                "_run_auto_ticket_ai_classification",
+                TicketAutoClassificationService,
+                "run_auto_ticket_ai_classification",
                 side_effect=lambda _db, ticket, **_kwargs: (ticket, {}),
             ),
             patch.object(TicketSyncService, "run_sync_automation", return_value={}),
             patch.object(
-                TicketSyncService,
-                "_finalize_publish_state_after_post_process",
+                TicketSyncGroupPushService,
+                "finalize_publish_state_after_post_process",
                 side_effect=lambda _db, ticket, **_kwargs: (ticket, {}, None),
             ),
             patch.object(TicketSyncService, "extract_sync_summary", return_value={}),

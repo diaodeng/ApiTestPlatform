@@ -8,14 +8,23 @@ updated: 2026-07-04
 
 # 操作日志
 
+## [2026-07-04] INGEST-CODE | 清理 TicketSyncService 兼容门面并评估继续拆包
+
+- 触发：用户指出 `TicketSyncService` 历史兼容门面仍属于为了兼容拆分而存在的内容，也需要清理；同时要求分析当前拆分是否合理、是否可以继续拆成独立包或子包。
+- 架构层：工单域 / 同步服务 / 配置服务 / 评论同步 / AI 分类统计 / 群推送
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/ticket_sync_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：`TicketSyncService` 兼容门面 -> 调用方直接依赖 `TicketSyncConfigService`、`TicketSyncCommentService`、`TicketSyncGroupPushService`、`TicketAutoClassificationService` -> 删除旧门面方法和源码目录 `.bak/.bak2` 备份文件 -> 文档记录后续子包拆分边界。
+- 关键结论：`TicketSyncService` 不再保留仅转发到子服务的拆分兼容入口；当前拆分方向正确但同步主服务仍偏大，后续应按 `sync/config/comment/notification/ai/log_pull/core` 子包边界渐进迁移，迁移时不要留下只 re-export 或只转发的旧文件。
+
 ## [2026-07-04] INGEST-CODE | 工单拆分依赖方向重构
 
 - 触发：用户指出函数内导入和延迟代理不是合理优雅的解法，要求把相关能力抽成子模块，不要相互依赖，并与拆分前逻辑保持一致。
 - 架构层：工单域 / 服务拆分 / 评论同步 / AI 分类统计 / 公共工具
 - 创建的页面：无
 - 更新的页面：`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/service/ticket_message_sync_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/service/ticket_sync_comment_service.py`、`server/modules/ticket/service/ticket_sync_group_push_service.py`、`server/modules/ticket/service/ticket_auto_classification_service.py`、`server/modules/ticket/service/ticket_comment_core_service.py`、`server/modules/ticket/util/ticket_common_util.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
-- 变更传播链：`TicketService` 本地导入同步服务 / `TicketMessageSyncService` 延迟代理主服务 / 同步评论反向依赖主服务 -> 下沉为 `TicketAutoClassificationService`、`TicketCommentCoreService`、`ticket_common_util` -> 高层服务不再通过函数内导入或代理互相调用；`TicketSyncService` 只保留兼容门面并委托子服务。
-- 关键结论：保留拆分结构时，共享能力必须处在更低层；兼容门面可以保留旧入口，但不能继续把旧大服务作为跨模块共享实现。
+- 变更传播链：`TicketService` 本地导入同步服务 / `TicketMessageSyncService` 延迟代理主服务 / 同步评论反向依赖主服务 -> 下沉为 `TicketAutoClassificationService`、`TicketCommentCoreService`、`ticket_common_util` -> 高层服务不再通过函数内导入或代理互相调用。
+- 关键结论：保留拆分结构时，共享能力必须处在更低层；不能继续把旧大服务作为跨模块共享实现。
 
 ## [2026-07-04] INGEST-CODE | 工单拆分循环引用与功能兼容修复
 
@@ -23,8 +32,8 @@ updated: 2026-07-04
 - 架构层：工单域 / 拆分控制器 / 同步服务兼容门面 / 消息同步 / 飞书多维表格主动拉取
 - 创建的页面：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`
 - 更新的页面：`server/modules/ticket/service/ticket_service.py`、`server/modules/ticket/service/ticket_message_sync_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/service/ticket_sync_config_service.py`、`server/modules/ticket/service/ticket_sync_field_mapping_service.py`、`server/modules/ticket/controller/ticket_crud_controller.py`、`server/modules/ticket/controller/ticket_config_controller.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
-- 变更传播链：拆分后顶层互相 import -> 启动期循环引用 -> 改为延迟导入/代理；拆分后旧私有入口缺失 -> 测试与历史调用失败 -> `TicketSyncService` 保留兼容门面并委托子服务；控制器拆分遗漏 RCA 路由 -> `PUT /ticket/{ticket_id:int}/rca` 补回。
-- 关键结论：保留拆分结构时，主同步服务仍需要短期兼容门面承接历史调用；新增代码优先调用拆出的 `TicketSyncConfigService`、`TicketSyncCommentService`、`TicketSyncGroupPushService`，但不要在服务模块顶层形成反向依赖。
+- 变更传播链：拆分后顶层互相 import -> 启动期循环引用 -> 改为延迟导入/代理；拆分后旧私有入口缺失 -> 测试与历史调用失败 -> 曾短期由 `TicketSyncService` 兼容门面委托子服务；控制器拆分遗漏 RCA 路由 -> `PUT /ticket/{ticket_id:int}/rca` 补回。
+- 关键结论：保留拆分结构时，主同步服务曾短期承接历史调用；后续已清理兼容门面，新增代码应直接调用拆出的 `TicketSyncConfigService`、`TicketSyncCommentService`、`TicketSyncGroupPushService`、`TicketAutoClassificationService`，且不要在服务模块顶层形成反向依赖。
 
 ## [2026-07-02] INGEST-CODE | 修复工单列表多选查询类型导致查不到数据和报错
 

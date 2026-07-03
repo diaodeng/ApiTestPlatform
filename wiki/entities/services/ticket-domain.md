@@ -75,8 +75,9 @@ graph TD
 
 ## 当前关键约束
 
-- 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 仍保留拆分前私有入口兼容门面，避免历史调用和边界测试失效，实际逻辑委托到 `TicketSyncConfigService`、`TicketSyncCommentService`、`TicketSyncGroupPushService`、`TicketAutoClassificationService` 等子服务。
-- 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入或延迟代理规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
+- 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取查询、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
+- 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入、延迟代理或兼容门面规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
+- 当前 `TicketSyncService` 仍偏大，后续可继续拆为独立子包：`service/sync` 承接同步编排，`service/sync/config` 承接配置和飞书 filter，`service/sync/comment` 承接评论同步，`service/sync/notification` 承接群推送和通知，`service/ai` 承接 AI 能力，`service/log_pull` 承接日志拉取，`service/core` 承接工单 CRUD 和流转。迁移时不保留只转发的旧路径文件。
 - 工单控制器拆分后必须保持备份分支接口兼容；当前路由包含 `PUT /ticket/{ticket_id:int}/rca`，前端保存 RCA 依赖该接口。
 - 工单所属维度复用 HRM 测试管理中的项目/模块，前端通过工单域选项接口拉取有效项目与模块。
 - 工单新增/编辑时项目和模块联动，模块必须属于当前项目；工单号作为外部系统唯一编号手动录入，不再自动生成。
