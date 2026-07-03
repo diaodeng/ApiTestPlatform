@@ -1,3 +1,4 @@
+from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -12,7 +13,10 @@ from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisSe
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.ticket_sync_comment_service import TicketSyncCommentService
+from modules.ticket.service.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 
 
 class TicketSyncMappingBoundaryTests(unittest.TestCase):
@@ -57,13 +61,13 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
 
         with (
-            patch.object(TicketSyncService, "_resolve_project_by_ticket_vender") as resolve_project,
-            patch.object(TicketSyncService, "_resolve_module_by_ticket_modle") as resolve_module,
-            patch.object(TicketSyncService, "_resolve_vendor_by_ticket_vender") as resolve_vendor,
-            patch.object(TicketSyncService, "_resolve_assignee_by_external_value") as resolve_assignee,
+            patch.object(TicketSyncFieldMappingService, "resolve_project_by_ticket_vender") as resolve_project,
+            patch.object(TicketSyncFieldMappingService, "resolve_module_by_ticket_modle") as resolve_module,
+            patch.object(TicketSyncFieldMappingService, "resolve_vendor_by_ticket_vender") as resolve_vendor,
+            patch.object(TicketSyncFieldMappingService, "resolve_assignee_by_external_value") as resolve_assignee,
             patch.object(
-                TicketSyncService,
-                "_resolve_external_person_by_mapping_or_email",
+                TicketSyncFieldMappingService,
+                "resolve_external_person_by_mapping_or_email",
                 side_effect=[(None, "内部处理人"), (None, ""), (None, "")],
             ) as resolve_person,
             patch.object(TicketSyncService, "_extract_pattern", return_value=None),
@@ -171,7 +175,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         with (
             patch.object(TicketSyncService, "_extract_pattern", return_value=None),
-            patch.object(TicketSyncService, "_resolve_project_by_ticket_vender", return_value=(None, "")),
+            patch.object(TicketSyncFieldMappingService, "resolve_project_by_ticket_vender", return_value=(None, "")),
         ):
             detected = TicketSyncService._detect_fields(
                 db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
@@ -500,8 +504,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         with (
             patch.object(TicketSyncService, "_extract_pattern", return_value=None),
             patch.object(
-                TicketSyncService,
-                "_resolve_external_person_by_mapping_or_email",
+                TicketSyncFieldMappingService,
+                "resolve_external_person_by_mapping_or_email",
                 side_effect=[
                     (22, "内部当前处理人"),
                     (11, "内部一线"),
@@ -799,7 +803,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_sync_config_keeps_bitable_common_independent_from_scene_sections(self):
         """保存态配置不应把多维表格公共配置写入各独立业务配置段。"""
-        config = TicketSyncService._normalize_sync_config(
+        config = TicketSyncConfigService.normalize_sync_config(
             {
                 "feishuAuth": {"appId": "app_a", "appSecret": "secret_a"},
                 "bitableCommon": {
@@ -832,7 +836,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_bitable_runtime_config_inherits_common_without_polluting_saved_config(self):
         """运行时多维表格配置应独立配置优先，独立为空时才继承公共配置。"""
-        config = TicketSyncService._normalize_sync_config(
+        config = TicketSyncConfigService.normalize_sync_config(
             {
                 "feishuAuth": {"appId": "app_a", "appSecret": "secret_a"},
                 "bitableCommon": {
@@ -850,10 +854,10 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             }
         )
 
-        runtime_config = TicketSyncService._resolve_bitable_runtime_config(
+        runtime_config = TicketSyncConfigService.resolve_bitable_runtime_config(
             config,
             "bitablePull",
-            TicketSyncService._default_bitable_pull_config(),
+            TicketSyncConfigService.default_bitable_pull_config(),
         )
 
         self.assertEqual(runtime_config["appId"], "app_a")
@@ -994,17 +998,17 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             sync_object.extra_data["_bitable_field_segments"]["stepReason"][3]["openId"],
             "ou_wangwu",
         )
-        segments = TicketSyncService.parse_step_reason_segments(
+        segments = TicketSyncCommentService.parse_step_reason_segments(
             sync_object.extra_data["external_field_mapping"]["stepReason"]
         )
         self.assertEqual(len(segments), 2)
         self.assertEqual(segments[0]["personName"], "张三")
         self.assertEqual(segments[1]["personName"], "李四")
         with (
-            patch("modules.ticket.service.ticket_sync_service.TicketService.upsert_synced_comment") as upsert,
+            patch("modules.ticket.service.ticket_sync_comment_service.TicketService.upsert_synced_comment") as upsert,
         ):
             upsert.return_value = (SimpleNamespace(id=1), "created")
-            TicketSyncService.sync_step_reason_comments(
+            TicketSyncCommentService.sync_step_reason_comments(
                 SimpleNamespace(),
                 ticket=SimpleNamespace(ticket_id=1),
                 sync_object=sync_object,
@@ -1197,7 +1201,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_preview_bitable_pull_fields_uses_field_metadata_without_filters(self):
         """字段预览应读取字段元数据，且不受主动拉取过滤条件和时间窗口影响。"""
-        config = TicketSyncService._default_sync_config()
+        config = TicketSyncConfigService.default_sync_config()
         config["bitablePull"].update(
             {
                 "enabled": True,
@@ -1234,7 +1238,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_preview_bitable_pull_fields_falls_back_to_unfiltered_sample_record(self):
         """字段元数据读取不可用时，应清空过滤条件后用样例记录推断字段。"""
-        config = TicketSyncService._default_sync_config()
+        config = TicketSyncConfigService.default_sync_config()
         config["bitablePull"].update(
             {
                 "enabled": True,
@@ -1410,7 +1414,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
     def test_bitable_pull_override_adds_default_created_after(self):
         """主动拉取任务未指定时间时，应默认查询当前时间前 1 小时后的记录。"""
         before_call = datetime.now() - timedelta(hours=1, seconds=2)
-        config = TicketSyncService._default_sync_config()
+        config = TicketSyncConfigService.default_sync_config()
         config["bitablePull"].update(
             {
                 "enabled": True,
@@ -1440,7 +1444,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_bitable_pull_override_keeps_specified_created_after(self):
         """主动拉取任务指定时间时，应使用指定时间作为创建时间下限。"""
-        config = TicketSyncService._default_sync_config()
+        config = TicketSyncConfigService.default_sync_config()
         config["bitablePull"].update(
             {
                 "enabled": True,
@@ -1467,7 +1471,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_bitable_pull_force_sync_bypasses_snapshot_skip(self):
         """强制同步时应忽略 snapshotHash 去重并重新调用外部同步入库。"""
-        config = TicketSyncService._default_sync_config()
+        config = TicketSyncConfigService.default_sync_config()
         config["bitablePull"].update(
             {
                 "enabled": True,
@@ -1540,7 +1544,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_bitable_pull_uses_external_field_model_required_fields_before_ingest(self):
         """主动拉取应按外部工单字段模型必填项校验，字段不全时不入库也不触发后处理。"""
-        config = TicketSyncService._default_sync_config()
+        config = TicketSyncConfigService.default_sync_config()
         config["externalFieldModel"] = {
             "fields": [
                 {"fieldName": "ticketNo", "label": "工单号", "required": True},
@@ -1586,7 +1590,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(
                 TicketSyncService,
                 "_load_sync_config",
-                return_value=TicketSyncService._normalize_sync_config(config),
+                return_value=TicketSyncConfigService.normalize_sync_config(config),
             ),
             patch.object(TicketSyncService, "_query_bitable_pull_records", return_value=[record]),
             patch.object(TicketSyncService, "sync_external_ticket") as sync_external,
@@ -1650,7 +1654,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 TicketSyncService,
                 "_load_sync_config",
                 return_value={
-                    **TicketSyncService._default_sync_config(),
+                    **TicketSyncConfigService.default_sync_config(),
                     "autoTranslateOnSync": False,
                     "externalSyncBitable": {"enabled": False},
                 },
@@ -1748,7 +1752,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             "当前负责人": [{"name": "李四", "email": "lisi@example.com"}],
         }
 
-        payload = TicketSyncService._build_bitable_pull_field_mapping_from_record(
+        payload = FeishuBitableUtil.build_pull_field_mapping_from_record(
             fields,
             field_mappings=[
                 {"sourceField": "提单人", "targetField": "reporterName"},
@@ -1779,9 +1783,9 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_bitable_pull_records_filter_builds_default_cloud_time_filter(self):
         """主动拉取应构造飞书云端更新时间过滤条件（仅更新时间字段）。"""
-        filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(datetime(2026, 6, 22, 10, 48, 0))
+        filter_millis = TicketSyncConfigService.datetime_to_bitable_filter_millis(datetime(2026, 6, 22, 10, 48, 0))
 
-        filters = TicketSyncService._build_bitable_pull_time_filters(
+        filters = TicketSyncConfigService.build_bitable_pull_time_filters(
             filter_formula="",
             created_after=datetime(2026, 6, 22, 10, 48, 0),
             updated_at_field="更新时间",
@@ -1806,7 +1810,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
     def test_bitable_pull_time_filter_nested_appends_outer_child_and_fills_inner_values(self):
         """嵌套 filter 应在最外层 children 追加时间范围，并递归补齐内部时间字段值（仅更新时间）。"""
         created_after = datetime(2026, 6, 24, 0, 59, 0)
-        filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(created_after)
+        filter_millis = TicketSyncConfigService.datetime_to_bitable_filter_millis(created_after)
         filter_formula = {
             "conjunction": "and",
             "children": [
@@ -1831,7 +1835,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ],
         }
 
-        filters = TicketSyncService._build_bitable_pull_time_filters(
+        filters = TicketSyncConfigService.build_bitable_pull_time_filters(
             filter_formula=filter_formula,
             created_after=created_after,
             updated_at_field="更新时间",
@@ -1850,7 +1854,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
     def test_bitable_pull_time_filter_flat_only_fills_configured_time_values(self):
         """扁平 filter 应只补齐已有时间字段值，不再追加默认时间范围。"""
         created_after = datetime(2026, 6, 24, 0, 59, 0)
-        filter_millis = TicketSyncService._datetime_to_bitable_filter_millis(created_after)
+        filter_millis = TicketSyncConfigService.datetime_to_bitable_filter_millis(created_after)
         filter_formula = {
             "conjunction": "and",
             "conditions": [
@@ -1859,7 +1863,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ],
         }
 
-        filters = TicketSyncService._build_bitable_pull_time_filters(
+        filters = TicketSyncConfigService.build_bitable_pull_time_filters(
             filter_formula=filter_formula,
             created_after=created_after,
             updated_at_field="更新时间",
@@ -1873,7 +1877,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_feishu_message_sync_resolves_sender_open_id_to_user_name(self):
         """飞书消息同步应把发送人 open_id 查询成用户名后再写入评论和多维排查过程。"""
-        config = TicketSyncService._default_sync_config()
+        config = TicketSyncConfigService.default_sync_config()
         config["feishuAuth"].update({"appId": "app_id", "appSecret": "app_secret"})
         config["bitablePull"].update({"appId": "bitable_app_id", "appSecret": "bitable_app_secret"})
         config["groupPush"].update({"appId": "group_app_id", "appSecret": "group_app_secret"})

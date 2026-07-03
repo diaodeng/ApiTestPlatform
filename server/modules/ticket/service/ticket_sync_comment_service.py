@@ -21,7 +21,7 @@ class TicketSyncCommentService:
     SOURCE_CODE = "external_sync"
 
     @classmethod
-    def _parse_step_reason_date(cls, value: str) -> datetime | None:
+    def parse_step_reason_date(cls, value: str) -> datetime | None:
         """
         解析 stepReason 分段开头的日期。
         :param value: 日期文本，支持 yyyyMMdd
@@ -87,13 +87,13 @@ class TicketSyncCommentService:
                     "personName": person_name,
                     "content": content,
                     "contentHash": SyncUtil.text_sha256(content),
-                    "externalCreatedAt": cls._parse_step_reason_date(date_text),
+                    "externalCreatedAt": cls.parse_step_reason_date(date_text),
                 }
             )
         return segments
 
     @classmethod
-    def _build_step_reason_segment_key(
+    def build_step_reason_segment_key(
         cls,
         *,
         source_system: str,
@@ -118,7 +118,7 @@ class TicketSyncCommentService:
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     @classmethod
-    def _get_step_reason_content_segments(cls, sync_object: TicketExternalSyncUpsertModel) -> list[dict[str, Any]]:
+    def get_step_reason_content_segments(cls, sync_object: TicketExternalSyncUpsertModel) -> list[dict[str, Any]]:
         """
         从同步模型中读取 stepReason 对应的富文本片段。
 
@@ -138,7 +138,7 @@ class TicketSyncCommentService:
         return []
 
     @classmethod
-    def _slice_content_segments_for_text(
+    def slice_content_segments_for_text(
         cls,
         *,
         full_text: str,
@@ -208,17 +208,17 @@ class TicketSyncCommentService:
             sync_object.ticket_no or ""
         ).strip()
         segments = cls.parse_step_reason_segments(step_reason)
-        rich_text_segments = cls._get_step_reason_content_segments(sync_object)
+        rich_text_segments = cls.get_step_reason_content_segments(sync_object)
         summary = {"skipped": False, "total": len(segments), "created": 0, "updated": 0, "skippedCount": 0}
         for segment in segments:
             segment_index = int(segment.get("segmentIndex") or 0)
             content = str(segment.get("content") or "").strip()
-            segment_key = cls._build_step_reason_segment_key(
+            segment_key = cls.build_step_reason_segment_key(
                 source_system=source_system,
                 source_record_id=source_record_id,
                 segment_index=segment_index,
             )
-            comment_segments = cls._slice_content_segments_for_text(
+            comment_segments = cls.slice_content_segments_for_text(
                 full_text=step_reason,
                 content=content,
                 content_segments=rich_text_segments,

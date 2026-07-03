@@ -2170,9 +2170,9 @@ class TicketAiAnalysisService:
         :return: 无
         """
         try:
-            from modules.ticket.service.ticket_sync_service import TicketSyncService
+            from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
 
-            TicketSyncService.finalize_sync_after_ai(
+            TicketSyncGroupPushService.finalize_sync_after_ai(
                 db,
                 ticket_id=ticket_id,
                 ai_task_status=status,

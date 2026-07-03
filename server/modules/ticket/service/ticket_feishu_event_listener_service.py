@@ -4,7 +4,7 @@ from typing import Any
 from config.database import SessionLocal
 from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
-from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from utils.log_util import logger
 
 
@@ -84,7 +84,7 @@ class TicketFeishuEventListenerService:
                 return {"skipped": True, "reason": "already_running"}
 
         with SessionLocal() as db:
-            sync_config = TicketSyncService._load_sync_config(db)
+            sync_config = TicketSyncConfigService.load_sync_config(db)
         message_config = sync_config.get("messageSync") if isinstance(sync_config.get("messageSync"), dict) else {}
         if not bool(message_config.get("enabled")) or not bool(message_config.get("feishuWsEnabled")):
             logger.info("飞书长连接监听未启动: 评论同步或长连接开关未启用")

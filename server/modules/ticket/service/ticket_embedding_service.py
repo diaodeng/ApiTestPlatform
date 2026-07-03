@@ -9,7 +9,7 @@ import requests
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
-from context.request_context import get_current_trace_id, trace_context
+from context.request_context import trace_context
 from module_admin.dao.config_dao import ConfigDao
 from module_admin.entity.do.config_do import SysConfig
 from modules.ticket.dao.ticket_dao import TicketDao

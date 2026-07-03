@@ -224,6 +224,145 @@ class TicketSyncService:
             payload["user"] = cls._build_system_current_user_payload()["user"]
         return payload
 
+    @classmethod
+    def _set_publish_state(cls, meta, *, ready, status, reason="", ai_task_status=None):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._set_publish_state(meta, ready=ready, status=status, reason=reason, ai_task_status=ai_task_status)
+
+    @classmethod
+    def _is_publish_ready(cls, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._is_publish_ready(meta)
+
+    @classmethod
+    def _can_recover_publish_state(cls, db, *, ticket, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._can_recover_publish_state(db, ticket=ticket, meta=meta)
+
+    @classmethod
+    def _ensure_publish_ready_for_pull(cls, db, *, ticket, current_user):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._ensure_publish_ready_for_pull(db, ticket=ticket, current_user=current_user)
+
+    @classmethod
+    def _is_group_push_sent_once(cls, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._is_group_push_sent_once(meta)
+
+    @classmethod
+    def _mark_group_push_sent_once(cls, meta, *, scene, revision):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._mark_group_push_sent_once(meta, scene=scene, revision=revision)
+
+    @classmethod
+    def _append_group_push_message_refs(cls, meta, message_refs):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._append_group_push_message_refs(meta, message_refs)
+
+    @classmethod
+    def _mark_group_push_processing(cls, meta, *, scene, revision):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._mark_group_push_processing(meta, scene=scene, revision=revision)
+
+    @classmethod
+    def _clear_group_push_processing(cls, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._clear_group_push_processing(meta)
+
+    @classmethod
+    def _is_group_push_processing_locked(cls, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._is_group_push_processing_locked(meta)
+
+    @classmethod
+    def _persist_group_push_meta_state(cls, db, *, ticket_id, update_by, scene, acquire_lock=False, clear_lock=False, mark_sent_once=False, message_refs=None):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._persist_group_push_meta_state(db, ticket_id=ticket_id, update_by=update_by, scene=scene, acquire_lock=acquire_lock, clear_lock=clear_lock, mark_sent_once=mark_sent_once, message_refs=message_refs)
+
+    @classmethod
+    def _resolve_ai_pending_state(cls, db, *, ticket_id, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._resolve_ai_pending_state(db, ticket_id=ticket_id, meta=meta)
+
+    @classmethod
+    def _persist_sync_meta(cls, db, *, ticket, meta, update_by):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._persist_sync_meta(db, ticket=ticket, meta=meta, update_by=update_by)
+
+    @classmethod
+    def _send_auto_group_message_once(cls, db, *, ticket, meta, group_config, scene, update_by):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._send_auto_group_message_once(db, ticket=ticket, meta=meta, group_config=group_config, scene=scene, update_by=update_by)
+
+    @classmethod
+    def _finalize_publish_state_after_post_process(cls, db, ticket, meta, scene, update_by):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._finalize_publish_state_after_post_process(db, ticket, meta, scene, update_by)
+
+    @classmethod
+    def finalize_sync_after_ai(cls, db, ticket_id, ai_task_status, sync_scene):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService.finalize_sync_after_ai(db, ticket_id, ai_task_status, sync_scene)
+
+    @classmethod
+    def _resolve_external_create_time(
+        cls,
+        *,
+        sync_object,
+        existing_meta,
+    ) -> str:
+        """
+        解析并固定外部工单创建时间。
+        :param sync_object: 外部同步模型
+        :param existing_meta: 已存在的同步元数据
+        :return: ISO 格式创建时间文本
+        """
+        current_meta = existing_meta if isinstance(existing_meta, dict) else {}
+        source_snapshot = current_meta.get("source") if isinstance(current_meta.get("source"), dict) else {}
+        existing_external_time = (
+            current_meta.get("externalCreateTime")
+            or source_snapshot.get("externalCreateTime")
+        )
+        parsed_existing = SyncUtil.parse_datetime_value(existing_external_time)
+        if parsed_existing:
+            return parsed_existing.isoformat()
+
+        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
+        parsed_candidate = (
+            SyncUtil.parse_datetime_value(sync_object.create_time)
+            or SyncUtil.parse_datetime_value(raw_payload.get("externalCreateTime"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("external_create_time"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("createTime"))
+            or SyncUtil.parse_datetime_value(raw_payload.get("create_time"))
+            or SyncUtil.parse_datetime_value(sync_object.source.pushed_at)
+            or datetime.now()
+        )
+        return parsed_candidate.isoformat()
+
+    @classmethod
+    def _resolve_ticket_submit_time(cls, *, ticket, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._resolve_ticket_submit_time(ticket=ticket, meta=meta)
+
+    @classmethod
+    def _resolve_group_push_auto_send_after_time(cls, group_config):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._resolve_group_push_auto_send_after_time(group_config)
+
+    @classmethod
+    def _normalize_group_push_auto_statuses(cls, value, *, fallback=None):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._normalize_group_push_auto_statuses(value, fallback=fallback)
+
+    @classmethod
+    def _should_skip_auto_group_push_by_status(cls, *, ticket, group_config):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._should_skip_auto_group_push_by_status(ticket=ticket, group_config=group_config)
+
+    @classmethod
+    def _should_skip_auto_group_push_by_submit_time(cls, *, ticket, meta, group_config):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._should_skip_auto_group_push_by_submit_time(ticket=ticket, meta=meta, group_config=group_config)
 
     @classmethod
     def _has_successful_ai_translation(cls, ticket: Ticket | None, source_description: str | None = None) -> bool:
@@ -301,6 +440,178 @@ class TicketSyncService:
                 ),
             )
         return True, "remote_time_newer_or_unknown"
+
+    @classmethod
+    def _default_sync_config(cls):
+        """委托到 TicketSyncConfigService._default_sync_config。"""
+        return TicketSyncConfigService._default_sync_config()
+
+
+    @classmethod
+    def _default_feishu_auth_config(cls) -> dict[str, Any]:
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._default_feishu_auth_config()
+
+    @classmethod
+    def _default_bitable_common_config(cls) -> dict[str, Any]:
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._default_bitable_common_config()
+
+    @classmethod
+    def _default_external_field_model_config(cls) -> dict[str, Any]:
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._default_external_field_model_config()
+
+    @classmethod
+    def _default_external_sync_bitable_config(cls):
+        """委托到 TicketSyncConfigService._default_external_sync_bitable_config。"""
+        return TicketSyncConfigService._default_external_sync_bitable_config()
+
+    @classmethod
+    def _default_bitable_pull_config(cls):
+        """委托到 TicketSyncConfigService._default_bitable_pull_config。"""
+        return TicketSyncConfigService._default_bitable_pull_config()
+
+
+    @classmethod
+    def _default_group_push_config(cls):
+        """委托到 TicketSyncConfigService._default_group_push_config。"""
+        return TicketSyncConfigService._default_group_push_config()
+
+    @classmethod
+    def _default_message_sync_config(cls):
+        """委托到 TicketSyncConfigService._default_message_sync_config。"""
+        return TicketSyncConfigService._default_message_sync_config()
+
+
+    @classmethod
+    def _default_person_reminder_config(cls):
+        """委托到 TicketSyncConfigService._default_person_reminder_config。"""
+        return TicketSyncConfigService._default_person_reminder_config()
+
+    @classmethod
+    def _default_summary_report_config(cls):
+        """委托到 TicketSyncConfigService._default_summary_report_config。"""
+        return TicketSyncConfigService._default_summary_report_config()
+
+
+    @classmethod
+    def _default_remote_sync_config(cls):
+        """委托到 TicketSyncConfigService._default_remote_sync_config。"""
+        return TicketSyncConfigService._default_remote_sync_config()
+
+    @classmethod
+    def _default_stat_classification_config(cls):
+        """委托到 TicketSyncConfigService._default_stat_classification_config。"""
+        return TicketSyncConfigService._default_stat_classification_config()
+
+
+    @classmethod
+    def _default_ai_classification_config(cls):
+        """委托到 TicketSyncConfigService._default_ai_classification_config。"""
+        return TicketSyncConfigService._default_ai_classification_config()
+
+    @classmethod
+    def _normalize_stat_option_rows(cls, value, default_rows):
+        """委托到 TicketSyncConfigService._normalize_stat_option_rows。"""
+        return TicketSyncConfigService._normalize_stat_option_rows(value, default_rows)
+
+    @classmethod
+    def _normalize_ai_classification_config(cls, value):
+        """委托到 TicketSyncConfigService._normalize_ai_classification_config。"""
+        return TicketSyncConfigService._normalize_ai_classification_config(value)
+
+    @classmethod
+    def _normalize_external_field_model_config(cls, value):
+        """委托到 TicketSyncConfigService._normalize_external_field_model_config。"""
+        return TicketSyncConfigService._normalize_external_field_model_config(value)
+
+    @classmethod
+    def _normalize_bitable_filter_config(cls, value):
+        """委托到 TicketSyncConfigService._normalize_bitable_filter_config。"""
+        return TicketSyncConfigService._normalize_bitable_filter_config(value)
+
+    @classmethod
+    def _format_bitable_filter_config(cls, value):
+        """委托到 TicketSyncConfigService._format_bitable_filter_config。"""
+        return TicketSyncConfigService._format_bitable_filter_config(value)
+
+    @classmethod
+    def _apply_bitable_common_defaults(cls, config, *, bitable_common, keep_filter_formula=True):
+        """委托到 TicketSyncConfigService._apply_bitable_common_defaults。"""
+        return TicketSyncConfigService._apply_bitable_common_defaults(config, bitable_common=bitable_common, keep_filter_formula=keep_filter_formula)
+
+    @classmethod
+    def _merge_non_empty_runtime_override(cls, base_config, override_config):
+        """委托到 TicketSyncConfigService._merge_non_empty_runtime_override。"""
+        return TicketSyncConfigService._merge_non_empty_runtime_override(base_config, override_config)
+
+    @classmethod
+    def _normalize_bitable_pull_target_field(cls, value: Any) -> str:
+        """委托到 FeishuBitableUtil.normalize_pull_target_field。"""
+        return FeishuBitableUtil.normalize_pull_target_field(value)
+
+    @classmethod
+    def _normalize_bitable_pull_config(cls, value, *, feishu_auth, bitable_common):
+        """委托到 TicketSyncConfigService._normalize_bitable_pull_config。"""
+        return TicketSyncConfigService._normalize_bitable_pull_config(value, feishu_auth=feishu_auth, bitable_common=bitable_common)
+
+    @classmethod
+    def _datetime_to_bitable_filter_millis(cls, value):
+        """委托到 TicketSyncConfigService._datetime_to_bitable_filter_millis。"""
+        return TicketSyncConfigService._datetime_to_bitable_filter_millis(value)
+
+    @classmethod
+    def _condition_needs_dynamic_time_value(cls, condition, *, time_field_names):
+        """委托到 TicketSyncConfigService._condition_needs_dynamic_time_value。"""
+        return TicketSyncConfigService._condition_needs_dynamic_time_value(condition, time_field_names=time_field_names)
+
+    @classmethod
+    def _build_bitable_pull_time_filters(cls, *, filter_formula, created_after, created_before=None, updated_at_field="", auto_append_time_filter=True):
+        """委托到 TicketSyncConfigService._build_bitable_pull_time_filters。"""
+        return TicketSyncConfigService._build_bitable_pull_time_filters(filter_formula=filter_formula, created_after=created_after, created_before=created_before, updated_at_field=updated_at_field, auto_append_time_filter=auto_append_time_filter)
+
+    @classmethod
+    def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
+        """委托到 TicketSyncConfigService._normalize_sync_config。"""
+        return TicketSyncConfigService._normalize_sync_config(config)
+
+    @classmethod
+    def _resolve_bitable_runtime_config(cls, config, section_key, default_config, *, keep_filter_formula=True):
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._resolve_bitable_runtime_config(config, section_key, default_config, keep_filter_formula=keep_filter_formula)
+
+    @classmethod
+    def _resolve_bitable_pull_created_after(cls, value):
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._resolve_bitable_pull_created_after(value)
+
+    @classmethod
+    def _query_bitable_pull_records(cls, pull_config, filters):
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._query_bitable_pull_records(pull_config, filters)
+
+    @classmethod
+    def _derive_required_fields_from_external_field_model(cls, value):
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._derive_required_fields_from_external_field_model(value)
+
+    @classmethod
+    def ensure_param_config_rows(cls, db: Session):
+        """委托到 TicketSyncConfigService.ensure_param_config_rows。"""
+        return TicketSyncConfigService.ensure_param_config_rows(db)
+
+    @classmethod
+    def _load_sync_config(cls, db: Session) -> dict[str, Any]:
+        """委托到 TicketSyncConfigService._load_sync_config。"""
+        return TicketSyncConfigService._load_sync_config(db)
+
+    @classmethod
+    def get_sync_automation_config_services(cls, db: Session):
+        """委托到 TicketSyncConfigService.get_sync_automation_config_services。"""
+        return TicketSyncConfigService.get_sync_automation_config_services(db)
+
+
     @classmethod
     def preview_bitable_pull_fields_services(
         cls,
@@ -315,11 +626,11 @@ class TicketSyncService:
         :param bitable_pull_override: 页面当前临时配置覆盖。
         :return: 字段名预览结果。
         """
-        config = TicketSyncConfigService.load_sync_config(db)
-        pull_config = TicketSyncConfigService.resolve_bitable_runtime_config(
+        config = cls._load_sync_config(db)
+        pull_config = cls._resolve_bitable_runtime_config(
             config,
             "bitablePull",
-            TicketSyncConfigService.default_bitable_pull_config(),
+            cls._default_bitable_pull_config(),
         )
         if isinstance(bitable_pull_override, dict):
             nested_override = (
@@ -327,11 +638,11 @@ class TicketSyncService:
                 if isinstance(bitable_pull_override.get("bitablePull"), dict)
                 else bitable_pull_override
             )
-            pull_config = TicketSyncConfigService.merge_non_empty_runtime_override(pull_config, nested_override)
-        pull_config = TicketSyncConfigService.normalize_bitable_pull_config(
+            pull_config = cls._merge_non_empty_runtime_override(pull_config, nested_override)
+        pull_config = cls._normalize_bitable_pull_config(
             pull_config,
-            feishu_auth=config.get("feishuAuth") or TicketSyncConfigService.default_feishu_auth_config(),
-            bitable_common=config.get("bitableCommon") or TicketSyncConfigService.default_bitable_common_config(),
+            feishu_auth=config.get("feishuAuth") or cls._default_feishu_auth_config(),
+            bitable_common=config.get("bitableCommon") or cls._default_bitable_common_config(),
         )
         preview_config = {
             **pull_config,
@@ -370,6 +681,27 @@ class TicketSyncService:
             "source": "sample_record",
         }
 
+    @classmethod
+    def get_ticket_stat_classification_options(cls, db: Session):
+        """委托到 TicketSyncConfigService.get_ticket_stat_classification_options。"""
+        return TicketSyncConfigService.get_ticket_stat_classification_options(db)
+
+
+    @classmethod
+    def update_sync_automation_config_services(
+        cls,
+        db: Session,
+        config_value: dict[str, Any],
+        current_user_name: str,
+    ) -> CrudResponseModel:
+        """委托到 TicketSyncConfigService.update_sync_automation_config_services。"""
+        return TicketSyncConfigService.update_sync_automation_config_services(db, config_value, current_user_name)
+
+    @classmethod
+    def get_sync_notify_push_options_services(cls, db: Session):
+        """委托到 TicketSyncConfigService.get_sync_notify_push_options_services。"""
+        return TicketSyncConfigService.get_sync_notify_push_options_services(db)
+
 
     @classmethod
     def preview_person_reminder_services(
@@ -387,11 +719,11 @@ class TicketSyncService:
         :param email: 可选邮箱。
         :return: 统计结果。
         """
-        config = TicketSyncConfigService.load_sync_config(db)
-        person_config = TicketSyncConfigService.resolve_bitable_runtime_config(
+        config = cls._load_sync_config(db)
+        person_config = cls._resolve_bitable_runtime_config(
             config,
             "personReminder",
-            TicketSyncConfigService.default_person_reminder_config(),
+            cls._default_person_reminder_config(),
         )
         return TicketSyncNotifyService.preview_person_overdue_statistics(
             db,
@@ -422,11 +754,11 @@ class TicketSyncService:
         :param person_config_override: 定时任务传入的人员催办配置覆盖项，非空字段优先于全局参数配置。
         :return: 执行结果摘要。
         """
-        config = TicketSyncConfigService.load_sync_config(db)
-        person_config = TicketSyncConfigService.resolve_bitable_runtime_config(
+        config = cls._load_sync_config(db)
+        person_config = cls._resolve_bitable_runtime_config(
             config,
             "personReminder",
-            TicketSyncConfigService.default_person_reminder_config(),
+            cls._default_person_reminder_config(),
         )
         if isinstance(person_config_override, dict):
             normalized_override = {
@@ -467,11 +799,11 @@ class TicketSyncService:
         :param end_time: 可选统计结束时间。
         :return: 执行结果摘要。
         """
-        config = TicketSyncConfigService.load_sync_config(db)
-        summary_config = TicketSyncConfigService.resolve_bitable_runtime_config(
+        config = cls._load_sync_config(db)
+        summary_config = cls._resolve_bitable_runtime_config(
             config,
             "summaryReport",
-            TicketSyncConfigService.default_summary_report_config(),
+            cls._default_summary_report_config(),
         )
         parsed_start_time = TicketSyncNotifyService._parse_datetime_value(start_time)
         parsed_end_time = TicketSyncNotifyService._parse_datetime_value(end_time)
@@ -501,24 +833,23 @@ class TicketSyncService:
         :param bitable_pull_override: 任务级覆盖配置。
         :return: 执行结果摘要。
         """
-        config = TicketSyncConfigService.load_sync_config(db)
-        pull_config = TicketSyncConfigService.resolve_bitable_runtime_config(
+        config = cls._load_sync_config(db)
+        pull_config = cls._resolve_bitable_runtime_config(
             config,
             "bitablePull",
-            TicketSyncConfigService.default_bitable_pull_config(),
+            cls._default_bitable_pull_config(),
         )
-
         if isinstance(bitable_pull_override, dict):
             nested_override = (
                 bitable_pull_override.get("bitablePull")
                 if isinstance(bitable_pull_override.get("bitablePull"), dict)
                 else bitable_pull_override
             )
-            pull_config = TicketSyncConfigService.merge_non_empty_runtime_override(pull_config, nested_override)
-        pull_config = TicketSyncConfigService.normalize_bitable_pull_config(
+            pull_config = cls._merge_non_empty_runtime_override(pull_config, nested_override)
+        pull_config = cls._normalize_bitable_pull_config(
             pull_config,
-            feishu_auth=config.get("feishuAuth") or TicketSyncConfigService.default_feishu_auth_config(),
-            bitable_common=config.get("bitableCommon") or TicketSyncConfigService.default_bitable_common_config(),
+            feishu_auth=config.get("feishuAuth") or cls._default_feishu_auth_config(),
+            bitable_common=config.get("bitableCommon") or cls._default_bitable_common_config(),
         )
         if not pull_config.get("enabled"):
             logger.info(f"飞书多维表格主动拉取已跳过: enabled=false, trigger={trigger_source}")
@@ -534,7 +865,6 @@ class TicketSyncService:
             normalized_override = {
                 str(key): value for key, value in dict(nested_override or {}).items() if value not in (None, "")
             }
-
         if normalized_override:
             logger.info(
                 f"飞书多维表格主动拉取使用任务级覆盖: trigger={trigger_source}, "
@@ -560,8 +890,8 @@ class TicketSyncService:
         raw_created_after = str(pull_config.get("createdAfter") or "").strip() if not auto_append else None
         raw_created_before = str(pull_config.get("createdBefore") or "").strip() if not auto_append else None
 
-        created_after = TicketSyncConfigService.resolve_bitable_pull_created_after(raw_created_after) if raw_created_after else None
-        created_before = TicketSyncConfigService.resolve_bitable_pull_created_after(raw_created_before) if raw_created_before else None
+        created_after = cls._resolve_bitable_pull_created_after(raw_created_after) if raw_created_after else None
+        created_before = cls._resolve_bitable_pull_created_after(raw_created_before) if raw_created_before else None
 
         if raw_created_after and not created_after:
             return {
@@ -594,7 +924,7 @@ class TicketSyncService:
         if created_after or created_before:
             updated_at_field = str(pull_config.get("updatedAtField") or "").strip() or "更新时间"
             try:
-                pull_filters = TicketSyncConfigService.build_bitable_pull_time_filters(
+                pull_filters = cls._build_bitable_pull_time_filters(
                     filter_formula=pull_config.get("filterFormula"),
                     created_after=created_after,
                     created_before=created_before,
@@ -622,7 +952,7 @@ class TicketSyncService:
             )
         else:
             try:
-                pull_filters = TicketSyncConfigService.build_bitable_pull_time_filters(
+                pull_filters = cls._build_bitable_pull_time_filters(
                     filter_formula=pull_config.get("filterFormula"),
                     created_after=None,
                     created_before=None,
@@ -641,10 +971,10 @@ class TicketSyncService:
             logger.info(
                 f"飞书多维表格主动拉取无时间过滤: trigger={trigger_source}, auto_append={auto_append}"
             )
-        records = TicketSyncConfigService.query_bitable_pull_records(pull_config, pull_filters)
+        records = cls._query_bitable_pull_records(pull_config, pull_filters)
         queried_count = len(records)
         force_sync = SyncUtil.to_bool(pull_config.get("forceSync"), False)
-        required_fields = TicketSyncConfigService.derive_required_fields_from_external_field_model(config.get("externalFieldModel"))
+        required_fields = cls._derive_required_fields_from_external_field_model(config.get("externalFieldModel"))
         summary = {
             "triggerSource": trigger_source,
             "skipped": False,
@@ -735,6 +1065,10 @@ class TicketSyncService:
                 )
         return summary
 
+    @classmethod
+    def send_group_push_by_ticket_no_services(cls, db, *, ticket_no, push_ids=None, message_template=None, force_push=False, update_by="system"):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService.send_group_push_by_ticket_no_services(db, ticket_no=ticket_no, push_ids=push_ids, message_template=message_template, force_push=force_push, update_by=update_by)
 
     @classmethod
     def _build_remote_sync_request_headers(cls, remote_sync: dict[str, Any]) -> dict[str, str]:
@@ -828,6 +1162,119 @@ class TicketSyncService:
             "automationError": automation.get("last_error"),
         }
 
+    @classmethod
+    def _describe_bitable_field_value_for_log(cls, value: Any) -> dict[str, Any]:
+        """委托到 FeishuBitableUtil.describe_field_value_for_log。"""
+        return FeishuBitableUtil.describe_field_value_for_log(value)
+
+    @classmethod
+    def _extract_email_from_bitable_value(cls, value):
+        """委托到 FeishuBitableUtil.extract_email。"""
+        return FeishuBitableUtil.extract_email(value)
+
+    @classmethod
+    def _mask_email_for_log(cls, email):
+        """委托到 FeishuBitableUtil.mask_email_for_log。"""
+        return FeishuBitableUtil.mask_email_for_log(email)
+
+    @classmethod
+    def _normalize_bitable_record_scalar(
+        cls,
+        value: Any,
+        *,
+        join_separator: str = ",",
+    ) -> Any:
+        """委托到 FeishuBitableUtil.normalize_record_scalar。"""
+        return FeishuBitableUtil.normalize_record_scalar(value, join_separator=join_separator)
+
+    @classmethod
+    def _is_bitable_rich_text_segment(cls, value: Any) -> bool:
+        """委托到 FeishuBitableUtil.is_rich_text_segment。"""
+        return FeishuBitableUtil.is_rich_text_segment(value)
+
+    @classmethod
+    def _is_bitable_rich_text_list(cls, value: Any) -> bool:
+        """委托到 FeishuBitableUtil.is_rich_text_list。"""
+        return FeishuBitableUtil.is_rich_text_list(value)
+
+    @classmethod
+    def _normalize_bitable_rich_text_segment(
+        cls,
+        value: Any,
+        *,
+        join_separator: str = ",",
+    ) -> str:
+        """委托到 FeishuBitableUtil.normalize_rich_text_segment。"""
+        return FeishuBitableUtil.normalize_rich_text_segment(value, join_separator=join_separator)
+
+    @classmethod
+    def _normalize_bitable_rich_text_segments_for_comment(cls, value: Any) -> list[dict[str, Any]]:
+        """委托到 FeishuBitableUtil.normalize_rich_text_segments_for_comment。"""
+        return FeishuBitableUtil.normalize_rich_text_segments_for_comment(value)
+
+    @classmethod
+    def _extract_bitable_person_text(
+        cls,
+        value: Any,
+        *,
+        preferred_keys: tuple[str, ...],
+        join_separator: str = ",",
+    ) -> str:
+        """委托到 FeishuBitableUtil.extract_person_text。"""
+        return FeishuBitableUtil.extract_person_text(
+            value, preferred_keys=preferred_keys, join_separator=join_separator
+        )
+
+    @classmethod
+    def _extract_bitable_person_email(cls, value: Any, *, join_separator: str = ",") -> str:
+        """委托到 FeishuBitableUtil.extract_person_email。"""
+        return FeishuBitableUtil.extract_person_email(value, join_separator=join_separator)
+
+    @classmethod
+    def _extract_bitable_person_name(cls, value: Any, *, join_separator: str = ",") -> str:
+        """委托到 FeishuBitableUtil.extract_person_name。"""
+        return FeishuBitableUtil.extract_person_name(value, join_separator=join_separator)
+
+    @classmethod
+    def _normalize_bitable_record_datetime_text(cls, value: Any) -> str:
+        """委托到 FeishuBitableUtil.normalize_record_datetime_text。"""
+        return FeishuBitableUtil.normalize_record_datetime_text(value)
+
+    @classmethod
+    def _build_bitable_record_url(
+        cls,
+        config: dict[str, Any],
+        *,
+        record_id: str,
+        record_url: str | None = None,
+    ) -> str:
+        """委托到 FeishuBitableUtil.build_record_url。"""
+        return FeishuBitableUtil.build_record_url(config, record_id=record_id, record_url=record_url)
+
+    @classmethod
+    def _build_bitable_pull_field_mapping_from_record(
+        cls,
+        fields: dict[str, Any],
+        *,
+        field_mappings: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """委托到 FeishuBitableUtil.build_pull_field_mapping_from_record。"""
+        return FeishuBitableUtil.build_pull_field_mapping_from_record(
+            fields, field_mappings=field_mappings
+        )
+
+    @classmethod
+    def _build_bitable_pull_snapshot_hash(
+        cls,
+        *,
+        source_payload: dict[str, Any],
+        field_mapping_snapshot: dict[str, str],
+    ) -> str:
+        """委托到 FeishuBitableUtil.build_pull_snapshot_hash。"""
+        return FeishuBitableUtil.build_pull_snapshot_hash(
+            source_payload=source_payload,
+            field_mapping_snapshot=field_mapping_snapshot,
+        )
 
     @classmethod
     def _build_bitable_pull_sync_object(
@@ -856,7 +1303,7 @@ class TicketSyncService:
             or record.get("sharedUrl")
             or ""
         ).strip()
-        payload = FeishuBitableUtil.build_pull_field_mapping_from_record(fields, field_mappings=field_mappings)
+        payload = cls._build_bitable_pull_field_mapping_from_record(fields, field_mappings=field_mappings)
         if not payload:
             return None
         # 主动拉取不经过外部推送 controller 的兼容层，这里补齐同等字段语义，避免优先级和人员字段丢失。
@@ -900,7 +1347,7 @@ class TicketSyncService:
             if source_key in payload and payload.get(source_key) not in (None, "", []):
                 payload.setdefault(target_key, payload.get(source_key))
         field_mapping_snapshot = {
-            FeishuBitableUtil.normalize_pull_target_field(item.get("targetField")): str(
+            cls._normalize_bitable_pull_target_field(item.get("targetField")): str(
                 item.get("sourceField") or ""
             ).strip()
             for item in field_mappings
@@ -924,7 +1371,7 @@ class TicketSyncService:
             )
             return None
         if config.get("includeRecordUrl", True):
-            payload["ticketUrl"] = payload.get("ticketUrl") or FeishuBitableUtil.build_record_url(
+            payload["ticketUrl"] = payload.get("ticketUrl") or cls._build_bitable_record_url(
                 config,
                 record_id=record_id,
                 record_url=record_url,
@@ -932,12 +1379,12 @@ class TicketSyncService:
         payload["source"] = {
             "system": str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull",
             "recordId": payload.get("recordId") or record_id,
-            "recordUrl": payload.get("ticketUrl") or FeishuBitableUtil.build_record_url(
+            "recordUrl": payload.get("ticketUrl") or cls._build_bitable_record_url(
                 config,
                 record_id=record_id,
                 record_url=record_url,
             ),
-            "pushedAt": FeishuBitableUtil.normalize_record_datetime_text(
+            "pushedAt": cls._normalize_bitable_record_datetime_text(
                 fields.get(str(config.get("updatedAtField") or "").strip()) or record.get("created_time")
             )
             or None,
@@ -963,7 +1410,7 @@ class TicketSyncService:
         extra_data["external_field_mapping"] = external_field_mapping
         bitable_pull_meta: dict[str, Any] = {
             "recordId": record_id,
-            "snapshotHash": FeishuBitableUtil.build_pull_snapshot_hash(
+            "snapshotHash": cls._build_bitable_pull_snapshot_hash(
                 source_payload=payload,
                 field_mapping_snapshot=field_mapping_snapshot,
             ),
@@ -1026,10 +1473,10 @@ class TicketSyncService:
         :param record_id: 飞书多维表格记录 ID
         :return: 记录 fields 字典，查询失败返回空字典
         """
-        bitable_config = TicketSyncConfigService.resolve_bitable_runtime_config(
+        bitable_config = cls._resolve_bitable_runtime_config(
             config,
             "externalSyncBitable",
-            TicketSyncConfigService.default_external_sync_bitable_config(),
+            cls._default_external_sync_bitable_config(),
             keep_filter_formula=False,
         )
         if not bool(bitable_config.get("enabled")):
@@ -1145,7 +1592,7 @@ class TicketSyncService:
         for email_key, field_name in email_field_map.items():
             field_present = field_name in fields
             field_value = fields.get(field_name)
-            email = FeishuBitableUtil.extract_email(field_value)
+            email = cls._extract_email_from_bitable_value(field_value)
             if email:
                 email_map[email_key] = email
                 status = "success"
@@ -1163,8 +1610,8 @@ class TicketSyncService:
                     "fieldPresent": field_present,
                     "status": status,
                     "reason": reason,
-                    "email": FeishuBitableUtil.mask_email_for_log(email),
-                    "fieldSummary": FeishuBitableUtil.describe_field_value_for_log(field_value),
+                    "email": cls._mask_email_for_log(email),
+                    "fieldSummary": cls._describe_bitable_field_value_for_log(field_value),
                 }
             )
         logger.info(
@@ -1197,7 +1644,7 @@ class TicketSyncService:
             "emailKeys": list(email_map.keys()),
             "syncedAt": external_mapping["bitableEmailSyncedAt"],
         }
-        masked_emails = {key: FeishuBitableUtil.mask_email_for_log(value) for key, value in email_map.items()}
+        masked_emails = {key: cls._mask_email_for_log(value) for key, value in email_map.items()}
         logger.info(
             f"外部同步多维表格邮箱补齐结束: ticket_no={ticket_no or '-'}, "
             f"record_id={record_id}, updated=true, email_keys={list(email_map.keys())}, "
@@ -1610,7 +2057,7 @@ class TicketSyncService:
                     "categoryName": existing_category,
                     "meta": category_meta,
                 }
-            config = TicketSyncConfigService.load_sync_config(db)
+            config = cls._load_sync_config(db)
             ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
             stat_options = (
                 config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
@@ -1772,7 +2219,7 @@ class TicketSyncService:
                 f"reason=当前场景入参未启用且未强制重归类, source_type={source_type}"
             )
             return ticket, {"skipped": True, "skipReason": "当前场景未启用AI分类统计"}
-        config = TicketSyncConfigService.load_sync_config(db)
+        config = cls._load_sync_config(db)
         if not cls._should_run_ai_classification_for_scene(config, source_type) and not force_reclassify:
             logger.info(
                 f"工单AI分类统计跳过: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
@@ -2936,7 +3383,7 @@ class TicketSyncService:
         :return: 同步结果。
         """
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
-        config = TicketSyncConfigService.load_sync_config(db)
+        config = cls._load_sync_config(db)
         automation = sync_object.automation
         if sync_scene == "external_sync":
             sync_object = cls._enrich_external_person_emails_from_bitable(config, sync_object, ticket)
@@ -3082,7 +3529,7 @@ class TicketSyncService:
         )
         if defer_post_process:
             meta["sourceStatusBefore"] = previous_status
-            meta = TicketSyncGroupPushService.set_publish_state(
+            meta = cls._set_publish_state(
                 meta,
                 ready=False,
                 status=cls.PUBLISH_STATUS_PROCESSING_AI,
@@ -3268,7 +3715,7 @@ class TicketSyncService:
         group_push_summary = None
         try:
             ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
-            ticket, _, group_push_summary = TicketSyncGroupPushService.finalize_publish_state_after_post_process(
+            ticket, _, group_push_summary = cls._finalize_publish_state_after_post_process(
                 db,
                 ticket=ticket,
                 sync_scene=sync_scene,
@@ -3430,7 +3877,7 @@ class TicketSyncService:
         if not ticket:
             logger.warning(f"外部工单同步延后后处理跳过: 未找到工单 ticket_no={sync_object.ticket_no}")
             return
-        config = TicketSyncConfigService.load_sync_config(db)
+        config = cls._load_sync_config(db)
         automation = sync_object.automation
         update_data: dict[str, Any] = {}
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
@@ -3637,7 +4084,7 @@ class TicketSyncService:
             )
             ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
         try:
-            TicketSyncGroupPushService.finalize_publish_state_after_post_process(
+            cls._finalize_publish_state_after_post_process(
                 db,
                 ticket=ticket,
                 sync_scene=sync_scene,
@@ -3661,7 +4108,7 @@ class TicketSyncService:
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
         if not ticket:
             return {}
-        config = TicketSyncConfigService.load_sync_config(db)
+        config = cls._load_sync_config(db)
         automation = sync_object.automation
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
         meta = cls._build_meta(extra_data)
@@ -3855,8 +4302,8 @@ class TicketSyncService:
         batch_id = f"{query.consumer}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         payload_rows: list[dict[str, Any]] = []
         for ticket in rows:
-            ticket, meta, _ = TicketSyncGroupPushService.ensure_publish_ready_for_pull(db, ticket=ticket, current_user=current_user)
-            if not TicketSyncGroupPushService.is_publish_ready(meta):
+            ticket, meta, _ = cls._ensure_publish_ready_for_pull(db, ticket=ticket, current_user=current_user)
+            if not cls._is_publish_ready(meta):
                 continue
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             revision = int(meta.get("revision") or 0)
@@ -4331,8 +4778,8 @@ class TicketSyncService:
         :param remote_sync_override: 可选远端同步覆盖配置。
         :return: 同步汇总结果。
         """
-        config = TicketSyncConfigService.load_sync_config(db)
-        remote_sync = dict(config.get("remoteSync") or TicketSyncConfigService.default_remote_sync_config())
+        config = cls._load_sync_config(db)
+        remote_sync = dict(config.get("remoteSync") or cls._default_remote_sync_config())
         if remote_sync_override:
             override_remote_sync = (
                 remote_sync_override.get("remoteSync")
@@ -4352,7 +4799,7 @@ class TicketSyncService:
         remote_sync["autoTranslateOnPull"] = bool(remote_sync.get("autoTranslateOnPull", True))
         remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
         remote_sync["headers"] = {
-            **TicketSyncConfigService.default_remote_sync_config()["headers"],
+            **cls._default_remote_sync_config()["headers"],
             **(remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}),
         }
 

@@ -28,7 +28,7 @@ from modules.ticket.service.ticket_embedding_service import TicketEmbeddingServi
 from modules.ticket.service.ticket_import_service import TicketImportService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService
-from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -601,7 +601,7 @@ async def get_ticket_stat_classification_options(request: Request, query_db: Ses
     :return: 工单类型、根因分类、解决方式和关闭结果选项
     """
     try:
-        return ResponseUtil.success(data=TicketSyncService.get_ticket_stat_classification_options(query_db))
+        return ResponseUtil.success(data=TicketSyncConfigService.get_ticket_stat_classification_options(query_db))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

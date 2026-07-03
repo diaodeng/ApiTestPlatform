@@ -34,7 +34,7 @@ class TicketSyncGroupPushService:
     META_KEY = "external_sync"
 
     @classmethod
-    def build_meta(cls, extra_data: dict[str, Any] | None) -> dict[str, Any]:
+    def _build_meta(cls, extra_data: dict[str, Any] | None) -> dict[str, Any]:
         source = extra_data if isinstance(extra_data, dict) else {}
         meta = source.get(cls.META_KEY) if isinstance(source.get(cls.META_KEY), dict) else {}
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
@@ -64,7 +64,7 @@ class TicketSyncGroupPushService:
         return meta
 
     @classmethod
-    def attach_meta(cls, extra_data: dict[str, Any] | None, meta: dict[str, Any]) -> dict[str, Any]:
+    def _attach_meta(cls, extra_data: dict[str, Any] | None, meta: dict[str, Any]) -> dict[str, Any]:
         payload = dict(extra_data or {})
         payload[cls.META_KEY] = meta
         return payload
@@ -107,7 +107,7 @@ class TicketSyncGroupPushService:
         }
 
     @classmethod
-    def set_publish_state(
+    def _set_publish_state(
         cls,
         meta: dict[str, Any],
         *,
@@ -136,7 +136,7 @@ class TicketSyncGroupPushService:
         return meta
 
     @classmethod
-    def is_publish_ready(cls, meta: dict[str, Any]) -> bool:
+    def _is_publish_ready(cls, meta: dict[str, Any]) -> bool:
         """
         判断同步数据是否允许对外发布。
         :param meta: 同步元数据
@@ -148,7 +148,7 @@ class TicketSyncGroupPushService:
         return bool(sync_state.get("publish_ready"))
 
     @classmethod
-    def can_recover_publish_state(cls, db: Session, *, ticket: Ticket, meta: dict[str, Any]) -> tuple[bool, str]:
+    def _can_recover_publish_state(cls, db: Session, *, ticket: Ticket, meta: dict[str, Any]) -> tuple[bool, str]:
         """
         判断未发布同步数据是否可恢复为可发布状态。
         :param db: 数据库会话
@@ -156,19 +156,19 @@ class TicketSyncGroupPushService:
         :param meta: 同步元数据
         :return: (是否可恢复, 恢复原因)
         """
-        if cls.is_publish_ready(meta):
+        if cls._is_publish_ready(meta):
             return False, "already_ready"
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
         publish_status = str(sync_state.get("publish_status") or "").strip()
         if publish_status != cls.PUBLISH_STATUS_PROCESSING_AI:
             return False, f"publish_status_not_recoverable:{publish_status or '-'}"
-        ai_pending, ai_status = cls.resolve_ai_pending_state(db, ticket_id=ticket.ticket_id, meta=meta)
+        ai_pending, ai_status = cls._resolve_ai_pending_state(db, ticket_id=ticket.ticket_id, meta=meta)
         if ai_pending:
             return False, f"ai_still_pending:{ai_status or '-'}"
         return True, f"ai_not_pending:{ai_status or '-'}"
 
     @classmethod
-    def ensure_publish_ready_for_pull(
+    def _ensure_publish_ready_for_pull(
         cls,
         db: Session,
         *,
@@ -183,8 +183,8 @@ class TicketSyncGroupPushService:
         :return: (刷新后的工单, 同步元数据, 是否已恢复)
         """
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        meta = cls.build_meta(extra_data)
-        recoverable, recover_reason = cls.can_recover_publish_state(db, ticket=ticket, meta=meta)
+        meta = cls._build_meta(extra_data)
+        recoverable, recover_reason = cls._can_recover_publish_state(db, ticket=ticket, meta=meta)
         if not recoverable:
             return ticket, meta, False
         logger.warning(
@@ -193,14 +193,14 @@ class TicketSyncGroupPushService:
             meta.get("revision"),
             recover_reason,
         )
-        meta = cls.set_publish_state(
+        meta = cls._set_publish_state(
             meta,
             ready=True,
             status=cls.PUBLISH_STATUS_READY,
             reason="拉取前检测到无活动AI任务，自动恢复发布状态",
             ai_task_status=str((meta.get("sync_state") or {}).get("ai_task_status") or "").strip(),
         )
-        ticket = cls.persist_sync_meta(
+        ticket = cls._persist_sync_meta(
             db,
             ticket=ticket,
             meta=meta,
@@ -209,7 +209,7 @@ class TicketSyncGroupPushService:
         return ticket, meta, True
 
     @classmethod
-    def is_group_push_sent_once(cls, meta: dict[str, Any]) -> bool:
+    def _is_group_push_sent_once(cls, meta: dict[str, Any]) -> bool:
         """
         判断工单是否已成功发送过群推送。
         :param meta: 同步元数据
@@ -219,7 +219,7 @@ class TicketSyncGroupPushService:
         return bool(sync_state.get("group_push_sent_once"))
 
     @classmethod
-    def mark_group_push_sent_once(
+    def _mark_group_push_sent_once(
         cls,
         meta: dict[str, Any],
         *,
@@ -242,7 +242,7 @@ class TicketSyncGroupPushService:
         return meta
 
     @classmethod
-    def append_group_push_message_refs(
+    def _append_group_push_message_refs(
         cls,
         meta: dict[str, Any],
         message_refs: list[dict[str, Any]] | None,
@@ -287,7 +287,7 @@ class TicketSyncGroupPushService:
         return meta
 
     @classmethod
-    def mark_group_push_processing(
+    def _mark_group_push_processing(
         cls,
         meta: dict[str, Any],
         *,
@@ -310,7 +310,7 @@ class TicketSyncGroupPushService:
         return meta
 
     @classmethod
-    def clear_group_push_processing(cls, meta: dict[str, Any]) -> dict[str, Any]:
+    def _clear_group_push_processing(cls, meta: dict[str, Any]) -> dict[str, Any]:
         """
         清理工单群推送处理中锁。
         :param meta: 同步元数据
@@ -325,7 +325,7 @@ class TicketSyncGroupPushService:
         return meta
 
     @classmethod
-    def is_group_push_processing_locked(cls, meta: dict[str, Any]) -> tuple[bool, str]:
+    def _is_group_push_processing_locked(cls, meta: dict[str, Any]) -> tuple[bool, str]:
         """
         判断群推送处理锁是否生效。
         :param meta: 同步元数据
@@ -343,7 +343,7 @@ class TicketSyncGroupPushService:
         return True, "群推送处理中"
 
     @classmethod
-    def persist_group_push_meta_state(
+    def _persist_group_push_meta_state(
         cls,
         db: Session,
         *,
@@ -379,31 +379,31 @@ class TicketSyncGroupPushService:
                 return False, None, {}, "ticket_not_found"
 
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-            meta = cls.build_meta(extra_data)
+            meta = cls._build_meta(extra_data)
             if acquire_lock:
-                if cls.is_group_push_sent_once(meta):
+                if cls._is_group_push_sent_once(meta):
                     db.rollback()
                     return False, ticket, meta, "already_sent"
-                locked, lock_reason = cls.is_group_push_processing_locked(meta)
+                locked, lock_reason = cls._is_group_push_processing_locked(meta)
                 if locked:
                     db.rollback()
                     return False, ticket, meta, lock_reason or "group_push_processing"
-                meta = cls.mark_group_push_processing(
+                meta = cls._mark_group_push_processing(
                     meta,
                     scene=scene,
                     revision=int(meta.get("revision") or 0),
                 )
             if clear_lock:
-                meta = cls.clear_group_push_processing(meta)
+                meta = cls._clear_group_push_processing(meta)
             if mark_sent_once:
-                meta = cls.mark_group_push_sent_once(
+                meta = cls._mark_group_push_sent_once(
                     meta,
                     scene=scene,
                     revision=int(meta.get("revision") or 0),
                 )
-            meta = cls.append_group_push_message_refs(meta, message_refs)
+            meta = cls._append_group_push_message_refs(meta, message_refs)
             if acquire_lock or clear_lock or mark_sent_once or message_refs:
-                refreshed_extra_data = cls.attach_meta(extra_data, meta)
+                refreshed_extra_data = cls._attach_meta(extra_data, meta)
                 TicketDao.update_ticket(
                     db,
                     ticket.ticket_id,
@@ -423,7 +423,7 @@ class TicketSyncGroupPushService:
             raise
 
     @classmethod
-    def resolve_ai_pending_state(
+    def _resolve_ai_pending_state(
         cls,
         db: Session,
         *,
@@ -468,7 +468,7 @@ class TicketSyncGroupPushService:
         return False, ai_step_status
 
     @classmethod
-    def persist_sync_meta(
+    def _persist_sync_meta(
         cls,
         db: Session,
         *,
@@ -485,7 +485,7 @@ class TicketSyncGroupPushService:
         :return: 刷新后的工单对象
         """
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        extra_data = cls.attach_meta(extra_data, meta)
+        extra_data = cls._attach_meta(extra_data, meta)
         TicketDao.update_ticket(
             db,
             ticket.ticket_id,
@@ -499,7 +499,7 @@ class TicketSyncGroupPushService:
         return TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
 
     @classmethod
-    def send_auto_group_message_once(
+    def _send_auto_group_message_once(
         cls,
         db: Session,
         *,
@@ -537,7 +537,7 @@ class TicketSyncGroupPushService:
                 meta,
             )
 
-        skip_by_status, status_skip_reason = cls.should_skip_auto_group_push_by_status(
+        skip_by_status, status_skip_reason = cls._should_skip_auto_group_push_by_status(
             ticket=ticket,
             group_config=group_config,
         )
@@ -556,7 +556,7 @@ class TicketSyncGroupPushService:
                 meta,
             )
 
-        if not cls.is_publish_ready(meta):
+        if not cls._is_publish_ready(meta):
             logger.info(
                 f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
                 f"reason=同步数据未发布就绪"
@@ -566,7 +566,7 @@ class TicketSyncGroupPushService:
                 ticket,
                 meta,
             )
-        if cls.is_group_push_sent_once(meta):
+        if cls._is_group_push_sent_once(meta):
             logger.info(
                 f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
                 f"reason=工单已发送过群推送"
@@ -576,7 +576,7 @@ class TicketSyncGroupPushService:
                 ticket,
                 meta,
             )
-        skip_by_submit_time, submit_time_skip_reason = cls.should_skip_auto_group_push_by_submit_time(
+        skip_by_submit_time, submit_time_skip_reason = cls._should_skip_auto_group_push_by_submit_time(
             ticket=ticket,
             meta=meta,
             group_config=group_config,
@@ -596,7 +596,7 @@ class TicketSyncGroupPushService:
                 meta,
             )
 
-        lock_acquired, locked_ticket, locked_meta, lock_reason = cls.persist_group_push_meta_state(
+        lock_acquired, locked_ticket, locked_meta, lock_reason = cls._persist_group_push_meta_state(
             db,
             ticket_id=ticket.ticket_id,
             update_by=update_by,
@@ -629,7 +629,7 @@ class TicketSyncGroupPushService:
             meta = locked_meta
 
         sync_summary = cls.extract_sync_summary(
-            cls.attach_meta(dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}, meta)
+            cls._attach_meta(dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}, meta)
         ) or {}
         result: dict[str, Any] = {}
         mark_sent_once = False
@@ -661,7 +661,7 @@ class TicketSyncGroupPushService:
                 if isinstance(result.get("feishuMessageRefs"), list)
                 else None
             )
-            state_updated, refreshed_ticket, refreshed_meta, _ = cls.persist_group_push_meta_state(
+            state_updated, refreshed_ticket, refreshed_meta, _ = cls._persist_group_push_meta_state(
                 db,
                 ticket_id=ticket.ticket_id,
                 update_by=update_by,
@@ -678,7 +678,7 @@ class TicketSyncGroupPushService:
         return result, ticket, meta
 
     @classmethod
-    def finalize_publish_state_after_post_process(
+    def _finalize_publish_state_after_post_process(
         cls,
         db: Session,
         *,
@@ -695,18 +695,18 @@ class TicketSyncGroupPushService:
         :return: (刷新后的工单, 元数据, 群推送结果)
         """
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        meta = cls.build_meta(extra_data)
-        ai_pending, ai_status = cls.resolve_ai_pending_state(db, ticket_id=ticket.ticket_id, meta=meta)
+        meta = cls._build_meta(extra_data)
+        ai_pending, ai_status = cls._resolve_ai_pending_state(db, ticket_id=ticket.ticket_id, meta=meta)
         ai_task_status = str(ai_status or "").strip().lower()
         if ai_pending:
-            meta = cls.set_publish_state(
+            meta = cls._set_publish_state(
                 meta,
                 ready=False,
                 status=cls.PUBLISH_STATUS_PROCESSING_AI,
                 reason="AI分析处理中，暂不对外发布",
                 ai_task_status=ai_task_status or TicketAiAnalysisStatus.RUNNING.value,
             )
-            ticket = cls.persist_sync_meta(
+            ticket = cls._persist_sync_meta(
                 db,
                 ticket=ticket,
                 meta=meta,
@@ -715,14 +715,14 @@ class TicketSyncGroupPushService:
             return ticket, meta, {"skipped": True, "skipReason": "AI分析处理中，暂不推送", "scene": sync_scene}
 
         reason = "AI分析已结束，允许对外发布" if ai_task_status else "后处理完成，允许对外发布"
-        meta = cls.set_publish_state(
+        meta = cls._set_publish_state(
             meta,
             ready=True,
             status=cls.PUBLISH_STATUS_READY,
             reason=reason,
             ai_task_status=ai_task_status,
         )
-        ticket = cls.persist_sync_meta(
+        ticket = cls._persist_sync_meta(
             db,
             ticket=ticket,
             meta=meta,
@@ -730,7 +730,7 @@ class TicketSyncGroupPushService:
         )
         config = TicketSyncConfigService.load_sync_config(db)
         group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
-        group_push_result, ticket, meta = cls.send_auto_group_message_once(
+        group_push_result, ticket, meta = cls._send_auto_group_message_once(
             db,
             ticket=ticket,
             meta=meta,
@@ -762,17 +762,17 @@ class TicketSyncGroupPushService:
             if not ticket:
                 return
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-            meta = cls.build_meta(extra_data)
+            meta = cls._build_meta(extra_data)
             normalized_status = str(ai_task_status or "").strip().lower()
             if normalized_status in cls.AI_PENDING_TASK_STATUSES:
-                meta = cls.set_publish_state(
+                meta = cls._set_publish_state(
                     meta,
                     ready=False,
                     status=cls.PUBLISH_STATUS_PROCESSING_AI,
                     reason="AI分析处理中，暂不对外发布",
                     ai_task_status=normalized_status,
                 )
-                cls.persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
+                cls._persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
                 return
 
             reason = (
@@ -780,17 +780,17 @@ class TicketSyncGroupPushService:
                 if normalized_status == TicketAiAnalysisStatus.SUCCESS.value
                 else "AI分析结束，允许对外发布"
             )
-            meta = cls.set_publish_state(
+            meta = cls._set_publish_state(
                 meta,
                 ready=True,
                 status=cls.PUBLISH_STATUS_READY,
                 reason=reason,
                 ai_task_status=normalized_status,
             )
-            ticket = cls.persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
+            ticket = cls._persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
             config = TicketSyncConfigService.load_sync_config(db)
             group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
-            cls.send_auto_group_message_once(
+            cls._send_auto_group_message_once(
                 db,
                 ticket=ticket,
                 meta=meta,
@@ -806,7 +806,7 @@ class TicketSyncGroupPushService:
             )
 
     @classmethod
-    def resolve_ticket_submit_time(cls, *, ticket: Ticket, meta: dict[str, Any] | None) -> datetime | None:
+    def _resolve_ticket_submit_time(cls, *, ticket: Ticket, meta: dict[str, Any] | None) -> datetime | None:
         """
         解析工单提交时间：优先外部 createTime，缺失时回退本地创建时间。
 
@@ -826,7 +826,7 @@ class TicketSyncGroupPushService:
         return SyncUtil.parse_datetime_value(getattr(ticket, "create_time", None))
 
     @classmethod
-    def resolve_group_push_auto_send_after_time(cls, group_config: dict[str, Any] | None) -> datetime | None:
+    def _resolve_group_push_auto_send_after_time(cls, group_config: dict[str, Any] | None) -> datetime | None:
         """
         解析自动群推送起始时间配置。
 
@@ -840,7 +840,7 @@ class TicketSyncGroupPushService:
         )
 
     @classmethod
-    def normalize_group_push_auto_statuses(
+    def _normalize_group_push_auto_statuses(
         cls,
         value: Any,
         *,
@@ -870,7 +870,7 @@ class TicketSyncGroupPushService:
         return normalized
 
     @classmethod
-    def should_skip_auto_group_push_by_status(
+    def _should_skip_auto_group_push_by_status(
         cls,
         *,
         ticket: Ticket,
@@ -884,7 +884,7 @@ class TicketSyncGroupPushService:
         :return: (是否跳过, 跳过原因)。
         """
         config = group_config if isinstance(group_config, dict) else {}
-        auto_push_statuses = cls.normalize_group_push_auto_statuses(
+        auto_push_statuses = cls._normalize_group_push_auto_statuses(
             config.get("autoPushStatuses", config.get("auto_push_statuses")),
         )
         if not auto_push_statuses:
@@ -895,7 +895,7 @@ class TicketSyncGroupPushService:
         return True, f"工单状态({ticket_status or '-'})未命中自动推送状态条件"
 
     @classmethod
-    def should_skip_auto_group_push_by_submit_time(
+    def _should_skip_auto_group_push_by_submit_time(
         cls,
         *,
         ticket: Ticket,
@@ -910,10 +910,10 @@ class TicketSyncGroupPushService:
         :param group_config: 群推送配置。
         :return: (是否跳过, 跳过原因)。
         """
-        auto_send_after_time = cls.resolve_group_push_auto_send_after_time(group_config)
+        auto_send_after_time = cls._resolve_group_push_auto_send_after_time(group_config)
         if not auto_send_after_time:
             return False, None
-        submit_time = cls.resolve_ticket_submit_time(ticket=ticket, meta=meta)
+        submit_time = cls._resolve_ticket_submit_time(ticket=ticket, meta=meta)
         if submit_time is None:
             return False, None
         if submit_time <= auto_send_after_time:
@@ -952,8 +952,8 @@ class TicketSyncGroupPushService:
         config = TicketSyncConfigService.load_sync_config(db)
         group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        meta = cls.build_meta(extra_data)
-        already_sent = cls.is_group_push_sent_once(meta)
+        meta = cls._build_meta(extra_data)
+        already_sent = cls._is_group_push_sent_once(meta)
         force_push_enabled = bool(force_push)
         manual_scene = "manual_force" if force_push_enabled else "manual"
         if already_sent and not force_push_enabled:
@@ -989,16 +989,16 @@ class TicketSyncGroupPushService:
         app_success_count = int(result.get("chatSuccessCount") or 0)
         group_push_state_updated = False
         if not bool(result.get("skipped")) and (push_success_count > 0 or app_success_count > 0):
-            meta = cls.mark_group_push_sent_once(
+            meta = cls._mark_group_push_sent_once(
                 meta,
                 scene=manual_scene,
                 revision=int(meta.get("revision") or 0),
             )
-            meta = cls.append_group_push_message_refs(
+            meta = cls._append_group_push_message_refs(
                 meta,
                 result.get("feishuMessageRefs") if isinstance(result.get("feishuMessageRefs"), list) else None,
             )
-            ticket = cls.persist_sync_meta(
+            ticket = cls._persist_sync_meta(
                 db,
                 ticket=ticket,
                 meta=meta,

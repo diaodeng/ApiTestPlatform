@@ -133,23 +133,23 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_sync_config ---
 
     @classmethod
-    def default_sync_config(cls) -> dict[str, Any]:
+    def _default_sync_config(cls) -> dict[str, Any]:
         return {
             "autoRunOnSync": False,
             "autoTranslateOnSync": True,
             "defaultPullLimit": 50,
-            "feishuAuth": cls.default_feishu_auth_config(),
-            "bitableCommon": cls.default_bitable_common_config(),
-            "externalFieldModel": cls.default_external_field_model_config(),
-            "externalSyncBitable": cls.default_external_sync_bitable_config(),
-            "remoteSync": cls.default_remote_sync_config(),
-            "bitablePull": cls.default_bitable_pull_config(),
-            "groupPush": cls.default_group_push_config(),
-            "messageSync": cls.default_message_sync_config(),
-            "personReminder": cls.default_person_reminder_config(),
-            "summaryReport": cls.default_summary_report_config(),
-            "statClassification": cls.default_stat_classification_config(),
-            "aiClassification": cls.default_ai_classification_config(),
+            "feishuAuth": cls._default_feishu_auth_config(),
+            "bitableCommon": cls._default_bitable_common_config(),
+            "externalFieldModel": cls._default_external_field_model_config(),
+            "externalSyncBitable": cls._default_external_sync_bitable_config(),
+            "remoteSync": cls._default_remote_sync_config(),
+            "bitablePull": cls._default_bitable_pull_config(),
+            "groupPush": cls._default_group_push_config(),
+            "messageSync": cls._default_message_sync_config(),
+            "personReminder": cls._default_person_reminder_config(),
+            "summaryReport": cls._default_summary_report_config(),
+            "statClassification": cls._default_stat_classification_config(),
+            "aiClassification": cls._default_ai_classification_config(),
             "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
             "projectMappings": [],
             "moduleMappings": [],
@@ -181,7 +181,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_feishu_auth_config ---
 
     @classmethod
-    def default_feishu_auth_config(cls) -> dict[str, Any]:
+    def _default_feishu_auth_config(cls) -> dict[str, Any]:
         """
         构建飞书应用统一凭证默认配置。
 
@@ -195,7 +195,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_bitable_common_config ---
 
     @classmethod
-    def default_bitable_common_config(cls) -> dict[str, Any]:
+    def _default_bitable_common_config(cls) -> dict[str, Any]:
         """
         构建飞书多维表格公共配置。
 
@@ -214,7 +214,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_external_field_model_config ---
 
     @classmethod
-    def default_external_field_model_config(cls) -> dict[str, Any]:
+    def _default_external_field_model_config(cls) -> dict[str, Any]:
         """
         构建外部工单字段模型默认配置。
 
@@ -227,7 +227,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_external_sync_bitable_config ---
 
     @classmethod
-    def default_external_sync_bitable_config(cls) -> dict[str, Any]:
+    def _default_external_sync_bitable_config(cls) -> dict[str, Any]:
         """
         构建外部同步多维表格补充查询默认配置。
 
@@ -245,7 +245,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_bitable_pull_config ---
 
     @classmethod
-    def default_bitable_pull_config(cls) -> dict[str, Any]:
+    def _default_bitable_pull_config(cls) -> dict[str, Any]:
         """
         构建飞书多维表格主动拉取默认配置。
 
@@ -282,7 +282,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_group_push_config ---
 
     @classmethod
-    def default_group_push_config(cls) -> dict[str, Any]:
+    def _default_group_push_config(cls) -> dict[str, Any]:
         """
         构建工单群推送默认配置。
 
@@ -305,7 +305,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_message_sync_config ---
 
     @classmethod
-    def default_message_sync_config(cls) -> dict[str, Any]:
+    def _default_message_sync_config(cls) -> dict[str, Any]:
         """
         构建工单评论多端同步默认配置。
 
@@ -332,7 +332,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_person_reminder_config ---
 
     @classmethod
-    def default_person_reminder_config(cls) -> dict[str, Any]:
+    def _default_person_reminder_config(cls) -> dict[str, Any]:
         """
         构建按人催办默认配置。
 
@@ -363,7 +363,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_summary_report_config ---
 
     @classmethod
-    def default_summary_report_config(cls) -> dict[str, Any]:
+    def _default_summary_report_config(cls) -> dict[str, Any]:
         """
         构建工单汇总通知默认配置。
 
@@ -401,7 +401,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_remote_sync_config ---
 
     @classmethod
-    def default_remote_sync_config(cls) -> dict[str, Any]:
+    def _default_remote_sync_config(cls) -> dict[str, Any]:
         """
         构建远端工单同步默认配置。
 
@@ -427,7 +427,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_stat_classification_config ---
 
     @classmethod
-    def default_stat_classification_config(cls) -> dict[str, Any]:
+    def _default_stat_classification_config(cls) -> dict[str, Any]:
         """
         构建工单分类统计枚举默认配置。
 
@@ -444,7 +444,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._default_ai_classification_config ---
 
     @classmethod
-    def default_ai_classification_config(cls) -> dict[str, Any]:
+    def _default_ai_classification_config(cls) -> dict[str, Any]:
         """
         构建工单 AI 分类统计默认配置。
 
@@ -466,7 +466,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_stat_option_rows ---
 
     @classmethod
-    def normalize_stat_option_rows(cls, value: Any, default_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _normalize_stat_option_rows(cls, value: Any, default_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         归一化可视化维护的统计枚举行。
 
@@ -525,7 +525,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_stat_classification_config ---
 
     @classmethod
-    def normalize_stat_classification_config(cls, value: Any) -> dict[str, Any]:
+    def _normalize_stat_classification_config(cls, value: Any) -> dict[str, Any]:
         """
         归一化工单分类统计配置。
 
@@ -533,25 +533,25 @@ class TicketSyncConfigService:
         :return: 带默认值的配置。
         """
         source = value if isinstance(value, dict) else {}
-        defaults = cls.default_stat_classification_config()
+        defaults = cls._default_stat_classification_config()
         return {
-            "issueTypes": cls.normalize_stat_option_rows(
+            "issueTypes": cls._normalize_stat_option_rows(
                 source.get("issueTypes") or source.get("issue_types"),
                 defaults["issueTypes"],
             ),
-            "rootCauseTypes": cls.normalize_stat_option_rows(
+            "rootCauseTypes": cls._normalize_stat_option_rows(
                 source.get("rootCauseTypes") or source.get("root_cause_types"),
                 defaults["rootCauseTypes"],
             ),
-            "solutionTypes": cls.normalize_stat_option_rows(
+            "solutionTypes": cls._normalize_stat_option_rows(
                 source.get("solutionTypes") or source.get("solution_types"),
                 defaults["solutionTypes"],
             ),
-            "resolutions": cls.normalize_stat_option_rows(
+            "resolutions": cls._normalize_stat_option_rows(
                 source.get("resolutions"),
                 defaults["resolutions"],
             ),
-            "problemPatterns": cls.normalize_stat_option_rows(
+            "problemPatterns": cls._normalize_stat_option_rows(
                 source.get("problemPatterns") or source.get("problem_patterns"),
                 defaults["problemPatterns"],
             ),
@@ -560,7 +560,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_ai_classification_config ---
 
     @classmethod
-    def normalize_ai_classification_config(cls, value: Any) -> dict[str, Any]:
+    def _normalize_ai_classification_config(cls, value: Any) -> dict[str, Any]:
         """
         归一化工单 AI 分类统计配置。
 
@@ -568,14 +568,14 @@ class TicketSyncConfigService:
         :return: 带默认值的配置。
         """
         source = value if isinstance(value, dict) else {}
-        defaults = cls.default_ai_classification_config()
+        defaults = cls._default_ai_classification_config()
         return {
             "enabled": bool(source.get("enabled", defaults["enabled"])),
             "runOnExternalSync": bool(source.get("runOnExternalSync", source.get("run_on_external_sync", False))),
             "runOnRemotePull": bool(source.get("runOnRemotePull", source.get("run_on_remote_pull", False))),
             "runOnManualCreate": bool(source.get("runOnManualCreate", source.get("run_on_manual_create", False))),
             "runOnStatusChange": bool(source.get("runOnStatusChange", source.get("run_on_status_change", False))),
-            "statusChangeTriggerStatuses": cls.normalize_ai_classification_status_triggers(
+            "statusChangeTriggerStatuses": cls._normalize_ai_classification_status_triggers(
                 source.get("statusChangeTriggerStatuses", source.get("status_change_trigger_statuses"))
             ),
             "statusChangeForceReclassify": bool(
@@ -594,7 +594,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_ai_classification_status_triggers ---
 
     @classmethod
-    def normalize_ai_classification_status_triggers(cls, value: Any) -> list[str]:
+    def _normalize_ai_classification_status_triggers(cls, value: Any) -> list[str]:
         """
         归一化状态变更触发 AI 分类统计的目标状态列表。
 
@@ -613,7 +613,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_external_field_model_config ---
 
     @classmethod
-    def normalize_external_field_model_config(cls, value: Any) -> dict[str, Any]:
+    def _normalize_external_field_model_config(cls, value: Any) -> dict[str, Any]:
         """
         归一化外部工单字段模型配置。
 
@@ -647,14 +647,14 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._derive_required_fields_from_external_field_model ---
 
     @classmethod
-    def derive_required_fields_from_external_field_model(cls, value: Any) -> list[str]:
+    def _derive_required_fields_from_external_field_model(cls, value: Any) -> list[str]:
         """
         根据外部字段模型推导必填字段列表。
 
         :param value: 外部字段模型配置。
         :return: 必填字段列表。
         """
-        model_config = cls.normalize_external_field_model_config(value)
+        model_config = cls._normalize_external_field_model_config(value)
         required_fields: list[str] = []
         for item in model_config.get("fields") or []:
             if not isinstance(item, dict):
@@ -669,7 +669,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_bitable_filter_config ---
 
     @classmethod
-    def normalize_bitable_filter_config(cls, value: Any) -> str | dict[str, Any]:
+    def _normalize_bitable_filter_config(cls, value: Any) -> str | dict[str, Any]:
         """
         归一化飞书多维表格查询过滤配置。
 
@@ -685,7 +685,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._parse_bitable_filter_config ---
 
     @classmethod
-    def parse_bitable_filter_config(cls, value: Any) -> dict[str, Any]:
+    def _parse_bitable_filter_config(cls, value: Any) -> dict[str, Any]:
         """
         将飞书多维表格过滤配置解析为条件对象。
 
@@ -705,7 +705,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._format_bitable_filter_config ---
 
     @classmethod
-    def format_bitable_filter_config(cls, value: Any) -> str | dict[str, Any]:
+    def _format_bitable_filter_config(cls, value: Any) -> str | dict[str, Any]:
         """
         按原输入形态输出过滤配置，兼容页面保存字符串和任务参数对象。
 
@@ -719,7 +719,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_bitable_common_config ---
 
     @classmethod
-    def normalize_bitable_common_config(cls, value: Any, *, feishu_auth: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_bitable_common_config(cls, value: Any, *, feishu_auth: dict[str, Any]) -> dict[str, Any]:
         """
         归一化飞书多维表格公共配置。
 
@@ -728,20 +728,20 @@ class TicketSyncConfigService:
         :return: 归一化后的公共配置。
         """
         source = value if isinstance(value, dict) else {}
-        config = {**cls.default_bitable_common_config(), **source}
+        config = {**cls._default_bitable_common_config(), **source}
         config["appId"] = str(config.get("appId") or "").strip()
         config["appSecret"] = str(config.get("appSecret") or "").strip()
         config["appToken"] = str(config.get("appToken") or "").strip()
         config["tableId"] = str(config.get("tableId") or "").strip()
         config["viewId"] = str(config.get("viewId") or "").strip()
         config["pageSize"] = min(max(SyncUtil.safe_int(config.get("pageSize")) or 500, 1), 500)
-        config["filterFormula"] = cls.normalize_bitable_filter_config(config.get("filterFormula"))
+        config["filterFormula"] = cls._normalize_bitable_filter_config(config.get("filterFormula"))
         return config
 
     # --- migrated from TicketSyncService._apply_bitable_common_defaults ---
 
     @classmethod
-    def apply_bitable_common_defaults(
+    def _apply_bitable_common_defaults(
         cls,
         config: dict[str, Any] | None,
         *,
@@ -765,14 +765,14 @@ class TicketSyncConfigService:
             source["pageSize"] = bitable_common.get("pageSize")
         else:
             source["pageSize"] = min(max(page_size, 1), 500)
-        if keep_filter_formula and not cls.normalize_bitable_filter_config(source.get("filterFormula")):
+        if keep_filter_formula and not cls._normalize_bitable_filter_config(source.get("filterFormula")):
             source["filterFormula"] = bitable_common.get("filterFormula")
         return source
 
     # --- migrated from TicketSyncService._resolve_bitable_runtime_config ---
 
     @classmethod
-    def resolve_bitable_runtime_config(
+    def _resolve_bitable_runtime_config(
         cls,
         config: dict[str, Any],
         section_key: str,
@@ -793,7 +793,7 @@ class TicketSyncConfigService:
         bitable_common = config.get("bitableCommon") if isinstance(config.get("bitableCommon"), dict) else {}
         section_config = config.get(section_key) if isinstance(config.get(section_key), dict) else {}
         runtime_config = {**default_config, **section_config}
-        runtime_config = cls.apply_bitable_common_defaults(
+        runtime_config = cls._apply_bitable_common_defaults(
             runtime_config,
             bitable_common=bitable_common,
             keep_filter_formula=keep_filter_formula,
@@ -807,7 +807,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._merge_non_empty_runtime_override ---
 
     @classmethod
-    def merge_non_empty_runtime_override(
+    def _merge_non_empty_runtime_override(
         cls,
         base_config: dict[str, Any],
         override_config: dict[str, Any] | None,
@@ -833,7 +833,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_bitable_field_mappings ---
 
     @classmethod
-    def normalize_bitable_field_mappings(cls, value: Any) -> list[dict[str, Any]]:
+    def _normalize_bitable_field_mappings(cls, value: Any) -> list[dict[str, Any]]:
         """
         归一化多维表格字段映射列表。
 
@@ -869,14 +869,14 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_bitable_pull_target_field ---
 
     @classmethod
-    def normalize_bitable_pull_target_field(cls, value: Any) -> str:
+    def _normalize_bitable_pull_target_field(cls, value: Any) -> str:
         """委托到 FeishuBitableUtil.normalize_pull_target_field。"""
         return FeishuBitableUtil.normalize_pull_target_field(value)
 
     # --- migrated from TicketSyncService._normalize_bitable_pull_config ---
 
     @classmethod
-    def normalize_bitable_pull_config(
+    def _normalize_bitable_pull_config(
         cls,
         value: Any,
         *,
@@ -892,7 +892,7 @@ class TicketSyncConfigService:
         :return: 归一化后的主动拉取配置。
         """
         source = value if isinstance(value, dict) else {}
-        config = {**cls.default_bitable_pull_config(), **source}
+        config = {**cls._default_bitable_pull_config(), **source}
         config["enabled"] = SyncUtil.to_bool(config.get("enabled"), False)
         config["appId"] = str(config.get("appId") or "").strip() or str(feishu_auth.get("appId") or "").strip()
         config["appSecret"] = (
@@ -902,7 +902,7 @@ class TicketSyncConfigService:
         config["tableId"] = str(config.get("tableId") or "").strip()
         config["viewId"] = str(config.get("viewId") or "").strip()
         config["pageSize"] = min(max(SyncUtil.safe_int(config.get("pageSize")) or 200, 1), 500)
-        config["filterFormula"] = cls.normalize_bitable_filter_config(config.get("filterFormula"))
+        config["filterFormula"] = cls._normalize_bitable_filter_config(config.get("filterFormula"))
         config["sourceSystem"] = (
             str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull"
         )
@@ -919,7 +919,7 @@ class TicketSyncConfigService:
         else:
             config["sendGroupMessage"] = SyncUtil.to_bool(raw_send_group)
         config["autoAppendTimeFilter"] = SyncUtil.to_bool(config.get("autoAppendTimeFilter"), True)
-        config["fieldMappings"] = cls.normalize_bitable_field_mappings(config.get("fieldMappings"))
+        config["fieldMappings"] = cls._normalize_bitable_field_mappings(config.get("fieldMappings"))
         automation = config.get("automation") if isinstance(config.get("automation"), dict) else {}
         config["automation"] = {
             "autoIdentify": SyncUtil.to_bool(automation.get("autoIdentify"), True),
@@ -932,7 +932,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._resolve_bitable_pull_created_after ---
 
     @classmethod
-    def resolve_bitable_pull_created_after(cls, value: Any) -> datetime | None:
+    def _resolve_bitable_pull_created_after(cls, value: Any) -> datetime | None:
         """
         解析飞书多维表格主动拉取的创建时间下限。
 
@@ -946,7 +946,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._datetime_to_bitable_filter_millis ---
 
     @classmethod
-    def datetime_to_bitable_filter_millis(cls, value: datetime) -> int:
+    def _datetime_to_bitable_filter_millis(cls, value: datetime) -> int:
         """
         将 datetime 转换为飞书多维表格日期过滤使用的毫秒时间戳。
 
@@ -958,7 +958,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._resolve_bitable_pull_create_time_field ---
 
     @classmethod
-    def resolve_bitable_pull_create_time_field(cls, field_mappings: list[dict[str, Any]]) -> str:
+    def _resolve_bitable_pull_create_time_field(cls, field_mappings: list[dict[str, Any]]) -> str:
         """
         从主动拉取字段映射中解析外部创建时间对应的多维字段名。
 
@@ -977,7 +977,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._condition_needs_dynamic_time_value ---
 
     @classmethod
-    def condition_needs_dynamic_time_value(
+    def _condition_needs_dynamic_time_value(
         cls,
         condition: dict[str, Any],
         *,
@@ -1003,7 +1003,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._fill_dynamic_time_filter_values ---
 
     @classmethod
-    def fill_dynamic_time_filter_values(
+    def _fill_dynamic_time_filter_values(
         cls,
         filter_item: Any,
         *,
@@ -1020,7 +1020,7 @@ class TicketSyncConfigService:
         """
         if isinstance(filter_item, list):
             return [
-                cls.fill_dynamic_time_filter_values(
+                cls._fill_dynamic_time_filter_values(
                     item,
                     time_field_names=time_field_names,
                     filter_value=filter_value,
@@ -1033,18 +1033,18 @@ class TicketSyncConfigService:
 
         normalized_filter = dict(filter_item)
         if isinstance(normalized_filter.get("children"), list):
-            normalized_filter["children"] = cls.fill_dynamic_time_filter_values(
+            normalized_filter["children"] = cls._fill_dynamic_time_filter_values(
                 normalized_filter.get("children"),
                 time_field_names=time_field_names,
                 filter_value=filter_value,
             )
         if isinstance(normalized_filter.get("conditions"), list):
-            normalized_filter["conditions"] = cls.fill_dynamic_time_filter_values(
+            normalized_filter["conditions"] = cls._fill_dynamic_time_filter_values(
                 normalized_filter.get("conditions"),
                 time_field_names=time_field_names,
                 filter_value=filter_value,
             )
-        if cls.condition_needs_dynamic_time_value(
+        if cls._condition_needs_dynamic_time_value(
             normalized_filter,
             time_field_names=time_field_names,
         ):
@@ -1054,7 +1054,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._build_bitable_pull_time_filters ---
 
     @classmethod
-    def build_bitable_pull_time_filters(
+    def _build_bitable_pull_time_filters(
         cls,
         *,
         filter_formula: Any,
@@ -1074,7 +1074,7 @@ class TicketSyncConfigService:
             False 时使用精确时间比较（isGreater / isLess）。
         :return: 一个或多个 filter 条件对象；多个对象表示需要分别请求飞书后按 record_id 合并。
         """
-        parsed_filter = cls.parse_bitable_filter_config(filter_formula)
+        parsed_filter = cls._parse_bitable_filter_config(filter_formula)
 
         if auto_append_time_filter and not created_after:
             return [parsed_filter] if parsed_filter else []
@@ -1082,7 +1082,7 @@ class TicketSyncConfigService:
         time_field = str(updated_at_field or "").strip()
         time_conditions = []
         if created_after:
-            start_millis = cls.datetime_to_bitable_filter_millis(created_after)
+            start_millis = cls._datetime_to_bitable_filter_millis(created_after)
             time_conditions.append(
                 {
                     "field_name": time_field,
@@ -1091,7 +1091,7 @@ class TicketSyncConfigService:
                 }
             )
         if created_before:
-            end_millis = cls.datetime_to_bitable_filter_millis(created_before)
+            end_millis = cls._datetime_to_bitable_filter_millis(created_before)
             time_conditions.append(
                 {
                     "field_name": time_field,
@@ -1119,7 +1119,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._query_bitable_pull_records ---
 
     @classmethod
-    def query_bitable_pull_records(
+    def _query_bitable_pull_records(
         cls,
         pull_config: dict[str, Any],
         filters: list[dict[str, Any]],
@@ -1153,7 +1153,7 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_group_push_auto_statuses ---
 
     @classmethod
-    def normalize_group_push_auto_statuses(
+    def _normalize_group_push_auto_statuses(
         cls,
         value: Any,
         *,
@@ -1185,33 +1185,33 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._normalize_sync_config ---
 
     @classmethod
-    def normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
-        merged = cls.default_sync_config()
+    def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
+        merged = cls._default_sync_config()
         if isinstance(config, dict):
             merged.update(config)
         feishu_auth = merged.get("feishuAuth") if isinstance(merged.get("feishuAuth"), dict) else {}
-        feishu_auth = {**cls.default_feishu_auth_config(), **feishu_auth}
+        feishu_auth = {**cls._default_feishu_auth_config(), **feishu_auth}
         feishu_auth["appId"] = str(feishu_auth.get("appId") or "").strip()
         feishu_auth["appSecret"] = str(feishu_auth.get("appSecret") or "").strip()
         merged["feishuAuth"] = feishu_auth
-        merged["bitableCommon"] = cls.normalize_bitable_common_config(
+        merged["bitableCommon"] = cls._normalize_bitable_common_config(
             merged.get("bitableCommon"),
             feishu_auth=feishu_auth,
         )
-        merged["externalFieldModel"] = cls.normalize_external_field_model_config(merged.get("externalFieldModel"))
+        merged["externalFieldModel"] = cls._normalize_external_field_model_config(merged.get("externalFieldModel"))
         if not isinstance(merged.get("logPullDefaults"), dict):
-            merged["logPullDefaults"] = cls.default_sync_config()["logPullDefaults"]
+            merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
         if not isinstance(merged.get("promptTemplates"), dict):
-            merged["promptTemplates"] = cls.default_sync_config()["promptTemplates"]
-        merged["statClassification"] = cls.normalize_stat_classification_config(merged.get("statClassification"))
-        merged["aiClassification"] = cls.normalize_ai_classification_config(merged.get("aiClassification"))
+            merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
+        merged["statClassification"] = cls._normalize_stat_classification_config(merged.get("statClassification"))
+        merged["aiClassification"] = cls._normalize_ai_classification_config(merged.get("aiClassification"))
         external_sync_bitable = (
             merged.get("externalSyncBitable")
             if isinstance(merged.get("externalSyncBitable"), dict)
             else {}
         )
         external_sync_bitable = {
-            **cls.default_external_sync_bitable_config(),
+            **cls._default_external_sync_bitable_config(),
             **external_sync_bitable,
         }
         external_sync_bitable["enabled"] = bool(external_sync_bitable.get("enabled"))
@@ -1221,7 +1221,7 @@ class TicketSyncConfigService:
         external_sync_bitable["tableId"] = str(external_sync_bitable.get("tableId") or "").strip()
         external_sync_bitable["viewId"] = str(external_sync_bitable.get("viewId") or "").strip()
         merged["externalSyncBitable"] = external_sync_bitable
-        merged["bitablePull"] = cls.normalize_bitable_pull_config(
+        merged["bitablePull"] = cls._normalize_bitable_pull_config(
             merged.get("bitablePull"),
             feishu_auth=feishu_auth,
             bitable_common=merged["bitableCommon"],
@@ -1237,16 +1237,16 @@ class TicketSyncConfigService:
                 cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS
             )
         else:
-            merged["externalSyncRequiredFields"] = cls.derive_required_fields_from_external_field_model(
+            merged["externalSyncRequiredFields"] = cls._derive_required_fields_from_external_field_model(
                 merged.get("externalFieldModel")
             )
         if not isinstance(merged.get("remoteSync"), dict):
-            merged["remoteSync"] = cls.default_remote_sync_config()
+            merged["remoteSync"] = cls._default_remote_sync_config()
         else:
-            remote_sync = dict(cls.default_remote_sync_config())
+            remote_sync = dict(cls._default_remote_sync_config())
             remote_sync.update(merged.get("remoteSync") or {})
             remote_headers = remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}
-            remote_sync["headers"] = {**cls.default_remote_sync_config()["headers"], **remote_headers}
+            remote_sync["headers"] = {**cls._default_remote_sync_config()["headers"], **remote_headers}
             remote_sync["enabled"] = bool(remote_sync.get("enabled"))
             remote_sync["limit"] = min(max(int(remote_sync.get("limit") or 50), 1), 200)
             remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
@@ -1258,7 +1258,7 @@ class TicketSyncConfigService:
             remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
             merged["remoteSync"] = remote_sync
         group_push = merged.get("groupPush") if isinstance(merged.get("groupPush"), dict) else {}
-        default_group_push = cls.default_group_push_config()
+        default_group_push = cls._default_group_push_config()
         group_push = {**default_group_push, **group_push}
         group_push["sendMode"] = TicketSyncNotifyService._normalize_send_mode(group_push.get("sendMode"))
         group_push["enabled"] = bool(group_push.get("enabled"))
@@ -1266,7 +1266,7 @@ class TicketSyncConfigService:
         group_push["sendAfterRemotePull"] = bool(group_push.get("sendAfterRemotePull"))
         group_push["pushIds"] = TicketSyncNotifyService._normalize_push_ids(group_push.get("pushIds"))
         group_push["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(group_push.get("appChatIds"))
-        group_push["autoPushStatuses"] = cls.normalize_group_push_auto_statuses(
+        group_push["autoPushStatuses"] = cls._normalize_group_push_auto_statuses(
             group_push.get("autoPushStatuses", group_push.get("auto_push_statuses")),
             fallback=default_group_push.get("autoPushStatuses"),
         )
@@ -1315,7 +1315,7 @@ class TicketSyncConfigService:
         merged["groupPush"] = group_push
 
         message_sync = merged.get("messageSync") if isinstance(merged.get("messageSync"), dict) else {}
-        default_message_sync = cls.default_message_sync_config()
+        default_message_sync = cls._default_message_sync_config()
         message_sync = {**default_message_sync, **message_sync}
         message_sync["enabled"] = SyncUtil.to_bool(message_sync.get("enabled"), False)
         message_sync["feishuEventEnabled"] = SyncUtil.to_bool(message_sync.get("feishuEventEnabled"), False)
@@ -1369,7 +1369,7 @@ class TicketSyncConfigService:
         merged["messageSync"] = message_sync
 
         person_reminder = merged.get("personReminder") if isinstance(merged.get("personReminder"), dict) else {}
-        default_person_reminder = cls.default_person_reminder_config()
+        default_person_reminder = cls._default_person_reminder_config()
         person_reminder = {**default_person_reminder, **person_reminder}
         person_reminder["sendMode"] = TicketSyncNotifyService._normalize_send_mode(person_reminder.get("sendMode"))
         person_reminder["dataSource"] = TicketSyncNotifyService._normalize_person_data_source(
@@ -1384,7 +1384,7 @@ class TicketSyncConfigService:
         person_reminder["appToken"] = str(person_reminder.get("appToken") or "").strip()
         person_reminder["tableId"] = str(person_reminder.get("tableId") or "").strip()
         person_reminder["viewId"] = str(person_reminder.get("viewId") or "").strip()
-        person_reminder["filterFormula"] = cls.normalize_bitable_filter_config(person_reminder.get("filterFormula"))
+        person_reminder["filterFormula"] = cls._normalize_bitable_filter_config(person_reminder.get("filterFormula"))
         person_reminder["personField"] = str(person_reminder.get("personField") or "").strip()
         person_reminder["timeField"] = str(person_reminder.get("timeField") or "").strip()
         person_reminder["thresholdMinutes"] = max(SyncUtil.safe_int(person_reminder.get("thresholdMinutes")) or 30, 1)
@@ -1401,7 +1401,7 @@ class TicketSyncConfigService:
         merged["personReminder"] = person_reminder
 
         summary_report = merged.get("summaryReport") if isinstance(merged.get("summaryReport"), dict) else {}
-        default_summary_report = cls.default_summary_report_config()
+        default_summary_report = cls._default_summary_report_config()
         summary_report = {**default_summary_report, **summary_report}
         summary_report["enabled"] = bool(summary_report.get("enabled"))
         summary_report["sendMode"] = TicketSyncNotifyService._normalize_send_mode(summary_report.get("sendMode"))
@@ -1418,7 +1418,7 @@ class TicketSyncConfigService:
         summary_report["appToken"] = str(summary_report.get("appToken") or "").strip()
         summary_report["tableId"] = str(summary_report.get("tableId") or "").strip()
         summary_report["viewId"] = str(summary_report.get("viewId") or "").strip()
-        summary_report["filterFormula"] = cls.normalize_bitable_filter_config(summary_report.get("filterFormula"))
+        summary_report["filterFormula"] = cls._normalize_bitable_filter_config(summary_report.get("filterFormula"))
         summary_report["statusField"] = str(summary_report.get("statusField") or "状态").strip() or "状态"
         summary_report["categoryField"] = str(summary_report.get("categoryField") or "分类").strip() or "分类"
         summary_report["priorityField"] = str(summary_report.get("priorityField") or "优先级").strip() or "优先级"
@@ -1447,11 +1447,11 @@ class TicketSyncConfigService:
         if not isinstance(merged.get("assigneeMappings"), list):
             merged["assigneeMappings"] = []
         if not isinstance(merged.get("posPatterns"), list):
-            merged["posPatterns"] = cls.default_sync_config()["posPatterns"]
+            merged["posPatterns"] = cls._default_sync_config()["posPatterns"]
         if not isinstance(merged.get("scoPatterns"), list):
-            merged["scoPatterns"] = cls.default_sync_config()["scoPatterns"]
+            merged["scoPatterns"] = cls._default_sync_config()["scoPatterns"]
         if not isinstance(merged.get("versionPatterns"), list):
-            merged["versionPatterns"] = cls.default_sync_config()["versionPatterns"]
+            merged["versionPatterns"] = cls._default_sync_config()["versionPatterns"]
         merged["autoRunOnSync"] = bool(merged.get("autoRunOnSync"))
         merged["autoTranslateOnSync"] = bool(merged.get("autoTranslateOnSync", True))
         merged["defaultPullLimit"] = min(max(int(merged.get("defaultPullLimit") or 50), 1), 200)
@@ -1469,7 +1469,7 @@ class TicketSyncConfigService:
             SysConfig(
                 config_name="工单同步自动化配置",
                 config_key=cls.CONFIG_KEY,
-                config_value=SyncUtil.json_dumps(cls.default_sync_config()),
+                config_value=SyncUtil.json_dumps(cls._default_sync_config()),
                 config_type="Y",
                 create_by="system",
                 update_by="system",
@@ -1483,20 +1483,20 @@ class TicketSyncConfigService:
     # --- migrated from TicketSyncService._load_sync_config ---
 
     @classmethod
-    def load_sync_config(cls, db: Session) -> dict[str, Any]:
+    def _load_sync_config(cls, db: Session) -> dict[str, Any]:
         cls.ensure_param_config_rows(db)
         row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
-        config = SyncUtil.json_loads(getattr(row, "config_value", None), cls.default_sync_config())
+        config = SyncUtil.json_loads(getattr(row, "config_value", None), cls._default_sync_config())
         if not isinstance(config, dict):
-            return cls.default_sync_config()
-        return cls.normalize_sync_config(config)
+            return cls._default_sync_config()
+        return cls._normalize_sync_config(config)
 
     # --- migrated from TicketSyncService.get_sync_automation_config_services ---
 
     @classmethod
     def get_sync_automation_config_services(cls, db: Session) -> dict[str, Any]:
-        config_value = cls.load_sync_config(db)
-        config_value["externalSyncRequiredFields"] = cls.derive_required_fields_from_external_field_model(
+        config_value = cls._load_sync_config(db)
+        config_value["externalSyncRequiredFields"] = cls._derive_required_fields_from_external_field_model(
             config_value.get("externalFieldModel")
         )
         return {
@@ -1513,13 +1513,13 @@ class TicketSyncConfigService:
         :param db: 数据库会话
         :return: 工单分类统计枚举配置
         """
-        config = cls.load_sync_config(db)
-        return cls.normalize_stat_classification_config(config.get("statClassification"))
+        config = cls._load_sync_config(db)
+        return cls._normalize_stat_classification_config(config.get("statClassification"))
 
     # --- migrated from TicketSyncService._merge_legacy_ai_classification_prompt_content ---
 
     @classmethod
-    def merge_legacy_ai_classification_prompt_content(
+    def _merge_legacy_ai_classification_prompt_content(
         cls,
         current_config: dict[str, Any],
         next_config: dict[str, Any],
@@ -1562,9 +1562,9 @@ class TicketSyncConfigService:
         current_user_name: str,
     ) -> CrudResponseModel:
         try:
-            current_config = cls.load_sync_config(db)
-            merged = cls.normalize_sync_config(config_value)
-            merged = cls.merge_legacy_ai_classification_prompt_content(current_config, merged)
+            current_config = cls._load_sync_config(db)
+            merged = cls._normalize_sync_config(config_value)
+            merged = cls._merge_legacy_ai_classification_prompt_content(current_config, merged)
             now = datetime.now()
             row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
             if row:

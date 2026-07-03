@@ -47,7 +47,9 @@ from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisSe
 from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.ticket_sync_service import TicketSyncConfigService, TicketSyncService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.snowflake import snowIdWorker
@@ -1095,7 +1097,6 @@ class TicketService:
             )
             query_db.commit()
             try:
-                from modules.ticket.service.ticket_sync_service import TicketSyncService
 
                 ticket, ai_stat_summary = TicketSyncService._run_auto_ticket_ai_classification(
                     query_db,
@@ -1663,9 +1664,8 @@ class TicketService:
         :return: 无。
         """
         try:
-            from modules.ticket.service.ticket_sync_service import TicketSyncService
 
-            config = TicketSyncService._load_sync_config(query_db)
+            config = TicketSyncConfigService.load_sync_config(query_db)
             ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
             if not bool(ai_config.get("enabled")) or not bool(ai_config.get("runOnStatusChange")):
                 logger.info(
@@ -1784,8 +1784,6 @@ class TicketService:
             )
             outbound_summary = {"skipped": True, "reason": "not_attempted"}
             try:
-                from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
-
                 ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
                 if ticket:
                     outbound_summary = TicketMessageSyncService.sync_local_comment_outbound(

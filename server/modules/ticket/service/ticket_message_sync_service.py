@@ -11,6 +11,7 @@ from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.service.ticket_service import TicketService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.log_util import logger
 
@@ -424,10 +425,10 @@ class TicketMessageSyncService:
 
         feishu_auth = sync_config.get("feishuAuth") if isinstance(sync_config.get("feishuAuth"), dict) else {}
         group_config = sync_config.get("groupPush") if isinstance(sync_config.get("groupPush"), dict) else {}
-        bitable_config = TicketSyncService._resolve_bitable_runtime_config(
+        bitable_config = TicketSyncConfigService.resolve_bitable_runtime_config(
             sync_config,
             "bitablePull",
-            TicketSyncService._default_bitable_pull_config(),
+            TicketSyncConfigService.default_bitable_pull_config(),
         )
         app_id, app_secret = TicketSyncNotifyService._resolve_feishu_auth(
             {**bitable_config, **group_config, **feishu_auth}
@@ -693,12 +694,12 @@ class TicketMessageSyncService:
         :param content_segments: 评论正文片段，用于恢复多维表格 @ 人员样式
         :return: 写回结果摘要
         """
-        sync_config = TicketSyncService._load_sync_config(db)
+        sync_config = TicketSyncConfigService.load_sync_config(db)
         message_config = sync_config.get("messageSync") if isinstance(sync_config.get("messageSync"), dict) else {}
-        bitable_config = TicketSyncService._resolve_bitable_runtime_config(
+        bitable_config = TicketSyncConfigService.resolve_bitable_runtime_config(
             sync_config,
             "bitablePull",
-            TicketSyncService._default_bitable_pull_config(),
+            TicketSyncConfigService.default_bitable_pull_config(),
         )
         record_id = cls._resolve_bitable_record_id(ticket)
         field_name = str(message_config.get("bitableStepReasonField") or "stepReason").strip() or "stepReason"
@@ -786,7 +787,7 @@ class TicketMessageSyncService:
         :param attachments: 评论附件或引用信息
         :return: 出站同步结果摘要
         """
-        sync_config = TicketSyncService._load_sync_config(db)
+        sync_config = TicketSyncConfigService.load_sync_config(db)
         message_config = sync_config.get("messageSync") if isinstance(sync_config.get("messageSync"), dict) else {}
         if not bool(message_config.get("enabled")):
             return {"skipped": True, "reason": "message_sync_disabled"}
@@ -851,7 +852,7 @@ class TicketMessageSyncService:
         if not message:
             return {"skipped": True, "reason": "empty_message"}
 
-        sync_config = TicketSyncService._load_sync_config(db)
+        sync_config = TicketSyncConfigService.load_sync_config(db)
         message_config = sync_config.get("messageSync") if isinstance(sync_config.get("messageSync"), dict) else {}
         channel_enabled = bool(message_config.get("feishuWsEnabled")) if inbound_channel == "ws" else bool(
             message_config.get("feishuEventEnabled")

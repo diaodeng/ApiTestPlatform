@@ -21,6 +21,8 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketSyncSummaryRunModel,
 )
 from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -47,7 +49,7 @@ async def sync_external_ticket(
     """
     try:
         payload = await TicketSyncService.load_external_sync_payload(request)
-        sync_config = await run_in_threadpool(TicketSyncService._load_sync_config, query_db)
+        sync_config = await run_in_threadpool(TicketSyncConfigService.load_sync_config, query_db)
         external_sync_required_fields = (
             sync_config.get("externalSyncRequiredFields")
             if isinstance(sync_config, dict)
@@ -156,7 +158,7 @@ async def get_sync_automation_config(request: Request, query_db: Session = Depen
     获取工单同步自动化配置。
     """
     try:
-        return ResponseUtil.success(data=TicketSyncService.get_sync_automation_config_services(query_db))
+        return ResponseUtil.success(data=TicketSyncConfigService.get_sync_automation_config_services(query_db))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -176,7 +178,7 @@ async def update_sync_automation_config(
     保存工单同步自动化配置。
     """
     try:
-        result = TicketSyncService.update_sync_automation_config_services(
+        result = TicketSyncConfigService.update_sync_automation_config_services(
             query_db,
             config_value,
             current_user.user.user_name,
@@ -225,7 +227,7 @@ async def get_sync_notify_push_options(request: Request, query_db: Session = Dep
     :return: 推送配置列表。
     """
     try:
-        return ResponseUtil.success(data=TicketSyncService.get_sync_notify_push_options_services(query_db))
+        return ResponseUtil.success(data=TicketSyncConfigService.get_sync_notify_push_options_services(query_db))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -337,7 +339,7 @@ async def send_sync_group_push_by_ticket(
     """
     logger.info(f"/sync/notify/group/send-by-ticket 请求参数： {query_object.model_dump_json()}")
     try:
-        result = TicketSyncService.send_group_push_by_ticket_no_services(
+        result = TicketSyncGroupPushService.send_group_push_by_ticket_no_services(
             query_db,
             ticket_no=query_object.ticket_no,
             push_ids=query_object.push_ids,

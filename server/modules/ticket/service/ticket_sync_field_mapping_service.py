@@ -4,14 +4,12 @@
 """
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from module_admin.entity.do.user_do import SysUser
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.enums.enums import QtrDataStatusEnum
-from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullProjectVendorMap, TicketLogPullStoreConfig
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.enums.ticket_enums import TicketStatus
@@ -22,7 +20,7 @@ class TicketSyncFieldMappingService:
     """工单外部字段映射与人员解析。"""
 
     @classmethod
-    def _extract_external_mapping_fields(cls, sync_object: TicketExternalSyncUpsertModel) -> dict[str, str]:
+    def extract_external_mapping_fields(cls, sync_object: TicketExternalSyncUpsertModel) -> dict[str, str]:
         """
         提取外部同步字段映射上下文。
         :param sync_object: 外部同步模型
@@ -254,7 +252,7 @@ class TicketSyncFieldMappingService:
         }
 
     @classmethod
-    def _has_incoming_project_value(
+    def has_incoming_project_value(
         cls,
         sync_object: TicketExternalSyncUpsertModel,
         detected: dict[str, Any] | None,
@@ -265,7 +263,7 @@ class TicketSyncFieldMappingService:
         :param detected: 字段识别结果
         :return: 本次同步存在项目ID或项目文本时返回 True
         """
-        external_fields = cls._extract_external_mapping_fields(sync_object)
+        external_fields = cls.extract_external_mapping_fields(sync_object)
         return any(
             str(value or "").strip()
             for value in (
@@ -280,7 +278,7 @@ class TicketSyncFieldMappingService:
         )
 
     @classmethod
-    def _has_incoming_module_value(
+    def has_incoming_module_value(
         cls,
         sync_object: TicketExternalSyncUpsertModel,
         detected: dict[str, Any] | None,
@@ -291,7 +289,7 @@ class TicketSyncFieldMappingService:
         :param detected: 字段识别结果
         :return: 本次同步存在模块ID或模块文本时返回 True
         """
-        external_fields = cls._extract_external_mapping_fields(sync_object)
+        external_fields = cls.extract_external_mapping_fields(sync_object)
         return any(
             str(value or "").strip()
             for value in (
@@ -305,7 +303,7 @@ class TicketSyncFieldMappingService:
         )
 
     @classmethod
-    def _match_mapping_exact(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
+    def match_mapping_exact(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
         """
         按完整关键字做精确映射，不进行模糊猜测。
         :param field_value: 外部字段值
@@ -318,13 +316,13 @@ class TicketSyncFieldMappingService:
         for mapping in mappings:
             if not isinstance(mapping, dict):
                 continue
-            keywords = cls._mapping_keywords(mapping)
+            keywords = cls.mapping_keywords(mapping)
             if target in keywords:
                 return mapping
         return None
 
     @classmethod
-    def _match_mapping_contains(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
+    def match_mapping_contains(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
         """
         按关键字“包含关系”匹配映射配置（外部字段包含任意关键词即命中）。
         :param field_value: 外部字段值
@@ -337,13 +335,13 @@ class TicketSyncFieldMappingService:
         for mapping in mappings:
             if not isinstance(mapping, dict):
                 continue
-            keywords = cls._mapping_keywords(mapping)
+            keywords = cls.mapping_keywords(mapping)
             if any(keyword and keyword in target for keyword in keywords):
                 return mapping
         return None
 
     @classmethod
-    def _resolve_project_by_ticket_vender(
+    def resolve_project_by_ticket_vender(
         cls,
         db: Session,
         *,
@@ -360,7 +358,7 @@ class TicketSyncFieldMappingService:
         vendor_text = str(ticket_vender or "").strip()
         if not vendor_text:
             return None, ""
-        matched_mapping = cls._match_mapping_contains(vendor_text, project_mappings)
+        matched_mapping = cls.match_mapping_contains(vendor_text, project_mappings)
         if isinstance(matched_mapping, dict):
             project_id = SyncUtil.safe_int(
                 matched_mapping.get("projectId")
@@ -418,7 +416,7 @@ class TicketSyncFieldMappingService:
         return None, str(project_vendor_row.project_name or "").strip()
 
     @classmethod
-    def _resolve_module_by_ticket_modle(
+    def resolve_module_by_ticket_modle(
         cls,
         db: Session,
         *,
@@ -437,7 +435,7 @@ class TicketSyncFieldMappingService:
         module_text = str(ticket_modle or "").strip()
         if not module_text:
             return None
-        matched_mapping = cls._match_mapping_contains(module_text, module_mappings)
+        matched_mapping = cls.match_mapping_contains(module_text, module_mappings)
         module_id = SyncUtil.safe_int((matched_mapping or {}).get("moduleId") or (matched_mapping or {}).get("module_id"))
         module_code = str(
             (matched_mapping or {}).get("moduleCode")
@@ -470,7 +468,7 @@ class TicketSyncFieldMappingService:
         return query.filter(func.lower(HrmModule.module_name) == module_text.lower()).first()
 
     @classmethod
-    def _resolve_status_by_external_value(
+    def resolve_status_by_external_value(
         cls,
         *,
         status_text: str,
@@ -500,7 +498,7 @@ class TicketSyncFieldMappingService:
             "user_misoperation": TicketStatus.USER_MISOPERATION.value,
             "duplicated": TicketStatus.DUPLICATED.value,
         }
-        matched_mapping = cls._match_mapping_exact(source_status, status_mappings)
+        matched_mapping = cls.match_mapping_exact(source_status, status_mappings)
         status_candidate = source_status
         if isinstance(matched_mapping, dict):
             status_candidate = str(
@@ -513,7 +511,7 @@ class TicketSyncFieldMappingService:
         return status_map.get(status_candidate.lower(), status_candidate)
 
     @classmethod
-    def _resolve_vendor_by_ticket_vender(
+    def resolve_vendor_by_ticket_vender(
         cls,
         *,
         ticket_vender: str,
@@ -528,7 +526,7 @@ class TicketSyncFieldMappingService:
         vendor_text = str(ticket_vender or "").strip()
         if not vendor_text:
             return None, ""
-        matched_mapping = cls._match_mapping_contains(vendor_text, vendor_mappings)
+        matched_mapping = cls.match_mapping_contains(vendor_text, vendor_mappings)
         if isinstance(matched_mapping, dict):
             vendor_id = SyncUtil.safe_int(
                 matched_mapping.get("vendorId")
@@ -541,7 +539,7 @@ class TicketSyncFieldMappingService:
         return None, vendor_text
 
     @classmethod
-    def _resolve_vendor_by_project(cls, db: Session, *, project_id: int | None) -> int | None:
+    def resolve_vendor_by_project(cls, db: Session, *, project_id: int | None) -> int | None:
         """
         按项目映射配置回退解析商家ID。
         :param db: 数据库会话
@@ -561,7 +559,7 @@ class TicketSyncFieldMappingService:
         return SyncUtil.safe_int(getattr(row, "vender_no", None))
 
     @classmethod
-    def _resolve_store_by_external_value(
+    def resolve_store_by_external_value(
         cls,
         db: Session,
         *,
@@ -590,7 +588,7 @@ class TicketSyncFieldMappingService:
         return resolved_store_id, str(row.org_name or "").strip()
 
     @classmethod
-    def _match_assignee_mapping_exact(cls, assignee_text: str, assignee_mappings: Any) -> dict[str, Any] | None:
+    def match_assignee_mapping_exact(cls, assignee_text: str, assignee_mappings: Any) -> dict[str, Any] | None:
         """
         按人员名称做完整匹配（不支持模糊包含）。
         :param assignee_text: 外部处理人文本
@@ -603,7 +601,7 @@ class TicketSyncFieldMappingService:
         for mapping in assignee_mappings:
             if not isinstance(mapping, dict):
                 continue
-            candidates = cls._mapping_keywords(mapping)
+            candidates = cls.mapping_keywords(mapping)
             candidates.extend(
                 SyncUtil.normalize_keywords(
                     [
@@ -619,7 +617,7 @@ class TicketSyncFieldMappingService:
         return None
 
     @classmethod
-    def _resolve_assignee_by_external_value(
+    def resolve_assignee_by_external_value(
         cls,
         db: Session,
         *,
@@ -636,7 +634,7 @@ class TicketSyncFieldMappingService:
         from module_admin.entity.do.user_do import SysUser
 
         source_text = str(assignee_text or "").strip()
-        matched_mapping = cls._match_assignee_mapping_exact(source_text, assignee_mappings)
+        matched_mapping = cls.match_assignee_mapping_exact(source_text, assignee_mappings)
         mapped_user_id = SyncUtil.safe_int(
             (matched_mapping or {}).get("userId")
             or (matched_mapping or {}).get("user_id")
@@ -704,7 +702,7 @@ class TicketSyncFieldMappingService:
         return None, mapped_user_name or source_text
 
     @classmethod
-    def _resolve_sys_user_by_email(cls, db: Session, email: str):
+    def resolve_sys_user_by_email(cls, db: Session, email: str):
         """
         根据邮箱匹配本地系统用户。
         :param db: 数据库会话
@@ -727,7 +725,7 @@ class TicketSyncFieldMappingService:
         )
 
     @classmethod
-    def _resolve_external_person_by_mapping_or_email(
+    def resolve_external_person_by_mapping_or_email(
         cls,
         db: Session,
         *,
@@ -746,7 +744,7 @@ class TicketSyncFieldMappingService:
         from module_admin.entity.do.user_do import SysUser
 
         source_text = str(person_text or "").strip()
-        matched_mapping = cls._match_assignee_mapping_exact(source_text, assignee_mappings)
+        matched_mapping = cls.match_assignee_mapping_exact(source_text, assignee_mappings)
         mapped_user_id = SyncUtil.safe_int(
             (matched_mapping or {}).get("userId")
             or (matched_mapping or {}).get("user_id")
@@ -775,7 +773,7 @@ class TicketSyncFieldMappingService:
 
         lookup_email = mapped_email or str(person_email or "").strip()
         if lookup_email:
-            user = cls._resolve_sys_user_by_email(db, lookup_email)
+            user = cls.resolve_sys_user_by_email(db, lookup_email)
             if user:
                 return user.user_id, user.user_name or user.nick_name or mapped_user_name
 
@@ -795,7 +793,7 @@ class TicketSyncFieldMappingService:
         return None, mapped_user_name or source_text
 
     @classmethod
-    def _resolve_remote_assignee_by_email_or_name(
+    def resolve_remote_assignee_by_email_or_name(
         cls,
         db: Session,
         *,
@@ -844,7 +842,7 @@ class TicketSyncFieldMappingService:
         return None, normalized_name or normalized_email
 
     @classmethod
-    def _mapping_keywords(cls, mapping: dict[str, Any]) -> list[str]:
+    def mapping_keywords(cls, mapping: dict[str, Any]) -> list[str]:
         keywords = SyncUtil.normalize_keywords(mapping.get("keywords") or mapping.get("aliases"))
         if mapping.get("matchText"):
             keywords.extend(SyncUtil.normalize_keywords([mapping.get("matchText")]))
