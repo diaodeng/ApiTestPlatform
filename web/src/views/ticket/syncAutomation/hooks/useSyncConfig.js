@@ -119,40 +119,77 @@ export function useSyncConfig(proxy) {
 
   function createDefaultForm() {
     return {
+      autoRunOnSync: false,
+      autoTranslateOnSync: true,
+      defaultPullLimit: 50,
       feishuAuth: { appId: '', appSecret: '' },
-      bitableCommon: { appToken: '', tableId: '' },
+      bitableCommon: { appId: '', appSecret: '', appToken: '', tableId: '', viewId: '', pageSize: 500, filterFormula: '' },
       externalFieldModel: [],
       externalSyncRequiredFields: [...externalSyncRequiredFieldOptions],
-      externalSyncBitable: { appToken: '', tableId: '', filterConfig: '{}', fieldMappings: [] },
-      bitablePullConfig: {
-        enabled: false, appToken: '', tableId: '', fieldMappings: [],
-        createTimeField: '', filterConfig: '{}', pullMode: 'incremental',
+      externalSyncBitable: { enabled: false, appId: '', appSecret: '', appToken: '', tableId: '', viewId: '' },
+      bitablePull: {
+        enabled: false, appId: '', appSecret: '',
+        appToken: '', tableId: '', viewId: '',
+        pageSize: 200, filterFormula: '',
+        sourceSystem: 'feishu_bitable_pull',
+        ticketNoField: 'ticketNo', updatedAtField: '', sortField: '',
+        includeRecordUrl: true, forceSync: false, fieldMappings: [],
+        automation: { autoIdentify: true, autoLogPull: false, autoAiAnalysis: false, autoTranslate: true },
       },
       groupPush: {
-        enabled: false, sendMode: 'app_chat', pushIds: [], appChatIds: [],
-        autoStatuses: [...groupPushAutoStatusOptions],
-        autoSendAfterMinutes: 30, messageTemplate: '', forcePush: false,
+        enabled: false, sendMode: 'push_config', pushIds: [], appChatIds: [],
+        autoPushStatuses: [...groupPushAutoStatusOptions],
+        priorityRoutes: [],
+        sendAfterExternalSync: false, sendAfterRemotePull: false,
+        autoSendAfterTime: '', template: '', manualTemplate: '',
       },
-      messageSync: { enabled: false, allowedChatIds: [] },
+      messageSync: {
+        enabled: false, feishuEventEnabled: false, feishuWsEnabled: false,
+        feishuWsEncryptKey: '', feishuWsVerificationToken: '',
+        allowedChatIds: [], ignoreBotOpenIds: [],
+        syncFeishuCommentToTicket: true, syncFeishuCommentToBitable: false,
+        syncTicketCommentToBitable: false, syncTicketCommentToFeishuThread: false,
+        syncBitableNewStepToFeishuThread: false,
+        bitableStepReasonField: 'stepReason', bitableTicketNoField: 'ticketNo',
+        appendStepReasonFormat: '{date} {user}：{content}',
+      },
       personReminder: {
-        enabled: false, sendMode: 'push_config', dataSource: 'current_assignee',
-        pushIds: [], localTimeField: 'submit_time', timeoutHours: 48,
-        messageTemplate: '',
+        enabled: false, sendMode: 'push_config', dataSource: 'bitable',
+        pushIds: [], appId: '', appSecret: '',
+        feishuAppId: '', feishuAppSecret: '',
+        appToken: '', tableId: '', viewId: '', filterFormula: '',
+        personField: '', timeField: '', thresholdMinutes: 30,
+        messageTemplate: '', maxRowsPerPerson: 20, rowsMarkdownTemplate: '', pageSize: 500,
       },
       summaryReport: {
-        enabled: false, sendMode: 'push_config', dataSource: 'submit_time',
-        pushIds: [], appChatIds: [], timeField: 'submit_time',
-        cronExpression: '0 9 * * 1', messageTemplate: '', lookbackDays: 7,
+        enabled: false, sendMode: 'push_config', dataSource: 'local',
+        pushIds: [], appChatIds: [], appId: '', appSecret: '',
+        timeField: 'create_time', appToken: '', tableId: '', viewId: '', filterFormula: '',
+        statusField: '状态', categoryField: '分类', priorityField: '优先级',
+        bitableTimeField: '', pageSize: 500,
+        aiEnabled: false, aiProviderCode: '', aiPromptCode: '',
+        windowMinutes: 60, endDelayMinutes: 0,
+        startTime: '', endTime: '', includeClosed: true, messageTemplate: '',
       },
       remoteSync: {
-        enabled: false, consumer: '', pullUrl: '', ackUrl: '',
-        timeoutSec: 30, intervalMinutes: 5,
+        enabled: false, pullUrl: '', ackUrl: '', consumer: '',
+        sourceSystem: 'public', limit: 50, includeClosed: true,
+        autoTranslateOnPull: true, timeoutSec: 30,
+        headers: { cookie: '', authorization: '', origin: '' },
       },
       statClassification: JSON.parse(JSON.stringify(defaultStatClassification)),
       aiClassification: {
-        enabled: false, providerCode: '', promptCode: '',
-        statusTriggers: [], forceReclassify: false,
+        enabled: false, runOnExternalSync: false, runOnRemotePull: false,
+        runOnManualCreate: false, runOnStatusChange: false,
+        statusChangeTriggerStatuses: [], statusChangeForceReclassify: false,
+        providerCode: '', promptCode: 'ticket_stat_classify_default', promptContent: '',
       },
+      logPullDefaults: {
+        commandDataType: 1, fileMaxSize: 500, zipMaxSize: 500,
+        storageMode: 'local', rangeBeforeMinutes: 10, rangeAfterMinutes: 10,
+        autoAiEnabled: false, aiAgentCode: '', aiProviderCode: '',
+      },
+      promptTemplates: { classificationHint: '' },
     }
   }
 
@@ -239,14 +276,23 @@ export function useSyncConfig(proxy) {
         fieldMappings: normalizeArray(b.fieldMappings || []),
       }
     }
-    if (payload.bitablePullConfig) {
-      const p = payload.bitablePullConfig
-      form.bitablePullConfig = {
-        enabled: !!p.enabled, appToken: p.appToken || '', tableId: p.tableId || '',
+    if (payload.bitablePull) {
+      const p = payload.bitablePull
+      form.bitablePull = {
+        enabled: !!p.enabled, appId: p.appId || '', appSecret: p.appSecret || '',
+        appToken: p.appToken || '', tableId: p.tableId || '', viewId: p.viewId || '',
+        pageSize: p.pageSize || 200, filterFormula: p.filterFormula || '',
+        sourceSystem: p.sourceSystem || 'feishu_bitable_pull',
+        ticketNoField: p.ticketNoField || 'ticketNo',
+        updatedAtField: p.updatedAtField || '', sortField: p.sortField || '',
+        includeRecordUrl: p.includeRecordUrl !== false, forceSync: !!p.forceSync,
         fieldMappings: normalizeArray(p.fieldMappings || []),
-        createTimeField: p.createTimeField || '',
-        filterConfig: typeof p.filterConfig === 'string' ? p.filterConfig : JSON.stringify(p.filterConfig || {}),
-        pullMode: p.pullMode || 'incremental',
+        automation: {
+          autoIdentify: p.automation?.autoIdentify !== false,
+          autoLogPull: !!p.automation?.autoLogPull,
+          autoAiAnalysis: !!p.automation?.autoAiAnalysis,
+          autoTranslate: p.automation?.autoTranslate !== false,
+        },
       }
     }
     if (payload.groupPush) Object.assign(form.groupPush, payload.groupPush)
@@ -266,6 +312,11 @@ export function useSyncConfig(proxy) {
         forceReclassify: !!payload.aiClassification.forceReclassify,
       }
     }
+    if (payload.logPullDefaults) Object.assign(form.logPullDefaults, payload.logPullDefaults)
+    if (payload.promptTemplates) Object.assign(form.promptTemplates, payload.promptTemplates)
+    if (payload.autoRunOnSync !== undefined) form.autoRunOnSync = !!payload.autoRunOnSync
+    if (payload.autoTranslateOnSync !== undefined) form.autoTranslateOnSync = !!payload.autoTranslateOnSync
+    if (payload.defaultPullLimit !== undefined) form.defaultPullLimit = payload.defaultPullLimit
     mappingTexts.projectMappings = JSON.stringify(normalizeArray(payload.projectMappings), null, 2)
     mappingTexts.moduleMappings = JSON.stringify(normalizeArray(payload.moduleMappings), null, 2)
     mappingTexts.vendorMappings = JSON.stringify(normalizeArray(payload.vendorMappings), null, 2)
@@ -280,7 +331,7 @@ export function useSyncConfig(proxy) {
   function loadConfig() {
     loading.value = true
     return getTicketSyncAutomationConfig().then(res => {
-      applyConfig(res.data || {})
+      applyConfig((res.data && res.data.configValue) || res.data || {})
     }).finally(() => { loading.value = false })
   }
 
@@ -301,17 +352,17 @@ export function useSyncConfig(proxy) {
     saving.value = true
     try {
       const payload = {
+        autoRunOnSync: form.autoRunOnSync,
+        autoTranslateOnSync: form.autoTranslateOnSync,
+        defaultPullLimit: form.defaultPullLimit,
         feishuAuth: { ...form.feishuAuth },
         bitableCommon: { ...form.bitableCommon },
         externalFieldModel: [...form.externalFieldModel],
         externalSyncRequiredFields: [...form.externalSyncRequiredFields],
-        externalSyncBitable: {
-          ...form.externalSyncBitable,
-          fieldMappings: [...form.externalSyncBitable.fieldMappings],
-        },
-        bitablePullConfig: {
-          ...form.bitablePullConfig,
-          fieldMappings: [...form.bitablePullConfig.fieldMappings],
+        externalSyncBitable: { ...form.externalSyncBitable },
+        bitablePull: {
+          ...form.bitablePull,
+          fieldMappings: [...form.bitablePull.fieldMappings],
         },
         groupPush: { ...form.groupPush },
         messageSync: { ...form.messageSync },
@@ -320,6 +371,8 @@ export function useSyncConfig(proxy) {
         remoteSync: { ...form.remoteSync },
         statClassification: JSON.parse(JSON.stringify(form.statClassification)),
         aiClassification: { ...form.aiClassification },
+        logPullDefaults: { ...form.logPullDefaults },
+        promptTemplates: { ...form.promptTemplates },
         projectMappings: parseJsonArray(mappingTexts.projectMappings),
         moduleMappings: parseJsonArray(mappingTexts.moduleMappings),
         vendorMappings: parseJsonArray(mappingTexts.vendorMappings),
@@ -349,10 +402,10 @@ export function useSyncConfig(proxy) {
   }
   function removeExternalFieldModel(index) { form.externalFieldModel.splice(index, 1) }
   function addBitablePullFieldMapping() {
-    form.bitablePullConfig.fieldMappings.push({ sourceField: '', targetField: '' })
+    form.bitablePull.fieldMappings.push({ sourceField: '', targetField: '' })
   }
   function removeBitablePullFieldMapping(index) {
-    form.bitablePullConfig.fieldMappings.splice(index, 1)
+    form.bitablePull.fieldMappings.splice(index, 1)
   }
 
   return {

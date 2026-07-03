@@ -11,6 +11,7 @@ from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.service.ticket_service import TicketService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.log_util import logger
 
 
@@ -710,7 +711,7 @@ class TicketMessageSyncService:
                 config=bitable_config,
                 record_id=record_id,
             )
-            old_text = TicketSyncService._normalize_bitable_record_scalar(
+            old_text = FeishuBitableUtil.normalize_record_scalar(
                 current_fields.get(field_name),
                 join_separator="\n",
             )

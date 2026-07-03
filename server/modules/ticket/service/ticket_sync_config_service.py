@@ -1,21 +1,136 @@
 """
 工单同步配置管理服务：默认配置工厂、配置规范化和持久化。
 """
+import json
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from module_admin.dao.config_dao import ConfigDao
 from module_admin.entity.do.config_do import SysConfig
+from module_hrm.entity.vo.common_vo import CrudResponseModel
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
+from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.log_util import logger
 
 
 class TicketSyncConfigService:
     """工单同步自动化配置管理。"""
 
-    CONFIG_KEY = "ticket.sync.automation.config"
+    CONFIG_KEY = "ticket.sync.automation"
+
+    # --- constants migrated from TicketSyncService ---
+
+    DEFAULT_GROUP_PUSH_AUTO_STATUSES = [
+        "2. 1.5线处理",
+        "3. 待产研处理",
+        "4. 产研处理中",
+    ]
+    DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS = [
+        "ticketNo",
+        "description",
+        "internalPriority",
+        "ticketVender",
+        "ticketModle",
+        "createTime",
+        "reporterName",
+    ]
+    DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS = [
+        {"fieldName": "ticketNo", "label": "工单号", "required": True, "category": "basic"},
+        {"fieldName": "title", "label": "工单标题", "required": False, "category": "basic"},
+        {"fieldName": "description", "label": "问题描述", "required": True, "category": "basic"},
+        {"fieldName": "customerPriority", "label": "对方优先级", "required": False, "category": "priority"},
+        {"fieldName": "internalPriority", "label": "内部优先级", "required": True, "category": "priority"},
+        {"fieldName": "ticketVender", "label": "商家/供应商", "required": True, "category": "mapping"},
+        {"fieldName": "ticketModle", "label": "模块", "required": True, "category": "mapping"},
+        {"fieldName": "ticketStatus", "label": "外部状态", "required": False, "category": "mapping"},
+        {"fieldName": "ticketStore", "label": "门店信息", "required": False, "category": "mapping"},
+        {"fieldName": "ticketPos", "label": "POS号", "required": False, "category": "mapping"},
+        {"fieldName": "ticketSco", "label": "SCO号", "required": False, "category": "mapping"},
+        {"fieldName": "createTime", "label": "创建时间", "required": True, "category": "time"},
+        {"fieldName": "reporterName", "label": "报告人/1线处理人", "required": True, "category": "person"},
+        {"fieldName": "reporterEmail", "label": "报告人邮箱", "required": False, "category": "person"},
+        {"fieldName": "currentAssigneeName", "label": "当前处理人", "required": False, "category": "person"},
+        {"fieldName": "currentAssigneeEmail", "label": "当前处理人邮箱", "required": False, "category": "person"},
+        {"fieldName": "internalOwner", "label": "内部负责人", "required": False, "category": "person"},
+        {"fieldName": "internalOwnerEmail", "label": "内部负责人邮箱", "required": False, "category": "person"},
+        {"fieldName": "ticketUrl", "label": "工单链接", "required": False, "category": "basic"},
+        {"fieldName": "recordId", "label": "多维表格记录ID", "required": False, "category": "source"},
+        {"fieldName": "reason", "label": "原因说明", "required": False, "category": "basic"},
+        {"fieldName": "stepReason", "label": "排查过程", "required": False, "category": "basic"},
+    ]
+    DEFAULT_TICKET_STAT_CLASSIFICATIONS = {
+        "issueTypes": [
+            {"value": "system_bug", "label": "系统Bug", "isProblem": True},
+            {"value": "data_error", "label": "数据错误", "isProblem": True},
+            {"value": "config_issue", "label": "配置问题", "isProblem": True},
+            {"value": "performance_issue", "label": "性能问题", "isProblem": True},
+            {"value": "support_consulting", "label": "支持咨询", "isProblem": False},
+            {"value": "requirement_consulting", "label": "需求咨询", "isProblem": False},
+            {"value": "user_operation", "label": "用户操作问题", "isProblem": False},
+            {"value": "api_exception", "label": "接口异常", "isProblem": True},
+        ],
+        "rootCauseTypes": [
+            {"value": "code_defect", "label": "代码缺陷"},
+            {"value": "config_error", "label": "配置错误"},
+            {"value": "data_exception", "label": "数据异常"},
+            {"value": "third_party", "label": "第三方问题"},
+            {"value": "network_issue", "label": "网络问题"},
+            {"value": "environment_issue", "label": "环境问题"},
+            {"value": "operation_mistake", "label": "操作失误"},
+            {"value": "requirement_design", "label": "需求设计问题"},
+            {"value": "unknown", "label": "未知"},
+        ],
+        "solutionTypes": [
+            {"value": "code_fix", "label": "代码修复"},
+            {"value": "config_fix", "label": "配置修复"},
+            {"value": "data_fix", "label": "数据修复"},
+            {"value": "temporary_workaround", "label": "临时处理"},
+            {"value": "manual_process", "label": "人工处理"},
+            {"value": "no_action", "label": "无需处理"},
+        ],
+        "resolutions": [
+            {"value": "fixed", "label": "已修复", "isProblem": True},
+            {"value": "non_problem", "label": "非问题", "isProblem": False},
+            {"value": "data_processed", "label": "数据已处理", "isProblem": True},
+            {"value": "config_fixed", "label": "配置已修复", "isProblem": True},
+            {"value": "user_canceled", "label": "用户撤销", "isProblem": False},
+            {"value": "duplicated", "label": "重复工单", "isProblem": False},
+            {"value": "cannot_reproduce", "label": "无法复现", "isProblem": None},
+            {"value": "as_designed", "label": "需求如此", "isProblem": False},
+            {"value": "transferred", "label": "已转其他团队", "isProblem": None},
+        ],
+        "problemPatterns": [
+            {
+                "value": "memory_leak",
+                "label": "内存泄露",
+                "moduleCode": "",
+                "issueTypeId": "performance_issue",
+                "isProblem": True,
+                "rootCauseType": "code_defect",
+                "resolutionCode": "fixed",
+                "description": "进程内存持续增长、未释放或最终 OOM 的问题模式。",
+                "positiveExamples": ["内存泄露", "内存泄漏", "memory leak", "OOM"],
+                "negativeExamples": ["单次内存高峰", "磁盘空间不足"],
+                "enabled": True,
+            },
+            {
+                "value": "coupon_280_paper_rule",
+                "label": "280开头券为纸质券规则说明",
+                "moduleCode": "coupon",
+                "issueTypeId": "support_consulting",
+                "isProblem": False,
+                "rootCauseType": "requirement_design",
+                "resolutionCode": "as_designed",
+                "description": "用户反馈 280 开头券不能按电子券处理，实际业务规则定义为纸质券。",
+                "positiveExamples": ["280开头券", "纸质券", "券规则说明"],
+                "negativeExamples": ["电子券接口报错", "券配置错误"],
+                "enabled": True,
+            },
+        ],
+    }
 
     # --- migrated from TicketSyncService._default_sync_config ---
 
@@ -734,7 +849,7 @@ class TicketSyncConfigService:
             if not isinstance(row, dict):
                 continue
             source_field = str(row.get("sourceField") or row.get("from") or row.get("bitableField") or "").strip()
-            target_field = cls._normalize_bitable_pull_target_field(
+            target_field = FeishuBitableUtil.normalize_pull_target_field(
                 row.get("targetField") or row.get("to") or row.get("externalField")
             )
             if not source_field or not target_field:
@@ -757,34 +872,8 @@ class TicketSyncConfigService:
 
     @classmethod
     def _normalize_bitable_pull_target_field(cls, value: Any) -> str:
-        """
-        归一化主动拉取字段映射的目标字段名。
-
-        :param value: 配置中的目标字段名。
-        :return: 外部同步模型识别的规范字段名。
-        """
-        field_name = str(value or "").strip()
-        alias_map = {
-            "ticketModel": "ticketModle",
-            "ticket_model": "ticketModle",
-            "moduleName": "ticketModle",
-            "module_name": "ticketModle",
-            "projectName": "ticketVender",
-            "project_name": "ticketVender",
-            "merchantName": "ticketVender",
-            "merchant_name": "ticketVender",
-            "internalOwnerName": "internalOwner",
-            "internal_owner_name": "internalOwner",
-            "ticketAssigneeName": "ticketAssignee",
-            "ticket_assignee_name": "ticketAssignee",
-            "assigneeName": "ticketAssignee",
-            "assignee_name": "ticketAssignee",
-            "ticketAssigneeEmail": "ticketAssigneeEmail",
-            "ticket_assignee_email": "ticketAssigneeEmail",
-            "assigneeEmail": "ticketAssigneeEmail",
-            "assignee_email": "ticketAssigneeEmail",
-        }
-        return alias_map.get(field_name, field_name)
+        """委托到 FeishuBitableUtil.normalize_pull_target_field。"""
+        return FeishuBitableUtil.normalize_pull_target_field(value)
 
     # --- migrated from TicketSyncService._normalize_bitable_pull_config ---
 
@@ -1062,6 +1151,38 @@ class TicketSyncConfigService:
                 seen_record_ids.add(unique_key)
                 merged_records.append(record)
         return merged_records
+
+    # --- migrated from TicketSyncService._normalize_group_push_auto_statuses ---
+
+    @classmethod
+    def _normalize_group_push_auto_statuses(
+        cls,
+        value: Any,
+        *,
+        fallback: Any = None,
+    ) -> list[str]:
+        """
+        归一化自动群推送状态条件配置。
+
+        :param value: 原始状态条件，支持列表或逗号分隔字符串。
+        :param fallback: 回退配置值。
+        :return: 去重后的状态文本列表。
+        """
+        source_value = value
+        if source_value is None:
+            source_value = fallback
+        if isinstance(source_value, str):
+            source_list = [item.strip() for item in source_value.split(",")]
+        elif isinstance(source_value, list):
+            source_list = source_value
+        else:
+            source_list = []
+        normalized: list[str] = []
+        for item in source_list:
+            status_text = str(item or "").strip()
+            if status_text and status_text not in normalized:
+                normalized.append(status_text)
+        return normalized
 
     # --- migrated from TicketSyncService._normalize_sync_config ---
 

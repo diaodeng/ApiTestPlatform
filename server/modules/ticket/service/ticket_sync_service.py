@@ -1,7 +1,7 @@
 import hashlib
 import json
 import re
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 import requests
@@ -36,9 +36,13 @@ from modules.ticket.service.ticket_embedding_service import TicketEmbeddingServi
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.ticket_service import TicketService, _extract_ticket_version_key, _user_id, _user_name
+from modules.ticket.service.ticket_sync_comment_service import TicketSyncCommentService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
+from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
+from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.common_util import CamelCaseUtil
 from utils.field_util import compatible_field_value, extract_person_name_email, normalize_email_text
 from utils.log_util import logger
@@ -176,12 +180,37 @@ class TicketSyncService:
     }
     GROUP_PUSH_LOCK_TIMEOUT_SECONDS = 300
 
-            return True
-        if normalized_value in {"false", "0", "no", "n", "off", "关闭", "否"}:
-            return False
-        return default
+    @classmethod
+    def _build_system_current_user(cls) -> CurrentUserModel:
+        """
+        构造后台任务使用的系统用户上下文。
 
+        :return: 包含空权限、空角色和 system 用户信息的当前用户模型。
+        """
+        return CurrentUserModel.model_validate(cls._build_system_current_user_payload())
 
+    @classmethod
+    def _build_system_current_user_payload(cls) -> dict[str, Any]:
+        """
+        构造可跨 Celery 序列化的系统用户载荷。
+
+        :return: 满足 CurrentUserModel 校验要求的用户字典。
+        """
+        return {
+            "permissions": [],
+            "roles": [],
+            "user": {"userId": 0, "userName": "system", "nickName": "system"},
+        }
+
+    @classmethod
+    def _normalize_current_user_payload(cls, current_user_payload: dict[str, Any] | None) -> dict[str, Any]:
+        """
+        归一化延后后处理任务的当前用户载荷。
+
+        :param current_user_payload: Celery 或本地后台任务传入的当前用户字典。
+        :return: 补齐 permissions、roles 和 user 后的当前用户字典。
+        """
+        payload = dict(current_user_payload or {})
         payload.setdefault("permissions", [])
         payload.setdefault("roles", [])
         user_payload = payload.get("user")
@@ -195,1124 +224,149 @@ class TicketSyncService:
             payload["user"] = cls._build_system_current_user_payload()["user"]
         return payload
 
-            return None
-        try:
-            return datetime.combine(datetime.strptime(text, "%Y%m%d").date(), time.min)
-        except Exception:
-            return None
+    @classmethod
+    def _parse_step_reason_date(cls, value: str):
+        """委托到 TicketSyncCommentService._parse_step_reason_date。"""
+        return TicketSyncCommentService._parse_step_reason_date(value)
 
     @classmethod
-    def parse_step_reason_segments(cls, step_reason: Any) -> list[dict[str, Any]]:
-        """
-        将飞书排查过程 stepReason 拆分为评论片段。
-        :param step_reason: 原始排查过程文本
-        :return: 片段列表，包含 segmentIndex/date/person/content/contentHash
-        """
-        text = str(step_reason or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-        if not text:
-            return []
-        pattern = re.compile(r"(?m)^(?P<date>\d{8})(?:\s+(?P<person>[^：:\n]{1,50}))?[：:]")
-        matches = list(pattern.finditer(text))
-        segments: list[dict[str, Any]] = []
-        if not matches:
-            content_hash = SyncUtil.text_sha256(text)
-            return [
-                {
-                    "segmentIndex": 0,
-                    "dateText": "",
-                    "personName": "",
-                    "content": text,
-                    "contentHash": content_hash,
-                    "externalCreatedAt": None,
-                }
-            ]
-        prefix = text[: matches[0].start()].strip()
-        if prefix:
-            segments.append(
-                {
-                    "segmentIndex": len(segments),
-                    "dateText": "",
-                    "personName": "",
-                    "content": prefix,
-                    "contentHash": SyncUtil.text_sha256(prefix),
-                    "externalCreatedAt": None,
-                }
-            )
-        for index, match in enumerate(matches):
-            start = match.end()
-            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-            content = text[start:end].strip()
-            if not content:
-                continue
-            date_text = str(match.group("date") or "").strip()
-            person_name = str(match.group("person") or "").strip()
-            segments.append(
-                {
-                    "segmentIndex": len(segments),
-                    "dateText": date_text,
-                    "personName": person_name,
-                    "content": content,
-                    "contentHash": SyncUtil.text_sha256(content),
-                    "externalCreatedAt": cls._parse_step_reason_date(date_text),
-                }
-            )
-        return segments
+    def parse_step_reason_segments(cls, step_reason):
+        """委托到 TicketSyncCommentService.parse_step_reason_segments。"""
+        return TicketSyncCommentService.parse_step_reason_segments(step_reason)
 
     @classmethod
-    def _build_step_reason_segment_key(
-        cls,
-        *,
-        source_system: str,
-        source_record_id: str,
-        segment_index: int,
-    ) -> str:
-        """
-        构建 stepReason 评论分段幂等键。
-        :param source_system: 来源系统
-        :param source_record_id: 来源记录ID
-        :param segment_index: 分段序号
-        :return: 稳定幂等键
-        """
-        raw_key = "|".join(
-            [
-                str(source_system or "").strip() or cls.SOURCE_CODE,
-                str(source_record_id or "").strip(),
-                "stepReason",
-                str(int(segment_index or 0)),
-            ]
-        )
-        return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+    def _build_step_reason_segment_key(cls, *, source_system, source_record_id, segment_index):
+        """委托到 TicketSyncCommentService._build_step_reason_segment_key。"""
+        return TicketSyncCommentService._build_step_reason_segment_key(
+            source_system=source_system, source_record_id=source_record_id, segment_index=segment_index)
 
     @classmethod
-    def _get_step_reason_content_segments(cls, sync_object: TicketExternalSyncUpsertModel) -> list[dict[str, Any]]:
-        """
-        从同步模型中读取 stepReason 对应的富文本片段。
-
-        :param sync_object: 外部同步入参。
-        :return: text/mention 片段列表。
-        """
-        extra_data = sync_object.extra_data if isinstance(sync_object.extra_data, dict) else {}
-        field_segments = (
-            extra_data.get("_bitable_field_segments")
-            if isinstance(extra_data.get("_bitable_field_segments"), dict)
-            else {}
-        )
-        for key in ("stepReason", "step_reason"):
-            segments = field_segments.get(key)
-            if isinstance(segments, list):
-                return [item for item in segments if isinstance(item, dict)]
-        return []
+    def _get_step_reason_content_segments(cls, sync_object):
+        """委托到 TicketSyncCommentService._get_step_reason_content_segments。"""
+        return TicketSyncCommentService._get_step_reason_content_segments(sync_object)
 
     @classmethod
-    def _slice_content_segments_for_text(
-        cls,
-        *,
-        full_text: str,
-        content: str,
-        content_segments: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """
-        从完整富文本片段中截取某段评论对应的片段。
-
-        :param full_text: 完整 stepReason 文本。
-        :param content: 当前评论正文。
-        :param content_segments: 完整 stepReason 的 text/mention 片段。
-        :return: 当前评论正文对应片段。
-        """
-        if not content or not content_segments:
-            return []
-        start = str(full_text or "").find(content)
-        if start < 0:
-            return []
-        end = start + len(content)
-        cursor = 0
-        result: list[dict[str, Any]] = []
-        for item in content_segments:
-            text = str(item.get("text") or "")
-            if not text:
-                continue
-            item_start = cursor
-            item_end = cursor + len(text)
-            cursor = item_end
-            overlap_start = max(start, item_start)
-            overlap_end = min(end, item_end)
-            if overlap_start >= overlap_end:
-                continue
-            sliced = dict(item)
-            sliced["text"] = text[overlap_start - item_start : overlap_end - item_start]
-            result.append(sliced)
-        return result
+    def _slice_content_segments_for_text(cls, *, full_text, content, content_segments):
+        """委托到 TicketSyncCommentService._slice_content_segments_for_text。"""
+        return TicketSyncCommentService._slice_content_segments_for_text(
+            full_text=full_text, content=content, content_segments=content_segments)
 
     @classmethod
-    def sync_step_reason_comments(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        sync_object: TicketExternalSyncUpsertModel,
-    ) -> dict[str, Any]:
-        """
-        将外部 stepReason 排查过程幂等同步为工单评论。
-        :param db: 数据库会话
-        :param ticket: 工单对象
-        :param sync_object: 外部同步入参
-        :return: 同步结果摘要
-        """
-        step_reason = str(getattr(sync_object, "step_reason", "") or "").strip()
-        if not step_reason and isinstance(sync_object.extra_data, dict):
-            step_reason = str(sync_object.extra_data.get("step_reason") or "").strip()
-        if not step_reason and isinstance(sync_object.raw_payload, dict):
-            step_reason = str(
-                sync_object.raw_payload.get("stepReason")
-                or sync_object.raw_payload.get("step_reason")
-                or ""
-            ).strip()
-        if not step_reason:
-            return {"skipped": True, "reason": "empty_step_reason", "created": 0, "updated": 0, "skippedCount": 0}
-        source_system = str(getattr(sync_object.source, "system", "") or "").strip() or cls.SOURCE_CODE
-        source_record_id = str(getattr(sync_object.source, "record_id", "") or "").strip() or str(
-            sync_object.ticket_no or ""
-        ).strip()
-        segments = cls.parse_step_reason_segments(step_reason)
-        rich_text_segments = cls._get_step_reason_content_segments(sync_object)
-        summary = {"skipped": False, "total": len(segments), "created": 0, "updated": 0, "skippedCount": 0}
-        for segment in segments:
-            segment_index = int(segment.get("segmentIndex") or 0)
-            content = str(segment.get("content") or "").strip()
-            segment_key = cls._build_step_reason_segment_key(
-                source_system=source_system,
-                source_record_id=source_record_id,
-                segment_index=segment_index,
-            )
-            comment_segments = cls._slice_content_segments_for_text(
-                full_text=step_reason,
-                content=content,
-                content_segments=rich_text_segments,
-            )
-            _, action = TicketService.upsert_synced_comment(
-                db,
-                ticket_id=ticket.ticket_id,
-                content=content,
-                user_name=str(segment.get("personName") or "").strip() or "外部同步",
-                source_type="feishu_bitable",
-                source_system=source_system,
-                source_record_id=source_record_id,
-                source_field="stepReason",
-                source_segment_key=segment_key,
-                source_segment_index=segment_index,
-                source_content_hash=str(segment.get("contentHash") or "").strip(),
-                external_created_at=segment.get("externalCreatedAt"),
-                attachments={"content_segments": comment_segments} if comment_segments else None,
-                is_internal=False,
-            )
-            if action == "created":
-                summary["created"] += 1
-            elif action == "updated":
-                summary["updated"] += 1
-            else:
-                summary["skippedCount"] += 1
-        return summary
+    def sync_step_reason_comments(cls, db, *, ticket, sync_object):
+        """委托到 TicketSyncCommentService.sync_step_reason_comments。"""
+        return TicketSyncCommentService.sync_step_reason_comments(
+            db, ticket=ticket, sync_object=sync_object)
 
     @classmethod
-    def sync_remote_payload_comments(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        sync_object: TicketExternalSyncUpsertModel,
-    ) -> dict[str, Any]:
-        """
-        将远端 pending payload 中的同步评论幂等写入本地。
-        :param db: 数据库会话
-        :param ticket: 本地工单对象
-        :param sync_object: 远端拉取入库模型
-        :return: 同步结果摘要
-        """
-        if not isinstance(sync_object.extra_data, dict):
-            return {"skipped": True, "reason": "empty_extra_data", "created": 0, "updated": 0, "skippedCount": 0}
-        comments = sync_object.extra_data.get("_remote_sync_comments")
-        if not isinstance(comments, list) or not comments:
-            return {"skipped": True, "reason": "empty_comments", "created": 0, "updated": 0, "skippedCount": 0}
-        summary = {"skipped": False, "total": 0, "created": 0, "updated": 0, "skippedCount": 0}
-        for item in comments:
-            if not isinstance(item, dict):
-                continue
-            source_type = str(item.get("sourceType") or item.get("source_type") or "local").strip()
-            if source_type in ("", "local"):
-                continue
-            source_segment_key = str(item.get("sourceSegmentKey") or item.get("source_segment_key") or "").strip()
-            content = str(item.get("content") or "").strip()
-            if not source_segment_key or not content:
-                continue
-            summary["total"] += 1
-            external_created_at = SyncUtil.parse_datetime_value(
-                item.get("externalCreatedAt")
-                or item.get("external_created_at")
-                or item.get("createTime")
-                or item.get("create_time")
-            )
-            _, action = TicketService.upsert_synced_comment(
-                db,
-                ticket_id=ticket.ticket_id,
-                content=content,
-                user_name=str(item.get("userName") or item.get("user_name") or "").strip() or "外部同步",
-                source_type=source_type,
-                source_system=str(item.get("sourceSystem") or item.get("source_system") or "").strip(),
-                source_record_id=str(item.get("sourceRecordId") or item.get("source_record_id") or "").strip(),
-                source_field=str(item.get("sourceField") or item.get("source_field") or "").strip(),
-                source_segment_key=source_segment_key,
-                source_segment_index=int(item.get("sourceSegmentIndex") or item.get("source_segment_index") or 0),
-                source_content_hash=str(item.get("sourceContentHash") or item.get("source_content_hash") or "").strip()
-                or SyncUtil.text_sha256(content),
-                external_created_at=external_created_at,
-                attachments=item.get("attachments"),
-                is_internal=bool(item.get("isInternal") if "isInternal" in item else item.get("is_internal", False)),
-            )
-            if action == "created":
-                summary["created"] += 1
-            elif action == "updated":
-                summary["updated"] += 1
-            else:
-                summary["skippedCount"] += 1
-        return summary
+    def sync_remote_payload_comments(cls, db, *, ticket, sync_object):
+        """委托到 TicketSyncCommentService.sync_remote_payload_comments。"""
+        return TicketSyncCommentService.sync_remote_payload_comments(
+            db, ticket=ticket, sync_object=sync_object)
 
     @classmethod
-    def _set_publish_state(
-        cls,
-        meta: dict[str, Any],
-        *,
-        ready: bool,
-        status: str,
-        reason: str = "",
-        ai_task_status: str | None = None,
-    ) -> dict[str, Any]:
-        """
-        更新同步数据发布状态。
-        :param meta: 同步元数据
-        :param ready: 是否允许对外发布（内网拉取/群推送）
-        :param status: 发布状态编码
-        :param reason: 状态说明
-        :param ai_task_status: AI任务状态
-        :return: 更新后的同步元数据
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        sync_state["publish_ready"] = bool(ready)
-        sync_state["publish_status"] = str(status or "").strip() or cls.PUBLISH_STATUS_READY
-        sync_state["publish_reason"] = str(reason or "").strip()
-        sync_state["publish_updated_at"] = SyncUtil.now_iso()
-        if ai_task_status is not None:
-            sync_state["ai_task_status"] = str(ai_task_status or "").strip()
-        meta["sync_state"] = sync_state
-        return meta
+    def _set_publish_state(cls, meta, *, ready, status, reason="", ai_task_status=None):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._set_publish_state(meta, ready=ready, status=status, reason=reason, ai_task_status=ai_task_status)
 
     @classmethod
-    def _is_publish_ready(cls, meta: dict[str, Any]) -> bool:
-        """
-        判断同步数据是否允许对外发布。
-        :param meta: 同步元数据
-        :return: 是否可发布
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        if "publish_ready" not in sync_state:
-            return True
-        return bool(sync_state.get("publish_ready"))
+    def _is_publish_ready(cls, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._is_publish_ready(meta)
 
     @classmethod
-    def _can_recover_publish_state(cls, db: Session, *, ticket: Ticket, meta: dict[str, Any]) -> tuple[bool, str]:
-        """
-        判断未发布同步数据是否可恢复为可发布状态。
-        :param db: 数据库会话
-        :param ticket: 待检查工单
-        :param meta: 同步元数据
-        :return: (是否可恢复, 恢复原因)
-        """
-        if cls._is_publish_ready(meta):
-            return False, "already_ready"
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        publish_status = str(sync_state.get("publish_status") or "").strip()
-        if publish_status != cls.PUBLISH_STATUS_PROCESSING_AI:
-            return False, f"publish_status_not_recoverable:{publish_status or '-'}"
-        ai_pending, ai_status = cls._resolve_ai_pending_state(db, ticket_id=ticket.ticket_id, meta=meta)
-        if ai_pending:
-            return False, f"ai_still_pending:{ai_status or '-'}"
-        return True, f"ai_not_pending:{ai_status or '-'}"
+    def _can_recover_publish_state(cls, db, *, ticket, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._can_recover_publish_state(db, ticket=ticket, meta=meta)
 
     @classmethod
-    def _ensure_publish_ready_for_pull(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        current_user: CurrentUserModel,
-    ) -> tuple[Ticket, dict[str, Any], bool]:
-        """
-        拉取前自愈同步发布状态，避免服务重启后 processing_ai 长期卡住。
-        :param db: 数据库会话
-        :param ticket: 候选工单
-        :param current_user: 当前用户
-        :return: (刷新后的工单, 同步元数据, 是否已恢复)
-        """
-        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        meta = cls._build_meta(extra_data)
-        recoverable, recover_reason = cls._can_recover_publish_state(db, ticket=ticket, meta=meta)
-        if not recoverable:
-            return ticket, meta, False
-        logger.warning(
-            "工单同步发布状态自愈: ticket_no=%s, revision=%s, reason=%s",
-            ticket.ticket_no,
-            meta.get("revision"),
-            recover_reason,
-        )
-        meta = cls._set_publish_state(
-            meta,
-            ready=True,
-            status=cls.PUBLISH_STATUS_READY,
-            reason="拉取前检测到无活动AI任务，自动恢复发布状态",
-            ai_task_status=str((meta.get("sync_state") or {}).get("ai_task_status") or "").strip(),
-        )
-        ticket = cls._persist_sync_meta(
-            db,
-            ticket=ticket,
-            meta=meta,
-            update_by=_user_name(current_user),
-        )
-        return ticket, meta, True
+    def _ensure_publish_ready_for_pull(cls, db, *, ticket, current_user):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._ensure_publish_ready_for_pull(db, ticket=ticket, current_user=current_user)
 
     @classmethod
-    def _is_group_push_sent_once(cls, meta: dict[str, Any]) -> bool:
-        """
-        判断工单是否已成功发送过群推送。
-        :param meta: 同步元数据
-        :return: 是否已发送过
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        return bool(sync_state.get("group_push_sent_once"))
+    def _is_group_push_sent_once(cls, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._is_group_push_sent_once(meta)
 
     @classmethod
-    def _mark_group_push_sent_once(
-        cls,
-        meta: dict[str, Any],
-        *,
-        scene: str,
-        revision: int,
-    ) -> dict[str, Any]:
-        """
-        标记工单已成功发送过群推送（仅一次）。
-        :param meta: 同步元数据
-        :param scene: 触发场景
-        :param revision: 同步修订号
-        :return: 更新后的同步元数据
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        sync_state["group_push_sent_once"] = True
-        sync_state["group_push_sent_at"] = SyncUtil.now_iso()
-        sync_state["group_push_scene"] = str(scene or "").strip() or "external_sync"
-        sync_state["group_push_revision"] = int(revision or 0)
-        meta["sync_state"] = sync_state
-        return meta
+    def _mark_group_push_sent_once(cls, meta, *, scene, revision):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._mark_group_push_sent_once(meta, scene=scene, revision=revision)
 
     @classmethod
-    def _append_group_push_message_refs(
-        cls,
-        meta: dict[str, Any],
-        message_refs: list[dict[str, Any]] | None,
-    ) -> dict[str, Any]:
-        """
-        记录群推送成功发送后的飞书消息 ID，供后续评论回帖定位话题。
-        :param meta: 同步元数据
-        :param message_refs: 飞书发送返回的消息明细
-        :return: 更新后的同步元数据
-        """
-        if not isinstance(message_refs, list) or not message_refs:
-            return meta
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        existing_refs = sync_state.get("group_push_message_refs")
-        if not isinstance(existing_refs, list):
-            existing_refs = []
-        existing_message_ids = {
-            str(item.get("messageId") or item.get("message_id") or "").strip()
-            for item in existing_refs
-            if isinstance(item, dict)
-        }
-        for item in message_refs:
-            if not isinstance(item, dict):
-                continue
-            message_id = str(item.get("messageId") or item.get("message_id") or "").strip()
-            if not message_id or message_id in existing_message_ids:
-                continue
-            existing_refs.append(
-                {
-                    "messageId": message_id,
-                    "rootId": str(item.get("rootId") or item.get("root_id") or message_id).strip(),
-                    "threadId": str(item.get("threadId") or item.get("thread_id") or "").strip(),
-                    "chatId": str(item.get("chatId") or item.get("chat_id") or item.get("receiveId") or "").strip(),
-                    "receiveId": str(item.get("receiveId") or item.get("receive_id") or "").strip(),
-                    "receiveIdType": str(item.get("receiveIdType") or item.get("receive_id_type") or "").strip(),
-                    "sentAt": SyncUtil.now_iso(),
-                }
-            )
-            existing_message_ids.add(message_id)
-        sync_state["group_push_message_refs"] = existing_refs[-20:]
-        meta["sync_state"] = sync_state
-        return meta
+    def _append_group_push_message_refs(cls, meta, message_refs):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._append_group_push_message_refs(meta, message_refs)
 
     @classmethod
-    def _mark_group_push_processing(
-        cls,
-        meta: dict[str, Any],
-        *,
-        scene: str,
-        revision: int,
-    ) -> dict[str, Any]:
-        """
-        标记工单群推送正在处理中，作为并发互斥锁。
-        :param meta: 同步元数据
-        :param scene: 触发场景
-        :param revision: 同步修订号
-        :return: 更新后的同步元数据
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        sync_state["group_push_processing"] = True
-        sync_state["group_push_processing_at"] = SyncUtil.now_iso()
-        sync_state["group_push_processing_scene"] = str(scene or "").strip() or "external_sync"
-        sync_state["group_push_processing_revision"] = int(revision or 0)
-        meta["sync_state"] = sync_state
-        return meta
+    def _mark_group_push_processing(cls, meta, *, scene, revision):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._mark_group_push_processing(meta, scene=scene, revision=revision)
 
     @classmethod
-    def _clear_group_push_processing(cls, meta: dict[str, Any]) -> dict[str, Any]:
-        """
-        清理工单群推送处理中锁。
-        :param meta: 同步元数据
-        :return: 更新后的同步元数据
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        sync_state["group_push_processing"] = False
-        sync_state["group_push_processing_at"] = None
-        sync_state["group_push_processing_scene"] = None
-        sync_state["group_push_processing_revision"] = None
-        meta["sync_state"] = sync_state
-        return meta
+    def _clear_group_push_processing(cls, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._clear_group_push_processing(meta)
 
     @classmethod
-    def _is_group_push_processing_locked(cls, meta: dict[str, Any]) -> tuple[bool, str]:
-        """
-        判断群推送处理锁是否生效。
-        :param meta: 同步元数据
-        :return: (是否锁定, 锁定原因)
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        if not bool(sync_state.get("group_push_processing")):
-            return False, ""
-        lock_time = SyncUtil.parse_datetime_value(sync_state.get("group_push_processing_at"))
-        if lock_time is None:
-            return True, "群推送处理中（锁时间缺失）"
-        elapsed_seconds = (datetime.now() - lock_time).total_seconds()
-        if elapsed_seconds > cls.GROUP_PUSH_LOCK_TIMEOUT_SECONDS:
-            return False, ""
-        return True, "群推送处理中"
+    def _is_group_push_processing_locked(cls, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._is_group_push_processing_locked(meta)
 
     @classmethod
-    def _persist_group_push_meta_state(
-        cls,
-        db: Session,
-        *,
-        ticket_id: int,
-        update_by: str,
-        scene: str,
-        acquire_lock: bool = False,
-        clear_lock: bool = False,
-        mark_sent_once: bool = False,
-        message_refs: list[dict[str, Any]] | None = None,
-    ) -> tuple[bool, Ticket | None, dict[str, Any], str]:
-        """
-        在数据库行级锁内更新群推送状态，保障并发下的去重一致性。
-        :param db: 数据库会话
-        :param ticket_id: 工单ID
-        :param update_by: 更新人
-        :param scene: 触发场景
-        :param acquire_lock: 是否抢占群推送处理锁
-        :param clear_lock: 是否清理群推送处理锁
-        :param mark_sent_once: 是否标记已发送过
-        :param message_refs: 飞书应用发送返回的消息明细
-        :return: (是否更新成功, 工单对象, 最新元数据, 结果原因)
-        """
-        try:
-            ticket = (
-                db.query(Ticket)
-                .filter(Ticket.ticket_id == ticket_id, Ticket.del_flag == "0")
-                .with_for_update()
-                .first()
-            )
-            if not ticket:
-                db.rollback()
-                return False, None, {}, "ticket_not_found"
-
-            extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-            meta = cls._build_meta(extra_data)
-            if acquire_lock:
-                if cls._is_group_push_sent_once(meta):
-                    db.rollback()
-                    return False, ticket, meta, "already_sent"
-                locked, lock_reason = cls._is_group_push_processing_locked(meta)
-                if locked:
-                    db.rollback()
-                    return False, ticket, meta, lock_reason or "group_push_processing"
-                meta = cls._mark_group_push_processing(
-                    meta,
-                    scene=scene,
-                    revision=int(meta.get("revision") or 0),
-                )
-            if clear_lock:
-                meta = cls._clear_group_push_processing(meta)
-            if mark_sent_once:
-                meta = cls._mark_group_push_sent_once(
-                    meta,
-                    scene=scene,
-                    revision=int(meta.get("revision") or 0),
-                )
-            meta = cls._append_group_push_message_refs(meta, message_refs)
-            if acquire_lock or clear_lock or mark_sent_once or message_refs:
-                refreshed_extra_data = cls._attach_meta(extra_data, meta)
-                TicketDao.update_ticket(
-                    db,
-                    ticket.ticket_id,
-                    {
-                        "extra_data": refreshed_extra_data,
-                        "update_by": update_by,
-                        "update_time": datetime.now(),
-                    },
-                )
-                db.commit()
-                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
-            else:
-                db.rollback()
-            return True, ticket, meta, "updated"
-        except Exception:
-            db.rollback()
-            raise
+    def _persist_group_push_meta_state(cls, db, *, ticket_id, update_by, scene, acquire_lock=False, clear_lock=False, mark_sent_once=False, message_refs=None):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._persist_group_push_meta_state(db, ticket_id=ticket_id, update_by=update_by, scene=scene, acquire_lock=acquire_lock, clear_lock=clear_lock, mark_sent_once=mark_sent_once, message_refs=message_refs)
 
     @classmethod
-    def _resolve_ai_pending_state(
-        cls,
-        db: Session,
-        *,
-        ticket_id: int,
-        meta: dict[str, Any],
-    ) -> tuple[bool, str]:
-        """
-        判断工单是否仍处于 AI 处理中状态。
-        :param db: 数据库会话
-        :param ticket_id: 工单ID
-        :param meta: 同步元数据
-        :return: (是否处理中, AI状态文本)
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        automation = sync_state.get("automation") if isinstance(sync_state.get("automation"), dict) else {}
-        steps = automation.get("steps") if isinstance(automation.get("steps"), dict) else {}
-        ai_step = steps.get("ai_analysis") if isinstance(steps.get("ai_analysis"), dict) else {}
-        ai_step_status = str(ai_step.get("status") or "").strip().lower()
-        ai_task_status = str(sync_state.get("ai_task_status") or "").strip().lower()
-        ai_terminal_statuses = {
-            TicketAiAnalysisStatus.SUCCESS.value,
-            TicketAiAnalysisStatus.FAILED.value,
-            TicketAiAnalysisStatus.CANCELED.value,
-        }
-
-        latest_task = TicketAiDao.get_latest_task_by_ticket_id(db, ticket_id)
-        latest_status = str(getattr(latest_task, "status", "") or "").strip().lower()
-        if latest_status in cls.AI_PENDING_TASK_STATUSES:
-            return True, latest_status
-        if latest_status in ai_terminal_statuses:
-            return False, latest_status
-        if ai_task_status in ai_terminal_statuses:
-            return False, ai_task_status
-        if ai_task_status in cls.AI_PENDING_TASK_STATUSES:
-            return True, ai_task_status
-        if ai_step_status in cls.AI_PENDING_AUTOMATION_STATUSES:
-            return True, ai_task_status or ai_step_status
-        if latest_status:
-            return False, latest_status
-        if ai_task_status:
-            return False, ai_task_status
-        return False, ai_step_status
+    def _resolve_ai_pending_state(cls, db, *, ticket_id, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._resolve_ai_pending_state(db, ticket_id=ticket_id, meta=meta)
 
     @classmethod
-    def _persist_sync_meta(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        meta: dict[str, Any],
-        update_by: str,
-    ) -> Ticket:
-        """
-        将同步元数据回写到工单并提交。
-        :param db: 数据库会话
-        :param ticket: 工单对象
-        :param meta: 同步元数据
-        :param update_by: 更新人
-        :return: 刷新后的工单对象
-        """
-        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        extra_data = cls._attach_meta(extra_data, meta)
-        TicketDao.update_ticket(
-            db,
-            ticket.ticket_id,
-            {
-                "extra_data": extra_data,
-                "update_by": update_by,
-                "update_time": datetime.now(),
-            },
-        )
-        db.commit()
-        return TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+    def _persist_sync_meta(cls, db, *, ticket, meta, update_by):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._persist_sync_meta(db, ticket=ticket, meta=meta, update_by=update_by)
 
     @classmethod
-    def _send_auto_group_message_once(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        meta: dict[str, Any],
-        group_config: dict[str, Any],
-        scene: str,
-        update_by: str,
-    ) -> tuple[dict[str, Any], Ticket, dict[str, Any]]:
-        """
-        自动触发群推送（仅发送一次）。
-        :param db: 数据库会话
-        :param ticket: 工单对象
-        :param meta: 同步元数据
-        :param group_config: 群推送配置
-        :param scene: 触发场景
-        :param update_by: 更新人
-        :return: (推送结果, 刷新后的工单, 最新元数据)
-        """
-        # 检查主动拉取任务级群消息开关（bitable_pull.sendGroupMessage）
-        ticket_extra = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-        bitable_pull_meta = (
-            ticket_extra.get("bitable_pull")
-            if isinstance(ticket_extra.get("bitable_pull"), dict)
-            else {}
-        )
-        if bitable_pull_meta.get("sendGroupMessage") is False:
-            logger.info(
-                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason=主动拉取任务级参数关闭了群消息推送"
-            )
-            return (
-                {"skipped": True, "skipReason": "主动拉取任务级参数关闭了群消息推送", "scene": scene},
-                ticket,
-                meta,
-            )
-
-        skip_by_status, status_skip_reason = cls._should_skip_auto_group_push_by_status(
-            ticket=ticket,
-            group_config=group_config,
-        )
-        if skip_by_status:
-            logger.info(
-                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason={status_skip_reason or '工单状态不满足自动推送条件'}"
-            )
-            return (
-                {
-                    "skipped": True,
-                    "skipReason": status_skip_reason or "工单状态不满足自动推送条件",
-                    "scene": scene,
-                },
-                ticket,
-                meta,
-            )
-
-        if not cls._is_publish_ready(meta):
-            logger.info(
-                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason=同步数据未发布就绪"
-            )
-            return (
-                {"skipped": True, "skipReason": "同步数据未发布就绪", "scene": scene},
-                ticket,
-                meta,
-            )
-        if cls._is_group_push_sent_once(meta):
-            logger.info(
-                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason=工单已发送过群推送"
-            )
-            return (
-                {"skipped": True, "skipReason": "工单已发送过群推送", "scene": scene},
-                ticket,
-                meta,
-            )
-        skip_by_submit_time, submit_time_skip_reason = cls._should_skip_auto_group_push_by_submit_time(
-            ticket=ticket,
-            meta=meta,
-            group_config=group_config,
-        )
-        if skip_by_submit_time:
-            logger.info(
-                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason={submit_time_skip_reason or '工单提交时间不满足自动推送起始时间'}"
-            )
-            return (
-                {
-                    "skipped": True,
-                    "skipReason": submit_time_skip_reason or "工单提交时间不满足自动推送起始时间",
-                    "scene": scene,
-                },
-                ticket,
-                meta,
-            )
-
-        lock_acquired, locked_ticket, locked_meta, lock_reason = cls._persist_group_push_meta_state(
-            db,
-            ticket_id=ticket.ticket_id,
-            update_by=update_by,
-            scene=scene,
-            acquire_lock=True,
-        )
-        if not lock_acquired:
-            if lock_reason == "already_sent":
-                logger.info(
-                    f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                    f"reason=工单已发送过群推送"
-                )
-                return (
-                    {"skipped": True, "skipReason": "工单已发送过群推送", "scene": scene},
-                    ticket,
-                    meta,
-                )
-            logger.info(
-                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason={lock_reason or '群推送处理中'}"
-            )
-            return (
-                {"skipped": True, "skipReason": lock_reason or "群推送处理中", "scene": scene},
-                ticket,
-                meta,
-            )
-        if locked_ticket:
-            ticket = locked_ticket
-        if locked_meta:
-            meta = locked_meta
-
-        sync_summary = cls.extract_sync_summary(
-            cls._attach_meta(dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}, meta)
-        ) or {}
-        result: dict[str, Any] = {}
-        mark_sent_once = False
-        try:
-            result = TicketSyncNotifyService.send_group_message_for_ticket(
-                db,
-                ticket=ticket,
-                group_config=group_config,
-                scene=scene,
-                manual_trigger=False,
-                sync_summary=sync_summary,
-            )
-            push_success_count = int(result.get("pushSuccessCount") or 0)
-            app_success_count = int(result.get("chatSuccessCount") or 0)
-            mark_sent_once = not bool(result.get("skipped")) and (push_success_count > 0 or app_success_count > 0)
-            if mark_sent_once:
-                logger.info(
-                    f"自动群推送已标记去重: ticket_no={ticket.ticket_no}, scene={scene}, "
-                    f"push_success_count={push_success_count}, app_success_count={app_success_count}"
-                )
-            elif not bool(result.get("skipped")):
-                logger.warning(
-                    f"自动群推送未产生成功发送，保持未去重状态: ticket_no={ticket.ticket_no}, scene={scene}, "
-                    f"push_success_count={push_success_count}, app_success_count={app_success_count}"
-                )
-        finally:
-            message_refs = (
-                result.get("feishuMessageRefs")
-                if isinstance(result.get("feishuMessageRefs"), list)
-                else None
-            )
-            state_updated, refreshed_ticket, refreshed_meta, _ = cls._persist_group_push_meta_state(
-                db,
-                ticket_id=ticket.ticket_id,
-                update_by=update_by,
-                scene=scene,
-                clear_lock=True,
-                mark_sent_once=mark_sent_once,
-                message_refs=message_refs,
-            )
-            if state_updated:
-                if refreshed_ticket:
-                    ticket = refreshed_ticket
-                if refreshed_meta:
-                    meta = refreshed_meta
-        return result, ticket, meta
+    def _send_auto_group_message_once(cls, db, *, ticket, meta, group_config, scene, update_by):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._send_auto_group_message_once(db, ticket=ticket, meta=meta, group_config=group_config, scene=scene, update_by=update_by)
 
     @classmethod
-    def _finalize_publish_state_after_post_process(
-        cls,
-        db: Session,
-        *,
-        ticket: Ticket,
-        sync_scene: str,
-        update_by: str,
-    ) -> tuple[Ticket, dict[str, Any], dict[str, Any] | None]:
-        """
-        根据 AI 状态收敛发布状态，并按需触发自动群推送。
-        :param db: 数据库会话
-        :param ticket: 工单对象
-        :param sync_scene: 触发场景
-        :param update_by: 更新人
-        :return: (刷新后的工单, 元数据, 群推送结果)
-        """
-        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        meta = cls._build_meta(extra_data)
-        ai_pending, ai_status = cls._resolve_ai_pending_state(db, ticket_id=ticket.ticket_id, meta=meta)
-        ai_task_status = str(ai_status or "").strip().lower()
-        if ai_pending:
-            meta = cls._set_publish_state(
-                meta,
-                ready=False,
-                status=cls.PUBLISH_STATUS_PROCESSING_AI,
-                reason="AI分析处理中，暂不对外发布",
-                ai_task_status=ai_task_status or TicketAiAnalysisStatus.RUNNING.value,
-            )
-            ticket = cls._persist_sync_meta(
-                db,
-                ticket=ticket,
-                meta=meta,
-                update_by=update_by,
-            )
-            return ticket, meta, {"skipped": True, "skipReason": "AI分析处理中，暂不推送", "scene": sync_scene}
-
-        reason = "AI分析已结束，允许对外发布" if ai_task_status else "后处理完成，允许对外发布"
-        meta = cls._set_publish_state(
-            meta,
-            ready=True,
-            status=cls.PUBLISH_STATUS_READY,
-            reason=reason,
-            ai_task_status=ai_task_status,
-        )
-        ticket = cls._persist_sync_meta(
-            db,
-            ticket=ticket,
-            meta=meta,
-            update_by=update_by,
-        )
-        config = cls._load_sync_config(db)
-        group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
-        group_push_result, ticket, meta = cls._send_auto_group_message_once(
-            db,
-            ticket=ticket,
-            meta=meta,
-            group_config=group_config,
-            scene=sync_scene,
-            update_by=update_by,
-        )
-        return ticket, meta, group_push_result
+    def _finalize_publish_state_after_post_process(cls, db, ticket, meta, scene, update_by):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._finalize_publish_state_after_post_process(db, ticket, meta, scene, update_by)
 
     @classmethod
-    def finalize_sync_after_ai(
-        cls,
-        db: Session,
-        *,
-        ticket_id: int,
-        ai_task_status: str,
-        sync_scene: str = "external_sync",
-    ) -> None:
-        """
-        在 AI 任务终态后收敛同步发布状态并补发一次自动群推送。
-        :param db: 数据库会话
-        :param ticket_id: 工单ID
-        :param ai_task_status: AI任务状态
-        :param sync_scene: 触发场景
-        :return: 无
-        """
-        try:
-            ticket = TicketDao.get_ticket_by_id(db, ticket_id)
-            if not ticket:
-                return
-            extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-            meta = cls._build_meta(extra_data)
-            normalized_status = str(ai_task_status or "").strip().lower()
-            if normalized_status in cls.AI_PENDING_TASK_STATUSES:
-                meta = cls._set_publish_state(
-                    meta,
-                    ready=False,
-                    status=cls.PUBLISH_STATUS_PROCESSING_AI,
-                    reason="AI分析处理中，暂不对外发布",
-                    ai_task_status=normalized_status,
-                )
-                cls._persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
-                return
-
-            reason = (
-                "AI分析成功，允许对外发布"
-                if normalized_status == TicketAiAnalysisStatus.SUCCESS.value
-                else "AI分析结束，允许对外发布"
-            )
-            meta = cls._set_publish_state(
-                meta,
-                ready=True,
-                status=cls.PUBLISH_STATUS_READY,
-                reason=reason,
-                ai_task_status=normalized_status,
-            )
-            ticket = cls._persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
-            config = cls._load_sync_config(db)
-            group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
-            cls._send_auto_group_message_once(
-                db,
-                ticket=ticket,
-                meta=meta,
-                group_config=group_config,
-                scene=sync_scene,
-                update_by="system",
-            )
-        except Exception as exc:
-            db.rollback()
-            logger.warning(
-                f"AI任务完成后同步发布状态回写失败: "
-                f"ticket_id={ticket_id}, ai_task_status={ai_task_status}, error={exc}"
-            )
-
-        source_snapshot = current_meta.get("source") if isinstance(current_meta.get("source"), dict) else {}
-        existing_external_time = (
-            current_meta.get("externalCreateTime")
-            or source_snapshot.get("externalCreateTime")
-        )
-        parsed_existing = SyncUtil.parse_datetime_value(existing_external_time)
-        if parsed_existing:
-            return parsed_existing.isoformat()
-
-        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
-        parsed_candidate = (
-            SyncUtil.parse_datetime_value(sync_object.create_time)
-            or SyncUtil.parse_datetime_value(raw_payload.get("externalCreateTime"))
-            or SyncUtil.parse_datetime_value(raw_payload.get("external_create_time"))
-            or SyncUtil.parse_datetime_value(raw_payload.get("createTime"))
-            or SyncUtil.parse_datetime_value(raw_payload.get("create_time"))
-            or SyncUtil.parse_datetime_value(sync_object.source.pushed_at)
-            or datetime.now()
-        )
-        return parsed_candidate.isoformat()
+    def finalize_sync_after_ai(cls, db, ticket_id, ai_task_status, sync_scene):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService.finalize_sync_after_ai(db, ticket_id, ai_task_status, sync_scene)
 
     @classmethod
-    def _resolve_ticket_submit_time(cls, *, ticket: Ticket, meta: dict[str, Any] | None) -> datetime | None:
-        """
-        解析工单提交时间：优先外部 createTime，缺失时回退本地创建时间。
-
-        :param ticket: 工单对象。
-        :param meta: 同步元数据。
-        :return: 可比较的提交时间，无法解析时返回 None。
-        """
-        sync_meta = meta if isinstance(meta, dict) else {}
-        source_snapshot = sync_meta.get("source") if isinstance(sync_meta.get("source"), dict) else {}
-        external_create_time = (
-            sync_meta.get("externalCreateTime")
-            or source_snapshot.get("externalCreateTime")
-        )
-        parsed_external_time = SyncUtil.parse_datetime_value(external_create_time)
-        if parsed_external_time:
-            return parsed_external_time
-        return SyncUtil.parse_datetime_value(getattr(ticket, "create_time", None))
+    def _resolve_ticket_submit_time(cls, *, ticket, meta):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._resolve_ticket_submit_time(ticket=ticket, meta=meta)
 
     @classmethod
-    def _resolve_group_push_auto_send_after_time(cls, group_config: dict[str, Any] | None) -> datetime | None:
-        """
-        解析自动群推送起始时间配置。
-
-        :param group_config: 群推送配置。
-        :return: 起始时间，未配置或解析失败时返回 None。
-        """
-        config = group_config if isinstance(group_config, dict) else {}
-        return SyncUtil.parse_datetime_value(
-            config.get("autoSendAfterTime")
-            or config.get("auto_send_after_time")
-        )
+    def _resolve_group_push_auto_send_after_time(cls, group_config):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._resolve_group_push_auto_send_after_time(group_config)
 
     @classmethod
-    def _normalize_group_push_auto_statuses(
-        cls,
-        value: Any,
-        *,
-        fallback: Any = None,
-    ) -> list[str]:
-        """
-        归一化自动群推送状态条件配置。
-
-        :param value: 原始状态条件，支持列表或逗号分隔字符串。
-        :param fallback: 回退配置值。
-        :return: 去重后的状态文本列表。
-        """
-        source_value = value
-        if source_value is None:
-            source_value = fallback
-        if isinstance(source_value, str):
-            source_list = [item.strip() for item in source_value.split(",")]
-        elif isinstance(source_value, list):
-            source_list = source_value
-        else:
-            source_list = []
-        normalized: list[str] = []
-        for item in source_list:
-            status_text = str(item or "").strip()
-            if status_text and status_text not in normalized:
-                normalized.append(status_text)
-        return normalized
+    def _normalize_group_push_auto_statuses(cls, value, *, fallback=None):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._normalize_group_push_auto_statuses(value, fallback=fallback)
 
     @classmethod
-    def _should_skip_auto_group_push_by_status(
-        cls,
-        *,
-        ticket: Ticket,
-        group_config: dict[str, Any] | None,
-    ) -> tuple[bool, str | None]:
-        """
-        判断自动群推送是否因状态条件不满足而跳过。
-
-        :param ticket: 工单对象。
-        :param group_config: 群推送配置。
-        :return: (是否跳过, 跳过原因)。
-        """
-        config = group_config if isinstance(group_config, dict) else {}
-        auto_push_statuses = cls._normalize_group_push_auto_statuses(
-            config.get("autoPushStatuses", config.get("auto_push_statuses")),
-        )
-        if not auto_push_statuses:
-            return False, None
-        ticket_status = str(getattr(ticket, "status", "") or "").strip()
-        if ticket_status in auto_push_statuses:
-            return False, None
-        return True, f"工单状态({ticket_status or '-'})未命中自动推送状态条件"
+    def _should_skip_auto_group_push_by_status(cls, *, ticket, group_config):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._should_skip_auto_group_push_by_status(ticket=ticket, group_config=group_config)
 
     @classmethod
-    def _should_skip_auto_group_push_by_submit_time(
-        cls,
-        *,
-        ticket: Ticket,
-        meta: dict[str, Any] | None,
-        group_config: dict[str, Any] | None,
-    ) -> tuple[bool, str | None]:
-        """
-        判断自动群推送是否因“起始提交时间”配置而跳过。
-
-        :param ticket: 工单对象。
-        :param meta: 同步元数据。
-        :param group_config: 群推送配置。
-        :return: (是否跳过, 跳过原因)。
-        """
-        auto_send_after_time = cls._resolve_group_push_auto_send_after_time(group_config)
-        if not auto_send_after_time:
-            return False, None
-        submit_time = cls._resolve_ticket_submit_time(ticket=ticket, meta=meta)
-        if submit_time is None:
-            return False, None
-        if submit_time <= auto_send_after_time:
-            return (
-                True,
-                f"工单提交时间({submit_time.isoformat()})未晚于自动推送起始时间({auto_send_after_time.isoformat()})",
-            )
-        return False, None
+    def _should_skip_auto_group_push_by_submit_time(cls, *, ticket, meta, group_config):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService._should_skip_auto_group_push_by_submit_time(ticket=ticket, meta=meta, group_config=group_config)
 
     @classmethod
     def _has_successful_ai_translation(cls, ticket: Ticket | None, source_description: str | None = None) -> bool:
@@ -1344,6 +398,7 @@ class TicketSyncService:
             return SyncUtil.text_sha256(legacy_source_description) == source_hash
         return False
 
+    @classmethod
     @classmethod
     def _should_apply_remote_sync_item(
         cls,
@@ -1392,1294 +447,157 @@ class TicketSyncService:
         return True, "remote_time_newer_or_unknown"
 
     @classmethod
-    def _default_sync_config(cls) -> dict[str, Any]:
-        return {
-            "autoRunOnSync": False,
-            "autoTranslateOnSync": True,
-            "defaultPullLimit": 50,
-            "feishuAuth": cls._default_feishu_auth_config(),
-            "bitableCommon": cls._default_bitable_common_config(),
-            "externalFieldModel": cls._default_external_field_model_config(),
-            "externalSyncBitable": cls._default_external_sync_bitable_config(),
-            "remoteSync": cls._default_remote_sync_config(),
-            "bitablePull": cls._default_bitable_pull_config(),
-            "groupPush": cls._default_group_push_config(),
-            "messageSync": cls._default_message_sync_config(),
-            "personReminder": cls._default_person_reminder_config(),
-            "summaryReport": cls._default_summary_report_config(),
-            "statClassification": cls._default_stat_classification_config(),
-            "aiClassification": cls._default_ai_classification_config(),
-            "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
-            "projectMappings": [],
-            "moduleMappings": [],
-            "vendorMappings": [],
-            "storeMappings": [],
-            "statusMappings": [],
-            "assigneeMappings": [],
-            "posPatterns": [r"(?:^|[^A-Z0-9])POS[^0-9]{0,3}(\d{1,10})(?:[^A-Z0-9]|$)"],
-            "scoPatterns": [r"(?:^|[^A-Z0-9])SCO[^0-9]{0,3}(\d{1,10})(?:[^A-Z0-9]|$)"],
-            "versionPatterns": [
-                r"(?:版本|version|app[_\\s-]*version)[:：\\s-]*([A-Za-z0-9._/-]+)",
-            ],
-            "logPullDefaults": {
-                "commandDataType": 1,
-                "fileMaxSize": 500,
-                "zipMaxSize": 500,
-                "storageMode": "local",
-                "rangeBeforeMinutes": 10,
-                "rangeAfterMinutes": 10,
-                "autoAiEnabled": False,
-                "aiAgentCode": "",
-                "aiProviderCode": "",
-            },
-            "promptTemplates": {
-                "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
-            },
-        }
+    def _default_sync_config(cls):
+        """委托到 TicketSyncConfigService._default_sync_config。"""
+        return TicketSyncConfigService._default_sync_config()
 
-    @classmethod
+
     def _default_feishu_auth_config(cls) -> dict[str, Any]:
-        """
-        构建飞书应用统一凭证默认配置。
-
-        :return: 统一凭证配置默认值。
-        """
-        return {
-            "appId": "",
-            "appSecret": "",
-        }
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._default_feishu_auth_config()
 
     @classmethod
     def _default_bitable_common_config(cls) -> dict[str, Any]:
-        """
-        构建飞书多维表格公共配置。
-
-        :return: 公共多维表格配置默认值。
-        """
-        return {
-            "appId": "",
-            "appSecret": "",
-            "appToken": "",
-            "tableId": "",
-            "viewId": "",
-            "pageSize": 500,
-            "filterFormula": "",
-        }
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._default_bitable_common_config()
 
     @classmethod
     def _default_external_field_model_config(cls) -> dict[str, Any]:
-        """
-        构建外部工单字段模型默认配置。
-
-        :return: 外部字段模型默认值。
-        """
-        return {
-            "fields": [dict(item) for item in cls.DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS],
-        }
+        """委托到 TicketSyncConfigService。"""
+        return TicketSyncConfigService._default_external_field_model_config()
 
     @classmethod
-    def _default_external_sync_bitable_config(cls) -> dict[str, Any]:
-        """
-        构建外部同步多维表格补充查询默认配置。
-
-        :return: 外部同步多维表格配置默认值。
-        """
-        return {
-            "enabled": False,
-            "appId": "",
-            "appSecret": "",
-            "appToken": "",
-            "tableId": "",
-            "viewId": "",
-        }
+    def _default_external_sync_bitable_config(cls):
+        """委托到 TicketSyncConfigService._default_external_sync_bitable_config。"""
+        return TicketSyncConfigService._default_external_sync_bitable_config()
 
     @classmethod
-    def _default_bitable_pull_config(cls) -> dict[str, Any]:
-        """
-        构建飞书多维表格主动拉取默认配置。
+    def _default_bitable_pull_config(cls):
+        """委托到 TicketSyncConfigService._default_bitable_pull_config。"""
+        return TicketSyncConfigService._default_bitable_pull_config()
 
-        :return: 主动拉取配置默认值。
-        """
-        return {
-            "enabled": False,
-            "appId": "",
-            "appSecret": "",
-            "appToken": "",
-            "tableId": "",
-            "viewId": "",
-            "pageSize": 200,
-            "filterFormula": "",
-            "fieldMappings": [],
-            "sourceSystem": "feishu_bitable_pull",
-            "ticketNoField": "ticketNo",
-            "updatedAtField": "",
-            "sortField": "",
-            "includeRecordUrl": True,
-            "createdAfter": "",
-            "createdBefore": "",
-            "forceSync": False,
-            "sendGroupMessage": None,
-            "autoAppendTimeFilter": True,
-            "automation": {
-                "autoIdentify": True,
-                "autoLogPull": False,
-                "autoAiAnalysis": False,
-                "autoTranslate": True,
-            },
-        }
 
     @classmethod
-    def _default_group_push_config(cls) -> dict[str, Any]:
-        """
-        构建工单群推送默认配置。
-
-        :return: 群推送配置默认值。
-        """
-        return {
-            "enabled": False,
-            "sendMode": "push_config",
-            "pushIds": [],
-            "appChatIds": [],
-            "autoPushStatuses": list(cls.DEFAULT_GROUP_PUSH_AUTO_STATUSES),
-            "priorityRoutes": [],
-            "sendAfterExternalSync": False,
-            "sendAfterRemotePull": False,
-            "autoSendAfterTime": "",
-            "template": "",
-            "manualTemplate": "",
-        }
+    def _default_group_push_config(cls):
+        """委托到 TicketSyncConfigService._default_group_push_config。"""
+        return TicketSyncConfigService._default_group_push_config()
 
     @classmethod
-    def _default_message_sync_config(cls) -> dict[str, Any]:
-        """
-        构建工单评论多端同步默认配置。
+    def _default_message_sync_config(cls):
+        """委托到 TicketSyncConfigService._default_message_sync_config。"""
+        return TicketSyncConfigService._default_message_sync_config()
 
-        :return: 评论同步配置默认值。
-        """
-        return {
-            "enabled": False,
-            "feishuEventEnabled": False,
-            "feishuWsEnabled": False,
-            "feishuWsEncryptKey": "",
-            "feishuWsVerificationToken": "",
-            "allowedChatIds": [],
-            "ignoreBotOpenIds": [],
-            "syncFeishuCommentToTicket": True,
-            "syncFeishuCommentToBitable": False,
-            "syncTicketCommentToBitable": False,
-            "syncTicketCommentToFeishuThread": False,
-            "syncBitableNewStepToFeishuThread": False,
-            "bitableStepReasonField": "stepReason",
-            "bitableTicketNoField": "ticketNo",
-            "appendStepReasonFormat": "{date} {user}：{content}",
-        }
 
     @classmethod
-    def _default_person_reminder_config(cls) -> dict[str, Any]:
-        """
-        构建按人催办默认配置。
-
-        :return: 人维度催办配置默认值。
-        """
-        return {
-            "enabled": False,
-            "sendMode": "push_config",
-            "dataSource": "bitable",
-            "pushIds": [],
-            "appId": "",
-            "appSecret": "",
-            "feishuAppId": "",
-            "feishuAppSecret": "",
-            "appToken": "",
-            "tableId": "",
-            "viewId": "",
-            "filterFormula": "",
-            "personField": "",
-            "timeField": "",
-            "thresholdMinutes": 30,
-            "messageTemplate": "",
-            "rowsMarkdownTemplate": "",
-            "maxRowsPerPerson": 20,
-            "pageSize": 500,
-        }
+    def _default_person_reminder_config(cls):
+        """委托到 TicketSyncConfigService._default_person_reminder_config。"""
+        return TicketSyncConfigService._default_person_reminder_config()
 
     @classmethod
-    def _default_summary_report_config(cls) -> dict[str, Any]:
-        """
-        构建工单汇总通知默认配置。
+    def _default_summary_report_config(cls):
+        """委托到 TicketSyncConfigService._default_summary_report_config。"""
+        return TicketSyncConfigService._default_summary_report_config()
 
-        :return: 汇总通知配置默认值。
-        """
-        return {
-            "enabled": False,
-            "sendMode": "push_config",
-            "dataSource": "local",
-            "pushIds": [],
-            "appChatIds": [],
-            "appId": "",
-            "appSecret": "",
-            "timeField": "create_time",
-            "appToken": "",
-            "tableId": "",
-            "viewId": "",
-            "filterFormula": "",
-            "statusField": "状态",
-            "categoryField": "分类",
-            "priorityField": "优先级",
-            "bitableTimeField": "",
-            "pageSize": 500,
-            "aiEnabled": False,
-            "aiProviderCode": "",
-            "aiPromptCode": "",
-            "windowMinutes": 60,
-            "endDelayMinutes": 0,
-            "startTime": "",
-            "endTime": "",
-            "includeClosed": True,
-            "messageTemplate": "",
-        }
 
     @classmethod
-    def _default_remote_sync_config(cls) -> dict[str, Any]:
-        """
-        构建远端工单同步默认配置。
-
-        :return: 默认远端同步配置。
-        """
-        return {
-            "enabled": False,
-            "pullUrl": "",
-            "ackUrl": "",
-            "consumer": "",
-            "sourceSystem": "public",
-            "limit": 50,
-            "includeClosed": True,
-            "autoTranslateOnPull": True,
-            "timeoutSec": 30,
-            "headers": {
-                "cookie": "",
-                "authorization": "",
-                "origin": "",
-            },
-        }
+    def _default_remote_sync_config(cls):
+        """委托到 TicketSyncConfigService._default_remote_sync_config。"""
+        return TicketSyncConfigService._default_remote_sync_config()
 
     @classmethod
-    def _default_stat_classification_config(cls) -> dict[str, Any]:
-        """
-        构建工单分类统计枚举默认配置。
+    def _default_stat_classification_config(cls):
+        """委托到 TicketSyncConfigService._default_stat_classification_config。"""
+        return TicketSyncConfigService._default_stat_classification_config()
 
-        :return: 分类统计枚举配置。
-        """
-        return {
-            "issueTypes": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["issueTypes"]],
-            "rootCauseTypes": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["rootCauseTypes"]],
-            "solutionTypes": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["solutionTypes"]],
-            "resolutions": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["resolutions"]],
-            "problemPatterns": [dict(item) for item in cls.DEFAULT_TICKET_STAT_CLASSIFICATIONS["problemPatterns"]],
-        }
 
     @classmethod
-    def _default_ai_classification_config(cls) -> dict[str, Any]:
-        """
-        构建工单 AI 分类统计默认配置。
-
-        :return: AI 分类统计配置。
-        """
-        return {
-            "enabled": False,
-            "runOnExternalSync": False,
-            "runOnRemotePull": False,
-            "runOnManualCreate": False,
-            "runOnStatusChange": False,
-            "statusChangeTriggerStatuses": [],
-            "statusChangeForceReclassify": False,
-            "providerCode": "",
-            "promptCode": "ticket_stat_classify_default",
-            "promptContent": "",
-        }
+    def _default_ai_classification_config(cls):
+        """委托到 TicketSyncConfigService._default_ai_classification_config。"""
+        return TicketSyncConfigService._default_ai_classification_config()
 
     @classmethod
-    def _normalize_stat_option_rows(cls, value: Any, default_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """
-        归一化可视化维护的统计枚举行。
-
-        :param value: 前端提交的枚举行。
-        :param default_rows: 默认枚举。
-        :return: 去重后的枚举行。
-        """
-        source_rows = value if isinstance(value, list) else default_rows
-        result: list[dict[str, Any]] = []
-        seen_values: set[str] = set()
-        for row in source_rows:
-            if not isinstance(row, dict):
-                continue
-            option_value = str(row.get("value") or row.get("code") or row.get("id") or "").strip()
-            option_label = str(row.get("label") or row.get("name") or option_value).strip()
-            if not option_value or option_value in seen_values:
-                continue
-            normalized_row: dict[str, Any] = {
-                "value": option_value,
-                "label": option_label or option_value,
-            }
-            if "isProblem" in row:
-                raw_is_problem = row.get("isProblem")
-                normalized_row["isProblem"] = raw_is_problem if isinstance(raw_is_problem, bool) else None
-            elif "is_problem" in row:
-                raw_is_problem = row.get("is_problem")
-                normalized_row["isProblem"] = raw_is_problem if isinstance(raw_is_problem, bool) else None
-            if str(row.get("remark") or "").strip():
-                normalized_row["remark"] = str(row.get("remark") or "").strip()
-            for extra_key in (
-                "moduleCode",
-                "issueTypeId",
-                "rootCauseType",
-                "resolutionCode",
-                "description",
-                "positiveExamples",
-                "negativeExamples",
-                "enabled",
-            ):
-                if extra_key in row:
-                    normalized_row[extra_key] = row.get(extra_key)
-            for snake_key, camel_key in (
-                ("module_code", "moduleCode"),
-                ("issue_type_id", "issueTypeId"),
-                ("root_cause_type", "rootCauseType"),
-                ("resolution_code", "resolutionCode"),
-                ("positive_examples", "positiveExamples"),
-                ("negative_examples", "negativeExamples"),
-            ):
-                if snake_key in row and camel_key not in normalized_row:
-                    normalized_row[camel_key] = row.get(snake_key)
-            result.append(normalized_row)
-            seen_values.add(option_value)
-        return result or [dict(item) for item in default_rows]
+    def _normalize_stat_option_rows(cls, value, default_rows):
+        """委托到 TicketSyncConfigService._normalize_stat_option_rows。"""
+        return TicketSyncConfigService._normalize_stat_option_rows(value, default_rows)
 
     @classmethod
-    def _normalize_stat_classification_config(cls, value: Any) -> dict[str, Any]:
-        """
-        归一化工单分类统计配置。
-
-        :param value: 原始配置。
-        :return: 带默认值的配置。
-        """
-        source = value if isinstance(value, dict) else {}
-        defaults = cls._default_stat_classification_config()
-        return {
-            "issueTypes": cls._normalize_stat_option_rows(
-                source.get("issueTypes") or source.get("issue_types"),
-                defaults["issueTypes"],
-            ),
-            "rootCauseTypes": cls._normalize_stat_option_rows(
-                source.get("rootCauseTypes") or source.get("root_cause_types"),
-                defaults["rootCauseTypes"],
-            ),
-            "solutionTypes": cls._normalize_stat_option_rows(
-                source.get("solutionTypes") or source.get("solution_types"),
-                defaults["solutionTypes"],
-            ),
-            "resolutions": cls._normalize_stat_option_rows(
-                source.get("resolutions"),
-                defaults["resolutions"],
-            ),
-            "problemPatterns": cls._normalize_stat_option_rows(
-                source.get("problemPatterns") or source.get("problem_patterns"),
-                defaults["problemPatterns"],
-            ),
-        }
+    def _normalize_ai_classification_config(cls, value):
+        """委托到 TicketSyncConfigService._normalize_ai_classification_config。"""
+        return TicketSyncConfigService._normalize_ai_classification_config(value)
 
     @classmethod
-    def _normalize_ai_classification_config(cls, value: Any) -> dict[str, Any]:
-        """
-        归一化工单 AI 分类统计配置。
-
-        :param value: 原始配置。
-        :return: 带默认值的配置。
-        """
-        source = value if isinstance(value, dict) else {}
-        defaults = cls._default_ai_classification_config()
-        return {
-            "enabled": bool(source.get("enabled", defaults["enabled"])),
-            "runOnExternalSync": bool(source.get("runOnExternalSync", source.get("run_on_external_sync", False))),
-            "runOnRemotePull": bool(source.get("runOnRemotePull", source.get("run_on_remote_pull", False))),
-            "runOnManualCreate": bool(source.get("runOnManualCreate", source.get("run_on_manual_create", False))),
-            "runOnStatusChange": bool(source.get("runOnStatusChange", source.get("run_on_status_change", False))),
-            "statusChangeTriggerStatuses": cls._normalize_ai_classification_status_triggers(
-                source.get("statusChangeTriggerStatuses", source.get("status_change_trigger_statuses"))
-            ),
-            "statusChangeForceReclassify": bool(
-                source.get("statusChangeForceReclassify", source.get("status_change_force_reclassify", False))
-            ),
-            "providerCode": str(source.get("providerCode") or source.get("provider_code") or "").strip(),
-            "promptCode": str(
-                source.get("promptCode")
-                or source.get("prompt_code")
-                or defaults["promptCode"]
-                or ""
-            ).strip(),
-            "promptContent": str(source.get("promptContent") or source.get("prompt_content") or "").strip(),
-        }
+    def _normalize_external_field_model_config(cls, value):
+        """委托到 TicketSyncConfigService._normalize_external_field_model_config。"""
+        return TicketSyncConfigService._normalize_external_field_model_config(value)
 
     @classmethod
-    def _normalize_ai_classification_status_triggers(cls, value: Any) -> list[str]:
-        """
-        归一化状态变更触发 AI 分类统计的目标状态列表。
-
-        :param value: 前端或历史配置提交的状态编码列表。
-        :return: 去重后的状态编码列表。
-        """
-        if not isinstance(value, list):
-            return []
-        normalized: list[str] = []
-        for item in value:
-            status = str(item or "").strip()
-            if status and status not in normalized:
-                normalized.append(status)
-        return normalized
+    def _normalize_bitable_filter_config(cls, value):
+        """委托到 TicketSyncConfigService._normalize_bitable_filter_config。"""
+        return TicketSyncConfigService._normalize_bitable_filter_config(value)
 
     @classmethod
-    def _normalize_external_field_model_config(cls, value: Any) -> dict[str, Any]:
-        """
-        归一化外部工单字段模型配置。
-
-        :param value: 原始配置。
-        :return: 归一化后的字段模型。
-        """
-        source = value if isinstance(value, dict) else {}
-        source_fields = source.get("fields") if isinstance(source.get("fields"), list) else []
-        normalized_fields: list[dict[str, Any]] = []
-        seen_field_names: set[str] = set()
-        for field in source_fields or cls.DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS:
-            if not isinstance(field, dict):
-                continue
-            field_name = str(field.get("fieldName") or field.get("value") or field.get("name") or "").strip()
-            if not field_name or field_name in seen_field_names:
-                continue
-            normalized_fields.append(
-                {
-                    "fieldName": field_name,
-                    "label": str(field.get("label") or field.get("name") or field_name).strip() or field_name,
-                    "required": bool(field.get("required")),
-                    "category": str(field.get("category") or "custom").strip() or "custom",
-                    "description": str(field.get("description") or "").strip(),
-                }
-            )
-            seen_field_names.add(field_name)
-        if not normalized_fields:
-            normalized_fields = [dict(item) for item in cls.DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS]
-        return {"fields": normalized_fields}
+    def _format_bitable_filter_config(cls, value):
+        """委托到 TicketSyncConfigService._format_bitable_filter_config。"""
+        return TicketSyncConfigService._format_bitable_filter_config(value)
 
     @classmethod
-    def _derive_required_fields_from_external_field_model(cls, value: Any) -> list[str]:
-        """
-        根据外部字段模型推导必填字段列表。
-
-        :param value: 外部字段模型配置。
-        :return: 必填字段列表。
-        """
-        model_config = cls._normalize_external_field_model_config(value)
-        required_fields: list[str] = []
-        for item in model_config.get("fields") or []:
-            if not isinstance(item, dict):
-                continue
-            if not bool(item.get("required")):
-                continue
-            field_name = str(item.get("fieldName") or "").strip()
-            if field_name and field_name not in required_fields:
-                required_fields.append(field_name)
-        return required_fields or list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS)
+    def _apply_bitable_common_defaults(cls, config, *, bitable_common, keep_filter_formula=True):
+        """委托到 TicketSyncConfigService._apply_bitable_common_defaults。"""
+        return TicketSyncConfigService._apply_bitable_common_defaults(config, bitable_common=bitable_common, keep_filter_formula=keep_filter_formula)
 
     @classmethod
-    def _normalize_bitable_filter_config(cls, value: Any) -> str | dict[str, Any]:
-        """
-        归一化飞书多维表格查询过滤配置。
-
-        :param value: 页面保存的 JSON 字符串，或任务参数直接传入的 JSON 对象。
-        :return: 字符串或对象；空值返回空字符串。
-        """
-        if isinstance(value, dict):
-            return value
-        if value in (None, ""):
-            return ""
-        return str(value or "").strip()
-
-    @classmethod
-    def _parse_bitable_filter_config(cls, value: Any) -> dict[str, Any]:
-        """
-        将飞书多维表格过滤配置解析为条件对象。
-
-        :param value: JSON 字符串或字典。
-        :return: 可传给飞书 records/search 的 filter 对象；无效时返回空字典。
-        """
-        if isinstance(value, dict):
-            return dict(value)
-        if value in (None, ""):
-            return {}
-        try:
-            parsed = json.loads(str(value or "").strip())
-        except Exception as exc:
-            raise ValueError("过滤条件格式错误，请填写飞书 records/search filter JSON") from exc
-        return dict(parsed) if isinstance(parsed, dict) else {}
-
-    @classmethod
-    def _format_bitable_filter_config(cls, value: Any) -> str | dict[str, Any]:
-        """
-        按原输入形态输出过滤配置，兼容页面保存字符串和任务参数对象。
-
-        :param value: 过滤条件对象。
-        :return: JSON 字符串或对象。
-        """
-        if isinstance(value, dict):
-            return value
-        return ""
-
-    @classmethod
-    def _normalize_bitable_common_config(cls, value: Any, *, feishu_auth: dict[str, Any]) -> dict[str, Any]:
-        """
-        归一化飞书多维表格公共配置。
-
-        :param value: 原始公共配置。
-        :param feishu_auth: 飞书统一凭证。
-        :return: 归一化后的公共配置。
-        """
-        source = value if isinstance(value, dict) else {}
-        config = {**cls._default_bitable_common_config(), **source}
-        config["appId"] = str(config.get("appId") or "").strip()
-        config["appSecret"] = str(config.get("appSecret") or "").strip()
-        config["appToken"] = str(config.get("appToken") or "").strip()
-        config["tableId"] = str(config.get("tableId") or "").strip()
-        config["viewId"] = str(config.get("viewId") or "").strip()
-        config["pageSize"] = min(max(SyncUtil.safe_int(config.get("pageSize")) or 500, 1), 500)
-        config["filterFormula"] = cls._normalize_bitable_filter_config(config.get("filterFormula"))
-        return config
-
-    @classmethod
-    def _apply_bitable_common_defaults(
-        cls,
-        config: dict[str, Any] | None,
-        *,
-        bitable_common: dict[str, Any],
-        keep_filter_formula: bool = True,
-    ) -> dict[str, Any]:
-        """
-        将公共多维表格配置补齐到具体业务配置中。
-
-        :param config: 业务侧配置。
-        :param bitable_common: 公共多维表格配置。
-        :param keep_filter_formula: 是否保留业务侧的 filterFormula 覆盖。
-        :return: 合并后的配置。
-        """
-        source = dict(config or {})
-        for key in ("appId", "appSecret", "appToken", "tableId", "viewId"):
-            if not str(source.get(key) or "").strip():
-                source[key] = bitable_common.get(key)
-        page_size = SyncUtil.safe_int(source.get("pageSize"))
-        if page_size is None:
-            source["pageSize"] = bitable_common.get("pageSize")
-        else:
-            source["pageSize"] = min(max(page_size, 1), 500)
-        if keep_filter_formula and not cls._normalize_bitable_filter_config(source.get("filterFormula")):
-            source["filterFormula"] = bitable_common.get("filterFormula")
-        return source
-
-    @classmethod
-    def _resolve_bitable_runtime_config(
-        cls,
-        config: dict[str, Any],
-        section_key: str,
-        default_config: dict[str, Any],
-        *,
-        keep_filter_formula: bool = True,
-    ) -> dict[str, Any]:
-        """
-        解析运行时多维表格配置，只在真正执行飞书查询前继承公共配置。
-
-        :param config: 完整同步配置。
-        :param section_key: 业务配置段名称。
-        :param default_config: 业务配置默认值。
-        :param keep_filter_formula: 是否允许公共过滤公式兜底。
-        :return: 已按“独立配置优先，公共配置兜底”合并后的运行时配置。
-        """
-        feishu_auth = config.get("feishuAuth") if isinstance(config.get("feishuAuth"), dict) else {}
-        bitable_common = config.get("bitableCommon") if isinstance(config.get("bitableCommon"), dict) else {}
-        section_config = config.get(section_key) if isinstance(config.get(section_key), dict) else {}
-        runtime_config = {**default_config, **section_config}
-        runtime_config = cls._apply_bitable_common_defaults(
-            runtime_config,
-            bitable_common=bitable_common,
-            keep_filter_formula=keep_filter_formula,
-        )
-        if not str(runtime_config.get("appId") or "").strip():
-            runtime_config["appId"] = str(feishu_auth.get("appId") or "").strip()
-        if not str(runtime_config.get("appSecret") or "").strip():
-            runtime_config["appSecret"] = str(feishu_auth.get("appSecret") or "").strip()
-        return runtime_config
-
-    @classmethod
-    def _merge_non_empty_runtime_override(
-        cls,
-        base_config: dict[str, Any],
-        override_config: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        """
-        合并运行时覆盖配置，空字符串不覆盖已继承的公共配置。
-
-        :param base_config: 已解析的基础运行时配置。
-        :param override_config: 页面预览或定时任务传入的覆盖配置。
-        :return: 合并后的运行时配置。
-        """
-        merged_config = dict(base_config or {})
-        if not isinstance(override_config, dict):
-            return merged_config
-        for key, value in override_config.items():
-            if value is None:
-                continue
-            if isinstance(value, str) and not value.strip():
-                continue
-            merged_config[key] = value
-        return merged_config
-
-    @classmethod
-    def _normalize_bitable_field_mappings(cls, value: Any) -> list[dict[str, Any]]:
-        """
-        归一化多维表格字段映射列表。
-
-        :param value: 原始映射列表。
-        :return: 归一化后的映射。
-        """
-        source_rows = value if isinstance(value, list) else []
-        mappings: list[dict[str, Any]] = []
-        seen_targets: set[str] = set()
-        for row in source_rows:
-            if not isinstance(row, dict):
-                continue
-            source_field = str(row.get("sourceField") or row.get("from") or row.get("bitableField") or "").strip()
-            target_field = cls._normalize_bitable_pull_target_field(
-                row.get("targetField") or row.get("to") or row.get("externalField")
-            )
-            if not source_field or not target_field:
-                continue
-            unique_key = f"{source_field}->{target_field}"
-            if unique_key in seen_targets:
-                continue
-            mappings.append(
-                {
-                    "sourceField": source_field,
-                    "targetField": target_field,
-                    "defaultValue": row.get("defaultValue"),
-                    "joinSeparator": str(row.get("joinSeparator") or "").strip() or ",",
-                }
-            )
-            seen_targets.add(unique_key)
-        return mappings
+    def _merge_non_empty_runtime_override(cls, base_config, override_config):
+        """委托到 TicketSyncConfigService._merge_non_empty_runtime_override。"""
+        return TicketSyncConfigService._merge_non_empty_runtime_override(base_config, override_config)
 
     @classmethod
     def _normalize_bitable_pull_target_field(cls, value: Any) -> str:
-        """
-        归一化主动拉取字段映射的目标字段名。
-
-        :param value: 配置中的目标字段名。
-        :return: 外部同步模型识别的规范字段名。
-        """
-        field_name = str(value or "").strip()
-        alias_map = {
-            "ticketModel": "ticketModle",
-            "ticket_model": "ticketModle",
-            "moduleName": "ticketModle",
-            "module_name": "ticketModle",
-            "projectName": "ticketVender",
-            "project_name": "ticketVender",
-            "merchantName": "ticketVender",
-            "merchant_name": "ticketVender",
-            "internalOwnerName": "internalOwner",
-            "internal_owner_name": "internalOwner",
-            "ticketAssigneeName": "ticketAssignee",
-            "ticket_assignee_name": "ticketAssignee",
-            "assigneeName": "ticketAssignee",
-            "assignee_name": "ticketAssignee",
-            "ticketAssigneeEmail": "ticketAssigneeEmail",
-            "ticket_assignee_email": "ticketAssigneeEmail",
-            "assigneeEmail": "ticketAssigneeEmail",
-            "assignee_email": "ticketAssigneeEmail",
-        }
-        return alias_map.get(field_name, field_name)
+        """委托到 FeishuBitableUtil.normalize_pull_target_field。"""
+        return FeishuBitableUtil.normalize_pull_target_field(value)
 
     @classmethod
-    def _normalize_bitable_pull_config(
-        cls,
-        value: Any,
-        *,
-        feishu_auth: dict[str, Any],
-        bitable_common: dict[str, Any],
-    ) -> dict[str, Any]:
-        """
-        归一化飞书多维表格主动拉取配置。
-
-        :param value: 原始配置。
-        :param feishu_auth: 飞书统一凭证。
-        :param bitable_common: 多维公共配置。
-        :return: 归一化后的主动拉取配置。
-        """
-        source = value if isinstance(value, dict) else {}
-        config = {**cls._default_bitable_pull_config(), **source}
-        config["enabled"] = SyncUtil.to_bool(config.get("enabled"), False)
-        config["appId"] = str(config.get("appId") or "").strip() or str(feishu_auth.get("appId") or "").strip()
-        config["appSecret"] = (
-            str(config.get("appSecret") or "").strip() or str(feishu_auth.get("appSecret") or "").strip()
-        )
-        config["appToken"] = str(config.get("appToken") or "").strip()
-        config["tableId"] = str(config.get("tableId") or "").strip()
-        config["viewId"] = str(config.get("viewId") or "").strip()
-        config["pageSize"] = min(max(SyncUtil.safe_int(config.get("pageSize")) or 200, 1), 500)
-        config["filterFormula"] = cls._normalize_bitable_filter_config(config.get("filterFormula"))
-        config["sourceSystem"] = (
-            str(config.get("sourceSystem") or "feishu_bitable_pull").strip() or "feishu_bitable_pull"
-        )
-        config["ticketNoField"] = str(config.get("ticketNoField") or "ticketNo").strip() or "ticketNo"
-        config["updatedAtField"] = str(config.get("updatedAtField") or "").strip()
-        config["sortField"] = str(config.get("sortField") or "").strip()
-        config["includeRecordUrl"] = SyncUtil.to_bool(config.get("includeRecordUrl"), True)
-        config["createdAfter"] = str(config.get("createdAfter") or "").strip()
-        config["createdBefore"] = str(config.get("createdBefore") or "").strip()
-        config["forceSync"] = SyncUtil.to_bool(config.get("forceSync"), False)
-        raw_send_group = config.get("sendGroupMessage")
-        if raw_send_group is None or (isinstance(raw_send_group, str) and str(raw_send_group).strip() == ""):
-            config["sendGroupMessage"] = None
-        else:
-            config["sendGroupMessage"] = SyncUtil.to_bool(raw_send_group)
-        config["autoAppendTimeFilter"] = SyncUtil.to_bool(config.get("autoAppendTimeFilter"), True)
-        config["fieldMappings"] = cls._normalize_bitable_field_mappings(config.get("fieldMappings"))
-        automation = config.get("automation") if isinstance(config.get("automation"), dict) else {}
-        config["automation"] = {
-            "autoIdentify": SyncUtil.to_bool(automation.get("autoIdentify"), True),
-            "autoLogPull": SyncUtil.to_bool(automation.get("autoLogPull"), False),
-            "autoAiAnalysis": SyncUtil.to_bool(automation.get("autoAiAnalysis"), False),
-            "autoTranslate": SyncUtil.to_bool(automation.get("autoTranslate"), True),
-        }
-        return config
+    def _normalize_bitable_pull_config(cls, value, *, feishu_auth, bitable_common):
+        """委托到 TicketSyncConfigService._normalize_bitable_pull_config。"""
+        return TicketSyncConfigService._normalize_bitable_pull_config(value, feishu_auth=feishu_auth, bitable_common=bitable_common)
 
     @classmethod
-    def _resolve_bitable_pull_created_after(cls, value: Any) -> datetime | None:
-        """
-        解析飞书多维表格主动拉取的创建时间下限。
-
-        :param value: 用户指定的时间，支持 datetime、时间戳或常见日期时间文本。
-        :return: 可比较的时间对象；为空或无法解析时返回 None。
-        """
-        if value in (None, ""):
-            return None
-        return SyncUtil.parse_datetime_value(value)
+    def _datetime_to_bitable_filter_millis(cls, value):
+        """委托到 TicketSyncConfigService._datetime_to_bitable_filter_millis。"""
+        return TicketSyncConfigService._datetime_to_bitable_filter_millis(value)
 
     @classmethod
-    def _datetime_to_bitable_filter_millis(cls, value: datetime) -> int:
-        """
-        将 datetime 转换为飞书多维表格日期过滤使用的毫秒时间戳。
-
-        :param value: 时间对象；无时区时按本地时间解释。
-        :return: 13 位毫秒时间戳。
-        """
-        return int(value.timestamp() * 1000)
+    def _condition_needs_dynamic_time_value(cls, condition, *, time_field_names):
+        """委托到 TicketSyncConfigService._condition_needs_dynamic_time_value。"""
+        return TicketSyncConfigService._condition_needs_dynamic_time_value(condition, time_field_names=time_field_names)
 
     @classmethod
-    def _resolve_bitable_pull_create_time_field(cls, field_mappings: list[dict[str, Any]]) -> str:
-        """
-        从主动拉取字段映射中解析外部创建时间对应的多维字段名。
-
-        :param field_mappings: 字段映射配置。
-        :return: 多维表格创建时间字段名。
-        """
-        for item in field_mappings or []:
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("targetField") or "").strip() == "createTime":
-                source_field = str(item.get("sourceField") or "").strip()
-                if source_field:
-                    return source_field
-        return "创建时间"
+    def _build_bitable_pull_time_filters(cls, *, filter_formula, created_after, created_before=None, updated_at_field="", auto_append_time_filter=True):
+        """委托到 TicketSyncConfigService._build_bitable_pull_time_filters。"""
+        return TicketSyncConfigService._build_bitable_pull_time_filters(filter_formula=filter_formula, created_after=created_after, created_before=created_before, updated_at_field=updated_at_field, auto_append_time_filter=auto_append_time_filter)
 
     @classmethod
-    def _condition_needs_dynamic_time_value(
-        cls,
-        condition: dict[str, Any],
-        *,
-        time_field_names: set[str],
-    ) -> bool:
-        """
-        判断过滤条件是否需要补齐动态时间值。
-
-        :param condition: 飞书 filter 条件。
-        :param time_field_names: 可识别为时间字段的字段名集合。
-        :return: 时间比较条件 value 为空时返回 True。
-        """
-        if not isinstance(condition, dict):
-            return False
-        operator = str(condition.get("operator") or "").strip()
-        if operator not in {"isGreater", "isGreaterEqual", "isLess", "isLessEqual"}:
-            return False
-        field_name = str(condition.get("field_name") or "").strip()
-        if field_name not in time_field_names:
-            return False
-        return condition.get("value") in (None, "", [])
-
-    @classmethod
-    def _fill_dynamic_time_filter_values(
-        cls,
-        filter_item: Any,
-        *,
-        time_field_names: set[str],
-        filter_value: Any,
-    ) -> Any:
-        """
-        递归补齐时间过滤条件中的动态 value。
-
-        :param filter_item: 飞书 filter 条件、条件组或条件列表。
-        :param time_field_names: 可识别为时间字段的字段名集合。
-        :param filter_value: 时间窗口下限值。
-        :return: 补齐后的 filter 条件结构。
-        """
-        if isinstance(filter_item, list):
-            return [
-                cls._fill_dynamic_time_filter_values(
-                    item,
-                    time_field_names=time_field_names,
-                    filter_value=filter_value,
-                )
-                for item in filter_item
-                if isinstance(item, dict)
-            ]
-        if not isinstance(filter_item, dict):
-            return filter_item
-
-        normalized_filter = dict(filter_item)
-        if isinstance(normalized_filter.get("children"), list):
-            normalized_filter["children"] = cls._fill_dynamic_time_filter_values(
-                normalized_filter.get("children"),
-                time_field_names=time_field_names,
-                filter_value=filter_value,
-            )
-        if isinstance(normalized_filter.get("conditions"), list):
-            normalized_filter["conditions"] = cls._fill_dynamic_time_filter_values(
-                normalized_filter.get("conditions"),
-                time_field_names=time_field_names,
-                filter_value=filter_value,
-            )
-        if cls._condition_needs_dynamic_time_value(
-            normalized_filter,
-            time_field_names=time_field_names,
-        ):
-            normalized_filter["value"] = filter_value
-        return normalized_filter
-
-    @classmethod
-    def _build_bitable_pull_time_filters(
-        cls,
-        *,
-        filter_formula: Any,
-        created_after: datetime | None,
-        created_before: datetime | None = None,
-        updated_at_field: str = "",
-        auto_append_time_filter: bool = True,
-    ) -> list[dict[str, Any]]:
-        """
-        构建主动拉取时间窗口对应的飞书 records/search filter 列表。
-
-        :param filter_formula: 用户配置的 filter 条件。
-        :param created_after: 时间窗口下限。
-        :param created_before: 时间窗口上限。
-        :param updated_at_field: 多维表格更新时间字段名。
-        :param auto_append_time_filter: True 时保持现有行为（自动追加过去1小时窗口）；
-            False 时使用精确时间比较（isGreater / isLess）。
-        :return: 一个或多个 filter 条件对象；多个对象表示需要分别请求飞书后按 record_id 合并。
-        """
-        parsed_filter = cls._parse_bitable_filter_config(filter_formula)
-
-        if auto_append_time_filter and not created_after:
-            return [parsed_filter] if parsed_filter else []
-
-        time_field = str(updated_at_field or "").strip()
-        time_conditions = []
-        if created_after:
-            start_millis = cls._datetime_to_bitable_filter_millis(created_after)
-            time_conditions.append(
-                {
-                    "field_name": time_field,
-                    "operator": "isGreater",
-                    "value": ["ExactDate", f"{start_millis}"],
-                }
-            )
-        if created_before:
-            end_millis = cls._datetime_to_bitable_filter_millis(created_before)
-            time_conditions.append(
-                {
-                    "field_name": time_field,
-                    "operator": "isLess",
-                    "value": ["ExactDate", f"{end_millis}"],
-                }
-            )
-
-        if not parsed_filter:
-            return [{"conjunction": "and", "conditions": time_conditions}] if time_conditions else []
-
-        if isinstance(parsed_filter.get("children"), list):
-            if time_conditions:
-                parsed_filter["children"].append(
-                    {
-                        "conjunction": "and",
-                        "conditions": time_conditions,
-                    }
-                )
-            return [parsed_filter]
-
-        return [parsed_filter]
-
-
-    @classmethod
-    def _query_bitable_pull_records(
-        cls,
-        pull_config: dict[str, Any],
-        filters: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """
-        按一个或多个飞书 filter 查询主动拉取记录，并按 record_id 去重。
-
-        :param pull_config: 主动拉取配置。
-        :param filters: 过滤条件列表。
-        :return: 去重后的飞书记录。
-        """
-        if not filters:
-            return TicketSyncNotifyService.query_bitable_records(pull_config)
-        merged_records: list[dict[str, Any]] = []
-        seen_record_ids: set[str] = set()
-        for filter_item in filters:
-            query_config = dict(pull_config)
-            query_config["filterFormula"] = filter_item
-            page_records = TicketSyncNotifyService.query_bitable_records(query_config)
-            for record in page_records:
-                if not isinstance(record, dict):
-                    continue
-                record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
-                unique_key = record_id or SyncUtil.text_sha256(json.dumps(record, ensure_ascii=False, sort_keys=True))
-                if unique_key in seen_record_ids:
-                    continue
-                seen_record_ids.add(unique_key)
-                merged_records.append(record)
-        return merged_records
-
     @classmethod
     def _normalize_sync_config(cls, config: dict[str, Any] | None) -> dict[str, Any]:
-        merged = cls._default_sync_config()
-        if isinstance(config, dict):
-            merged.update(config)
-        feishu_auth = merged.get("feishuAuth") if isinstance(merged.get("feishuAuth"), dict) else {}
-        feishu_auth = {**cls._default_feishu_auth_config(), **feishu_auth}
-        feishu_auth["appId"] = str(feishu_auth.get("appId") or "").strip()
-        feishu_auth["appSecret"] = str(feishu_auth.get("appSecret") or "").strip()
-        merged["feishuAuth"] = feishu_auth
-        merged["bitableCommon"] = cls._normalize_bitable_common_config(
-            merged.get("bitableCommon"),
-            feishu_auth=feishu_auth,
-        )
-        merged["externalFieldModel"] = cls._normalize_external_field_model_config(merged.get("externalFieldModel"))
-        if not isinstance(merged.get("logPullDefaults"), dict):
-            merged["logPullDefaults"] = cls._default_sync_config()["logPullDefaults"]
-        if not isinstance(merged.get("promptTemplates"), dict):
-            merged["promptTemplates"] = cls._default_sync_config()["promptTemplates"]
-        merged["statClassification"] = cls._normalize_stat_classification_config(merged.get("statClassification"))
-        merged["aiClassification"] = cls._normalize_ai_classification_config(merged.get("aiClassification"))
-        external_sync_bitable = (
-            merged.get("externalSyncBitable")
-            if isinstance(merged.get("externalSyncBitable"), dict)
-            else {}
-        )
-        external_sync_bitable = {
-            **cls._default_external_sync_bitable_config(),
-            **external_sync_bitable,
-        }
-        external_sync_bitable["enabled"] = bool(external_sync_bitable.get("enabled"))
-        external_sync_bitable["appId"] = str(external_sync_bitable.get("appId") or "").strip()
-        external_sync_bitable["appSecret"] = str(external_sync_bitable.get("appSecret") or "").strip()
-        external_sync_bitable["appToken"] = str(external_sync_bitable.get("appToken") or "").strip()
-        external_sync_bitable["tableId"] = str(external_sync_bitable.get("tableId") or "").strip()
-        external_sync_bitable["viewId"] = str(external_sync_bitable.get("viewId") or "").strip()
-        merged["externalSyncBitable"] = external_sync_bitable
-        merged["bitablePull"] = cls._normalize_bitable_pull_config(
-            merged.get("bitablePull"),
-            feishu_auth=feishu_auth,
-            bitable_common=merged["bitableCommon"],
-        )
-        external_sync_required_fields = merged.get("externalSyncRequiredFields")
-        if isinstance(external_sync_required_fields, list):
-            normalized_required_fields: list[str] = []
-            for item in external_sync_required_fields:
-                field_name = str(item or "").strip()
-                if field_name and field_name not in normalized_required_fields:
-                    normalized_required_fields.append(field_name)
-            merged["externalSyncRequiredFields"] = normalized_required_fields or list(
-                cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS
-            )
-        else:
-            merged["externalSyncRequiredFields"] = cls._derive_required_fields_from_external_field_model(
-                merged.get("externalFieldModel")
-            )
-        if not isinstance(merged.get("remoteSync"), dict):
-            merged["remoteSync"] = cls._default_remote_sync_config()
-        else:
-            remote_sync = dict(cls._default_remote_sync_config())
-            remote_sync.update(merged.get("remoteSync") or {})
-            remote_headers = remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}
-            remote_sync["headers"] = {**cls._default_remote_sync_config()["headers"], **remote_headers}
-            remote_sync["enabled"] = bool(remote_sync.get("enabled"))
-            remote_sync["limit"] = min(max(int(remote_sync.get("limit") or 50), 1), 200)
-            remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
-            remote_sync["autoTranslateOnPull"] = bool(remote_sync.get("autoTranslateOnPull", True))
-            remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
-            remote_sync["pullUrl"] = str(remote_sync.get("pullUrl") or "").strip()
-            remote_sync["ackUrl"] = str(remote_sync.get("ackUrl") or "").strip()
-            remote_sync["consumer"] = str(remote_sync.get("consumer") or "").strip()
-            remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
-            merged["remoteSync"] = remote_sync
-        group_push = merged.get("groupPush") if isinstance(merged.get("groupPush"), dict) else {}
-        default_group_push = cls._default_group_push_config()
-        group_push = {**default_group_push, **group_push}
-        group_push["sendMode"] = TicketSyncNotifyService._normalize_send_mode(group_push.get("sendMode"))
-        group_push["enabled"] = bool(group_push.get("enabled"))
-        group_push["sendAfterExternalSync"] = bool(group_push.get("sendAfterExternalSync"))
-        group_push["sendAfterRemotePull"] = bool(group_push.get("sendAfterRemotePull"))
-        group_push["pushIds"] = TicketSyncNotifyService._normalize_push_ids(group_push.get("pushIds"))
-        group_push["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(group_push.get("appChatIds"))
-        group_push["autoPushStatuses"] = cls._normalize_group_push_auto_statuses(
-            group_push.get("autoPushStatuses", group_push.get("auto_push_statuses")),
-            fallback=default_group_push.get("autoPushStatuses"),
-        )
-        parsed_group_push_auto_send_after = SyncUtil.parse_datetime_value(
-            group_push.get("autoSendAfterTime")
-            or group_push.get("auto_send_after_time")
-        )
-        group_push["autoSendAfterTime"] = (
-            parsed_group_push_auto_send_after.isoformat()
-            if parsed_group_push_auto_send_after
-            else ""
-        )
-        group_push["appId"] = str(group_push.get("appId") or "").strip()
-        group_push["appSecret"] = str(group_push.get("appSecret") or "").strip()
-        priority_routes = group_push.get("priorityRoutes") if isinstance(group_push.get("priorityRoutes"), list) else []
-        normalized_priority_routes: list[dict[str, Any]] = []
-        for route in priority_routes:
-            if not isinstance(route, dict):
-                continue
-            priorities_raw = route.get("priorities")
-            if isinstance(priorities_raw, str):
-                priorities = [TicketSyncNotifyService._normalize_priority(item) for item in priorities_raw.split(",")]
-            elif isinstance(priorities_raw, list):
-                priorities = [TicketSyncNotifyService._normalize_priority(item) for item in priorities_raw]
-            else:
-                priorities = []
-            priorities = [item for item in priorities if item]
-            push_ids = TicketSyncNotifyService._normalize_push_ids(route.get("pushIds"))
-            chat_ids = TicketSyncNotifyService._normalize_chat_ids(route.get("chatIds") or route.get("appChatIds"))
-            if not priorities:
-                continue
-            normalized_priority_routes.append(
-                {
-                    "priorities": priorities,
-                    "pushIds": push_ids,
-                    "chatIds": chat_ids,
-                }
-            )
-        group_push["priorityRoutes"] = normalized_priority_routes
-        group_push["template"] = str(group_push.get("template") or "").strip()
-        group_push["manualTemplate"] = str(group_push.get("manualTemplate") or "").strip()
-        if not group_push["appId"]:
-            group_push["appId"] = feishu_auth["appId"]
-        if not group_push["appSecret"]:
-            group_push["appSecret"] = feishu_auth["appSecret"]
-        merged["groupPush"] = group_push
+        """委托到 TicketSyncConfigService._normalize_sync_config。"""
+        return TicketSyncConfigService._normalize_sync_config(config)
 
-        message_sync = merged.get("messageSync") if isinstance(merged.get("messageSync"), dict) else {}
-        default_message_sync = cls._default_message_sync_config()
-        message_sync = {**default_message_sync, **message_sync}
-        message_sync["enabled"] = SyncUtil.to_bool(message_sync.get("enabled"), False)
-        message_sync["feishuEventEnabled"] = SyncUtil.to_bool(message_sync.get("feishuEventEnabled"), False)
-        message_sync["feishuWsEnabled"] = SyncUtil.to_bool(message_sync.get("feishuWsEnabled"), False)
-        message_sync["feishuWsEncryptKey"] = str(message_sync.get("feishuWsEncryptKey") or "").strip()
-        message_sync["feishuWsVerificationToken"] = str(
-            message_sync.get("feishuWsVerificationToken") or ""
-        ).strip()
-        message_sync["allowedChatIds"] = TicketSyncNotifyService._normalize_chat_ids(
-            message_sync.get("allowedChatIds")
-        )
-        message_sync["ignoreBotOpenIds"] = [
-            str(item or "").strip()
-            for item in (
-                message_sync.get("ignoreBotOpenIds")
-                if isinstance(message_sync.get("ignoreBotOpenIds"), list)
-                else str(message_sync.get("ignoreBotOpenIds") or "").split(",")
-            )
-            if str(item or "").strip()
-        ]
-        message_sync["syncFeishuCommentToTicket"] = SyncUtil.to_bool(
-            message_sync.get("syncFeishuCommentToTicket"),
-            True,
-        )
-        message_sync["syncFeishuCommentToBitable"] = SyncUtil.to_bool(
-            message_sync.get("syncFeishuCommentToBitable"),
-            False,
-        )
-        message_sync["syncTicketCommentToBitable"] = SyncUtil.to_bool(
-            message_sync.get("syncTicketCommentToBitable"),
-            False,
-        )
-        message_sync["syncTicketCommentToFeishuThread"] = SyncUtil.to_bool(
-            message_sync.get("syncTicketCommentToFeishuThread"),
-            False,
-        )
-        message_sync["syncBitableNewStepToFeishuThread"] = SyncUtil.to_bool(
-            message_sync.get("syncBitableNewStepToFeishuThread"),
-            False,
-        )
-        message_sync["bitableStepReasonField"] = (
-            str(message_sync.get("bitableStepReasonField") or "stepReason").strip() or "stepReason"
-        )
-        message_sync["bitableTicketNoField"] = (
-            str(message_sync.get("bitableTicketNoField") or "ticketNo").strip() or "ticketNo"
-        )
-        message_sync["appendStepReasonFormat"] = (
-            str(message_sync.get("appendStepReasonFormat") or "{date} {user}：{content}").strip()
-            or "{date} {user}：{content}"
-        )
-        merged["messageSync"] = message_sync
-
-        person_reminder = merged.get("personReminder") if isinstance(merged.get("personReminder"), dict) else {}
-        default_person_reminder = cls._default_person_reminder_config()
-        person_reminder = {**default_person_reminder, **person_reminder}
-        person_reminder["sendMode"] = TicketSyncNotifyService._normalize_send_mode(person_reminder.get("sendMode"))
-        person_reminder["dataSource"] = TicketSyncNotifyService._normalize_person_data_source(
-            person_reminder.get("dataSource")
-        )
-        person_reminder["enabled"] = bool(person_reminder.get("enabled"))
-        person_reminder["pushIds"] = TicketSyncNotifyService._normalize_push_ids(person_reminder.get("pushIds"))
-        person_reminder["appId"] = str(person_reminder.get("appId") or "").strip()
-        person_reminder["appSecret"] = str(person_reminder.get("appSecret") or "").strip()
-        person_reminder["feishuAppId"] = str(person_reminder.get("feishuAppId") or "").strip()
-        person_reminder["feishuAppSecret"] = str(person_reminder.get("feishuAppSecret") or "").strip()
-        person_reminder["appToken"] = str(person_reminder.get("appToken") or "").strip()
-        person_reminder["tableId"] = str(person_reminder.get("tableId") or "").strip()
-        person_reminder["viewId"] = str(person_reminder.get("viewId") or "").strip()
-        person_reminder["filterFormula"] = cls._normalize_bitable_filter_config(person_reminder.get("filterFormula"))
-        person_reminder["personField"] = str(person_reminder.get("personField") or "").strip()
-        person_reminder["timeField"] = str(person_reminder.get("timeField") or "").strip()
-        person_reminder["thresholdMinutes"] = max(SyncUtil.safe_int(person_reminder.get("thresholdMinutes")) or 30, 1)
-        person_reminder["messageTemplate"] = str(person_reminder.get("messageTemplate") or "").strip()
-        person_reminder["rowsMarkdownTemplate"] = str(person_reminder.get("rowsMarkdownTemplate") or "").strip()
-        person_reminder["maxRowsPerPerson"] = max(SyncUtil.safe_int(person_reminder.get("maxRowsPerPerson")) or 20, 1)
-        person_reminder["pageSize"] = min(max(SyncUtil.safe_int(person_reminder.get("pageSize")) or 500, 1), 500)
-        if not person_reminder["appId"]:
-            person_reminder["appId"] = person_reminder["feishuAppId"]
-        if not person_reminder["appSecret"]:
-            person_reminder["appSecret"] = person_reminder["feishuAppSecret"]
-        person_reminder["feishuAppId"] = person_reminder["appId"]
-        person_reminder["feishuAppSecret"] = person_reminder["appSecret"]
-        merged["personReminder"] = person_reminder
-
-        summary_report = merged.get("summaryReport") if isinstance(merged.get("summaryReport"), dict) else {}
-        default_summary_report = cls._default_summary_report_config()
-        summary_report = {**default_summary_report, **summary_report}
-        summary_report["enabled"] = bool(summary_report.get("enabled"))
-        summary_report["sendMode"] = TicketSyncNotifyService._normalize_send_mode(summary_report.get("sendMode"))
-        summary_report["dataSource"] = TicketSyncNotifyService._normalize_summary_data_source(
-            summary_report.get("dataSource")
-        )
-        summary_report["pushIds"] = TicketSyncNotifyService._normalize_push_ids(summary_report.get("pushIds"))
-        summary_report["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(summary_report.get("appChatIds"))
-        summary_report["appId"] = str(summary_report.get("appId") or "").strip()
-        summary_report["appSecret"] = str(summary_report.get("appSecret") or "").strip()
-        summary_report["timeField"] = TicketSyncNotifyService._resolve_summary_time_field(
-            summary_report.get("timeField")
-        )
-        summary_report["appToken"] = str(summary_report.get("appToken") or "").strip()
-        summary_report["tableId"] = str(summary_report.get("tableId") or "").strip()
-        summary_report["viewId"] = str(summary_report.get("viewId") or "").strip()
-        summary_report["filterFormula"] = cls._normalize_bitable_filter_config(summary_report.get("filterFormula"))
-        summary_report["statusField"] = str(summary_report.get("statusField") or "状态").strip() or "状态"
-        summary_report["categoryField"] = str(summary_report.get("categoryField") or "分类").strip() or "分类"
-        summary_report["priorityField"] = str(summary_report.get("priorityField") or "优先级").strip() or "优先级"
-        summary_report["bitableTimeField"] = str(summary_report.get("bitableTimeField") or "").strip()
-        summary_report["pageSize"] = min(max(SyncUtil.safe_int(summary_report.get("pageSize")) or 500, 1), 500)
-        summary_report["aiEnabled"] = bool(summary_report.get("aiEnabled"))
-        summary_report["aiProviderCode"] = str(summary_report.get("aiProviderCode") or "").strip()
-        summary_report["aiPromptCode"] = str(summary_report.get("aiPromptCode") or "").strip()
-        summary_report["windowMinutes"] = max(SyncUtil.safe_int(summary_report.get("windowMinutes")) or 60, 1)
-        summary_report["endDelayMinutes"] = max(SyncUtil.safe_int(summary_report.get("endDelayMinutes")) or 0, 0)
-        summary_report["startTime"] = str(summary_report.get("startTime") or "").strip()
-        summary_report["endTime"] = str(summary_report.get("endTime") or "").strip()
-        summary_report["includeClosed"] = bool(summary_report.get("includeClosed", True))
-        summary_report["messageTemplate"] = str(summary_report.get("messageTemplate") or "").strip()
-        merged["summaryReport"] = summary_report
-        if not isinstance(merged.get("projectMappings"), list):
-            merged["projectMappings"] = []
-        if not isinstance(merged.get("moduleMappings"), list):
-            merged["moduleMappings"] = []
-        if not isinstance(merged.get("vendorMappings"), list):
-            merged["vendorMappings"] = []
-        if not isinstance(merged.get("storeMappings"), list):
-            merged["storeMappings"] = []
-        if not isinstance(merged.get("statusMappings"), list):
-            merged["statusMappings"] = []
-        if not isinstance(merged.get("assigneeMappings"), list):
-            merged["assigneeMappings"] = []
-        if not isinstance(merged.get("posPatterns"), list):
-            merged["posPatterns"] = cls._default_sync_config()["posPatterns"]
-        if not isinstance(merged.get("scoPatterns"), list):
-            merged["scoPatterns"] = cls._default_sync_config()["scoPatterns"]
-        if not isinstance(merged.get("versionPatterns"), list):
-            merged["versionPatterns"] = cls._default_sync_config()["versionPatterns"]
-        merged["autoRunOnSync"] = bool(merged.get("autoRunOnSync"))
-        merged["autoTranslateOnSync"] = bool(merged.get("autoTranslateOnSync", True))
-        merged["defaultPullLimit"] = min(max(int(merged.get("defaultPullLimit") or 50), 1), 200)
-        return merged
 
     @classmethod
-    def ensure_param_config_rows(cls, db: Session) -> None:
-        now = datetime.now()
-        existing = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
-        if existing:
-            return
-        db.add(
-            SysConfig(
-                config_name="工单同步自动化配置",
-                config_key=cls.CONFIG_KEY,
-                config_value=SyncUtil.json_dumps(cls._default_sync_config()),
-                config_type="Y",
-                create_by="system",
-                update_by="system",
-                create_time=now,
-                update_time=now,
-                remark="外部工单同步、内网拉取、规则识别和自动化链路配置 JSON",
-            )
-        )
-        db.flush()
+    def ensure_param_config_rows(cls, db: Session):
+        """委托到 TicketSyncConfigService.ensure_param_config_rows。"""
+        return TicketSyncConfigService.ensure_param_config_rows(db)
 
     @classmethod
     def _load_sync_config(cls, db: Session) -> dict[str, Any]:
-        cls.ensure_param_config_rows(db)
-        row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
-        config = SyncUtil.json_loads(getattr(row, "config_value", None), cls._default_sync_config())
-        if not isinstance(config, dict):
-            return cls._default_sync_config()
-        return cls._normalize_sync_config(config)
+        """委托到 TicketSyncConfigService._load_sync_config。"""
+        return TicketSyncConfigService._load_sync_config(db)
 
     @classmethod
-    def get_sync_automation_config_services(cls, db: Session) -> dict[str, Any]:
-        config_value = cls._load_sync_config(db)
-        config_value["externalSyncRequiredFields"] = cls._derive_required_fields_from_external_field_model(
-            config_value.get("externalFieldModel")
-        )
-        return {
-            "configKey": cls.CONFIG_KEY,
-            "configValue": config_value,
-        }
+    def get_sync_automation_config_services(cls, db: Session):
+        """委托到 TicketSyncConfigService.get_sync_automation_config_services。"""
+        return TicketSyncConfigService.get_sync_automation_config_services(db)
 
-    @classmethod
+
     def preview_bitable_pull_fields_services(
         cls,
         db: Session,
@@ -2749,16 +667,11 @@ class TicketSyncService:
         }
 
     @classmethod
-    def get_ticket_stat_classification_options(cls, db: Session) -> dict[str, Any]:
-        """
-        获取工单分类统计枚举选项。
-        :param db: 数据库会话
-        :return: 工单分类统计枚举配置
-        """
-        config = cls._load_sync_config(db)
-        return cls._normalize_stat_classification_config(config.get("statClassification"))
+    def get_ticket_stat_classification_options(cls, db: Session):
+        """委托到 TicketSyncConfigService.get_ticket_stat_classification_options。"""
+        return TicketSyncConfigService.get_ticket_stat_classification_options(db)
 
-    @classmethod
+
     def update_sync_automation_config_services(
         cls,
         db: Session,
@@ -2798,16 +711,11 @@ class TicketSyncService:
             raise exc
 
     @classmethod
-    def get_sync_notify_push_options_services(cls, db: Session) -> list[dict[str, Any]]:
-        """
-        查询通知相关可选推送配置。
+    def get_sync_notify_push_options_services(cls, db: Session):
+        """委托到 TicketSyncConfigService.get_sync_notify_push_options_services。"""
+        return TicketSyncConfigService.get_sync_notify_push_options_services(db)
 
-        :param db: 数据库会话。
-        :return: 推送配置列表。
-        """
-        return TicketSyncNotifyService.list_push_options(db)
 
-    @classmethod
     def preview_person_reminder_services(
         cls,
         db: Session,
@@ -3170,103 +1078,11 @@ class TicketSyncService:
         return summary
 
     @classmethod
-    def send_group_push_by_ticket_no_services(
-        cls,
-        db: Session,
-        *,
-        ticket_no: str,
-        push_ids: list[int] | None = None,
-        message_template: str | None = None,
-        force_push: bool = False,
-        update_by: str = "system",
-    ) -> dict[str, Any]:
-        """
-        手动按工单号发送群消息。
+    def send_group_push_by_ticket_no_services(cls, db, *, ticket_no, push_ids=None, message_template=None, force_push=False, update_by="system"):
+        """委托到 TicketSyncGroupPushService。"""
+        return TicketSyncGroupPushService.send_group_push_by_ticket_no_services(db, ticket_no=ticket_no, push_ids=push_ids, message_template=message_template, force_push=force_push, update_by=update_by)
 
-        :param db: 数据库会话。
-        :param ticket_no: 工单号。
-        :param push_ids: 覆盖推送渠道ID列表。
-        :param message_template: 覆盖消息模板。
-        :param force_push: 是否强制推送（忽略已推送状态）。
-        :param update_by: 推送状态更新人。
-        :return: 发送结果。
-        """
-        ticket = TicketDao.get_ticket_by_no(db, ticket_no)
-        if not ticket:
-            raise ValueError(f"工单不存在: {ticket_no}")
-        config = cls._load_sync_config(db)
-        group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
-        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        meta = cls._build_meta(extra_data)
-        already_sent = cls._is_group_push_sent_once(meta)
-        force_push_enabled = bool(force_push)
-        manual_scene = "manual_force" if force_push_enabled else "manual"
-        if already_sent and not force_push_enabled:
-            logger.info(
-                f"手动群推送跳过: ticket_no={ticket.ticket_no}, scene={manual_scene}, "
-                f"reason=工单已发送过群推送且未开启强制推送"
-            )
-            return {
-                "skipped": True,
-                "skipReason": "工单已发送过群推送，未开启强制推送",
-                "scene": manual_scene,
-                "ticketNo": ticket.ticket_no,
-                "alreadySent": True,
-                "forcePush": False,
-                "groupPushSentOnceUpdated": False,
-            }
-        sync_summary = cls.extract_sync_summary(ticket.extra_data) or {}
-        logger.info(
-            f"手动群推送触发: ticket_no={ticket.ticket_no}, scene={manual_scene}, "
-            f"force_push={force_push_enabled}, already_sent={already_sent}"
-        )
-        result = TicketSyncNotifyService.send_group_message_for_ticket(
-            db,
-            ticket=ticket,
-            group_config=group_config,
-            scene=manual_scene,
-            manual_trigger=True,
-            override_push_ids=push_ids,
-            override_template=message_template,
-            sync_summary=sync_summary,
-        )
-        push_success_count = int(result.get("pushSuccessCount") or 0)
-        app_success_count = int(result.get("chatSuccessCount") or 0)
-        group_push_state_updated = False
-        if not bool(result.get("skipped")) and (push_success_count > 0 or app_success_count > 0):
-            meta = cls._mark_group_push_sent_once(
-                meta,
-                scene=manual_scene,
-                revision=int(meta.get("revision") or 0),
-            )
-            meta = cls._append_group_push_message_refs(
-                meta,
-                result.get("feishuMessageRefs") if isinstance(result.get("feishuMessageRefs"), list) else None,
-            )
-            ticket = cls._persist_sync_meta(
-                db,
-                ticket=ticket,
-                meta=meta,
-                update_by=str(update_by or "system"),
-            )
-            group_push_state_updated = True
-            logger.info(
-                f"手动群推送已更新去重状态: ticket_no={ticket.ticket_no}, scene={manual_scene}, "
-                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
-            )
-        elif not bool(result.get("skipped")):
-            logger.warning(
-                f"手动群推送未产生成功发送，不更新去重状态: ticket_no={ticket.ticket_no}, scene={manual_scene}, "
-                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
-            )
-        return {
-            **result,
-            "ticketNo": ticket.ticket_no,
-            "alreadySent": already_sent,
-            "forcePush": force_push_enabled,
-            "groupPushSentOnceUpdated": group_push_state_updated,
-        }
-
+    @classmethod
     @classmethod
     def _build_remote_sync_request_headers(cls, remote_sync: dict[str, Any]) -> dict[str, str]:
         """
@@ -3359,923 +1175,97 @@ class TicketSyncService:
             "automationError": automation.get("last_error"),
         }
 
-        )
-        for key in (camel_key, normalized_snake_key):
-            if key not in payload:
-                continue
-            value = payload.get(key)
-            if value in (None, "", []):
-                continue
-            return value
-        return default
+    @classmethod
+    @classmethod
+    def _extract_external_mapping_fields(cls, sync_object):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._extract_external_mapping_fields(sync_object)
 
     @classmethod
-    def _extract_external_mapping_fields(cls, sync_object: TicketExternalSyncUpsertModel) -> dict[str, str]:
-        """
-        提取外部同步字段映射上下文。
-        :param sync_object: 外部同步模型
-        :return: 字段映射字典
-        """
-        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
-        extra_data = sync_object.extra_data if isinstance(sync_object.extra_data, dict) else {}
-        mapping_payload = (
-            extra_data.get("external_field_mapping")
-            if isinstance(extra_data.get("external_field_mapping"), dict)
-            else {}
-        )
-        ticket_vender = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "ticketVender",
-                "ticket_vender",
-                default=SyncUtil.payload_field_value(mapping_payload, "ticketVender", "ticket_vender", default=""),
-            )
-            or ""
-        ).strip()
-        ticket_modle = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "ticketModle",
-                "ticket_modle",
-                default=SyncUtil.payload_field_value(mapping_payload, "ticketModle", "ticket_modle", default=""),
-            )
-            or ""
-        ).strip()
-        ticket_status = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "ticketStatus",
-                "ticket_status",
-                default=SyncUtil.payload_field_value(raw_payload, "status", "status", default=""),
-            )
-            or ""
-        ).strip()
-        ticket_store = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "ticketStore",
-                "ticket_store",
-                default=SyncUtil.payload_field_value(
-                    raw_payload,
-                    "storeInfo",
-                    "store_info",
-                    default=SyncUtil.payload_field_value(
-                        raw_payload,
-                        "storeId",
-                        "store_id",
-                        default=SyncUtil.payload_field_value(mapping_payload, "ticketStore", "ticket_store", default=""),
-                    ),
-                ),
-            )
-            or ""
-        ).strip()
-        ticket_assignee = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "ticketAssignee",
-                "ticket_assignee",
-                default=SyncUtil.payload_field_value(
-                    raw_payload,
-                    "currentAssigneeName",
-                    "current_assignee_name",
-                    default="",
-                ),
-            )
-            or ""
-        ).strip()
-        current_assignee = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "currentAssigneeName",
-                "current_assignee_name",
-                default=SyncUtil.payload_field_value(
-                    mapping_payload,
-                    "currentAssigneeName",
-                    "current_assignee_name",
-                    default=ticket_assignee,
-                ),
-            )
-            or ""
-        ).strip()
-        ticket_assignee_email = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "ticketAssigneeEmail",
-                "ticket_assignee_email",
-                default=SyncUtil.payload_field_value(
-                    raw_payload,
-                    "currentAssigneeEmail",
-                    "current_assignee_email",
-                    default=SyncUtil.payload_field_value(
-                        raw_payload,
-                        "assigneeEmail",
-                        "assignee_email",
-                        default=SyncUtil.payload_field_value(
-                            mapping_payload,
-                            "ticketAssigneeEmail",
-                            "ticket_assignee_email",
-                            default="",
-                        ),
-                    ),
-                ),
-            )
-            or ""
-        ).strip()
-        current_assignee_email = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "currentAssigneeEmail",
-                "current_assignee_email",
-                default=SyncUtil.payload_field_value(
-                    mapping_payload,
-                    "currentAssigneeEmail",
-                    "current_assignee_email",
-                    default=ticket_assignee_email,
-                ),
-            )
-            or ""
-        ).strip()
-        reporter_email = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "reporterEmail",
-                "reporter_email",
-                default=SyncUtil.payload_field_value(
-                    mapping_payload,
-                    "reporterEmail",
-                    "reporter_email",
-                    default="",
-                ),
-            )
-            or ""
-        ).strip()
-        internal_owner = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "internalOwner",
-                "internal_owner",
-                default=SyncUtil.payload_field_value(
-                    raw_payload,
-                    "internalOwnerName",
-                    "internal_owner_name",
-                    default=SyncUtil.payload_field_value(
-                        mapping_payload,
-                        "internalOwner",
-                        "internal_owner",
-                        default=SyncUtil.payload_field_value(
-                            mapping_payload,
-                            "internalOwnerName",
-                            "internal_owner_name",
-                            default="",
-                        ),
-                    ),
-                ),
-            )
-            or ""
-        ).strip()
-        internal_owner_email = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "internalOwnerEmail",
-                "internal_owner_email",
-                default=SyncUtil.payload_field_value(
-                    mapping_payload,
-                    "internalOwnerEmail",
-                    "internal_owner_email",
-                    default="",
-                ),
-            )
-            or ""
-        ).strip()
-        ticket_pos = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "ticketPos",
-                "ticket_pos",
-                default=SyncUtil.payload_field_value(
-                    raw_payload,
-                    "posNo",
-                    "pos_no",
-                    default=SyncUtil.payload_field_value(
-                        raw_payload,
-                        "posId",
-                        "pos_id",
-                        default=SyncUtil.payload_field_value(mapping_payload, "ticketPos", "ticket_pos", default=""),
-                    ),
-                ),
-            )
-            or ""
-        ).strip()
-        ticket_sco = str(
-            SyncUtil.payload_field_value(
-                raw_payload,
-                "ticketSco",
-                "ticket_sco",
-                default=SyncUtil.payload_field_value(
-                    raw_payload,
-                    "scoNo",
-                    "sco_no",
-                    default=SyncUtil.payload_field_value(
-                        raw_payload,
-                        "scoId",
-                        "sco_id",
-                        default=SyncUtil.payload_field_value(mapping_payload, "ticketSco", "ticket_sco", default=""),
-                    ),
-                ),
-            )
-            or ""
-        ).strip()
-        return {
-            "ticketVender": ticket_vender,
-            "ticketModle": ticket_modle,
-            "ticketStatus": ticket_status,
-            "ticketStore": ticket_store,
-            "ticketAssignee": ticket_assignee,
-            "ticketAssigneeEmail": ticket_assignee_email,
-            "currentAssigneeName": current_assignee,
-            "currentAssigneeEmail": current_assignee_email,
-            "reporterEmail": reporter_email,
-            "internalOwner": internal_owner,
-            "internalOwnerEmail": internal_owner_email,
-            "ticketPos": ticket_pos,
-            "ticketSco": ticket_sco,
-        }
+    def _has_incoming_project_value(cls, sync_object, mapping_payload):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._has_incoming_project_value(sync_object, mapping_payload)
 
     @classmethod
-    def _has_incoming_project_value(
-        cls,
-        sync_object: TicketExternalSyncUpsertModel,
-        detected: dict[str, Any] | None,
-    ) -> bool:
-        """
-        判断本次同步是否携带项目归属字段，用于决定更新场景是否允许覆盖旧项目。
-        :param sync_object: 外部同步模型
-        :param detected: 字段识别结果
-        :return: 本次同步存在项目ID或项目文本时返回 True
-        """
-        external_fields = cls._extract_external_mapping_fields(sync_object)
-        return any(
-            str(value or "").strip()
-            for value in (
-                (detected or {}).get("projectId"),
-                (detected or {}).get("projectName"),
-                getattr(sync_object, "project_id", None),
-                getattr(sync_object, "project_code", None),
-                getattr(sync_object, "project_name", None),
-                getattr(sync_object, "merchant_name", None),
-                external_fields.get("ticketVender"),
-            )
-        )
+    def _has_incoming_module_value(cls, sync_object, mapping_payload):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._has_incoming_module_value(sync_object, mapping_payload)
 
     @classmethod
-    def _has_incoming_module_value(
-        cls,
-        sync_object: TicketExternalSyncUpsertModel,
-        detected: dict[str, Any] | None,
-    ) -> bool:
-        """
-        判断本次同步是否携带模块归属字段，用于决定更新场景是否允许覆盖旧模块。
-        :param sync_object: 外部同步模型
-        :param detected: 字段识别结果
-        :return: 本次同步存在模块ID或模块文本时返回 True
-        """
-        external_fields = cls._extract_external_mapping_fields(sync_object)
-        return any(
-            str(value or "").strip()
-            for value in (
-                (detected or {}).get("moduleId"),
-                (detected or {}).get("moduleName"),
-                getattr(sync_object, "module_id", None),
-                getattr(sync_object, "module_code", None),
-                getattr(sync_object, "module_name", None),
-                external_fields.get("ticketModle"),
-            )
-        )
+    def _match_mapping_exact(cls, field_value, mappings):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._match_mapping_exact(field_value, mappings)
 
     @classmethod
-    def _match_mapping_exact(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
-        """
-        按完整关键字做精确映射，不进行模糊猜测。
-        :param field_value: 外部字段值
-        :param mappings: 映射配置列表
-        :return: 命中的映射对象
-        """
-        target = str(field_value or "").strip().lower()
-        if not target or not isinstance(mappings, list):
-            return None
-        for mapping in mappings:
-            if not isinstance(mapping, dict):
-                continue
-            keywords = cls._mapping_keywords(mapping)
-            if target in keywords:
-                return mapping
-        return None
+    def _match_mapping_contains(cls, field_value, mappings):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._match_mapping_contains(field_value, mappings)
 
     @classmethod
-    def _match_mapping_contains(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
-        """
-        按关键字“包含关系”匹配映射配置（外部字段包含任意关键词即命中）。
-        :param field_value: 外部字段值
-        :param mappings: 映射配置列表
-        :return: 命中的映射对象
-        """
-        target = str(field_value or "").strip().lower()
-        if not target or not isinstance(mappings, list):
-            return None
-        for mapping in mappings:
-            if not isinstance(mapping, dict):
-                continue
-            keywords = cls._mapping_keywords(mapping)
-            if any(keyword and keyword in target for keyword in keywords):
-                return mapping
-        return None
+    def _resolve_project_by_ticket_vender(cls, db, *, ticket_vender, project_mappings):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_project_by_ticket_vender(
+            db, ticket_vender=ticket_vender, project_mappings=project_mappings)
 
     @classmethod
-    def _resolve_project_by_ticket_vender(
-        cls,
-        db: Session,
-        *,
-        ticket_vender: str,
-        project_mappings: list[dict[str, Any]],
-    ) -> tuple[HrmProject | None, str]:
-        """
-        按 ticketVender 匹配所属项目与项目名称。
-        :param db: 数据库会话
-        :param ticket_vender: 外部商家文本
-        :param project_mappings: 项目映射配置
-        :return: (项目对象, 项目名称)
-        """
-        vendor_text = str(ticket_vender or "").strip()
-        if not vendor_text:
-            return None, ""
-        matched_mapping = cls._match_mapping_contains(vendor_text, project_mappings)
-        if isinstance(matched_mapping, dict):
-            project_id = SyncUtil.safe_int(
-                matched_mapping.get("projectId")
-                or matched_mapping.get("project_id")
-                or matched_mapping.get("id")
-            )
-            project_code = str(
-                matched_mapping.get("projectCode")
-                or matched_mapping.get("project_code")
-                or ""
-            ).strip()
-            project_name = str(
-                matched_mapping.get("projectName")
-                or matched_mapping.get("project_name")
-                or ""
-            ).strip()
-            query = db.query(HrmProject).filter(
-                HrmProject.status == QtrDataStatusEnum.normal.value,
-                HrmProject.del_flag == "0",
-            )
-            if project_id:
-                project = query.filter(HrmProject.project_id == project_id).first()
-                if project:
-                    return project, str(project.project_name or "").strip()
-            if project_code:
-                project = query.filter(HrmProject.project_code == project_code).first()
-                if project:
-                    return project, str(project.project_name or "").strip()
-            if project_name:
-                project = query.filter(func.lower(HrmProject.project_name) == project_name.lower()).first()
-                if project:
-                    return project, str(project.project_name or "").strip()
-                return None, project_name
-
-        # 向后兼容：若商户编号本身可直接匹配项目商家映射表，则仍可命中项目。
-        project_vendor_row = (
-            db.query(TicketLogPullProjectVendorMap)
-            .filter(TicketLogPullProjectVendorMap.vender_no == vendor_text)
-            .order_by(TicketLogPullProjectVendorMap.modifid.desc(), TicketLogPullProjectVendorMap.id.desc())
-            .first()
-        )
-        if not project_vendor_row:
-            return None, ""
-        project = (
-            db.query(HrmProject)
-            .filter(
-                HrmProject.project_id == project_vendor_row.project_id,
-                HrmProject.status == QtrDataStatusEnum.normal.value,
-                HrmProject.del_flag == "0",
-            )
-            .first()
-        )
-        if project:
-            return project, str(project.project_name or "").strip()
-        return None, str(project_vendor_row.project_name or "").strip()
+    def _resolve_module_by_ticket_modle(cls, db, *, ticket_modle, module_mappings, project_id=None):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_module_by_ticket_modle(
+            db, ticket_modle=ticket_modle, module_mappings=module_mappings, project_id=project_id)
 
     @classmethod
-    def _resolve_module_by_ticket_modle(
-        cls,
-        db: Session,
-        *,
-        ticket_modle: str,
-        project_id: int | None,
-        module_mappings: list[dict[str, Any]],
-    ) -> HrmModule | None:
-        """
-        按 ticketModle 匹配所属模块。
-        :param db: 数据库会话
-        :param ticket_modle: 外部模块字段
-        :param project_id: 已匹配项目ID
-        :param module_mappings: 模块映射配置
-        :return: 模块对象
-        """
-        module_text = str(ticket_modle or "").strip()
-        if not module_text:
-            return None
-        matched_mapping = cls._match_mapping_contains(module_text, module_mappings)
-        module_id = SyncUtil.safe_int((matched_mapping or {}).get("moduleId") or (matched_mapping or {}).get("module_id"))
-        module_code = str(
-            (matched_mapping or {}).get("moduleCode")
-            or (matched_mapping or {}).get("module_code")
-            or ""
-        ).strip()
-        module_name = str(
-            (matched_mapping or {}).get("moduleName")
-            or (matched_mapping or {}).get("module_name")
-            or ""
-        ).strip()
-        query = db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
-        if project_id:
-            query = query.filter(HrmModule.project_id == project_id)
-        if module_id:
-            module = query.filter(HrmModule.module_id == module_id).first()
-            if module:
-                return module
-        if module_code:
-            module = query.filter(func.lower(HrmModule.module_code) == module_code.lower()).first()
-            if module:
-                return module
-        if module_name:
-            module = query.filter(func.lower(HrmModule.module_name) == module_name.lower()).first()
-            if module:
-                return module
-        module = query.filter(func.lower(HrmModule.module_code) == module_text.lower()).first()
-        if module:
-            return module
-        return query.filter(func.lower(HrmModule.module_name) == module_text.lower()).first()
+    def _resolve_status_by_external_value(cls, ticket_status, status_mappings):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_status_by_external_value(ticket_status, status_mappings)
 
     @classmethod
-    def _resolve_status_by_external_value(
-        cls,
-        *,
-        status_text: str,
-        status_mappings: list[dict[str, Any]],
-    ) -> str:
-        """
-        按显式外部状态字段匹配本地状态，不做模糊猜测。
-        :param status_text: 外部状态值
-        :param status_mappings: 状态映射配置
-        :return: 本地状态编码或原始状态值
-        """
-        source_status = str(status_text or "").strip()
-        if not source_status:
-            return ""
-        status_map = {
-            "pending": TicketStatus.PENDING.value,
-            "processing": TicketStatus.PROCESSING.value,
-            "wait_user": TicketStatus.WAIT_USER.value,
-            "wait_dev": TicketStatus.WAIT_DEV.value,
-            "wait_release": TicketStatus.WAIT_RELEASE.value,
-            "wait_verify": TicketStatus.WAIT_VERIFY.value,
-            "resolved": TicketStatus.RESOLVED.value,
-            "closed": TicketStatus.CLOSED.value,
-            "rejected": TicketStatus.REJECTED.value,
-            "non_problem": TicketStatus.NON_PROBLEM.value,
-            "design_as_expected": TicketStatus.DESIGN_AS_EXPECTED.value,
-            "user_misoperation": TicketStatus.USER_MISOPERATION.value,
-            "duplicated": TicketStatus.DUPLICATED.value,
-        }
-        matched_mapping = cls._match_mapping_exact(source_status, status_mappings)
-        status_candidate = source_status
-        if isinstance(matched_mapping, dict):
-            status_candidate = str(
-                matched_mapping.get("status")
-                or matched_mapping.get("ticketStatus")
-                or matched_mapping.get("statusCode")
-                or matched_mapping.get("value")
-                or source_status
-            ).strip()
-        return status_map.get(status_candidate.lower(), status_candidate)
+    def _resolve_vendor_by_ticket_vender(cls, ticket_vender, vendor_mappings):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_vendor_by_ticket_vender(ticket_vender, vendor_mappings)
 
     @classmethod
-    def _resolve_vendor_by_ticket_vender(
-        cls,
-        *,
-        ticket_vender: str,
-        vendor_mappings: list[dict[str, Any]],
-    ) -> tuple[int | None, str]:
-        """
-        按 ticketVender 解析日志拉取商家信息。
-        :param ticket_vender: 外部商家文本
-        :param vendor_mappings: 商家映射配置
-        :return: (vendor_id, vendor_name)
-        """
-        vendor_text = str(ticket_vender or "").strip()
-        if not vendor_text:
-            return None, ""
-        matched_mapping = cls._match_mapping_contains(vendor_text, vendor_mappings)
-        if isinstance(matched_mapping, dict):
-            vendor_id = SyncUtil.safe_int(
-                matched_mapping.get("vendorId")
-                or matched_mapping.get("vendor_id")
-                or matched_mapping.get("id")
-            )
-            vendor_name = str(matched_mapping.get("vendorName") or matched_mapping.get("vendor_name") or "").strip()
-            if vendor_id:
-                return vendor_id, vendor_name or vendor_text
-        return None, vendor_text
+    def _resolve_vendor_by_project(cls, db, *, project_id):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_vendor_by_project(db, project_id=project_id)
 
     @classmethod
-    def _resolve_vendor_by_project(cls, db: Session, *, project_id: int | None) -> int | None:
-        """
-        按项目映射配置回退解析商家ID。
-        :param db: 数据库会话
-        :param project_id: 项目ID
-        :return: 商家ID，未命中返回 None
-        """
-        if not project_id:
-            return None
-        row = (
-            db.query(TicketLogPullProjectVendorMap)
-            .filter(TicketLogPullProjectVendorMap.project_id == project_id)
-            .order_by(TicketLogPullProjectVendorMap.modifid.desc(), TicketLogPullProjectVendorMap.id.desc())
-            .first()
-        )
-        if not row:
-            return None
-        return SyncUtil.safe_int(getattr(row, "vender_no", None))
+    def _resolve_store_by_external_value(cls, db, *, store_text):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_store_by_external_value(db, store_text=store_text)
 
     @classmethod
-    def _resolve_store_by_external_value(
-        cls,
-        db: Session,
-        *,
-        vendor_id: int | None,
-        ticket_store: str,
-    ) -> tuple[str, str]:
-        """
-        按商家ID + 外部门店字段（sap_org_no）匹配门店配置。
-        :param db: 数据库会话
-        :param vendor_id: 已匹配商家ID
-        :param ticket_store: 外部门店字段
-        :return: (store_id, store_name)
-        """
-        store_text = str(ticket_store or "").strip()
-        if not store_text:
-            return "", ""
-        if not vendor_id:
-            return store_text, ""
-
-        query = db.query(TicketLogPullStoreConfig).filter(TicketLogPullStoreConfig.sap_org_no == store_text)
-        query = query.filter(TicketLogPullStoreConfig.vender_no == str(vendor_id))
-        row = query.order_by(TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc()).first()
-        if not row:
-            return store_text, ""
-        resolved_store_id = str(row.org_no or row.sap_org_no or "").strip() or store_text
-        return resolved_store_id, str(row.org_name or "").strip()
+    def _match_assignee_mapping_exact(cls, assignee_text, assignee_mappings):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._match_assignee_mapping_exact(assignee_text, assignee_mappings)
 
     @classmethod
-    def _match_assignee_mapping_exact(cls, assignee_text: str, assignee_mappings: Any) -> dict[str, Any] | None:
-        """
-        按人员名称做完整匹配（不支持模糊包含）。
-        :param assignee_text: 外部处理人文本
-        :param assignee_mappings: 处理人映射配置
-        :return: 命中的映射对象
-        """
-        target = str(assignee_text or "").strip().lower()
-        if not target or not isinstance(assignee_mappings, list):
-            return None
-        for mapping in assignee_mappings:
-            if not isinstance(mapping, dict):
-                continue
-            candidates = cls._mapping_keywords(mapping)
-            candidates.extend(
-                SyncUtil.normalize_keywords(
-                    [
-                        mapping.get("userName"),
-                        mapping.get("user_name"),
-                        mapping.get("name"),
-                        mapping.get("email"),
-                    ]
-                )
-            )
-            if any(target == candidate for candidate in candidates if candidate):
-                return mapping
-        return None
+    def _resolve_assignee_by_external_value(cls, db, *, assignee_text, assignee_mappings):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_assignee_by_external_value(
+            db, assignee_text=assignee_text, assignee_mappings=assignee_mappings)
 
     @classmethod
-    def _resolve_assignee_by_external_value(
-        cls,
-        db: Session,
-        *,
-        assignee_text: str,
-        assignee_mappings: list[dict[str, Any]],
-    ) -> tuple[int | None, str]:
-        """
-        按显式处理人字段匹配本地用户，不做包含式猜测。
-        :param db: 数据库会话
-        :param assignee_text: 外部处理人字段
-        :param assignee_mappings: 处理人映射配置
-        :return: (处理人ID, 处理人名称)
-        """
-        from module_admin.entity.do.user_do import SysUser
-
-        source_text = str(assignee_text or "").strip()
-        matched_mapping = cls._match_assignee_mapping_exact(source_text, assignee_mappings)
-        mapped_user_id = SyncUtil.safe_int(
-            (matched_mapping or {}).get("userId")
-            or (matched_mapping or {}).get("user_id")
-            or (matched_mapping or {}).get("assigneeId")
-        )
-        mapped_email = str((matched_mapping or {}).get("email") or "").strip()
-        mapped_user_name = str(
-            (matched_mapping or {}).get("userName")
-            or (matched_mapping or {}).get("user_name")
-            or (matched_mapping or {}).get("name")
-            or source_text
-        ).strip()
-        if mapped_user_id:
-            user = (
-                db.query(SysUser)
-                .filter(
-                    SysUser.user_id == mapped_user_id,
-                    SysUser.status == "0",
-                    SysUser.del_flag == "0",
-                )
-                .first()
-            )
-            if user:
-                return user.user_id, user.user_name or user.nick_name or mapped_user_name
-        if mapped_email:
-            user = (
-                db.query(SysUser)
-                .filter(
-                    SysUser.status == "0",
-                    SysUser.del_flag == "0",
-                    func.lower(SysUser.email) == mapped_email.lower(),
-                )
-                .first()
-            )
-            if user:
-                return user.user_id, user.user_name or user.nick_name or mapped_user_name
-        if mapped_user_name:
-            user = (
-                db.query(SysUser)
-                .filter(
-                    SysUser.status == "0",
-                    SysUser.del_flag == "0",
-                    (SysUser.user_name == mapped_user_name) | (SysUser.nick_name == mapped_user_name),
-                )
-                .first()
-            )
-            if user:
-                return user.user_id, user.user_name or user.nick_name or mapped_user_name
-        if source_text:
-            user = (
-                db.query(SysUser)
-                .filter(
-                    SysUser.status == "0",
-                    SysUser.del_flag == "0",
-                    (
-                        (SysUser.user_name == source_text)
-                        | (SysUser.nick_name == source_text)
-                        | (func.lower(SysUser.email) == source_text.lower())
-                    ),
-                )
-                .first()
-            )
-            if user:
-                return user.user_id, user.user_name or user.nick_name or source_text
-        return None, mapped_user_name or source_text
+    def _resolve_sys_user_by_email(cls, db, email):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_sys_user_by_email(db, email)
 
     @classmethod
-    def _resolve_sys_user_by_email(cls, db: Session, email: str):
-        """
-        根据邮箱匹配本地系统用户。
-        :param db: 数据库会话
-        :param email: 邮箱地址
-        :return: 系统用户对象或 None
-        """
-        from module_admin.entity.do.user_do import SysUser
-
-        normalized_email = str(email or "").strip().lower()
-        if not normalized_email:
-            return None
-        return (
-            db.query(SysUser)
-            .filter(
-                SysUser.status == "0",
-                SysUser.del_flag == "0",
-                func.lower(SysUser.email) == normalized_email,
-            )
-            .first()
-        )
+    def _resolve_external_person_by_mapping_or_email(cls, db, *, person_text, assignee_mappings, email_hint=None):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_external_person_by_mapping_or_email(
+            db, person_text=person_text, assignee_mappings=assignee_mappings, email_hint=email_hint)
 
     @classmethod
-    def _resolve_external_person_by_mapping_or_email(
-        cls,
-        db: Session,
-        *,
-        person_text: str,
-        person_email: str,
-        assignee_mappings: list[dict[str, Any]],
-    ) -> tuple[int | None, str]:
-        """
-        外部推送人员先按显式映射表解析，再用多维表格邮箱匹配本地用户；失败时只保留名称。
-        :param db: 数据库会话
-        :param person_text: 外部人员名称
-        :param person_email: 多维表格或入参补充邮箱
-        :param assignee_mappings: 人员映射配置
-        :return: (本地用户ID, 人员名称)
-        """
-        from module_admin.entity.do.user_do import SysUser
+    def _resolve_remote_assignee_by_email_or_name(cls, db, *, assignee_text, email_hint=None):
+        """委托到 TicketSyncFieldMappingService。"""
+        return TicketSyncFieldMappingService._resolve_remote_assignee_by_email_or_name(
+            db, assignee_text=assignee_text, email_hint=email_hint)
 
-        source_text = str(person_text or "").strip()
-        matched_mapping = cls._match_assignee_mapping_exact(source_text, assignee_mappings)
-        mapped_user_id = SyncUtil.safe_int(
-            (matched_mapping or {}).get("userId")
-            or (matched_mapping or {}).get("user_id")
-            or (matched_mapping or {}).get("assigneeId")
-        )
-        mapped_email = str((matched_mapping or {}).get("email") or "").strip()
-        mapped_user_name = str(
-            (matched_mapping or {}).get("userName")
-            or (matched_mapping or {}).get("user_name")
-            or (matched_mapping or {}).get("name")
-            or source_text
-        ).strip()
-
-        if mapped_user_id:
-            user = (
-                db.query(SysUser)
-                .filter(
-                    SysUser.user_id == mapped_user_id,
-                    SysUser.status == "0",
-                    SysUser.del_flag == "0",
-                )
-                .first()
-            )
-            if user:
-                return user.user_id, user.user_name or user.nick_name or mapped_user_name
-
-        lookup_email = mapped_email or str(person_email or "").strip()
-        if lookup_email:
-            user = cls._resolve_sys_user_by_email(db, lookup_email)
-            if user:
-                return user.user_id, user.user_name or user.nick_name or mapped_user_name
-
-        if matched_mapping and mapped_user_name:
-            user = (
-                db.query(SysUser)
-                .filter(
-                    SysUser.status == "0",
-                    SysUser.del_flag == "0",
-                    (SysUser.user_name == mapped_user_name) | (SysUser.nick_name == mapped_user_name),
-                )
-                .first()
-            )
-            if user:
-                return user.user_id, user.user_name or user.nick_name or mapped_user_name
-
-        return None, mapped_user_name or source_text
-
-    @classmethod
-    def _resolve_remote_assignee_by_email_or_name(
-        cls,
-        db: Session,
-        *,
-        assignee_email: str,
-        assignee_name: str,
-    ) -> tuple[int | None, str]:
-        """
-        远端拉取人员只按邮箱或名称关联本地用户，禁止使用跨环境用户 ID。
-        :param db: 数据库会话
-        :param assignee_email: 远端处理人邮箱
-        :param assignee_name: 远端处理人名称
-        :return: (本地用户ID, 处理人名称)，未命中时只返回名称不返回ID
-        """
-        from module_admin.entity.do.user_do import SysUser
-
-        normalized_email = str(assignee_email or "").strip().lower()
-        normalized_name = str(assignee_name or "").strip()
-        if normalized_email:
-            user = (
-                db.query(SysUser)
-                .filter(
-                    SysUser.status == "0",
-                    SysUser.del_flag == "0",
-                    func.lower(SysUser.email) == normalized_email,
-                )
-                .first()
-            )
-            if user:
-                return user.user_id, user.user_name or user.nick_name or normalized_name
-        if normalized_name:
-            user = (
-                db.query(SysUser)
-                .filter(
-                    SysUser.status == "0",
-                    SysUser.del_flag == "0",
-                    (
-                        (SysUser.user_name == normalized_name)
-                        | (SysUser.nick_name == normalized_name)
-                        | (func.lower(SysUser.email) == normalized_name.lower())
-                    ),
-                )
-                .first()
-            )
-            if user:
-                return user.user_id, user.user_name or user.nick_name or normalized_name
-        return None, normalized_name or normalized_email
-
-    @classmethod
-    def _extract_email_from_bitable_value(cls, value: Any) -> str:
-        """
-        从飞书多维表格字段值中提取邮箱，兼容人员字段、文本字段和数组字段。
-        :param value: 多维表格字段值
-        :return: 邮箱，未命中返回空字符串
-        """
-        if isinstance(value, list):
-            for item in value:
-                email = cls._extract_email_from_bitable_value(item)
-                if email:
-                    return email
-            return ""
-        if isinstance(value, dict):
-            for key in (
-                "email",
-                "mail",
-                "userEmail",
-                "user_email",
-                "workEmail",
-                "work_email",
-                "text",
-                "value",
-            ):
-                email = cls._extract_email_from_bitable_value(value.get(key))
-                if email:
-                    return email
-            return ""
-        text = str(value or "").strip().lower()
-        if "@" not in text:
-            return ""
-        matched = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text)
-        return matched.group(0).lower() if matched else ""
-
-    @classmethod
-    def _mask_email_for_log(cls, email: str) -> str:
-        """
-        将邮箱脱敏后写入日志，避免排查同步链路时泄露完整邮箱。
-        :param email: 原始邮箱
-        :return: 脱敏后的邮箱
-        """
-        normalized_email = str(email or "").strip().lower()
-        if "@" not in normalized_email:
-            return normalized_email
-        local_part, domain = normalized_email.split("@", 1)
-        if len(local_part) <= 2:
-            masked_local = f"{local_part[:1]}*"
-        else:
-            masked_local = f"{local_part[:2]}***{local_part[-1:]}"
-        if "." in domain:
-            domain_name, domain_suffix = domain.rsplit(".", 1)
-            masked_domain = f"{domain_name[:1]}***.{domain_suffix}"
-        else:
-            masked_domain = f"{domain[:1]}***"
-        return f"{masked_local}@{masked_domain}"
 
     @classmethod
     def _describe_bitable_field_value_for_log(cls, value: Any) -> dict[str, Any]:
-        """
-        生成多维表格字段值的日志摘要，只记录类型、结构和是否像邮箱，不记录原始字段值。
-        :param value: 多维表格字段值
-        :return: 字段值摘要
-        """
-        if value is None:
-            return {"type": "missing", "empty": True}
-        if isinstance(value, list):
-            return {
-                "type": "list",
-                "empty": len(value) == 0,
-                "length": len(value),
-                "itemTypes": sorted({type(item).__name__ for item in value}),
-            }
-        if isinstance(value, dict):
-            return {
-                "type": "dict",
-                "empty": len(value) == 0,
-                "keys": list(value.keys())[:20],
-            }
-        text = str(value or "").strip()
-        return {
-            "type": type(value).__name__,
-            "empty": not bool(text),
-            "length": len(text),
-            "hasEmailPattern": "@" in text,
-        }
+        """委托到 FeishuBitableUtil.describe_field_value_for_log。"""
+        return FeishuBitableUtil.describe_field_value_for_log(value)
 
     @classmethod
     def _normalize_bitable_record_scalar(
@@ -4284,69 +1274,18 @@ class TicketSyncService:
         *,
         join_separator: str = ",",
     ) -> Any:
-        """
-        将飞书多维表格字段值归一化为适合外部同步入参的标量。
-
-        :param value: 多维表格原始字段值。
-        :param join_separator: 列表字段拼接分隔符。
-        :return: 归一化后的字段值。
-        """
-        if value is None:
-            return None
-        if isinstance(value, list):
-            if cls._is_bitable_rich_text_list(value):
-                return "".join(
-                    cls._normalize_bitable_rich_text_segment(item, join_separator=join_separator) for item in value
-                )
-            normalized_items: list[str] = []
-            for item in value:
-                normalized_item = cls._normalize_bitable_record_scalar(item, join_separator=join_separator)
-                text = str(normalized_item or "").strip()
-                if text and text not in normalized_items:
-                    normalized_items.append(text)
-            return join_separator.join(normalized_items)
-        if isinstance(value, dict):
-            if cls._is_bitable_rich_text_segment(value):
-                return cls._normalize_bitable_rich_text_segment(value, join_separator=join_separator)
-            for key in ("text", "name", "value", "email", "link", "title"):
-                if key in value:
-                    normalized_value = cls._normalize_bitable_record_scalar(
-                        value.get(key),
-                        join_separator=join_separator,
-                    )
-                    if normalized_value not in (None, ""):
-                        return normalized_value
-            return json.dumps(value, ensure_ascii=False, sort_keys=True)
-        if isinstance(value, (int, float, bool)):
-            return value
-        text = str(value).strip()
-        return text
+        """委托到 FeishuBitableUtil.normalize_record_scalar。"""
+        return FeishuBitableUtil.normalize_record_scalar(value, join_separator=join_separator)
 
     @classmethod
     def _is_bitable_rich_text_segment(cls, value: Any) -> bool:
-        """
-        判断字段值是否为飞书多维表格富文本片段。
-
-        :param value: 多维表格字段中的单个值。
-        :return: 是富文本片段返回 True，否则返回 False。
-        """
-        return isinstance(value, dict) and "text" in value and (
-            "type" in value or "link" in value or "mention_user_id" in value
-        )
+        """委托到 FeishuBitableUtil.is_rich_text_segment。"""
+        return FeishuBitableUtil.is_rich_text_segment(value)
 
     @classmethod
     def _is_bitable_rich_text_list(cls, value: Any) -> bool:
-        """
-        判断字段值是否为飞书多维表格富文本片段数组。
-
-        :param value: 多维表格字段值。
-        :return: 是富文本片段数组返回 True，否则返回 False。
-        """
-        return (
-            isinstance(value, list)
-            and bool(value)
-            and all(cls._is_bitable_rich_text_segment(item) for item in value)
-        )
+        """委托到 FeishuBitableUtil.is_rich_text_list。"""
+        return FeishuBitableUtil.is_rich_text_list(value)
 
     @classmethod
     def _normalize_bitable_rich_text_segment(
@@ -4355,60 +1294,13 @@ class TicketSyncService:
         *,
         join_separator: str = ",",
     ) -> str:
-        """
-        将飞书富文本片段归一化为原始文本，保留换行等排版字符。
-
-        :param value: 单个富文本片段，通常包含 text/type/link 等字段。
-        :param join_separator: 嵌套列表值的拼接分隔符。
-        :return: 片段文本，空片段返回空字符串。
-        """
-        if not isinstance(value, dict):
-            return str(value or "")
-        mention_user_id = str(value.get("mention_user_id") or value.get("mentionUserId") or "").strip()
-        raw_text = value.get("text")
-        if raw_text is None:
-            raw_text = value.get("name") or value.get("value") or value.get("title") or value.get("link")
-        if isinstance(raw_text, str):
-            if mention_user_id and raw_text and not raw_text.startswith("@"):
-                return f"@{raw_text}"
-            return raw_text
-        normalized_text = cls._normalize_bitable_record_scalar(raw_text, join_separator=join_separator)
-        text = str(normalized_text or "")
-        if mention_user_id and text and not text.startswith("@"):
-            return f"@{text}"
-        return text
+        """委托到 FeishuBitableUtil.normalize_rich_text_segment。"""
+        return FeishuBitableUtil.normalize_rich_text_segment(value, join_separator=join_separator)
 
     @classmethod
     def _normalize_bitable_rich_text_segments_for_comment(cls, value: Any) -> list[dict[str, Any]]:
-        """
-        将多维表格富文本片段转换为评论附件可保存的内部片段。
-
-        :param value: 多维表格字段原始值。
-        :return: text/mention 片段列表。
-        """
-        if not isinstance(value, list) or not cls._is_bitable_rich_text_list(value):
-            return []
-        segments: list[dict[str, Any]] = []
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            text = cls._normalize_bitable_rich_text_segment(item, join_separator="\n")
-            if not text:
-                continue
-            mention_user_id = str(item.get("mention_user_id") or item.get("mentionUserId") or "").strip()
-            if mention_user_id:
-                segments.append(
-                    {
-                        "type": "mention",
-                        "text": text,
-                        "name": text[1:] if text.startswith("@") else text,
-                        "openId": mention_user_id,
-                        "userId": mention_user_id,
-                    }
-                )
-            else:
-                segments.append({"type": "text", "text": text})
-        return segments
+        """委托到 FeishuBitableUtil.normalize_rich_text_segments_for_comment。"""
+        return FeishuBitableUtil.normalize_rich_text_segments_for_comment(value)
 
     @classmethod
     def _extract_bitable_person_text(
@@ -4418,83 +1310,25 @@ class TicketSyncService:
         preferred_keys: tuple[str, ...],
         join_separator: str = ",",
     ) -> str:
-        """
-        从飞书多维表格人员字段中提取指定文本。
-
-        :param value: 多维表格原始字段值，支持人员对象、数组或普通文本。
-        :param preferred_keys: 优先提取的字段键，例如 email/name/text。
-        :param join_separator: 多个人员值的拼接分隔符。
-        :return: 去重后的文本，未提取到时返回空字符串。
-        """
-        if value is None:
-            return ""
-        if isinstance(value, list):
-            result_items: list[str] = []
-            for item in value:
-                item_text = cls._extract_bitable_person_text(
-                    item,
-                    preferred_keys=preferred_keys,
-                    join_separator=join_separator,
-                )
-                if item_text and item_text not in result_items:
-                    result_items.append(item_text)
-            return join_separator.join(result_items)
-        if isinstance(value, dict):
-            for key in preferred_keys:
-                if key not in value:
-                    continue
-                item_text = cls._extract_bitable_person_text(
-                    value.get(key),
-                    preferred_keys=preferred_keys,
-                    join_separator=join_separator,
-                )
-                if item_text:
-                    return item_text
-            return ""
-        return str(value or "").strip()
+        """委托到 FeishuBitableUtil.extract_person_text。"""
+        return FeishuBitableUtil.extract_person_text(
+            value, preferred_keys=preferred_keys, join_separator=join_separator
+        )
 
     @classmethod
     def _extract_bitable_person_email(cls, value: Any, *, join_separator: str = ",") -> str:
-        """
-        从飞书多维表格人员字段中提取邮箱。
-
-        :param value: 多维表格原始字段值。
-        :param join_separator: 多个邮箱的拼接分隔符。
-        :return: 邮箱文本，未提取到时返回空字符串。
-        """
-        return cls._extract_bitable_person_text(
-            value,
-            preferred_keys=("email", "mail"),
-            join_separator=join_separator,
-        )
+        """委托到 FeishuBitableUtil.extract_person_email。"""
+        return FeishuBitableUtil.extract_person_email(value, join_separator=join_separator)
 
     @classmethod
     def _extract_bitable_person_name(cls, value: Any, *, join_separator: str = ",") -> str:
-        """
-        从飞书多维表格人员字段中提取人员名称。
-
-        :param value: 多维表格原始字段值。
-        :param join_separator: 多个人员名的拼接分隔符。
-        :return: 人员名称文本，未提取到时返回空字符串。
-        """
-        return cls._extract_bitable_person_text(
-            value,
-            preferred_keys=("name", "text", "value", "en_name", "nickname"),
-            join_separator=join_separator,
-        )
+        """委托到 FeishuBitableUtil.extract_person_name。"""
+        return FeishuBitableUtil.extract_person_name(value, join_separator=join_separator)
 
     @classmethod
     def _normalize_bitable_record_datetime_text(cls, value: Any) -> str:
-        """
-        将多维表格时间字段归一化为接口可消费的时间文本。
-
-        :param value: 原始时间字段值。
-        :return: `YYYY-MM-DD HH:MM:SS` 格式文本，失败时返回原始文本。
-        """
-        parsed = SyncUtil.parse_datetime_value(value)
-        if parsed:
-            return parsed.strftime("%Y-%m-%d %H:%M:%S")
-        return str(value or "").strip()
+        """委托到 FeishuBitableUtil.normalize_record_datetime_text。"""
+        return FeishuBitableUtil.normalize_record_datetime_text(value)
 
     @classmethod
     def _build_bitable_record_url(
@@ -4504,15 +1338,8 @@ class TicketSyncService:
         record_id: str,
         record_url: str | None = None,
     ) -> str:
-        """
-        根据多维表格配置构建记录详情 URL。
-
-        :param config: 多维配置。
-        :param record_id: 记录ID。
-        :param record_url: 飞书接口直接返回的记录详情 URL。
-        :return: 记录详情地址。
-        """
-        return TicketSyncNotifyService.get_bitable_record_url(config, record_id, record_url=record_url)
+        """委托到 FeishuBitableUtil.build_record_url。"""
+        return FeishuBitableUtil.build_record_url(config, record_id=record_id, record_url=record_url)
 
     @classmethod
     def _build_bitable_pull_field_mapping_from_record(
@@ -4521,64 +1348,10 @@ class TicketSyncService:
         *,
         field_mappings: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """
-        根据多维表格字段映射生成外部同步字段字典。
-
-        :param fields: 多维表格 fields。
-        :param field_mappings: 可视化或任务参数配置的字段映射。
-        :return: 同步字段字典。
-        """
-        payload: dict[str, Any] = {}
-        field_segments: dict[str, list[dict[str, Any]]] = {}
-        for mapping in field_mappings:
-            source_field = str(mapping.get("sourceField") or "").strip()
-            target_field = cls._normalize_bitable_pull_target_field(mapping.get("targetField"))
-            if not source_field or not target_field:
-                continue
-            raw_value = fields.get(source_field)
-            join_separator = str(mapping.get("joinSeparator") or ",").strip() or ","
-            if target_field in {
-                "reporterEmail",
-                "currentAssigneeEmail",
-                "ticketAssigneeEmail",
-                "internalOwnerEmail",
-            }:
-                normalized_value = cls._extract_bitable_person_email(raw_value, join_separator=join_separator)
-            elif target_field in {
-                "reporterName",
-                "currentAssigneeName",
-                "ticketAssignee",
-                "internalOwner",
-            }:
-                normalized_value = (
-                    cls._extract_bitable_person_name(raw_value, join_separator=join_separator)
-                    or cls._normalize_bitable_record_scalar(raw_value, join_separator=join_separator)
-                )
-            else:
-                normalized_value = cls._normalize_bitable_record_scalar(
-                    raw_value,
-                    join_separator=join_separator,
-                )
-            if normalized_value in (None, "", []):
-                default_value = mapping.get("defaultValue")
-                normalized_value = default_value if default_value not in ("", None) else None
-            if normalized_value in (None, "", []):
-                continue
-            if target_field in {"createTime"}:
-                payload[target_field] = cls._normalize_bitable_record_datetime_text(normalized_value)
-            else:
-                payload[target_field] = normalized_value
-            if target_field == "stepReason":
-                segments = cls._normalize_bitable_rich_text_segments_for_comment(raw_value)
-                if segments:
-                    field_segments[target_field] = segments
-                    field_segments[source_field] = segments
-        if field_segments:
-            extra_data = payload.get("extraData") if isinstance(payload.get("extraData"), dict) else {}
-            extra_data = dict(extra_data or {})
-            extra_data["_bitable_field_segments"] = field_segments
-            payload["extraData"] = extra_data
-        return payload
+        """委托到 FeishuBitableUtil.build_pull_field_mapping_from_record。"""
+        return FeishuBitableUtil.build_pull_field_mapping_from_record(
+            fields, field_mappings=field_mappings
+        )
 
     @classmethod
     def _build_bitable_pull_snapshot_hash(
@@ -4587,18 +1360,11 @@ class TicketSyncService:
         source_payload: dict[str, Any],
         field_mapping_snapshot: dict[str, str],
     ) -> str:
-        """
-        计算主动拉取记录快照哈希，用于判断记录内容是否变化。
-
-        :param source_payload: 归一化后的同步负载。
-        :param field_mapping_snapshot: 字段映射快照。
-        :return: SHA256 哈希。
-        """
-        raw = {
-            "payload": source_payload,
-            "mapping": field_mapping_snapshot,
-        }
-        return hashlib.sha256(json.dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+        """委托到 FeishuBitableUtil.build_pull_snapshot_hash。"""
+        return FeishuBitableUtil.build_pull_snapshot_hash(
+            source_payload=source_payload,
+            field_mapping_snapshot=field_mapping_snapshot,
+        )
 
     @classmethod
     def _build_bitable_pull_sync_object(
@@ -5147,11 +1913,11 @@ class TicketSyncService:
         return "\n".join(str(item).strip() for item in parts if str(item or "").strip())
 
     @classmethod
-    def _mapping_keywords(cls, mapping: dict[str, Any]) -> list[str]:
-        keywords = SyncUtil.normalize_keywords(mapping.get("keywords") or mapping.get("aliases"))
-        if mapping.get("matchText"):
-            keywords.extend(SyncUtil.normalize_keywords([mapping.get("matchText")]))
-        return [keyword for keyword in keywords if keyword]
+    @classmethod
+    def _mapping_keywords(cls, mapping):
+        """委托到 TicketSyncFieldMappingService._mapping_keywords。"""
+        return TicketSyncFieldMappingService._mapping_keywords(mapping)
+
 
     @classmethod
     def _merge_external_text_fields(
@@ -7618,6 +4384,7 @@ class TicketSyncService:
         return summary
 
     @classmethod
+    @classmethod
     def pull_pending_tickets(
         cls,
         db: Session,
@@ -7681,6 +4448,7 @@ class TicketSyncService:
             "items": payload_rows,
         }
 
+    @classmethod
     @classmethod
     def ack_sync_delivery(
         cls,
@@ -7924,6 +4692,7 @@ class TicketSyncService:
         }
 
     @classmethod
+    @classmethod
     def _build_remote_sync_upsert_model(
         cls,
         item: dict[str, Any],
@@ -8094,6 +4863,7 @@ class TicketSyncService:
             logger.warning(f"转换远端工单同步模型失败，ticket_no={ticket_no}, error={exc}")
             return None
 
+    @classmethod
     @classmethod
     def sync_remote_pending_tickets(
         cls,

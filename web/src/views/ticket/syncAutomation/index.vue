@@ -58,7 +58,10 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="默认 tableId">
-                    <el-input v-model="form.bitableCommon.tableId" placeholder="默认多维表格 tableId" />
+                    <el-input
+                      v-model="form.bitableCommon.tableId"
+                      placeholder="默认多维表格 tableId"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
@@ -95,8 +98,6 @@
               </el-row>
             </el-form>
           </el-card>
-
-
 
           <el-card shadow="never" class="config-card mt16">
             <template #header>
@@ -250,7 +251,7 @@
                       v-model="form.summaryReport.filterFormula"
                       type="textarea"
                       :rows="3"
-                      placeholder='可选，飞书 records/search filter JSON'
+                      placeholder="可选，飞书 records/search filter JSON"
                     />
                   </el-form-item>
                 </el-col>
@@ -536,7 +537,7 @@
                       v-model="form.personReminder.filterFormula"
                       type="textarea"
                       :rows="3"
-                      placeholder='可选，飞书 records/search filter JSON'
+                      placeholder="可选，飞书 records/search filter JSON"
                     />
                   </el-form-item>
                 </el-col>
@@ -1078,27 +1079,49 @@
               <el-row :gutter="16">
                 <el-col :xs="24" :md="12">
                   <el-form-item label="启用评论同步">
-                    <el-switch v-model="form.messageSync.enabled" inline-prompt active-text="开" inactive-text="关" />
+                    <el-switch
+                      v-model="form.messageSync.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="Webhook 入站">
-                    <el-switch v-model="form.messageSync.feishuEventEnabled" inline-prompt active-text="开" inactive-text="关" />
+                    <el-switch
+                      v-model="form.messageSync.feishuEventEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="长连接入站">
-                    <el-switch v-model="form.messageSync.feishuWsEnabled" inline-prompt active-text="开" inactive-text="关" />
+                    <el-switch
+                      v-model="form.messageSync.feishuWsEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="长连接 Token">
-                    <el-input v-model="form.messageSync.feishuWsVerificationToken" placeholder="飞书事件订阅 Verification Token，可空" />
+                    <el-input
+                      v-model="form.messageSync.feishuWsVerificationToken"
+                      placeholder="飞书事件订阅 Verification Token，可空"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="长连接 Encrypt Key">
-                    <el-input v-model="form.messageSync.feishuWsEncryptKey" placeholder="飞书事件订阅 Encrypt Key，可空" show-password />
+                    <el-input
+                      v-model="form.messageSync.feishuWsEncryptKey"
+                      placeholder="飞书事件订阅 Encrypt Key，可空"
+                      show-password
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
@@ -1129,37 +1152,68 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="飞书评论写入工单">
-                    <el-switch v-model="form.messageSync.syncFeishuCommentToTicket" inline-prompt active-text="开" inactive-text="关" />
+                    <el-switch
+                      v-model="form.messageSync.syncFeishuCommentToTicket"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="飞书评论写入多维">
-                    <el-switch v-model="form.messageSync.syncFeishuCommentToBitable" inline-prompt active-text="开" inactive-text="关" />
+                    <el-switch
+                      v-model="form.messageSync.syncFeishuCommentToBitable"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="系统评论写入多维">
-                    <el-switch v-model="form.messageSync.syncTicketCommentToBitable" inline-prompt active-text="开" inactive-text="关" />
+                    <el-switch
+                      v-model="form.messageSync.syncTicketCommentToBitable"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="系统评论发到话题">
-                    <el-switch v-model="form.messageSync.syncTicketCommentToFeishuThread" inline-prompt active-text="开" inactive-text="关" />
+                    <el-switch
+                      v-model="form.messageSync.syncTicketCommentToFeishuThread"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="多维新增同步话题">
-                    <el-switch v-model="form.messageSync.syncBitableNewStepToFeishuThread" inline-prompt active-text="开" inactive-text="关" />
+                    <el-switch
+                      v-model="form.messageSync.syncBitableNewStepToFeishuThread"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="排查过程字段">
-                    <el-input v-model="form.messageSync.bitableStepReasonField" placeholder="默认 stepReason" />
+                    <el-input
+                      v-model="form.messageSync.bitableStepReasonField"
+                      placeholder="默认 stepReason"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="工单号字段">
-                    <el-input v-model="form.messageSync.bitableTicketNoField" placeholder="默认 ticketNo" />
+                    <el-input
+                      v-model="form.messageSync.bitableTicketNoField"
+                      placeholder="默认 ticketNo"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :span="24">
@@ -1216,12 +1270,19 @@
                   </el-table-column>
                   <el-table-column label="操作" width="80" align="center">
                     <template #default="scope">
-                      <el-button link type="danger" icon="Delete" @click="removeExternalFieldModel(scope.$index)" />
+                      <el-button
+                        link
+                        type="danger"
+                        icon="Delete"
+                        @click="removeExternalFieldModel(scope.$index)"
+                      />
                     </template>
                   </el-table-column>
                 </el-table>
                 <div class="mt8">
-                  <el-button type="primary" link icon="Plus" @click="addExternalFieldModel">新增字段</el-button>
+                  <el-button type="primary" link icon="Plus" @click="addExternalFieldModel"
+                    >新增字段</el-button
+                  >
                 </div>
               </el-form-item>
             </el-form>
@@ -1321,7 +1382,10 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="来源系统标识">
-                    <el-input v-model="form.bitablePull.sourceSystem" placeholder="如 feishu_bitable_pull" />
+                    <el-input
+                      v-model="form.bitablePull.sourceSystem"
+                      placeholder="如 feishu_bitable_pull"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
@@ -1351,17 +1415,26 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="工单号字段">
-                    <el-input v-model="form.bitablePull.ticketNoField" placeholder="用于说明，多数情况由字段映射给 ticketNo" />
+                    <el-input
+                      v-model="form.bitablePull.ticketNoField"
+                      placeholder="用于说明，多数情况由字段映射给 ticketNo"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="更新时间字段">
-                    <el-input v-model="form.bitablePull.updatedAtField" placeholder="如 更新时间；默认时间窗口过滤字段之一" />
+                    <el-input
+                      v-model="form.bitablePull.updatedAtField"
+                      placeholder="如 更新时间；默认时间窗口过滤字段之一"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="排序字段">
-                    <el-input v-model="form.bitablePull.sortField" placeholder="预留；当前仅保存说明" />
+                    <el-input
+                      v-model="form.bitablePull.sortField"
+                      placeholder="预留；当前仅保存说明"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
@@ -1382,7 +1455,9 @@
                       active-text="是"
                       inactive-text="否"
                     />
-                    <div class="switch-inline-desc__text">开启后忽略本地快照去重，重新拉取远端数据入库并触发后处理</div>
+                    <div class="switch-inline-desc__text">
+                      开启后忽略本地快照去重，重新拉取远端数据入库并触发后处理
+                    </div>
                   </el-form-item>
                 </el-col>
                 <el-col :span="24">
@@ -1406,7 +1481,9 @@
                             active-text="开启"
                             inactive-text="关闭"
                           />
-                          <div class="switch-inline-desc__text">自动识别项目/模块/人员/门店等归属信息</div>
+                          <div class="switch-inline-desc__text">
+                            自动识别项目/模块/人员/门店等归属信息
+                          </div>
                         </el-form-item>
                       </el-col>
                       <el-col :xs="12" :md="6">
@@ -1417,7 +1494,9 @@
                             active-text="开启"
                             inactive-text="关闭"
                           />
-                          <div class="switch-inline-desc__text">入库后按识别结果自动提交日志拉取任务</div>
+                          <div class="switch-inline-desc__text">
+                            入库后按识别结果自动提交日志拉取任务
+                          </div>
                         </el-form-item>
                       </el-col>
                       <el-col :xs="12" :md="6">
@@ -1458,7 +1537,11 @@
                       >
                         读取表格字段
                       </el-button>
-                      <span v-if="bitablePullFieldOptions.length" class="mapping-desc" style="margin-left: 12px">
+                      <span
+                        v-if="bitablePullFieldOptions.length"
+                        class="mapping-desc"
+                        style="margin-left: 12px"
+                      >
                         已读取 {{ bitablePullFieldOptions.length }} 个字段
                       </span>
                     </div>
@@ -1504,7 +1587,10 @@
                       </el-table-column>
                       <el-table-column label="默认值" min-width="180">
                         <template #default="scope">
-                          <el-input v-model="scope.row.defaultValue" placeholder="为空时可回填默认值" />
+                          <el-input
+                            v-model="scope.row.defaultValue"
+                            placeholder="为空时可回填默认值"
+                          />
                         </template>
                       </el-table-column>
                       <el-table-column label="多值分隔符" width="120">
@@ -1514,12 +1600,19 @@
                       </el-table-column>
                       <el-table-column label="操作" width="80" align="center">
                         <template #default="scope">
-                          <el-button link type="danger" icon="Delete" @click="removeBitablePullFieldMapping(scope.$index)" />
+                          <el-button
+                            link
+                            type="danger"
+                            icon="Delete"
+                            @click="removeBitablePullFieldMapping(scope.$index)"
+                          />
                         </template>
                       </el-table-column>
                     </el-table>
                     <div class="mt8">
-                      <el-button type="primary" link icon="Plus" @click="addBitablePullFieldMapping">新增映射</el-button>
+                      <el-button type="primary" link icon="Plus" @click="addBitablePullFieldMapping"
+                        >新增映射</el-button
+                      >
                     </div>
                   </el-form-item>
                 </el-col>
@@ -1858,7 +1951,11 @@
               <section class="stat-config-section stat-config-section--wide">
                 <div class="stat-config-section__head">
                   <span>细分问题类型</span>
-                  <el-button link type="primary" icon="Plus" @click="addStatOption('problemPatterns')"
+                  <el-button
+                    link
+                    type="primary"
+                    icon="Plus"
+                    @click="addStatOption('problemPatterns')"
                     >新增</el-button
                   >
                 </div>
@@ -1895,7 +1992,10 @@
                   </el-table-column>
                   <el-table-column label="说明" min-width="240">
                     <template #default="scope">
-                      <el-input v-model="scope.row.description" placeholder="用于AI判定的业务定义" />
+                      <el-input
+                        v-model="scope.row.description"
+                        placeholder="用于AI判定的业务定义"
+                      />
                     </template>
                   </el-table-column>
                   <el-table-column label="启用" width="90" align="center">
@@ -1917,9 +2017,6 @@
               </section>
             </div>
           </el-card>
-
-
-
         </el-tab-pane>
         <el-tab-pane label="操作">
           <el-card shadow="never" class="config-card mt16">
@@ -2177,12 +2274,50 @@
   } from '@/api/ticket/ticket';
   import { listAiProviderOptions } from '@/api/system/aiprovider';
   import { listAiPromptTemplateOptions } from '@/api/system/aiprompt';
-import { useSyncConfig } from './hooks/useSyncConfig';
+  import { useSyncConfig } from './hooks/useSyncConfig';
 
   const { proxy } = getCurrentInstance();
 
   // 配置管理已提取到 hooks/useSyncConfig.js
-  const { loading, saving, workflowStatusOptions, form, mappingTexts, posPatternsText, scoPatternsText, versionPatternsText, mappingSections, notifySendModes, groupPushAutoStatusOptions, externalSyncRequiredFieldOptions, personDataSourceOptions, summaryDataSourceOptions, personLocalTimeFieldOptions, summaryTimeFieldOptions, externalFieldModelOptions, rules, remoteRules, defaultStatClassification, normalizeArray, normalizeStatOptionRows, normalizeStatClassificationConfig, normalizeDateTimeText, normalizeWorkflowStatusOptions, parseJsonArray, applyConfig, loadConfig, loadWorkflowStatuses, validateElForm, handleSave, addStatOption, removeStatOption, addExternalFieldModel, removeExternalFieldModel, addBitablePullFieldMapping, removeBitablePullFieldMapping } = useSyncConfig(proxy)
+  const {
+    loading,
+    saving,
+    workflowStatusOptions,
+    form,
+    mappingTexts,
+    posPatternsText,
+    scoPatternsText,
+    versionPatternsText,
+    mappingSections,
+    notifySendModes,
+    groupPushAutoStatusOptions,
+    externalSyncRequiredFieldOptions,
+    personDataSourceOptions,
+    summaryDataSourceOptions,
+    personLocalTimeFieldOptions,
+    summaryTimeFieldOptions,
+    externalFieldModelOptions,
+    rules,
+    remoteRules,
+    defaultStatClassification,
+    normalizeArray,
+    normalizeStatOptionRows,
+    normalizeStatClassificationConfig,
+    normalizeDateTimeText,
+    normalizeWorkflowStatusOptions,
+    parseJsonArray,
+    applyConfig,
+    loadConfig,
+    loadWorkflowStatuses,
+    validateElForm,
+    handleSave,
+    addStatOption,
+    removeStatOption,
+    addExternalFieldModel,
+    removeExternalFieldModel,
+    addBitablePullFieldMapping,
+    removeBitablePullFieldMapping,
+  } = useSyncConfig(proxy);
   const pushOptionsLoading = ref(false);
   const pushOptions = ref([]);
   const providerOptions = ref([]);
@@ -2223,13 +2358,6 @@ import { useSyncConfig } from './hooks/useSyncConfig';
   });
   // mappingTexts + groupPushAutoStatusOptions 已通过 useSyncConfig() 提供
 
-
-
-
-
-
-
-
   /**
    * 创建远端同步字段的条件必填校验器。
    * 仅在启用远端同步时校验字段是否为空。
@@ -2237,32 +2365,11 @@ import { useSyncConfig } from './hooks/useSyncConfig';
    * @returns {(rule: any, value: any, callback: (error?: Error) => void) => void} Element Plus 表单校验回调。
    */
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   /**
    * 归一化日期时间字符串，统一为 `YYYY-MM-DD HH:mm:ss`，不做时区换算。
    * @param {any} value 原始值。
    * @returns {string} 归一化后的时间文本。
    */
-
-
-
-
-
 
   watch(
     () => form.remoteSync.enabled,
@@ -2301,11 +2408,23 @@ import { useSyncConfig } from './hooks/useSyncConfig';
     }
   );
 
-
   /**
    * 加载 AI Provider 和提示词模板选项。
    * 页面仍允许手工输入编码，选项加载失败时不阻塞配置保存。
    */
+  function formatProviderOptionLabel(item = {}) {
+    const code = item.providerCode || '';
+    const name = item.providerName || code || '-';
+    const modelName = item.modelName || '';
+    return `${name}${code && name !== code ? ` [${code}]` : ''}${modelName ? ` - ${modelName}` : ''}`;
+  }
+
+  function formatPromptOptionLabel(item = {}) {
+    const code = item.promptCode || item.templateCode || item.value || '';
+    const name = item.promptName || item.templateName || item.label || code || '-';
+    return `${name}${code && name !== code ? ` [${code}]` : ''}`;
+  }
+
   function loadAiOptions() {
     listAiProviderOptions()
       .then((response) => {
@@ -2325,7 +2444,6 @@ import { useSyncConfig } from './hooks/useSyncConfig';
         promptOptions.value = [];
       });
   }
-
 
   function normalizeOptionalInt(value) {
     if (value === null || value === undefined || value === '') {
@@ -2624,6 +2742,17 @@ import { useSyncConfig } from './hooks/useSyncConfig';
       })
       .finally(() => {
         groupSendLoading.value = false;
+      });
+  }
+
+  function loadPushOptions() {
+    pushOptionsLoading.value = true;
+    listTicketSyncNotifyPushOptions()
+      .then((response) => {
+        pushOptions.value = Array.isArray(response.data) ? response.data : [];
+      })
+      .finally(() => {
+        pushOptionsLoading.value = false;
       });
   }
 
