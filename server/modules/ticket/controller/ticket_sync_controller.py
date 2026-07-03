@@ -1,73 +1,25 @@
 import json
-from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
-from starlette.background import BackgroundTask
 
-from config.database import SessionLocal
 from config.get_db import get_db
-from context.request_context import get_current_trace_id, trace_context
-from module_admin.annotation.log_annotation import log_decorator
+from context.request_context import get_current_trace_id
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
-from modules.ticket.entity.vo.ticket_log_pull_vo import (
-    TicketLogErrorsRequestModel,
-    TicketLogPrepareRequestModel,
-    TicketLogPullContentQueryModel,
-    TicketLogPullCreateModel,
-    TicketLogPullProjectVendorMapQueryModel,
-    TicketLogPullProjectVendorMapUpsertModel,
-    TicketLogPullQueryModel,
-    TicketLogPullStorageConfigModel,
-    TicketLogPullStoreConfigQueryModel,
-    TicketLogSearchRequestModel,
-    TicketLogSearchTimeRequestModel,
-)
 from modules.ticket.entity.vo.ticket_vo import (
-    KnowledgeArticleModel,
-    KnowledgeArticleQueryModel,
-    TicketAiAnalysisRequestModel,
-    TicketAiAnalysisTaskQueryModel,
-    TicketAiRepoMappingCreateModel,
-    TicketAiRepoMappingQueryModel,
-    TicketAiRepoMappingUpdateModel,
-    TicketAssignModel,
     TicketBatchReclassifyRequestModel,
-    TicketCommentCreateModel,
-    TicketCreateModel,
-    TicketEmbeddingRebuildRequestModel,
-    TicketEventCreateModel,
     TicketExternalSyncUpsertModel,
-    TicketMessageCreateModel,
-    TicketQueryModel,
-    TicketRcaModel,
-    TicketSimilarityConfigModel,
-    TicketSnapshotModel,
-    TicketStatisticsQueryModel,
-    TicketStatusChangeModel,
     TicketSyncAckRequestModel,
     TicketSyncGroupPushSendModel,
     TicketSyncPersonReminderPreviewModel,
     TicketSyncPersonReminderRunModel,
     TicketSyncPullQueryModel,
     TicketSyncSummaryRunModel,
-    TicketUpdateModel,
-    TicketUserOptionQueryModel,
-    WorkflowStatusModel,
-    WorkflowTransitionModel,
 )
-from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
-from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
-from modules.ticket.service.ticket_import_service import TicketImportService
-from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
-from modules.ticket.service.ticket_log_service import LogService
-from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
-from modules.ticket.service.ticket_service import TicketService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil

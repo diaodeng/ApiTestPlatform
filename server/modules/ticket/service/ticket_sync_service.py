@@ -176,59 +176,12 @@ class TicketSyncService:
     }
     GROUP_PUSH_LOCK_TIMEOUT_SECONDS = 300
 
-    @classmethod
-    def _to_bool(cls, value: Any, default: bool = False) -> bool:
-        """
-        将任务参数或配置值转换为布尔值。
-
-        :param value: 原始布尔、数字或字符串值。
-        :param default: 值为空或无法识别时返回的默认值。
-        :return: 归一化后的布尔值。
-        """
-        if value is None:
-            return default
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        normalized_value = str(value).strip().lower()
-        if normalized_value in {"true", "1", "yes", "y", "on", "开启", "是"}:
             return True
         if normalized_value in {"false", "0", "no", "n", "off", "关闭", "否"}:
             return False
         return default
 
-    @classmethod
-    def _build_system_current_user(cls) -> CurrentUserModel:
-        """
-        构造后台任务使用的系统用户上下文。
 
-        :return: 包含空权限、空角色和 system 用户信息的当前用户模型。
-        """
-        return CurrentUserModel.model_validate(cls._build_system_current_user_payload())
-
-    @classmethod
-    def _build_system_current_user_payload(cls) -> dict[str, Any]:
-        """
-        构造可跨 Celery 序列化的系统用户载荷。
-
-        :return: 满足 CurrentUserModel 校验要求的用户字典。
-        """
-        return {
-            "permissions": [],
-            "roles": [],
-            "user": {"userId": 0, "userName": "system", "nickName": "system"},
-        }
-
-    @classmethod
-    def _normalize_current_user_payload(cls, current_user_payload: dict[str, Any] | None) -> dict[str, Any]:
-        """
-        归一化延后后处理任务的当前用户载荷。
-
-        :param current_user_payload: Celery 或本地后台任务传入的当前用户字典。
-        :return: 补齐 permissions、roles 和 user 后的当前用户字典。
-        """
-        payload = dict(current_user_payload or {})
         payload.setdefault("permissions", [])
         payload.setdefault("roles", [])
         user_payload = payload.get("user")
@@ -242,47 +195,6 @@ class TicketSyncService:
             payload["user"] = cls._build_system_current_user_payload()["user"]
         return payload
 
-    @classmethod
-    def _json_dumps(cls, value: Any) -> str:
-        return json.dumps(value, ensure_ascii=False, indent=2)
-
-    @classmethod
-    def _json_loads(cls, value: Any, default: Any):
-        if value in (None, ""):
-            return default
-        if isinstance(value, (dict, list)):
-            return value
-        try:
-            return json.loads(str(value))
-        except Exception:
-            return default
-
-    @classmethod
-    def _now_iso(cls) -> str:
-        return datetime.now().isoformat()
-
-    @classmethod
-    def _text_sha256(cls, value: Any) -> str:
-        """
-        计算文本的 SHA256 摘要，用于判断翻译源是否变化。
-
-        :param value: 原始文本。
-        :return: 文本摘要，空值返回空字符串。
-        """
-        normalized = str(value or "").strip()
-        if not normalized:
-            return ""
-        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-    @classmethod
-    def _parse_step_reason_date(cls, value: str) -> datetime | None:
-        """
-        解析 stepReason 分段开头的日期。
-        :param value: 日期文本，支持 yyyyMMdd
-        :return: 日期时间，解析失败返回 None
-        """
-        text = str(value or "").strip()
-        if not re.fullmatch(r"\d{8}", text):
             return None
         try:
             return datetime.combine(datetime.strptime(text, "%Y%m%d").date(), time.min)
@@ -1263,80 +1175,6 @@ class TicketSyncService:
                 f"ticket_id={ticket_id}, ai_task_status={ai_task_status}, error={exc}"
             )
 
-    @classmethod
-    def _safe_int(cls, value: Any) -> int | None:
-        try:
-            if value in (None, ""):
-                return None
-            return int(value)
-        except Exception:
-            return None
-
-    @classmethod
-    def _parse_datetime_value(cls, value: Any) -> datetime | None:
-        """
-        将多种时间格式解析为可比较的 datetime。
-        :param value: 原始时间值
-        :return: datetime，失败返回 None
-        """
-        if value in (None, ""):
-            return None
-        parsed: datetime | None = None
-        if isinstance(value, datetime):
-            parsed = value
-        elif isinstance(value, (int, float)):
-            timestamp = float(value)
-            if timestamp > 10_000_000_000:
-                timestamp = timestamp / 1000.0
-            try:
-                parsed = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-            except Exception:
-                parsed = None
-        else:
-            text = str(value or "").strip()
-            if not text:
-                return None
-            try:
-                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            except Exception:
-                parsed = None
-            if parsed is None:
-                for fmt in (
-                    "%Y-%m-%d %H:%M:%S",
-                    "%Y/%m/%d %H:%M:%S",
-                    "%Y-%m-%d %H:%M",
-                    "%Y/%m/%d %H:%M",
-                    "%Y-%m-%d",
-                    "%Y/%m/%d",
-                ):
-                    try:
-                        parsed = datetime.strptime(text, fmt)
-                        break
-                    except Exception:
-                        continue
-        if parsed is None:
-            return None
-        if parsed.tzinfo is not None:
-            try:
-                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-            except Exception:
-                parsed = parsed.replace(tzinfo=None)
-        return parsed
-
-    @classmethod
-    def _resolve_external_create_time(
-        cls,
-        *,
-        sync_object: TicketExternalSyncUpsertModel,
-        existing_meta: dict[str, Any] | None,
-    ) -> str:
-        """
-        解析并固定外部工单创建时间。
-        :param sync_object: 外部同步模型
-        :param existing_meta: 已存在的同步元数据
-        :return: ISO 格式创建时间文本
-        """
-        current_meta = existing_meta if isinstance(existing_meta, dict) else {}
         source_snapshot = current_meta.get("source") if isinstance(current_meta.get("source"), dict) else {}
         existing_external_time = (
             current_meta.get("externalCreateTime")
@@ -3521,41 +3359,6 @@ class TicketSyncService:
             "automationError": automation.get("last_error"),
         }
 
-    @classmethod
-    def _normalize_keywords(cls, value: Any) -> list[str]:
-        if isinstance(value, list):
-            items = value
-        elif isinstance(value, str):
-            items = [item.strip() for item in value.split(",")]
-        else:
-            items = []
-        result: list[str] = []
-        for item in items:
-            text = str(item or "").strip().lower()
-            if text and text not in result:
-                result.append(text)
-        return result
-
-    @classmethod
-    def _payload_field_value(
-        cls,
-        payload: dict[str, Any] | None,
-        camel_key: str,
-        snake_key: str | None = None,
-        default=None,
-    ):
-        """
-        从外部载荷中读取字段值，仅兼容驼峰与下划线写法。
-        :param payload: 外部载荷字典
-        :param camel_key: 驼峰字段名
-        :param snake_key: 下划线字段名，未传时自动转换
-        :param default: 默认值
-        :return: 命中的字段值或默认值
-        """
-        if not isinstance(payload, dict):
-            return default
-        normalized_snake_key = snake_key or "".join(
-            [f"_{char.lower()}" if char.isupper() else char for char in camel_key]
         )
         for key in (camel_key, normalized_snake_key):
             if key not in payload:
