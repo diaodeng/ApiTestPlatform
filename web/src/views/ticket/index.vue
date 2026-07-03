@@ -2087,62 +2087,24 @@ import UserSelect from './components/UserSelect.vue'
 import { blobValidate } from '@/utils/ruoyi'
 import { useRoute, useRouter } from 'vue-router'
 import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig'
+import { useWorkflow } from './hooks/useWorkflow'
+import { useAiRepoMapping } from './hooks/useAiRepoMapping'
+import { useOptions } from './hooks/useOptions'
+import { useLogViewer } from './hooks/useLogViewer'
+import { useTicketList } from './hooks/useTicketList'
 
 const { proxy } = getCurrentInstance()
 const route = useRoute()
 const router = useRouter()
 
-const loading = ref(false)
-const showSearch = ref(true)
-const ticketList = ref([])
-const total = ref(0)
-const projectOptions = ref([])
-const projectVendorMapOptions = ref([])
-const formModuleOptions = ref([])
-const formVersionOptions = ref([])
-const queryModuleOptions = ref([])
-const queryModuleCodeOptions = ref([])
-const issueTypeOptions = ref([])
-const rootCauseTypeOptions = ref([])
-const solutionTypeOptions = ref([])
-const resolutionOptions = ref([])
-const problemPatternOptions = ref([])
-const columnConfigOpen = ref(false)
-const ticketColumnOptions = [
-  { key: 'ticketNo', label: '工单编号', required: true },
-  { key: 'title', label: '标题', required: true },
-  { key: 'status', label: '状态' },
-  { key: 'processStatus', label: '处理状态' },
-  { key: 'project', label: '项目' },
-  { key: 'moduleName', label: '模块' },
-  { key: 'issueType', label: '工单类型' },
-  { key: 'isProblem', label: '问题性质' },
-  { key: 'rootCauseType', label: '根因分类' },
-  { key: 'solutionType', label: '解决方式' },
-  { key: 'resolution', label: '关闭结果' },
-  { key: 'problemPattern', label: '细分问题' },
-  { key: 'customerPriority', label: '对方优先级' },
-  { key: 'internalPriority', label: '内部优先级' },
-  { key: 'source', label: '来源' },
-  { key: 'firstLineAssigneeName', label: '1线人员' },
-  { key: 'internalOwnerName', label: '内部负责人' },
-  { key: 'currentAssigneeName', label: '当前处理人' },
-  { key: 'submitTime', label: '工单提交时间' },
-  { key: 'createTime', label: '创建时间' }
-]
-const defaultTicketColumnKeys = ticketColumnOptions.map(item => item.key)
-const requiredTicketColumnKeys = ticketColumnOptions.filter(item => item.required).map(item => item.key)
-const visibleTicketColumnKeys = ref([...defaultTicketColumnKeys])
-const agentOptions = ref([])
-const providerOptions = ref([])
-const analysisPromptOptions = ref([])
-const vendorOptions = ref([])
-const parameterExamples = ref([])
-const pushOptions = ref([])
-const workflowConfig = ref({
-  statuses: [],
-  transitions: []
-})
+// 列表查询 + 列配置 + 外部链接 已提取到 hooks/useTicketList.js
+const { loading, showSearch, ticketList, total, naturalKeyword, submitTimeRange, queryParams, queryCurrentAssigneeOption, queryFirstLineAssigneeOption, queryInternalOwnerOption, columnConfigOpen, ticketColumnOptions, visibleTicketColumnKeys, loadTicketColumnConfig, saveTicketColumnConfig, resetTicketColumnConfig, isTicketColumnVisible, getList, handleTicketSortChange, resolveTicketDetailUrl, openTicketLink, buildSystemTicketDetailUrl, openSystemTicketDetail, handleQuery, handleSearch, resetQuery, handleNaturalSearch, handleQueryCurrentAssigneeChange, handleQueryFirstLineAssigneeChange, handleQueryInternalOwnerChange } = useTicketList(proxy, standaloneDetailMode)
+// 选项数据 + 格式化函数 已提取到 hooks/useOptions.js
+const { projectOptions, projectVendorMapOptions, formModuleOptions, formVersionOptions, queryModuleOptions, queryModuleCodeOptions, issueTypeOptions, rootCauseTypeOptions, solutionTypeOptions, resolutionOptions, problemPatternOptions, agentOptions, providerOptions, analysisPromptOptions, vendorOptions, parameterExamples, pushOptions, detailVersionOptions, normalizeVendorOptions, loadVendorOptions, loadProjectVendorMapOptions, getProjectVendorNo, applyProjectVendorMapping, getVendorStoreOptions, loadProviderOptions, loadAnalysisPromptOptions, getTicketAutomationLogPullConfig, findAiProviderOption, applyAiAnalysisProviderAgent, handleAiAnalysisProviderChange, resolveDefaultAiPromptTemplateCodes, loadDetailVersionOptions, loadPushOptions, loadProjectOptions, loadAgentOptions, loadQueryModuleOptions, loadFormModuleOptions, loadFormVersionOptions, getStatOptionLabel, formatStatOption, formatProblemFlag, formatIssueType, formatResolution, formatProblemPattern, normalizeStatOptions, loadStatClassificationOptions } = useOptions()
+// ticketColumnOptions / defaultTicketColumnKeys / requiredTicketColumnKeys 已通过 useTicketList() 提供
+// agentOptions / providerOptions / analysisPromptOptions / vendorOptions / parameterExamples / pushOptions 已通过 useOptions() 提供
+// 已提取到 hooks/useWorkflow.js — workflowConfig / ticketStatusOptions / statusTransitionOptions / getStatusTagType / loadWorkflowConfig
+const { workflowConfig, ticketStatusOptions, statusTransitionOptions, getStatusTagType, loadWorkflowConfig } = useWorkflow(currentTicketStatus)
 const currentTicketStatus = ref('')
 const open = ref(false)
 const formSubmitting = ref(false)
@@ -2159,9 +2121,6 @@ const historyActiveTab = ref('timeline')
 const title = ref('')
 const currentTicketId = ref()
 const currentAssigneeOption = ref(null)
-const queryCurrentAssigneeOption = ref([])
-const queryFirstLineAssigneeOption = ref([])
-const queryInternalOwnerOption = ref([])
 const firstLineAssigneeOption = ref(null)
 const internalOwnerOption = ref(null)
 const formModuleValue = ref('')
@@ -2176,33 +2135,9 @@ const similarTickets = ref([])
 const tagText = ref('')
 const eventDataText = ref('')
 const messageDataText = ref('')
-const naturalKeyword = ref('')
-const submitTimeRange = ref([])
 const importResult = ref(null)
-const logPullLoading = ref(false)
-const logPullSubmitting = ref(false)
-const logPullActionLoading = ref(false)
-const logPullSubmitOpen = ref(false)
-const logPullContentOpen = ref(false)
-const logViewerTicketMeta = ref({
-  ticketId: undefined,
-  ticketNo: '',
-  title: ''
-})
-const logPullList = ref([])
-const logPullTotal = ref(0)
-const logViewerSearching = ref(false)
-const logViewerHits = ref([])
-const logViewerContext = ref(null)
-const logViewerErrorSummary = ref(null)
-const logViewerResultViewMode = ref('normal')
-const logViewerContextViewMode = ref('normal')
-const logViewerForm = ref({
-  ticketId: undefined,
-  keyword: '',
-  contextLines: 20,
-  limit: 500
-})
+// 日志拉取 + 日志查看器 已提取到 hooks/useLogViewer.js
+const { logPullLoading, logPullSubmitting, logPullActionLoading, logPullSubmitOpen, logPullContentOpen, logPullList, logPullTotal, logPullForm, logPullQuery, logPullWrapEnabled, logPullAutoRefreshing, selectedLogPullRecord, activeLogPullStatuses, logViewerTicketMeta, logViewerSearching, logViewerHits, logViewerContext, logViewerErrorSummary, logViewerResultViewMode, logViewerContextViewMode, logViewerForm, createDefaultLogPullForm, buildCleanLogPullConfig, resetLogPullForm, openLogPullSubmitDialog, stopLogPullAutoRefresh, scheduleLogPullAutoRefresh, loadLogPullList, submitLogPull, deleteLogPull, retryLogPull, redownloadLogPull, openBrowserDownload, getLogPullOriginalDownloadUrl, copyTextToClipboard, copyLogPullOriginalDownloadUrl, resolveLogPullDownloadFileName, downloadLogPullFile, downloadLogPullArchive, downloadLogPullOriginal, syncLogViewerTicketMeta, buildLogViewerRecord, openTicketLogViewer, openLogViewerFromPullRecord, handleLogPullDialogClosed, resetLogViewerState, buildLogViewerPayload, setLogViewerPanelMode, searchLogViewerKeyword, loadLogViewerErrors, setLogViewerHits, selectLogViewerHit, pageLogViewerContext, loadLogViewerContext } = useLogViewer(proxy, currentTicketId)
 const aiAnalysisLoading = ref(false)
 const aiAnalysisSubmitting = ref(false)
 const aiAnalysisRetryLoading = ref(false)
@@ -2211,18 +2146,15 @@ const aiAnalysisOpen = ref(false)
 const aiTaskHistoryOpen = ref(false)
 const aiTaskDetailOpen = ref(false)
 const selectedAiTask = ref(null)
-const aiRepoMappingOpen = ref(false)
-const aiRepoMappingLoading = ref(false)
-const aiRepoMappingSubmitting = ref(false)
+// aiRepoMapping* 已提取到 hooks/useAiRepoMapping.js
+const { aiRepoMappingOpen, aiRepoMappingLoading, aiRepoMappingSubmitting, aiRepoMappingList, aiRepoMappingTotal, aiRepoMappingForm, aiRepoMappingRules, resetAiRepoMappingForm, loadAiRepoMappings, openAiRepoMappingDialog, submitAiRepoMapping, deleteAiRepoMapping } = useAiRepoMapping(detail, proxy)
 const projectVendorMapOpen = ref(false)
 const projectVendorMapLoading = ref(false)
 const projectVendorMapSubmitting = ref(false)
 const aiTaskLoading = ref(false)
 const aiTaskList = ref([])
 const aiTaskTotal = ref(0)
-const aiRepoMappingList = ref([])
-const aiRepoMappingTotal = ref(0)
-const detailVersionOptions = ref([])
+// detailVersionOptions 已通过 useOptions() 提供
 const aiAnalysisTaskForm = ref({
   versionKey: '',
   logPullRecordId: undefined,
@@ -2240,20 +2172,6 @@ const aiAnalysisTaskForm = ref({
   extraInstruction: '',
   promptTemplateCodes: []
 })
-const aiRepoMappingForm = ref({
-  mappingId: undefined,
-  projectId: undefined,
-  projectName: '',
-  versionKey: '',
-  repoUrl: '',
-  branchName: '',
-  localRepoPath: '',
-  workspaceRoot: '',
-  workerCommand: '',
-  isDefault: false,
-  enabled: true,
-  remark: ''
-})
 const projectVendorMapForm = ref({
   projectId: undefined,
   projectName: '',
@@ -2264,14 +2182,9 @@ const aiTaskQuery = ref({
   pageSize: 10,
   status: undefined
 })
-const selectedLogPullRecord = ref(null)
-const logPullWrapEnabled = ref(false)
-const logPullAutoRefreshing = ref(false)
 
-let logPullRefreshTimer = null
 let suppressProjectWatcher = false
-
-const activeLogPullStatuses = ['created', 'submitting', 'polling', 'downloading', 'processing']
+// activeLogPullStatuses 已通过 useLogViewer() 提供
 const aiTerminalStatuses = ['success', 'failed', 'canceled']
 const standaloneDetailMode = computed(() => route.name === 'TicketDetail')
 const standaloneRouteTicketId = computed(() => {
@@ -2279,229 +2192,47 @@ const standaloneRouteTicketId = computed(() => {
   return Number.isFinite(ticketId) && ticketId > 0 ? ticketId : undefined
 })
 
-function createDefaultLogPullForm() {
-  return {
-    vendorId: undefined,
-    storeId: undefined,
-    posNo: undefined,
-    commandDataType: 1,
-    modifyTime: undefined,
-    path: '',
-    cutLogEnabled: false,
-    timeRangeMode: 'between',
-    fileMaxSize: 500,
-    zipMaxSize: 500,
-    logBeginTime: undefined,
-    logEndTime: undefined,
-    logPointTime: undefined,
-    rangeBeforeMinutes: 30,
-    rangeAfterMinutes: 30,
-    storageMode: 'local',
-    autoAiEnabled: false,
-    aiAgentCode: '',
-    aiProviderCode: '',
-    notifyConfig: createDefaultLogPullNotifyConfig()
-  }
-}
 
-function normalizeVendorOptions(rows = []) {
-  return rows.map(item => ({
-    vendorId: Number(item.vendorId),
-    vendorCode: String(item.vendorCode || '').trim(),
-    vendorName: String(item.vendorName || item.vendorId || '').trim(),
-    label: buildVendorOptionLabel(item),
-    stores: Array.isArray(item.stores)
-      ? item.stores.map(store => ({
-        storeId: String(store.storeId || '').trim(),
-        storeCode: String(store.storeCode || '').trim(),
-        sapOrgNo: String(store.sapOrgNo || '').trim(),
-        storeName: String(store.storeName || store.storeId || '').trim(),
-        label: buildStoreOptionLabel(store)
-      }))
-      : []
-  }))
-}
 
-function buildVendorOptionLabel(vendor) {
-  const name = String(vendor.vendorName || vendor.vendorId || '').trim()
-  const code = String(vendor.vendorCode || '').trim()
-  const id = String(vendor.vendorId || '').trim()
-  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
-}
 
-function buildStoreOptionLabel(store) {
-  const name = String(store.storeName || store.storeId || '').trim()
-  const orgNo = String(store.storeCode || store.storeId || '').trim()
-  const sapOrgNo = String(store.sapOrgNo || '').trim()
-  return [name, orgNo ? `[${orgNo}]` : '', sapOrgNo ? `(${sapOrgNo})` : ''].filter(Boolean).join(' ')
-}
 
-function loadVendorOptions() {
-  return getTicketLogPullVendorStoreOptions().then(response => {
-    vendorOptions.value = normalizeVendorOptions(response.data?.vendors || [])
-    parameterExamples.value = Array.isArray(response.data?.parameterExamples)
-      ? response.data.parameterExamples
-      : []
-  })
-}
 
-function loadProjectVendorMapOptions() {
-  return listTicketLogPullProjectVendorMapOptions().then(response => {
-    projectVendorMapOptions.value = Array.isArray(response.data) ? response.data : []
-  })
-}
 
-function getProjectVendorNo(projectId) {
-  const resolvedProjectId = Number(projectId)
-  if (!resolvedProjectId) {
-    return ''
-  }
-  const mapping = projectVendorMapOptions.value.find(item => Number(item.projectId) === resolvedProjectId)
-  return String(mapping?.venderNo || '').trim()
-}
 
-function applyProjectVendorMapping(projectId) {
-  const vendorNo = getProjectVendorNo(projectId)
-  if (!vendorNo) {
-    return
-  }
-  const resolvedVendorId = Number(vendorNo)
-  logPullForm.value.vendorId = Number.isNaN(resolvedVendorId) ? vendorNo : resolvedVendorId
-  resetStoreSelection(logPullForm.value, logPullForm.value.vendorId)
-}
 
-function loadProviderOptions() {
-  return listAiProviderOptions().then(response => {
-    providerOptions.value = response.data || []
-  })
-}
 
-function loadAnalysisPromptOptions() {
-  return listAiPromptTemplateOptions({
-    template_category: 'analysis,common',
-    enabled_only: true
-  }).then(response => {
-    analysisPromptOptions.value = response.data || []
-  })
-}
 
 /**
  * 获取工单自动化日志拉取配置，兼容新旧 extraData 命名。
  * @param {object} ticketData 工单详情数据
  * @returns {object} 日志拉取配置对象
  */
-function getTicketAutomationLogPullConfig(ticketData = {}) {
-  const extraData = ticketData.extraData || ticketData.extra_data || {}
-  const automation = extraData.ticketAutomation || extraData.ticket_automation || {}
-  return automation.logPullConfig || automation.log_pull_config || {}
-}
 
 /**
  * 根据 Provider 编码获取 Provider 配置。
  * @param {string} providerCode Provider 编码
  * @returns {object | undefined} Provider 配置
  */
-function findAiProviderOption(providerCode) {
-  const resolvedCode = String(providerCode || '').trim()
-  if (!resolvedCode) {
-    return undefined
-  }
-  return providerOptions.value.find(item => String(item.providerCode || '').trim() === resolvedCode)
-}
 
 /**
  * 按 Provider 绑定关系自动补齐 AI 分析表单 Agent。
  * @param {string} providerCode Provider 编码
  * @returns {void}
  */
-function applyAiAnalysisProviderAgent(providerCode) {
-  const provider = findAiProviderOption(providerCode)
-  const providerAgentCode = String(provider?.agentCode || '').trim()
-  if (providerAgentCode) {
-    aiAnalysisTaskForm.value.agentCode = providerAgentCode
-  }
-}
 
 /**
  * 处理 AI 分析 Provider 变更，自动带入 Provider 绑定的 Agent。
  * @param {string} providerCode Provider 编码
  * @returns {void}
  */
-function handleAiAnalysisProviderChange(providerCode) {
-  applyAiAnalysisProviderAgent(providerCode)
-}
 
 /**
  * 解析本次 AI 分析的默认追加提示词编码。
  * @returns {Array<string>} 追加提示词编码列表
  */
-function resolveDefaultAiPromptTemplateCodes() {
-  const contextCodes = detail.value.latestAiAnalysis?.analysisContext?.selectedPromptTemplateCodes
-  if (Array.isArray(contextCodes) && contextCodes.length) {
-    return contextCodes
-  }
-  const config = getTicketAutomationLogPullConfig(detail.value)
-  const rawCodes = config.promptTemplateCodes || config.prompt_template_codes || config.aiPromptTemplateCodes || config.ai_prompt_template_codes
-  if (Array.isArray(rawCodes)) {
-    return rawCodes.map(item => String(item || '').trim()).filter(Boolean)
-  }
-  if (typeof rawCodes === 'string') {
-    return rawCodes.split(',').map(item => item.trim()).filter(Boolean)
-  }
-  return []
-}
 
-function loadDetailVersionOptions(projectId) {
-  if (!projectId) {
-    detailVersionOptions.value = []
-    return Promise.resolve()
-  }
-  return listTicketAiRepoMappings({
-    pageNum: 1,
-    pageSize: 200,
-    projectId,
-    enabled: true
-  }).then(response => {
-    const rows = response.rows || []
-    const optionMap = new Map()
-    rows.forEach(item => {
-      const value = String(item.versionKey || '').trim()
-      if (!value || optionMap.has(value)) {
-        return
-      }
-      const branchName = String(item.branchName || '').trim()
-      const repoUrl = String(item.repoUrl || '').trim()
-      const labelParts = [value]
-      if (branchName) {
-        labelParts.push(`- ${branchName}`)
-      }
-      if (repoUrl) {
-        labelParts.push(`(${repoUrl})`)
-      }
-      optionMap.set(value, {
-        value,
-        label: labelParts.join(' ')
-      })
-    })
-    detailVersionOptions.value = Array.from(optionMap.values())
-  })
-}
 
-function loadPushOptions() {
-  return listAllPushConfig({ pageNum: 1, pageSize: 500 }).then(response => {
-    const rows = response.data || []
-    pushOptions.value = Array.isArray(rows) ? rows : []
-  })
-}
 
-function getVendorStoreOptions(vendorId) {
-  const resolvedVendorId = Number(vendorId)
-  if (!resolvedVendorId) {
-    return []
-  }
-  const vendor = vendorOptions.value.find(item => item.vendorId === resolvedVendorId)
-  return vendor?.stores || []
-}
 
 function resetStoreSelection(target, vendorId) {
   const storeId = String(target.storeId || '').trim()
@@ -2515,9 +2246,6 @@ function resetStoreSelection(target, vendorId) {
   }
 }
 
-function handleLogPullVendorChange(vendorId) {
-  resetStoreSelection(logPullForm.value, vendorId)
-}
 
 function pickFirstFilledValue(candidates = []) {
   for (const candidate of candidates) {
@@ -2532,104 +2260,7 @@ function pickFirstFilledValue(candidates = []) {
   return undefined
 }
 
-function resolveTicketLogPullHintsFromDetail(ticketDetail) {
-  const detailPayload = ticketDetail || {}
-  const extraData = detailPayload.extraData || detailPayload.extra_data || {}
-  const externalSync = extraData.externalSync || extraData.external_sync || {}
-  const source = externalSync.source || {}
-  const logPullHints = extraData.logPullHints || extraData.log_pull_hints || {}
-  const ticketAutomation = extraData.ticketAutomation || extraData.ticket_automation || {}
-  const automationLogPullConfig = ticketAutomation.logPullConfig || ticketAutomation.log_pull_config || {}
-  const latestLogPull = detailPayload.latestLogPull || detailPayload.latest_log_pull || {}
-  const directLogPullConfig = detailPayload.logPullConfig || detailPayload.log_pull_config || {}
-  return {
-    vendorId: pickFirstFilledValue([
-      source.vendorId,
-      source.vendor_id,
-      logPullHints.vendorId,
-      logPullHints.vendor_id,
-      latestLogPull.vendorId,
-      latestLogPull.vendor_id,
-      automationLogPullConfig.vendorId,
-      automationLogPullConfig.vendor_id,
-      directLogPullConfig.vendorId,
-      directLogPullConfig.vendor_id
-    ]),
-    storeId: pickFirstFilledValue([
-      source.storeId,
-      source.store_id,
-      logPullHints.storeId,
-      logPullHints.store_id,
-      latestLogPull.storeId,
-      latestLogPull.store_id,
-      automationLogPullConfig.storeId,
-      automationLogPullConfig.store_id,
-      directLogPullConfig.storeId,
-      directLogPullConfig.store_id
-    ]),
-    posNo: pickFirstFilledValue([
-      source.posNo,
-      source.pos_no,
-      source.posId,
-      source.pos_id,
-      source.scoNo,
-      source.sco_no,
-      logPullHints.posNo,
-      logPullHints.pos_no,
-      latestLogPull.posNo,
-      latestLogPull.pos_no,
-      automationLogPullConfig.posNo,
-      automationLogPullConfig.pos_no,
-      automationLogPullConfig.posId,
-      automationLogPullConfig.pos_id,
-      automationLogPullConfig.scoNo,
-      automationLogPullConfig.sco_no,
-      directLogPullConfig.posNo,
-      directLogPullConfig.pos_no,
-      directLogPullConfig.posId,
-      directLogPullConfig.pos_id,
-      directLogPullConfig.scoNo,
-      directLogPullConfig.sco_no
-    ]),
-    modifyTime: pickFirstFilledValue([
-      logPullHints.modifyTime,
-      logPullHints.modify_time,
-      logPullHints.logDate,
-      logPullHints.log_date,
-      source.modifyTime,
-      source.modify_time,
-      source.logDate,
-      source.log_date,
-      automationLogPullConfig.modifyTime,
-      automationLogPullConfig.modify_time,
-      directLogPullConfig.modifyTime,
-      directLogPullConfig.modify_time
-    ])
-  }
-}
 
-function applyTicketDetailLogPullPrefill(ticketDetail) {
-  const hints = resolveTicketLogPullHintsFromDetail(ticketDetail)
-  let vendorApplied = false
-  const vendorId = Number(hints.vendorId)
-  if (Number.isFinite(vendorId) && vendorId > 0) {
-    logPullForm.value.vendorId = vendorId
-    vendorApplied = true
-  }
-  const storeId = String(hints.storeId || '').trim()
-  if (storeId) {
-    logPullForm.value.storeId = storeId
-  }
-  const posNo = Number(hints.posNo)
-  if (Number.isFinite(posNo) && posNo > 0) {
-    logPullForm.value.posNo = posNo
-  }
-  const modifyTime = String(hints.modifyTime || '').trim()
-  if (modifyTime) {
-    logPullForm.value.modifyTime = modifyTime.slice(0, 10)
-  }
-  return { vendorApplied }
-}
 
 function createDefaultTicketForm() {
   return {
@@ -2670,31 +2301,7 @@ function createDefaultTicketForm() {
 }
 
 const data = reactive({
-  queryParams: {
-    pageNum: 1,
-    pageSize: 10,
-    keyword: undefined,
-    statuses: [],
-    ticketNo: undefined,
-    processStatuses: [],
-    projectIds: [],
-    moduleIds: [],
-    moduleCodes: [],
-    issueTypeIds: [],
-    isProblems: [],
-    rootCauseTypes: [],
-    solutionTypes: [],
-    resolutionCodes: [],
-    problemPatternCodes: [],
-    internalPriorities: [],
-    currentAssigneeIds: [],
-    firstLineAssigneeIds: [],
-    internalOwnerIds: [],
-    submitBeginTime: undefined,
-    submitEndTime: undefined,
-    sortField: 'submitTime',
-    sortOrder: 'desc'
-  },
+  // queryParams 已通过 useTicketList() 提供
   form: createDefaultTicketForm(),
   assignForm: {},
   statusForm: {},
@@ -2716,12 +2323,7 @@ const data = reactive({
     content: ''
   },
   rcaForm: {},
-  logPullForm: createDefaultLogPullForm(),
-  logPullQuery: {
-    pageNum: 1,
-    pageSize: 10,
-    status: undefined
-  },
+  // logPullForm / logPullQuery 已通过 useLogViewer() 提供
   rules: {
     title: [{ required: true, message: '工单标题不能为空', trigger: 'blur' }],
     ticketNo: [{ required: true, message: '工单号不能为空', trigger: 'blur' }],
@@ -2744,19 +2346,14 @@ const data = reactive({
   aiAnalysisRules: {
     versionKey: []
   },
-  aiRepoMappingRules: {
-    projectId: [{ required: true, message: '请选择项目', trigger: 'change' }],
-    versionKey: [{ required: true, message: '版本标识不能为空', trigger: 'blur' }],
-    repoUrl: [{ required: true, message: '仓库地址不能为空', trigger: 'blur' }],
-    branchName: [{ required: true, message: '分支名称不能为空', trigger: 'blur' }]
-  },
+  // aiRepoMappingRules 已提取到 hooks/useAiRepoMapping.js
   projectVendorMapRules: {
     venderNo: [{ required: true, message: '商户编号不能为空', trigger: 'blur' }]
   }
 })
 
 const {
-  queryParams,
+  // queryParams 已通过 useTicketList() 提供
   form,
   assignForm,
   statusForm,
@@ -2764,14 +2361,12 @@ const {
   messageForm,
   eventForm,
   rcaForm,
-  logPullForm,
-  logPullQuery,
+  // logPullForm / logPullQuery 已通过 useLogViewer() 提供
   rules,
   assignRules,
   statusRules,
   logPullRules,
   aiAnalysisRules,
-  aiRepoMappingRules,
   projectVendorMapRules
 } = toRefs(data)
 
@@ -2816,55 +2411,11 @@ const logViewerDialogTitle = computed(() => {
   return '日志查看'
 })
 
-function getStatOptionLabel(options, value) {
-  const text = String(value || '').trim()
-  if (!text) {
-    return '-'
-  }
-  const option = (options || []).find(item => item.value === text)
-  return option?.label || text
-}
 
-function formatStatOption(options, value) {
-  return getStatOptionLabel(options.value || options, value)
-}
 
-function formatProblemFlag(value) {
-  if (value === true) return '真实问题'
-  if (value === false) return '非问题'
-  return '-'
-}
 
-function formatIssueType(row) {
-  const issueTypeName = row?.issueTypeName || row?.issue_type_name || ''
-  if (issueTypeName) {
-    return issueTypeName
-  }
-  const issueTypeId = row?.issueTypeId || row?.issue_type_id || ''
-  if (!issueTypeId) {
-    return '-'
-  }
-  const option = issueTypeOptions.value.find(item => item.value === String(issueTypeId).trim())
-  return option?.label || '-'
-}
 
-function formatResolution(row) {
-  const resolutionName = row?.resolutionName || row?.resolution_name || ''
-  if (resolutionName) {
-    return resolutionName
-  }
-  const resolutionCode = row?.resolutionCode || row?.resolution_code || ''
-  return resolutionCode ? getStatOptionLabel(resolutionOptions.value, resolutionCode) : '-'
-}
 
-function formatProblemPattern(row) {
-  const patternName = row?.problemPatternName || row?.problem_pattern_name || ''
-  if (patternName) {
-    return patternName
-  }
-  const patternCode = row?.problemPatternCode || row?.problem_pattern_code || ''
-  return patternCode ? getStatOptionLabel(problemPatternOptions.value, patternCode) : '-'
-}
 
 function resolveTicketProcessStatus(row) {
   const latestAi = row?.latestAiAnalysis || row?.latest_ai_analysis || null
@@ -2897,108 +2448,14 @@ function resolveTicketProcessStatus(row) {
   }
 }
 
-function normalizeWorkflowStatusOptions(statuses = []) {
-  return (statuses || [])
-    .map(item => {
-      const value = String(item.code || '').trim()
-      if (!value) {
-        return null
-      }
-      const fallback = defaultTicketStatusOptions.find(option => option.value === value)
-      return {
-        label: String(item.name || fallback?.label || value).trim(),
-        value,
-        type: fallback?.type || 'info',
-        orderNum: Number(item.orderNum ?? item.order_num ?? 0)
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.orderNum - b.orderNum)
-}
+// normalizeWorkflowStatusOptions / getStatusTagType / loadWorkflowConfig 已提取到 hooks/useWorkflow.js
 
-function getStatusTagType(value) {
-  return ticketStatusOptions.value.find(item => item.value === value)?.type || getDefaultStatusTagType(value)
-}
 
-function loadWorkflowConfig() {
-  return getTicketWorkflow().then(response => {
-    workflowConfig.value = response.data || { statuses: [], transitions: [] }
-  }).catch(() => {
-    workflowConfig.value = { statuses: [], transitions: [] }
-  })
-}
 
-function normalizeStatOptions(items = []) {
-  return (Array.isArray(items) ? items : [])
-    .map(item => ({
-      value: String(item.value || item.code || '').trim(),
-      label: String(item.label || item.name || item.value || item.code || '').trim(),
-      isProblem: typeof item.isProblem === 'boolean' ? item.isProblem : undefined
-    }))
-    .filter(item => item.value)
-}
 
-function loadStatClassificationOptions() {
-  return getTicketStatClassificationOptions().then(response => {
-    const config = response.data || {}
-    issueTypeOptions.value = normalizeStatOptions(config.issueTypes)
-    rootCauseTypeOptions.value = normalizeStatOptions(config.rootCauseTypes)
-    solutionTypeOptions.value = normalizeStatOptions(config.solutionTypes)
-    resolutionOptions.value = normalizeStatOptions(config.resolutions)
-    problemPatternOptions.value = normalizeStatOptions(config.problemPatterns)
-  }).catch(() => {
-    issueTypeOptions.value = []
-    rootCauseTypeOptions.value = []
-    solutionTypeOptions.value = []
-    resolutionOptions.value = []
-    problemPatternOptions.value = []
-  })
-}
 
-function normalizeTicketColumnKeys(value) {
-  const rawKeys = Array.isArray(value?.visibleColumns) ? value.visibleColumns : value
-  const validKeys = new Set(ticketColumnOptions.map(item => item.key))
-  const normalized = (Array.isArray(rawKeys) ? rawKeys : defaultTicketColumnKeys)
-    .map(item => String(item || '').trim())
-    .filter(item => validKeys.has(item))
-  requiredTicketColumnKeys.forEach(key => {
-    if (!normalized.includes(key)) {
-      normalized.push(key)
-    }
-  })
-  return normalized.length ? normalized : [...defaultTicketColumnKeys]
-}
 
-function loadTicketColumnConfig() {
-  return getCurrentUserConfig('ticket', 'ticket_list_columns').then(response => {
-    visibleTicketColumnKeys.value = normalizeTicketColumnKeys(response.data?.configValue)
-  }).catch(() => {
-    visibleTicketColumnKeys.value = [...defaultTicketColumnKeys]
-  })
-}
 
-function saveTicketColumnConfig() {
-  visibleTicketColumnKeys.value = normalizeTicketColumnKeys(visibleTicketColumnKeys.value)
-  saveCurrentUserConfig({
-    configType: 'ticket',
-    configKey: 'ticket_list_columns',
-    configValue: {
-      visibleColumns: visibleTicketColumnKeys.value
-    },
-    remark: '工单列表显示列配置'
-  }).then(() => {
-    columnConfigOpen.value = false
-    proxy.$modal.msgSuccess('保存成功')
-  })
-}
-
-function resetTicketColumnConfig() {
-  visibleTicketColumnKeys.value = [...defaultTicketColumnKeys]
-}
-
-function isTicketColumnVisible(key) {
-  return visibleTicketColumnKeys.value.includes(key)
-}
 
 const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null)
 
@@ -3027,24 +2484,7 @@ const aiPromptHintDesc = computed(() => {
   return '项目和模块的默认提示词会自动参与本次分析，额外说明仅用于补充临时背景，不会覆盖系统约束和输出结构。'
 })
 
-const ticketStatusOptions = computed(() => {
-  const dynamicOptions = normalizeWorkflowStatusOptions(workflowConfig.value.statuses)
-  return dynamicOptions.length ? dynamicOptions : defaultTicketStatusOptions
-})
-
-const statusTransitionOptions = computed(() => {
-  const fromStatus = String(currentTicketStatus.value || '').trim()
-  if (!fromStatus) {
-    return []
-  }
-  const toStatusSet = new Set(
-    (workflowConfig.value.transitions || [])
-      .filter(item => String(item.fromStatus || '').trim() === fromStatus)
-      .map(item => String(item.toStatus || '').trim())
-      .filter(Boolean)
-  )
-  return ticketStatusOptions.value.filter(item => toStatusSet.has(item.value))
-})
+// ticketStatusOptions / statusTransitionOptions 已提取到 hooks/useWorkflow.js
 
 const timelineItems = computed(() => {
   const items = []
@@ -3084,139 +2524,18 @@ const messageItems = computed(() => {
 })
 
 // 将查询栏中的单值或多选数组统一转成数组，便于后续拼接查询参数。
-function normalizeQueryList(value) {
-  if (Array.isArray(value)) {
-    return value.filter(item => item !== undefined && item !== null && item !== '')
-  }
-  if (value === undefined || value === null || value === '') {
-    return []
-  }
-  return [value]
-}
 
 // 将多选数组拼成后端约定的逗号分隔查询参数。
-function joinQueryList(value) {
-  const items = normalizeQueryList(value)
-  return items.length ? items.join(',') : undefined
-}
 
 // 构造工单列表查询参数，避免全局 GET 序列化把数组转成 field[0] 形式。
-function buildTicketListQueryParams() {
-  const params = {
-    ...queryParams.value,
-    statuses: joinQueryList(queryParams.value.statuses),
-    processStatuses: joinQueryList(queryParams.value.processStatuses),
-    projectIds: joinQueryList(queryParams.value.projectIds),
-    moduleIds: joinQueryList(queryParams.value.moduleIds),
-    moduleCodes: joinQueryList(queryParams.value.moduleCodes),
-    issueTypeIds: joinQueryList(queryParams.value.issueTypeIds),
-    isProblems: joinQueryList(queryParams.value.isProblems),
-    rootCauseTypes: joinQueryList(queryParams.value.rootCauseTypes),
-    solutionTypes: joinQueryList(queryParams.value.solutionTypes),
-    resolutionCodes: joinQueryList(queryParams.value.resolutionCodes),
-    problemPatternCodes: joinQueryList(queryParams.value.problemPatternCodes),
-    internalPriorities: joinQueryList(queryParams.value.internalPriorities),
-    currentAssigneeIds: joinQueryList(queryParams.value.currentAssigneeIds),
-    firstLineAssigneeIds: joinQueryList(queryParams.value.firstLineAssigneeIds),
-    internalOwnerIds: joinQueryList(queryParams.value.internalOwnerIds)
-  }
-  return Object.fromEntries(
-    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
-  )
-}
 
-function getList() {
-  const rangeValues = Array.isArray(submitTimeRange.value) ? submitTimeRange.value : []
-  const [submitBeginTime, submitEndTime] = rangeValues
-  queryParams.value.submitBeginTime = submitBeginTime || undefined
-  queryParams.value.submitEndTime = submitEndTime || undefined
-  loading.value = true
-  listTicket(buildTicketListQueryParams()).then(response => {
-    ticketList.value = response.rows || []
-    total.value = response.total || 0
-  }).finally(() => {
-    loading.value = false
-  })
-}
 
-function toElementSortOrder(sortOrder) {
-  const value = String(sortOrder || '').trim().toLowerCase()
-  if (value === 'asc' || value === 'ascending') {
-    return 'ascending'
-  }
-  return 'descending'
-}
 
-function normalizeTicketSortOrder(sortOrder) {
-  const value = String(sortOrder || '').trim().toLowerCase()
-  if (value === 'ascending' || value === 'asc') {
-    return 'asc'
-  }
-  if (value === 'descending' || value === 'desc') {
-    return 'desc'
-  }
-  return 'desc'
-}
 
-function handleTicketSortChange({ prop, order }) {
-  queryParams.value.sortField = order ? (prop || 'submitTime') : 'submitTime'
-  queryParams.value.sortOrder = order ? normalizeTicketSortOrder(order) : 'desc'
-  queryParams.value.pageNum = 1
-  getList()
-}
 
-function resolveTicketDetailUrl(ticketRow) {
-  const row = ticketRow || {}
-  const syncSummary = row.syncSummary || row.sync_summary || {}
-  const extraData = row.extraData || row.extra_data || {}
-  const externalSync = extraData.externalSync || extraData.external_sync || {}
-  const source = externalSync.source || {}
-  const value = String(
-    row.ticketUrl
-      || row.ticket_url
-      || row.url
-      || syncSummary.ticketUrl
-      || syncSummary.ticket_url
-      || syncSummary.sourceRecordUrl
-      || syncSummary.source_record_url
-      || source.ticketUrl
-      || source.ticket_url
-      || source.recordUrl
-      || source.record_url
-      || ''
-  ).trim()
-  return value || ''
-}
 
-function openTicketLink(ticketRow) {
-  const ticketUrl = resolveTicketDetailUrl(ticketRow)
-  if (!ticketUrl) {
-    proxy.$modal.msgWarning('当前工单未配置详情链接')
-    return
-  }
-  window.open(ticketUrl, '_blank', 'noopener')
-}
 
-function buildSystemTicketDetailUrl(ticketRow) {
-  const ticketId = Number(ticketRow?.ticketId || ticketRow?.ticket_id)
-  if (!Number.isFinite(ticketId) || ticketId <= 0) {
-    return ''
-  }
-  const resolved = router.resolve({
-    name: 'TicketDetail',
-    params: { ticketId }
-  })
-  return resolved.href
-}
 
-function openSystemTicketDetail(ticketRow) {
-  const detailUrl = buildSystemTicketDetailUrl(ticketRow)
-  if (!detailUrl) {
-    proxy.$modal.msgWarning('当前相似工单缺少系统工单ID')
-    return
-  }
-  window.open(detailUrl, '_blank', 'noopener')
-}
 
 function reset() {
   formSubmitting.value = false
@@ -3323,44 +2642,9 @@ function syncDetailBundle(payload) {
   similarTickets.value = detail.value.similarTickets || []
 }
 
-function handleQuery() {
-  queryParams.value.pageNum = 1
-  getList()
-}
 
-function handleSearch() {
-  if (naturalKeyword.value) {
-    handleNaturalSearch()
-    return
-  }
-  handleQuery()
-}
 
-function resetQuery() {
-  proxy.resetForm('queryRef')
-  naturalKeyword.value = ''
-  submitTimeRange.value = []
-  queryParams.value.submitBeginTime = undefined
-  queryParams.value.submitEndTime = undefined
-  queryCurrentAssigneeOption.value = []
-  queryFirstLineAssigneeOption.value = []
-  queryInternalOwnerOption.value = []
-  handleQuery()
-}
 
-function handleNaturalSearch() {
-  if (!naturalKeyword.value) {
-    handleQuery()
-    return
-  }
-  loading.value = true
-  searchTicketNaturalLanguage({ keyword: naturalKeyword.value, limit: queryParams.value.pageSize }).then(response => {
-    ticketList.value = response.data || []
-    total.value = ticketList.value.length
-  }).finally(() => {
-    loading.value = false
-  })
-}
 
 function downloadTemplate() {
   downloadTicketImportTemplate().then(data => {
@@ -3485,36 +2769,6 @@ function validateTicketAutomationConfig() {
   return true
 }
 
-function buildCleanLogPullConfig(source) {
-  const config = { ...(source || {}) }
-  config.notifyConfig = normalizeLogPullNotifyConfig(config.notifyConfig)
-  if (Number(config.commandDataType) === 2) {
-    delete config.modifyTime
-  } else {
-    delete config.path
-  }
-  if (!config.cutLogEnabled) {
-    delete config.timeRangeMode
-    delete config.logBeginTime
-    delete config.logEndTime
-    delete config.logPointTime
-    delete config.rangeBeforeMinutes
-    delete config.rangeAfterMinutes
-  } else if (config.timeRangeMode === 'between') {
-    delete config.logPointTime
-    delete config.rangeBeforeMinutes
-    delete config.rangeAfterMinutes
-  } else if (config.timeRangeMode === 'point') {
-    delete config.logBeginTime
-    delete config.logEndTime
-  }
-  delete config.cutLogEnabled
-  if (!config.autoAiEnabled) {
-    config.aiAgentCode = ''
-    config.aiProviderCode = ''
-  }
-  return config
-}
 
 function submitForm() {
   if (formSubmitting.value) {
@@ -3599,17 +2853,8 @@ function handleAssigneeChange(user) {
   currentAssigneeOption.value = user
 }
 
-function handleQueryCurrentAssigneeChange(user) {
-  queryCurrentAssigneeOption.value = Array.isArray(user) ? user : (user ? [user] : [])
-}
 
-function handleQueryFirstLineAssigneeChange(user) {
-  queryFirstLineAssigneeOption.value = Array.isArray(user) ? user : (user ? [user] : [])
-}
 
-function handleQueryInternalOwnerChange(user) {
-  queryInternalOwnerOption.value = Array.isArray(user) ? user : (user ? [user] : [])
-}
 
 function buildTicketUserOption(userId, userName) {
   if (!userId) {
@@ -3678,67 +2923,10 @@ function submitStatus() {
   })
 }
 
-function resetLogPullForm() {
-  logPullForm.value = createDefaultLogPullForm()
-  if (proxy.$refs.logPullRef) {
-    proxy.resetForm('logPullRef')
-  }
-}
 
-function openLogPullSubmitDialog() {
-  resetLogPullForm()
-  if (currentTicketId.value) {
-    logPullForm.value.ticketId = currentTicketId.value
-  }
-  const prefillResult = applyTicketDetailLogPullPrefill(detail.value)
-  if (!prefillResult.vendorApplied) {
-    applyProjectVendorMapping(detail.value.projectId)
-  }
-  logPullSubmitOpen.value = true
-}
 
-function stopLogPullAutoRefresh() {
-  if (logPullRefreshTimer) {
-    window.clearTimeout(logPullRefreshTimer)
-    logPullRefreshTimer = null
-  }
-  logPullAutoRefreshing.value = false
-}
 
-function scheduleLogPullAutoRefresh() {
-  stopLogPullAutoRefresh()
-  const hasRunningTask = detailOpen.value && logPullList.value.some(item => activeLogPullStatuses.includes(item.status))
-  logPullAutoRefreshing.value = hasRunningTask
-  if (!hasRunningTask) {
-    return
-  }
-  logPullRefreshTimer = window.setTimeout(() => {
-    Promise.all([loadLogPullList(true), refreshDetail()]).finally(() => {
-      scheduleLogPullAutoRefresh()
-    })
-  }, 10000)
-}
 
-function loadLogPullList(silent = false) {
-  if (!currentTicketId.value) {
-    return Promise.resolve()
-  }
-  if (!silent) {
-    logPullLoading.value = true
-  }
-  return listTicketLogPulls(currentTicketId.value, logPullQuery.value).then(response => {
-    logPullList.value = response.rows || []
-    logPullTotal.value = response.total || 0
-    if (selectedLogPullRecord.value) {
-      selectedLogPullRecord.value = logPullList.value.find(item => item.id === selectedLogPullRecord.value.id) || selectedLogPullRecord.value
-    }
-    scheduleLogPullAutoRefresh()
-  }).finally(() => {
-    if (!silent) {
-      logPullLoading.value = false
-    }
-  })
-}
 
 function refreshDetail() {
   if (!currentTicketId.value) {
@@ -3750,29 +2938,7 @@ function refreshDetail() {
   })
 }
 
-function createDefaultAiRepoMappingForm(projectId, projectName) {
-  return {
-    mappingId: undefined,
-    projectId,
-    projectName: projectName || '',
-    versionKey: '',
-    repoUrl: '',
-    branchName: '',
-    localRepoPath: '',
-    workspaceRoot: '',
-    workerCommand: '',
-    isDefault: false,
-    enabled: true,
-    remark: ''
-  }
-}
-
-function resetAiRepoMappingForm() {
-  aiRepoMappingForm.value = createDefaultAiRepoMappingForm(detail.value.projectId, detail.value.projectName || detail.value.merchantName || '')
-  if (proxy.$refs.aiRepoMappingRef) {
-    proxy.resetForm('aiRepoMappingRef')
-  }
-}
+// createDefaultAiRepoMappingForm / resetAiRepoMappingForm 已提取到 hooks/useAiRepoMapping.js
 
 function createDefaultProjectVendorMapForm(projectId, projectName) {
   return {
@@ -3832,29 +2998,7 @@ function submitProjectVendorMap() {
   })
 }
 
-function loadAiRepoMappings(silent = false) {
-  if (!detail.value.projectId) {
-    aiRepoMappingList.value = []
-    aiRepoMappingTotal.value = 0
-    return Promise.resolve()
-  }
-  if (!silent) {
-    aiRepoMappingLoading.value = true
-  }
-  const query = {
-    pageNum: 1,
-    pageSize: 50,
-    projectId: detail.value.projectId
-  }
-  return listTicketAiRepoMappings(query).then(response => {
-    aiRepoMappingList.value = response.rows || []
-    aiRepoMappingTotal.value = response.total || 0
-  }).finally(() => {
-    if (!silent) {
-      aiRepoMappingLoading.value = false
-    }
-  })
-}
+// loadAiRepoMappings 已提取到 hooks/useAiRepoMapping.js
 
 function loadAiAnalysisTasks(silent = false) {
   if (!currentTicketId.value) {
@@ -4147,63 +3291,7 @@ function retryAiAnalysisTask(row) {
   })
 }
 
-function openAiRepoMappingDialog(row) {
-  if (!detail.value.projectId) {
-    proxy.$modal.msgWarning('当前工单缺少项目，无法维护映射')
-    return
-  }
-  if (row) {
-    aiRepoMappingForm.value = {
-      mappingId: row.mappingId,
-      projectId: row.projectId,
-      projectName: row.projectName || detail.value.projectName || '',
-      versionKey: row.versionKey || '',
-      repoUrl: row.repoUrl || '',
-      branchName: row.branchName || '',
-      localRepoPath: row.localRepoPath || '',
-      workspaceRoot: row.workspaceRoot || '',
-      workerCommand: row.workerCommand || '',
-      isDefault: Boolean(row.isDefault),
-      enabled: row.enabled !== false,
-      remark: row.remark || ''
-    }
-  } else {
-    resetAiRepoMappingForm()
-  }
-  aiRepoMappingOpen.value = true
-  loadAiRepoMappings(true)
-}
-
-function submitAiRepoMapping() {
-  proxy.$refs.aiRepoMappingRef.validate(valid => {
-    if (!valid) return
-    aiRepoMappingSubmitting.value = true
-    const payload = { ...aiRepoMappingForm.value }
-    const request = payload.mappingId ? updateTicketAiRepoMapping(payload) : addTicketAiRepoMapping(payload)
-    request.then(() => {
-      proxy.$modal.msgSuccess(payload.mappingId ? '映射更新成功' : '映射新增成功')
-      aiRepoMappingOpen.value = false
-      loadAiRepoMappings(true)
-    }).finally(() => {
-      aiRepoMappingSubmitting.value = false
-    })
-  })
-}
-
-function deleteAiRepoMapping(row) {
-  if (!row?.mappingId) {
-    return
-  }
-  proxy.$modal.confirm(`是否确认删除版本映射 "${row.versionKey}"？`).then(() => {
-    aiRepoMappingLoading.value = true
-    return delTicketAiRepoMapping(row.mappingId)
-  }).then(() => {
-    proxy.$modal.msgSuccess('删除成功')
-    loadAiRepoMappings(true)
-  }).catch(() => {}).finally(() => {
-    aiRepoMappingLoading.value = false
-  })
-}
+// openAiRepoMappingDialog / submitAiRepoMapping / deleteAiRepoMapping 已提取到 hooks/useAiRepoMapping.js
 
 function openDetail(row) {
   const ticketId = Number(row?.ticketId || row?.ticket_id || row)
@@ -4468,268 +3556,35 @@ function submitRca() {
   })
 }
 
-function submitLogPull() {
-  proxy.$refs.logPullRef.validate(valid => {
-    if (!valid) return
-    if (Number(logPullForm.value.commandDataType) === 2 && !String(logPullForm.value.path || '').trim()) {
-      proxy.$modal.msgWarning('数据类型为数据库时，path 不能为空')
-      return
-    }
-    if (Number(logPullForm.value.commandDataType) !== 2 && !logPullForm.value.modifyTime) {
-      proxy.$modal.msgWarning('数据类型为日志时，modifyTime 不能为空')
-      return
-    }
-    const timeRangeError = getOptionalLogPullTimeRangeError(logPullForm.value)
-    if (timeRangeError) {
-      proxy.$modal.msgWarning(timeRangeError)
-      return
-    }
-    if (
-      logPullForm.value.autoAiEnabled
-      && !String(logPullForm.value.aiAgentCode || '').trim()
-      && !String(logPullForm.value.aiProviderCode || '').trim()
-    ) {
-      proxy.$modal.msgWarning('启用自动AI分析时，请先选择Provider或Agent')
-      return
-    }
-    const payload = {
-      vendorId: logPullForm.value.vendorId,
-      storeId: logPullForm.value.storeId,
-      posNo: logPullForm.value.posNo,
-      commandDataType: logPullForm.value.commandDataType,
-      fileMaxSize: logPullForm.value.fileMaxSize,
-      zipMaxSize: logPullForm.value.zipMaxSize,
-      storageMode: logPullForm.value.storageMode,
-      notifyConfig: normalizeLogPullNotifyConfig(logPullForm.value.notifyConfig)
-    }
-    if (Number(logPullForm.value.commandDataType) === 2) {
-      payload.path = logPullForm.value.path
-    } else {
-      payload.modifyTime = logPullForm.value.modifyTime
-    }
-    Object.assign(payload, buildOptionalLogPullTimeRangePayload(logPullForm.value))
-    payload.autoAiEnabled = Boolean(logPullForm.value.autoAiEnabled)
-    payload.aiAgentCode = logPullForm.value.autoAiEnabled ? String(logPullForm.value.aiAgentCode || '').trim() : ''
-    payload.aiProviderCode = logPullForm.value.autoAiEnabled ? String(logPullForm.value.aiProviderCode || '').trim() : ''
-    logPullSubmitting.value = true
-    addTicketLogPull(currentTicketId.value, payload).then(() => {
-      proxy.$modal.msgSuccess('日志拉取任务已提交')
-      logPullSubmitOpen.value = false
-      resetLogPullForm()
-      Promise.all([loadLogPullList(true), refreshDetail(), getList()])
-    }).finally(() => {
-      logPullSubmitting.value = false
-    })
-  })
-}
 
-function runLogPullAction(actionPromise, successMessage) {
-  logPullActionLoading.value = true
-  return actionPromise
-    .then(() => {
-      proxy.$modal.msgSuccess(successMessage)
-      return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
-    })
-    .finally(() => {
-      logPullActionLoading.value = false
-    })
-}
 
-function deleteLogPull(row) {
-  if (!row?.id) {
-    return
-  }
-  if (activeLogPullStatuses.includes(row.status)) {
-    proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能删除')
-    return
-  }
-  proxy.$modal.confirm(`是否确认删除日志拉取记录 #${row.id}？删除后会同步清理关联文件数据。`).then(() => {
-    logPullActionLoading.value = true
-    return delTicketLogPull(row.id)
-  }).then(() => {
-    proxy.$modal.msgSuccess('日志拉取记录已删除')
-    if (selectedLogPullRecord.value?.id === row.id) {
-      logPullContentOpen.value = false
-      selectedLogPullRecord.value = null
-    }
-    return Promise.all([loadLogPullList(true), refreshDetail(), getList()])
-  }).catch(() => {}).finally(() => {
-    logPullActionLoading.value = false
-  })
-}
 
-function retryLogPull(row) {
-  if (!row?.id) {
-    return
-  }
-  if (activeLogPullStatuses.includes(row.status)) {
-    proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能重新拉取')
-    return
-  }
-  runLogPullAction(retryTicketLogPull(row.id), '已重新提交拉取任务')
-}
 
-function redownloadLogPull(row) {
-  if (!row?.id) {
-    return
-  }
-  if (!row.commandResultUrl && !row.storagePath) {
-    proxy.$modal.msgWarning('当前记录缺少可用于重新下载的归档地址')
-    return
-  }
-  runLogPullAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载')
-}
 
-function openBrowserDownload(url) {
-  const targetUrl = String(url || '').trim()
-  if (!targetUrl) {
-    return false
-  }
-  window.open(targetUrl, '_blank', 'noopener')
-  return true
-}
 
 /**
  * 读取日志拉取记录的外部原始压缩包下载地址。
  * @param {object} row 日志拉取记录行数据
  * @returns {string} 可用于打开或复制的原始压缩包地址
  */
-function getLogPullOriginalDownloadUrl(row) {
-  return String(row?.commandResultUrl || '').trim()
-}
 
 /**
  * 复制文本到系统剪贴板，优先使用 Clipboard API，不支持时回退到临时输入框。
  * @param {string} text 需要复制的文本
  * @returns {Promise<boolean>} 是否复制成功
  */
-async function copyTextToClipboard(text) {
-  const copyText = String(text || '').trim()
-  if (!copyText) {
-    return false
-  }
-  if (navigator.clipboard?.writeText && window.isSecureContext) {
-    await navigator.clipboard.writeText(copyText)
-    return true
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = copyText
-  textarea.setAttribute('readonly', 'readonly')
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand('copy')
-  document.body.removeChild(textarea)
-  return copied
-}
 
 /**
  * 复制工单详情页日志拉取记录的原始压缩包地址，方便粘贴到邮件或 IM。
  * @param {object} row 日志拉取记录行数据
  * @returns {Promise<void>}
  */
-async function copyLogPullOriginalDownloadUrl(row) {
-  const targetUrl = getLogPullOriginalDownloadUrl(row)
-  if (!targetUrl) {
-    proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
-    return
-  }
-  try {
-    const copied = await copyTextToClipboard(targetUrl)
-    if (!copied) {
-      proxy.$modal.msgError('复制失败，请手动复制链接')
-      return
-    }
-    proxy.$modal.msgSuccess('下载链接已复制')
-  } catch (error) {
-    console.error(error)
-    proxy.$modal.msgError('复制失败，请手动复制链接')
-  }
-}
 
-function resolveLogPullDownloadFileName(row, source = 'auto') {
-  let remoteName = ''
-  if (row?.commandResultUrl) {
-    try {
-      remoteName = new URL(String(row.commandResultUrl)).pathname.split('/').pop() || ''
-    } catch (error) {
-      remoteName = String(row.commandResultUrl).split('/').pop() || ''
-    }
-  }
-  const candidates = [
-    row?.downloadFileName,
-    source !== 'original' && row?.storagePath ? String(row.storagePath).split(/[\\/]/).pop() : '',
-    remoteName,
-    `ticket_log_pull_${row?.id || Date.now()}.zip`
-  ]
-  for (const candidate of candidates) {
-    const text = String(candidate || '').trim()
-    if (text) {
-      return text
-    }
-  }
-  return `ticket_log_pull_${row?.id || Date.now()}.zip`
-}
 
-async function downloadLogPullFile(row, source, emptyMessage) {
-  if (!row?.id) {
-    return
-  }
-  try {
-    logPullActionLoading.value = true
-    const blob = await downloadTicketLogPull(row.id, source)
-    if (!blobValidate(blob)) {
-      try {
-        const text = await blob.text()
-        const payload = JSON.parse(text)
-        proxy.$modal.msgError(payload.msg || emptyMessage || '下载失败')
-      } catch (error) {
-        proxy.$modal.msgError(emptyMessage || '下载失败')
-      }
-      return
-    }
-    saveAs(blob, resolveLogPullDownloadFileName(row, source))
-  } catch (error) {
-    console.error(error)
-    proxy.$modal.msgError(emptyMessage || '下载失败')
-  } finally {
-    logPullActionLoading.value = false
-  }
-}
 
-function downloadLogPullArchive(row) {
-  if (!row?.storagePath) {
-    proxy.$modal.msgWarning('当前记录缺少本服务归档地址')
-    return
-  }
-  if (/^https?:\/\//i.test(String(row.storagePath))) {
-    openBrowserDownload(row.storagePath)
-    return
-  }
-  downloadLogPullFile(row, 'service', '本服务归档文件不存在或不可下载')
-}
 
-function downloadLogPullOriginal(row) {
-  if (!row?.commandResultUrl) {
-    proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
-    return
-  }
-  openBrowserDownload(row.commandResultUrl)
-}
 
-function loadProjectOptions() {
-  return listTicketProjectOptions().then(response => {
-    projectOptions.value = response.data || []
-  })
-}
 
-function loadAgentOptions() {
-  return listAllAgents().then(response => {
-    const rows = response.data || []
-    agentOptions.value = Array.isArray(rows) ? rows : []
-  })
-}
 
 // 过滤掉项目变更后已经不在模块候选范围内的模块和模块 Code。
 function filterInvalidQueryValues(values, validValues) {
@@ -4738,281 +3593,22 @@ function filterInvalidQueryValues(values, validValues) {
 }
 
 // 加载列表筛选用模块选项，多项目筛选时在前端按项目 ID 收敛候选。
-function loadQueryModuleOptions(projectIds) {
-  const selectedProjectIds = normalizeQueryList(projectIds).map(item => String(item))
-  return listTicketModuleOptions({}).then(response => {
-    const allModules = response.data || []
-    queryModuleOptions.value = selectedProjectIds.length
-      ? allModules.filter(item => selectedProjectIds.includes(String(item.projectId)))
-      : allModules
-    queryModuleCodeOptions.value = buildModuleCodeOptions(queryModuleOptions.value)
-    queryParams.value.moduleIds = filterInvalidQueryValues(
-      queryParams.value.moduleIds,
-      queryModuleOptions.value.map(item => item.moduleId)
-    )
-    queryParams.value.moduleCodes = filterInvalidQueryValues(
-      queryParams.value.moduleCodes,
-      queryModuleCodeOptions.value.map(item => item.value)
-    )
-  })
-}
 
-function loadFormModuleOptions(projectId) {
-  if (!projectId) {
-    formModuleOptions.value = []
-    return Promise.resolve()
-  }
-  return listTicketModuleOptions(projectId ? { projectId } : {}).then(response => {
-    formModuleOptions.value = response.data || []
-    const option = resolveFormModuleOption(form.value.moduleId)
-    if (option) {
-      form.value.moduleId = option.moduleId
-      form.value.moduleName = option.moduleName || ''
-    }
-    syncFormModuleValueFromForm()
-  })
-}
 
-function loadFormVersionOptions(projectId) {
-  if (!projectId) {
-    formVersionOptions.value = []
-    return Promise.resolve()
-  }
-  return listTicketAiRepoMappings({
-    pageNum: 1,
-    pageSize: 200,
-    projectId,
-    enabled: true
-  }).then(response => {
-    const rows = response.rows || []
-    const optionMap = new Map()
-    rows.forEach(item => {
-      const value = String(item.versionKey || '').trim()
-      if (!value || optionMap.has(value)) {
-        return
-      }
-      const branchName = String(item.branchName || '').trim()
-      const repoUrl = String(item.repoUrl || '').trim()
-      const labelParts = [value]
-      if (branchName) {
-        labelParts.push(`- ${branchName}`)
-      }
-      if (repoUrl) {
-        labelParts.push(`(${repoUrl})`)
-      }
-      optionMap.set(value, {
-        value,
-        label: labelParts.join(' ')
-      })
-    })
-    formVersionOptions.value = Array.from(optionMap.values())
-  })
-}
 
-function syncLogViewerTicketMeta(payload = {}) {
-  logViewerTicketMeta.value = {
-    ticketId: payload.ticketId,
-    ticketNo: payload.ticketNo || '',
-    title: payload.title || ''
-  }
-}
 
-function buildLogViewerRecord(row, ticketMeta = {}) {
-  return {
-    ...row,
-    ticketId: row?.ticketId || ticketMeta.ticketId,
-    ticketNo: row?.ticketNo || ticketMeta.ticketNo || '',
-    title: row?.title || ticketMeta.title || ''
-  }
-}
 
-function openTicketLogViewer(row) {
-  const ticketId = row?.ticketId
-  const recordId = row?.id
-  if (!ticketId) {
-    return
-  }
-  logViewerSearching.value = true
-  prepareTicketLogs(ticketId, recordId).then(() => {
-    currentTicketId.value = ticketId
-    syncLogViewerTicketMeta({
-      ticketId,
-      ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
-      title: row?.title || detail.value?.title || ''
-    })
-    selectedLogPullRecord.value = row?.id
-      ? buildLogViewerRecord(row, {
-        ticketId,
-        ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
-        title: row?.title || detail.value?.title || ''
-      })
-      : {
-        id: undefined,
-        ticketId,
-        ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
-        title: row?.title || detail.value?.title || '',
-        storagePath: row.latestLogPull?.storagePath || '',
-        commandResultUrl: row.latestLogPull?.commandResultUrl || ''
-      }
-    resetLogViewerState(ticketId)
-    logPullWrapEnabled.value = false
-    logPullContentOpen.value = true
-  }).finally(() => {
-    logViewerSearching.value = false
-  })
-}
 
-function openLogViewerFromPullRecord(row) {
-  const ticketMeta = {
-    ticketId: row?.ticketId || currentTicketId.value || detail.value?.ticketId,
-    ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
-    title: row?.title || detail.value?.title || ''
-  }
-  if (!ticketMeta.ticketId) {
-    proxy.$modal.msgWarning('当前日志记录缺少工单ID，无法查看日志')
-    return
-  }
-  selectedLogPullRecord.value = buildLogViewerRecord(row, ticketMeta)
-  openTicketLogViewer(buildLogViewerRecord(row, ticketMeta))
-}
 
-function handleLogPullDialogClosed() {
-  logViewerTicketMeta.value = {
-    ticketId: undefined,
-    ticketNo: '',
-    title: ''
-  }
-  selectedLogPullRecord.value = null
-  logPullWrapEnabled.value = false
-  logViewerHits.value = []
-  logViewerContext.value = null
-  logViewerErrorSummary.value = null
-  logViewerResultViewMode.value = 'normal'
-  logViewerContextViewMode.value = 'normal'
-}
 
-function resetLogViewerState(ticketId = currentTicketId.value) {
-  logViewerForm.value = {
-    ticketId,
-    keyword: '',
-    contextLines: 20,
-    limit: 500
-  }
-  logViewerHits.value = []
-  logViewerContext.value = null
-  logViewerErrorSummary.value = null
-  logViewerResultViewMode.value = 'normal'
-  logViewerContextViewMode.value = 'normal'
-}
 
-function buildLogViewerPayload(keywordField = 'keyword') {
-  const contextLines = Number(logViewerForm.value.contextLines || 0)
-  const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000)
-  const recordId = selectedLogPullRecord.value?.id
-  const payload = {
-    ticketId: currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId,
-    recordId,
-    contextBefore: contextLines,
-    contextAfter: contextLines,
-    limit,
-    withContext: false
-  }
-  payload[keywordField] = logViewerForm.value[keywordField]
-  return payload
-}
 
-function setLogViewerPanelMode(panel, mode) {
-  if (panel === 'result') {
-    logViewerResultViewMode.value = mode
-    return
-  }
-  logViewerContextViewMode.value = mode
-}
 
-function searchLogViewerKeyword() {
-  const keyword = String(logViewerForm.value.keyword || '').trim()
-  if (!keyword) {
-    proxy.$modal.msgWarning('请输入搜索关键字')
-    return
-  }
-  const payload = buildLogViewerPayload('keyword')
-  logViewerSearching.value = true
-  searchTicketLogs(payload).then(response => {
-    setLogViewerHits(response?.data || [])
-  }).finally(() => {
-    logViewerSearching.value = false
-  })
-}
 
-function loadLogViewerErrors() {
-  const ticketId = currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId
-  if (!ticketId) {
-    return
-  }
-  const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000)
-  logViewerSearching.value = true
-  getTicketLogErrors({ ticketId, recordId: selectedLogPullRecord.value?.id, limit }).then(response => {
-    logViewerErrorSummary.value = response?.data || null
-    setLogViewerHits(logViewerErrorSummary.value?.samples || [])
-  }).finally(() => {
-    logViewerSearching.value = false
-  })
-}
 
-function setLogViewerHits(rows = []) {
-  logViewerHits.value = rows.map((item, index) => ({
-    ...item,
-    hitKey: `${item.file || ''}:${item.line || 0}:${index}`
-  }))
-  logViewerContext.value = null
-  if (logViewerHits.value.length === 1) {
-    selectLogViewerHit(logViewerHits.value[0])
-  }
-}
 
-function selectLogViewerHit(row) {
-  if (!row) {
-    return
-  }
-  if (row.context) {
-    logViewerContext.value = row.context
-    return
-  }
-  loadLogViewerContext(row.file, row.line)
-}
 
-function pageLogViewerContext(direction) {
-  const context = logViewerContext.value
-  if (!context) {
-    return
-  }
-  if (direction > 0) {
-    loadLogViewerContext(context.nextFile, context.nextLine)
-    return
-  }
-  loadLogViewerContext(context.prevFile, context.prevLine)
-}
 
-function loadLogViewerContext(file, line) {
-  const ticketId = currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerTicketMeta.value?.ticketId || logViewerForm.value.ticketId
-  if (!ticketId || !file || !line) {
-    return
-  }
-  const contextLines = Number(logViewerForm.value.contextLines || 0)
-  logViewerSearching.value = true
-  getTicketLogContext({
-    ticketId,
-    record_id: selectedLogPullRecord.value?.id,
-    file,
-    line,
-    before: contextLines,
-    after: contextLines
-  }).then(response => {
-    logViewerContext.value = response?.data || null
-  }).finally(() => {
-    logViewerSearching.value = false
-  })
-}
 
 function formatJson(value) {
   return JSON.stringify(value, null, 2)
