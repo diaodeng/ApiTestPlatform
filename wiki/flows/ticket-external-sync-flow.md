@@ -20,7 +20,7 @@ entry_points:
     path: im.message.receive_v1
     trigger: 飞书官方 SDK 长连接接收群消息事件
 created: 2026-05-31
-updated: 2026-07-02
+updated: 2026-07-04
 ---
 
 # 工单外部同步与内网拉取流程
@@ -67,7 +67,7 @@ sequenceDiagram
 | 5 | 字段识别采用可配置映射和正则规则：项目/模块/商家按关键词包含匹配；处理人按完整名称匹配（支持 email）；门店按商家ID+`sap_org_no` 查询配置。项目或模块未匹配本地 HRM 配置时，会保留外部原始文本到工单项目/模块名称字段。已有工单再次同步时，只要本次外部数据携带项目或模块字段，就按本次解析结果覆盖旧归属；解析不到本地 ID 时清空旧 ID 并保留本次外部文本。规则统一存放在 `ticket.sync.automation`。 |
 | 5.1 | 外部推送多维表格邮箱补齐由 `externalSyncBitable.enabled` 控制；同一工单已成功补齐过同一个 `recordId` 时，会根据 `extra_data.external_sync.bitableEmailSync` 跳过重复查询。 |
 | 5.1.1 | 飞书多维表格相关配置已收敛到公共配置 `bitableCommon`；外部推送邮箱补齐、按人催办、汇总统计和主动拉取默认继承公共配置，局部配置非空时覆盖。 |
-| 5.1.2 | 新增主动拉取链路 `bitablePull`：调度任务按条件查询飞书多维表格记录，经 `fieldMappings` 映射成外部同步字段后复用 `POST /ticket/sync/external` 入库；任务参数提供映射时优先于可视化配置；默认时间窗口在飞书 `records/search` filter 中按更新时间字段或创建时间字段大于等于当前时间前 1 小时执行，`createdAfter` 仅用于覆盖窗口下限；嵌套 filter 会在最外层 `children` 追加默认时间窗口并递归补齐内部时间字段空值，扁平 filter 只补齐已有时间字段；分页查询中 `page_size/page_token` 放在 URL 查询参数，`filter/view_id/view_type` 放在请求体，并对重复 `page_token` 熔断，避免飞书返回同一页导致循环拉取。 |
+| 5.1.2 | 新增主动拉取链路 `bitablePull`：调度任务按条件查询飞书多维表格记录，由 `TicketBitablePullService` 经 `fieldMappings` 映射成外部同步字段后复用 `POST /ticket/sync/external` 入库；任务参数提供映射时优先于可视化配置；默认时间窗口在飞书 `records/search` filter 中按更新时间字段或创建时间字段大于等于当前时间前 1 小时执行，`createdAfter` 仅用于覆盖窗口下限；嵌套 filter 会在最外层 `children` 追加默认时间窗口并递归补齐内部时间字段空值，扁平 filter 只补齐已有时间字段；分页查询中 `page_size/page_token` 放在 URL 查询参数，`filter/view_id/view_type` 放在请求体，并对重复 `page_token` 熔断，避免飞书返回同一页导致循环拉取。 |
 | 5.1.3 | 主动拉取会把 `recordId + snapshotHash` 记录到 `extra_data.bitable_pull`；同一记录内容未变化时跳过，避免周期任务反复制造新 revision。 |
 | 5.1.4 | 飞书“查询记录”接口在当前环境中可能只返回 `record_id`；服务会继续按缺失记录的 `record_id` 调用 `records/batch_get(with_shared_url=true)` 批量补齐 `shared_url`，主动拉取和按人催办统一透传该真实详情地址，不再直接拼接页面 URL。 |
 | 5.1.5 | 主动拉取配置页的字段预览优先读取飞书字段元数据，不使用运行时 `filterFormula/createdAfter`；字段元数据不可用时才回退到不带过滤条件的样例记录推断字段，避免最近时间窗口无记录导致字段下拉为空。 |

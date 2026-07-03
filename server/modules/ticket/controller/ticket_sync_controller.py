@@ -20,6 +20,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketSyncPullQueryModel,
     TicketSyncSummaryRunModel,
 )
+from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
@@ -205,7 +206,7 @@ async def preview_bitable_pull_fields(
     """
     try:
         result = await run_in_threadpool(
-            TicketSyncService.preview_bitable_pull_fields_services,
+            TicketBitablePullService.preview_bitable_pull_fields_services,
             query_db,
             bitable_pull_override=config_value,
         )

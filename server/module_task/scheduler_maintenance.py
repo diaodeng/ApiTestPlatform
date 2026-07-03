@@ -4,10 +4,11 @@ import time
 from typing import Any
 
 from config.database import SessionLocal
-from module_task.celery_job_models import CeleryPeriodicTask
 from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.service.report_service import ReportService
+from module_task.celery_job_models import CeleryPeriodicTask
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
+from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 from modules.ticket.service.ticket_topic_stats_service import TicketTopicStatsService
 from utils.log_util import logger
@@ -271,7 +272,7 @@ def pull_feishu_bitable_ticket_sync(
         raise TaskStopRequestedError("任务已手动终止")
     override = _build_bitable_pull_config_override(kwargs)
     with SessionLocal() as db:
-        result = TicketSyncService.run_bitable_pull_services(
+        result = TicketBitablePullService.run_bitable_pull_services(
             db,
             trigger_source="scheduler",
             current_user=None,

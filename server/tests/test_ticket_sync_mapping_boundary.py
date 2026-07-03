@@ -10,6 +10,7 @@ from module_task.scheduler_maintenance import (
 from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_auto_classification_service import TicketAutoClassificationService
+from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.ticket_sync_comment_service import TicketSyncCommentService
@@ -878,7 +879,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             extra_data={"bitable_pull": {"recordId": "rec_001", "snapshotHash": "hash_001"}}
         )
 
-        should_skip, reason = TicketSyncService._should_skip_bitable_pull_record(
+        should_skip, reason = TicketBitablePullService._should_skip_bitable_pull_record(
             existing_ticket=existing_ticket,
             sync_object=sync_object,
         )
@@ -922,7 +923,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             {"sourceField": "创建时间", "targetField": "createTime"},
         ]
 
-        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
             record=record,
             config=config,
             field_mappings=field_mappings,
@@ -984,7 +985,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1049,7 +1050,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1090,7 +1091,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1132,7 +1133,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1178,7 +1179,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1233,7 +1234,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncNotifyService, "query_bitable_fields", side_effect=fake_query_fields),
             patch.object(TicketSyncNotifyService, "query_bitable_records") as query_records,
         ):
-            result = TicketSyncService.preview_bitable_pull_fields_services(db=SimpleNamespace())
+            result = TicketBitablePullService.preview_bitable_pull_fields_services(db=SimpleNamespace())
 
         self.assertEqual(result["source"], "fields")
         self.assertEqual(result["fieldNames"], ["工单号", "描述"])
@@ -1269,7 +1270,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncNotifyService, "query_bitable_fields", side_effect=RuntimeError("no scope")),
             patch.object(TicketSyncNotifyService, "query_bitable_records", side_effect=fake_query_records),
         ):
-            result = TicketSyncService.preview_bitable_pull_fields_services(db=SimpleNamespace())
+            result = TicketBitablePullService.preview_bitable_pull_fields_services(db=SimpleNamespace())
 
         self.assertEqual(result["source"], "sample_record")
         self.assertEqual(result["fieldNames"], ["工单号", "描述"])
@@ -1435,7 +1436,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
             patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[]),
         ):
-            result = TicketSyncService.run_bitable_pull_services(
+            result = TicketBitablePullService.run_bitable_pull_services(
                 db=SimpleNamespace(),
                 trigger_source="test",
                 bitable_pull_override=_build_bitable_pull_config_override({}),
@@ -1465,7 +1466,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
             patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[]),
         ):
-            result = TicketSyncService.run_bitable_pull_services(
+            result = TicketBitablePullService.run_bitable_pull_services(
                 db=SimpleNamespace(),
                 trigger_source="test",
                 bitable_pull_override=_build_bitable_pull_config_override({"created_after": "2026-06-22 10:48:00"}),
@@ -1516,7 +1517,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
             patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[record]),
             patch.object(
-                TicketSyncService,
+                TicketBitablePullService,
                 "_should_skip_bitable_pull_record",
                 return_value=(True, "snapshot_not_changed"),
             ) as skip_check,
@@ -1531,11 +1532,11 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 return_value=SimpleNamespace(is_success=True),
             ) as sync_external,
             patch(
-                "modules.ticket.service.ticket_sync_service.TicketDao.get_ticket_by_no",
+                "modules.ticket.service.ticket_bitable_pull_service.TicketDao.get_ticket_by_no",
                 return_value=existing_ticket,
             ),
         ):
-            result = TicketSyncService.run_bitable_pull_services(
+            result = TicketBitablePullService.run_bitable_pull_services(
                 db=SimpleNamespace(),
                 trigger_source="test",
                 bitable_pull_override=_build_bitable_pull_config_override({"forceSync": True}),
@@ -1601,7 +1602,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncService, "sync_external_ticket") as sync_external,
             patch.object(TicketSyncService, "dispatch_deferred_sync_post_process_task") as dispatch_deferred,
         ):
-            result = TicketSyncService.run_bitable_pull_services(
+            result = TicketBitablePullService.run_bitable_pull_services(
                 db=SimpleNamespace(),
                 trigger_source="test",
                 bitable_pull_override=_build_bitable_pull_config_override({"createdAfter": "2026-06-24 00:00:00"}),
@@ -1616,7 +1617,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_external_sync_uses_automation_translate_switch_when_present(self):
         """外部同步传入自动化配置时，翻译开关应优先使用本次场景配置。"""
-        sync_object = TicketSyncService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
             record={
                 "record_id": "rec_translate",
                 "fields": {
@@ -1652,7 +1653,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 })
             }
         )
-        current_user = CurrentUserModel.model_validate(TicketSyncService._build_system_current_user_payload())
+        current_user = CurrentUserModel.model_validate(TicketBitablePullService._build_system_current_user_payload())
 
         with (
             patch.object(
@@ -1728,7 +1729,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_system_current_user_payload_matches_current_user_model(self):
         """后台系统用户载荷应满足 CurrentUserModel 校验，避免 Celery 反序列化失败。"""
-        payload = TicketSyncService._build_system_current_user_payload()
+        payload = TicketBitablePullService._build_system_current_user_payload()
 
         current_user = CurrentUserModel.model_validate(payload)
 
@@ -1984,3 +1985,4 @@ class _EmptyQuery:
 
 if __name__ == "__main__":
     unittest.main()
+

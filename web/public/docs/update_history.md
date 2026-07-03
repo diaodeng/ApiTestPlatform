@@ -282,6 +282,13 @@
 3. 工单列表、表单、状态流转、RCA 和统计页接入新枚举配置；统计页新增工单类型、是否真实问题、根因分类、解决方式、关闭结果统计，旧分类统计保留兼容。
 4. 新增说明文档：`web/public/docs/2026-06-16-ticket-classification-statistics-fields.md`。
 
+## 2026-07-04
+
+1. 继续拆分工单同步服务：新增 `TicketBitablePullService` 承接飞书多维表格主动拉取字段预览、记录转换、快照去重和调度执行。
+2. `TicketSyncService` 删除主动拉取相关方法，不保留转发 shim；同步配置页字段预览和主动拉取定时任务改为直接调用新服务。
+3. 对照 `master_params_ticket_new` 保留主动拉取业务语义，字段映射、富文本换行、必填校验、快照去重、强制同步和延后后处理行为不变。
+4. 补充说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
+
 ## 2026-06-15
 
 1. 专题工单会话状态统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 新增分类与状态关键词补充参数：`couponKeywords/stampKeywords/memberKeywords/promoKeywords/closedKeywords/conclusionKeywords`，任务参数未传时继续使用代码内置关键词，传入时与内置关键词合并后参与专题分类和状态判断。

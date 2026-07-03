@@ -75,9 +75,9 @@ graph TD
 
 ## 当前关键约束
 
-- 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取查询、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
+- 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
 - 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入、延迟代理或兼容门面规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
-- 当前 `TicketSyncService` 仍偏大，后续可继续拆为独立子包：`service/sync` 承接同步编排，`service/sync/config` 承接配置和飞书 filter，`service/sync/comment` 承接评论同步，`service/sync/notification` 承接群推送和通知，`service/ai` 承接 AI 能力，`service/log_pull` 承接日志拉取，`service/core` 承接工单 CRUD 和流转。迁移时不保留只转发的旧路径文件。
+- 当前 `TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`；后续可继续拆为独立子包：`service/sync` 承接同步编排，`service/sync/config` 承接配置和飞书 filter，`service/sync/comment` 承接评论同步，`service/sync/notification` 承接群推送和通知，`service/ai` 承接 AI 能力，`service/log_pull` 承接日志拉取，`service/core` 承接工单 CRUD 和流转。迁移时不保留只转发的旧路径文件。
 - 工单控制器拆分后必须保持备份分支接口兼容；当前路由包含 `PUT /ticket/{ticket_id:int}/rca`，前端保存 RCA 依赖该接口。
 - 工单所属维度复用 HRM 测试管理中的项目/模块，前端通过工单域选项接口拉取有效项目与模块。
 - 工单新增/编辑时项目和模块联动，模块必须属于当前项目；工单号作为外部系统唯一编号手动录入，不再自动生成。
@@ -97,7 +97,7 @@ graph TD
 - 飞书多维表格公共配置已下沉到 `ticket.sync.automation.bitableCommon`；工单汇总统计、按人催办、外部推送邮箱补全和主动拉取默认继承该配置，局部配置非空时覆盖公共配置。
 - 外部字段枚举已抽成 `ticket.sync.automation.externalFieldModel`；同步配置页的必填字段下拉与主动拉取字段映射目标字段统一读取该模型。
 - `externalFieldModel` 现在同时承担“字段全集”和“必填标记”职责；页面不再建议单独维护另一份必填字段配置，服务端仅保留 `externalSyncRequiredFields` 作为历史兼容输出。
-- 新增主动拉取配置 `ticket.sync.automation.bitablePull` 与定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync`：任务按条件搜索飞书多维表格记录，经字段映射转换后复用外部同步入库链路；默认时间窗口会下推到飞书 `records/search` filter，按更新时间字段或创建时间字段大于等于当前时间前 1 小时查询，`createdAfter` 仅用于覆盖窗口下限。
+- 新增主动拉取配置 `ticket.sync.automation.bitablePull` 与定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync`：任务按条件搜索飞书多维表格记录，由 `TicketBitablePullService` 经字段映射转换后复用外部同步入库链路；默认时间窗口会下推到飞书 `records/search` filter，按更新时间字段或创建时间字段大于等于当前时间前 1 小时查询，`createdAfter` 仅用于覆盖窗口下限。
 - 主动拉取的 `filterFormula` 支持飞书嵌套 filter JSON：顶层存在 `children` 时，服务会递归补齐内部时间字段空值，并把默认时间窗口作为新的最外层 child 追加；顶层不是嵌套模式时只补齐已有时间字段，不额外追加默认时间范围。飞书 `records/search` 分页参数 `page_size/page_token` 必须放在 URL 查询参数，服务会记录每页实际条数，并在返回重复 `page_token` 时停止继续拉取，避免同一页无限循环。
 - 主动拉取记录会把 `recordId/snapshotHash/fieldMappings/sourceSystem/pulledAt` 落到 `ticket.extra_data.bitable_pull`；同一记录内容未变化时直接跳过，避免定时任务反复递增同步 revision。
 - 飞书多维表格搜索结果中的 `record_id` 不能直接拼成可访问详情链接；当前环境下 `records/search` 实际可能不返回 `record_url/shared_url`，因此服务会继续按缺失记录的 `record_id` 调用 `records/batch_get(with_shared_url=true)` 批量补齐 `shared_url`，再写入 `ticket_url/source.recordUrl/detailUrl`；若补查后仍为空，则保持空字符串，不再伪造 `...?record=record_id` 假链接。
