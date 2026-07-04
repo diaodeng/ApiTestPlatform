@@ -8,6 +8,15 @@ updated: 2026-07-04
 
 # 操作日志
 
+## [2026-07-04] INGEST-CODE | 拆分 TicketSyncService 外部入库 payload 构造
+
+- 触发：用户要求继续拆 `TicketSyncService` 的延后后处理或外部入库 payload 构造；本次优先迁移边界更清晰的外部入库 payload 构造。
+- 架构层：工单域 / 外部同步入库 / 同步元数据 / 自动拉日志参数提示
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/ticket_sync_payload_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/2026-07-04-project-implementation-boundary-rules.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`TicketSyncService._build_upsert_payload/_build_meta/_attach_meta/_resolve_external_create_time/_merge_external_text_fields/_resolve_auto_log_pull_modify_time` -> `TicketSyncPayloadService.build_upsert_payload/build_meta/attach_meta/resolve_external_create_time/merge_external_text_fields/resolve_auto_log_pull_modify_time` -> 外部同步入库、延后后处理、pending 拉取、ack 和自动化链路直接调用新服务公开方法。
+- 关键结论：`TicketSyncService` 不再负责拼装 Ticket 持久化 payload 和同步 meta；项目/模块兜底、来源快照、外部创建时间、revision、`log_pull_hints` 与自动拉日志日期解析集中在 `TicketSyncPayloadService`，且没有保留旧私有入口转发 shim。
+
 ## [2026-07-04] INGEST-CODE | 清理 TicketSyncService 兼容门面并评估继续拆包
 
 - 触发：用户指出 `TicketSyncService` 历史兼容门面仍属于为了兼容拆分而存在的内容，也需要清理；同时要求分析当前拆分是否合理、是否可以继续拆成独立包或子包。

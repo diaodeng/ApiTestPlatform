@@ -54,7 +54,8 @@
 5. 同步配置由 `TicketSyncConfigService` 承接。
 6. 评论同步由 `TicketSyncCommentService` 和 `TicketCommentCoreService` 承接。
 7. 群推送和发布状态由 `TicketSyncGroupPushService` 承接。
-8. 新增工单同步相关能力时，不能再往 `TicketSyncService` 里直接堆新主题；应先判断是否属于上述子服务或新建子服务。
+8. 外部同步入库 payload、同步 meta、外部创建时间和自动拉日志日期解析由 `TicketSyncPayloadService` 承接。
+9. 新增工单同步相关能力时，不能再往 `TicketSyncService` 里直接堆新主题；应先判断是否属于上述子服务或新建子服务。
 
 ## 验证要求
 

@@ -29,6 +29,7 @@
 17. 修正拆分后子服务的公开方法命名：`TicketBitablePullService` 对外可调用方法改为非 `_` 开头；`TicketSyncNotifyService` 补充公开飞书凭证、请求和时间解析方法，拆分后的子服务不再调用它的私有方法。
 18. 继续拆分外部推送多维表格邮箱补齐边界：新增 `TicketExternalBitableEmailService`，承接按 `recordId` 查询飞书多维表格字段、提取三类人员邮箱并写入 `external_field_mapping` 的逻辑。
 19. 继续拆分远端拉取边界：新增 `TicketRemoteSyncService`，承接远端 pending 拉取、远端 payload 转入库模型、本地 revision/time 跳过判断和 ack 回写；`pull_remote_ticket_sync` 定时任务已改为直接调用该服务，`TicketSyncService` 删除远端拉取方法，不保留转发 shim。
+20. 继续拆分外部入库 payload 构造边界：新增 `TicketSyncPayloadService`，承接 `build_upsert_payload`、`build_meta`、`attach_meta`、`resolve_external_create_time`、`merge_external_text_fields` 和自动拉日志日期解析；`TicketSyncService` 删除对应私有方法，不保留转发 shim，只在入库、延后后处理、pending/ack 和自动化链路中直接调用新服务公开方法。
 
 ## 关键不变项
 
@@ -36,12 +37,13 @@
 2. 本次未修改数据库结构。
 3. 本次未手工修改 `web/dist` 构建产物。
 4. `TicketSyncService` 不再作为拆分兼容门面；新增代码必须直接调用对应子服务。
+5. 外部同步持久化字段构造已下沉到 `TicketSyncPayloadService`；后续项目/模块、来源快照、revision、log_pull_hints 等入库 payload 规则应优先修改该服务，不再回填到 `TicketSyncService`。
 5. 新增共享能力必须放入无上层依赖的子服务或 util，不使用函数内导入、延迟代理来掩盖依赖方向问题。
 
 ## 当前拆分评估
 
 1. 当前拆分方向基本正确：评论幂等、消息流写入、AI 分类统计、配置归一化、主动拉取飞书查询、主动拉取编排、通知任务编排、外部推送多维表格邮箱补齐和远端拉取同步已经下沉到低层服务，解决了主服务之间相互依赖的问题。
-2. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库、延后后处理、自动化和 payload 构造等多类职责，文件仍偏大。
+2. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库、延后后处理和自动化等多类职责，文件仍偏大；payload 构造已先拆入独立服务。
 3. 可以继续拆成独立子包，但应按调用方向渐进迁移，避免一次性移动大量文件导致接口和导入路径风险。
 
 ## 建议子包边界

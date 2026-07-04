@@ -61,8 +61,8 @@ sequenceDiagram
 | 步骤 | 说明 |
 |---|---|
 | 1 | 外部系统调用 `POST /ticket/sync/external`，必填 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`；`title` 允许缺省。 |
-| 2 | `TicketSyncService.sync_external_ticket` 以 `ticketNo` 为幂等键创建或更新工单，并在 `extra_data.external_sync` 中递增 `revision`。 |
-| 3 | 同步元数据会记录来源系统、来源记录 ID、远端 source revision、外部原始创建时间（`externalCreateTime`）、最近导入时间、最近一次交付状态、每个消费方的交付 revision 以及自动化执行状态。 |
+| 2 | `TicketSyncService.sync_external_ticket` 以 `ticketNo` 为幂等键创建或更新工单，入库 payload 由 `TicketSyncPayloadService.build_upsert_payload` 构造，并在 `extra_data.external_sync` 中递增 `revision`。 |
+| 3 | `TicketSyncPayloadService` 统一维护同步元数据：来源系统、来源记录 ID、远端 source revision、外部原始创建时间（`externalCreateTime`）、最近导入时间、最近一次交付状态、每个消费方的交付 revision、自动化执行状态、项目/模块文本兜底和 `log_pull_hints`。 |
 | 4 | 主链路会先完成工单入库并快速返回；入库后先写 `publish_ready=false`、`publish_status=processing_ai`，AI翻译、AI标题总结、自动化与群推送改为后台异步后处理，避免阻塞 `POST /ticket/sync/external` 请求。 |
 | 5 | 字段识别采用可配置映射和正则规则：项目/模块/商家按关键词包含匹配；处理人按完整名称匹配（支持 email）；门店按商家ID+`sap_org_no` 查询配置。项目或模块未匹配本地 HRM 配置时，会保留外部原始文本到工单项目/模块名称字段。已有工单再次同步时，只要本次外部数据携带项目或模块字段，就按本次解析结果覆盖旧归属；解析不到本地 ID 时清空旧 ID 并保留本次外部文本。规则统一存放在 `ticket.sync.automation`。 |
 | 5.1 | 外部推送多维表格邮箱补齐由 `TicketExternalBitableEmailService` 承接，并由 `externalSyncBitable.enabled` 控制；同一工单已成功补齐过同一个 `recordId` 时，会根据 `extra_data.external_sync.bitableEmailSync` 跳过重复查询。 |

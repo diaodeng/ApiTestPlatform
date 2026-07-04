@@ -8,6 +8,7 @@
 6. 删除源码目录中的 `.bak/.bak2` 历史备份文件，避免后续检索和 AI 分析误判仍存在旧私有入口；拆分前逻辑统一以 `master_params_ticket_new` 分支为准。
 7. 新增说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
 8. 新增 `TicketRemoteSyncService` 承接远端 pending 拉取、payload 转换、本地 revision/time 跳过判断和 ack 回写；远端拉取定时任务直接调用该服务，`TicketSyncService` 不再保留远端拉取转发入口。
+9. 新增 `TicketSyncPayloadService` 承接外部同步入库 payload 构造、同步 meta、外部创建时间、来源快照、`log_pull_hints` 和自动拉日志日期解析；`TicketSyncService` 删除对应私有方法并直接调用新服务公开方法。
 
 ## 2026-07-02
 
