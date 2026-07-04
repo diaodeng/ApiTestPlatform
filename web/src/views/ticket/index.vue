@@ -1491,6 +1491,9 @@
                     {{ getOptionLabel(logPullDataTypeOptions, scope.row.commandDataType) }}
                   </template>
                 </el-table-column>
+                <el-table-column label="拉取参数" min-width="180" show-overflow-tooltip>
+                  <template #default="scope">{{ formatLogPullParameter(scope.row) }}</template>
+                </el-table-column>
                 <el-table-column label="商家" prop="vendorId" width="110" show-overflow-tooltip />
                 <el-table-column
                   label="门店"
@@ -1517,34 +1520,30 @@
                 <el-table-column label="归档地址" min-width="220" show-overflow-tooltip>
                   <template #default="scope">
                     <el-link
-                      v-if="scope.row.storagePath"
+                      v-if="getLogPullArchiveDownloadUrl(scope.row)"
                       type="primary"
-                      @click="downloadLogPullArchive(scope.row)"
+                      :href="getLogPullArchiveDownloadUrl(scope.row)"
+                      target="_blank"
+                      @click.prevent="downloadLogPullArchive(scope.row)"
+                      @contextmenu.prevent="copyLogPullArchiveDownloadUrl(scope.row)"
                     >
-                      {{ scope.row.storagePath }}
+                      {{ getLogPullArchiveDisplayText(scope.row) }}
                     </el-link>
                     <span v-else>-</span>
                   </template>
                 </el-table-column>
                 <el-table-column label="原始压缩包" min-width="180" show-overflow-tooltip>
                   <template #default="scope">
-                    <el-space v-if="scope.row.commandResultUrl" :size="8">
-                      <el-link
-                        type="primary"
-                        :href="getLogPullOriginalDownloadUrl(scope.row)"
-                        target="_blank"
-                        @click.prevent="downloadLogPullOriginal(scope.row)"
-                      >
-                        下载原始包
-                      </el-link>
-                      <el-link
-                        type="success"
-                        icon="CopyDocument"
-                        @click="copyLogPullOriginalDownloadUrl(scope.row)"
-                      >
-                        复制链接
-                      </el-link>
-                    </el-space>
+                    <el-link
+                      v-if="getLogPullOriginalDownloadUrl(scope.row)"
+                      type="primary"
+                      :href="getLogPullOriginalDownloadUrl(scope.row)"
+                      target="_blank"
+                      @click.prevent="downloadLogPullOriginal(scope.row)"
+                      @contextmenu.prevent="copyLogPullOriginalDownloadUrl(scope.row)"
+                    >
+                      {{ getLogPullOriginalDownloadUrl(scope.row) }}
+                    </el-link>
                     <span v-else>-</span>
                   </template>
                 </el-table-column>
@@ -1737,6 +1736,7 @@
                             placeholder="可选"
                             filterable
                             clearable
+                            @change="handleMessageAgentChange"
                           >
                             <el-option
                               v-for="item in agentOptions"
@@ -1755,6 +1755,7 @@
                             filterable
                             clearable
                             style="width: 100%"
+                            @change="handleMessageProviderChange"
                           >
                             <el-option
                               v-for="item in providerOptions"
@@ -2433,6 +2434,7 @@
             filterable
             clearable
             style="width: 100%"
+            @change="handleAiAnalysisAgentChange"
           >
             <el-option
               v-for="item in agentOptions"
@@ -2547,6 +2549,7 @@
             filterable
             clearable
             style="width: 100%"
+            @change="handleAiAnalysisPromptTemplateChange"
           >
             <el-option
               v-for="item in analysisPromptOptions"
@@ -3128,6 +3131,10 @@
   import { useOptions } from './hooks/useOptions';
   import { useLogViewer } from './hooks/useLogViewer';
   import { useTicketList } from './hooks/useTicketList';
+  import {
+    buildTicketAiPreferenceDefaults,
+    saveTicketAiPreferencePatch,
+  } from './hooks/useTicketAiPreference';
 
   const { proxy } = getCurrentInstance();
   const route = useRoute();
@@ -3285,7 +3292,11 @@
     retryLogPull,
     redownloadLogPull,
     getLogPullOriginalDownloadUrl,
+    getLogPullArchiveDownloadUrl,
+    getLogPullArchiveDisplayText,
+    formatLogPullParameter,
     copyLogPullOriginalDownloadUrl,
+    copyLogPullArchiveDownloadUrl,
     downloadLogPullArchive,
     downloadLogPullOriginal,
     openTicketLogViewer,
@@ -3374,10 +3385,56 @@
   }
 
   /**
+   * 根据 Provider 绑定关系回填协同消息 Agent。
+   */
+  function applyMessageProviderAgent(providerCode) {
+    const providerAgentCode = resolveAiAnalysisProviderAgent(providerCode);
+    if (providerAgentCode) {
+      messageForm.value.agentCode = providerAgentCode;
+    }
+  }
+
+  /**
+   * 记录发起 AI 分析弹窗中用户手动选择的 Agent。
+   */
+  function handleAiAnalysisAgentChange(agentCode) {
+    saveTicketAiPreferencePatch({ agentCode });
+  }
+
+  /**
    * 处理 AI 分析 Provider 变更，保持与备份分支一致的 Agent 自动带入行为。
    */
   function handleAiAnalysisProviderChange(providerCode) {
     applyAiAnalysisProviderAgent(providerCode)
+    saveTicketAiPreferencePatch({
+      aiProviderCode: providerCode,
+      agentCode: aiAnalysisTaskForm.value.agentCode,
+    })
+  }
+
+  /**
+   * 记录发起 AI 分析弹窗中用户手动选择的追加提示词。
+   */
+  function handleAiAnalysisPromptTemplateChange(promptTemplateCodes) {
+    saveTicketAiPreferencePatch({ promptTemplateCodes });
+  }
+
+  /**
+   * 记录协同/AI 表单中用户手动选择的 Agent。
+   */
+  function handleMessageAgentChange(agentCode) {
+    saveTicketAiPreferencePatch({ agentCode });
+  }
+
+  /**
+   * 处理协同/AI Provider 变更，并保存本次手动选择。
+   */
+  function handleMessageProviderChange(providerCode) {
+    applyMessageProviderAgent(providerCode);
+    saveTicketAiPreferencePatch({
+      aiProviderCode: providerCode,
+      agentCode: messageForm.value.agentCode,
+    });
   }
 
   /**
@@ -4394,22 +4451,18 @@
 
   function resetAiAnalysisDialog() {
     const logPullConfig = getTicketAutomationLogPullConfig(detail.value);
+    const aiDefaults = buildTicketAiPreferenceDefaults(
+      detail.value,
+      resolveDefaultAiPromptTemplateCodes()
+    );
     aiAnalysisTaskForm.value.versionKey =
       detail.value.versionKey || detail.value.extraData?.versionKey || '';
     aiAnalysisTaskForm.value.logPullRecordId = selectedLogPullRecord.value?.id || undefined;
-    aiAnalysisTaskForm.value.agentCode =
-      logPullConfig.aiAgentCode ||
-      logPullConfig.ai_agent_code ||
-      detail.value.latestAiAnalysis?.agentCode ||
-      detail.value.latestAiAnalysis?.analysisContext?.selectedAgentCode ||
-      '';
-    aiAnalysisTaskForm.value.aiProviderCode =
-      logPullConfig.aiProviderCode ||
-      logPullConfig.ai_provider_code ||
-      detail.value.latestAiAnalysis?.aiProviderCode ||
-      detail.value.latestAiAnalysis?.analysisContext?.selectedAiProviderCode ||
-      '';
-    applyAiAnalysisProviderAgent(aiAnalysisTaskForm.value.aiProviderCode);
+    aiAnalysisTaskForm.value.agentCode = aiDefaults.agentCode;
+    aiAnalysisTaskForm.value.aiProviderCode = aiDefaults.aiProviderCode;
+    if (!aiDefaults.hasManualAgentCode) {
+      applyAiAnalysisProviderAgent(aiAnalysisTaskForm.value.aiProviderCode);
+    }
     aiAnalysisTaskForm.value.forceRefresh = false;
     aiAnalysisTaskForm.value.logAnalysisMode =
       logPullConfig.logAnalysisMode || logPullConfig.log_analysis_mode || 'hybrid';
@@ -4423,7 +4476,7 @@
     aiAnalysisTaskForm.value.rangeAfterMinutes = 10;
     aiAnalysisTaskForm.value.extraInstruction =
       logPullConfig.extraInstruction || logPullConfig.extra_instruction || '';
-    aiAnalysisTaskForm.value.promptTemplateCodes = resolveDefaultAiPromptTemplateCodes();
+    aiAnalysisTaskForm.value.promptTemplateCodes = aiDefaults.promptTemplateCodes;
   }
 
   function openAiAnalysisDialog() {
@@ -4701,23 +4754,22 @@
   }
 
   function resetMessageForm() {
+    const aiDefaults = buildTicketAiPreferenceDefaults(
+      detail.value,
+      resolveDefaultAiPromptTemplateCodes()
+    );
     messageForm.value = {
       role: 'user',
       messageType: 'question',
       content: '',
       runAi: true,
       versionKey: detail.value.versionKey || detail.value.extraData?.versionKey || '',
-      agentCode:
-        detail.value.latestAiAnalysis?.agentCode ||
-        detail.value.latestAiAnalysis?.analysisContext?.selectedAgentCode ||
-        '',
-      aiProviderCode:
-        detail.value.latestAiAnalysis?.aiProviderCode ||
-        detail.value.latestAiAnalysis?.analysisContext?.selectedAiProviderCode ||
-        detail.value.extraData?.ticketAutomation?.logPullConfig?.aiProviderCode ||
-        detail.value.extraData?.ticket_automation?.log_pull_config?.aiProviderCode ||
-        '',
+      agentCode: aiDefaults.agentCode,
+      aiProviderCode: aiDefaults.aiProviderCode,
     };
+    if (!aiDefaults.hasManualAgentCode) {
+      applyMessageProviderAgent(messageForm.value.aiProviderCode);
+    }
     messageDataText.value = '';
   }
 

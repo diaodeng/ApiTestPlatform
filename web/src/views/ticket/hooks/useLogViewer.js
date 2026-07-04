@@ -22,8 +22,11 @@ import {
 import {
   buildOptionalLogPullTimeRangePayload,
   createDefaultLogPullNotifyConfig,
+  formatLogPullParameter,
   getOptionalLogPullTimeRangeError,
-  normalizeLogPullNotifyConfig
+  normalizeLogPullNotifyConfig,
+  resolveLogPullArchiveLink,
+  resolveLogPullOriginalLink
 } from '@/views/ticket/logPull.shared'
 
 export function useLogViewer(proxy, currentTicketId, options = {}) {
@@ -381,7 +384,16 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   }
 
   function getLogPullOriginalDownloadUrl(row) {
-    return String(row?.commandResultUrl || '').trim()
+    return resolveLogPullOriginalLink(row).url
+  }
+
+  function getLogPullArchiveDownloadUrl(row) {
+    return resolveLogPullArchiveLink(row, 'service').url
+  }
+
+  function getLogPullArchiveDisplayText(row) {
+    const link = resolveLogPullArchiveLink(row, 'service')
+    return link.text || link.url
   }
 
   async function copyTextToClipboard(text) {
@@ -416,6 +428,25 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         return
       }
       proxy.$modal.msgSuccess('下载链接已复制')
+    } catch (error) {
+      console.error(error)
+      proxy.$modal.msgError('复制失败，请手动复制链接')
+    }
+  }
+
+  async function copyLogPullArchiveDownloadUrl(row) {
+    const { url, needLogin } = resolveLogPullArchiveLink(row, 'service')
+    if (!url) {
+      proxy.$modal.msgWarning('当前记录缺少本服务归档地址')
+      return
+    }
+    try {
+      const copied = await copyTextToClipboard(url)
+      if (!copied) {
+        proxy.$modal.msgError('复制失败，请手动复制链接')
+        return
+      }
+      proxy.$modal.msgSuccess(needLogin ? '下载链接已复制，访问时需要当前系统登录态' : '下载链接已复制')
     } catch (error) {
       console.error(error)
       proxy.$modal.msgError('复制失败，请手动复制链接')
@@ -712,8 +743,12 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     redownloadLogPull,
     openBrowserDownload,
     getLogPullOriginalDownloadUrl,
+    getLogPullArchiveDownloadUrl,
+    getLogPullArchiveDisplayText,
+    formatLogPullParameter,
     copyTextToClipboard,
     copyLogPullOriginalDownloadUrl,
+    copyLogPullArchiveDownloadUrl,
     resolveLogPullDownloadFileName,
     downloadLogPullFile,
     downloadLogPullArchive,

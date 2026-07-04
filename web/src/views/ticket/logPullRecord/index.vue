@@ -131,39 +131,49 @@
       <el-table-column label="保存方式" width="100" align="center">
         <template #default="scope">{{ getOptionLabel(logPullStorageModeOptions, scope.row.storageMode) }}</template>
       </el-table-column>
+      <el-table-column label="拉取参数" min-width="180" show-overflow-tooltip>
+        <template #default="scope">{{ formatLogPullParameter(scope.row) }}</template>
+      </el-table-column>
+      <el-table-column label="归档地址" min-width="220" show-overflow-tooltip>
+        <template #default="scope">
+          <el-link
+            v-if="getLogPullArchiveDownloadUrl(scope.row)"
+            type="primary"
+            :href="getLogPullArchiveDownloadUrl(scope.row)"
+            target="_blank"
+            @click.prevent="downloadLogPullArchive(scope.row)"
+            @contextmenu.prevent="copyLogPullArchiveDownloadUrl(scope.row)"
+          >
+            {{ getLogPullArchiveDisplayText(scope.row) }}
+          </el-link>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="原始压缩包" min-width="220" show-overflow-tooltip>
+        <template #default="scope">
+          <el-link
+            v-if="getLogPullOriginalDownloadUrl(scope.row)"
+            type="primary"
+            :href="getLogPullOriginalDownloadUrl(scope.row)"
+            target="_blank"
+            @click.prevent="downloadLogPullOriginal(scope.row)"
+            @contextmenu.prevent="copyLogPullOriginalDownloadUrl(scope.row)"
+          >
+            {{ getLogPullOriginalDownloadUrl(scope.row) }}
+          </el-link>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="摘要/异常" min-width="240" prop="contentSummary" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</template>
-      </el-table-column>
-      <el-table-column label="拉取日期" width="120">
-        <template #default="scope">{{ scope.row.modifyTime || '-' }}</template>
       </el-table-column>
       <el-table-column label="创建时间" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="420" fixed="right">
+      <el-table-column label="操作" width="300" fixed="right">
         <template #default="scope">
           <el-button link type="primary" icon="View" @click="openContentDialog(scope.row)" v-hasPermi="['ticket:logpull:query']">
             查看日志
-          </el-button>
-          <el-button
-            link
-            type="success"
-            icon="Download"
-            @click="downloadLogPull(scope.row)"
-            :disabled="actionLoading"
-            v-hasPermi="['ticket:logpull:query']"
-          >
-            下载日志
-          </el-button>
-          <el-button
-            link
-            type="success"
-            icon="CopyDocument"
-            @click="copyLogPullDownloadUrl(scope.row)"
-            :disabled="actionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
-            v-hasPermi="['ticket:logpull:query']"
-          >
-            复制链接
           </el-button>
           <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
             重新拉取
@@ -535,8 +545,12 @@ import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPul
 import {
   buildOptionalLogPullTimeRangePayload,
   createDefaultLogPullNotifyConfig,
+  formatLogPullParameter,
   getOptionalLogPullTimeRangeError,
-  normalizeLogPullNotifyConfig
+  normalizeLogPullNotifyConfig,
+  resolveLogPullArchiveLink,
+  resolveLogPullOriginalLink,
+  isHttpDownloadUrl
 } from '../logPull.shared'
 import { blobValidate } from '@/utils/ruoyi'
 
@@ -1240,48 +1254,17 @@ function openBrowserDownload(url) {
   return true
 }
 
-/**
- * 判断地址是否为浏览器可直接访问的 HTTP(S) 链接。
- * @param {string} url 待判断的地址
- * @returns {boolean} true=HTTP(S) 地址
- */
-function isHttpDownloadUrl(url) {
-  return /^https?:\/\//i.test(String(url || '').trim())
+function getLogPullArchiveDownloadUrl(row) {
+  return resolveLogPullArchiveLink(row, 'service').url
 }
 
-/**
- * 拼接日志拉取下载接口地址。
- * @param {number|string} recordId 日志拉取记录ID
- * @param {string} source 下载来源，支持 auto/service/original
- * @returns {string} 当前站点下的后端下载接口地址
- */
-function buildLogPullApiDownloadUrl(recordId, source = 'auto') {
-  const baseApi = String(window.BASE_API || '').replace(/\/$/, '')
-  const path = `/ticket/log-pulls/${recordId}/download?source=${encodeURIComponent(source)}`
-  return baseApi ? `${baseApi}${path}` : path
+function getLogPullArchiveDisplayText(row) {
+  const link = resolveLogPullArchiveLink(row, 'service')
+  return link.text || link.url
 }
 
-/**
- * 按“下载日志”当前策略解析可复制地址。
- * @param {object} row 日志拉取记录行数据
- * @returns {{url: string, needLogin: boolean}} url为复制目标，needLogin表示是否依赖当前系统登录态
- */
-function resolveLogPullCopyDownloadUrl(row) {
-  if (!row?.id) {
-    return { url: '', needLogin: false }
-  }
-  const storagePath = String(row.storagePath || '').trim()
-  const originalUrl = String(row.commandResultUrl || '').trim()
-  if (!storagePath && originalUrl) {
-    return { url: originalUrl, needLogin: false }
-  }
-  if (isHttpDownloadUrl(storagePath)) {
-    return { url: storagePath, needLogin: false }
-  }
-  if (storagePath) {
-    return { url: buildLogPullApiDownloadUrl(row.id, 'auto'), needLogin: true }
-  }
-  return { url: originalUrl, needLogin: false }
+function getLogPullOriginalDownloadUrl(row) {
+  return resolveLogPullOriginalLink(row).url
 }
 
 /**
@@ -1310,28 +1293,50 @@ async function copyTextToClipboard(text) {
   return copied
 }
 
-/**
- * 复制日志拉取管理页“下载日志”的实际下载地址，方便粘贴到邮件或 IM。
- * @param {object} row 日志拉取记录行数据
- * @returns {Promise<void>}
- */
-async function copyLogPullDownloadUrl(row) {
-  const { url, needLogin } = resolveLogPullCopyDownloadUrl(row)
-  if (!url) {
-    proxy.$modal.msgWarning('当前记录缺少可下载的归档文件')
+async function copyResolvedLogPullUrl(link, emptyMessage) {
+  if (!link?.url) {
+    proxy.$modal.msgWarning(emptyMessage)
     return
   }
   try {
-    const copied = await copyTextToClipboard(url)
+    const copied = await copyTextToClipboard(link.url)
     if (!copied) {
       proxy.$modal.msgError('复制失败，请手动复制链接')
       return
     }
-    proxy.$modal.msgSuccess(needLogin ? '下载链接已复制，访问时需要当前系统登录态' : '下载链接已复制')
+    proxy.$modal.msgSuccess(link.needLogin ? '下载链接已复制，访问时需要当前系统登录态' : '下载链接已复制')
   } catch (error) {
     console.error(error)
     proxy.$modal.msgError('复制失败，请手动复制链接')
   }
+}
+
+function copyLogPullArchiveDownloadUrl(row) {
+  return copyResolvedLogPullUrl(resolveLogPullArchiveLink(row, 'service'), '当前记录缺少本服务归档地址')
+}
+
+function copyLogPullOriginalDownloadUrl(row) {
+  return copyResolvedLogPullUrl(resolveLogPullOriginalLink(row), '当前记录缺少原始压缩包地址')
+}
+
+function downloadLogPullArchive(row) {
+  if (!row?.storagePath) {
+    proxy.$modal.msgWarning('当前记录缺少本服务归档地址')
+    return
+  }
+  if (isHttpDownloadUrl(row.storagePath)) {
+    openBrowserDownload(row.storagePath)
+    return
+  }
+  downloadLogPull(row)
+}
+
+function downloadLogPullOriginal(row) {
+  if (!row?.commandResultUrl) {
+    proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
+    return
+  }
+  openBrowserDownload(row.commandResultUrl)
 }
 
 async function downloadLogPull(row) {

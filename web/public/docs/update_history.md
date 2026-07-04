@@ -16,6 +16,8 @@
 14. 新增 `TicketBatchReclassificationService` 承接批量重归类、正则归类批处理和未归类统计；`/ticket/sync/auto-category/reclassify` 与 `/ticket/sync/auto-category/stats` 控制器直接调用该服务，`TicketSyncService` 不再保留手动重归类入口。
 15. 新增 `TicketExternalSyncRequestService` 承接外部同步请求读取、JSON/表单兼容、必填字段校验、人员字段拆分和外部字段快照构造；`/ticket/sync/external` 控制器直接调用该服务，`TicketSyncService` 不再保留外部请求归一化入口。
 16. 清理 `TicketSyncService` 中已迁移到子服务的常量副本，配置默认值、统计枚举、字段模型、群推送锁和交付状态常量继续由对应子服务维护。
+17. 工单详情页和日志拉取管理页的日志拉取列表新增“拉取参数”列，按数据类型显示 `时间：modifyTime` 或 `路径：path`；归档地址和原始压缩包改为左键打开/下载、右键复制链接。
+18. 发起 AI 分析和协同/AI 表单的 Agent、Provider、追加提示词默认选择改为“手动记忆 > 配置项 > 最近任务”，用户手动修改后下次自动沿用；新增说明文档：`web/public/docs/2026-07-04-ticket-log-link-and-ai-preference.md`。
 
 ## 2026-07-02
 

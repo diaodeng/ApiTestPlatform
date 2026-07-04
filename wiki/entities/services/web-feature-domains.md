@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-05-20
 created: 2026-05-20
-updated: 2026-06-28
+updated: 2026-07-04
 related_files:
   - web/src/views/system/user/index.vue
   - web/src/views/system/role/index.vue
@@ -18,6 +18,10 @@ related_files:
   - web/src/views/qtr/job/index.vue
   - web/src/views/qtr/suite/index.vue
   - web/src/views/ticket/index.vue
+  - web/src/views/ticket/logPull.shared.js
+  - web/src/views/ticket/hooks/useLogViewer.js
+  - web/src/views/ticket/hooks/useTicketAiPreference.js
+  - web/src/views/ticket/logPullRecord/index.vue
   - web/src/views/ticket/knowledge/index.vue
   - web/src/views/tool/swagger/index.vue
   - web/src/views/tool/gen/index.vue
@@ -46,6 +50,7 @@ graph TD
 - 通过页面、组件和 API 封装连接后端服务。
 - 与后端模块一一对应，方便按域维护。
 - 帮助中心读取 `web/public/docs/docs-index.json` 自动展示 Markdown 文档，业务说明和配置说明只要写入 `web/public/docs` 并重新启动或构建前端即可出现在页面中。
+- 工单日志拉取列表的参数展示、归档/原始压缩包链接解析和 AI 表单前端偏好由工单前端 hook/shared 维护；用户手动选择的 Agent、Provider、追加提示词优先于配置项，下次打开表单自动沿用。
 
 ## 参见
 

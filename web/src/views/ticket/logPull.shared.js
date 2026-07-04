@@ -109,3 +109,46 @@ export function buildOptionalLogPullTimeRangePayload(form) {
 
   return payload
 }
+
+export function isHttpDownloadUrl(url) {
+  return /^https?:\/\//i.test(String(url || '').trim())
+}
+
+export function buildLogPullApiDownloadUrl(recordId, source = 'auto') {
+  if (!recordId) {
+    return ''
+  }
+  const baseApi = String(window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || '').replace(/\/$/, '')
+  const path = `/ticket/log-pulls/${recordId}/download?source=${encodeURIComponent(source)}`
+  return baseApi ? `${baseApi}${path}` : path
+}
+
+export function formatLogPullParameter(row) {
+  const commandDataType = Number(row?.commandDataType)
+  if (commandDataType === 2) {
+    const path = String(row?.path || '').trim()
+    return path ? `路径：${path}` : '-'
+  }
+  const modifyTime = String(row?.modifyTime || '').trim()
+  return modifyTime ? `时间：${modifyTime}` : '-'
+}
+
+export function resolveLogPullArchiveLink(row, source = 'service') {
+  const storagePath = String(row?.storagePath || '').trim()
+  if (!storagePath) {
+    return { url: '', text: '', needLogin: false }
+  }
+  if (isHttpDownloadUrl(storagePath)) {
+    return { url: storagePath, text: storagePath, needLogin: false }
+  }
+  return {
+    url: buildLogPullApiDownloadUrl(row?.id, source),
+    text: storagePath,
+    needLogin: true
+  }
+}
+
+export function resolveLogPullOriginalLink(row) {
+  const commandResultUrl = String(row?.commandResultUrl || '').trim()
+  return { url: commandResultUrl, text: commandResultUrl, needLogin: false }
+}

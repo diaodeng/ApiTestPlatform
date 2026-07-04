@@ -8,6 +8,15 @@ updated: 2026-07-04
 
 # 操作日志
 
+## [2026-07-04] INGEST-CODE | 工单日志链接与 AI 前端偏好
+
+- 触发：用户反馈工单日志拉取列表缺少时间/路径参数，归档地址和压缩包需要像外部链接一样左键打开、右键复制；发起 AI 分析和协同/AI 的 Agent、Provider、追加提示词默认选择和手动记忆失效。
+- 架构层：Web 前端 / 工单详情 / 日志拉取管理 / AI 表单偏好
+- 创建的页面：`web/public/docs/2026-07-04-ticket-log-link-and-ai-preference.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/logPullRecord/index.vue`、`web/src/views/ticket/logPull.shared.js`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/src/views/ticket/hooks/useTicketAiPreference.js`、`web/public/docs/update_history.md`、`wiki/entities/services/web-feature-domains.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：日志拉取记录行数据 `commandDataType/modifyTime/path/storagePath/commandResultUrl` -> 共享链接解析与参数格式化工具 -> 工单详情页日志拉取列表和独立日志拉取管理页统一展示；AI 表单配置、最近任务和用户手动选择 -> `useTicketAiPreference` -> 发起 AI 分析弹窗与协同/AI 消息表单默认值。
+- 关键结论：日志拉取列表现在可直接看出本次拉取用的是时间还是路径，归档/原始包链接左键执行原下载策略、右键复制目标链接；AI 表单默认值优先使用用户手动记忆，其次才使用工单配置和最近任务。
+
 ## [2026-07-04] INGEST-CODE | 清理 TicketSyncService 已迁移常量副本
 
 - 触发：用户要求清理 `TicketSyncService` 未使用常量。
