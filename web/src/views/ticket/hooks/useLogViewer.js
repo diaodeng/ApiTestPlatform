@@ -1,10 +1,8 @@
 /**
- * 工单日志查看器 + 日志拉取 composable。
+ * 工单日志拉取和日志查看器 composable。
  *
- * 从 index.vue 提取（37 个函数，~624 行）：
- * - 日志拉取记录 CRUD（提交/重试/删除/下载/刷新）
- * - 日志查看器（搜索/上下文/异常提取/面板切换）
- * - 下载工具（复制链接/浏览器下载/blob 保存）
+ * 该 hook 从工单管理页拆出日志拉取表单、记录刷新、下载和日志查看器能力；
+ * 业务行为保持与备份分支 master_params_ticket_new 中 index.vue 的实现一致。
  */
 import { ref } from 'vue'
 import { saveAs } from 'file-saver'
@@ -21,10 +19,23 @@ import {
   getTicketLogContext,
   getTicketLogErrors
 } from '@/api/ticket/ticket'
-import { createDefaultLogPullNotifyConfig } from '@/views/ticket/logPull.shared'
+import {
+  buildOptionalLogPullTimeRangePayload,
+  createDefaultLogPullNotifyConfig,
+  getOptionalLogPullTimeRangeError,
+  normalizeLogPullNotifyConfig
+} from '@/views/ticket/logPull.shared'
 
-export function useLogViewer(proxy, currentTicketId) {
-  // === 日志拉取状态 ===
+export function useLogViewer(proxy, currentTicketId, options = {}) {
+  const {
+    detail,
+    detailOpen,
+    getList,
+    refreshDetail,
+    applyProjectVendorMapping,
+    getVendorStoreOptions
+  } = options
+
   const logPullLoading = ref(false)
   const logPullSubmitting = ref(false)
   const logPullActionLoading = ref(false)
@@ -37,33 +48,34 @@ export function useLogViewer(proxy, currentTicketId) {
   let logPullRefreshTimer = null
   const selectedLogPullRecord = ref(null)
   const activeLogPullStatuses = ['pending', 'processing', 'polling']
-
-  const logPullQuery = { pageNum: 1, pageSize: 20 }
+  const logPullQuery = ref({ pageNum: 1, pageSize: 20 })
 
   function createDefaultLogPullForm() {
     return {
-      logDataType: 'app_log',
-      storageMode: 'ftp',
       vendorId: undefined,
       storeId: undefined,
-      posNo: '',
-      commandType: 'pull',
+      posNo: undefined,
+      commandDataType: 1,
+      modifyTime: undefined,
+      path: '',
+      cutLogEnabled: false,
       timeRangeMode: 'between',
-      beginTime: '',
-      endTime: '',
-      pointTime: '',
-      rangeBeforeMinutes: 5,
-      rangeAfterMinutes: 10,
-      autoRefresh: false,
-      autoRefreshCount: 0,
-      ticketId: undefined,
+      fileMaxSize: 500,
+      zipMaxSize: 500,
+      logBeginTime: undefined,
+      logEndTime: undefined,
+      logPointTime: undefined,
+      rangeBeforeMinutes: 30,
+      rangeAfterMinutes: 30,
+      storageMode: 'local',
+      autoAiEnabled: false,
+      aiAgentCode: '',
+      aiProviderCode: '',
       notifyConfig: createDefaultLogPullNotifyConfig()
     }
   }
 
   const logPullForm = ref(createDefaultLogPullForm())
-
-  // === 日志查看器状态 ===
   const logViewerTicketMeta = ref({ ticketId: undefined, ticketNo: '', title: '' })
   const logViewerSearching = ref(false)
   const logViewerHits = ref([])
@@ -73,92 +85,304 @@ export function useLogViewer(proxy, currentTicketId) {
   const logViewerContextViewMode = ref('normal')
   const logViewerForm = ref({ ticketId: undefined, keyword: '', contextLines: 20, limit: 500 })
 
-  // === 日志拉取 CRUD ===
-  function buildCleanLogPullConfig(rawConfig) {
-    const config = typeof rawConfig === 'object' && rawConfig !== null ? { ...rawConfig } : {}
-    const clean = {}
-    const allowedKeys = ['logDataType', 'storageMode', 'vendorId', 'storeId', 'posNo',
-      'commandType', 'timeRangeMode', 'beginTime', 'endTime', 'pointTime',
-      'rangeBeforeMinutes', 'rangeAfterMinutes', 'notifyConfig', 'ticketId',
-      'autoRefresh', 'autoRefreshCount']
-    for (const key of allowedKeys) {
-      if (key in config) clean[key] = config[key]
+  function buildCleanLogPullConfig(source) {
+    const config = { ...(source || {}) }
+    config.notifyConfig = normalizeLogPullNotifyConfig(config.notifyConfig)
+    if (Number(config.commandDataType) === 2) {
+      delete config.modifyTime
+    } else {
+      delete config.path
     }
-    return clean
+    if (!config.cutLogEnabled) {
+      delete config.timeRangeMode
+      delete config.logBeginTime
+      delete config.logEndTime
+      delete config.logPointTime
+      delete config.rangeBeforeMinutes
+      delete config.rangeAfterMinutes
+    } else if (config.timeRangeMode === 'between') {
+      delete config.logPointTime
+      delete config.rangeBeforeMinutes
+      delete config.rangeAfterMinutes
+    } else if (config.timeRangeMode === 'point') {
+      delete config.logBeginTime
+      delete config.logEndTime
+    }
+    delete config.cutLogEnabled
+    if (!config.autoAiEnabled) {
+      config.aiAgentCode = ''
+      config.aiProviderCode = ''
+    }
+    return config
   }
 
   function resetLogPullForm() {
     logPullForm.value = createDefaultLogPullForm()
+    if (proxy.$refs.logPullRef) {
+      proxy.resetForm('logPullRef')
+    }
+  }
+
+  function resetStoreSelection(target, vendorId) {
+    const storeId = String(target.storeId || '').trim()
+    if (!storeId) {
+      target.storeId = undefined
+      return
+    }
+    const storeOptions = typeof getVendorStoreOptions === 'function' ? getVendorStoreOptions(vendorId) : []
+    if (storeOptions.length && !storeOptions.some(item => String(item.storeId || '').trim() === storeId)) {
+      target.storeId = storeId
+    }
+  }
+
+  function handleLogPullVendorChange(vendorId) {
+    resetStoreSelection(logPullForm.value, vendorId)
+  }
+
+  function pickFirstFilledValue(candidates = []) {
+    for (const candidate of candidates) {
+      if (candidate === null || candidate === undefined) continue
+      if (typeof candidate === 'string' && !candidate.trim()) continue
+      return candidate
+    }
+    return undefined
+  }
+
+  function resolveTicketLogPullHintsFromDetail(ticketDetail) {
+    const detailPayload = ticketDetail || {}
+    const extraData = detailPayload.extraData || detailPayload.extra_data || {}
+    const externalSync = extraData.externalSync || extraData.external_sync || {}
+    const source = externalSync.source || {}
+    const logPullHints = extraData.logPullHints || extraData.log_pull_hints || {}
+    const ticketAutomation = extraData.ticketAutomation || extraData.ticket_automation || {}
+    const automationLogPullConfig = ticketAutomation.logPullConfig || ticketAutomation.log_pull_config || {}
+    const latestLogPull = detailPayload.latestLogPull || detailPayload.latest_log_pull || {}
+    const directLogPullConfig = detailPayload.logPullConfig || detailPayload.log_pull_config || {}
+    return {
+      vendorId: pickFirstFilledValue([
+        source.vendorId, source.vendor_id, logPullHints.vendorId, logPullHints.vendor_id,
+        latestLogPull.vendorId, latestLogPull.vendor_id, automationLogPullConfig.vendorId,
+        automationLogPullConfig.vendor_id, directLogPullConfig.vendorId, directLogPullConfig.vendor_id
+      ]),
+      storeId: pickFirstFilledValue([
+        source.storeId, source.store_id, logPullHints.storeId, logPullHints.store_id,
+        latestLogPull.storeId, latestLogPull.store_id, automationLogPullConfig.storeId,
+        automationLogPullConfig.store_id, directLogPullConfig.storeId, directLogPullConfig.store_id
+      ]),
+      posNo: pickFirstFilledValue([
+        source.posNo, source.pos_no, source.posId, source.pos_id, source.scoNo, source.sco_no,
+        logPullHints.posNo, logPullHints.pos_no, latestLogPull.posNo, latestLogPull.pos_no,
+        automationLogPullConfig.posNo, automationLogPullConfig.pos_no,
+        directLogPullConfig.posNo, directLogPullConfig.pos_no
+      ]),
+      modifyTime: pickFirstFilledValue([
+        source.modifyTime, source.modify_time, source.logDate, source.log_date,
+        logPullHints.modifyTime, logPullHints.modify_time, logPullHints.logDate, logPullHints.log_date,
+        latestLogPull.modifyTime, latestLogPull.modify_time,
+        automationLogPullConfig.modifyTime, automationLogPullConfig.modify_time,
+        directLogPullConfig.modifyTime, directLogPullConfig.modify_time
+      ])
+    }
+  }
+
+  function applyTicketDetailLogPullPrefill(ticketDetail) {
+    const hints = resolveTicketLogPullHintsFromDetail(ticketDetail)
+    let vendorApplied = false
+    const vendorId = Number(hints.vendorId)
+    if (Number.isFinite(vendorId) && vendorId > 0) {
+      logPullForm.value.vendorId = vendorId
+      vendorApplied = true
+    }
+    const storeId = String(hints.storeId || '').trim()
+    if (storeId) logPullForm.value.storeId = storeId
+    const posNo = Number(hints.posNo)
+    if (Number.isFinite(posNo) && posNo > 0) logPullForm.value.posNo = posNo
+    const modifyTime = String(hints.modifyTime || '').trim()
+    if (modifyTime) logPullForm.value.modifyTime = modifyTime.slice(0, 10)
+    return { vendorApplied }
   }
 
   function openLogPullSubmitDialog() {
     resetLogPullForm()
+    if (currentTicketId.value) {
+      logPullForm.value.ticketId = currentTicketId.value
+    }
+    const prefillResult = applyTicketDetailLogPullPrefill(detail?.value)
+    if (!prefillResult.vendorApplied && typeof applyProjectVendorMapping === 'function') {
+      applyProjectVendorMapping(detail?.value?.projectId)
+    }
     logPullSubmitOpen.value = true
   }
 
   function stopLogPullAutoRefresh() {
-    logPullAutoRefreshing.value = false
     if (logPullRefreshTimer) {
-      clearInterval(logPullRefreshTimer)
+      window.clearTimeout(logPullRefreshTimer)
       logPullRefreshTimer = null
     }
+    logPullAutoRefreshing.value = false
   }
 
   function scheduleLogPullAutoRefresh() {
     stopLogPullAutoRefresh()
-    logPullAutoRefreshing.value = true
-    logPullRefreshTimer = setInterval(() => {
-      if (!logPullAutoRefreshing.value) { stopLogPullAutoRefresh(); return }
-      loadLogPullList()
-    }, 8000)
+    const hasRunningTask = detailOpen?.value && logPullList.value.some(item =>
+      activeLogPullStatuses.includes(String(item.status || '').toLowerCase())
+    )
+    logPullAutoRefreshing.value = hasRunningTask
+    if (!hasRunningTask) return
+    logPullRefreshTimer = window.setTimeout(() => {
+      Promise.all([
+        loadLogPullList(true),
+        typeof refreshDetail === 'function' ? refreshDetail() : Promise.resolve()
+      ]).finally(() => scheduleLogPullAutoRefresh())
+    }, 10000)
   }
 
-  function loadLogPullList() {
-    logPullLoading.value = true
-    return listTicketLogPulls({ ...logPullQuery, ticketId: currentTicketId.value })
-      .then(response => {
-        logPullList.value = response.rows || []
-        logPullTotal.value = response.total || 0
-        const hasActive = logPullList.value.some(item =>
-          activeLogPullStatuses.includes(String(item.status || '').toLowerCase())
-        )
-        if (hasActive && !logPullAutoRefreshing.value) scheduleLogPullAutoRefresh()
-        else if (!hasActive && logPullAutoRefreshing.value) stopLogPullAutoRefresh()
-      }).finally(() => { logPullLoading.value = false })
+  function loadLogPullList(silent = false) {
+    if (!currentTicketId.value) return Promise.resolve()
+    if (!silent) logPullLoading.value = true
+    return listTicketLogPulls(currentTicketId.value, logPullQuery.value).then(response => {
+      logPullList.value = response.rows || []
+      logPullTotal.value = response.total || 0
+      if (selectedLogPullRecord.value) {
+        selectedLogPullRecord.value =
+          logPullList.value.find(item => item.id === selectedLogPullRecord.value.id) || selectedLogPullRecord.value
+      }
+      scheduleLogPullAutoRefresh()
+    }).finally(() => {
+      if (!silent) logPullLoading.value = false
+    })
   }
 
-  async function submitLogPull() {
-    logPullSubmitting.value = true
-    try {
-      await addTicketLogPull({ ...logPullForm.value, ticketId: currentTicketId.value })
-      proxy.$modal.msgSuccess('日志拉取任务已提交')
-      logPullSubmitOpen.value = false
-      loadLogPullList()
-    } catch (e) { console.error(e) }
-    finally { logPullSubmitting.value = false }
+  function submitLogPull() {
+    proxy.$refs.logPullRef.validate(valid => {
+      if (!valid) return
+      if (Number(logPullForm.value.commandDataType) === 2 && !String(logPullForm.value.path || '').trim()) {
+        proxy.$modal.msgWarning('数据类型为数据库时，path 不能为空')
+        return
+      }
+      if (Number(logPullForm.value.commandDataType) !== 2 && !logPullForm.value.modifyTime) {
+        proxy.$modal.msgWarning('数据类型为日志时，modifyTime 不能为空')
+        return
+      }
+      const timeRangeError = getOptionalLogPullTimeRangeError(logPullForm.value)
+      if (timeRangeError) {
+        proxy.$modal.msgWarning(timeRangeError)
+        return
+      }
+      if (
+        logPullForm.value.autoAiEnabled &&
+        !String(logPullForm.value.aiAgentCode || '').trim() &&
+        !String(logPullForm.value.aiProviderCode || '').trim()
+      ) {
+        proxy.$modal.msgWarning('启用自动AI分析时，请先选择Provider或Agent')
+        return
+      }
+      const payload = {
+        vendorId: logPullForm.value.vendorId,
+        storeId: logPullForm.value.storeId,
+        posNo: logPullForm.value.posNo,
+        commandDataType: logPullForm.value.commandDataType,
+        fileMaxSize: logPullForm.value.fileMaxSize,
+        zipMaxSize: logPullForm.value.zipMaxSize,
+        storageMode: logPullForm.value.storageMode,
+        notifyConfig: normalizeLogPullNotifyConfig(logPullForm.value.notifyConfig)
+      }
+      if (Number(logPullForm.value.commandDataType) === 2) {
+        payload.path = logPullForm.value.path
+      } else {
+        payload.modifyTime = logPullForm.value.modifyTime
+      }
+      Object.assign(payload, buildOptionalLogPullTimeRangePayload(logPullForm.value))
+      payload.autoAiEnabled = Boolean(logPullForm.value.autoAiEnabled)
+      payload.aiAgentCode = logPullForm.value.autoAiEnabled ? String(logPullForm.value.aiAgentCode || '').trim() : ''
+      payload.aiProviderCode = logPullForm.value.autoAiEnabled
+        ? String(logPullForm.value.aiProviderCode || '').trim()
+        : ''
+      logPullSubmitting.value = true
+      addTicketLogPull(currentTicketId.value, payload).then(() => {
+        proxy.$modal.msgSuccess('日志拉取任务已提交')
+        logPullSubmitOpen.value = false
+        resetLogPullForm()
+        Promise.all([
+          loadLogPullList(true),
+          typeof refreshDetail === 'function' ? refreshDetail() : Promise.resolve(),
+          typeof getList === 'function' ? getList() : Promise.resolve()
+        ])
+      }).finally(() => {
+        logPullSubmitting.value = false
+      })
+    })
   }
 
-  async function runLogPullAction(action, row, msg) {
+  function runLogPullAction(actionPromise, successMessage) {
     logPullActionLoading.value = true
-    try {
-      await action(row.id)
-      proxy.$modal.msgSuccess(msg)
-      loadLogPullList()
-    } catch (e) { console.error(e) }
-    finally { logPullActionLoading.value = false }
+    return actionPromise
+      .then(() => {
+        proxy.$modal.msgSuccess(successMessage)
+        return Promise.all([
+          loadLogPullList(true),
+          typeof refreshDetail === 'function' ? refreshDetail() : Promise.resolve(),
+          typeof getList === 'function' ? getList() : Promise.resolve()
+        ])
+      })
+      .finally(() => {
+        logPullActionLoading.value = false
+      })
   }
 
-  function deleteLogPull(row) { runLogPullAction(delTicketLogPull, row, '删除成功') }
-  function retryLogPull(row) { runLogPullAction(retryTicketLogPull, row, '重新拉取已提交') }
-  function redownloadLogPull(row) { runLogPullAction(redownloadTicketLogPull, row, '重新下载已提交') }
+  function deleteLogPull(row) {
+    if (!row?.id) return
+    if (activeLogPullStatuses.includes(String(row.status || '').toLowerCase())) {
+      proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能删除')
+      return
+    }
+    proxy.$modal.confirm(`是否确认删除日志拉取记录 #${row.id}？删除后会同步清理关联文件数据。`).then(() => {
+      logPullActionLoading.value = true
+      return delTicketLogPull(row.id)
+    }).then(() => {
+      proxy.$modal.msgSuccess('日志拉取记录已删除')
+      if (selectedLogPullRecord.value?.id === row.id) {
+        logPullContentOpen.value = false
+        selectedLogPullRecord.value = null
+      }
+      return Promise.all([
+        loadLogPullList(true),
+        typeof refreshDetail === 'function' ? refreshDetail() : Promise.resolve(),
+        typeof getList === 'function' ? getList() : Promise.resolve()
+      ])
+    }).catch(() => {}).finally(() => {
+      logPullActionLoading.value = false
+    })
+  }
 
-  // === 下载工具 ===
+  function retryLogPull(row) {
+    if (!row?.id) return
+    if (activeLogPullStatuses.includes(String(row.status || '').toLowerCase())) {
+      proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能重新拉取')
+      return
+    }
+    runLogPullAction(retryTicketLogPull(row.id), '已重新提交拉取任务')
+  }
+
+  function redownloadLogPull(row) {
+    if (!row?.id) return
+    if (!row.commandResultUrl && !row.storagePath) {
+      proxy.$modal.msgWarning('当前记录缺少可用于重新下载的归档地址')
+      return
+    }
+    runLogPullAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载')
+  }
+
   function openBrowserDownload(url) {
-    if (!url) { proxy.$modal.msgWarning('缺少下载地址'); return }
-    window.open(url, '_blank')
+    const targetUrl = String(url || '').trim()
+    if (!targetUrl) return false
+    window.open(targetUrl, '_blank', 'noopener')
+    return true
   }
 
-  function getLogPullOriginalDownloadUrl(row) { return String(row?.commandResultUrl || '').trim() }
+  function getLogPullOriginalDownloadUrl(row) {
+    return String(row?.commandResultUrl || '').trim()
+  }
 
   async function copyTextToClipboard(text) {
     const copyText = String(text || '').trim()
@@ -181,19 +405,31 @@ export function useLogViewer(proxy, currentTicketId) {
 
   async function copyLogPullOriginalDownloadUrl(row) {
     const targetUrl = getLogPullOriginalDownloadUrl(row)
-    if (!targetUrl) { proxy.$modal.msgWarning('当前记录缺少原始压缩包地址'); return }
+    if (!targetUrl) {
+      proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
+      return
+    }
     try {
       const copied = await copyTextToClipboard(targetUrl)
-      if (!copied) { proxy.$modal.msgError('复制失败，请手动复制链接'); return }
+      if (!copied) {
+        proxy.$modal.msgError('复制失败，请手动复制链接')
+        return
+      }
       proxy.$modal.msgSuccess('下载链接已复制')
-    } catch (error) { console.error(error); proxy.$modal.msgError('复制失败，请手动复制链接') }
+    } catch (error) {
+      console.error(error)
+      proxy.$modal.msgError('复制失败，请手动复制链接')
+    }
   }
 
   function resolveLogPullDownloadFileName(row, source = 'auto') {
     let remoteName = ''
     if (row?.commandResultUrl) {
-      try { remoteName = new URL(String(row.commandResultUrl)).pathname.split('/').pop() || '' }
-      catch (error) { remoteName = String(row.commandResultUrl).split('/').pop() || '' }
+      try {
+        remoteName = new URL(String(row.commandResultUrl)).pathname.split('/').pop() || ''
+      } catch (error) {
+        remoteName = String(row.commandResultUrl).split('/').pop() || ''
+      }
     }
     const candidates = [
       row?.downloadFileName,
@@ -201,7 +437,10 @@ export function useLogViewer(proxy, currentTicketId) {
       remoteName,
       `ticket_log_pull_${row?.id || Date.now()}.zip`
     ]
-    for (const candidate of candidates) { const text = String(candidate || '').trim(); if (text) return text }
+    for (const candidate of candidates) {
+      const text = String(candidate || '').trim()
+      if (text) return text
+    }
     return `ticket_log_pull_${row?.id || Date.now()}.zip`
   }
 
@@ -215,18 +454,39 @@ export function useLogViewer(proxy, currentTicketId) {
           const text = await blob.text()
           const payload = JSON.parse(text)
           proxy.$modal.msgError(payload.msg || emptyMessage || '下载失败')
-        } catch (error) { proxy.$modal.msgError(emptyMessage || '下载失败') }
+        } catch (error) {
+          proxy.$modal.msgError(emptyMessage || '下载失败')
+        }
         return
       }
       saveAs(blob, resolveLogPullDownloadFileName(row, source))
-    } catch (error) { console.error(error) }
-    finally { logPullActionLoading.value = false }
+    } catch (error) {
+      console.error(error)
+    } finally {
+      logPullActionLoading.value = false
+    }
   }
 
-  function downloadLogPullArchive(row) { downloadLogPullFile(row, 'archive', '归档文件不存在') }
-  function downloadLogPullOriginal(row) { downloadLogPullFile(row, 'original', '原始压缩包不存在') }
+  function downloadLogPullArchive(row) {
+    if (!row?.storagePath) {
+      proxy.$modal.msgWarning('当前记录缺少本服务归档地址')
+      return
+    }
+    if (/^https?:\/\//i.test(String(row.storagePath))) {
+      openBrowserDownload(row.storagePath)
+      return
+    }
+    downloadLogPullFile(row, 'service', '本服务归档文件不存在或不可下载')
+  }
 
-  // === 日志查看器 ===
+  function downloadLogPullOriginal(row) {
+    if (!row?.commandResultUrl) {
+      proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
+      return
+    }
+    openBrowserDownload(row.commandResultUrl)
+  }
+
   function syncLogViewerTicketMeta(payload = {}) {
     logViewerTicketMeta.value = {
       ticketId: payload.ticketId ?? currentTicketId.value,
@@ -236,130 +496,241 @@ export function useLogViewer(proxy, currentTicketId) {
   }
 
   function buildLogViewerRecord(row, ticketMeta = {}) {
-    selectedLogPullRecord.value = row
-    syncLogViewerTicketMeta(ticketMeta)
+    const record = {
+      ...(row || {}),
+      ticketId: ticketMeta.ticketId || row?.ticketId,
+      ticketNo: ticketMeta.ticketNo || row?.ticketNo || '',
+      title: ticketMeta.title || row?.title || ''
+    }
+    syncLogViewerTicketMeta(record)
+    return record
+  }
+
+  function resetLogViewerState(ticketId = currentTicketId.value) {
+    selectedLogPullRecord.value = null
+    logViewerHits.value = []
+    logViewerContext.value = null
+    logViewerErrorSummary.value = null
+    logViewerForm.value.keyword = ''
+    logViewerForm.value.ticketId = ticketId
   }
 
   function openTicketLogViewer(row) {
-    buildLogViewerRecord(row)
-    logPullContentOpen.value = true
-    logViewerForm.value.ticketId = row?.ticketId
-    logViewerForm.value.keyword = ''
-    logViewerHits.value = []
-    logViewerContext.value = null
-    logViewerErrorSummary.value = null
+    const ticketId = row?.ticketId
+    const recordId = row?.id
+    if (!ticketId) return
+    logViewerSearching.value = true
+    prepareTicketLogs(ticketId, recordId).then(() => {
+      currentTicketId.value = ticketId
+      syncLogViewerTicketMeta({
+        ticketId,
+        ticketNo: row?.ticketNo || detail?.value?.ticketNo || '',
+        title: row?.title || detail?.value?.title || ''
+      })
+      selectedLogPullRecord.value = row?.id
+        ? buildLogViewerRecord(row, {
+          ticketId,
+          ticketNo: row?.ticketNo || detail?.value?.ticketNo || '',
+          title: row?.title || detail?.value?.title || ''
+        })
+        : {
+          id: undefined,
+          ticketId,
+          ticketNo: row?.ticketNo || detail?.value?.ticketNo || '',
+          title: row?.title || detail?.value?.title || '',
+          storagePath: row.latestLogPull?.storagePath || '',
+          commandResultUrl: row.latestLogPull?.commandResultUrl || ''
+        }
+      resetLogViewerState(ticketId)
+      logPullWrapEnabled.value = false
+      logPullContentOpen.value = true
+    }).finally(() => {
+      logViewerSearching.value = false
+    })
   }
 
-  function openLogViewerFromPullRecord(row) { openTicketLogViewer(row) }
+  function openLogViewerFromPullRecord(row) {
+    const ticketMeta = {
+      ticketId: row?.ticketId || currentTicketId.value || detail?.value?.ticketId,
+      ticketNo: row?.ticketNo || detail?.value?.ticketNo || '',
+      title: row?.title || detail?.value?.title || ''
+    }
+    if (!ticketMeta.ticketId) {
+      proxy.$modal.msgWarning('当前日志记录缺少工单ID，无法查看日志')
+      return
+    }
+    selectedLogPullRecord.value = buildLogViewerRecord(row, ticketMeta)
+    openTicketLogViewer(buildLogViewerRecord(row, ticketMeta))
+  }
 
   function handleLogPullDialogClosed() {
-    stopLogPullAutoRefresh()
-    logPullContentOpen.value = false
+    logViewerTicketMeta.value = { ticketId: undefined, ticketNo: '', title: '' }
     selectedLogPullRecord.value = null
+    logPullWrapEnabled.value = false
     logViewerHits.value = []
     logViewerContext.value = null
     logViewerErrorSummary.value = null
-  }
-
-  function resetLogViewerState(ticketId) {
-    stopLogPullAutoRefresh()
-    selectedLogPullRecord.value = null
-    logViewerHits.value = []
-    logViewerContext.value = null
-    logViewerErrorSummary.value = null
-    logViewerForm.value.keyword = ''
   }
 
   function buildLogViewerPayload(keywordField = 'keyword') {
-    return {
-      recordId: selectedLogPullRecord.value?.id,
-      ticketId: logViewerForm.value.ticketId || currentTicketId.value,
-      keyword: logViewerForm.value[keywordField] || '',
-      contextLines: logViewerForm.value.contextLines,
-      limit: logViewerForm.value.limit
+    const contextLines = Number(logViewerForm.value.contextLines || 0)
+    const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000)
+    const recordId = selectedLogPullRecord.value?.id
+    const payload = {
+      ticketId: currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId,
+      recordId,
+      contextBefore: contextLines,
+      contextAfter: contextLines,
+      limit,
+      withContext: false
     }
+    payload[keywordField] = logViewerForm.value[keywordField]
+    return payload
   }
 
   function setLogViewerPanelMode(panel, mode) {
-    if (panel === 'result') logViewerResultViewMode.value = mode
-    if (panel === 'context') logViewerContextViewMode.value = mode
+    if (panel === 'result') {
+      logViewerResultViewMode.value = mode
+      return
+    }
+    logViewerContextViewMode.value = mode
   }
 
-  async function searchLogViewerKeyword() {
+  function searchLogViewerKeyword() {
+    const keyword = String(logViewerForm.value.keyword || '').trim()
+    if (!keyword) {
+      proxy.$modal.msgWarning('请输入搜索关键字')
+      return
+    }
     logViewerSearching.value = true
-    try {
-      const payload = buildLogViewerPayload()
-      const data = await searchTicketLogs(payload)
-      setLogViewerHits(data?.hits || [])
-    } catch (error) { console.error(error) }
-    finally { logViewerSearching.value = false }
+    searchTicketLogs(buildLogViewerPayload('keyword')).then(response => {
+      setLogViewerHits(response?.data || [])
+    }).finally(() => {
+      logViewerSearching.value = false
+    })
   }
 
-  async function loadLogViewerErrors() {
+  function loadLogViewerErrors() {
+    const ticketId = currentTicketId.value || selectedLogPullRecord.value?.ticketId || logViewerForm.value.ticketId
+    if (!ticketId) return
+    const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000)
     logViewerSearching.value = true
-    try {
-      const payload = buildLogViewerPayload()
-      const data = await getTicketLogErrors(payload)
-      logViewerErrorSummary.value = data?.errorSummary || null
-    } catch (error) { console.error(error) }
-    finally { logViewerSearching.value = false }
+    getTicketLogErrors({ ticketId, recordId: selectedLogPullRecord.value?.id, limit }).then(response => {
+      logViewerErrorSummary.value = response?.data || null
+      setLogViewerHits(logViewerErrorSummary.value?.samples || [])
+    }).finally(() => {
+      logViewerSearching.value = false
+    })
   }
 
-  function setLogViewerHits(rows = []) { logViewerHits.value = rows }
+  function setLogViewerHits(rows = []) {
+    logViewerHits.value = rows.map((item, index) => ({
+      ...item,
+      hitKey: `${item.file || ''}:${item.line || 0}:${index}`
+    }))
+    logViewerContext.value = null
+    if (logViewerHits.value.length === 1) {
+      selectLogViewerHit(logViewerHits.value[0])
+    }
+  }
 
   function selectLogViewerHit(row) {
     if (!row) return
     loadLogViewerContext(row.file, row.line)
   }
 
-  async function pageLogViewerContext(direction) {
-    if (!logViewerContext.value) return
-    const offset = direction > 0 ? logViewerContext.value.end : Math.max(0, logViewerContext.value.start - logViewerContext.value.contextLines * 2)
-    await loadLogViewerContext(logViewerContext.value.file, Math.max(1, offset))
+  function pageLogViewerContext(direction) {
+    const context = logViewerContext.value
+    if (!context) return
+    if (direction > 0) {
+      loadLogViewerContext(context.nextFile, context.nextLine)
+      return
+    }
+    loadLogViewerContext(context.prevFile, context.prevLine)
   }
 
-  async function loadLogViewerContext(file, line) {
+  function loadLogViewerContext(file, line) {
+    const ticketId = currentTicketId.value ||
+      selectedLogPullRecord.value?.ticketId ||
+      logViewerTicketMeta.value?.ticketId ||
+      logViewerForm.value.ticketId
+    if (!ticketId || !file || !line) return
+    const contextLines = Number(logViewerForm.value.contextLines || 0)
     logViewerSearching.value = true
-    try {
-      const data = await getTicketLogContext({
-        recordId: selectedLogPullRecord.value?.id,
-        ticketId: logViewerForm.value.ticketId || currentTicketId.value,
-        file, line, contextLines: logViewerForm.value.contextLines
-      })
-      logViewerContext.value = data?.context || null
-    } catch (error) { console.error(error) }
-    finally { logViewerSearching.value = false }
+    getTicketLogContext({
+      ticketId,
+      record_id: selectedLogPullRecord.value?.id,
+      file,
+      line,
+      before: contextLines,
+      after: contextLines
+    }).then(response => {
+      logViewerContext.value = response?.data || null
+    }).finally(() => {
+      logViewerSearching.value = false
+    })
   }
 
   return {
-    // 日志拉取状态
-    logPullLoading, logPullSubmitting, logPullActionLoading,
-    logPullSubmitOpen, logPullContentOpen,
-    logPullList, logPullTotal, logPullForm, logPullQuery,
-    logPullWrapEnabled, logPullAutoRefreshing,
-    selectedLogPullRecord, activeLogPullStatuses,
-    // 日志查看器状态
-    logViewerTicketMeta, logViewerSearching, logViewerHits,
-    logViewerContext, logViewerErrorSummary,
-    logViewerResultViewMode, logViewerContextViewMode, logViewerForm,
-    // 表单工厂
+    logPullLoading,
+    logPullSubmitting,
+    logPullActionLoading,
+    logPullSubmitOpen,
+    logPullContentOpen,
+    logPullList,
+    logPullTotal,
+    logPullForm,
+    logPullQuery,
+    logPullWrapEnabled,
+    logPullAutoRefreshing,
+    selectedLogPullRecord,
+    activeLogPullStatuses,
+    logViewerTicketMeta,
+    logViewerSearching,
+    logViewerHits,
+    logViewerContext,
+    logViewerErrorSummary,
+    logViewerResultViewMode,
+    logViewerContextViewMode,
+    logViewerForm,
     createDefaultLogPullForm,
-    // 日志拉取 CRUD
-    buildCleanLogPullConfig, resetLogPullForm, openLogPullSubmitDialog,
-    stopLogPullAutoRefresh, scheduleLogPullAutoRefresh, loadLogPullList,
-    submitLogPull, deleteLogPull, retryLogPull, redownloadLogPull,
-    // 下载工具
-    openBrowserDownload, getLogPullOriginalDownloadUrl,
-    copyTextToClipboard, copyLogPullOriginalDownloadUrl,
-    resolveLogPullDownloadFileName, downloadLogPullFile,
-    downloadLogPullArchive, downloadLogPullOriginal,
-    // 日志查看器
-    syncLogViewerTicketMeta, buildLogViewerRecord,
-    openTicketLogViewer, openLogViewerFromPullRecord,
-    handleLogPullDialogClosed, resetLogViewerState,
-    buildLogViewerPayload, setLogViewerPanelMode,
-    searchLogViewerKeyword, loadLogViewerErrors,
-    setLogViewerHits, selectLogViewerHit,
-    pageLogViewerContext, loadLogViewerContext
+    buildCleanLogPullConfig,
+    resetLogPullForm,
+    resetStoreSelection,
+    handleLogPullVendorChange,
+    pickFirstFilledValue,
+    resolveTicketLogPullHintsFromDetail,
+    applyTicketDetailLogPullPrefill,
+    openLogPullSubmitDialog,
+    stopLogPullAutoRefresh,
+    scheduleLogPullAutoRefresh,
+    loadLogPullList,
+    submitLogPull,
+    runLogPullAction,
+    deleteLogPull,
+    retryLogPull,
+    redownloadLogPull,
+    openBrowserDownload,
+    getLogPullOriginalDownloadUrl,
+    copyTextToClipboard,
+    copyLogPullOriginalDownloadUrl,
+    resolveLogPullDownloadFileName,
+    downloadLogPullFile,
+    downloadLogPullArchive,
+    downloadLogPullOriginal,
+    syncLogViewerTicketMeta,
+    buildLogViewerRecord,
+    openTicketLogViewer,
+    openLogViewerFromPullRecord,
+    handleLogPullDialogClosed,
+    resetLogViewerState,
+    buildLogViewerPayload,
+    setLogViewerPanelMode,
+    searchLogViewerKeyword,
+    loadLogViewerErrors,
+    setLogViewerHits,
+    selectLogViewerHit,
+    pageLogViewerContext,
+    loadLogViewerContext
   }
 }

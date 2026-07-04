@@ -232,6 +232,7 @@ graph TD
 - Agent 执行过程会通过 `ai_analysis_step` / `ai_analysis_status` / `ai_analysis_error` / `ai_analysis_finished` 事件把阶段日志回传服务端，服务端只记录系统日志，不把调试细节落到业务表。
 - 工作流流转规则会把允许角色、默认处理人和通知预留统一压到 `workflow_transition.allowed_roles` JSON 中，避免引入额外表结构迁移。
 - 工单列表页和流转弹窗的状态选项优先读取 `/ticket/workflow/config` 的动态工作流状态节点；流转弹窗只展示当前状态已配置流转规则的目标状态。新增状态节点后必须配置对应流转规则，才会出现在目标状态下拉中。
+- 2026-07-04 对照备份分支 `master_params_ticket_new` 完成工单前端拆分逻辑审计：工单 API 拆分保持 80 个函数 method/url 一致；工单管理页和同步自动化页旧函数无遗漏；已恢复日志拉取表单字段、提交签名、详情预填、下载来源、日志查看器请求参数、列表查询逗号序列化、列配置结构、版本选项数据源、AI Provider 回填 Agent，以及同步自动化 JSON 校验失败即阻止保存的语义。
 
 ## 参见
 

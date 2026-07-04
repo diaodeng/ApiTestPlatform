@@ -3168,7 +3168,7 @@
     handleQueryFirstLineAssigneeChange,
     handleQueryInternalOwnerChange,
     toElementSortOrder,
-  } = useTicketList(proxy, standaloneDetailMode);
+  } = useTicketList(proxy, standaloneDetailMode, router);
   // 选项数据 + 格式化函数 已提取到 hooks/useOptions.js
   const {
     projectOptions,
@@ -3190,13 +3190,13 @@
     detailVersionOptions,
     loadVendorOptions,
     loadProjectVendorMapOptions,
+    getProjectVendorNo,
     getVendorStoreOptions,
     loadProviderOptions,
     loadAnalysisPromptOptions,
     getTicketAutomationLogPullConfig,
-    applyAiAnalysisProviderAgent,
-    handleAiAnalysisProviderChange,
-    resolveDefaultAiPromptTemplateCodes,
+    resolveAiAnalysisProviderAgent,
+    resolveDefaultAiPromptTemplateCodesFromDetail,
     loadDetailVersionOptions,
     loadPushOptions,
     loadProjectOptions,
@@ -3274,10 +3274,12 @@
     logViewerForm,
     createDefaultLogPullForm,
     buildCleanLogPullConfig,
+    resetStoreSelection,
     resetLogPullForm,
     openLogPullSubmitDialog,
     stopLogPullAutoRefresh,
     loadLogPullList,
+    handleLogPullVendorChange,
     submitLogPull,
     deleteLogPull,
     retryLogPull,
@@ -3294,7 +3296,28 @@
     loadLogViewerErrors,
     selectLogViewerHit,
     pageLogViewerContext,
-  } = useLogViewer(proxy, currentTicketId);
+  } = useLogViewer(proxy, currentTicketId, {
+    detail,
+    detailOpen,
+    getList,
+    refreshDetail,
+    applyProjectVendorMapping,
+    getVendorStoreOptions,
+  });
+
+  /**
+   * 根据工单项目映射预填日志拉取供应商。
+   * 拆分后日志拉取表单归 useLogViewer 管理，因此保留在页面层完成跨 hook 状态回写。
+   */
+  function applyProjectVendorMapping(projectId) {
+    const vendorNo = getProjectVendorNo(projectId)
+    if (!vendorNo) {
+      return
+    }
+    const resolvedVendorId = Number(vendorNo)
+    logPullForm.value.vendorId = Number.isNaN(resolvedVendorId) ? vendorNo : resolvedVendorId
+    resetStoreSelection(logPullForm.value, logPullForm.value.vendorId)
+  }
   const aiAnalysisSubmitting = ref(false);
   const aiAnalysisRetryLoading = ref(false);
   const aiAnalysisRefreshLoading = ref(false);
@@ -3338,6 +3361,31 @@
     extraInstruction: '',
     promptTemplateCodes: [],
   });
+
+  /**
+   * 根据 Provider 绑定关系回填 AI 分析 Agent。
+   * useOptions 只负责解析选项，页面层负责写入当前分析表单。
+   */
+  function applyAiAnalysisProviderAgent(providerCode) {
+    const providerAgentCode = resolveAiAnalysisProviderAgent(providerCode)
+    if (providerAgentCode) {
+      aiAnalysisTaskForm.value.agentCode = providerAgentCode
+    }
+  }
+
+  /**
+   * 处理 AI 分析 Provider 变更，保持与备份分支一致的 Agent 自动带入行为。
+   */
+  function handleAiAnalysisProviderChange(providerCode) {
+    applyAiAnalysisProviderAgent(providerCode)
+  }
+
+  /**
+   * 从当前工单详情解析默认追加提示词编码。
+   */
+  function resolveDefaultAiPromptTemplateCodes() {
+    return resolveDefaultAiPromptTemplateCodesFromDetail(detail.value)
+  }
   const projectVendorMapForm = ref({
     projectId: undefined,
     projectName: '',

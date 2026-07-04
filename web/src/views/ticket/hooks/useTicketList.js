@@ -11,9 +11,7 @@ import { ref } from 'vue'
 import { listTicket, searchTicketNaturalLanguage } from '@/api/ticket/ticket'
 import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig'
 
-const USER_CONFIG_KEY = 'ticket_column_visible_keys'
-
-export function useTicketList(proxy, standaloneDetailMode) {
+export function useTicketList(proxy, standaloneDetailMode, router) {
   // === 列表状态 ===
   const loading = ref(false)
   const showSearch = ref(true)
@@ -29,8 +27,8 @@ export function useTicketList(proxy, standaloneDetailMode) {
     moduleCodes: [], issueTypeIds: [], rootCauseTypes: [], solutionTypes: [],
     resolutionCodes: [], problemPatternCodes: [], isProblems: [],
     internalPriorities: [], sources: [], reporterNames: [],
-    currentAssigneeUserIds: [], firstLineAssigneeUserIds: [],
-    internalOwnerUserIds: [], sortField: '', sortOrder: ''
+    currentAssigneeIds: [], firstLineAssigneeIds: [],
+    internalOwnerIds: [], sortField: 'submitTime', sortOrder: 'desc'
   })
 
   const queryCurrentAssigneeOption = ref([])
@@ -67,21 +65,38 @@ export function useTicketList(proxy, standaloneDetailMode) {
 
   // === 列配置方法 ===
   function normalizeTicketColumnKeys(value) {
-    if (Array.isArray(value)) return [...new Set(value.filter(k => typeof k === 'string' && k.trim()))]
-    if (typeof value === 'string') return [...new Set(value.split(',').map(k => k.trim()).filter(Boolean))]
-    return [...defaultTicketColumnKeys]
+    const rawKeys = Array.isArray(value?.visibleColumns) ? value.visibleColumns : value
+    const validKeys = new Set(ticketColumnOptions.map(item => item.key))
+    const normalized = (Array.isArray(rawKeys) ? rawKeys : defaultTicketColumnKeys)
+      .map(item => String(item || '').trim())
+      .filter(item => validKeys.has(item))
+    requiredTicketColumnKeys.forEach(key => {
+      if (!normalized.includes(key)) {
+        normalized.push(key)
+      }
+    })
+    return normalized.length ? normalized : [...defaultTicketColumnKeys]
   }
 
   function loadTicketColumnConfig() {
-    return getCurrentUserConfig(USER_CONFIG_KEY).then(response => {
-      const raw = response?.data?.configValue ?? response?.data?.config_value
-      visibleTicketColumnKeys.value = normalizeTicketColumnKeys(raw)
+    return getCurrentUserConfig('ticket', 'ticket_list_columns').then(response => {
+      visibleTicketColumnKeys.value = normalizeTicketColumnKeys(response.data?.configValue)
     }).catch(() => { visibleTicketColumnKeys.value = [...defaultTicketColumnKeys] })
   }
 
   function saveTicketColumnConfig() {
-    const keys = [...new Set([...requiredTicketColumnKeys, ...visibleTicketColumnKeys.value])]
-    return saveCurrentUserConfig({ configKey: USER_CONFIG_KEY, configValue: keys.join(',') })
+    visibleTicketColumnKeys.value = normalizeTicketColumnKeys(visibleTicketColumnKeys.value)
+    return saveCurrentUserConfig({
+      configType: 'ticket',
+      configKey: 'ticket_list_columns',
+      configValue: {
+        visibleColumns: visibleTicketColumnKeys.value
+      },
+      remark: '工单列表显示列配置'
+    }).then(() => {
+      columnConfigOpen.value = false
+      proxy.$modal.msgSuccess('保存成功')
+    })
   }
 
   function resetTicketColumnConfig() { visibleTicketColumnKeys.value = [...defaultTicketColumnKeys] }
@@ -89,23 +104,50 @@ export function useTicketList(proxy, standaloneDetailMode) {
 
   // === 查询方法 ===
   function normalizeQueryList(value) {
-    if (!Array.isArray(value)) return []
-    return [...new Set(value.filter(Boolean))]
+    if (Array.isArray(value)) {
+      return value.filter(item => item !== undefined && item !== null && item !== '')
+    }
+    if (value === undefined || value === null || value === '') {
+      return []
+    }
+    return [value]
   }
 
-  function joinQueryList(value) { return normalizeQueryList(value).join(',') }
+  function joinQueryList(value) {
+    const items = normalizeQueryList(value)
+    return items.length ? items.join(',') : undefined
+  }
 
   function buildTicketListQueryParams() {
-    const params = { ...queryParams.value }
-    if (submitTimeRange.value?.length === 2) {
-      params.submitTimeBegin = submitTimeRange.value[0]
-      params.submitTimeEnd = submitTimeRange.value[1]
+    const params = {
+      ...queryParams.value,
+      statuses: joinQueryList(queryParams.value.statuses),
+      processStatuses: joinQueryList(queryParams.value.processStatuses),
+      projectIds: joinQueryList(queryParams.value.projectIds),
+      moduleIds: joinQueryList(queryParams.value.moduleIds),
+      moduleCodes: joinQueryList(queryParams.value.moduleCodes),
+      issueTypeIds: joinQueryList(queryParams.value.issueTypeIds),
+      isProblems: joinQueryList(queryParams.value.isProblems),
+      rootCauseTypes: joinQueryList(queryParams.value.rootCauseTypes),
+      solutionTypes: joinQueryList(queryParams.value.solutionTypes),
+      resolutionCodes: joinQueryList(queryParams.value.resolutionCodes),
+      problemPatternCodes: joinQueryList(queryParams.value.problemPatternCodes),
+      internalPriorities: joinQueryList(queryParams.value.internalPriorities),
+      currentAssigneeIds: joinQueryList(queryParams.value.currentAssigneeIds),
+      firstLineAssigneeIds: joinQueryList(queryParams.value.firstLineAssigneeIds),
+      internalOwnerIds: joinQueryList(queryParams.value.internalOwnerIds)
     }
-    return params
+    return Object.fromEntries(
+      Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+    )
   }
 
   function getList() {
     if (standaloneDetailMode?.value) return Promise.resolve()
+    const rangeValues = Array.isArray(submitTimeRange.value) ? submitTimeRange.value : []
+    const [submitBeginTime, submitEndTime] = rangeValues
+    queryParams.value.submitBeginTime = submitBeginTime || undefined
+    queryParams.value.submitEndTime = submitEndTime || undefined
     loading.value = true
     return listTicket(buildTicketListQueryParams()).then(response => {
       ticketList.value = response.rows || []
@@ -114,39 +156,74 @@ export function useTicketList(proxy, standaloneDetailMode) {
   }
 
   function toElementSortOrder(sortOrder) {
-    if (sortOrder === 'ascending') return 'asc'
-    if (sortOrder === 'descending') return 'desc'
-    return ''
+    const value = String(sortOrder || '').trim().toLowerCase()
+    if (value === 'asc' || value === 'ascending') {
+      return 'ascending'
+    }
+    return 'descending'
   }
 
   function normalizeTicketSortOrder(sortOrder) {
-    if (sortOrder === 'asc') return 'ascending'
-    if (sortOrder === 'desc') return 'descending'
-    return ''
+    const value = String(sortOrder || '').trim().toLowerCase()
+    if (value === 'ascending' || value === 'asc') {
+      return 'asc'
+    }
+    if (value === 'descending' || value === 'desc') {
+      return 'desc'
+    }
+    return 'desc'
   }
 
   function handleTicketSortChange({ prop, order }) {
-    queryParams.value.sortField = prop || ''
-    queryParams.value.sortOrder = toElementSortOrder(order)
+    queryParams.value.sortField = order ? (prop || 'submitTime') : 'submitTime'
+    queryParams.value.sortOrder = order ? normalizeTicketSortOrder(order) : 'desc'
+    queryParams.value.pageNum = 1
     getList()
   }
 
   // === 外部链接 ===
   function resolveTicketDetailUrl(ticketRow) {
-    const extraData = ticketRow?.extraData || ticketRow?.extra_data || {}
-    const source = extraData?.source || extraData?.external_source || ''
-    return extraData?.ticketUrl || extraData?.ticket_url || extraData?.recordUrl || extraData?.record_url || ''
+    const row = ticketRow || {}
+    const syncSummary = row.syncSummary || row.sync_summary || {}
+    const extraData = row.extraData || row.extra_data || {}
+    const externalSync = extraData.externalSync || extraData.external_sync || {}
+    const source = externalSync.source || {}
+    const value = String(
+      row.ticketUrl
+        || row.ticket_url
+        || row.url
+        || syncSummary.ticketUrl
+        || syncSummary.ticket_url
+        || syncSummary.sourceRecordUrl
+        || syncSummary.source_record_url
+        || source.ticketUrl
+        || source.ticket_url
+        || source.recordUrl
+        || source.record_url
+        || ''
+    ).trim()
+    return value || ''
   }
 
   function openTicketLink(ticketRow) {
     const url = resolveTicketDetailUrl(ticketRow)
-    if (!url) { proxy.$modal.msgWarning('该工单缺少外部链接'); return }
-    window.open(url, '_blank')
+    if (!url) { proxy.$modal.msgWarning('当前工单未配置详情链接'); return }
+    window.open(url, '_blank', 'noopener')
   }
 
   function buildSystemTicketDetailUrl(ticketRow) {
-    const id = ticketRow?.ticketId ?? ticketRow?.id
-    return id ? `/ticket/detail/${id}` : ''
+    const ticketId = Number(ticketRow?.ticketId || ticketRow?.ticket_id)
+    if (!Number.isFinite(ticketId) || ticketId <= 0) {
+      return ''
+    }
+    if (router?.resolve) {
+      const resolved = router.resolve({
+        name: 'TicketDetail',
+        params: { ticketId }
+      })
+      return resolved.href
+    }
+    return `/ticket/detail/${ticketId}`
   }
 
   function openSystemTicketDetail(ticketRow) {
@@ -156,19 +233,19 @@ export function useTicketList(proxy, standaloneDetailMode) {
 
   // === 搜索 ===
   function handleQuery() { queryParams.value.pageNum = 1; getList() }
-  function handleSearch() { handleQuery() }
-  function resetQuery() {
-    queryParams.value = {
-      pageNum: 1, pageSize: 20, keyword: '', ticketNo: '',
-      statuses: [], processStatuses: [], projectIds: [], moduleIds: [],
-      moduleCodes: [], issueTypeIds: [], rootCauseTypes: [], solutionTypes: [],
-      resolutionCodes: [], problemPatternCodes: [], isProblems: [],
-      internalPriorities: [], sources: [], reporterNames: [],
-      currentAssigneeUserIds: [], firstLineAssigneeUserIds: [],
-      internalOwnerUserIds: [], sortField: '', sortOrder: ''
+  function handleSearch() {
+    if (naturalKeyword.value) {
+      handleNaturalSearch()
+      return
     }
+    handleQuery()
+  }
+  function resetQuery() {
+    proxy.resetForm('queryRef')
     submitTimeRange.value = []
     naturalKeyword.value = ''
+    queryParams.value.submitBeginTime = undefined
+    queryParams.value.submitEndTime = undefined
     queryCurrentAssigneeOption.value = []
     queryFirstLineAssigneeOption.value = []
     queryInternalOwnerOption.value = []
@@ -176,19 +253,18 @@ export function useTicketList(proxy, standaloneDetailMode) {
   }
 
   function handleNaturalSearch() {
-    const keyword = naturalKeyword.value?.trim()
-    if (!keyword) { proxy.$modal.msgWarning('请输入自然语言描述'); return }
+    if (!naturalKeyword.value) { handleQuery(); return }
     loading.value = true
-    return searchTicketNaturalLanguage({ keyword, limit: 20 }).then(response => {
+    return searchTicketNaturalLanguage({ keyword: naturalKeyword.value, limit: queryParams.value.pageSize }).then(response => {
       ticketList.value = response.data || []
       total.value = ticketList.value.length
     }).finally(() => { loading.value = false })
   }
 
   // === 人员筛选 ===
-  function handleQueryCurrentAssigneeChange(user) { queryParams.value.currentAssigneeUserIds = user ? [user.userId] : [] }
-  function handleQueryFirstLineAssigneeChange(user) { queryParams.value.firstLineAssigneeUserIds = user ? [user.userId] : [] }
-  function handleQueryInternalOwnerChange(user) { queryParams.value.internalOwnerUserIds = user ? [user.userId] : [] }
+  function handleQueryCurrentAssigneeChange(user) { queryCurrentAssigneeOption.value = Array.isArray(user) ? user : (user ? [user] : []) }
+  function handleQueryFirstLineAssigneeChange(user) { queryFirstLineAssigneeOption.value = Array.isArray(user) ? user : (user ? [user] : []) }
+  function handleQueryInternalOwnerChange(user) { queryInternalOwnerOption.value = Array.isArray(user) ? user : (user ? [user] : []) }
 
   return {
     // state

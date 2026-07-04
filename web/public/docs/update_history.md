@@ -304,6 +304,8 @@
 9. 补充说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
 10. 对照备份分支 `master_params_ticket_new` 审计拆分后逻辑：恢复主动拉取自动时间窗口、filter 连接符和嵌套 filter 追加语义；删除拆分 controller 中的重复路由注册，当前工单路由集合与备份分支一致。
 11. 新增说明文档：`web/public/docs/2026-07-04-ticket-split-backup-branch-logic-audit.md`。
+12. 对照备份分支 `master_params_ticket_new` 审计工单管理前端拆分逻辑：恢复日志拉取提交/预填/下载/查看器、列表查询参数、选项加载、AI Provider 联动和同步自动化保存校验语义。
+13. 新增说明文档：`web/public/docs/2026-07-04-ticket-frontend-split-backup-branch-logic-audit.md`。
 
 ## 2026-06-15
 

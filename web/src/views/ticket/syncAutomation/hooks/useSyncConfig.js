@@ -339,13 +339,19 @@ export function useSyncConfig(proxy) {
 
   function normalizeDateTimeText(value) {
     const text = String(value || '').trim()
-    if (!text) return ''
+    if (!text) {
+      return ''
+    }
     const normalized = text.replace('T', ' ')
     const fullMatch = normalized.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)
-    if (fullMatch) return fullMatch[0]
+    if (fullMatch?.[0]) {
+      return fullMatch[0]
+    }
     const minuteMatch = normalized.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
-    if (minuteMatch) return minuteMatch[0] + ':00'
-    return text.substring(0, 19)
+    if (minuteMatch?.[0]) {
+      return `${minuteMatch[0]}:00`
+    }
+    return text
   }
 
   function normalizeWorkflowStatusOptions(statuses = []) {
@@ -399,8 +405,15 @@ export function useSyncConfig(proxy) {
   }
 
   function parseJsonArray(text, fallback = []) {
-    try { const parsed = JSON.parse(text || '[]'); return Array.isArray(parsed) ? parsed : fallback }
-    catch (e) { return fallback }
+    if (!String(text || '').trim()) {
+      return fallback
+    }
+    try {
+      const parsed = JSON.parse(text)
+      return Array.isArray(parsed) ? parsed : fallback
+    } catch (error) {
+      throw new Error('请检查JSON数组格式是否正确')
+    }
   }
 
   // === Config load ===
@@ -706,7 +719,12 @@ export function useSyncConfig(proxy) {
 
   function validateElForm(refName) {
     return new Promise((resolve) => {
-      proxy.$refs[refName]?.validate(valid => resolve(valid))
+      const formRef = proxy.$refs[refName]
+      if (!formRef || typeof formRef.validate !== 'function') {
+        resolve(true)
+        return
+      }
+      formRef.validate((valid) => resolve(valid))
     })
   }
 
@@ -946,10 +964,16 @@ export function useSyncConfig(proxy) {
   }
 
   function addBitablePullFieldMapping() {
+    if (!Array.isArray(form.bitablePull.fieldMappings)) {
+      form.bitablePull.fieldMappings = []
+    }
     form.bitablePull.fieldMappings.push({ sourceField: '', targetField: '', defaultValue: '', joinSeparator: ',' })
   }
 
   function removeBitablePullFieldMapping(index) {
+    if (!Array.isArray(form.bitablePull.fieldMappings)) {
+      return
+    }
     form.bitablePull.fieldMappings.splice(index, 1)
   }
 

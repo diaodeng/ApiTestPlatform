@@ -14,6 +14,7 @@ import {
   getTicketLogPullVendorStoreOptions,
   listTicketLogPullProjectVendorMapOptions,
   getTicketStatClassificationOptions,
+  listTicketAiRepoMappings,
   listTicketProjectOptions,
   listTicketModuleOptions
 } from '@/api/ticket/ticket'
@@ -95,10 +96,6 @@ export function useOptions() {
     return String(mapping?.venderNo || '').trim()
   }
 
-  function applyProjectVendorMapping(projectId) {
-    // Note: this also references logPullForm which is external - kept in index.vue
-  }
-
   function getVendorStoreOptions(vendorId) {
     const resolvedVendorId = Number(vendorId)
     if (!vendorId && vendorId !== 0) return []
@@ -134,21 +131,13 @@ export function useOptions() {
     return providerOptions.value.find(item => String(item.providerCode || '').trim() === resolvedCode)
   }
 
-  function applyAiAnalysisProviderAgent(providerCode) {
+  function resolveAiAnalysisProviderAgent(providerCode) {
     const provider = findAiProviderOption(providerCode)
     const providerAgentCode = String(provider?.agentCode || '').trim()
-    if (providerAgentCode) {
-      // Note: aiAnalysisTaskForm is external - caller needs to handle
-      return providerAgentCode
-    }
-    return null
+    return providerAgentCode || null
   }
 
-  function handleAiAnalysisProviderChange(providerCode) {
-    return applyAiAnalysisProviderAgent(providerCode)
-  }
-
-  function resolveDefaultAiPromptTemplateCodes(detail) {
+  function resolveDefaultAiPromptTemplateCodesFromDetail(detail) {
     const contextCodes = detail?.latestAiAnalysis?.analysisContext?.selectedPromptTemplateCodes
     if (Array.isArray(contextCodes) && contextCodes.length) return contextCodes
     const config = getTicketAutomationLogPullConfig(detail || {})
@@ -160,30 +149,46 @@ export function useOptions() {
 
   // === 版本选项 ===
   function loadDetailVersionOptions(projectId) {
-    const resolvedId = Number(projectId)
-    if (!resolvedId) {
+    if (!projectId) {
       detailVersionOptions.value = []
-      return
+      return Promise.resolve()
     }
-    const mappings = Array.isArray(projectVendorMapOptions.value) ? projectVendorMapOptions.value : []
-    const projectMappings = mappings.filter(item => Number(item.projectId) === resolvedId)
-    const optionMap = new Map()
-    for (const item of projectMappings) {
-      const versionKey = String(item.versionKey || '').trim()
-      if (versionKey && !optionMap.has(versionKey)) {
-        optionMap.set(versionKey, {
-          value: versionKey,
-          label: `${versionKey} (${String(item.repoUrl || '').trim() || '-'})`
+    return listTicketAiRepoMappings({
+      pageNum: 1,
+      pageSize: 200,
+      projectId,
+      enabled: true
+    }).then(response => {
+      const rows = response.rows || []
+      const optionMap = new Map()
+      rows.forEach(item => {
+        const value = String(item.versionKey || '').trim()
+        if (!value || optionMap.has(value)) {
+          return
+        }
+        const branchName = String(item.branchName || '').trim()
+        const repoUrl = String(item.repoUrl || '').trim()
+        const labelParts = [value]
+        if (branchName) {
+          labelParts.push(`- ${branchName}`)
+        }
+        if (repoUrl) {
+          labelParts.push(`(${repoUrl})`)
+        }
+        optionMap.set(value, {
+          value,
+          label: labelParts.join(' ')
         })
-      }
-    }
-    detailVersionOptions.value = Array.from(optionMap.values())
+      })
+      detailVersionOptions.value = Array.from(optionMap.values())
+    })
   }
 
   // === Push 选项 ===
   function loadPushOptions() {
-    return listAllPushConfig().then(response => {
-      pushOptions.value = Array.isArray(response.data) ? response.data : []
+    return listAllPushConfig({ pageNum: 1, pageSize: 500 }).then(response => {
+      const rows = response.data || []
+      pushOptions.value = Array.isArray(rows) ? rows : []
     })
   }
 
@@ -200,40 +205,86 @@ export function useOptions() {
     })
   }
 
-  function loadQueryModuleOptions(projectIds) {
-    const ids = Array.isArray(projectIds) ? projectIds.filter(Boolean) : []
-    if (!ids.length) {
-      queryModuleOptions.value = []
-      queryModuleCodeOptions.value = []
-      return
+  function normalizeQueryList(value) {
+    if (Array.isArray(value)) {
+      return value.filter(item => item !== undefined && item !== null && item !== '')
     }
-    return listTicketModuleOptions({ projectIds: ids }).then(response => {
-      const modules = response.data || []
-      queryModuleOptions.value = modules
-      const codeSet = new Set()
-      queryModuleCodeOptions.value = modules
-        .map(item => String(item.moduleCode || '').trim())
-        .filter(code => code && !codeSet.has(code) && codeSet.add(code))
-        .map(code => ({ value: code, label: code }))
+    if (value === undefined || value === null || value === '') {
+      return []
+    }
+    return [value]
+  }
+
+  function buildModuleCodeOptions(moduleOptions = []) {
+    const codeMap = new Map()
+    ;(Array.isArray(moduleOptions) ? moduleOptions : []).forEach(item => {
+      const code = String(item?.moduleCode || '').trim()
+      if (!code || codeMap.has(code)) {
+        return
+      }
+      codeMap.set(code, {
+        value: code,
+        label: code
+      })
+    })
+    return Array.from(codeMap.values())
+  }
+
+  function loadQueryModuleOptions(projectIds) {
+    const selectedProjectIds = normalizeQueryList(projectIds).map(item => String(item))
+    return listTicketModuleOptions({}).then(response => {
+      const allModules = response.data || []
+      queryModuleOptions.value = selectedProjectIds.length
+        ? allModules.filter(item => selectedProjectIds.includes(String(item.projectId)))
+        : allModules
+      queryModuleCodeOptions.value = buildModuleCodeOptions(queryModuleOptions.value)
     })
   }
 
   function loadFormModuleOptions(projectId) {
-    const resolvedId = Number(projectId)
-    if (!resolvedId) {
+    if (!projectId) {
       formModuleOptions.value = []
-      formVersionOptions.value = []
-      return
+      return Promise.resolve()
     }
-    return listTicketModuleOptions({ projectIds: [resolvedId] }).then(response => {
+    return listTicketModuleOptions(projectId ? { projectId } : {}).then(response => {
       formModuleOptions.value = response.data || []
-    }).then(() => {
-      loadDetailVersionOptions(resolvedId)
     })
   }
 
   function loadFormVersionOptions(projectId) {
-    loadDetailVersionOptions(projectId)
+    if (!projectId) {
+      formVersionOptions.value = []
+      return Promise.resolve()
+    }
+    return listTicketAiRepoMappings({
+      pageNum: 1,
+      pageSize: 200,
+      projectId,
+      enabled: true
+    }).then(response => {
+      const rows = response.rows || []
+      const optionMap = new Map()
+      rows.forEach(item => {
+        const value = String(item.versionKey || '').trim()
+        if (!value || optionMap.has(value)) {
+          return
+        }
+        const branchName = String(item.branchName || '').trim()
+        const repoUrl = String(item.repoUrl || '').trim()
+        const labelParts = [value]
+        if (branchName) {
+          labelParts.push(`- ${branchName}`)
+        }
+        if (repoUrl) {
+          labelParts.push(`(${repoUrl})`)
+        }
+        optionMap.set(value, {
+          value,
+          label: labelParts.join(' ')
+        })
+      })
+      formVersionOptions.value = Array.from(optionMap.values())
+    })
   }
 
   // === 格式化辅助函数 ===
@@ -289,22 +340,18 @@ export function useOptions() {
 
   function loadStatClassificationOptions() {
     return getTicketStatClassificationOptions().then(response => {
-      const data = response.data || {}
-      if (Array.isArray(data.issueTypes) && data.issueTypes.length) {
-        issueTypeOptions.value = normalizeStatOptions(data.issueTypes)
-      }
-      if (Array.isArray(data.rootCauseTypes) && data.rootCauseTypes.length) {
-        rootCauseTypeOptions.value = normalizeStatOptions(data.rootCauseTypes)
-      }
-      if (Array.isArray(data.solutionTypes) && data.solutionTypes.length) {
-        solutionTypeOptions.value = normalizeStatOptions(data.solutionTypes)
-      }
-      if (Array.isArray(data.resolutionCodes) && data.resolutionCodes.length) {
-        resolutionOptions.value = normalizeStatOptions(data.resolutionCodes)
-      }
-      if (Array.isArray(data.problemPatternCodes) && data.problemPatternCodes.length) {
-        problemPatternOptions.value = normalizeStatOptions(data.problemPatternCodes)
-      }
+      const config = response.data || {}
+      issueTypeOptions.value = normalizeStatOptions(config.issueTypes)
+      rootCauseTypeOptions.value = normalizeStatOptions(config.rootCauseTypes)
+      solutionTypeOptions.value = normalizeStatOptions(config.solutionTypes)
+      resolutionOptions.value = normalizeStatOptions(config.resolutions)
+      problemPatternOptions.value = normalizeStatOptions(config.problemPatterns)
+    }).catch(() => {
+      issueTypeOptions.value = []
+      rootCauseTypeOptions.value = []
+      solutionTypeOptions.value = []
+      resolutionOptions.value = []
+      problemPatternOptions.value = []
     })
   }
 
@@ -318,18 +365,18 @@ export function useOptions() {
     // vendor/store functions
     normalizeVendorOptions, buildVendorOptionLabel, buildStoreOptionLabel,
     loadVendorOptions, loadProjectVendorMapOptions,
-    getProjectVendorNo, applyProjectVendorMapping, getVendorStoreOptions,
+    getProjectVendorNo, getVendorStoreOptions,
     // provider/agent/prompt functions
     loadProviderOptions, loadAnalysisPromptOptions,
     getTicketAutomationLogPullConfig, findAiProviderOption,
-    applyAiAnalysisProviderAgent, handleAiAnalysisProviderChange,
-    resolveDefaultAiPromptTemplateCodes,
+    resolveAiAnalysisProviderAgent,
+    resolveDefaultAiPromptTemplateCodesFromDetail,
     // version functions
     loadDetailVersionOptions,
     // push functions
     loadPushOptions,
     // project/module functions
-    loadProjectOptions, loadAgentOptions,
+    loadProjectOptions, loadAgentOptions, normalizeQueryList, buildModuleCodeOptions,
     loadQueryModuleOptions, loadFormModuleOptions, loadFormVersionOptions,
     // format helpers
     getStatOptionLabel, formatStatOption, formatProblemFlag,

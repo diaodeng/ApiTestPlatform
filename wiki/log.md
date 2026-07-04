@@ -1129,3 +1129,12 @@ updated: 2026-07-04
 - 创建的双向链接：0 对
 - 变更传播链：`TicketBitablePullService.run_bitable_pull_services` / `TicketSyncConfigService.build_bitable_pull_time_filters` / 拆分 controller 路由集合 -> 工单域知识页。
 - 总共涉及页面：4
+
+## [2026-07-04] INGEST-CODE | 工单前端拆分后备份分支逻辑审计
+- 触发：用户要求检查工单管理下面拆分后的前端逻辑是否与备份分支 `master_params_ticket_new` 一致。
+- 架构层：工单域 / 工单管理前端拆分 / 同步自动化配置页
+- 创建的页面：`web/public/docs/2026-07-04-ticket-frontend-split-backup-branch-logic-audit.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`web/src/views/ticket/hooks/useLogViewer.js` / `useTicketList.js` / `useOptions.js` / `syncAutomation/hooks/useSyncConfig.js` -> 工单详情日志拉取、列表查询、AI 分析 Provider 联动、同步自动化保存校验。
+- 总共涉及页面：3
