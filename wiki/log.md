@@ -8,6 +8,15 @@ updated: 2026-07-04
 
 # 操作日志
 
+## [2026-07-04] INGEST-CODE | 拆分 TicketSyncService 同步交付边界
+
+- 触发：用户要求继续拆分工单同步服务，当前优先迁移边界清晰的 pending/ack 交付状态能力。
+- 架构层：工单域 / 外部同步 / 内网 pending 拉取 / 同步 ack 回执 / 同步元数据摘要
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/sync/ticket_sync_delivery_service.py`、`server/modules/ticket/service/sync/ticket_sync_service.py`、`server/modules/ticket/controller/ticket_sync_controller.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/2026-07-04-project-implementation-boundary-rules.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`TicketSyncService.extract_sync_summary/_update_consumer_state/pull_pending_tickets/ack_sync_delivery` -> `TicketSyncDeliveryService.extract_sync_summary/update_consumer_state/pull_pending_tickets/ack_sync_delivery` -> `/ticket/sync/pending` 与 `/ticket/sync/ack` 控制器直接调用新服务；主同步入库链路仅通过新服务读取 `syncSummary`。
+- 关键结论：消费者交付状态、`delivered_revision` 推进、pending 租约和 `syncSummary` 构造不再属于 `TicketSyncService`；后续修改内网同步交付规则应优先改 `TicketSyncDeliveryService`。
+
 ## [2026-07-04] INGEST-CODE | 工单服务按依赖关系组织为子包
 
 - 触发：用户要求将已经拆出的工单服务按照依赖关系组织成独立模块或子包，不要全部放在同一个 service 包中，后续再继续细拆。

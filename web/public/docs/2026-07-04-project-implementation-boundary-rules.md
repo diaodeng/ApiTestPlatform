@@ -48,7 +48,7 @@
 ## 工单域当前约束
 
 1. 工单服务已经按依赖关系组织为 `service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats` 子包；新增调用方必须直接引用子包路径。
-2. `service/sync/TicketSyncService` 只保留外部同步入库主编排、pending 拉取、ack、批量重归类和外部请求归一化等未拆部分。
+2. `service/sync/TicketSyncService` 只保留外部同步入库主编排、批量重归类和外部请求归一化等未拆部分。
 3. 飞书多维表格主动拉取由 `service/sync/TicketBitablePullService` 承接。
 4. 人员催办和汇总统计通知任务由 `service/sync/TicketSyncNotificationJobService` 承接。
 5. 外部推送按 recordId 查询飞书多维表格补齐人员邮箱由 `service/sync/TicketExternalBitableEmailService` 承接。
@@ -58,9 +58,10 @@
 9. 外部同步入库 payload、同步 meta、外部创建时间和自动拉日志日期解析由 `service/sync/TicketSyncPayloadService` 承接。
 10. 延后后处理投递、运行入口和执行主体由 `service/sync/TicketSyncPostProcessService` 承接。
 11. 字段识别、同步自动化步骤状态、相似工单检索、自动拉日志和自动 AI 分析提交由 `service/sync/TicketSyncAutomationService` 承接。
-12. AI 分析、轻量 AI、提示词、分类统计和向量相似度能力放在 `service/ai`；日志拉取和日志查看放在 `service/log_pull`；工单 CRUD、导入、状态流转和知识库放在 `service/core`。
-13. 新增工单同步相关能力时，不能再往 `TicketSyncService` 里直接堆新主题；应先判断是否属于上述子服务或新建子服务。
-14. 禁止恢复 `modules.ticket.service.ticket_*` 旧顶层入口，禁止新增只做 re-export 的兼容文件。
+12. pending 拉取、ack 回执、消费者交付状态和 `syncSummary` 构造由 `service/sync/TicketSyncDeliveryService` 承接。
+13. AI 分析、轻量 AI、提示词、分类统计和向量相似度能力放在 `service/ai`；日志拉取和日志查看放在 `service/log_pull`；工单 CRUD、导入、状态流转和知识库放在 `service/core`。
+14. 新增工单同步相关能力时，不能再往 `TicketSyncService` 里直接堆新主题；应先判断是否属于上述子服务或新建子服务。
+15. 禁止恢复 `modules.ticket.service.ticket_*` 旧顶层入口，禁止新增只做 re-export 的兼容文件。
 
 ## 验证要求
 

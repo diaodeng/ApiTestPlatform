@@ -22,6 +22,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_delivery_service import TicketSyncDeliveryService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.sync.ticket_sync_notification_job_service import TicketSyncNotificationJobService
 from modules.ticket.service.sync.ticket_sync_post_process_service import TicketSyncPostProcessService
@@ -125,7 +126,7 @@ async def pull_pending_sync_tickets(
     内网系统拉取未同步或更新后的工单数据。
     """
     try:
-        result = await run_in_threadpool(TicketSyncService.pull_pending_tickets, query_db, query, current_user)
+        result = await run_in_threadpool(TicketSyncDeliveryService.pull_pending_tickets, query_db, query, current_user)
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
@@ -143,7 +144,12 @@ async def ack_sync_tickets(
     内网系统回执本次拉取数据的交付状态。
     """
     try:
-        result = await run_in_threadpool(TicketSyncService.ack_sync_delivery, query_db, ack_object, current_user)
+        result = await run_in_threadpool(
+            TicketSyncDeliveryService.ack_sync_delivery,
+            query_db,
+            ack_object,
+            current_user,
+        )
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)

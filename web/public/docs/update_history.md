@@ -12,6 +12,7 @@
 10. 新增 `TicketSyncPostProcessService` 承接外部同步延后后处理投递、运行入口、系统用户 payload 归一化和后处理执行主体；控制器、主动拉取和 Celery 任务不再调用 `TicketSyncService` 的延后入口。
 11. 新增 `TicketSyncAutomationService` 承接字段识别、自动化步骤状态、相似工单、自动拉日志和自动 AI 分析提交；`TicketSyncService` 与延后后处理服务都直接调用该服务。
 12. 将工单服务按依赖关系组织为 `service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats` 子包；所有调用方改为新路径，旧顶层 `modules.ticket.service.ticket_*` 服务入口删除且不保留 re-export shim。
+13. 新增 `TicketSyncDeliveryService` 承接同步摘要、pending 拉取、ack 回执和消费者交付状态更新；`/ticket/sync/pending` 与 `/ticket/sync/ack` 控制器直接调用该服务，`TicketSyncService` 不再保留交付状态入口。
 
 ## 2026-07-02
 

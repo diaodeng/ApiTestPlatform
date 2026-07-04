@@ -18,6 +18,7 @@ from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteS
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_comment_service import TicketSyncCommentService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_delivery_service import TicketSyncDeliveryService
 from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
@@ -1739,7 +1740,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "finalize_publish_state_after_post_process",
                 side_effect=lambda _db, ticket, **_kwargs: (ticket, {}, None),
             ),
-            patch.object(TicketSyncService, "extract_sync_summary", return_value={}),
+            patch.object(TicketSyncDeliveryService, "extract_sync_summary", return_value={}),
             patch.object(TicketSyncService, "_resolve_sync_title", return_value=("T-TRANS", {"mode": "raw"})),
             patch.object(
                 TicketExternalBitableEmailService,

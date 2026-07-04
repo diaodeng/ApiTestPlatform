@@ -33,6 +33,7 @@
 21. 继续拆分延后后处理边界：新增 `TicketSyncPostProcessService` 承接 Celery 可用性探测、延后任务投递、本地后台/Celery 运行入口、系统用户 payload 归一化和延后后处理执行主体；控制器、主动拉取和 Celery 任务已改为直接调用该服务，`TicketSyncService` 删除对应入口。
 22. 为避免延后后处理服务反向依赖主同步服务，新增 `TicketSyncAutomationService` 承接字段识别、同步自动化步骤状态、相似工单检索、自动拉日志和自动 AI 分析提交；`TicketSyncService` 主入库链路与 `TicketSyncPostProcessService` 均直接调用该服务。
 23. 将工单服务按依赖关系移动到独立子包：`service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats`；所有调用方和测试均改为新路径，旧 `service/ticket_*.py` 顶层服务文件删除，不保留 re-export 或转发 shim。
+24. 继续拆分同步交付边界：新增 `TicketSyncDeliveryService` 承接 `syncSummary` 构造、消费者状态更新、`/ticket/sync/pending` 拉取和 `/ticket/sync/ack` 回执；控制器直接调用该服务，`TicketSyncService` 删除 pending/ack 入口。
 
 ## 关键不变项
 
@@ -45,16 +46,17 @@
 7. 字段识别和自动化执行已下沉到 `TicketSyncAutomationService`；后续新增项目/模块/人员识别、自动拉日志或自动 AI 分析规则应优先修改该服务。
 8. 新增共享能力必须放入无上层依赖的子服务或 util，不使用函数内导入、延迟代理来掩盖依赖方向问题。
 9. 工单服务当前已按子包组织，新增或修改调用方必须使用 `modules.ticket.service.<子包>.<服务文件>` 路径；不得恢复 `modules.ticket.service.ticket_*` 旧入口。
+10. 内网消费者交付状态已下沉到 `TicketSyncDeliveryService`；后续 pending 拉取、ack 回执、`delivered_revision` 推进和 `syncSummary` 字段规则应优先修改该服务，不再回填到 `TicketSyncService`。
 
 ## 当前拆分评估
 
 1. 当前拆分方向基本正确：评论幂等、消息流写入、AI 分类统计、配置归一化、主动拉取飞书查询、主动拉取编排、通知任务编排、外部推送多维表格邮箱补齐和远端拉取同步已经下沉到低层服务，解决了主服务之间相互依赖的问题。
 2. 当前已完成第一轮包级收敛：同步、AI、日志拉取、核心工单、协作、通知和统计服务不再全部堆在 `service/` 根包。
-3. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库主编排、pending 拉取、ack、批量重归类和外部请求归一化等职责，但 payload 构造、延后后处理、字段识别和同步自动化已拆入独立服务；后续继续拆分时应在 `service/sync/` 内按更细职责迁移。
+3. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库主编排、批量重归类和外部请求归一化等职责，但 payload 构造、延后后处理、字段识别、同步自动化、pending 拉取和 ack 回执已拆入独立服务；后续继续拆分时应在 `service/sync/` 内按更细职责迁移。
 
 ## 当前子包边界
 
-1. `service/sync/`：外部同步入库、同步配置、字段映射、飞书主动拉取、远端拉取、延后后处理、同步自动化、群推送和同步通知任务。
+1. `service/sync/`：外部同步入库、同步配置、字段映射、飞书主动拉取、远端拉取、同步交付、延后后处理、同步自动化、群推送和同步通知任务。
 2. `service/ai/`：AI 分析、轻量 AI、自动分类统计、提示词解析和相似度向量能力。
 3. `service/log_pull/`：日志拉取执行、日志记录查看和日志内容处理。
 4. `service/core/`：工单 CRUD、状态流转、RCA、知识库、导入和快照等核心工单能力。
@@ -90,6 +92,13 @@
 1. `cd server; uv run python -m compileall modules/ticket module_task tests`
 2. `cd server; uv run ruff check server.py module_admin/service/ai_config_service.py module_admin/service/ai_prompt_template_service.py module_task/celery_tasks.py module_task/scheduler_maintenance.py modules/ticket/controller/ticket_ai_controller.py modules/ticket/controller/ticket_config_controller.py modules/ticket/controller/ticket_controller.py modules/ticket/controller/ticket_crud_controller.py modules/ticket/controller/ticket_log_pull_controller.py modules/ticket/controller/ticket_sync_controller.py modules/ticket/util/ticket_feishu_bitable_util.py tests/test_ticket_sync_mapping_boundary.py tests/test_ticket_topic_stats_service.py modules/ticket/service/ai modules/ticket/service/collaboration modules/ticket/service/core modules/ticket/service/log_pull modules/ticket/service/notification modules/ticket/service/sync`
 3. `rg -n "from modules\.ticket\.service\.ticket_|import modules\.ticket\.service\.ticket_|modules\.ticket\.service\.ticket_" server web/public/docs/2026-07-04-ticket-split-compat-fix.md wiki/entities/services/ticket-domain.md wiki/flows/ticket-external-sync-flow.md -S`
+
+2026-07-04 同步交付服务拆分后补充验证：
+
+1. `cd server; uv run ruff check modules/ticket/service/sync/ticket_sync_service.py modules/ticket/service/sync/ticket_sync_delivery_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
+2. `cd server; uv run python -m compileall modules/ticket/service/sync modules/ticket/controller tests/test_ticket_sync_mapping_boundary.py tests/test_ticket_topic_stats_service.py`
+3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary tests.test_ticket_topic_stats_service`
+4. `rg -n "TicketSyncService\.(pull_pending_tickets|ack_sync_delivery|extract_sync_summary)|_update_consumer_state|modules\.ticket\.service\.ticket_" server -S`
 
 历史拆分验证：
 
