@@ -15,6 +15,7 @@ from modules.ticket.service.collaboration.ticket_message_sync_service import Tic
 from modules.ticket.service.sync.ticket_batch_reclassification_service import TicketBatchReclassificationService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_external_bitable_email_service import TicketExternalBitableEmailService
+from modules.ticket.service.sync.ticket_external_sync_request_service import TicketExternalSyncRequestService
 from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_comment_service import TicketSyncCommentService
@@ -1885,6 +1886,45 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(result["selectedCount"], 1)
         self.assertEqual(result["successCount"], 1)
         self.assertEqual(result["details"][0]["categoryName"], "支付问题")
+
+    def test_external_sync_request_service_normalizes_person_fields_and_raw_payload(self):
+        """外部请求归一化应保留原始载荷，并从人员文本提取姓名和邮箱。"""
+        payload = {
+            "ticketNo": "EXT-NORMALIZE",
+            "description": "无法结账",
+            "internalPriority": "P1",
+            "ticketVender": "海外收银",
+            "ticketModle": "POS",
+            "createTime": "2026-07-04 12:00:00",
+            "reporterName": {"name": "张三", "email": "zhangsan@example.com"},
+            "currentAssigneeName": {"name": "李四", "email": "lisi@example.com"},
+            "internalOwner": {"name": "王五", "email": "wangwu@example.com"},
+            "ticketUrl": "https://example.com/ticket/1",
+            "stepReason": "20260704 张三：初步排查",
+        }
+
+        normalized = TicketExternalSyncRequestService.normalize_external_sync_payload(payload)
+
+        self.assertEqual(normalized["ticketNo"], "EXT-NORMALIZE")
+        self.assertEqual(normalized["reporterName"], "张三")
+        self.assertEqual(normalized["reporterEmail"], "zhangsan@example.com")
+        self.assertEqual(normalized["currentAssigneeName"], "李四")
+        self.assertEqual(normalized["internalOwnerName"], "王五")
+        self.assertEqual(normalized["source"]["recordId"], "EXT-NORMALIZE")
+        self.assertEqual(normalized["source"]["recordUrl"], "https://example.com/ticket/1")
+        self.assertEqual(normalized["raw_payload"]["reporterName"]["name"], "张三")
+        external_mapping = normalized["extraData"]["external_field_mapping"]
+        self.assertEqual(external_mapping["currentAssigneeEmail"], "lisi@example.com")
+        self.assertEqual(external_mapping["internalOwnerEmail"], "wangwu@example.com")
+        self.assertEqual(normalized["extraData"]["step_reason"], "20260704 张三：初步排查")
+
+    def test_external_sync_request_service_validates_required_fields(self):
+        """外部请求归一化应按配置必填字段提前拒绝缺失载荷。"""
+        with self.assertRaisesRegex(ValueError, "ticketNo"):
+            TicketExternalSyncRequestService.normalize_external_sync_payload(
+                {"description": "缺少工单号"},
+                required_fields=["ticketNo", "description"],
+            )
 
     def test_bitable_pull_records_filter_builds_default_cloud_time_filter(self):
         """主动拉取应构造飞书云端更新时间过滤条件（仅更新时间字段）。"""

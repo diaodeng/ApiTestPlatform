@@ -14,6 +14,8 @@
 12. 将工单服务按依赖关系组织为 `service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats` 子包；所有调用方改为新路径，旧顶层 `modules.ticket.service.ticket_*` 服务入口删除且不保留 re-export shim。
 13. 新增 `TicketSyncDeliveryService` 承接同步摘要、pending 拉取、ack 回执和消费者交付状态更新；`/ticket/sync/pending` 与 `/ticket/sync/ack` 控制器直接调用该服务，`TicketSyncService` 不再保留交付状态入口。
 14. 新增 `TicketBatchReclassificationService` 承接批量重归类、正则归类批处理和未归类统计；`/ticket/sync/auto-category/reclassify` 与 `/ticket/sync/auto-category/stats` 控制器直接调用该服务，`TicketSyncService` 不再保留手动重归类入口。
+15. 新增 `TicketExternalSyncRequestService` 承接外部同步请求读取、JSON/表单兼容、必填字段校验、人员字段拆分和外部字段快照构造；`/ticket/sync/external` 控制器直接调用该服务，`TicketSyncService` 不再保留外部请求归一化入口。
+16. 清理 `TicketSyncService` 中已迁移到子服务的常量副本，配置默认值、统计枚举、字段模型、群推送锁和交付状态常量继续由对应子服务维护。
 
 ## 2026-07-02
 

@@ -10,6 +10,7 @@ from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel, Ti
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.sync.ticket_sync_post_process_service import TicketSyncPostProcessService
+from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.log_util import logger
@@ -328,8 +329,6 @@ class TicketBitablePullService:
             else cls.normalize_current_user_payload(current_user.model_dump())
         )
         automation_override = pull_config.get("automation") if isinstance(pull_config.get("automation"), dict) else {}
-
-        from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 
         for record in records:
             sync_object = cls.build_bitable_pull_sync_object(

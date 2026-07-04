@@ -35,6 +35,8 @@
 23. 将工单服务按依赖关系移动到独立子包：`service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats`；所有调用方和测试均改为新路径，旧 `service/ticket_*.py` 顶层服务文件删除，不保留 re-export 或转发 shim。
 24. 继续拆分同步交付边界：新增 `TicketSyncDeliveryService` 承接 `syncSummary` 构造、消费者状态更新、`/ticket/sync/pending` 拉取和 `/ticket/sync/ack` 回执；控制器直接调用该服务，`TicketSyncService` 删除 pending/ack 入口。
 25. 继续拆分批量重归类边界：新增 `TicketBatchReclassificationService` 承接 `/ticket/sync/auto-category/reclassify`、`/ticket/sync/auto-category/stats`、正则批量归类、AI 批量归类调度和未归类统计；控制器直接调用新服务，`TicketSyncService` 删除对应入口。
+26. 继续拆分外部请求归一化边界：新增 `TicketExternalSyncRequestService` 承接 `/ticket/sync/external` 的 JSON/表单请求体读取、外部字段必填校验、人员字段拆分、`extraData.external_field_mapping` 和 `raw_payload` 构造；控制器直接调用新服务，`TicketSyncService` 删除对应入口。
+27. 清理 `TicketSyncService` 中已迁移到配置、payload、后处理、群推送和同步交付子服务的常量副本，只保留入库主编排当前实际使用的 `PUBLISH_STATUS_PROCESSING_AI`。
 
 ## 关键不变项
 
@@ -49,12 +51,14 @@
 9. 工单服务当前已按子包组织，新增或修改调用方必须使用 `modules.ticket.service.<子包>.<服务文件>` 路径；不得恢复 `modules.ticket.service.ticket_*` 旧入口。
 10. 内网消费者交付状态已下沉到 `TicketSyncDeliveryService`；后续 pending 拉取、ack 回执、`delivered_revision` 推进和 `syncSummary` 字段规则应优先修改该服务，不再回填到 `TicketSyncService`。
 11. 批量重归类和未归类统计已下沉到 `TicketBatchReclassificationService`；后续手动重归类、正则归类批处理和统计入口不得再回填到 `TicketSyncService`。
+12. 外部同步请求读取和字段归一化已下沉到 `TicketExternalSyncRequestService`；后续调整 `/ticket/sync/external` 字段契约、人员字段解析、表单兼容或 `external_field_mapping` 构造时不得回填到 `TicketSyncService`。
+13. 配置默认值、统计枚举、字段模型、Celery 分发模式、群推送锁和消费者交付常量的权威归属分别在对应子服务中，不能再复制回 `TicketSyncService`。
 
 ## 当前拆分评估
 
 1. 当前拆分方向基本正确：评论幂等、消息流写入、AI 分类统计、配置归一化、主动拉取飞书查询、主动拉取编排、通知任务编排、外部推送多维表格邮箱补齐和远端拉取同步已经下沉到低层服务，解决了主服务之间相互依赖的问题。
 2. 当前已完成第一轮包级收敛：同步、AI、日志拉取、核心工单、协作、通知和统计服务不再全部堆在 `service/` 根包。
-3. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库主编排和外部请求归一化等职责，但 payload 构造、延后后处理、字段识别、同步自动化、pending 拉取、ack 回执、批量重归类和未归类统计已拆入独立服务；后续继续拆分时应在 `service/sync/` 内按更细职责迁移。
+3. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库主编排，但请求归一化、payload 构造、延后后处理、字段识别、同步自动化、pending 拉取、ack 回执、批量重归类和未归类统计已拆入独立服务；后续继续拆分时应在 `service/sync/` 内按更细职责迁移。
 
 ## 当前子包边界
 
@@ -108,6 +112,20 @@
 2. `cd server; uv run ruff check modules/ticket/service/sync/ticket_batch_reclassification_service.py modules/ticket/service/sync/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
 3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary`
 4. `rg -n "TicketSyncService\.(batch_reclassify_ticket_categories_services|get_uncategorized_ticket_statistics_services)|_run_auto_ticket_category_classification|TicketSyncService\._run_auto_ticket_category_classification" server web/public/docs wiki -S`
+
+2026-07-04 外部请求归一化服务拆分后补充验证：
+
+1. `cd server; uv run python -m py_compile modules/ticket/service/sync/ticket_external_sync_request_service.py modules/ticket/service/sync/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
+2. `cd server; uv run ruff check modules/ticket/service/sync/ticket_external_sync_request_service.py modules/ticket/service/sync/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
+3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary`
+4. `rg -n "TicketSyncService\.(normalize_external_sync_payload|load_external_sync_payload)|def normalize_external_sync_payload|def load_external_sync_payload" server/modules server/tests -S`
+
+2026-07-04 TicketSyncService 未使用常量清理后补充验证：
+
+1. `cd server; uv run ruff check modules/ticket/service/sync/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
+2. `cd server; uv run python -m py_compile modules/ticket/service/sync/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
+3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary`
+4. `rg -n "TicketSyncService\.(CONFIG_KEY|SOURCE_CODE|META_KEY|CELERY_DISPATCH_MODE|BACKGROUND_DISPATCH_MODE|PUBLISH_STATUS_READY|AI_PENDING_AUTOMATION_STATUSES|AI_PENDING_TASK_STATUSES|DEFAULT_GROUP_PUSH_AUTO_STATUSES|DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS|DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS|DEFAULT_TICKET_STAT_CLASSIFICATIONS|GROUP_PUSH_LOCK_TIMEOUT_SECONDS)|TicketSyncService\.DEFAULT" server/modules/ticket server/tests -S`
 
 历史拆分验证：
 

@@ -62,7 +62,7 @@ sequenceDiagram
 
 | 步骤 | 说明 |
 |---|---|
-| 1 | 外部系统调用 `POST /ticket/sync/external`，必填 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`；`title` 允许缺省。 |
+| 1 | 外部系统调用 `POST /ticket/sync/external`，`TicketExternalSyncRequestService` 读取 JSON 或表单请求体并归一化字段；必填 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`，`title` 允许缺省。 |
 | 2 | `TicketSyncService.sync_external_ticket` 以 `ticketNo` 为幂等键创建或更新工单，入库 payload 由 `TicketSyncPayloadService.build_upsert_payload` 构造，并在 `extra_data.external_sync` 中递增 `revision`。 |
 | 3 | `TicketSyncPayloadService` 统一维护入库同步元数据：来源系统、来源记录 ID、远端 source revision、外部原始创建时间（`externalCreateTime`）、最近导入时间、自动化执行状态、项目/模块文本兜底和 `log_pull_hints`；消费者交付状态由 `TicketSyncDeliveryService` 更新。 |
 | 4 | 主链路会先完成工单入库并快速返回；入库后先写 `publish_ready=false`、`publish_status=processing_ai`，AI翻译、AI标题总结、自动化与群推送由 `TicketSyncPostProcessService` 投递 Celery 或回退本地后台执行，避免阻塞 `POST /ticket/sync/external` 请求。 |
@@ -97,6 +97,7 @@ sequenceDiagram
 | 17 | 2026-07-04 起，工单服务按依赖关系移动到子包：本流程涉及的同步服务统一位于 `modules.ticket.service.sync`，AI、日志拉取、核心工单、协作、通知和统计能力分别位于 `service.ai`、`service.log_pull`、`service.core`、`service.collaboration`、`service.notification`、`service.stats`；流程调用方不再引用旧的 `modules.ticket.service.ticket_*` 顶层路径。 |
 | 18 | `syncSummary` 构造、消费者状态更新、pending 拉取和 ack 回执已下沉到 `TicketSyncDeliveryService`；后续交付状态规则不再回填到 `TicketSyncService`。 |
 | 19 | `POST /ticket/sync/auto-category/reclassify` 和 `GET /ticket/sync/auto-category/stats` 属于手动管理链路，由 `TicketBatchReclassificationService` 编排批量筛选、正则分类、AI 分类调度和未归类统计，不参与外部入库事务主路径。 |
+| 20 | `POST /ticket/sync/external` 的请求体读取、外部字段必填校验、人员字段拆分、`external_field_mapping` 与 `raw_payload` 构造已下沉到 `TicketExternalSyncRequestService`；`TicketSyncService` 只接收已通过模型校验的同步对象执行入库主编排。 |
 
 ## 错误处理
 

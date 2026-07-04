@@ -186,7 +186,7 @@
 ### 第三方直推
 
 1. 外部系统调用 `/ticket/sync/external`
-2. 服务端只接受约定字段的驼峰/下划线写法，不再猜测第三方自定义字段名；字段不符合契约时直接返回 422，不入库
+2. 服务端只接受约定字段的驼峰/下划线写法，不再猜测第三方自定义字段名；请求读取和字段归一化由 `TicketExternalSyncRequestService` 承接，字段不符合契约时直接返回 422，不入库
 3. 必填字段默认是 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`，可通过 `externalSyncRequiredFields` 调整
 4. 可选字段包括 `title`、`customerPriority`、`reason`、`ticketStatus`、`currentAssigneeName`、`internalOwner`、`ticketAssignee`、`ticketAssigneeEmail`、`reporterEmail`、`ticketStore`、`ticketPos`、`ticketSco`、`ticketUrl`、`recordId`
 5. 原始请求体会完整保存到 `extraData.raw_payload`，外部字段快照会保存到 `extraData.external_field_mapping`，供通知和排查复用

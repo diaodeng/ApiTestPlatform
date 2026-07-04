@@ -22,6 +22,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.service.sync.ticket_batch_reclassification_service import TicketBatchReclassificationService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
+from modules.ticket.service.sync.ticket_external_sync_request_service import TicketExternalSyncRequestService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_delivery_service import TicketSyncDeliveryService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
@@ -53,14 +54,17 @@ async def sync_external_ticket(
     若 Celery Worker 可用，优先投递 Celery 任务；否则回退 FastAPI 本地后台任务。
     """
     try:
-        payload = await TicketSyncService.load_external_sync_payload(request)
+        payload = await TicketExternalSyncRequestService.load_external_sync_payload(request)
         sync_config = await run_in_threadpool(TicketSyncConfigService.load_sync_config, query_db)
         external_sync_required_fields = (
             sync_config.get("externalSyncRequiredFields")
             if isinstance(sync_config, dict)
             else None
         )
-        payload = TicketSyncService.normalize_external_sync_payload(payload, external_sync_required_fields)
+        payload = TicketExternalSyncRequestService.normalize_external_sync_payload(
+            payload,
+            external_sync_required_fields,
+        )
         sync_object = TicketExternalSyncUpsertModel.model_validate(payload)
     except ValidationError as exc:
         logger.warning(

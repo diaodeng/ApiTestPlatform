@@ -8,6 +8,24 @@ updated: 2026-07-04
 
 # 操作日志
 
+## [2026-07-04] INGEST-CODE | 清理 TicketSyncService 已迁移常量副本
+
+- 触发：用户要求清理 `TicketSyncService` 未使用常量。
+- 架构层：工单域 / 同步服务 / 常量归属 / 主编排瘦身
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/sync/ticket_sync_service.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：`TicketSyncService` 中配置默认值、外部字段模型、统计枚举、Celery 分发模式、消费者交付、群推送锁和 AI 任务状态常量副本 -> 对应子服务 `TicketSyncConfigService`、`TicketSyncPayloadService`、`TicketSyncPostProcessService`、`TicketSyncGroupPushService`、`TicketSyncDeliveryService` 已维护权威常量 -> 主同步服务仅保留当前入库延后发布需要的 `PUBLISH_STATUS_PROCESSING_AI`。
+- 关键结论：`TicketSyncService` 不再携带已迁移职责的默认配置和状态常量副本；后续新增常量应放入对应职责子服务，不应为了调用方便复制到主编排服务。
+
+## [2026-07-04] INGEST-CODE | 拆分 TicketSyncService 外部请求归一化边界
+
+- 触发：用户要求继续拆分；批量重归类已迁移后，本次继续迁移剩余的外部请求归一化边界。
+- 架构层：工单域 / 外部同步接口 / 请求体读取 / 字段归一化 / 同步入库前置契约
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/sync/ticket_external_sync_request_service.py`、`server/modules/ticket/service/sync/ticket_sync_service.py`、`server/modules/ticket/controller/ticket_sync_controller.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/2026-07-04-project-implementation-boundary-rules.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`TicketSyncService.load_external_sync_payload/normalize_external_sync_payload` -> `TicketExternalSyncRequestService.load_external_sync_payload/normalize_external_sync_payload` -> `/ticket/sync/external` 控制器直接调用新服务并继续使用 `TicketExternalSyncUpsertModel` 校验。
+- 关键结论：JSON/表单请求读取、外部字段必填校验、人员字段拆分、`extraData.external_field_mapping` 和 `raw_payload` 构造不再属于 `TicketSyncService`；后续调整外部请求契约应优先修改 `TicketExternalSyncRequestService`。
+
 ## [2026-07-04] INGEST-CODE | 拆分 TicketSyncService 批量重归类边界
 
 - 触发：用户建议继续拆批量重归类或外部请求归一化，并优先选择不影响入库事务主路径的部分；本次选择手动批量重归类边界。

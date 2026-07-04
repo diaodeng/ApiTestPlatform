@@ -19,6 +19,7 @@ related_files:
   - server/modules/ticket/service/sync/ticket_sync_automation_service.py
   - server/modules/ticket/service/sync/ticket_sync_delivery_service.py
   - server/modules/ticket/service/sync/ticket_batch_reclassification_service.py
+  - server/modules/ticket/service/sync/ticket_external_sync_request_service.py
   - server/modules/ticket/service/sync/ticket_remote_sync_service.py
   - server/modules/ticket/service/sync/ticket_bitable_pull_service.py
   - server/modules/ticket/service/sync/ticket_sync_config_service.py
@@ -66,7 +67,7 @@ graph TD
 ## 2026-06-16 分类统计维度
 
 - 工单统计现在拆分为独立维度：`status` 表示流程状态，`module_id/module_name` 表示业务域，`issue_type_id/issue_type_name` 表示工单类型，`is_problem` 表示是否真实问题，`root_cause_type` 表示根因分类，`solution_type` 表示解决方式，`resolution_code/resolution_name` 表示关闭结果。
-- 统计枚举配置统一保存在系统参数 `ticket.sync.automation.statClassification`，由工单同步自动化页面可视化维护；默认枚举来自 `TicketSyncService.DEFAULT_TICKET_STAT_CLASSIFICATIONS`。
+- 统计枚举配置统一保存在系统参数 `ticket.sync.automation.statClassification`，由工单同步自动化页面可视化维护；默认枚举来自 `TicketSyncConfigService.DEFAULT_TICKET_STAT_CLASSIFICATIONS`。
 - 2026-07-01 起，细分问题类型也进入同一套统计枚举：`problemPatterns`，工单主表落点为 `problem_pattern_code/problem_pattern_name/problem_pattern_confidence/problem_pattern_source/problem_pattern_verified*`。该字段用于统计“内存泄露”“280开头券为纸质券规则说明”等可治理问题模式，`tags` 仅作为辅助检索，不作为领导看板主统计口径。
 - 工单分类 AI 的 Provider 与提示词正文统一由系统管理中的 AI Provider / AI 提示词维护；`ticket.sync.automation.aiClassification` 只保存场景开关、Provider 编码和提示词编码选择。
 - 2026-07-01 修正提示词优先级：`classify_ticket_statistics` 现优先使用 DB 模板表 `SysAiPromptTemplate` 中的提示词，同步配置中的旧版 `promptContent` 仅作为 DB 模板为空时的兜底，不再覆盖已维护好的新版模板。同步配置保存时若前端显式提交了 `promptContent` 字段（含空字符串），以提交值为准而不再强制恢复旧值；仅在前端未提交该字段时才保留历史值防止数据丢失。
@@ -90,7 +91,8 @@ graph TD
 - 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
 - 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入、延迟代理或兼容门面规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
 - 当前工单服务已按依赖关系组织为独立子包：`service/sync` 承接同步编排、配置、主动拉取、远端拉取、同步交付、payload、延后后处理、自动化、群推送和同步通知任务；`service/ai` 承接 AI 分析、轻量 AI、提示词、自动分类统计和向量能力；`service/log_pull` 承接日志拉取和日志查看；`service/core` 承接工单 CRUD、导入、状态流转、RCA、知识库和快照；`service/collaboration` 承接评论幂等、飞书消息同步和事件监听；`service/notification` 承接通用通知；`service/stats` 承接专题统计。旧 `modules.ticket.service.ticket_*` 顶层服务入口已删除，不保留只转发或 re-export 的兼容文件。
-- 当前 `service/sync/TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`，人员催办和汇总统计通知任务已拆入 `TicketSyncNotificationJobService`，外部推送多维表格邮箱补齐已拆入 `TicketExternalBitableEmailService`，远端 pending 拉取与远端 ack 回写已拆入 `TicketRemoteSyncService`，消费者 pending 拉取、ack 回执、`delivered_revision` 推进和 `syncSummary` 构造已拆入 `TicketSyncDeliveryService`，批量重归类和未归类统计已拆入 `TicketBatchReclassificationService`，外部同步入库 payload、同步 meta、外部创建时间、来源快照和自动拉日志日期解析已拆入 `TicketSyncPayloadService`，延后后处理投递与执行已拆入 `TicketSyncPostProcessService`，字段识别和同步自动化执行已拆入 `TicketSyncAutomationService`；后续继续拆分应在 `service/sync` 内按职责下沉，不恢复旧顶层路径。
+- 当前 `service/sync/TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`，人员催办和汇总统计通知任务已拆入 `TicketSyncNotificationJobService`，外部推送多维表格邮箱补齐已拆入 `TicketExternalBitableEmailService`，远端 pending 拉取与远端 ack 回写已拆入 `TicketRemoteSyncService`，消费者 pending 拉取、ack 回执、`delivered_revision` 推进和 `syncSummary` 构造已拆入 `TicketSyncDeliveryService`，批量重归类和未归类统计已拆入 `TicketBatchReclassificationService`，外部请求读取和字段归一化已拆入 `TicketExternalSyncRequestService`，外部同步入库 payload、同步 meta、外部创建时间、来源快照和自动拉日志日期解析已拆入 `TicketSyncPayloadService`，延后后处理投递与执行已拆入 `TicketSyncPostProcessService`，字段识别和同步自动化执行已拆入 `TicketSyncAutomationService`；后续继续拆分应在 `service/sync` 内按职责下沉，不恢复旧顶层路径。
+- `TicketSyncService` 中已删除配置默认值、外部字段模型、统计枚举、Celery 分发模式、消费者交付、群推送锁和 AI 任务状态等已迁移常量副本；当前仅保留入库主编排实际使用的 `PUBLISH_STATUS_PROCESSING_AI`。
 - 2026-07-04 起，项目实现规则已固化到根目录 `AGENTS.md` 和 `web/public/docs/2026-07-04-project-implementation-boundary-rules.md`：新增功能必须先按 controller/service/dao/util/scheduler 作用域拆分，不得继续堆大文件或新增只转发的兼容 shim；拆分后子服务对外方法必须使用公开命名，不允许以 `_` 开头。
 - 工单控制器拆分后必须保持备份分支接口兼容；当前路由包含 `PUT /ticket/{ticket_id:int}/rca`，前端保存 RCA 依赖该接口。
 - 工单所属维度复用 HRM 测试管理中的项目/模块，前端通过工单域选项接口拉取有效项目与模块。
@@ -120,7 +122,8 @@ graph TD
 - 主动拉取字段映射目标字段兼容 `moduleName/module_name/ticketModel/ticket_model`，统一归一为 `ticketModle` 后再执行必填校验；但如果来源多维字段本身为空，仍会按缺失必填字段跳过该记录。
 - 主动拉取新增 `forceSync` 运行参数和页面开关；开启后只绕过本地快照去重，是否拉到历史远端数据仍取决于 `createdAfter/filterFormula/viewId`。任务参数兼容 `forceSync` 和 `force_sync`。
 - 主动拉取会把映射后的 `ticketVender/ticketModle/internalOwner` 写入 `extra_data.external_field_mapping`，并同步到 `projectName/moduleName/internalOwnerName`，避免 Pydantic 模型丢弃外部字段后导致项目、模块、内部负责人为空。
-- 主动拉取不经过外部推送 controller 的入参归一化，因此 `_build_bitable_pull_sync_object` 内会补齐主动拉取专用兼容：内部优先级为空时使用对方优先级，当前处理人字段兼容 `ticketAssigneeName/assigneeName` 等别名，并同步写入顶层模型和 `extra_data.external_field_mapping`；外部推送 `/ticket/sync/external` 逻辑不变。
+- 外部推送 `/ticket/sync/external` 的 JSON/表单读取、必填校验、人员字段拆分、`extra_data.external_field_mapping` 和 `raw_payload` 构造由 `TicketExternalSyncRequestService` 承接；控制器只做协议、鉴权、配置读取、模型校验和响应转换。
+- 主动拉取不经过外部推送 controller 的入参归一化，因此 `_build_bitable_pull_sync_object` 内会补齐主动拉取专用兼容：内部优先级为空时使用对方优先级，当前处理人字段兼容 `ticketAssigneeName/assigneeName` 等别名，并同步写入顶层模型和 `extra_data.external_field_mapping`；外部推送 `/ticket/sync/external` 归一化规则由 `TicketExternalSyncRequestService` 维护。
 - 主动拉取必填校验直接读取 `externalFieldModel.fields[].required`，不再优先使用历史兼容字段 `externalSyncRequiredFields`；缺少必填字段的记录只计入失败汇总和 `missing_required_fields` 日志，不调用入库，也不会触发延后后处理或自动群消息。
 - 主动拉取会识别飞书长文本富文本片段数组，按片段顺序拼接并保留 `\n` 为真实换行；空文本片段不会被 JSON 化，避免描述内容挤在一起，也保证 `stepReason` 仍可按日期行拆分同步评论。
 - 飞书话题评论入站同步会使用 `sender.open_id` 查询飞书通讯录用户详情，工单评论 `user_name` 和多维表格排查过程 `{user}` 都写入解析后的用户名；飞书凭证缺失或查询失败时才回退事件自带名称或 ID。
