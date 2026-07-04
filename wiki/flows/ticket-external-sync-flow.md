@@ -96,6 +96,7 @@ sequenceDiagram
 | 16 | 人员催办预览、人员催办执行和工单汇总统计通知由 `TicketSyncNotificationJobService` 读取同步自动化配置并调用 `TicketSyncNotifyService`，不再通过 `TicketSyncService` 转发。 |
 | 17 | 2026-07-04 起，工单服务按依赖关系移动到子包：本流程涉及的同步服务统一位于 `modules.ticket.service.sync`，AI、日志拉取、核心工单、协作、通知和统计能力分别位于 `service.ai`、`service.log_pull`、`service.core`、`service.collaboration`、`service.notification`、`service.stats`；流程调用方不再引用旧的 `modules.ticket.service.ticket_*` 顶层路径。 |
 | 18 | `syncSummary` 构造、消费者状态更新、pending 拉取和 ack 回执已下沉到 `TicketSyncDeliveryService`；后续交付状态规则不再回填到 `TicketSyncService`。 |
+| 19 | `POST /ticket/sync/auto-category/reclassify` 和 `GET /ticket/sync/auto-category/stats` 属于手动管理链路，由 `TicketBatchReclassificationService` 编排批量筛选、正则分类、AI 分类调度和未归类统计，不参与外部入库事务主路径。 |
 
 ## 错误处理
 

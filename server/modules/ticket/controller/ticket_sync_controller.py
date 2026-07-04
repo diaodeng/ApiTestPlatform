@@ -20,6 +20,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketSyncPullQueryModel,
     TicketSyncSummaryRunModel,
 )
+from modules.ticket.service.sync.ticket_batch_reclassification_service import TicketBatchReclassificationService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_delivery_service import TicketSyncDeliveryService
@@ -385,7 +386,11 @@ def batch_reclassify_sync_tickets(
         f"user={current_user.user.user_name if current_user and current_user.user else 'system'}"
     )
     try:
-        result = TicketSyncService.batch_reclassify_ticket_categories_services(query_db, query_object, current_user)
+        result = TicketBatchReclassificationService.batch_reclassify_ticket_categories_services(
+            query_db,
+            query_object,
+            current_user,
+        )
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
@@ -408,7 +413,7 @@ async def get_sync_auto_category_stats(
     """
     logger.info("/sync/auto-category/stats 请求到达: 仅统计未归类数量，不执行自动归类")
     try:
-        result = TicketSyncService.get_uncategorized_ticket_statistics_services(query_db)
+        result = TicketBatchReclassificationService.get_uncategorized_ticket_statistics_services(query_db)
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)

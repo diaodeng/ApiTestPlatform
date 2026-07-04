@@ -34,6 +34,7 @@
 22. 为避免延后后处理服务反向依赖主同步服务，新增 `TicketSyncAutomationService` 承接字段识别、同步自动化步骤状态、相似工单检索、自动拉日志和自动 AI 分析提交；`TicketSyncService` 主入库链路与 `TicketSyncPostProcessService` 均直接调用该服务。
 23. 将工单服务按依赖关系移动到独立子包：`service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats`；所有调用方和测试均改为新路径，旧 `service/ticket_*.py` 顶层服务文件删除，不保留 re-export 或转发 shim。
 24. 继续拆分同步交付边界：新增 `TicketSyncDeliveryService` 承接 `syncSummary` 构造、消费者状态更新、`/ticket/sync/pending` 拉取和 `/ticket/sync/ack` 回执；控制器直接调用该服务，`TicketSyncService` 删除 pending/ack 入口。
+25. 继续拆分批量重归类边界：新增 `TicketBatchReclassificationService` 承接 `/ticket/sync/auto-category/reclassify`、`/ticket/sync/auto-category/stats`、正则批量归类、AI 批量归类调度和未归类统计；控制器直接调用新服务，`TicketSyncService` 删除对应入口。
 
 ## 关键不变项
 
@@ -47,12 +48,13 @@
 8. 新增共享能力必须放入无上层依赖的子服务或 util，不使用函数内导入、延迟代理来掩盖依赖方向问题。
 9. 工单服务当前已按子包组织，新增或修改调用方必须使用 `modules.ticket.service.<子包>.<服务文件>` 路径；不得恢复 `modules.ticket.service.ticket_*` 旧入口。
 10. 内网消费者交付状态已下沉到 `TicketSyncDeliveryService`；后续 pending 拉取、ack 回执、`delivered_revision` 推进和 `syncSummary` 字段规则应优先修改该服务，不再回填到 `TicketSyncService`。
+11. 批量重归类和未归类统计已下沉到 `TicketBatchReclassificationService`；后续手动重归类、正则归类批处理和统计入口不得再回填到 `TicketSyncService`。
 
 ## 当前拆分评估
 
 1. 当前拆分方向基本正确：评论幂等、消息流写入、AI 分类统计、配置归一化、主动拉取飞书查询、主动拉取编排、通知任务编排、外部推送多维表格邮箱补齐和远端拉取同步已经下沉到低层服务，解决了主服务之间相互依赖的问题。
 2. 当前已完成第一轮包级收敛：同步、AI、日志拉取、核心工单、协作、通知和统计服务不再全部堆在 `service/` 根包。
-3. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库主编排、批量重归类和外部请求归一化等职责，但 payload 构造、延后后处理、字段识别、同步自动化、pending 拉取和 ack 回执已拆入独立服务；后续继续拆分时应在 `service/sync/` 内按更细职责迁移。
+3. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库主编排和外部请求归一化等职责，但 payload 构造、延后后处理、字段识别、同步自动化、pending 拉取、ack 回执、批量重归类和未归类统计已拆入独立服务；后续继续拆分时应在 `service/sync/` 内按更细职责迁移。
 
 ## 当前子包边界
 
@@ -99,6 +101,13 @@
 2. `cd server; uv run python -m compileall modules/ticket/service/sync modules/ticket/controller tests/test_ticket_sync_mapping_boundary.py tests/test_ticket_topic_stats_service.py`
 3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary tests.test_ticket_topic_stats_service`
 4. `rg -n "TicketSyncService\.(pull_pending_tickets|ack_sync_delivery|extract_sync_summary)|_update_consumer_state|modules\.ticket\.service\.ticket_" server -S`
+
+2026-07-04 批量重归类服务拆分后补充验证：
+
+1. `cd server; uv run python -m py_compile modules/ticket/service/sync/ticket_batch_reclassification_service.py modules/ticket/service/sync/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
+2. `cd server; uv run ruff check modules/ticket/service/sync/ticket_batch_reclassification_service.py modules/ticket/service/sync/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
+3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary`
+4. `rg -n "TicketSyncService\.(batch_reclassify_ticket_categories_services|get_uncategorized_ticket_statistics_services)|_run_auto_ticket_category_classification|TicketSyncService\._run_auto_ticket_category_classification" server web/public/docs wiki -S`
 
 历史拆分验证：
 

@@ -8,6 +8,15 @@ updated: 2026-07-04
 
 # 操作日志
 
+## [2026-07-04] INGEST-CODE | 拆分 TicketSyncService 批量重归类边界
+
+- 触发：用户建议继续拆批量重归类或外部请求归一化，并优先选择不影响入库事务主路径的部分；本次选择手动批量重归类边界。
+- 架构层：工单域 / 同步服务 / 批量重归类 / 未归类统计 / 手动管理接口
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/sync/ticket_batch_reclassification_service.py`、`server/modules/ticket/service/sync/ticket_sync_service.py`、`server/modules/ticket/controller/ticket_sync_controller.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/2026-07-04-project-implementation-boundary-rules.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`TicketSyncService._run_auto_ticket_category_classification/batch_reclassify_ticket_categories_services/get_uncategorized_ticket_statistics_services` -> `TicketBatchReclassificationService.run_auto_ticket_category_classification/batch_reclassify_ticket_categories_services/get_uncategorized_ticket_statistics_services` -> `/ticket/sync/auto-category/reclassify` 与 `/ticket/sync/auto-category/stats` 控制器直接调用新服务。
+- 关键结论：批量重归类、正则批量分类和未归类统计不再属于外部同步入库主服务；后续手动重归类规则应优先修改 `TicketBatchReclassificationService`，外部入库主路径仍留在 `TicketSyncService`。
+
 ## [2026-07-04] INGEST-CODE | 拆分 TicketSyncService 同步交付边界
 
 - 触发：用户要求继续拆分工单同步服务，当前优先迁移边界清晰的 pending/ack 交付状态能力。

@@ -18,6 +18,7 @@ related_files:
   - server/modules/ticket/service/sync/ticket_sync_post_process_service.py
   - server/modules/ticket/service/sync/ticket_sync_automation_service.py
   - server/modules/ticket/service/sync/ticket_sync_delivery_service.py
+  - server/modules/ticket/service/sync/ticket_batch_reclassification_service.py
   - server/modules/ticket/service/sync/ticket_remote_sync_service.py
   - server/modules/ticket/service/sync/ticket_bitable_pull_service.py
   - server/modules/ticket/service/sync/ticket_sync_config_service.py
@@ -89,7 +90,7 @@ graph TD
 - 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
 - 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入、延迟代理或兼容门面规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
 - 当前工单服务已按依赖关系组织为独立子包：`service/sync` 承接同步编排、配置、主动拉取、远端拉取、同步交付、payload、延后后处理、自动化、群推送和同步通知任务；`service/ai` 承接 AI 分析、轻量 AI、提示词、自动分类统计和向量能力；`service/log_pull` 承接日志拉取和日志查看；`service/core` 承接工单 CRUD、导入、状态流转、RCA、知识库和快照；`service/collaboration` 承接评论幂等、飞书消息同步和事件监听；`service/notification` 承接通用通知；`service/stats` 承接专题统计。旧 `modules.ticket.service.ticket_*` 顶层服务入口已删除，不保留只转发或 re-export 的兼容文件。
-- 当前 `service/sync/TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`，人员催办和汇总统计通知任务已拆入 `TicketSyncNotificationJobService`，外部推送多维表格邮箱补齐已拆入 `TicketExternalBitableEmailService`，远端 pending 拉取与远端 ack 回写已拆入 `TicketRemoteSyncService`，消费者 pending 拉取、ack 回执、`delivered_revision` 推进和 `syncSummary` 构造已拆入 `TicketSyncDeliveryService`，外部同步入库 payload、同步 meta、外部创建时间、来源快照和自动拉日志日期解析已拆入 `TicketSyncPayloadService`，延后后处理投递与执行已拆入 `TicketSyncPostProcessService`，字段识别和同步自动化执行已拆入 `TicketSyncAutomationService`；后续继续拆分应在 `service/sync` 内按职责下沉，不恢复旧顶层路径。
+- 当前 `service/sync/TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`，人员催办和汇总统计通知任务已拆入 `TicketSyncNotificationJobService`，外部推送多维表格邮箱补齐已拆入 `TicketExternalBitableEmailService`，远端 pending 拉取与远端 ack 回写已拆入 `TicketRemoteSyncService`，消费者 pending 拉取、ack 回执、`delivered_revision` 推进和 `syncSummary` 构造已拆入 `TicketSyncDeliveryService`，批量重归类和未归类统计已拆入 `TicketBatchReclassificationService`，外部同步入库 payload、同步 meta、外部创建时间、来源快照和自动拉日志日期解析已拆入 `TicketSyncPayloadService`，延后后处理投递与执行已拆入 `TicketSyncPostProcessService`，字段识别和同步自动化执行已拆入 `TicketSyncAutomationService`；后续继续拆分应在 `service/sync` 内按职责下沉，不恢复旧顶层路径。
 - 2026-07-04 起，项目实现规则已固化到根目录 `AGENTS.md` 和 `web/public/docs/2026-07-04-project-implementation-boundary-rules.md`：新增功能必须先按 controller/service/dao/util/scheduler 作用域拆分，不得继续堆大文件或新增只转发的兼容 shim；拆分后子服务对外方法必须使用公开命名，不允许以 `_` 开头。
 - 工单控制器拆分后必须保持备份分支接口兼容；当前路由包含 `PUT /ticket/{ticket_id:int}/rca`，前端保存 RCA 依赖该接口。
 - 工单所属维度复用 HRM 测试管理中的项目/模块，前端通过工单域选项接口拉取有效项目与模块。
@@ -156,7 +157,7 @@ graph TD
 - 日志上下文翻页由后端按当前窗口大小返回非重叠 `prevFile/prevLine` 与 `nextFile/nextLine` 指针，前端不再自行使用边界行推算上一段/下一段，避免重复展示上一段数据。
 - 日志查看中文编码兼容优先覆盖 UTF-8、UTF-8 BOM、GB18030、GBK 和 Big5；非 ASCII 关键字搜索走 Python 编码兼容路径，ASCII 关键字仍优先使用 `rg` 提升速度。
 - 工单外部推送、内网 pending 拉取、ack、日志内容读取、日志列表、日志拉取提交、重新拉取、重新下载、重新截取和删除等 `async def` 接口内的同步服务调用已显式使用 `run_in_threadpool`；这样保留异步请求体/后台任务编排能力，同时避免同步数据库、`requests`、文件和 FTP 操作直接阻塞事件循环。
-- 工单同步配置页的 `GET /ticket/sync/auto-category/stats` 只统计未归类数量，不执行自动归类；批量处理必须调用 `POST /ticket/sync/auto-category/reclassify`。自动归类链路已经补充入口、筛选、逐条处理、跳过原因、AI 配置、模型执行和字段回填日志，便于从服务日志判断为什么未执行。
+- 工单同步配置页的 `GET /ticket/sync/auto-category/stats` 只统计未归类数量，不执行自动归类；批量处理必须调用 `POST /ticket/sync/auto-category/reclassify`。这两个手动管理入口由 `TicketBatchReclassificationService` 承接，不再进入 `TicketSyncService`；自动归类链路已经补充入口、筛选、逐条处理、跳过原因、AI 配置、模型执行和字段回填日志，便于从服务日志判断为什么未执行。
 - 专题工单会话状态统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 按根消息中的“主题”文本归类促销、券、会员和印花；`主题:` 与 `主题：` 都可识别，英文专题关键词按词边界匹配，详情、回复和飞书富文本元数据不再参与专题分类，避免非券类工单被隐藏字段、人员 ID 或单词内部片段误判。
 - 该任务支持通过定时任务参数补充分类和状态关键词：`couponKeywords/stampKeywords/memberKeywords/promoKeywords/closedKeywords/conclusionKeywords`，传入后会与代码内置默认关键词合并，不传则继续使用默认关键词口径。
 - 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。

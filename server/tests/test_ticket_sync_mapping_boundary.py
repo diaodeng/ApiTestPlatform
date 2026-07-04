@@ -12,6 +12,7 @@ from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysi
 from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
+from modules.ticket.service.sync.ticket_batch_reclassification_service import TicketBatchReclassificationService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_external_bitable_email_service import TicketExternalBitableEmailService
 from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
@@ -1847,6 +1848,44 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         self.assertEqual(email, "lisi@example.com")
 
+    def test_batch_reclassification_service_runs_regex_batch_entry(self):
+        """批量重归类入口应由独立服务编排，不再回到 TicketSyncService。"""
+        ticket = SimpleNamespace(
+            ticket_id=1001,
+            ticket_no="TK-RECLASS",
+            title="支付失败",
+            description="用户反馈扣款异常",
+        )
+        db = SimpleNamespace(query=lambda *_args, **_kwargs: _TicketListQuery([ticket]))
+        request = SimpleNamespace(
+            strategy="regex",
+            regex_rules=[{"pattern": "支付|扣款", "category": "支付问题"}],
+            only_uncategorized=False,
+            all_tickets=True,
+            force_reclassify=True,
+            page_num=1,
+            page_size=100,
+            ticket_nos=None,
+            ai_prompt_code=None,
+        )
+        current_user = SimpleNamespace(user=SimpleNamespace(user_name="tester", nick_name=""))
+
+        with patch.object(
+            TicketBatchReclassificationService,
+            "run_auto_ticket_category_classification",
+            return_value=(ticket, {"skipped": False, "categoryName": "支付问题"}),
+        ) as run_category:
+            result = TicketBatchReclassificationService.batch_reclassify_ticket_categories_services(
+                db,
+                request,
+                current_user,
+            )
+
+        run_category.assert_called_once()
+        self.assertEqual(result["selectedCount"], 1)
+        self.assertEqual(result["successCount"], 1)
+        self.assertEqual(result["details"][0]["categoryName"], "支付问题")
+
     def test_bitable_pull_records_filter_builds_default_cloud_time_filter(self):
         """主动拉取应构造飞书云端更新时间过滤条件（仅更新时间字段）。"""
         filter_millis = TicketSyncConfigService.datetime_to_bitable_filter_millis(datetime(2026, 6, 22, 10, 48, 0))
@@ -2041,6 +2080,31 @@ class _EmptyQuery:
 
     def first(self):
         return None
+
+
+class _TicketListQuery:
+    """提供批量重归类测试需要的最小列表查询链。"""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def offset(self, *_args, **_kwargs):
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def count(self):
+        return len(self.rows)
+
+    def all(self):
+        return list(self.rows)
 
 
 if __name__ == "__main__":
