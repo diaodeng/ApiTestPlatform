@@ -13,7 +13,7 @@ from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketRca, TicketStatusHistory
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
-from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from utils.snowflake import snowIdWorker
 
 IMPORT_HEADERS = [

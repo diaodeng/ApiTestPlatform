@@ -12,8 +12,8 @@ from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import user_name as _user_name
 from utils.log_util import logger

@@ -47,15 +47,20 @@
 
 ## 工单域当前约束
 
-1. `TicketSyncService` 只保留外部同步入库、远端拉取、延后后处理和核心同步编排的未拆部分。
-2. 飞书多维表格主动拉取由 `TicketBitablePullService` 承接。
-3. 人员催办和汇总统计通知任务由 `TicketSyncNotificationJobService` 承接。
-4. 外部推送按 recordId 查询飞书多维表格补齐人员邮箱由 `TicketExternalBitableEmailService` 承接。
-5. 同步配置由 `TicketSyncConfigService` 承接。
-6. 评论同步由 `TicketSyncCommentService` 和 `TicketCommentCoreService` 承接。
-7. 群推送和发布状态由 `TicketSyncGroupPushService` 承接。
-8. 外部同步入库 payload、同步 meta、外部创建时间和自动拉日志日期解析由 `TicketSyncPayloadService` 承接。
-9. 新增工单同步相关能力时，不能再往 `TicketSyncService` 里直接堆新主题；应先判断是否属于上述子服务或新建子服务。
+1. 工单服务已经按依赖关系组织为 `service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats` 子包；新增调用方必须直接引用子包路径。
+2. `service/sync/TicketSyncService` 只保留外部同步入库主编排、pending 拉取、ack、批量重归类和外部请求归一化等未拆部分。
+3. 飞书多维表格主动拉取由 `service/sync/TicketBitablePullService` 承接。
+4. 人员催办和汇总统计通知任务由 `service/sync/TicketSyncNotificationJobService` 承接。
+5. 外部推送按 recordId 查询飞书多维表格补齐人员邮箱由 `service/sync/TicketExternalBitableEmailService` 承接。
+6. 同步配置由 `service/sync/TicketSyncConfigService` 承接。
+7. 同步评论由 `service/sync/TicketSyncCommentService` 承接，底层评论幂等写入由 `service/collaboration/TicketCommentCoreService` 承接。
+8. 群推送和发布状态由 `service/sync/TicketSyncGroupPushService` 承接。
+9. 外部同步入库 payload、同步 meta、外部创建时间和自动拉日志日期解析由 `service/sync/TicketSyncPayloadService` 承接。
+10. 延后后处理投递、运行入口和执行主体由 `service/sync/TicketSyncPostProcessService` 承接。
+11. 字段识别、同步自动化步骤状态、相似工单检索、自动拉日志和自动 AI 分析提交由 `service/sync/TicketSyncAutomationService` 承接。
+12. AI 分析、轻量 AI、提示词、分类统计和向量相似度能力放在 `service/ai`；日志拉取和日志查看放在 `service/log_pull`；工单 CRUD、导入、状态流转和知识库放在 `service/core`。
+13. 新增工单同步相关能力时，不能再往 `TicketSyncService` 里直接堆新主题；应先判断是否属于上述子服务或新建子服务。
+14. 禁止恢复 `modules.ticket.service.ticket_*` 旧顶层入口，禁止新增只做 re-export 的兼容文件。
 
 ## 验证要求
 

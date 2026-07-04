@@ -7,8 +7,8 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel, TicketSyncAutomationModel
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.sync_util import SyncUtil
 from utils.log_util import logger
 

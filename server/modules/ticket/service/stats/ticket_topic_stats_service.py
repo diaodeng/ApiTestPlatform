@@ -668,7 +668,8 @@ class TicketTopicStatsService:
             status = "无结论"
         logger.info(
             f"专题工单AI分类完成 | ticket_key={ticket_key} group_name={group_name} "
-            f"provider_code={resolved_provider_code} prompt_code={resolved_prompt_code or '-'} category={category} status={status}"
+            f"provider_code={resolved_provider_code} prompt_code={resolved_prompt_code or '-'} "
+            f"category={category} status={status}"
         )
         return category, status, topic_text
 

@@ -12,7 +12,7 @@ from module_admin.entity.vo.ai_config_vo import AiConfigSummaryItemModel, AiConf
 from module_admin.entity.vo.ai_prompt_template_vo import AiPromptTemplateOptionModel
 from module_admin.entity.vo.ai_provider_vo import AiProviderOptionModel
 from module_admin.entity.vo.common_vo import CrudResponseModel
-from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 
 
 class AiConfigService:
@@ -303,7 +303,16 @@ class AiConfigService:
         return normalized
 
     @classmethod
-    def _upsert_config(cls, db: Session, *, config_key: str, config_name: str, config_value: Any, remark: str, current_user_name: str):
+    def _upsert_config(
+        cls,
+        db: Session,
+        *,
+        config_key: str,
+        config_name: str,
+        config_value: Any,
+        remark: str,
+        current_user_name: str,
+    ):
         """
         新增或更新系统参数。
         :param db: orm对象
@@ -377,16 +386,21 @@ class AiConfigService:
             for category in ("translate", "knowledge", "analysis", "common")
         }
         summary = AiConfigSummaryModel(
-            translate_enabled=str(cls._get_config_text(db, "ticket.ai.translate.enabled", "false")).lower() == "true",
+            translate_enabled=str(cls._get_config_text(db, "ticket.ai.translate.enabled", "false")).lower()
+            == "true",
             translate_provider_code=cls._get_config_text(db, "ticket.ai.translate.provider.code", ""),
-            translate_prompt_code=cls._get_config_text(db, "ticket.ai.translate.prompt.code", "ticket_translate_default"),
+            translate_prompt_code=cls._get_config_text(
+                db, "ticket.ai.translate.prompt.code", "ticket_translate_default"
+            ),
             title_summary_enabled=str(cls._get_config_text(db, "ticket.ai.title.summary.enabled", "false")).lower()
             == "true",
             title_summary_provider_code=cls._get_config_text(db, "ticket.ai.title.summary.provider.code", ""),
             title_summary_prompt_code=cls._get_config_text(
                 db, "ticket.ai.title.summary.prompt.code", "ticket_title_summary_default"
             ),
-            category_classify_enabled=str(cls._get_config_text(db, "ticket.ai.category.classify.enabled", "false")).lower()
+            category_classify_enabled=str(
+                cls._get_config_text(db, "ticket.ai.category.classify.enabled", "false")
+            ).lower()
             == "true",
             category_classify_provider_code=cls._get_config_text(db, "ticket.ai.category.classify.provider.code", ""),
             category_classify_prompt_code=cls._normalize_classify_prompt_code(
@@ -394,7 +408,8 @@ class AiConfigService:
                     db, "ticket.ai.category.classify.prompt.code", "ticket_stat_classify_default"
                 )
             ),
-            log_extract_enabled=str(cls._get_config_text(db, "ticket.ai.log_extract.enabled", "false")).lower() == "true",
+            log_extract_enabled=str(cls._get_config_text(db, "ticket.ai.log_extract.enabled", "false")).lower()
+            == "true",
             log_extract_provider_code=cls._get_config_text(db, "ticket.ai.log_extract.provider.code", ""),
             log_extract_prompt_code=cls._get_config_text_with_blank_default(
                 db, "ticket.ai.log_extract.prompt.code", "ticket_log_extract_default"

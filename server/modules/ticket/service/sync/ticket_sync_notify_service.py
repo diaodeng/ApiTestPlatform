@@ -17,7 +17,7 @@ from module_hrm.entity.do.push_do import PushTarget
 from module_hrm.entity.vo.push_vo import PushModel
 from module_hrm.utils.parser import parse_string
 from modules.ticket.entity.do.ticket_do import Ticket
-from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
+from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from utils.log_util import logger
 from utils.message_util import MessageHandler
 

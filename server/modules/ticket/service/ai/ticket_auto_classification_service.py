@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket, TicketComment
-from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.sync_util import SyncUtil
 from utils.log_util import logger
 

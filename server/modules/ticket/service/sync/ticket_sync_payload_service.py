@@ -17,7 +17,7 @@ from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.enums.ticket_enums import TicketStatus
-from modules.ticket.service.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
+from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import user_id as _user_id
 from modules.ticket.util.ticket_common_util import user_name as _user_name

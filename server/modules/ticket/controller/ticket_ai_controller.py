@@ -14,7 +14,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketAiRepoMappingQueryModel,
     TicketAiRepoMappingUpdateModel,
 )
-from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 

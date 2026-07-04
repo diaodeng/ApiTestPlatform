@@ -1,6 +1,6 @@
 import unittest
 
-from modules.ticket.service.ticket_topic_stats_service import TicketTopicStatsService
+from modules.ticket.service.stats.ticket_topic_stats_service import TicketTopicStatsService
 
 
 class TicketTopicStatsServiceTests(unittest.TestCase):

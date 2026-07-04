@@ -10,11 +10,11 @@ from config.get_db import init_create_table
 from config.get_redis import RedisUtil
 from exceptions.handle import handle_exception
 from middlewares.handle import handle_middleware
-from module_admin.controller.api_key_controller import apiKeyController
 from module_admin.controller.ai_config_controller import aiConfigController
+from module_admin.controller.ai_prompt_template_controller import aiPromptTemplateController
 from module_admin.controller.ai_provider_controller import aiProviderController
 from module_admin.controller.ai_task_execution_controller import aiTaskExecutionController
-from module_admin.controller.ai_prompt_template_controller import aiPromptTemplateController
+from module_admin.controller.api_key_controller import apiKeyController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.common_controller import commonController
@@ -30,9 +30,10 @@ from module_admin.controller.online_controller import onlineController
 from module_admin.controller.post_controler import postController
 from module_admin.controller.role_controller import roleController
 from module_admin.controller.server_controller import serverController
-from module_admin.controller.user_controller import userController
 from module_admin.controller.user_config_controller import userConfigController
+from module_admin.controller.user_controller import userController
 from module_admin.perms import register as register_admin_permission_defs
+from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_hrm.controller.agent_controller import agentController as agentManagerController
 from module_hrm.controller.api_controler import hrmApiController
 from module_hrm.controller.case_controler import caseController
@@ -65,11 +66,10 @@ from modules.ticket.controller.ticket_crud_controller import ticketCrudControlle
 from modules.ticket.controller.ticket_log_pull_controller import ticketLogPullController
 from modules.ticket.controller.ticket_sync_controller import ticketSyncController
 from modules.ticket.perms import register as register_ticket_permission_defs
-from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
-from modules.ticket.service.ticket_feishu_event_listener_service import TicketFeishuEventListenerService
-from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
-from modules.ticket.service.ticket_service import TicketService
-from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
+from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.collaboration.ticket_feishu_event_listener_service import TicketFeishuEventListenerService
+from modules.ticket.service.core.ticket_service import TicketService
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
 from utils.log_util import logger

@@ -43,15 +43,15 @@ from modules.ticket.entity.vo.ticket_vo import (
     WorkflowTransitionModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
-from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
-from modules.ticket.service.ticket_auto_classification_service import TicketAutoClassificationService
-from modules.ticket.service.ticket_comment_core_service import TicketCommentCoreService
-from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
-from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
-from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
-from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
-from modules.ticket.service.ticket_prompt_service import TicketPromptService
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
+from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
+from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
+from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_common_util import (
     extract_ticket_version_key as _extract_ticket_version_key,
 )

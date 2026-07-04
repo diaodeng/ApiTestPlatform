@@ -379,7 +379,7 @@ class FeishuBitableUtil:
         :param record_url: 飞书接口直接返回的记录详情 URL。
         :return: 记录详情地址。
         """
-        from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+        from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
         return TicketSyncNotifyService.get_bitable_record_url(config, record_id, record_url=record_url)
 
     # ---- 字段映射转换 ----

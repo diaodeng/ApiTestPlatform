@@ -7,8 +7,9 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel, TicketSyncAutomationModel
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.sync.ticket_sync_post_process_service import TicketSyncPostProcessService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.log_util import logger
@@ -328,7 +329,7 @@ class TicketBitablePullService:
         )
         automation_override = pull_config.get("automation") if isinstance(pull_config.get("automation"), dict) else {}
 
-        from modules.ticket.service.ticket_sync_service import TicketSyncService
+        from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 
         for record in records:
             sync_object = cls.build_bitable_pull_sync_object(
@@ -375,13 +376,13 @@ class TicketBitablePullService:
                 )
                 if result.is_success:
                     summary["syncedCount"] += 1
-                    deferred_dispatch = TicketSyncService.dispatch_deferred_sync_post_process_task(
+                    deferred_dispatch = TicketSyncPostProcessService.dispatch_deferred_sync_post_process_task(
                         sync_object.model_dump(),
                         deferred_current_user_payload,
                         "external_sync",
                     )
-                    if deferred_dispatch.get("mode") != TicketSyncService.CELERY_DISPATCH_MODE:
-                        TicketSyncService.run_deferred_sync_post_process(
+                    if deferred_dispatch.get("mode") != TicketSyncPostProcessService.CELERY_DISPATCH_MODE:
+                        TicketSyncPostProcessService.run_deferred_sync_post_process(
                             sync_object.model_dump(),
                             deferred_current_user_payload,
                             "external_sync",

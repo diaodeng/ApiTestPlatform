@@ -8,10 +8,10 @@ from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.service.report_service import ReportService
 from module_task.celery_job_models import CeleryPeriodicTask
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
-from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
-from modules.ticket.service.ticket_remote_sync_service import TicketRemoteSyncService
-from modules.ticket.service.ticket_sync_notification_job_service import TicketSyncNotificationJobService
-from modules.ticket.service.ticket_topic_stats_service import TicketTopicStatsService
+from modules.ticket.service.stats.ticket_topic_stats_service import TicketTopicStatsService
+from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
+from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
+from modules.ticket.service.sync.ticket_sync_notification_job_service import TicketSyncNotificationJobService
 from utils.log_util import logger
 
 from .task_register import register_job

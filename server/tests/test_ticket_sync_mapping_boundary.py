@@ -8,19 +8,22 @@ from module_task.scheduler_maintenance import (
     _build_bitable_pull_config_override,
 )
 from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
-from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
-from modules.ticket.service.ticket_auto_classification_service import TicketAutoClassificationService
-from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
-from modules.ticket.service.ticket_external_bitable_email_service import TicketExternalBitableEmailService
-from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
-from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
-from modules.ticket.service.ticket_remote_sync_service import TicketRemoteSyncService
-from modules.ticket.service.ticket_sync_comment_service import TicketSyncCommentService
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
-from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
-from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
+from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
+from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
+from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
+from modules.ticket.service.sync.ticket_external_bitable_email_service import TicketExternalBitableEmailService
+from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
+from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
+from modules.ticket.service.sync.ticket_sync_comment_service import TicketSyncCommentService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
+from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
+from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
+from modules.ticket.service.sync.ticket_sync_post_process_service import TicketSyncPostProcessService
+from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 
 
@@ -75,9 +78,9 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "resolve_external_person_by_mapping_or_email",
                 side_effect=[(None, "内部处理人"), (None, ""), (None, "")],
             ) as resolve_person,
-            patch.object(TicketSyncService, "_extract_pattern", return_value=None),
+            patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None),
         ):
-            detected = TicketSyncService._detect_fields(
+            detected = TicketSyncAutomationService.detect_fields(
                 db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
                 sync_object=sync_object,
                 config={
@@ -134,8 +137,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             solution=None,
         )
 
-        with patch.object(TicketSyncService, "_extract_pattern", return_value=None):
-            detected = TicketSyncService._detect_fields(
+        with patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None):
+            detected = TicketSyncAutomationService.detect_fields(
                 db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
                 sync_object=sync_object,
                 config={
@@ -179,10 +182,10 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
 
         with (
-            patch.object(TicketSyncService, "_extract_pattern", return_value=None),
+            patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None),
             patch.object(TicketSyncFieldMappingService, "resolve_project_by_ticket_vender", return_value=(None, "")),
         ):
-            detected = TicketSyncService._detect_fields(
+            detected = TicketSyncAutomationService.detect_fields(
                 db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
                 sync_object=sync_object,
                 config={
@@ -237,7 +240,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
         current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
 
-        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+        payload, _meta, _revision = TicketSyncPayloadService.build_upsert_payload(
             db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
             ticket=None,
             sync_object=sync_object,
@@ -269,17 +272,19 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         with (
             patch.object(TicketAiAnalysisService, "_resolve_log_pull_record", return_value=log_record),
             patch.object(TicketAiAnalysisService, "_resolve_version_key", return_value=""),
-            patch.object(TicketSyncService, "_extract_pattern", return_value=None),
+            patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None),
             patch(
-                "modules.ticket.service.ticket_ai_analysis_service.TicketLogPullService._ensure_ticket_version_key_from_log",
+                "modules.ticket.service.ai.ticket_ai_analysis_service."
+                "TicketLogPullService._ensure_ticket_version_key_from_log",
                 return_value="2.0.1",
             ),
             patch(
-                "modules.ticket.service.ticket_ai_analysis_service.TicketLogPullDao.get_latest_success_record_by_ticket_id",
+                "modules.ticket.service.ai.ticket_ai_analysis_service."
+                "TicketLogPullDao.get_latest_success_record_by_ticket_id",
                 return_value=None,
             ),
             patch(
-                "modules.ticket.service.ticket_ai_analysis_service.TicketDao.get_ticket_by_id",
+                "modules.ticket.service.ai.ticket_ai_analysis_service.TicketDao.get_ticket_by_id",
                 return_value=SimpleNamespace(extra_data={"version_key": "2.0.1"}),
             ),
         ):
@@ -363,7 +368,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
         current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
 
-        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+        payload, _meta, _revision = TicketSyncPayloadService.build_upsert_payload(
             db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
             ticket=ticket,
             sync_object=sync_object,
@@ -374,7 +379,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         self.assertIsNone(payload["module_id"])
         self.assertEqual(payload["module_name"], "POS - 客户端")
-        source_snapshot = payload["extra_data"][TicketSyncService.META_KEY]["source"]
+        source_snapshot = payload["extra_data"][TicketSyncPayloadService.META_KEY]["source"]
         self.assertEqual(source_snapshot["moduleName"], "POS - 客户端")
 
     def test_external_upsert_overwrites_old_project_module_when_mapping_misses(self):
@@ -450,7 +455,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
         current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
 
-        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+        payload, _meta, _revision = TicketSyncPayloadService.build_upsert_payload(
             db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
             ticket=ticket,
             sync_object=sync_object,
@@ -507,7 +512,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
 
         with (
-            patch.object(TicketSyncService, "_extract_pattern", return_value=None),
+            patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None),
             patch.object(
                 TicketSyncFieldMappingService,
                 "resolve_external_person_by_mapping_or_email",
@@ -518,7 +523,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 ],
             ) as resolve_person,
         ):
-            detected = TicketSyncService._detect_fields(
+            detected = TicketSyncAutomationService.detect_fields(
                 db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
                 sync_object=sync_object,
                 config={
@@ -574,7 +579,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
         current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
 
-        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+        payload, _meta, _revision = TicketSyncPayloadService.build_upsert_payload(
             db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
             ticket=None,
             sync_object=sync_object,
@@ -663,7 +668,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
         current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
 
-        payload, _meta, _revision = TicketSyncService._build_upsert_payload(
+        payload, _meta, _revision = TicketSyncPayloadService.build_upsert_payload(
             db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
             ticket=ticket,
             sync_object=sync_object,
@@ -718,7 +723,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_remote_sync_service_skips_local_newer_revision(self):
         """远端 revision 不大于本地 sourceRevision 时，应跳过覆盖并返回明确原因。"""
-        local_ticket = SimpleNamespace(extra_data={TicketSyncService.META_KEY: {"sourceRevision": 8}})
+        local_ticket = SimpleNamespace(extra_data={TicketSyncPayloadService.META_KEY: {"sourceRevision": 8}})
 
         should_apply, reason = TicketRemoteSyncService.should_apply_remote_sync_item(
             local_ticket=local_ticket,
@@ -738,7 +743,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
         existing_ticket = SimpleNamespace(
             extra_data={
-                TicketSyncService.META_KEY: {
+                TicketSyncPayloadService.META_KEY: {
                     "bitableEmailSync": {
                         "status": "success",
                         "recordId": "rec_001",
@@ -804,7 +809,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
         current_user = SimpleNamespace(user=SimpleNamespace(user_id=1, user_name="tester", nick_name=""))
 
-        payload, meta, _revision = TicketSyncService._build_upsert_payload(
+        payload, meta, _revision = TicketSyncPayloadService.build_upsert_payload(
             db=SimpleNamespace(query=lambda *_args, **_kwargs: _EmptyQuery()),
             ticket=None,
             sync_object=sync_object,
@@ -817,7 +822,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(meta["bitableEmailSync"]["recordId"], "rec_002")
         self.assertNotIn("_bitable_email_sync", payload["extra_data"])
         self.assertEqual(
-            payload["extra_data"][TicketSyncService.META_KEY]["bitableEmailSync"]["recordId"],
+            payload["extra_data"][TicketSyncPayloadService.META_KEY]["bitableEmailSync"]["recordId"],
             "rec_002",
         )
 
@@ -1063,7 +1068,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(segments[1]["personName"], "李四")
         with (
             patch(
-                "modules.ticket.service.ticket_sync_comment_service."
+                "modules.ticket.service.sync.ticket_sync_comment_service."
                 "TicketCommentCoreService.upsert_synced_comment"
             ) as upsert,
         ):
@@ -1576,7 +1581,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 return_value=(True, "snapshot_not_changed"),
             ) as skip_check,
             patch.object(
-                TicketSyncService,
+                TicketSyncPostProcessService,
                 "dispatch_deferred_sync_post_process_task",
                 return_value={"mode": "celery"},
             ),
@@ -1586,7 +1591,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 return_value=SimpleNamespace(is_success=True),
             ) as sync_external,
             patch(
-                "modules.ticket.service.ticket_bitable_pull_service.TicketDao.get_ticket_by_no",
+                "modules.ticket.service.sync.ticket_bitable_pull_service.TicketDao.get_ticket_by_no",
                 return_value=existing_ticket,
             ),
         ):
@@ -1654,7 +1659,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ),
             patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[record]),
             patch.object(TicketSyncService, "sync_external_ticket") as sync_external,
-            patch.object(TicketSyncService, "dispatch_deferred_sync_post_process_task") as dispatch_deferred,
+            patch.object(TicketSyncPostProcessService, "dispatch_deferred_sync_post_process_task") as dispatch_deferred,
         ):
             result = TicketBitablePullService.run_bitable_pull_services(
                 db=SimpleNamespace(),
@@ -1719,16 +1724,16 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                     "externalSyncBitable": {"enabled": False},
                 },
             ),
-            patch.object(TicketSyncService, "_detect_fields", return_value={}),
+            patch.object(TicketSyncAutomationService, "detect_fields", return_value={}),
             patch.object(TicketSyncService, "_translate_sync_description") as translate_description,
-            patch.object(TicketSyncService, "_build_upsert_payload", return_value=({}, {}, 1)),
+            patch.object(TicketSyncPayloadService, "build_upsert_payload", return_value=({}, {}, 1)),
             patch.object(TicketSyncCommentService, "sync_step_reason_comments", return_value={}),
             patch.object(
                 TicketAutoClassificationService,
                 "run_auto_ticket_ai_classification",
                 side_effect=lambda _db, ticket, **_kwargs: (ticket, {}),
             ),
-            patch.object(TicketSyncService, "run_sync_automation", return_value={}),
+            patch.object(TicketSyncAutomationService, "run_sync_automation", return_value={}),
             patch.object(
                 TicketSyncGroupPushService,
                 "finalize_publish_state_after_post_process",
@@ -1743,14 +1748,14 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ),
             patch.object(TicketLightAiService, "is_translation_enabled", return_value=True),
             patch.object(TicketLightAiService, "extract_ticket_sync_fields", return_value=({}, {"skipped": True})),
-            patch("modules.ticket.service.ticket_sync_service.TicketDao.get_ticket_by_no", return_value=None),
-            patch("modules.ticket.service.ticket_sync_service.TicketDao.add_ticket") as add_ticket,
-            patch("modules.ticket.service.ticket_sync_service.TicketDao.add_status_history"),
-            patch("modules.ticket.service.ticket_sync_service.TicketDao.add_message"),
-            patch("modules.ticket.service.ticket_sync_service.TicketDao.add_event"),
-            patch("modules.ticket.service.ticket_sync_service.TicketDao.get_ticket_by_id") as get_ticket_by_id,
+            patch("modules.ticket.service.sync.ticket_sync_service.TicketDao.get_ticket_by_no", return_value=None),
+            patch("modules.ticket.service.sync.ticket_sync_service.TicketDao.add_ticket") as add_ticket,
+            patch("modules.ticket.service.sync.ticket_sync_service.TicketDao.add_status_history"),
+            patch("modules.ticket.service.sync.ticket_sync_service.TicketDao.add_message"),
+            patch("modules.ticket.service.sync.ticket_sync_service.TicketDao.add_event"),
+            patch("modules.ticket.service.sync.ticket_sync_service.TicketDao.get_ticket_by_id") as get_ticket_by_id,
             patch(
-                "modules.ticket.service.ticket_sync_service.TicketService.get_ticket_detail_services",
+                "modules.ticket.service.sync.ticket_sync_service.TicketService.get_ticket_detail_services",
                 return_value={"ticketId": 1, "extraData": {}},
             ),
         ):
@@ -1794,7 +1799,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_deferred_current_user_payload_accepts_legacy_user_only_payload(self):
         """延后后处理应兼容历史只包含 user 的任务载荷。"""
-        payload = TicketSyncService._normalize_current_user_payload(
+        payload = TicketSyncPostProcessService.normalize_current_user_payload(
             {"user": {"user_id": 0, "user_name": "system", "nick_name": "system"}}
         )
 
@@ -1953,7 +1958,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ticket_id=1001,
             ticket_no="TK1001",
             extra_data={
-                TicketSyncService.META_KEY: {
+                TicketSyncPayloadService.META_KEY: {
                     "sync_state": {
                         "group_push_message_refs": [
                             {
@@ -2006,7 +2011,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ) as query_user,
             patch.object(TicketMessageSyncService, "append_comment_to_bitable_step_reason") as append_bitable,
             patch(
-                "modules.ticket.service.ticket_message_sync_service."
+                "modules.ticket.service.collaboration.ticket_message_sync_service."
                 "TicketCommentCoreService.upsert_synced_comment"
             ) as upsert,
         ):

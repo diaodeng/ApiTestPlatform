@@ -710,13 +710,13 @@ def run_ticket_sync_deferred_post_process_task(
     token = request_id_var.set(resolved_trace_id)
     ticket_no = str(sync_payload.get("ticketNo") or sync_payload.get("ticket_no") or "").strip()
     try:
-        from modules.ticket.service.ticket_sync_service import TicketSyncService
+        from modules.ticket.service.sync.ticket_sync_post_process_service import TicketSyncPostProcessService
 
         logger.info(
             f"Celery接收外部工单延后后处理任务: ticket_no={ticket_no or '-'}, "
             f"sync_scene={sync_scene}, task_id={self.request.id}"
         )
-        TicketSyncService.run_deferred_sync_post_process(sync_payload, current_user_payload, sync_scene)
+        TicketSyncPostProcessService.run_deferred_sync_post_process(sync_payload, current_user_payload, sync_scene)
         return {"status": "success", "ticketNo": ticket_no or None}
     except Exception as exc:
         logger.exception(

@@ -2,9 +2,9 @@ import threading
 from typing import Any
 
 from config.database import SessionLocal
-from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from utils.log_util import logger
 
 

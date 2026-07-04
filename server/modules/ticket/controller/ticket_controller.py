@@ -6,7 +6,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
-from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
+from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 

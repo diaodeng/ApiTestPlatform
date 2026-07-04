@@ -8,6 +8,24 @@ updated: 2026-07-04
 
 # 操作日志
 
+## [2026-07-04] INGEST-CODE | 工单服务按依赖关系组织为子包
+
+- 触发：用户要求将已经拆出的工单服务按照依赖关系组织成独立模块或子包，不要全部放在同一个 service 包中，后续再继续细拆。
+- 架构层：工单域 / 服务包结构 / 同步服务 / AI 服务 / 日志拉取 / 协作 / 通知 / 统计
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/sync/*`、`server/modules/ticket/service/ai/*`、`server/modules/ticket/service/log_pull/*`、`server/modules/ticket/service/core/*`、`server/modules/ticket/service/collaboration/*`、`server/modules/ticket/service/notification/*`、`server/modules/ticket/service/stats/*`、`server/modules/ticket/controller/*`、`server/module_task/celery_tasks.py`、`server/module_task/scheduler_maintenance.py`、`server/server.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`server/tests/test_ticket_topic_stats_service.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/2026-07-04-project-implementation-boundary-rules.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：旧 `modules.ticket.service.ticket_*` 顶层服务文件 -> 按职责移动到 `service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats` -> 控制器、定时任务、应用启动、测试和运行时 `patch()` 字符串同步改为新路径 -> 删除旧顶层服务入口且不保留 re-export shim。
+- 关键结论：本次只做包结构收敛，不继续扩大业务拆分；工单同步主服务仍在 `service/sync` 内，后续可继续拆分该子包内部职责。新增调用方必须直接引用新子包路径，禁止恢复 `modules.ticket.service.ticket_*` 旧入口。
+
+## [2026-07-04] INGEST-CODE | 拆分 TicketSyncService 延后后处理与同步自动化
+
+- 触发：用户确认继续拆分，要求继续处理 `TicketSyncService` 的延后后处理边界。
+- 架构层：工单域 / 外部同步入库 / 延后后处理 / 字段识别 / 同步自动化 / Celery 后台任务
+- 创建的页面：无
+- 更新的页面：`server/modules/ticket/service/ticket_sync_post_process_service.py`、`server/modules/ticket/service/ticket_sync_automation_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`server/modules/ticket/controller/ticket_sync_controller.py`、`server/modules/ticket/service/ticket_bitable_pull_service.py`、`server/module_task/celery_tasks.py`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/2026-07-04-project-implementation-boundary-rules.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`TicketSyncService.dispatch_deferred_sync_post_process_task/run_deferred_sync_post_process/_execute_deferred_sync_post_process` -> `TicketSyncPostProcessService` -> 控制器、主动拉取和 Celery 任务直接调用新服务；`TicketSyncService._detect_fields/run_sync_automation/_mark_automation_step/_collect_text/_extract_pattern` -> `TicketSyncAutomationService` -> 主入库链路与延后后处理共用同一字段识别和自动化执行服务。
+- 关键结论：延后后处理不再挂在 `TicketSyncService` 上；Celery 分发、本地后台回退、系统用户 payload 归一化、AI 提取/翻译/分类、向量刷新和发布状态收敛由 `TicketSyncPostProcessService` 编排。字段识别、相似工单、自动拉日志和自动 AI 提交由 `TicketSyncAutomationService` 承接，避免后处理服务反向依赖主同步服务。
+
 ## [2026-07-04] INGEST-CODE | 拆分 TicketSyncService 外部入库 payload 构造
 
 - 触发：用户要求继续拆 `TicketSyncService` 的延后后处理或外部入库 payload 构造；本次优先迁移边界更清晰的外部入库 payload 构造。

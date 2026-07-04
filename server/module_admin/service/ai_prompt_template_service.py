@@ -133,7 +133,7 @@ class AiPromptTemplateService:
         :param db: 数据库会话
         :return: 无
         """
-        from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
+        from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 
         now = datetime.now()
         for item in cls.DEFAULT_PROMPT_TEMPLATES:
@@ -202,7 +202,11 @@ class AiPromptTemplateService:
         )
 
     @classmethod
-    def get_prompt_template_detail_services(cls, query_db: Session, template_id: int) -> AiPromptTemplateDetailModel | None:
+    def get_prompt_template_detail_services(
+        cls,
+        query_db: Session,
+        template_id: int,
+    ) -> AiPromptTemplateDetailModel | None:
         """
         获取 AI 提示词模板详情。
         :param query_db: orm对象

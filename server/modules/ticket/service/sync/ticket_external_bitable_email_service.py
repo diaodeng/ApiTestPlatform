@@ -3,8 +3,8 @@ from typing import Any
 
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.log_util import logger

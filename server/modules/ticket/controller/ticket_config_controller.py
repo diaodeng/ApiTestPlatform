@@ -17,9 +17,9 @@ from modules.ticket.entity.vo.ticket_vo import (
     WorkflowStatusModel,
     WorkflowTransitionModel,
 )
-from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
-from modules.ticket.service.ticket_service import TicketService
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.core.ticket_service import TicketService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 

@@ -9,6 +9,9 @@
 7. 新增说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
 8. 新增 `TicketRemoteSyncService` 承接远端 pending 拉取、payload 转换、本地 revision/time 跳过判断和 ack 回写；远端拉取定时任务直接调用该服务，`TicketSyncService` 不再保留远端拉取转发入口。
 9. 新增 `TicketSyncPayloadService` 承接外部同步入库 payload 构造、同步 meta、外部创建时间、来源快照、`log_pull_hints` 和自动拉日志日期解析；`TicketSyncService` 删除对应私有方法并直接调用新服务公开方法。
+10. 新增 `TicketSyncPostProcessService` 承接外部同步延后后处理投递、运行入口、系统用户 payload 归一化和后处理执行主体；控制器、主动拉取和 Celery 任务不再调用 `TicketSyncService` 的延后入口。
+11. 新增 `TicketSyncAutomationService` 承接字段识别、自动化步骤状态、相似工单、自动拉日志和自动 AI 分析提交；`TicketSyncService` 与延后后处理服务都直接调用该服务。
+12. 将工单服务按依赖关系组织为 `service/sync`、`service/ai`、`service/log_pull`、`service/core`、`service/collaboration`、`service/notification`、`service/stats` 子包；所有调用方改为新路径，旧顶层 `modules.ticket.service.ticket_*` 服务入口删除且不保留 re-export shim。
 
 ## 2026-07-02
 

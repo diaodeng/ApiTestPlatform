@@ -2,8 +2,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from utils.log_util import logger
 
 

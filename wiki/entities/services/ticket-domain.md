@@ -11,18 +11,26 @@ created: 2026-05-20
 updated: 2026-07-04
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
-  - server/modules/ticket/service/ticket_service.py
-  - server/modules/ticket/service/ticket_sync_service.py
-  - server/modules/ticket/service/ticket_sync_payload_service.py
-  - server/modules/ticket/service/ticket_remote_sync_service.py
-  - server/modules/ticket/service/ticket_auto_classification_service.py
-  - server/modules/ticket/service/ticket_comment_core_service.py
-  - server/modules/ticket/service/ticket_light_ai_service.py
-  - server/modules/ticket/service/ticket_log_pull_service.py
-  - server/modules/ticket/service/ticket_ai_analysis_service.py
-  - server/modules/ticket/service/ticket_notify_service.py
-  - server/modules/ticket/service/ticket_import_service.py
-  - server/modules/ticket/service/ticket_embedding_service.py
+  - server/modules/ticket/service/core/ticket_service.py
+  - server/modules/ticket/service/core/ticket_import_service.py
+  - server/modules/ticket/service/sync/ticket_sync_service.py
+  - server/modules/ticket/service/sync/ticket_sync_payload_service.py
+  - server/modules/ticket/service/sync/ticket_sync_post_process_service.py
+  - server/modules/ticket/service/sync/ticket_sync_automation_service.py
+  - server/modules/ticket/service/sync/ticket_remote_sync_service.py
+  - server/modules/ticket/service/sync/ticket_bitable_pull_service.py
+  - server/modules/ticket/service/sync/ticket_sync_config_service.py
+  - server/modules/ticket/service/sync/ticket_sync_notification_job_service.py
+  - server/modules/ticket/service/ai/ticket_auto_classification_service.py
+  - server/modules/ticket/service/ai/ticket_light_ai_service.py
+  - server/modules/ticket/service/ai/ticket_ai_analysis_service.py
+  - server/modules/ticket/service/ai/ticket_embedding_service.py
+  - server/modules/ticket/service/log_pull/ticket_log_pull_service.py
+  - server/modules/ticket/service/log_pull/ticket_log_service.py
+  - server/modules/ticket/service/collaboration/ticket_comment_core_service.py
+  - server/modules/ticket/service/collaboration/ticket_message_sync_service.py
+  - server/modules/ticket/service/notification/ticket_notify_service.py
+  - server/modules/ticket/service/stats/ticket_topic_stats_service.py
   - server/modules/ticket/dao/ticket_dao.py
   - server/modules/ticket/dao/ticket_log_pull_dao.py
   - server/modules/ticket/dao/ticket_ai_dao.py
@@ -79,7 +87,8 @@ graph TD
 
 - 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
 - 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入、延迟代理或兼容门面规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
-- 当前 `TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`，人员催办和汇总统计通知任务已拆入 `TicketSyncNotificationJobService`，外部推送多维表格邮箱补齐已拆入 `TicketExternalBitableEmailService`，远端 pending 拉取与 ack 回写已拆入 `TicketRemoteSyncService`，外部同步入库 payload、同步 meta、外部创建时间、来源快照和自动拉日志日期解析已拆入 `TicketSyncPayloadService`；后续可继续拆为独立子包：`service/sync` 承接同步编排和延后后处理，`service/sync/config` 承接配置和飞书 filter，`service/sync/comment` 承接评论同步，`service/sync/notification` 承接群推送和通知，`service/ai` 承接 AI 能力，`service/log_pull` 承接日志拉取，`service/core` 承接工单 CRUD 和流转。迁移时不保留只转发的旧路径文件。
+- 当前工单服务已按依赖关系组织为独立子包：`service/sync` 承接同步编排、配置、主动拉取、远端拉取、payload、延后后处理、自动化、群推送和同步通知任务；`service/ai` 承接 AI 分析、轻量 AI、提示词、自动分类统计和向量能力；`service/log_pull` 承接日志拉取和日志查看；`service/core` 承接工单 CRUD、导入、状态流转、RCA、知识库和快照；`service/collaboration` 承接评论幂等、飞书消息同步和事件监听；`service/notification` 承接通用通知；`service/stats` 承接专题统计。旧 `modules.ticket.service.ticket_*` 顶层服务入口已删除，不保留只转发或 re-export 的兼容文件。
+- 当前 `service/sync/TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`，人员催办和汇总统计通知任务已拆入 `TicketSyncNotificationJobService`，外部推送多维表格邮箱补齐已拆入 `TicketExternalBitableEmailService`，远端 pending 拉取与 ack 回写已拆入 `TicketRemoteSyncService`，外部同步入库 payload、同步 meta、外部创建时间、来源快照和自动拉日志日期解析已拆入 `TicketSyncPayloadService`，延后后处理投递与执行已拆入 `TicketSyncPostProcessService`，字段识别和同步自动化执行已拆入 `TicketSyncAutomationService`；后续继续拆分应在 `service/sync` 内按职责下沉，不恢复旧顶层路径。
 - 2026-07-04 起，项目实现规则已固化到根目录 `AGENTS.md` 和 `web/public/docs/2026-07-04-project-implementation-boundary-rules.md`：新增功能必须先按 controller/service/dao/util/scheduler 作用域拆分，不得继续堆大文件或新增只转发的兼容 shim；拆分后子服务对外方法必须使用公开命名，不允许以 `_` 开头。
 - 工单控制器拆分后必须保持备份分支接口兼容；当前路由包含 `PUT /ticket/{ticket_id:int}/rca`，前端保存 RCA 依赖该接口。
 - 工单所属维度复用 HRM 测试管理中的项目/模块，前端通过工单域选项接口拉取有效项目与模块。

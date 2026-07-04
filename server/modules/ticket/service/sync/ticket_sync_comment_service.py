@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
-from modules.ticket.service.ticket_comment_core_service import TicketCommentCoreService
+from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.util.sync_util import SyncUtil
 
 

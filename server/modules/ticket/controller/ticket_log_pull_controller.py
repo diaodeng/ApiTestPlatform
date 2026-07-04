@@ -24,8 +24,8 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogSearchRequestModel,
     TicketLogSearchTimeRequestModel,
 )
-from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
-from modules.ticket.service.ticket_log_service import LogService
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.log_pull.ticket_log_service import LogService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 

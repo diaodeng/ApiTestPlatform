@@ -63,8 +63,8 @@ sequenceDiagram
 | 1 | 外部系统调用 `POST /ticket/sync/external`，必填 `ticketNo`、`description`、`internalPriority`、`ticketVender`、`ticketModle`、`createTime`、`reporterName`；`title` 允许缺省。 |
 | 2 | `TicketSyncService.sync_external_ticket` 以 `ticketNo` 为幂等键创建或更新工单，入库 payload 由 `TicketSyncPayloadService.build_upsert_payload` 构造，并在 `extra_data.external_sync` 中递增 `revision`。 |
 | 3 | `TicketSyncPayloadService` 统一维护同步元数据：来源系统、来源记录 ID、远端 source revision、外部原始创建时间（`externalCreateTime`）、最近导入时间、最近一次交付状态、每个消费方的交付 revision、自动化执行状态、项目/模块文本兜底和 `log_pull_hints`。 |
-| 4 | 主链路会先完成工单入库并快速返回；入库后先写 `publish_ready=false`、`publish_status=processing_ai`，AI翻译、AI标题总结、自动化与群推送改为后台异步后处理，避免阻塞 `POST /ticket/sync/external` 请求。 |
-| 5 | 字段识别采用可配置映射和正则规则：项目/模块/商家按关键词包含匹配；处理人按完整名称匹配（支持 email）；门店按商家ID+`sap_org_no` 查询配置。项目或模块未匹配本地 HRM 配置时，会保留外部原始文本到工单项目/模块名称字段。已有工单再次同步时，只要本次外部数据携带项目或模块字段，就按本次解析结果覆盖旧归属；解析不到本地 ID 时清空旧 ID 并保留本次外部文本。规则统一存放在 `ticket.sync.automation`。 |
+| 4 | 主链路会先完成工单入库并快速返回；入库后先写 `publish_ready=false`、`publish_status=processing_ai`，AI翻译、AI标题总结、自动化与群推送由 `TicketSyncPostProcessService` 投递 Celery 或回退本地后台执行，避免阻塞 `POST /ticket/sync/external` 请求。 |
+| 5 | 字段识别由 `TicketSyncAutomationService.detect_fields` 承接，采用可配置映射和正则规则：项目/模块/商家按关键词包含匹配；处理人按完整名称匹配（支持 email）；门店按商家ID+`sap_org_no` 查询配置。项目或模块未匹配本地 HRM 配置时，会保留外部原始文本到工单项目/模块名称字段。已有工单再次同步时，只要本次外部数据携带项目或模块字段，就按本次解析结果覆盖旧归属；解析不到本地 ID 时清空旧 ID 并保留本次外部文本。规则统一存放在 `ticket.sync.automation`。 |
 | 5.1 | 外部推送多维表格邮箱补齐由 `TicketExternalBitableEmailService` 承接，并由 `externalSyncBitable.enabled` 控制；同一工单已成功补齐过同一个 `recordId` 时，会根据 `extra_data.external_sync.bitableEmailSync` 跳过重复查询。 |
 | 5.1.1 | 飞书多维表格相关配置已收敛到公共配置 `bitableCommon`；外部推送邮箱补齐、按人催办、汇总统计和主动拉取默认继承公共配置，局部配置非空时覆盖。 |
 | 5.1.2 | 新增主动拉取链路 `bitablePull`：调度任务按条件查询飞书多维表格记录，由 `TicketBitablePullService` 经 `fieldMappings` 映射成外部同步字段后复用 `POST /ticket/sync/external` 入库；任务参数提供映射时优先于可视化配置；默认时间窗口在飞书 `records/search` filter 中按更新时间字段或创建时间字段大于等于当前时间前 1 小时执行，`createdAfter` 仅用于覆盖窗口下限；嵌套 filter 会在最外层 `children` 追加默认时间窗口并递归补齐内部时间字段空值，扁平 filter 只补齐已有时间字段；分页查询中 `page_size/page_token` 放在 URL 查询参数，`filter/view_id/view_type` 放在请求体，并对重复 `page_token` 熔断，避免飞书返回同一页导致循环拉取。 |
@@ -92,6 +92,7 @@ sequenceDiagram
 | 14 | 为避免“飞书评论写回多维表格后又被主动拉取”造成重复评论，评论同步会同时使用 `source_segment_key` 与 `source_content_hash` 去重；同一工单同一内容哈希已存在时跳过新增。 |
 | 15 | 长连接监听使用后台守护线程运行，每条事件创建独立数据库会话；当前 SDK 只提供 `start()`，应用关闭时只能标记停止并等待进程退出释放连接。 |
 | 16 | 人员催办预览、人员催办执行和工单汇总统计通知由 `TicketSyncNotificationJobService` 读取同步自动化配置并调用 `TicketSyncNotifyService`，不再通过 `TicketSyncService` 转发。 |
+| 17 | 2026-07-04 起，工单服务按依赖关系移动到子包：本流程涉及的同步服务统一位于 `modules.ticket.service.sync`，AI、日志拉取、核心工单、协作、通知和统计能力分别位于 `service.ai`、`service.log_pull`、`service.core`、`service.collaboration`、`service.notification`、`service.stats`；流程调用方不再引用旧的 `modules.ticket.service.ticket_*` 顶层路径。 |
 
 ## 错误处理
 

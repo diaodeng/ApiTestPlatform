@@ -48,10 +48,10 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketAiRepoMappingUpdateModel,
 )
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType
-from modules.ticket.service.ticket_embedding_service import TicketEmbeddingService
-from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
-from modules.ticket.service.ticket_notify_service import TicketNotifyService
-from modules.ticket.service.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
 from utils.api_key_util import ApiKeyUtil
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -2170,7 +2170,7 @@ class TicketAiAnalysisService:
         :return: 无
         """
         try:
-            from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
+            from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
 
             TicketSyncGroupPushService.finalize_sync_after_ai(
                 db,

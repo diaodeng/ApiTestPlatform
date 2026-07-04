@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from module_admin.entity.do.config_do import SysConfig
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 

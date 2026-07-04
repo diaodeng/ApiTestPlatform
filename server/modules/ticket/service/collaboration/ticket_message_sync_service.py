@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
-from modules.ticket.service.ticket_comment_core_service import TicketCommentCoreService
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
+from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
 from utils.log_util import logger
 

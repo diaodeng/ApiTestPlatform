@@ -52,7 +52,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullVendorStoreOptionsModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
-from modules.ticket.service.ticket_notify_service import TicketNotifyService
+from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 
@@ -2361,7 +2361,7 @@ class TicketLogPullService:
             return
         try:
             from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel
-            from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
+            from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 
             request = TicketAiAnalysisRequestModel(
                 version_key=version_key,

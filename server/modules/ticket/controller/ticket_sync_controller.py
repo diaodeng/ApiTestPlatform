@@ -20,11 +20,12 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketSyncPullQueryModel,
     TicketSyncSummaryRunModel,
 )
-from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
-from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
-from modules.ticket.service.ticket_sync_notification_job_service import TicketSyncNotificationJobService
-from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
+from modules.ticket.service.sync.ticket_sync_notification_job_service import TicketSyncNotificationJobService
+from modules.ticket.service.sync.ticket_sync_post_process_service import TicketSyncPostProcessService
+from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -89,15 +90,15 @@ async def sync_external_ticket(
         )
         if result.is_success:
             deferred_dispatch = await run_in_threadpool(
-                TicketSyncService.dispatch_deferred_sync_post_process_task,
+                TicketSyncPostProcessService.dispatch_deferred_sync_post_process_task,
                 sync_object.model_dump(),
                 current_user.model_dump(),
                 "external_sync",
                 trace_id,
             )
-            if deferred_dispatch.get("mode") != TicketSyncService.CELERY_DISPATCH_MODE:
+            if deferred_dispatch.get("mode") != TicketSyncPostProcessService.CELERY_DISPATCH_MODE:
                 background_tasks.add_task(
-                    TicketSyncService.run_deferred_sync_post_process,
+                    TicketSyncPostProcessService.run_deferred_sync_post_process,
                     sync_object.model_dump(),
                     current_user.model_dump(),
                     "external_sync",
