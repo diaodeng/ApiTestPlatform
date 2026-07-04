@@ -11,8 +11,10 @@ from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
 from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ticket_auto_classification_service import TicketAutoClassificationService
 from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
+from modules.ticket.service.ticket_external_bitable_email_service import TicketExternalBitableEmailService
 from modules.ticket.service.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
+from modules.ticket.service.ticket_remote_sync_service import TicketRemoteSyncService
 from modules.ticket.service.ticket_sync_comment_service import TicketSyncCommentService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
@@ -675,6 +677,58 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertIsNone(payload["module_id"])
         self.assertEqual(payload["module_name"], "新远端模块")
 
+    def test_remote_sync_service_builds_upsert_model_with_alias_fields(self):
+        """远端拉取服务应保留拆分前字段别名兼容，不回退调用 TicketSyncService 私有方法。"""
+        sync_object = TicketRemoteSyncService.build_upsert_model(
+            {
+                "ticketId": 1001,
+                "ticketNo": "REMOTE-ALIAS",
+                "title": "远端工单",
+                "description": "远端描述",
+                "module_name": "远端模块",
+                "project_name": "远端项目",
+                "syncSummary": {"revision": 7, "ticketUrl": "https://example.com/ticket/1001"},
+                "extraData": {
+                    "external_field_mapping": {
+                        "ticketStatus": "processing",
+                        "internalOwnerEmail": "owner@example.com",
+                    },
+                    "log_pull_hints": {"storeId": "S001", "posNo": "9"},
+                },
+                "step_reason": "20260704：排查过程",
+            },
+            remote_sync={"consumer": "inner", "sourceSystem": "public"},
+        )
+
+        self.assertIsNotNone(sync_object)
+        self.assertEqual(sync_object.ticket_no, "REMOTE-ALIAS")
+        self.assertEqual(sync_object.module_name, "远端模块")
+        self.assertEqual(sync_object.project_name, "远端项目")
+        self.assertEqual(sync_object.source.record_id, "1001")
+        self.assertEqual(sync_object.source.record_url, "https://example.com/ticket/1001")
+        self.assertEqual(sync_object.sync_consumer, "inner")
+        self.assertEqual(sync_object.status, "processing")
+        self.assertEqual(
+            sync_object.extra_data["external_field_mapping"]["internalOwnerEmail"],
+            "owner@example.com",
+        )
+        self.assertEqual(sync_object.extra_data["_remote_sync_revision"], 7)
+        self.assertEqual(sync_object.log_pull_config["storeId"], "S001")
+        self.assertEqual(sync_object.step_reason, "20260704：排查过程")
+
+    def test_remote_sync_service_skips_local_newer_revision(self):
+        """远端 revision 不大于本地 sourceRevision 时，应跳过覆盖并返回明确原因。"""
+        local_ticket = SimpleNamespace(extra_data={TicketSyncService.META_KEY: {"sourceRevision": 8}})
+
+        should_apply, reason = TicketRemoteSyncService.should_apply_remote_sync_item(
+            local_ticket=local_ticket,
+            remote_sync_revision=7,
+            remote_pushed_at="2026-07-04T10:00:00",
+        )
+
+        self.assertFalse(should_apply)
+        self.assertEqual(reason, "remote_revision_not_newer(remote=7, local=8)")
+
     def test_bitable_email_enrich_skips_when_record_already_success(self):
         """同一 recordId 已成功补齐过邮箱时，不应再次请求多维表格。"""
         sync_object = SimpleNamespace(
@@ -693,8 +747,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             }
         )
 
-        with patch.object(TicketSyncService, "_query_external_sync_bitable_record_fields") as query_fields:
-            result = TicketSyncService._enrich_external_person_emails_from_bitable(
+        with patch.object(TicketExternalBitableEmailService, "query_record_fields") as query_fields:
+            result = TicketExternalBitableEmailService.enrich_person_emails(
                 {"externalSyncBitable": {"enabled": True}},
                 sync_object,
                 existing_ticket,
@@ -879,7 +933,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             extra_data={"bitable_pull": {"recordId": "rec_001", "snapshotHash": "hash_001"}}
         )
 
-        should_skip, reason = TicketBitablePullService._should_skip_bitable_pull_record(
+        should_skip, reason = TicketBitablePullService.should_skip_bitable_pull_record(
             existing_ticket=existing_ticket,
             sync_object=sync_object,
         )
@@ -923,7 +977,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             {"sourceField": "创建时间", "targetField": "createTime"},
         ]
 
-        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService.build_bitable_pull_sync_object(
             record=record,
             config=config,
             field_mappings=field_mappings,
@@ -985,7 +1039,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService.build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1050,7 +1104,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService.build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1091,7 +1145,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService.build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1133,7 +1187,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService.build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1179,7 +1233,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ]
         )
 
-        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService.build_bitable_pull_sync_object(
             record=record,
             config={"sourceSystem": "feishu_bitable_pull"},
             field_mappings=field_mappings,
@@ -1518,7 +1572,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[record]),
             patch.object(
                 TicketBitablePullService,
-                "_should_skip_bitable_pull_record",
+                "should_skip_bitable_pull_record",
                 return_value=(True, "snapshot_not_changed"),
             ) as skip_check,
             patch.object(
@@ -1617,7 +1671,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_external_sync_uses_automation_translate_switch_when_present(self):
         """外部同步传入自动化配置时，翻译开关应优先使用本次场景配置。"""
-        sync_object = TicketBitablePullService._build_bitable_pull_sync_object(
+        sync_object = TicketBitablePullService.build_bitable_pull_sync_object(
             record={
                 "record_id": "rec_translate",
                 "fields": {
@@ -1653,7 +1707,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 })
             }
         )
-        current_user = CurrentUserModel.model_validate(TicketBitablePullService._build_system_current_user_payload())
+        current_user = CurrentUserModel.model_validate(TicketBitablePullService.build_system_current_user_payload())
 
         with (
             patch.object(
@@ -1683,8 +1737,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncService, "extract_sync_summary", return_value={}),
             patch.object(TicketSyncService, "_resolve_sync_title", return_value=("T-TRANS", {"mode": "raw"})),
             patch.object(
-                TicketSyncService,
-                "_enrich_external_person_emails_from_bitable",
+                TicketExternalBitableEmailService,
+                "enrich_person_emails",
                 side_effect=lambda _c, obj, _t: obj,
             ),
             patch.object(TicketLightAiService, "is_translation_enabled", return_value=True),
@@ -1729,7 +1783,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
     def test_system_current_user_payload_matches_current_user_model(self):
         """后台系统用户载荷应满足 CurrentUserModel 校验，避免 Celery 反序列化失败。"""
-        payload = TicketBitablePullService._build_system_current_user_payload()
+        payload = TicketBitablePullService.build_system_current_user_payload()
 
         current_user = CurrentUserModel.model_validate(payload)
 
@@ -1985,4 +2039,5 @@ class _EmptyQuery:
 
 if __name__ == "__main__":
     unittest.main()
+
 

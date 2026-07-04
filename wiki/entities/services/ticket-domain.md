@@ -13,6 +13,7 @@ related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/ticket_service.py
   - server/modules/ticket/service/ticket_sync_service.py
+  - server/modules/ticket/service/ticket_remote_sync_service.py
   - server/modules/ticket/service/ticket_auto_classification_service.py
   - server/modules/ticket/service/ticket_comment_core_service.py
   - server/modules/ticket/service/ticket_light_ai_service.py
@@ -77,7 +78,8 @@ graph TD
 
 - 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
 - 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入、延迟代理或兼容门面规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
-- 当前 `TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`；后续可继续拆为独立子包：`service/sync` 承接同步编排，`service/sync/config` 承接配置和飞书 filter，`service/sync/comment` 承接评论同步，`service/sync/notification` 承接群推送和通知，`service/ai` 承接 AI 能力，`service/log_pull` 承接日志拉取，`service/core` 承接工单 CRUD 和流转。迁移时不保留只转发的旧路径文件。
+- 当前 `TicketSyncService` 仍偏大，但主动拉取已拆入 `TicketBitablePullService`，人员催办和汇总统计通知任务已拆入 `TicketSyncNotificationJobService`，外部推送多维表格邮箱补齐已拆入 `TicketExternalBitableEmailService`，远端 pending 拉取与 ack 回写已拆入 `TicketRemoteSyncService`；后续可继续拆为独立子包：`service/sync` 承接同步编排和延后后处理，`service/sync/config` 承接配置和飞书 filter，`service/sync/comment` 承接评论同步，`service/sync/notification` 承接群推送和通知，`service/ai` 承接 AI 能力，`service/log_pull` 承接日志拉取，`service/core` 承接工单 CRUD 和流转。迁移时不保留只转发的旧路径文件。
+- 2026-07-04 起，项目实现规则已固化到根目录 `AGENTS.md` 和 `web/public/docs/2026-07-04-project-implementation-boundary-rules.md`：新增功能必须先按 controller/service/dao/util/scheduler 作用域拆分，不得继续堆大文件或新增只转发的兼容 shim；拆分后子服务对外方法必须使用公开命名，不允许以 `_` 开头。
 - 工单控制器拆分后必须保持备份分支接口兼容；当前路由包含 `PUT /ticket/{ticket_id:int}/rca`，前端保存 RCA 依赖该接口。
 - 工单所属维度复用 HRM 测试管理中的项目/模块，前端通过工单域选项接口拉取有效项目与模块。
 - 工单新增/编辑时项目和模块联动，模块必须属于当前项目；工单号作为外部系统唯一编号手动录入，不再自动生成。
@@ -93,7 +95,7 @@ graph TD
 - 外部同步延后后处理会继承入库请求 tid：Celery 可用时随 `module_ticket.sync_deferred_post_process` 投递，Celery 不可用回退 FastAPI 本地后台任务时通过 `trace_context` 设置，保证入库、自动化、AI 和群推送日志可按同一个 tid 串联；定时任务主动拉取等非 HTTP 入口由 Celery Worker 生成 `job-xxxxxxxx`。
 - 外部同步识别项目失败时会保留 `ticketVender/projectName/merchantName` 原始文本到 `merchant_name`，模块识别失败时保留 `ticketModle/moduleName` 原始文本到 `module_name`，避免本地 HRM 未配置映射时入库数据丢失。
 - 识别和自动化配置统一由系统参数 `ticket.sync.automation` 驱动，优先通过映射规则、正则和默认参数适配不同工单系统，避免把定制话术写死在服务代码里。
-- 外部推送多维表格邮箱补齐由 `ticket.sync.automation.externalSyncBitable.enabled` 控制；成功补齐后会在 `extra_data.external_sync.bitableEmailSync` 记录 `status=success`、`recordId`、`emailKeys` 和 `syncedAt`，同一工单再次推送同一个 `recordId` 时会跳过重复查询。
+- 外部推送多维表格邮箱补齐由 `TicketExternalBitableEmailService` 承接，并由 `ticket.sync.automation.externalSyncBitable.enabled` 控制；成功补齐后会在 `extra_data.external_sync.bitableEmailSync` 记录 `status=success`、`recordId`、`emailKeys` 和 `syncedAt`，同一工单再次推送同一个 `recordId` 时会跳过重复查询。
 - 飞书多维表格公共配置已下沉到 `ticket.sync.automation.bitableCommon`；工单汇总统计、按人催办、外部推送邮箱补全和主动拉取默认继承该配置，局部配置非空时覆盖公共配置。
 - 外部字段枚举已抽成 `ticket.sync.automation.externalFieldModel`；同步配置页的必填字段下拉与主动拉取字段映射目标字段统一读取该模型。
 - `externalFieldModel` 现在同时承担“字段全集”和“必填标记”职责；页面不再建议单独维护另一份必填字段配置，服务端仅保留 `externalSyncRequiredFields` 作为历史兼容输出。
@@ -112,7 +114,7 @@ graph TD
 - 飞书话题评论入站同步会使用 `sender.open_id` 查询飞书通讯录用户详情，工单评论 `user_name` 和多维表格排查过程 `{user}` 都写入解析后的用户名；飞书凭证缺失或查询失败时才回退事件自带名称或 ID。
 - 飞书话题正文中的 `@_user_1` 会根据 `message.mentions` 映射为 `@用户名` 保存到工单评论，评论附件保存 `mentions/content_segments`；多维表格 Text 字段富文本片段中的 `mention_user_id` 同样会归一为 `@用户名` 并保留片段，后续写回飞书群或多维表格时恢复真实 @ 人员样式。
 - 主动拉取传入 `automation.autoTranslate` 时，外部同步主链路和延后后处理都会优先使用该场景开关；只有未传 automation 时才回退全局 `autoTranslateOnSync`。
-- 远端拉取由 `ticket.sync.automation.remoteSync.enabled` 控制，拉取入库不会再次查询公网多维表格；它只使用远端 payload 已携带的邮箱/姓名，并按内网本地 `assigneeMappings` 或邮箱用户匹配解析人员。
+- 远端拉取由 `TicketRemoteSyncService` 和 `ticket.sync.automation.remoteSync.enabled` 控制，拉取入库不会再次查询公网多维表格；它只使用远端 payload 已携带的邮箱/姓名，并按内网本地 `assigneeMappings` 或邮箱用户匹配解析人员。该服务公开方法不使用 `_` 前缀，对外提供 `build_upsert_model`、`should_apply_remote_sync_item`、`build_request_headers` 和 `sync_remote_pending_tickets`。
 - 工单项目/模块选项直接复用 HRM 公共项目管理，不单独维护工单项目库；后端按 HRM 的正常状态值 `QtrDataStatusEnum.normal = 2` 过滤有效项。
 - HRM 模块的 `module_code` 约束已调整为“同一项目下唯一”，不同项目允许复用同一业务 code，便于按业务域横向统计问题分布。
 - 若后续需要把“工单项目”和“测试项目”显式区分，优先增加结构化 `project_type`，不建议只靠自由标签做长期筛选。

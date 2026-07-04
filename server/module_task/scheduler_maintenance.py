@@ -9,7 +9,8 @@ from module_hrm.service.report_service import ReportService
 from module_task.celery_job_models import CeleryPeriodicTask
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
 from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
-from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.ticket_remote_sync_service import TicketRemoteSyncService
+from modules.ticket.service.ticket_sync_notification_job_service import TicketSyncNotificationJobService
 from modules.ticket.service.ticket_topic_stats_service import TicketTopicStatsService
 from utils.log_util import logger
 
@@ -239,15 +240,16 @@ def pull_public_ticket_sync(
         headers=headers if headers is not None else kwargs.pop("headers", None),
     )
     with SessionLocal() as db:
-        result = TicketSyncService.sync_remote_pending_tickets(db, current_user=None, remote_sync_override=override)
+        result = TicketRemoteSyncService.sync_remote_pending_tickets(
+            db,
+            current_user=None,
+            remote_sync_override=override,
+        )
     logger.info(
-        "远端工单拉取任务执行完成 | consumer={}, pulled={}, synced={}, skipped={}, failed={}, acked={}",
-        result.get("consumer"),
-        result.get("pulledCount"),
-        result.get("syncedCount"),
-        result.get("skippedCount"),
-        result.get("failedCount"),
-        result.get("ackedCount"),
+        f"远端工单拉取任务执行完成 | consumer={result.get('consumer')}, "
+        f"pulled={result.get('pulledCount')}, synced={result.get('syncedCount')}, "
+        f"skipped={result.get('skippedCount')}, failed={result.get('failedCount')}, "
+        f"acked={result.get('ackedCount')}"
     )
     return result
 
@@ -320,7 +322,7 @@ def ticket_person_overdue_reminder(
     person_config_override = _build_person_reminder_config_override(kwargs)
     if is_all:
         with SessionLocal() as db:
-            result = TicketSyncService.run_person_reminder_services(
+            result = TicketSyncNotificationJobService.run_person_reminder_services(
                 db,
                 trigger_source="scheduler",
                 is_all=is_all,
@@ -354,7 +356,7 @@ def ticket_person_overdue_reminder(
     result = {"skipped": True, "skipReason": "未指定用户或邮箱"}
     for resolved_email in resolved_emails:
         with SessionLocal() as db:
-            result = TicketSyncService.run_person_reminder_services(
+            result = TicketSyncNotificationJobService.run_person_reminder_services(
                 db,
                 trigger_source="scheduler",
                 user_id=normalized_user_id,
@@ -392,7 +394,7 @@ def ticket_summary_report(
     resolved_end_time = end_time if end_time is not None else kwargs.pop("endTime", None)
 
     with SessionLocal() as db:
-        result = TicketSyncService.run_summary_report_services(
+        result = TicketSyncNotificationJobService.run_summary_report_services(
             db,
             trigger_source="scheduler",
             start_time=resolved_start_time,

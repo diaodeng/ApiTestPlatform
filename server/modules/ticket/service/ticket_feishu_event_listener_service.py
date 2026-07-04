@@ -3,8 +3,8 @@ from typing import Any
 
 from config.database import SessionLocal
 from modules.ticket.service.ticket_message_sync_service import TicketMessageSyncService
-from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.ticket_sync_notify_service import TicketSyncNotifyService
 from utils.log_util import logger
 
 
@@ -92,7 +92,7 @@ class TicketFeishuEventListenerService:
 
         feishu_auth = sync_config.get("feishuAuth") if isinstance(sync_config.get("feishuAuth"), dict) else {}
         group_config = sync_config.get("groupPush") if isinstance(sync_config.get("groupPush"), dict) else {}
-        app_id, app_secret = TicketSyncNotifyService._resolve_feishu_auth({**feishu_auth, **group_config})
+        app_id, app_secret = TicketSyncNotifyService.resolve_feishu_auth({**feishu_auth, **group_config})
         if not app_id or not app_secret:
             logger.warning("飞书长连接监听未启动: 缺少 appId 或 appSecret")
             return {"skipped": True, "reason": "missing_feishu_app_config"}
@@ -127,3 +127,4 @@ class TicketFeishuEventListenerService:
         if was_running:
             logger.info("飞书长连接监听已标记停止: 当前 SDK 未提供显式 stop 接口，连接将在进程退出时释放")
         return {"skipped": not was_running}
+

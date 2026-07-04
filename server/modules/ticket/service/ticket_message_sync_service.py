@@ -430,7 +430,7 @@ class TicketMessageSyncService:
             "bitablePull",
             TicketSyncConfigService.default_bitable_pull_config(),
         )
-        app_id, app_secret = TicketSyncNotifyService._resolve_feishu_auth(
+        app_id, app_secret = TicketSyncNotifyService.resolve_feishu_auth(
             {**bitable_config, **group_config, **feishu_auth}
         )
         if not app_id or not app_secret:
@@ -805,7 +805,7 @@ class TicketMessageSyncService:
         feishu_result = {"skipped": True, "reason": "syncTicketCommentToFeishuThread=false"}
         if bool(message_config.get("syncTicketCommentToFeishuThread")):
             group_config = sync_config.get("groupPush") if isinstance(sync_config.get("groupPush"), dict) else {}
-            app_id, app_secret = TicketSyncNotifyService._resolve_feishu_auth(group_config)
+            app_id, app_secret = TicketSyncNotifyService.resolve_feishu_auth(group_config)
             anchor_message_id = cls._resolve_feishu_reply_anchor(ticket)
             if not anchor_message_id:
                 feishu_result = {"skipped": True, "reason": "missing_group_message_anchor"}
@@ -962,3 +962,4 @@ class TicketMessageSyncService:
             "commentId": comment_id,
             "bitableSync": bitable_result,
         }
+

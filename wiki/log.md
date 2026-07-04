@@ -1030,3 +1030,30 @@ updated: 2026-07-04
 - 创建的双向链接：0 对
 - 变更传播链：`server/modules/ticket/service/ticket_bitable_pull_service.py` -> `server/modules/ticket/controller/ticket_sync_controller.py` / `server/module_task/scheduler_maintenance.py` -> 工单外部同步与内网拉取流程。
 - 总共涉及页面：3
+
+## [2026-07-04] INGEST-CODE | 工单通知任务拆分与实现规则固化
+- 触发：用户要求继续拆分，并将项目实现规则固化，避免后续新增内容再次导致文件过大或不按作用域拆分。
+- 架构层：工单域 / 通知任务编排 / 项目工程规范
+- 创建的页面：`web/public/docs/2026-07-04-project-implementation-boundary-rules.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-external-sync-flow.md`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/update_history.md`、`AGENTS.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_sync_notification_job_service.py` -> `server/modules/ticket/controller/ticket_sync_controller.py` / `server/module_task/scheduler_maintenance.py` -> 工单外部同步与内网拉取流程；`AGENTS.md` -> 后续 AI 实现边界规则。
+- 总共涉及页面：6
+
+## [2026-07-04] INGEST-CODE | 工单外部多维邮箱补齐拆分与公开方法命名
+- 触发：用户要求继续拆分，并要求拆分后的子服务对外方法不要以 `_` 开头。
+- 架构层：工单域 / 外部推送多维表格邮箱补齐 / 子服务 API 命名规范
+- 创建的页面：无
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-external-sync-flow.md`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/2026-07-04-project-implementation-boundary-rules.md`、`web/public/docs/update_history.md`、`AGENTS.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_external_bitable_email_service.py` -> `server/modules/ticket/service/ticket_sync_service.py` -> 工单外部同步与内网拉取流程；`TicketBitablePullService` 公开方法改名 -> 主动拉取测试和定时任务边界。
+- 总共涉及页面：6
+
+## [2026-07-04] INGEST-CODE | 工单远端拉取服务拆分
+- 触发：用户要求继续拆分工单系统，并保持拆分后子服务公开方法不使用 `_` 前缀。
+- 架构层：工单域 / 内网远端拉取 / 同步编排拆分
+- 创建的页面：无
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-external-sync-flow.md`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`server/modules/ticket/service/ticket_remote_sync_service.py` -> `server/module_task/scheduler_maintenance.py` -> 工单外部同步与内网拉取流程；`TicketSyncService` 删除远端拉取方法，继续保留外部同步入库主链路。
+- 总共涉及页面：4

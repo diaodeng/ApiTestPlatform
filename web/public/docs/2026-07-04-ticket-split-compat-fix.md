@@ -24,6 +24,11 @@
 12. 继续拆分主动拉取边界：新增 `TicketBitablePullService` 承接飞书多维表格字段预览、记录转换、快照去重和主动拉取调度；`TicketSyncService` 删除对应主动拉取方法，不保留转发 shim。
 13. `ticket_sync_controller` 的字段预览接口和 `pull_feishu_bitable_ticket_sync` 定时任务已改为直接调用 `TicketBitablePullService`；主动拉取测试同步切换到新服务。
 14. 对照备份分支 `master_params_ticket_new` 保留主动拉取原始业务语义：字段映射别名归一、内部优先级兜底、当前处理人别名、`external_field_mapping` 快照、`recordId + snapshotHash` 去重、必填字段校验、富文本换行和延后后处理投递均不改变。
+15. 继续拆分通知任务边界：新增 `TicketSyncNotificationJobService` 承接人员催办预览、人员催办执行和工单汇总统计通知；`TicketSyncService` 删除对应通知任务门面。
+16. 固化项目实现边界规则到根目录 `AGENTS.md` 和 `web/public/docs/2026-07-04-project-implementation-boundary-rules.md`，后续实现必须先按 controller/service/dao/util/scheduler 作用域拆分。
+17. 修正拆分后子服务的公开方法命名：`TicketBitablePullService` 对外可调用方法改为非 `_` 开头；`TicketSyncNotifyService` 补充公开飞书凭证、请求和时间解析方法，拆分后的子服务不再调用它的私有方法。
+18. 继续拆分外部推送多维表格邮箱补齐边界：新增 `TicketExternalBitableEmailService`，承接按 `recordId` 查询飞书多维表格字段、提取三类人员邮箱并写入 `external_field_mapping` 的逻辑。
+19. 继续拆分远端拉取边界：新增 `TicketRemoteSyncService`，承接远端 pending 拉取、远端 payload 转入库模型、本地 revision/time 跳过判断和 ack 回写；`pull_remote_ticket_sync` 定时任务已改为直接调用该服务，`TicketSyncService` 删除远端拉取方法，不保留转发 shim。
 
 ## 关键不变项
 
@@ -35,13 +40,13 @@
 
 ## 当前拆分评估
 
-1. 当前拆分方向基本正确：评论幂等、消息流写入、AI 分类统计、配置归一化、主动拉取飞书查询和主动拉取编排已经下沉到低层服务，解决了主服务之间相互依赖的问题。
-2. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库、远端拉取、延后后处理、自动化和 payload 构造等多类职责，文件仍偏大。
+1. 当前拆分方向基本正确：评论幂等、消息流写入、AI 分类统计、配置归一化、主动拉取飞书查询、主动拉取编排、通知任务编排、外部推送多维表格邮箱补齐和远端拉取同步已经下沉到低层服务，解决了主服务之间相互依赖的问题。
+2. 当前仍不够理想：`TicketSyncService` 仍承担外部同步入库、延后后处理、自动化和 payload 构造等多类职责，文件仍偏大。
 3. 可以继续拆成独立子包，但应按调用方向渐进迁移，避免一次性移动大量文件导致接口和导入路径风险。
 
 ## 建议子包边界
 
-1. `service/sync/`：同步编排、外部入库、主动拉取、远端拉取、延后后处理；`TicketSyncService` 最终只保留公共编排入口。
+1. `service/sync/`：同步编排、外部入库、延后后处理；主动拉取和远端拉取已先拆为独立服务，`TicketSyncService` 最终只保留公共编排入口。
 2. `service/sync/config/`：同步配置、飞书多维表格公共配置、主动拉取 filter 和字段映射归一化。
 3. `service/sync/comment/`：`stepReason`、远端评论、评论幂等写入。
 4. `service/sync/notification/`：群推送、人员催办、汇总报表和飞书通知。
@@ -58,6 +63,13 @@
 1. `python -m py_compile server\modules\ticket\service\ticket_bitable_pull_service.py server\modules\ticket\service\ticket_sync_service.py server\modules\ticket\controller\ticket_sync_controller.py server\module_task\scheduler_maintenance.py`
 2. `cd server; uv run ruff check modules/ticket/service/ticket_bitable_pull_service.py modules/ticket/service/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py module_task/scheduler_maintenance.py tests/test_ticket_sync_mapping_boundary.py`
 3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary`
+
+2026-07-04 远端拉取服务拆分后补充验证：
+
+1. `cd server; uv run python -m py_compile modules/ticket/service/ticket_remote_sync_service.py modules/ticket/service/ticket_sync_service.py module_task/scheduler_maintenance.py tests/test_ticket_sync_mapping_boundary.py`
+2. `cd server; uv run ruff check modules/ticket/service/ticket_remote_sync_service.py modules/ticket/service/ticket_sync_service.py module_task/scheduler_maintenance.py tests/test_ticket_sync_mapping_boundary.py`
+3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary`
+4. `rg -n "TicketRemoteSyncService\._|TicketBitablePullService\._|TicketExternalBitableEmailService\._|TicketSyncNotificationJobService\._|TicketSyncService\.sync_remote_pending_tickets" server server\tests -g "*.py"`
 
 历史拆分验证：
 

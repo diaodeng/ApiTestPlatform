@@ -7,6 +7,7 @@
 5. 将函数内导入和延迟代理改为独立子模块：新增 `TicketCommentCoreService`、`TicketAutoClassificationService` 和 `ticket_common_util`，评论幂等、消息流、AI 分类与用户工具均从主服务中下沉，避免重新形成相互依赖。
 6. 删除源码目录中的 `.bak/.bak2` 历史备份文件，避免后续检索和 AI 分析误判仍存在旧私有入口；拆分前逻辑统一以 `master_params_ticket_new` 分支为准。
 7. 新增说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
+8. 新增 `TicketRemoteSyncService` 承接远端 pending 拉取、payload 转换、本地 revision/time 跳过判断和 ack 回写；远端拉取定时任务直接调用该服务，`TicketSyncService` 不再保留远端拉取转发入口。
 
 ## 2026-07-02
 
@@ -287,7 +288,12 @@
 1. 继续拆分工单同步服务：新增 `TicketBitablePullService` 承接飞书多维表格主动拉取字段预览、记录转换、快照去重和调度执行。
 2. `TicketSyncService` 删除主动拉取相关方法，不保留转发 shim；同步配置页字段预览和主动拉取定时任务改为直接调用新服务。
 3. 对照 `master_params_ticket_new` 保留主动拉取业务语义，字段映射、富文本换行、必填校验、快照去重、强制同步和延后后处理行为不变。
-4. 补充说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
+4. 新增 `TicketSyncNotificationJobService` 承接人员催办和汇总统计通知任务编排，控制器和定时任务直接调用该服务，`TicketSyncService` 不再保留通知任务门面。
+5. 固化项目实现边界规则到 `AGENTS.md` 和 `web/public/docs/2026-07-04-project-implementation-boundary-rules.md`，明确 controller/service/dao/util/scheduler 的职责边界和禁止转发 shim。
+6. 约束拆分后子服务的公开方法命名：外部调用的方法不再使用 `_` 开头；主动拉取子服务和通知工具公开方法已按该规则调整。
+7. 新增 `TicketExternalBitableEmailService` 承接外部推送多维表格邮箱补齐逻辑，保留 `recordId` 幂等跳过、字段查询、邮箱脱敏日志和 `external_field_mapping` 写入语义。
+8. 新增 `TicketRemoteSyncService` 承接远端拉取同步，保留 `remoteSync` 配置归一、字段别名兼容、本地版本跳过和远端 ack 结构；调度器直接调用新服务。
+9. 补充说明文档：`web/public/docs/2026-07-04-ticket-split-compat-fix.md`。
 
 ## 2026-06-15
 

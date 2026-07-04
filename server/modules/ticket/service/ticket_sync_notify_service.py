@@ -240,6 +240,16 @@ class TicketSyncNotifyService:
         return app_id, app_secret
 
     @classmethod
+    def resolve_feishu_auth(cls, config: dict[str, Any]) -> tuple[str, str]:
+        """
+        公开解析飞书应用凭证，供拆分后的子服务复用。
+
+        :param config: 通知或多维表格配置。
+        :return: (app_id, app_secret)。
+        """
+        return cls._resolve_feishu_auth(config)
+
+    @classmethod
     def _request_feishu_json(
         cls,
         *,
@@ -287,6 +297,37 @@ class TicketSyncNotifyService:
             raise RuntimeError(f"飞书接口调用失败:{e}  {url}") from e
 
     @classmethod
+    def request_feishu_json(
+        cls,
+        *,
+        method: str,
+        url: str,
+        tenant_access_token: str | None = None,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        timeout_sec: int = 30,
+    ) -> dict[str, Any]:
+        """
+        公开调用飞书开放平台接口并返回 JSON，供拆分后的子服务复用。
+
+        :param method: HTTP 方法。
+        :param url: 完整请求地址。
+        :param tenant_access_token: 飞书租户访问令牌，可为空。
+        :param params: URL 查询参数。
+        :param json_body: JSON 请求体。
+        :param timeout_sec: 超时时间（秒）。
+        :return: 响应 JSON 字典。
+        """
+        return cls._request_feishu_json(
+            method=method,
+            url=url,
+            tenant_access_token=tenant_access_token,
+            params=params,
+            json_body=json_body,
+            timeout_sec=timeout_sec,
+        )
+
+    @classmethod
     def _get_tenant_access_token(cls, app_id: str, app_secret: str) -> str:
         """
         获取飞书租户访问令牌并做内存缓存。
@@ -326,6 +367,17 @@ class TicketSyncNotifyService:
             "expire_at": now + timedelta(seconds=max(expire - 120, 60)),
         }
         return token
+
+    @classmethod
+    def get_tenant_access_token(cls, app_id: str, app_secret: str) -> str:
+        """
+        公开获取飞书租户访问令牌，供拆分后的子服务复用。
+
+        :param app_id: 飞书应用 app_id。
+        :param app_secret: 飞书应用 app_secret。
+        :return: tenant_access_token。
+        """
+        return cls._get_tenant_access_token(app_id, app_secret)
 
     @classmethod
     def _send_feishu_text_messages(
@@ -645,6 +697,16 @@ class TicketSyncNotifyService:
             except Exception:
                 continue
         return None
+
+    @classmethod
+    def parse_datetime_value(cls, value: Any) -> datetime | None:
+        """
+        公开解析多种格式的时间值，供拆分后的子服务复用。
+
+        :param value: 原始时间值。
+        :return: datetime，解析失败返回 None。
+        """
+        return cls._parse_datetime_value(value)
 
     @classmethod
     def _extract_person_names(cls, value: Any) -> list[str]:

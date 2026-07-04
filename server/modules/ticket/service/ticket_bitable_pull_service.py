@@ -23,16 +23,16 @@ class TicketBitablePullService:
     """
 
     @classmethod
-    def _build_system_current_user(cls) -> CurrentUserModel:
+    def build_system_current_user(cls) -> CurrentUserModel:
         """
         构造后台任务使用的系统用户上下文。
 
         :return: 包含空权限、空角色和 system 用户信息的当前用户模型。
         """
-        return CurrentUserModel.model_validate(cls._build_system_current_user_payload())
+        return CurrentUserModel.model_validate(cls.build_system_current_user_payload())
 
     @classmethod
-    def _build_system_current_user_payload(cls) -> dict[str, Any]:
+    def build_system_current_user_payload(cls) -> dict[str, Any]:
         """
         构造可跨 Celery 序列化的系统用户载荷。
 
@@ -45,7 +45,7 @@ class TicketBitablePullService:
         }
 
     @classmethod
-    def _normalize_current_user_payload(cls, current_user_payload: dict[str, Any] | None) -> dict[str, Any]:
+    def normalize_current_user_payload(cls, current_user_payload: dict[str, Any] | None) -> dict[str, Any]:
         """
         归一化延后后处理任务的当前用户载荷。
 
@@ -63,7 +63,7 @@ class TicketBitablePullService:
                 "nickName": user_payload.get("nickName", user_payload.get("nick_name")),
             }
         else:
-            payload["user"] = cls._build_system_current_user_payload()["user"]
+            payload["user"] = cls.build_system_current_user_payload()["user"]
         return payload
 
     @classmethod
@@ -320,18 +320,18 @@ class TicketBitablePullService:
             "skipReasons": {},
             "failures": [],
         }
-        fallback_user = current_user or cls._build_system_current_user()
+        fallback_user = current_user or cls.build_system_current_user()
         deferred_current_user_payload = (
-            cls._build_system_current_user_payload()
+            cls.build_system_current_user_payload()
             if current_user is None
-            else cls._normalize_current_user_payload(current_user.model_dump())
+            else cls.normalize_current_user_payload(current_user.model_dump())
         )
         automation_override = pull_config.get("automation") if isinstance(pull_config.get("automation"), dict) else {}
 
         from modules.ticket.service.ticket_sync_service import TicketSyncService
 
         for record in records:
-            sync_object = cls._build_bitable_pull_sync_object(
+            sync_object = cls.build_bitable_pull_sync_object(
                 record=record,
                 config=pull_config,
                 field_mappings=pull_config.get("fieldMappings") or [],
@@ -351,7 +351,7 @@ class TicketBitablePullService:
             should_skip, skip_reason = (
                 (False, "")
                 if force_sync
-                else cls._should_skip_bitable_pull_record(
+                else cls.should_skip_bitable_pull_record(
                     existing_ticket=existing_ticket,
                     sync_object=sync_object,
                 )
@@ -400,7 +400,7 @@ class TicketBitablePullService:
         return summary
 
     @classmethod
-    def _build_bitable_pull_sync_object(
+    def build_bitable_pull_sync_object(
         cls,
         *,
         record: dict[str, Any],
@@ -554,7 +554,7 @@ class TicketBitablePullService:
             return None
 
     @classmethod
-    def _should_skip_bitable_pull_record(
+    def should_skip_bitable_pull_record(
         cls,
         *,
         existing_ticket: Ticket | None,
@@ -582,3 +582,4 @@ class TicketBitablePullService:
         if existing_hash and current_hash and existing_hash == current_hash and existing_record_id == current_record_id:
             return True, "snapshot_not_changed"
         return False, ""
+

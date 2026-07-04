@@ -23,6 +23,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.service.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.ticket_sync_group_push_service import TicketSyncGroupPushService
+from modules.ticket.service.ticket_sync_notification_job_service import TicketSyncNotificationJobService
 from modules.ticket.service.ticket_sync_service import TicketSyncService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
@@ -251,7 +252,7 @@ async def preview_sync_person_reminder(
     :return: 人维度超时统计结果。
     """
     try:
-        result = TicketSyncService.preview_person_reminder_services(
+        result = TicketSyncNotificationJobService.preview_person_reminder_services(
             query_db,
             user_id=query_object.user_id,
             email=query_object.email,
@@ -279,7 +280,7 @@ async def run_sync_person_reminder(
     :return: 执行结果摘要。
     """
     try:
-        result = TicketSyncService.run_person_reminder_services(
+        result = TicketSyncNotificationJobService.run_person_reminder_services(
             query_db,
             trigger_source="manual",
             user_id=query_object.user_id,
@@ -308,7 +309,7 @@ async def run_sync_summary_report(
     :return: 执行结果摘要。
     """
     try:
-        result = TicketSyncService.run_summary_report_services(
+        result = TicketSyncNotificationJobService.run_summary_report_services(
             query_db,
             trigger_source="manual",
             start_time=query_object.start_time,
