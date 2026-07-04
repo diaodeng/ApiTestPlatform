@@ -19,7 +19,7 @@
 7. 补回拆分遗漏的 `PUT /ticket/{ticket_id:int}/rca` 接口，恢复前端“保存 RCA”功能。
 8. 恢复外部创建时间解析 `_resolve_external_create_time`，避免外部同步、远端拉取和主动拉取入库时缺少提交时间口径。
 9. 修复主动拉取时间覆盖：定时任务显式传入 `createdAfter/created_after` 时优先使用传入值；未传时才默认回退到当前时间前 1 小时。
-10. 恢复飞书多维表格时间过滤兼容行为：无原始 filter 时使用旧口径 `or` 条件；嵌套或扁平 filter 会递归补齐已有时间条件的空值。
+10. 按备份分支 `master_params_ticket_new` 回退飞书多维表格主动拉取时间过滤行为：无原始 filter 时使用 `and` 时间条件；嵌套 filter 只在最外层追加 `and` 时间子条件；扁平已有 filter 时不递归补齐原有空时间值。
 11. 删除源码目录中的 `ticket_sync_config_service.py.bak`、`ticket_sync_group_push_service.py.bak`、`ticket_sync_service.py.bak2`，避免旧入口污染代码检索和后续 AI 分析。
 12. 继续拆分主动拉取边界：新增 `TicketBitablePullService` 承接飞书多维表格字段预览、记录转换、快照去重和主动拉取调度；`TicketSyncService` 删除对应主动拉取方法，不保留转发 shim。
 13. `ticket_sync_controller` 的字段预览接口和 `pull_feishu_bitable_ticket_sync` 定时任务已改为直接调用 `TicketBitablePullService`；主动拉取测试同步切换到新服务。
@@ -37,6 +37,7 @@
 25. 继续拆分批量重归类边界：新增 `TicketBatchReclassificationService` 承接 `/ticket/sync/auto-category/reclassify`、`/ticket/sync/auto-category/stats`、正则批量归类、AI 批量归类调度和未归类统计；控制器直接调用新服务，`TicketSyncService` 删除对应入口。
 26. 继续拆分外部请求归一化边界：新增 `TicketExternalSyncRequestService` 承接 `/ticket/sync/external` 的 JSON/表单请求体读取、外部字段必填校验、人员字段拆分、`extraData.external_field_mapping` 和 `raw_payload` 构造；控制器直接调用新服务，`TicketSyncService` 删除对应入口。
 27. 清理 `TicketSyncService` 中已迁移到配置、payload、后处理、群推送和同步交付子服务的常量副本，只保留入库主编排当前实际使用的 `PUBLISH_STATUS_PROCESSING_AI`。
+28. 对照备份分支完成拆分后逻辑审计：主动拉取 `autoAppendTimeFilter=true` 时继续忽略显式 `createdAfter/createdBefore` 并动态使用最近 1 小时窗口；拆分 controller 路由集合恢复为 86 个且无重复注册。
 
 ## 关键不变项
 
@@ -126,6 +127,13 @@
 2. `cd server; uv run python -m py_compile modules/ticket/service/sync/ticket_sync_service.py modules/ticket/controller/ticket_sync_controller.py tests/test_ticket_sync_mapping_boundary.py`
 3. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary`
 4. `rg -n "TicketSyncService\.(CONFIG_KEY|SOURCE_CODE|META_KEY|CELERY_DISPATCH_MODE|BACKGROUND_DISPATCH_MODE|PUBLISH_STATUS_READY|AI_PENDING_AUTOMATION_STATUSES|AI_PENDING_TASK_STATUSES|DEFAULT_GROUP_PUSH_AUTO_STATUSES|DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS|DEFAULT_EXTERNAL_FIELD_MODEL_FIELDS|DEFAULT_TICKET_STAT_CLASSIFICATIONS|GROUP_PUSH_LOCK_TIMEOUT_SECONDS)|TicketSyncService\.DEFAULT" server/modules/ticket server/tests -S`
+
+2026-07-04 备份分支逻辑对齐审计后补充验证：
+
+1. `cd server; uv run ruff check modules/ticket/controller/ticket_crud_controller.py modules/ticket/service/sync/ticket_bitable_pull_service.py modules/ticket/service/sync/ticket_sync_config_service.py tests/test_ticket_sync_mapping_boundary.py`
+2. `cd server; uv run python -m unittest tests.test_ticket_sync_mapping_boundary -q`
+3. 路由脚本对比 `master_params_ticket_new:server/modules/ticket/controller/ticket_controller.py` 与当前拆分 controller，结果为 `old=86 current=86 missing=[] duplicates=[]`。
+4. 服务导入脚本验证 `TicketBitablePullService`、`TicketSyncConfigService` 可导入，并确认主动拉取默认时间 filter 连接符为 `and`。
 
 历史拆分验证：
 

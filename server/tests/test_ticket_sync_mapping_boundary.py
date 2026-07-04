@@ -1510,8 +1510,9 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertGreaterEqual(created_after, before_call.replace(microsecond=0))
         self.assertLessEqual(created_after, after_call.replace(microsecond=0))
 
-    def test_bitable_pull_override_keeps_specified_created_after(self):
-        """主动拉取任务指定时间时，应使用指定时间作为创建时间下限。"""
+    def test_bitable_pull_auto_append_ignores_specified_created_after(self):
+        """自动追加时间窗口开启时，应忽略显式时间并沿用拆分前的最近 1 小时窗口。"""
+        before_call = datetime.now() - timedelta(hours=1, seconds=2)
         config = TicketSyncConfigService.default_sync_config()
         config["bitablePull"].update(
             {
@@ -1534,8 +1535,11 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 bitable_pull_override=_build_bitable_pull_config_override({"created_after": "2026-06-22 10:48:00"}),
             )
 
+        after_call = datetime.now() - timedelta(hours=1) + timedelta(seconds=2)
+        created_after = datetime.strptime(result["createdAfter"], "%Y-%m-%d %H:%M:%S")
         self.assertFalse(result["skipped"])
-        self.assertEqual(result["createdAfter"], "2026-06-22 10:48:00")
+        self.assertGreaterEqual(created_after, before_call.replace(microsecond=0))
+        self.assertLessEqual(created_after, after_call.replace(microsecond=0))
 
     def test_bitable_pull_force_sync_bypasses_snapshot_skip(self):
         """强制同步时应忽略 snapshotHash 去重并重新调用外部同步入库。"""
@@ -1940,7 +1944,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             filters,
             [
                 {
-                    "conjunction": "or",
+                    "conjunction": "and",
                     "conditions": [
                         {
                             "field_name": "更新时间",
@@ -1952,8 +1956,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             ],
         )
 
-    def test_bitable_pull_time_filter_nested_appends_outer_child_and_fills_inner_values(self):
-        """嵌套 filter 应在最外层 children 追加时间范围，并递归补齐内部时间字段值（仅更新时间）。"""
+    def test_bitable_pull_time_filter_nested_appends_outer_child(self):
+        """嵌套 filter 应沿用拆分前语义，只在最外层 children 追加时间范围。"""
         created_after = datetime(2026, 6, 24, 0, 59, 0)
         filter_millis = TicketSyncConfigService.datetime_to_bitable_filter_millis(created_after)
         filter_formula = {
@@ -1989,17 +1993,17 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(len(filters), 1)
         children = filters[0]["children"]
         self.assertEqual(len(children), 3)
-        self.assertEqual(children[0]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
-        self.assertEqual(children[2]["conjunction"], "or")
+        self.assertEqual(children[0]["conditions"][0]["value"], "")
+        self.assertEqual(children[2]["conjunction"], "and")
         self.assertEqual(
             [condition["field_name"] for condition in children[2]["conditions"]],
             ["更新时间"],
         )
+        self.assertEqual(children[2]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
 
-    def test_bitable_pull_time_filter_flat_only_fills_configured_time_values(self):
-        """扁平 filter 应只补齐已有时间字段值，不再追加默认时间范围。"""
+    def test_bitable_pull_time_filter_flat_keeps_configured_filter(self):
+        """扁平 filter 应沿用拆分前语义，存在配置 filter 时不追加默认时间范围。"""
         created_after = datetime(2026, 6, 24, 0, 59, 0)
-        filter_millis = TicketSyncConfigService.datetime_to_bitable_filter_millis(created_after)
         filter_formula = {
             "conjunction": "and",
             "conditions": [
@@ -2017,7 +2021,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(len(filters), 1)
         self.assertNotIn("children", filters[0])
         self.assertEqual(len(filters[0]["conditions"]), 2)
-        self.assertEqual(filters[0]["conditions"][0]["value"], ["ExactDate", f"{filter_millis}"])
+        self.assertEqual(filters[0]["conditions"][0]["value"], "")
         self.assertEqual(filters[0]["conditions"][1]["value"], ["待处理"])
 
     def test_feishu_message_sync_resolves_sender_open_id_to_user_name(self):

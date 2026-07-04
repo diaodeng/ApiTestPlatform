@@ -1120,3 +1120,12 @@ updated: 2026-07-04
 - 创建的双向链接：0 对
 - 变更传播链：`server/modules/ticket/service/ticket_remote_sync_service.py` -> `server/module_task/scheduler_maintenance.py` -> 工单外部同步与内网拉取流程；`TicketSyncService` 删除远端拉取方法，继续保留外部同步入库主链路。
 - 总共涉及页面：4
+
+## [2026-07-04] INGEST-CODE | 工单拆分后备份分支逻辑审计
+- 触发：用户要求检查拆分后后端逻辑是否与备份分支 `master_params_ticket_new` 一致。
+- 架构层：工单域 / 同步拆分兼容 / 路由边界
+- 创建的页面：`web/public/docs/2026-07-04-ticket-split-backup-branch-logic-audit.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`web/public/docs/2026-07-04-ticket-split-compat-fix.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketBitablePullService.run_bitable_pull_services` / `TicketSyncConfigService.build_bitable_pull_time_filters` / 拆分 controller 路由集合 -> 工单域知识页。
+- 总共涉及页面：4

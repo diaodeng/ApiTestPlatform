@@ -211,8 +211,10 @@ class TicketBitablePullService:
             }
 
         auto_append = SyncUtil.to_bool(pull_config.get("autoAppendTimeFilter"), True)
-        raw_created_after = str(pull_config.get("createdAfter") or "").strip()
-        raw_created_before = str(pull_config.get("createdBefore") or "").strip()
+        # 与拆分前 TicketSyncService 保持一致：自动追加时间窗口时忽略配置里的显式时间，
+        # 统一由本次执行动态生成最近 1 小时窗口，避免历史配置扩大主动拉取范围。
+        raw_created_after = str(pull_config.get("createdAfter") or "").strip() if not auto_append else None
+        raw_created_before = str(pull_config.get("createdBefore") or "").strip() if not auto_append else None
 
         created_after = (
             TicketSyncConfigService.resolve_bitable_pull_created_after(raw_created_after)

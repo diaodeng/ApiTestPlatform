@@ -1101,34 +1101,18 @@ class TicketSyncConfigService:
             )
 
         if not parsed_filter:
-            return [{"conjunction": "or", "conditions": time_conditions}] if time_conditions else []
+            return [{"conjunction": "and", "conditions": time_conditions}] if time_conditions else []
 
         if isinstance(parsed_filter.get("children"), list):
             if time_conditions:
-                time_field_names = {item["field_name"] for item in time_conditions if item.get("field_name")}
-                filter_value = time_conditions[0].get("value")
-                parsed_filter = cls.fill_dynamic_time_filter_values(
-                    parsed_filter,
-                    time_field_names=time_field_names,
-                    filter_value=filter_value,
-                )
-            if time_conditions:
                 parsed_filter["children"].append(
                     {
-                        "conjunction": "or",
+                        "conjunction": "and",
                         "conditions": time_conditions,
                     }
                 )
             return [parsed_filter]
 
-        if time_conditions:
-            time_field_names = {item["field_name"] for item in time_conditions if item.get("field_name")}
-            filter_value = time_conditions[0].get("value")
-            parsed_filter = cls.fill_dynamic_time_filter_values(
-                parsed_filter,
-                time_field_names=time_field_names,
-                filter_value=filter_value,
-            )
         return [parsed_filter]
 
 

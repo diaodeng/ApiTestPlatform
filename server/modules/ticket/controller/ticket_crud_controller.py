@@ -9,9 +9,6 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
-from modules.ticket.entity.vo.ticket_log_pull_vo import (
-    TicketLogPullCreateModel,
-)
 from modules.ticket.entity.vo.ticket_vo import (
     TicketAssignModel,
     TicketCommentCreateModel,
@@ -28,8 +25,6 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.core.ticket_import_service import TicketImportService
 from modules.ticket.service.core.ticket_service import TicketService
-from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
-from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -457,38 +452,6 @@ async def get_ticket_messages(request: Request, ticket_id: int, query_db: Sessio
 
 
 @ticketCrudController.post(
-    "/log-pulls",
-    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:add"))],
-)
-async def create_ticket_log_pull_manage(
-    request: Request,
-    create_object: TicketLogPullCreateModel,
-    query_db: Session = Depends(get_db),
-    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
-):
-    """
-    新增日志拉取管理记录接口。
-    :param request: 请求对象
-    :param create_object: 日志拉取参数，关联工单可选
-    :param query_db: 数据库会话
-    :param current_user: 当前登录用户，用于写入申请人
-    :return: 创建结果
-    """
-    try:
-        result = await run_in_threadpool(
-            TicketLogPullService.create_log_pull_services,
-            query_db,
-            create_object.ticket_id,
-            create_object,
-            current_user,
-        )
-        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
-    except Exception as e:
-        logger.exception(e)
-        return ResponseUtil.error(msg=str(e))
-
-
-@ticketCrudController.post(
     "/{ticket_id:int}/messages", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:add"))]
 )
 async def add_ticket_message(
@@ -631,21 +594,4 @@ async def get_ticket_module_options(
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
-
-@ticketCrudController.get(
-    "/stat-classification/options",
-    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))],
-)
-async def get_ticket_stat_classification_options(request: Request, query_db: Session = Depends(get_db)):
-    """
-    获取工单分类统计枚举选项接口。
-    :param request: 请求对象
-    :param query_db: 数据库会话
-    :return: 工单类型、根因分类、解决方式和关闭结果选项
-    """
-    try:
-        return ResponseUtil.success(data=TicketSyncConfigService.get_ticket_stat_classification_options(query_db))
-    except Exception as e:
-        logger.exception(e)
-        return ResponseUtil.error(msg=str(e))
 
