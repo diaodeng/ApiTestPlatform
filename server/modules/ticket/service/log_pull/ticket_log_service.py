@@ -191,6 +191,7 @@ class LogService:
         limit: int = 100,
         with_context: bool = True,
         record_id: int | None = None,
+        file_path: str | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         使用 ripgrep 搜索工单日志，并按需返回每个命中的上下文。
@@ -200,6 +201,8 @@ class LogService:
         :param context_after: 后置上下文行数
         :param limit: 最大返回命中数
         :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param file_path: 指定相对日志文件路径，空值表示全局搜索
         :return: 搜索命中列表
         """
         keyword = str(keyword or "").strip()
@@ -208,18 +211,22 @@ class LogService:
         extract_dir = cls._extract_dir(ticket_id, record_id)
         if not extract_dir.exists():
             return []
+        normalized_file = cls._normalize_relative_path(file_path) if str(file_path or "").strip() else None
+        if normalized_file:
+            # 先解析一次相对路径，确保指定文件仍位于当前工单日志目录内。
+            cls._resolve_log_file(ticket_id, normalized_file, record_id)
         if not keyword.isascii():
             logger.info(
                 f"日志搜索包含非 ASCII 关键字，使用 Python 编码兼容模式，ticket_id={ticket_id}，keyword={keyword}"
             )
             return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
             )
         search_mode = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
         if search_mode == "python":
             logger.info(f"日志搜索使用 Python 降级模式，ticket_id={ticket_id}，keyword={keyword}")
             return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
             )
 
         executable = (
@@ -231,10 +238,21 @@ class LogService:
         if not executable:
             logger.warning(f"未找到 rg/ripgrep，日志搜索降级为 Python，ticket_id={ticket_id}，keyword={keyword}")
             return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
             )
 
-        command = [executable, "-n", "--no-heading", "--color", "never", "--fixed-strings", keyword, "."]
+        search_target = normalized_file or "."
+        command = [
+            executable,
+            "-n",
+            "--no-heading",
+            "--with-filename",
+            "--color",
+            "never",
+            "--fixed-strings",
+            keyword,
+            search_target,
+        ]
         try:
             process = subprocess.run(
                 command,
@@ -247,7 +265,7 @@ class LogService:
         except FileNotFoundError as exc:
             logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
             return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
             )
         if process.returncode not in (0, 1):
             logger.warning(
@@ -255,7 +273,7 @@ class LogService:
                 f"reason={process.stderr.strip() or process.stdout.strip()}"
             )
             return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id
+                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
             )
 
         hits: list[TicketLogSearchHitModel] = []
@@ -369,6 +387,7 @@ class LogService:
         limit: int,
         with_context: bool,
         record_id: int | None = None,
+        file_path: str | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         Python 降级搜索实现，在没有 rg/ripgrep 时使用。
@@ -378,26 +397,29 @@ class LogService:
         :param context_after: 后置上下文行数
         :param limit: 最大返回命中数
         :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param file_path: 指定相对日志文件路径，空值表示全局搜索
         :return: 搜索命中列表
         """
         hits: list[TicketLogSearchHitModel] = []
-        for file_item in cls.files(ticket_id, record_id):
+        target_files = [file_path] if file_path else [file_item.file for file_item in cls.files(ticket_id, record_id)]
+        for target_file in target_files:
             if len(hits) >= limit:
                 break
-            path = cls._resolve_log_file(ticket_id, file_item.file, record_id)
+            path = cls._resolve_log_file(ticket_id, target_file, record_id)
             encoding = cls._detect_file_encoding(path)
             with path.open("r", encoding=encoding, errors="replace") as file_obj:
                 for line_no, content in enumerate(file_obj, start=1):
                     if keyword not in content:
                         continue
                     hit = TicketLogSearchHitModel(
-                        file=file_item.file,
+                        file=target_file,
                         line=line_no,
                         content=content.rstrip("\r\n"),
                     )
                     if with_context:
                         hit.context = cls.context(
-                            ticket_id, file_item.file, line_no, context_before, context_after, record_id
+                            ticket_id, target_file, line_no, context_before, context_after, record_id
                         )
                     hits.append(hit)
                     if len(hits) >= limit:

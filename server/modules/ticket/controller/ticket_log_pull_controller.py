@@ -188,6 +188,7 @@ async def search_ticket_logs(request: Request, search_object: TicketLogSearchReq
             search_object.limit,
             search_object.with_context,
             search_object.record_id,
+            search_object.file,
         )
         return ResponseUtil.success(data=result)
     except Exception as e:

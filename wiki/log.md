@@ -8,6 +8,15 @@ updated: 2026-07-04
 
 # 操作日志
 
+## [2026-07-04] INGEST-CODE | 工单日志查看器文件范围搜索与高亮
+
+- 触发：用户要求日志查看页换行开关放到日志详细信息块标题上，日志搜索支持先全局再按文件搜索，并评估选中文案相同内容高亮是否可实现。
+- 架构层：工单域 / 日志查看 / Web 控制台
+- 创建的页面：`web/public/docs/2026-07-04-ticket-log-viewer-file-scope-highlight.md`
+- 更新的页面：`server/modules/ticket/entity/vo/ticket_log_pull_vo.py`、`server/modules/ticket/controller/ticket_log_pull_controller.py`、`server/modules/ticket/service/log_pull/ticket_log_service.py`、`server/tests/test_ticket_log_service.py`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`、`wiki/flows/ticket-log-record-isolated-view.md`、`wiki/entities/services/web-feature-domains.md`
+- 变更传播链：前端全局关键字搜索结果 `file` -> 文件范围下拉/在此文件搜索 -> `/ticket/logs/search.file` -> `LogService.search` 限定单文件扫描；日志详细信息块选中文案 -> `logViewerHighlightText` -> 当前上下文行片段高亮并在翻页后复用。
+- 关键结论：按文件搜索复用原搜索接口和日志相对路径校验；高亮只处理当前上下文块，不扫描整份日志，默认性能风险可控。打开查看器时必须先重置旧状态再写入当前记录，避免 `recordId` 被清空后搜索回落到工单级目录。
+
 ## [2026-07-04] INGEST-CODE | 工单日志链接与 AI 前端偏好
 
 - 触发：用户反馈工单日志拉取列表缺少时间/路径参数，归档地址和压缩包需要像外部链接一样左键打开、右键复制；发起 AI 分析和协同/AI 的 Agent、Provider、追加提示词默认选择和手动记忆失效。

@@ -86,7 +86,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   const logViewerErrorSummary = ref(null)
   const logViewerResultViewMode = ref('normal')
   const logViewerContextViewMode = ref('normal')
-  const logViewerForm = ref({ ticketId: undefined, keyword: '', contextLines: 20, limit: 500 })
+  const logViewerHighlightText = ref('')
+  const logViewerForm = ref({ ticketId: undefined, keyword: '', file: '', contextLines: 20, limit: 500 })
 
   function buildCleanLogPullConfig(source) {
     const config = { ...(source || {}) }
@@ -543,6 +544,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerContext.value = null
     logViewerErrorSummary.value = null
     logViewerForm.value.keyword = ''
+    logViewerForm.value.file = ''
+    logViewerHighlightText.value = ''
     logViewerForm.value.ticketId = ticketId
   }
 
@@ -553,6 +556,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerSearching.value = true
     prepareTicketLogs(ticketId, recordId).then(() => {
       currentTicketId.value = ticketId
+      resetLogViewerState(ticketId)
       syncLogViewerTicketMeta({
         ticketId,
         ticketNo: row?.ticketNo || detail?.value?.ticketNo || '',
@@ -572,7 +576,6 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
           storagePath: row.latestLogPull?.storagePath || '',
           commandResultUrl: row.latestLogPull?.commandResultUrl || ''
         }
-      resetLogViewerState(ticketId)
       logPullWrapEnabled.value = false
       logPullContentOpen.value = true
     }).finally(() => {
@@ -601,6 +604,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerHits.value = []
     logViewerContext.value = null
     logViewerErrorSummary.value = null
+    logViewerHighlightText.value = ''
   }
 
   function buildLogViewerPayload(keywordField = 'keyword') {
@@ -616,7 +620,48 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       withContext: false
     }
     payload[keywordField] = logViewerForm.value[keywordField]
+    const file = String(logViewerForm.value.file || '').trim()
+    if (file) payload.file = file
     return payload
+  }
+
+  /** 设置日志关键字搜索的文件范围。 */
+  function setLogViewerFileScope(file) {
+    logViewerForm.value.file = String(file || '').trim()
+  }
+
+  /** 将搜索范围切到指定日志文件后立即用当前关键字重新搜索。 */
+  function searchLogViewerInFile(file) {
+    setLogViewerFileScope(file)
+    searchLogViewerKeyword()
+  }
+
+  /** 清空日志搜索文件范围，后续搜索恢复全局目录。 */
+  function clearLogViewerFileScope() {
+    logViewerForm.value.file = ''
+  }
+
+  /** 归一化用户在日志详细信息中选中的文本，避免跨行选择导致高亮范围过大。 */
+  function normalizeLogViewerSelectedText(text) {
+    const selected = String(text || '').replace(/\r/g, '').trim()
+    if (!selected || selected.includes('\n')) return ''
+    return selected.length > 200 ? selected.slice(0, 200) : selected
+  }
+
+  /** 捕获日志详细信息块的鼠标选中文本，并作为当前上下文高亮关键字。 */
+  function captureLogViewerHighlight() {
+    const selected = normalizeLogViewerSelectedText(window.getSelection?.().toString())
+    if (!selected) return
+    if (selected.length < 2) {
+      proxy.$modal.msgWarning('请选择至少 2 个字符用于高亮')
+      return
+    }
+    logViewerHighlightText.value = selected
+  }
+
+  /** 清空当前上下文高亮关键字。 */
+  function clearLogViewerHighlight() {
+    logViewerHighlightText.value = ''
   }
 
   function setLogViewerPanelMode(panel, mode) {
@@ -723,6 +768,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerErrorSummary,
     logViewerResultViewMode,
     logViewerContextViewMode,
+    logViewerHighlightText,
     logViewerForm,
     createDefaultLogPullForm,
     buildCleanLogPullConfig,
@@ -760,6 +806,12 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     handleLogPullDialogClosed,
     resetLogViewerState,
     buildLogViewerPayload,
+    setLogViewerFileScope,
+    searchLogViewerInFile,
+    clearLogViewerFileScope,
+    normalizeLogViewerSelectedText,
+    captureLogViewerHighlight,
+    clearLogViewerHighlight,
     setLogViewerPanelMode,
     searchLogViewerKeyword,
     loadLogViewerErrors,

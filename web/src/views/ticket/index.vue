@@ -2893,6 +2893,27 @@
           <el-button type="primary" :loading="logViewerSearching" @click="searchLogViewerKeyword"
             >搜索</el-button
           >
+          <el-select
+            v-model="logViewerForm.file"
+            class="log-file-scope-select"
+            clearable
+            filterable
+            placeholder="全局搜索"
+          >
+            <el-option
+              v-for="file in logViewerFileOptions"
+              :key="file"
+              :label="file"
+              :value="file"
+            />
+          </el-select>
+          <el-button
+            v-if="logViewerForm.file"
+            link
+            type="primary"
+            @click="clearLogViewerFileScope"
+            >清除文件范围</el-button
+          >
           <el-text>上下文</el-text>
           <el-input-number
             v-model="logViewerForm.contextLines"
@@ -2907,12 +2928,6 @@
             :max="5000"
             :step="100"
             controls-position="right"
-          />
-          <el-switch
-            v-model="logPullWrapEnabled"
-            inline-prompt
-            active-text="换行"
-            inactive-text="不换行"
           />
           <el-button
             type="warning"
@@ -3001,6 +3016,16 @@
             <el-table-column label="文件" prop="file" min-width="220" show-overflow-tooltip />
             <el-table-column label="行号" prop="line" width="90" />
             <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip />
+            <el-table-column label="操作" width="130" fixed="right">
+              <template #default="scope">
+                <el-button
+                  link
+                  type="primary"
+                  @click.stop="searchLogViewerInFile(scope.row.file)"
+                  >在此文件搜索</el-button
+                >
+              </template>
+            </el-table-column>
           </el-table>
         </div>
         <div
@@ -3022,6 +3047,22 @@
               }}-{{ logViewerContext.end }}/{{ logViewerContext.totalLines }}）</span
             >
             <div class="panel-inline">
+              <el-switch
+                v-model="logPullWrapEnabled"
+                inline-prompt
+                active-text="换行"
+                inactive-text="不换行"
+              />
+              <el-tag v-if="logViewerHighlightText" type="warning" effect="plain" round>
+                高亮：{{ logViewerHighlightText }}
+              </el-tag>
+              <el-button
+                v-if="logViewerHighlightText"
+                link
+                type="primary"
+                @click="clearLogViewerHighlight"
+                >清除高亮</el-button
+              >
               <el-button
                 link
                 type="primary"
@@ -3071,7 +3112,21 @@
               'log-context-block',
               { 'log-content-wrap': logPullWrapEnabled },
             ]"
-            >{{ logViewerContextText }}</pre
+            @mouseup="captureLogViewerHighlight"
+            ><span
+              v-for="item in logViewerContextDisplayLines"
+              :key="`${item.file}:${item.line}`"
+              class="log-context-line"
+              ><span class="log-context-line-no">{{ item.paddedLine }}</span
+              ><span class="log-context-line-content"
+                ><template v-for="(part, partIndex) in item.parts" :key="partIndex"
+                  ><mark v-if="part.highlight" class="log-context-highlight">{{
+                    part.text
+                  }}</mark
+                  ><span v-else>{{ part.text }}</span></template
+                ></span
+              ></span
+            ></pre
           >
         </div>
       </div>
@@ -3278,6 +3333,7 @@
     logViewerErrorSummary,
     logViewerResultViewMode,
     logViewerContextViewMode,
+    logViewerHighlightText,
     logViewerForm,
     createDefaultLogPullForm,
     buildCleanLogPullConfig,
@@ -3302,6 +3358,10 @@
     openTicketLogViewer,
     openLogViewerFromPullRecord,
     handleLogPullDialogClosed,
+    searchLogViewerInFile,
+    clearLogViewerFileScope,
+    captureLogViewerHighlight,
+    clearLogViewerHighlight,
     setLogViewerPanelMode,
     searchLogViewerKeyword,
     loadLogViewerErrors,
@@ -3626,11 +3686,47 @@
   const latestSnapshotSummary = computed(
     () => latestSnapshot.value?.summary || detail.value.rootCause || detail.value.description || ''
   );
-  const logViewerContextText = computed(() => {
+  /** 根据当前搜索结果生成可选文件范围，支持先全局搜索再收敛到单文件。 */
+  const logViewerFileOptions = computed(() => {
+    const files = new Set();
+    logViewerHits.value.forEach((item) => {
+      const file = String(item?.file || '').trim();
+      if (file) files.add(file);
+    });
+    const scopedFile = String(logViewerForm.value.file || '').trim();
+    if (scopedFile) files.add(scopedFile);
+    return Array.from(files).sort();
+  });
+  /** 将一行日志按当前选中文案拆成普通片段和高亮片段。 */
+  function splitLogViewerHighlightParts(content) {
+    const text = String(content || '');
+    const keyword = String(logViewerHighlightText.value || '');
+    if (!keyword) return [{ text, highlight: false }];
+    const parts = [];
+    let cursor = 0;
+    while (cursor < text.length) {
+      const index = text.indexOf(keyword, cursor);
+      if (index < 0) {
+        parts.push({ text: text.slice(cursor), highlight: false });
+        break;
+      }
+      if (index > cursor) {
+        parts.push({ text: text.slice(cursor, index), highlight: false });
+      }
+      parts.push({ text: text.slice(index, index + keyword.length), highlight: true });
+      cursor = index + keyword.length;
+    }
+    return parts.length ? parts : [{ text, highlight: false }];
+  }
+  /** 生成日志详细信息块的展示行，避免在模板中拼接行号和高亮结构。 */
+  const logViewerContextDisplayLines = computed(() => {
     const lines = logViewerContext.value?.lines || [];
-    return lines
-      .map((item) => `${String(item.line).padStart(6, ' ')}  ${item.content || ''}`)
-      .join('\n');
+    return lines.map((item) => ({
+      file: item.file || logViewerContext.value?.file || '',
+      line: item.line,
+      paddedLine: `${String(item.line).padStart(6, ' ')}  `,
+      parts: splitLogViewerHighlightParts(item.content || ''),
+    }));
   });
   const logViewerResultTableHeight = computed(() =>
     logViewerResultViewMode.value === 'fullscreen' ? 'calc(100vh - 170px)' : 320
@@ -5210,6 +5306,10 @@
     width: 220px;
   }
 
+  .log-file-scope-select {
+    width: min(360px, 100%);
+  }
+
   .panel-inline {
     display: flex;
     align-items: center;
@@ -5314,6 +5414,26 @@
   .log-content-wrap {
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  .log-context-line {
+    display: block;
+  }
+
+  .log-context-line-no {
+    color: #94a3b8;
+    user-select: none;
+  }
+
+  .log-context-line-content {
+    white-space: inherit;
+  }
+
+  .log-context-highlight {
+    padding: 0 1px;
+    color: #111827;
+    background: #fde047;
+    border-radius: 2px;
   }
 
   .log-content-dialog {
