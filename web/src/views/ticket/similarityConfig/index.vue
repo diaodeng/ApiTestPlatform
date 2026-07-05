@@ -270,7 +270,7 @@
             <el-form-item label="重建范围">
               <el-select v-model="rebuildForm.scope" style="width: 100%">
                 <el-option label="全部有效工单" value="all" />
-                <el-option label="指定工单ID" value="ids" />
+                <el-option label="指定工单号" value="nos" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -312,13 +312,13 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col v-if="rebuildForm.scope === 'ids'" :xs="24" :md="24">
-            <el-form-item label="工单ID">
+          <el-col v-if="rebuildForm.scope === 'nos'" :xs="24" :md="24">
+            <el-form-item label="工单号">
               <el-input
-                v-model="rebuildForm.ticketIdsText"
+                v-model="rebuildForm.ticketNosText"
                 type="textarea"
                 :rows="3"
-                placeholder="多个ID用逗号、空格或换行分隔"
+                placeholder="多个工单号用逗号、空格或换行分隔，例如 INC202607050001"
               />
             </el-form-item>
           </el-col>
@@ -458,7 +458,7 @@
     provider: '',
     includeQdrantMode: 'auto',
     runInBackground: true,
-    ticketIdsText: '',
+    ticketNosText: '',
   });
 
   function assignConfig(config = {}) {
@@ -533,22 +533,29 @@
     });
   }
 
-  function parseTicketIds() {
-    return String(rebuildForm.ticketIdsText || '')
+  function parseTicketNos() {
+    const ticketNos = [];
+    String(rebuildForm.ticketNosText || '')
       .split(/[\s,，;；]+/)
-      .map((item) => Number(item))
-      .filter((item) => Number.isInteger(item) && item > 0);
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .forEach((item) => {
+        if (!ticketNos.includes(item)) {
+          ticketNos.push(item);
+        }
+      });
+    return ticketNos;
   }
 
   function handleRebuild() {
-    const ticketIds = rebuildForm.scope === 'ids' ? parseTicketIds() : [];
-    if (rebuildForm.scope === 'ids' && !ticketIds.length) {
-      proxy.$modal.msgWarning('请输入有效的工单ID');
+    const ticketNos = rebuildForm.scope === 'nos' ? parseTicketNos() : [];
+    if (rebuildForm.scope === 'nos' && !ticketNos.length) {
+      proxy.$modal.msgWarning('请输入有效的工单号');
       return;
     }
     const payload = {
       allTickets: rebuildForm.scope === 'all',
-      ticketIds: ticketIds.length ? ticketIds : null,
+      ticketNos: ticketNos.length ? ticketNos : null,
       pageSize: Number(rebuildForm.pageSize || 100),
       provider: rebuildForm.provider || null,
       includeQdrant:

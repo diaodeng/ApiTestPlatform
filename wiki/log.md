@@ -3,10 +3,28 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-04
+updated: 2026-07-05
 ---
 
 # 操作日志
+
+## [2026-07-05] INGEST-CODE | 工单向量重建 Qdrant 400 诊断增强
+
+- 触发：用户反馈手动重建工单 `INC00001699695` 时 Qdrant `/collections/ticket_similarity/points` 返回 400，日志只显示 `400 Client Error`，无法判断根因。
+- 架构层：工单域 / 相似工单 / Qdrant Provider / 后端诊断
+- 创建的页面：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`
+- 更新的页面：`server/modules/ticket/service/ai/ticket_embedding_service.py`、`server/tests/test_ticket_embedding_service.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-automation-flow.md`
+- 变更传播链：`TicketEmbeddingService.vectorize_ticket` -> `_upsert_qdrant_ticket` -> `_ensure_qdrant_collection(expected_dimension)` -> 维度一致才调用 Qdrant points 写入；Qdrant 4xx/5xx -> `_raise_for_qdrant_status` -> 异常信息保留响应体。
+- 关键结论：最可能原因是既有 `ticket_similarity` collection 维度与当前 Embedding 实际返回维度不一致。本次不自动删除或重建 collection，避免误清数据；应修正 Embedding 配置或切换新 collection 后重新重建。
+
+## [2026-07-05] INGEST-CODE | 相似工单手动重建改用 ticketNo
+
+- 触发：用户要求相似工单配置中的手动重建功能使用工单 `ticketNo`，并询问本地 hash 与 Embedding 的差异。
+- 架构层：工单域 / 相似工单 / Web 配置页 / API 契约
+- 创建的页面：`web/public/docs/2026-07-05-ticket-similarity-rebuild-ticket-no.md`
+- 更新的页面：`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/dao/ticket_dao.py`、`server/modules/ticket/service/ai/ticket_embedding_service.py`、`server/modules/ticket/controller/ticket_config_controller.py`、`web/src/views/ticket/similarityConfig/index.vue`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-automation-flow.md`
+- 变更传播链：相似工单配置页手动输入 `ticketNosText` -> `POST /ticket/similarity/rebuild.ticketNos` -> `TicketEmbeddingService.resolve_ticket_ids_for_rebuild` -> `TicketDao.list_tickets_by_nos` -> 现有向量重建流程按系统 `ticket_id` 执行。
+- 关键结论：页面不再要求用户输入内部 `ticketId`；后端保留 `ticketIds` 兼容但优先按 `ticketNos` 解析。指定工单号全部不存在时返回 0 条，不误触发全量重建。本地 hash 适合兜底和开发，真实 Embedding + Qdrant 的语义召回能力明显更强但有服务稳定性和配置成本。
 
 ## [2026-07-04] INGEST-CODE | 工单日志查看器文件范围搜索与高亮
 

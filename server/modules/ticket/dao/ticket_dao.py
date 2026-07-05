@@ -528,6 +528,18 @@ class TicketDao:
         return {row[0] for row in rows}
 
     @classmethod
+    def list_tickets_by_nos(cls, db: Session, ticket_nos: list[str]) -> list[Ticket]:
+        """
+        按工单编号批量查询未删除工单，用于手工重建等面向业务编号的入口。
+        :param db: 数据库会话
+        :param ticket_nos: 工单编号列表
+        :return: 未删除工单列表
+        """
+        if not ticket_nos:
+            return []
+        return db.query(Ticket).filter(Ticket.del_flag == "0", Ticket.ticket_no.in_(ticket_nos)).all()
+
+    @classmethod
     def get_ticket_list(cls, db: Session, query: TicketQueryModel):
         """
         根据查询条件分页获取工单列表。
@@ -1791,7 +1803,9 @@ class TicketDao:
         :return: 工单列表
         """
         query = db.query(Ticket).filter(Ticket.del_flag == "0")
-        if ticket_ids:
+        if ticket_ids is not None:
+            if not ticket_ids:
+                return []
             query = query.filter(Ticket.ticket_id.in_(ticket_ids))
         return query.order_by(Ticket.update_time.desc(), Ticket.create_time.desc()).offset(offset).limit(limit).all()
 
@@ -1804,7 +1818,9 @@ class TicketDao:
         :return: 工单数量
         """
         query = db.query(func.count(Ticket.ticket_id)).filter(Ticket.del_flag == "0")
-        if ticket_ids:
+        if ticket_ids is not None:
+            if not ticket_ids:
+                return 0
             query = query.filter(Ticket.ticket_id.in_(ticket_ids))
         return int(query.scalar() or 0)
 

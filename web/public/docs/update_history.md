@@ -1,3 +1,11 @@
+## 2026-07-05
+
+1. 相似工单配置页手动重建范围从系统内部 `ticketId` 改为业务工单号 `ticketNo`；后端新增 `ticketNos` 入参并保留旧 `ticketIds` 兼容。
+2. 指定工单号全部不存在时不再误触发全量重建，同步结果和后台日志会带出 `missingTicketNos`。
+3. 新增说明文档：`web/public/docs/2026-07-05-ticket-similarity-rebuild-ticket-no.md`。
+4. 修复手动重建同步 Qdrant 失败时只显示 `400 Client Error` 的问题：写入/查询前会校验实际向量维度与既有 collection 维度，Qdrant HTTP 异常会携带响应体，便于定位维度或 schema 不匹配。
+5. 新增说明文档：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`。
+
 ## 2026-07-04
 
 1. 修复工单大文件拆分后的启动期循环引用：`TicketService`、`TicketMessageSyncService` 和 `TicketSyncService` 不再互相顶层导入。

@@ -90,7 +90,7 @@
 - 保存 Embedding 配置：`local_hash` 或兼容 OpenAI Embedding 的 endpoint、model、dimension、apiKey、timeout。
 - 保存 Qdrant 配置：url、apiKey、collection、distance、timeout、是否自动创建 collection。
 - 保存场景触发开关：`externalSync`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge`。
-- 手动重建历史向量：支持全部有效工单或指定工单 ID，支持同步/后台执行，支持强制指定 Provider 和是否同步 Qdrant。
+- 手动重建历史向量：支持全部有效工单或指定工单号 `ticketNo`，支持同步/后台执行，支持强制指定 Provider 和是否同步 Qdrant。
 
 ## 接口
 
@@ -126,7 +126,7 @@
 
 ```json
 {
-  "ticketIds": [10001, 10002],
+  "ticketNos": ["INC202607050001", "INC202607050002"],
   "allTickets": false,
   "includeQdrant": true,
   "runInBackground": false

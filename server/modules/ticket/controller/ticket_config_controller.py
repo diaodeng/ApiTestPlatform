@@ -103,6 +103,7 @@ async def rebuild_ticket_similarity_embeddings(
             return ResponseUtil.success(
                 data={
                     "mode": "background",
+                    "ticketNos": rebuild_object.ticket_nos,
                     "ticketIds": rebuild_object.ticket_ids,
                     "allTickets": rebuild_object.all_tickets,
                     "pageSize": rebuild_object.page_size,

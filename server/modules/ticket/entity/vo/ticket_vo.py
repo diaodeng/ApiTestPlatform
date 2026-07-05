@@ -801,7 +801,10 @@ class TicketEmbeddingRebuildRequestModel(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
 
-    ticket_ids: list[int] | None = Field(default=None, description="指定重建的工单ID列表，为空时按条件批量重建")
+    ticket_ids: list[int] | None = Field(default=None, description="兼容旧入口的系统工单ID列表")
+    ticket_nos: list[str] | None = Field(
+        default=None, description="指定重建的工单号列表(ticketNo)，为空时按条件批量重建"
+    )
     all_tickets: bool = Field(default=True, description="是否重建全部有效工单")
     page_size: int = Field(default=100, description="每批处理数量")
     provider: str | None = Field(default=None, description="指定检索提供方，默认读取系统配置")
@@ -823,7 +826,13 @@ class TicketEmbeddingRebuildRequestModel(BaseModel):
             if normalized_id > 0 and normalized_id not in ids:
                 ids.append(normalized_id)
         self.ticket_ids = ids or None
-        self.all_tickets = bool(self.all_tickets or not self.ticket_ids)
+        ticket_nos: list[str] = []
+        for ticket_no in self.ticket_nos or []:
+            normalized_no = str(ticket_no or "").strip()
+            if normalized_no and normalized_no not in ticket_nos:
+                ticket_nos.append(normalized_no)
+        self.ticket_nos = ticket_nos or None
+        self.all_tickets = bool(self.all_tickets or not (self.ticket_nos or self.ticket_ids))
         self.page_size = min(max(int(self.page_size or 100), 1), 500)
         self.provider = str(self.provider or "").strip() or None
         return self
