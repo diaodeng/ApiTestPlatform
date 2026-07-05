@@ -221,6 +221,16 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="6">
+            <el-form-item label="维度不一致时重建">
+              <el-switch
+                v-model="form.qdrant.recreateCollectionOnDimensionMismatch"
+                inline-prompt
+                active-text="开"
+                inactive-text="关"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="6">
             <el-form-item label="超时秒数">
               <el-input-number
                 v-model="form.qdrant.timeoutSeconds"
@@ -232,6 +242,14 @@
           </el-col>
         </el-row>
       </el-form>
+      <el-alert
+        v-if="form.qdrant.recreateCollectionOnDimensionMismatch"
+        class="mt16"
+        type="warning"
+        show-icon
+        :closable="false"
+        title="开启后，重建写入 Qdrant 时如果发现 collection 维度不一致，会删除旧 collection 并按当前向量维度重建。"
+      />
     </el-card>
 
     <el-card shadow="never" class="config-card mt16">
@@ -439,6 +457,7 @@
         distance: 'Cosine',
         timeoutSeconds: 15,
         createCollection: true,
+        recreateCollectionOnDimensionMismatch: false,
       },
       sceneTriggers: {
         externalSync: true,
@@ -500,6 +519,9 @@
         distance: String(form.qdrant.distance || 'Cosine').trim(),
         timeoutSeconds: Number(form.qdrant.timeoutSeconds || 15),
         createCollection: Boolean(form.qdrant.createCollection),
+        recreateCollectionOnDimensionMismatch: Boolean(
+          form.qdrant.recreateCollectionOnDimensionMismatch
+        ),
       },
       sceneTriggers: { ...form.sceneTriggers },
     };

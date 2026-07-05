@@ -57,7 +57,8 @@
     "collection": "ticket_similarity",
     "distance": "Cosine",
     "timeoutSeconds": 15,
-    "createCollection": true
+    "createCollection": true,
+    "recreateCollectionOnDimensionMismatch": false
   },
   "sceneTriggers": {
     "externalSync": true,
@@ -88,7 +89,7 @@
 
 - 保存基础检索配置：启用状态、Provider、兜底 Provider、召回数量、阈值、关键词权重、向量权重、参与向量化字段。
 - 保存 Embedding 配置：`local_hash` 或兼容 OpenAI Embedding 的 endpoint、model、dimension、apiKey、timeout。
-- 保存 Qdrant 配置：url、apiKey、collection、distance、timeout、是否自动创建 collection。
+- 保存 Qdrant 配置：url、apiKey、collection、distance、timeout、是否自动创建 collection、维度不一致时是否删除并重建 collection。
 - 保存场景触发开关：`externalSync`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge`。
 - 手动重建历史向量：支持全部有效工单或指定工单号 `ticketNo`，支持同步/后台执行，支持强制指定 Provider 和是否同步 Qdrant。
 
@@ -158,10 +159,11 @@ docker run -p 6333:6333 -p 6334:6334 -v qdrant_storage:/qdrant/storage qdrant/qd
 
 - 为 Qdrant 配置 API Key，并写入 `qdrant.apiKey`。
 - collection 名称按环境区分，例如 `ticket_similarity_dev`、`ticket_similarity_prod`。
-- Embedding 模型维度变更时，新建 collection 或清空重建，避免维度不一致。
+- Embedding 模型维度变更时，优先新建 collection；若确认旧 Qdrant 数据可丢弃，可开启 `recreateCollectionOnDimensionMismatch` 后执行全量重建。
 
 ## 风险与回滚
 
 - 如果 Qdrant 不可用，查询会记录警告并回退本地哈希检索。
 - 如果 Embedding 服务不可用，会回退本地哈希向量；启用 Qdrant 时这种回退会让 collection 维度回到本地 128 维，建议生产配置真实 Embedding 前先确认接口稳定。
+- `recreateCollectionOnDimensionMismatch` 只在写入/重建链路生效，开启后会删除旧 collection 的全部点；建议配合全部有效工单重建使用。
 - 回滚只需把 `ticket.similarity.config.provider` 改回 `local_hash`，不需要删除 Qdrant 数据。

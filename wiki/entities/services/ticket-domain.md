@@ -202,7 +202,7 @@ graph TD
 - 工单关闭时会尝试从工单、RCA、事件和消息流自动生成知识库案例，知识文章关联原工单并刷新工单向量，供下一次相似工单检索复用。
 - 工单相似度检索已抽象为 `TicketEmbeddingService` 配置化 Provider：系统参数 `ticket.similarity.config` 控制 `local_hash` 或 `qdrant`，默认保留本地哈希兜底；Qdrant 不可用时查询会回退本地向量。
 - 相似工单入库文本扩展为标题、描述、AI 摘要、最终根因、解决方案和 RCA，批量重建接口 `POST /ticket/similarity/rebuild` 可刷新历史工单本地 `embedding_record` 并按配置同步 Qdrant；2026-07-05 起手动指定范围优先使用业务工单号 `ticketNos/ticketNo`，旧 `ticketIds` 仅作为兼容入口保留。
-- Qdrant 写入和查询前会按本次实际向量长度校验既有 collection 维度；维度不一致时提前返回明确错误，不自动删除或重建 collection。Qdrant HTTP 4xx/5xx 异常会带出响应体，避免日志只剩 `400 Client Error`。
+- Qdrant 写入和查询前会按本次实际向量长度校验既有 collection 维度；维度不一致时默认提前返回明确错误。配置 `qdrant.recreateCollectionOnDimensionMismatch=true` 后，仅写入/重建链路会删除旧 collection 并按当前维度重建，查询链路不触发删除。Qdrant HTTP 4xx/5xx 异常会带出响应体，避免日志只剩 `400 Client Error`。
 - 关键词命中在相似度合并中只作为弱加分，不再直接写成 100% 分，避免“包含同一字段文案”导致相似工单统计失真。
 - 相似工单配置已新增独立菜单 `ticket.similarity.config`，页面组件为 `ticket/similarityConfig/index`；页面可保存 Provider、Embedding、Qdrant、参与字段、阈值权重和 `sceneTriggers`，也可手动触发全部或指定工单号向量重建。
 - `sceneTriggers` 当前支持 `externalSync`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge` 六类场景；外部同步延后后处理、远端拉取、手动新增/编辑、Excel 导入和关闭工单知识沉淀都会先检查开关，再调用 `vectorize_ticket_for_scene` 或 `vectorize_tickets_for_scene`。

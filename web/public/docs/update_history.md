@@ -4,7 +4,8 @@
 2. 指定工单号全部不存在时不再误触发全量重建，同步结果和后台日志会带出 `missingTicketNos`。
 3. 新增说明文档：`web/public/docs/2026-07-05-ticket-similarity-rebuild-ticket-no.md`。
 4. 修复手动重建同步 Qdrant 失败时只显示 `400 Client Error` 的问题：写入/查询前会校验实际向量维度与既有 collection 维度，Qdrant HTTP 异常会携带响应体，便于定位维度或 schema 不匹配。
-5. 新增说明文档：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`。
+5. 相似工单 Qdrant 配置新增“维度不一致时重建”开关，默认关闭；开启后仅在重建写入链路删除旧 collection 并按当前向量维度重建。
+6. 新增说明文档：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`。
 
 ## 2026-07-04
 

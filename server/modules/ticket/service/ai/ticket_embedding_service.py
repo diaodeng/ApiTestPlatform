@@ -65,6 +65,7 @@ class TicketEmbeddingService:
             "distance": "Cosine",
             "timeoutSeconds": 15,
             "createCollection": True,
+            "recreateCollectionOnDimensionMismatch": False,
         },
         "sceneTriggers": {
             "externalSync": True,
@@ -106,6 +107,9 @@ class TicketEmbeddingService:
         qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else {}
         qdrant_config["timeoutSeconds"] = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
         qdrant_config["createCollection"] = bool(qdrant_config.get("createCollection", True))
+        qdrant_config["recreateCollectionOnDimensionMismatch"] = bool(
+            qdrant_config.get("recreateCollectionOnDimensionMismatch", False)
+        )
         config["qdrant"] = qdrant_config
         scene_triggers = config.get("sceneTriggers") if isinstance(config.get("sceneTriggers"), dict) else {}
         config["sceneTriggers"] = {
@@ -561,7 +565,7 @@ class TicketEmbeddingService:
         """
         query_vector = cls.embed_text(keyword, config)
         qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else {}
-        cls._ensure_qdrant_collection(config, expected_dimension=len(query_vector))
+        cls._ensure_qdrant_collection(config, expected_dimension=len(query_vector), allow_recreate=False)
         url = cls._qdrant_url(qdrant_config, f"/collections/{qdrant_config.get('collection')}/points/search")
         payload = {
             "vector": query_vector,
@@ -665,7 +669,7 @@ class TicketEmbeddingService:
         :return: 无
         """
         qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else {}
-        cls._ensure_qdrant_collection(config, expected_dimension=len(vector))
+        cls._ensure_qdrant_collection(config, expected_dimension=len(vector), allow_recreate=True)
         url = cls._qdrant_url(qdrant_config, f"/collections/{qdrant_config.get('collection')}/points")
         payload = {
             "points": [
@@ -696,11 +700,14 @@ class TicketEmbeddingService:
         cls._raise_for_qdrant_status(response, f"写入工单向量: ticket_id={ticket.ticket_id}")
 
     @classmethod
-    def _ensure_qdrant_collection(cls, config: dict[str, Any], expected_dimension: int | None = None) -> None:
+    def _ensure_qdrant_collection(
+        cls, config: dict[str, Any], expected_dimension: int | None = None, allow_recreate: bool = False
+    ) -> None:
         """
         确保 Qdrant collection 存在，配置关闭自动创建时只做存在性校验。
         :param config: 相似度配置
         :param expected_dimension: 本次要写入或查询的实际向量维度
+        :param allow_recreate: 当前调用链是否允许维度不一致时重建 collection
         :return: 无
         """
         qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else {}
@@ -714,6 +721,20 @@ class TicketEmbeddingService:
         if detail_response.status_code == 200:
             collection_dimension = cls._extract_qdrant_vector_size(detail_response.json())
             if expected_dimension and collection_dimension and collection_dimension != expected_dimension:
+                if allow_recreate and qdrant_config.get("recreateCollectionOnDimensionMismatch", False):
+                    logger.warning(
+                        f"Qdrant collection 维度不一致，按配置删除并重建: collection={collection}, "
+                        f"collectionDimension={collection_dimension}, vectorDimension={expected_dimension}"
+                    )
+                    cls._recreate_qdrant_collection(
+                        detail_url=detail_url,
+                        headers=headers,
+                        timeout=timeout,
+                        collection=collection,
+                        vector_size=expected_dimension,
+                        distance=qdrant_config.get("distance") or "Cosine",
+                    )
+                    return
                 raise ValueError(
                     f"Qdrant collection 向量维度不一致: collection={collection}, "
                     f"collectionDimension={collection_dimension}, vectorDimension={expected_dimension}。"
@@ -729,6 +750,33 @@ class TicketEmbeddingService:
         create_payload = {"vectors": {"size": vector_size, "distance": qdrant_config.get("distance") or "Cosine"}}
         create_response = requests.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
         cls._raise_for_qdrant_status(create_response, f"创建 collection: collection={collection}")
+
+    @classmethod
+    def _recreate_qdrant_collection(
+        cls,
+        *,
+        detail_url: str,
+        headers: dict[str, str],
+        timeout: int,
+        collection: str,
+        vector_size: int,
+        distance: str,
+    ) -> None:
+        """
+        删除并按当前向量维度重建 Qdrant collection，仅用于手动允许的写入链路。
+        :param detail_url: collection 详情地址
+        :param headers: Qdrant 请求头
+        :param timeout: 请求超时时间
+        :param collection: collection 名称
+        :param vector_size: 新 collection 向量维度
+        :param distance: 向量距离算法
+        :return: 无
+        """
+        delete_response = requests.delete(detail_url, headers=headers, timeout=timeout)
+        cls._raise_for_qdrant_status(delete_response, f"删除 collection: collection={collection}")
+        create_payload = {"vectors": {"size": vector_size, "distance": distance}}
+        create_response = requests.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
+        cls._raise_for_qdrant_status(create_response, f"重建 collection: collection={collection}")
 
     @classmethod
     def _extract_qdrant_vector_size(cls, collection_detail: dict[str, Any]) -> int | None:
@@ -935,6 +983,9 @@ class TicketEmbeddingService:
         qdrant_config["distance"] = str(qdrant_config.get("distance") or "Cosine").strip() or "Cosine"
         qdrant_config["timeoutSeconds"] = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
         qdrant_config["createCollection"] = bool(qdrant_config.get("createCollection", True))
+        qdrant_config["recreateCollectionOnDimensionMismatch"] = bool(
+            qdrant_config.get("recreateCollectionOnDimensionMismatch", False)
+        )
         normalized["qdrant"] = qdrant_config
         scene_triggers = normalized.get("sceneTriggers") if isinstance(normalized.get("sceneTriggers"), dict) else {}
         normalized["sceneTriggers"] = {

@@ -14,8 +14,8 @@ updated: 2026-07-05
 - 架构层：工单域 / 相似工单 / Qdrant Provider / 后端诊断
 - 创建的页面：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`
 - 更新的页面：`server/modules/ticket/service/ai/ticket_embedding_service.py`、`server/tests/test_ticket_embedding_service.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-automation-flow.md`
-- 变更传播链：`TicketEmbeddingService.vectorize_ticket` -> `_upsert_qdrant_ticket` -> `_ensure_qdrant_collection(expected_dimension)` -> 维度一致才调用 Qdrant points 写入；Qdrant 4xx/5xx -> `_raise_for_qdrant_status` -> 异常信息保留响应体。
-- 关键结论：最可能原因是既有 `ticket_similarity` collection 维度与当前 Embedding 实际返回维度不一致。本次不自动删除或重建 collection，避免误清数据；应修正 Embedding 配置或切换新 collection 后重新重建。
+- 变更传播链：`TicketEmbeddingService.vectorize_ticket` -> `_upsert_qdrant_ticket` -> `_ensure_qdrant_collection(expected_dimension, allow_recreate=True)` -> 维度一致才调用 Qdrant points 写入；配置允许覆盖时删除并重建 collection；Qdrant 4xx/5xx -> `_raise_for_qdrant_status` -> 异常信息保留响应体。
+- 关键结论：最可能原因是既有 `ticket_similarity` collection 维度与当前 Embedding 实际返回维度不一致。默认不自动删除或重建 collection；若确认旧 Qdrant 向量可丢弃，可开启 `recreateCollectionOnDimensionMismatch` 后全量重建。
 
 ## [2026-07-05] INGEST-CODE | 相似工单手动重建改用 ticketNo
 
