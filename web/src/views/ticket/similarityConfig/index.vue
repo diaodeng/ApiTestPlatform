@@ -140,6 +140,14 @@
               />
             </el-form-item>
           </el-col>
+          <el-col :xs="24" :md="24">
+            <el-alert
+              type="info"
+              show-icon
+              :closable="false"
+              title="OpenAI兼容接口会把该值作为 dimensions 参数下发；同步 Qdrant 时如果外部 Embedding 失败，不会回退本地哈希向量。"
+            />
+          </el-col>
           <el-col :xs="24" :md="16">
             <el-form-item label="接口地址">
               <el-input

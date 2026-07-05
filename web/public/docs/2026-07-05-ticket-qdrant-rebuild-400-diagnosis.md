@@ -20,12 +20,16 @@ PUT /collections/ticket_similarity/points 400
 5. 新增 `_raise_for_qdrant_status`，Qdrant 4xx/5xx 异常会携带响应体前 1000 字符，后续日志能看到服务端原始错误。
 6. 新增 `qdrant.recreateCollectionOnDimensionMismatch` 开关，默认关闭；开启后仅在写入/重建链路维度不一致时删除旧 collection 并按当前向量维度重建。
 7. 查询链路不会因为该开关删除 collection；查询失败仍会走本地向量回退，避免用户搜索时触发数据清理。
+8. OpenAI 兼容 Embedding 请求会把 `embedding.dimension` 作为 `dimensions` 参数下发，并校验返回向量长度。
+9. 同步 Qdrant 时，外部 Embedding 失败会直接让本条重建失败，不再回退本地 hash 写入 Qdrant，避免 collection 在真实模型维度和本地 hash 维度之间反复重建。
+10. collection 重建遇到并发 409 时，会再次读取 collection 详情；若维度已经符合当前向量维度，则视为成功。
 
 ## 常见原因
 
 - `embedding.dimension` 配置仍是本地 hash 的 128，但真实 Embedding 模型返回 768/1024/1536 等维度。
 - Qdrant `ticket_similarity` collection 之前按旧维度创建，后来更换了 Embedding 模型。
 - 外部 Embedding 接口失败后回退本地 hash，实际写入维度变回配置维度或 128，和既有 collection 不一致。
+- 多个重建任务并发执行时，一个任务按真实 Embedding 维度重建，另一个任务因外部接口失败按 hash 维度重建，会导致 collection 维度来回切换。
 
 ## 处理建议
 
@@ -40,3 +44,4 @@ PUT /collections/ticket_similarity/points 400
 - 2026-07-05 09:07:30 +08:00：执行 `uv run python -m unittest tests.test_ticket_embedding_service`，通过 3 个测试。
 - 2026-07-05 09:07:30 +08:00：执行 `uv run ruff check modules\ticket\service\ai\ticket_embedding_service.py tests\test_ticket_embedding_service.py`，通过。
 - 2026-07-05 09:18:00 +08:00：新增维度不一致时可配置重建 collection 的后端和页面开关。
+- 2026-07-05 10:12:00 +08:00：禁止 Qdrant 同步时回退本地 hash，Embedding 请求补充 `dimensions` 参数并校验返回维度。

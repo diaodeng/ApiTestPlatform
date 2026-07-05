@@ -77,7 +77,7 @@
 - `embedding.provider`: 推荐使用 `openai_compatible`
 - `embedding.endpoint`: 兼容 OpenAI Embedding 的接口地址
 - `embedding.model`: 实际 Embedding 模型名
-- `embedding.dimension`: 实际模型维度，必须与 Qdrant collection 一致
+- `embedding.dimension`: 实际模型维度，会作为 Embedding 请求 `dimensions` 参数下发，且必须与 Qdrant collection 一致
 - `qdrant.url`: Qdrant 服务地址
 - `qdrant.collection`: collection 名称
 
@@ -164,6 +164,6 @@ docker run -p 6333:6333 -p 6334:6334 -v qdrant_storage:/qdrant/storage qdrant/qd
 ## 风险与回滚
 
 - 如果 Qdrant 不可用，查询会记录警告并回退本地哈希检索。
-- 如果 Embedding 服务不可用，会回退本地哈希向量；启用 Qdrant 时这种回退会让 collection 维度回到本地 128 维，建议生产配置真实 Embedding 前先确认接口稳定。
+- 如果 Embedding 服务不可用，纯本地检索仍可回退本地哈希向量；但同步 Qdrant 时会直接失败，不再用本地哈希向量写入 Qdrant。
 - `recreateCollectionOnDimensionMismatch` 只在写入/重建链路生效，开启后会删除旧 collection 的全部点；建议配合全部有效工单重建使用。
 - 回滚只需把 `ticket.similarity.config.provider` 改回 `local_hash`，不需要删除 Qdrant 数据。

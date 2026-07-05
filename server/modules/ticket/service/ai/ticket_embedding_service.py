@@ -302,11 +302,14 @@ class TicketEmbeddingService:
         return "\n".join(str(item) for item in parts if item)
 
     @classmethod
-    def embed_text(cls, text: str, config: dict[str, Any] | None = None) -> list[float]:
+    def embed_text(
+        cls, text: str, config: dict[str, Any] | None = None, allow_local_fallback: bool = True
+    ) -> list[float]:
         """
         将文本转换为向量；默认使用本地哈希向量，可按配置调用兼容 OpenAI 的 Embedding 接口。
         :param text: 原始文本
         :param config: 相似度配置
+        :param allow_local_fallback: 外部 Embedding 失败时是否允许回退本地哈希向量
         :return: 归一化向量
         """
         embedding_config = (config or {}).get("embedding") if isinstance((config or {}).get("embedding"), dict) else {}
@@ -315,6 +318,10 @@ class TicketEmbeddingService:
             try:
                 return cls._embed_text_openai_compatible(text, embedding_config)
             except Exception as exc:
+                if not allow_local_fallback:
+                    raise ValueError(
+                        f"外部Embedding生成失败，已阻止回退本地哈希写入Qdrant: provider={provider}, error={exc}"
+                    ) from exc
                 logger.warning(f"外部Embedding生成失败，回退本地哈希向量: provider={provider}, error={exc}")
         dimension = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
         return cls._embed_text_local_hash(text, dimension)
@@ -340,7 +347,13 @@ class TicketEmbeddingService:
         """
         active_config = config or cls.get_similarity_config(query_db)
         text = cls.build_ticket_text(ticket, rca=rca, config=active_config)
-        vector = cls.embed_text(text, active_config)
+        should_sync_qdrant = (
+            sync_qdrant
+            if sync_qdrant is not None
+            else active_config.get("provider") == cls.PROVIDER_QDRANT
+            or active_config.get("fallbackProvider") == cls.PROVIDER_QDRANT
+        )
+        vector = cls.embed_text(text, active_config, allow_local_fallback=not should_sync_qdrant)
         embedding_config = active_config.get("embedding") if isinstance(active_config.get("embedding"), dict) else {}
         model = str(embedding_config.get("model") or cls.MODEL)
         version = str(embedding_config.get("version") or cls.VERSION)
@@ -356,12 +369,6 @@ class TicketEmbeddingService:
             create_time=datetime.now(),
         )
         saved_record = TicketDao.upsert_embedding_record(query_db, record)
-        should_sync_qdrant = (
-            sync_qdrant
-            if sync_qdrant is not None
-            else active_config.get("provider") == cls.PROVIDER_QDRANT
-            or active_config.get("fallbackProvider") == cls.PROVIDER_QDRANT
-        )
         if should_sync_qdrant:
             cls._upsert_qdrant_ticket(active_config, ticket, vector, text, model, version)
         return saved_record
@@ -773,9 +780,16 @@ class TicketEmbeddingService:
         :return: 无
         """
         delete_response = requests.delete(detail_url, headers=headers, timeout=timeout)
-        cls._raise_for_qdrant_status(delete_response, f"删除 collection: collection={collection}")
+        if delete_response.status_code != 404:
+            cls._raise_for_qdrant_status(delete_response, f"删除 collection: collection={collection}")
         create_payload = {"vectors": {"size": vector_size, "distance": distance}}
         create_response = requests.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
+        if create_response.status_code == 409:
+            detail_response = requests.get(detail_url, headers=headers, timeout=timeout)
+            cls._raise_for_qdrant_status(detail_response, f"确认 collection: collection={collection}")
+            collection_dimension = cls._extract_qdrant_vector_size(detail_response.json())
+            if collection_dimension == vector_size:
+                return
         cls._raise_for_qdrant_status(create_response, f"重建 collection: collection={collection}")
 
     @classmethod
@@ -824,10 +838,14 @@ class TicketEmbeddingService:
         api_key = str(embedding_config.get("apiKey") or "").strip()
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        dimension = cls._safe_int(embedding_config.get("dimension"), 0, 0, 16384)
+        payload: dict[str, Any] = {"model": embedding_config.get("model"), "input": text}
+        if dimension > 0:
+            payload["dimensions"] = dimension
         response = requests.post(
             endpoint,
             headers=headers,
-            json={"model": embedding_config.get("model"), "input": text},
+            json=payload,
             timeout=cls._safe_int(embedding_config.get("timeoutSeconds"), 15, 1, 120),
         )
         response.raise_for_status()
@@ -835,7 +853,10 @@ class TicketEmbeddingService:
         vector = ((data.get("data") or [{}])[0] or {}).get("embedding")
         if not isinstance(vector, list):
             raise ValueError("Embedding 接口未返回 data[0].embedding")
-        return [float(item) for item in vector]
+        result = [float(item) for item in vector]
+        if dimension > 0 and len(result) != dimension:
+            raise ValueError(f"Embedding接口返回维度与配置不一致: expected={dimension}, actual={len(result)}")
+        return result
 
     @classmethod
     def _embed_text_local_hash(cls, text: str, dimension: int | None = None) -> list[float]:

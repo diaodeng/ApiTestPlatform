@@ -81,7 +81,7 @@ sequenceDiagram
 | 8 | 工单详情页中的时间线、评论、日志拉取和 AI 分析改为按需加载，评论作为详情一级 tab 独立请求，避免打开详情或历史页时一次性拉取所有数据。 |
 | 9 | 协同追问会先写入 `ticket_message`，再复用 AI 分析任务入口读取消息流、快照和相似历史工单做增量分析；相似工单由 `ticket.similarity.config` 选择 `local_hash` 或 `qdrant` Provider，查询失败时回退本地向量；下发给 Agent 的日志正文会按首尾保留策略截断，避免超大上下文导致上游模型接口失败。 |
 | 10 | AI 分析成功后写回 `ticket.ai_analysis`、RCA、AI 消息和 `ticket_snapshot`；工单关闭时自动提炼 `knowledge_article` 供后续相似工单检索。 |
-| 11 | 历史工单可通过 `POST /ticket/similarity/rebuild` 批量重建向量，重建文本包含标题、描述、AI 摘要和 RCA，并可同步写入 Qdrant；手动指定范围使用 `ticketNos` 传业务工单号，服务端解析为系统 `ticket_id` 后复用重建流程。同步 Qdrant 前会校验本次实际向量维度与 collection 维度，失败日志会带 Qdrant 响应体；开启 `recreateCollectionOnDimensionMismatch` 时，写入链路会删除旧 collection 并重建。 |
+| 11 | 历史工单可通过 `POST /ticket/similarity/rebuild` 批量重建向量，重建文本包含标题、描述、AI 摘要和 RCA，并可同步写入 Qdrant；手动指定范围使用 `ticketNos` 传业务工单号，服务端解析为系统 `ticket_id` 后复用重建流程。同步 Qdrant 前会校验本次实际向量维度与 collection 维度，失败日志会带 Qdrant 响应体；开启 `recreateCollectionOnDimensionMismatch` 时，写入链路会删除旧 collection 并重建。Qdrant 同步链路不允许外部 Embedding 失败后回退 hash。 |
 | 12 | 相似工单配置页面可保存 `sceneTriggers`；外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路会按开关决定是否自动调用向量化。 |
 
 ## 错误处理

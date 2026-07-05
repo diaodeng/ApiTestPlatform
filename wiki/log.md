@@ -14,8 +14,8 @@ updated: 2026-07-05
 - 架构层：工单域 / 相似工单 / Qdrant Provider / 后端诊断
 - 创建的页面：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`
 - 更新的页面：`server/modules/ticket/service/ai/ticket_embedding_service.py`、`server/tests/test_ticket_embedding_service.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-automation-flow.md`
-- 变更传播链：`TicketEmbeddingService.vectorize_ticket` -> `_upsert_qdrant_ticket` -> `_ensure_qdrant_collection(expected_dimension, allow_recreate=True)` -> 维度一致才调用 Qdrant points 写入；配置允许覆盖时删除并重建 collection；Qdrant 4xx/5xx -> `_raise_for_qdrant_status` -> 异常信息保留响应体。
-- 关键结论：最可能原因是既有 `ticket_similarity` collection 维度与当前 Embedding 实际返回维度不一致。默认不自动删除或重建 collection；若确认旧 Qdrant 向量可丢弃，可开启 `recreateCollectionOnDimensionMismatch` 后全量重建。
+- 变更传播链：`TicketEmbeddingService.vectorize_ticket` -> 判断是否同步 Qdrant -> `embed_text(allow_local_fallback=False)` -> `_embed_text_openai_compatible(dimensions=配置维度)` -> `_upsert_qdrant_ticket` -> `_ensure_qdrant_collection(expected_dimension, allow_recreate=True)`；配置允许覆盖时删除并重建 collection；Qdrant 4xx/5xx -> `_raise_for_qdrant_status` -> 异常信息保留响应体。
+- 关键结论：既有 `ticket_similarity` collection 维度与当前 Embedding 实际返回维度不一致会导致 400；外部 Embedding 521 时不允许回退 hash 写 Qdrant，否则会在 2560 和 1024 等维度之间反复删建。若确认旧 Qdrant 向量可丢弃，可开启 `recreateCollectionOnDimensionMismatch` 后全量重建。
 
 ## [2026-07-05] INGEST-CODE | 相似工单手动重建改用 ticketNo
 
