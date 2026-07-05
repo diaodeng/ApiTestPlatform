@@ -18,9 +18,15 @@ from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 
 
+class ExternalEmbeddingUnavailableError(RuntimeError):
+    """
+    外部 Embedding 不可用异常，用于批量重建时熔断后续外部接口请求。
+    """
+
+
 class TicketEmbeddingService:
     """
-    工单相似度检索服务，支持本地哈希向量兜底和可配置的 Qdrant 外部向量库。
+    工单相似度检索服务，按配置严格使用本地哈希、外部 Embedding 或 Qdrant。
     """
 
     CONFIG_KEY = "ticket.similarity.config"
@@ -28,10 +34,12 @@ class TicketEmbeddingService:
     VERSION = "v1"
     DIMENSION = 128
     PROVIDER_LOCAL_HASH = "local_hash"
+    PROVIDER_EMBEDDING = "embedding"
     PROVIDER_QDRANT = "qdrant"
     DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "provider": PROVIDER_LOCAL_HASH,
+        # 历史字段，仅用于兼容旧配置 JSON；严格模式下不再读取降级 Provider。
         "fallbackProvider": PROVIDER_LOCAL_HASH,
         "topK": 20,
         "threshold": 0.05,
@@ -95,7 +103,6 @@ class TicketEmbeddingService:
             except Exception as exc:
                 logger.warning(f"工单相似度配置解析失败，使用默认配置: key={cls.CONFIG_KEY}, error={exc}")
         config["provider"] = cls._normalize_provider(config.get("provider"))
-        config["fallbackProvider"] = cls._normalize_provider(config.get("fallbackProvider"))
         config["topK"] = cls._safe_int(config.get("topK"), 20, 1, 100)
         config["threshold"] = cls._safe_float(config.get("threshold"), 0.05, -1.0, 1.0)
         config["keywordWeight"] = cls._safe_float(config.get("keywordWeight"), 0.15, 0.0, 1.0)
@@ -158,6 +165,7 @@ class TicketEmbeddingService:
         """
         try:
             normalized = cls._normalize_config_for_save(config)
+            cls._validate_similarity_config(normalized)
             config_text = json.dumps(normalized, ensure_ascii=False, indent=2)
             config_info = ConfigDao.get_config_detail_by_key(query_db, cls.CONFIG_KEY)
             now = datetime.now()
@@ -187,6 +195,55 @@ class TicketEmbeddingService:
         except Exception:
             query_db.rollback()
             raise
+
+    @classmethod
+    def _validate_similarity_config(cls, config: dict[str, Any]) -> None:
+        """
+        校验相似工单配置的 Provider 组合和已存在 Qdrant collection 维度。
+        :param config: 已规范化的相似工单配置
+        :return: 无
+        """
+        provider = cls._normalize_provider(config.get("provider"))
+        embedding_config = config.get("embedding") if isinstance(config.get("embedding"), dict) else {}
+        embedding_provider = cls._normalize_embedding_provider(embedding_config.get("provider"))
+        if provider == cls.PROVIDER_LOCAL_HASH:
+            return
+        if embedding_provider != "openai_compatible":
+            raise ValueError(f"检索 Provider={provider} 时，Embedding Provider 必须配置为 openai_compatible")
+        if provider == cls.PROVIDER_QDRANT:
+            cls._validate_qdrant_collection_dimension(config)
+
+    @classmethod
+    def _validate_qdrant_collection_dimension(cls, config: dict[str, Any]) -> None:
+        """
+        保存 Qdrant 配置时，如果目标 collection 已存在则提前校验维度是否一致。
+        :param config: 已规范化的相似工单配置
+        :return: 无
+        """
+        qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else {}
+        collection = str(qdrant_config.get("collection") or "").strip()
+        if not collection:
+            raise ValueError("Qdrant collection 未配置")
+        detail_url = cls._qdrant_url(qdrant_config, f"/collections/{collection}")
+        timeout = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
+        response = requests.get(detail_url, headers=cls._qdrant_headers(qdrant_config), timeout=timeout)
+        if response.status_code == 404:
+            logger.info(f"Qdrant配置保存校验跳过: collection={collection}, reason=collection不存在")
+            return
+        cls._raise_for_qdrant_status(response, f"保存配置校验 collection: collection={collection}")
+        collection_dimension = cls._extract_qdrant_vector_size(response.json())
+        embedding_config = config.get("embedding") if isinstance(config.get("embedding"), dict) else {}
+        configured_dimension = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
+        logger.info(
+            f"Qdrant配置保存校验: collection={collection}, collectionDimension={collection_dimension}, "
+            f"configuredDimension={configured_dimension}"
+        )
+        if collection_dimension and collection_dimension != configured_dimension:
+            raise ValueError(
+                f"Qdrant collection 向量维度不一致: collection={collection}, "
+                f"collectionDimension={collection_dimension}, configuredDimension={configured_dimension}。"
+                f"请调整 Embedding 维度或更换 Collection 后再保存。"
+            )
 
     @classmethod
     def should_vectorize_for_scene(cls, config: dict[str, Any], scene: str) -> bool:
@@ -223,8 +280,15 @@ class TicketEmbeddingService:
         """
         active_config = config or cls.get_similarity_config(query_db)
         if not cls.should_vectorize_for_scene(active_config, scene):
+            logger.info(
+                f"跳过工单场景向量刷新: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"scene={scene}, reason=相似工单配置未启用或场景开关关闭"
+            )
             return False
         cls.vectorize_ticket(query_db, ticket, rca=rca, config=active_config)
+        logger.info(
+            f"工单场景向量刷新完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, scene={scene}"
+        )
         return True
 
     @classmethod
@@ -246,6 +310,10 @@ class TicketEmbeddingService:
         """
         active_config = config or cls.get_similarity_config(query_db)
         if not cls.should_vectorize_for_scene(active_config, scene):
+            logger.info(
+                f"跳过工单批量场景向量刷新: scene={scene}, count={len(tickets)}, "
+                f"reason=相似工单配置未启用或场景开关关闭"
+            )
             return 0
         return cls.vectorize_tickets(query_db, tickets, config=active_config)
 
@@ -303,13 +371,12 @@ class TicketEmbeddingService:
 
     @classmethod
     def embed_text(
-        cls, text: str, config: dict[str, Any] | None = None, allow_local_fallback: bool = True
+        cls, text: str, config: dict[str, Any] | None = None
     ) -> list[float]:
         """
-        将文本转换为向量；默认使用本地哈希向量，可按配置调用兼容 OpenAI 的 Embedding 接口。
+        将文本转换为向量；配置本地哈希就只用本地哈希，配置外部接口就只调用外部接口。
         :param text: 原始文本
         :param config: 相似度配置
-        :param allow_local_fallback: 外部 Embedding 失败时是否允许回退本地哈希向量
         :return: 归一化向量
         """
         embedding_config = (config or {}).get("embedding") if isinstance((config or {}).get("embedding"), dict) else {}
@@ -318,11 +385,9 @@ class TicketEmbeddingService:
             try:
                 return cls._embed_text_openai_compatible(text, embedding_config)
             except Exception as exc:
-                if not allow_local_fallback:
-                    raise ValueError(
-                        f"外部Embedding生成失败，已阻止回退本地哈希写入Qdrant: provider={provider}, error={exc}"
-                    ) from exc
-                logger.warning(f"外部Embedding生成失败，回退本地哈希向量: provider={provider}, error={exc}")
+                raise ExternalEmbeddingUnavailableError(
+                    f"外部Embedding生成失败，严格模式不回退本地哈希: provider={provider}, error={exc}"
+                ) from exc
         dimension = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
         return cls._embed_text_local_hash(text, dimension)
 
@@ -335,6 +400,7 @@ class TicketEmbeddingService:
         rca: TicketRca | None = None,
         config: dict[str, Any] | None = None,
         sync_qdrant: bool | None = None,
+        force_rebuild: bool = False,
     ) -> EmbeddingRecord:
         """
         为单个工单生成或更新向量记录，并按配置同步外部向量库。
@@ -343,21 +409,70 @@ class TicketEmbeddingService:
         :param rca: 可选 RCA 对象
         :param config: 相似度配置
         :param sync_qdrant: 是否同步写入 Qdrant，None 表示由配置决定
+        :param force_rebuild: 是否强制重新生成向量，默认按内容哈希幂等跳过
         :return: 向量记录
         """
         active_config = config or cls.get_similarity_config(query_db)
+        vector_provider = cls._normalize_provider(active_config.get("provider"))
+        vector_config = cls._config_for_vector_provider(active_config, vector_provider)
         text = cls.build_ticket_text(ticket, rca=rca, config=active_config)
-        should_sync_qdrant = (
-            sync_qdrant
-            if sync_qdrant is not None
-            else active_config.get("provider") == cls.PROVIDER_QDRANT
-            or active_config.get("fallbackProvider") == cls.PROVIDER_QDRANT
-        )
-        vector = cls.embed_text(text, active_config, allow_local_fallback=not should_sync_qdrant)
-        embedding_config = active_config.get("embedding") if isinstance(active_config.get("embedding"), dict) else {}
+        embedding_config = vector_config.get("embedding") if isinstance(vector_config.get("embedding"), dict) else {}
         model = str(embedding_config.get("model") or cls.MODEL)
         version = str(embedding_config.get("version") or cls.VERSION)
-        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        configured_dimension = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
+        content_hash = cls._embedding_content_hash(text, active_config)
+        should_sync_qdrant = vector_provider == cls.PROVIDER_QDRANT
+        if sync_qdrant is not None and bool(sync_qdrant) != should_sync_qdrant:
+            logger.info(
+                f"忽略手动Qdrant同步覆盖: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"provider={vector_provider}, requestedSyncQdrant={sync_qdrant}, "
+                f"effectiveSyncQdrant={should_sync_qdrant}"
+            )
+        logger.info(
+            f"工单向量生成开始: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"provider={vector_provider}, embeddingProvider={embedding_config.get('provider')}, "
+            f"model={embedding_config.get('model')}, "
+            f"configuredDimension={embedding_config.get('dimension')}, shouldSyncQdrant={should_sync_qdrant}, "
+            f"textChars={len(text)}"
+        )
+        existing_record = TicketDao.get_embedding_record(query_db, "ticket", ticket.ticket_id, model, version)
+        if cls._can_reuse_embedding_record(existing_record, content_hash, configured_dimension, force_rebuild):
+            logger.info(
+                f"跳过外部Embedding请求: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=内容哈希、模型版本和维度未变化, contentHash={content_hash[:12]}, "
+                f"vectorDimension={existing_record.embedding_dimension}"
+            )
+            existing_record._embedding_reused = True
+            existing_record._qdrant_synced_from_cache = False
+            if should_sync_qdrant:
+                cls._upsert_qdrant_ticket(
+                    active_config,
+                    ticket,
+                    existing_record.embedding,
+                    text,
+                    model,
+                    version,
+                    content_hash,
+                    reused=True,
+                )
+                existing_record._qdrant_synced_from_cache = True
+            return existing_record
+        if existing_record and force_rebuild:
+            logger.info(
+                f"强制重建向量: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=forceRebuild=true"
+            )
+        elif existing_record:
+            logger.info(
+                f"需要重新生成向量: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"oldHash={str(existing_record.content_hash or '')[:12]}, newHash={content_hash[:12]}, "
+                f"oldDimension={existing_record.embedding_dimension}, configuredDimension={configured_dimension}"
+            )
+        vector = cls.embed_text(text, vector_config)
+        logger.info(
+            f"工单向量生成完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"vectorDimension={len(vector)}, contentHash={content_hash[:12]}"
+        )
         record = EmbeddingRecord(
             object_type="ticket",
             object_id=ticket.ticket_id,
@@ -370,7 +485,14 @@ class TicketEmbeddingService:
         )
         saved_record = TicketDao.upsert_embedding_record(query_db, record)
         if should_sync_qdrant:
-            cls._upsert_qdrant_ticket(active_config, ticket, vector, text, model, version)
+            cls._upsert_qdrant_ticket(active_config, ticket, vector, text, model, version, content_hash)
+        else:
+            logger.info(
+                f"跳过Qdrant写入: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+                f"reason=当前配置未要求同步Qdrant"
+            )
+        saved_record._embedding_reused = False
+        saved_record._qdrant_synced_from_cache = False
         return saved_record
 
     @classmethod
@@ -381,6 +503,7 @@ class TicketEmbeddingService:
         *,
         config: dict[str, Any] | None = None,
         sync_qdrant: bool | None = None,
+        force_rebuild: bool = False,
     ) -> int:
         """
         批量生成工单向量。
@@ -388,6 +511,7 @@ class TicketEmbeddingService:
         :param tickets: 工单对象列表
         :param config: 相似度配置
         :param sync_qdrant: 是否同步写入 Qdrant
+        :param force_rebuild: 是否强制重新生成向量
         :return: 成功写入向量数量
         """
         active_config = config or cls.get_similarity_config(query_db)
@@ -400,6 +524,7 @@ class TicketEmbeddingService:
                 rca=rca_map.get(ticket.ticket_id),
                 config=active_config,
                 sync_qdrant=sync_qdrant,
+                force_rebuild=force_rebuild,
             )
             count += 1
         return count
@@ -437,6 +562,7 @@ class TicketEmbeddingService:
         page_size: int = 100,
         provider: str | None = None,
         include_qdrant: bool | None = None,
+        force_rebuild: bool = False,
     ) -> dict[str, Any]:
         """
         批量重建历史工单向量，文本范围包含标题、描述、AI 摘要和 RCA。
@@ -445,6 +571,7 @@ class TicketEmbeddingService:
         :param page_size: 每批处理数量
         :param provider: 指定 Provider，传空则读取配置
         :param include_qdrant: 是否同步 Qdrant，传空则由配置决定
+        :param force_rebuild: 是否强制重新生成向量
         :return: 重建结果摘要
         """
         active_config = cls.ensure_default_config(query_db)
@@ -452,11 +579,32 @@ class TicketEmbeddingService:
             active_config["provider"] = cls._normalize_provider(provider)
         safe_page_size = min(max(int(page_size or 100), 1), 500)
         total = TicketDao.count_tickets_for_embedding(query_db, ticket_ids)
+        embedding_config = active_config.get("embedding") if isinstance(active_config.get("embedding"), dict) else {}
+        qdrant_config = active_config.get("qdrant") if isinstance(active_config.get("qdrant"), dict) else {}
+        qdrant_synced = active_config.get("provider") == cls.PROVIDER_QDRANT
+        if include_qdrant is not None and bool(include_qdrant) != qdrant_synced:
+            logger.info(
+                f"忽略手动Qdrant同步覆盖: provider={active_config.get('provider')}, "
+                f"requestedIncludeQdrant={include_qdrant}, effectiveQdrantSynced={qdrant_synced}"
+            )
+        logger.info(
+            f"工单向量重建开始: total={total}, specifiedTicketIds={bool(ticket_ids)}, "
+            f"pageSize={safe_page_size}, provider={active_config.get('provider')}, "
+            f"embeddingProvider={embedding_config.get('provider')}, model={embedding_config.get('model')}, "
+            f"configuredDimension={embedding_config.get('dimension')}, includeQdrant={include_qdrant}, "
+            f"qdrantSynced={qdrant_synced}, qdrantCollection={qdrant_config.get('collection')}, "
+            f"recreateOnDimensionMismatch={qdrant_config.get('recreateCollectionOnDimensionMismatch')}, "
+            f"forceRebuild={force_rebuild}"
+        )
         processed = 0
         failed = 0
         failed_items: list[dict[str, Any]] = []
+        skipped = 0
+        idempotent_skipped = 0
+        qdrant_synced_from_cache = 0
+        abort_reason: str | None = None
         offset = 0
-        while processed + failed < total:
+        while processed + failed < total and not abort_reason:
             current_offset = offset if not ticket_ids else processed + failed
             batch = TicketDao.list_tickets_for_embedding(
                 query_db,
@@ -466,17 +614,35 @@ class TicketEmbeddingService:
             )
             if not batch:
                 break
+            logger.info(
+                f"工单向量重建批次开始: offset={current_offset}, batchSize={len(batch)}, "
+                f"processed={processed}, failed={failed}"
+            )
             rca_map = TicketDao.list_rca_by_ticket_ids(query_db, [ticket.ticket_id for ticket in batch])
             for ticket in batch:
                 try:
-                    cls.vectorize_ticket(
+                    record = cls.vectorize_ticket(
                         query_db,
                         ticket,
                         rca=rca_map.get(ticket.ticket_id),
                         config=active_config,
                         sync_qdrant=include_qdrant,
+                        force_rebuild=force_rebuild,
                     )
+                    if getattr(record, "_embedding_reused", False):
+                        idempotent_skipped += 1
+                        if getattr(record, "_qdrant_synced_from_cache", False):
+                            qdrant_synced_from_cache += 1
                     processed += 1
+                except ExternalEmbeddingUnavailableError as exc:
+                    failed += 1
+                    abort_reason = str(exc)
+                    failed_items.append({"ticketId": ticket.ticket_id, "ticketNo": ticket.ticket_no, "error": str(exc)})
+                    logger.error(
+                        f"外部Embedding异常，停止本次重建后续外部请求: ticket_id={ticket.ticket_id}, "
+                        f"ticket_no={ticket.ticket_no}, processed={processed}, failed={failed}, error={exc}"
+                    )
+                    break
                 except Exception as exc:
                     failed += 1
                     failed_items.append({"ticketId": ticket.ticket_id, "ticketNo": ticket.ticket_no, "error": str(exc)})
@@ -485,25 +651,95 @@ class TicketEmbeddingService:
                         f"ticket_no={ticket.ticket_no}, error={exc}"
                     )
             query_db.commit()
+            logger.info(
+                f"工单向量重建批次结束: offset={current_offset}, processed={processed}, failed={failed}, "
+                f"abort={bool(abort_reason)}"
+            )
             offset += safe_page_size
-        qdrant_synced = (
-            bool(include_qdrant)
-            if include_qdrant is not None
-            else active_config.get("provider") == cls.PROVIDER_QDRANT
+        if abort_reason:
+            skipped = max(total - processed - failed, 0)
+            logger.warning(
+                f"工单向量重建提前停止: processed={processed}, failed={failed}, skipped={skipped}, "
+                f"reason={abort_reason}"
+            )
+        logger.info(
+            f"工单向量重建结束: total={total}, processed={processed}, failed={failed}, skipped={skipped}, "
+            f"provider={active_config.get('provider')}, qdrantSynced={qdrant_synced}"
         )
         return {
             "total": total,
             "processed": processed,
             "failed": failed,
+            "skipped": skipped,
+            "idempotentSkipped": idempotent_skipped,
+            "qdrantSyncedFromCache": qdrant_synced_from_cache,
+            "abortReason": abort_reason,
             "failedItems": failed_items[:20],
             "provider": active_config.get("provider"),
             "qdrantSynced": qdrant_synced,
         }
 
     @classmethod
+    def _embedding_content_hash(cls, text: str, config: dict[str, Any]) -> str:
+        """
+        根据向量化字段配置和最终文本计算内容哈希，字段范围变化也会触发重新生成。
+        :param text: 实际参与向量化的文本
+        :param config: 相似度配置
+        :return: 内容哈希
+        """
+        fields = config.get("fields") if isinstance(config.get("fields"), list) else cls.DEFAULT_CONFIG["fields"]
+        payload = {"fields": [str(item) for item in fields], "text": text}
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _config_for_vector_provider(cls, config: dict[str, Any], provider: str) -> dict[str, Any]:
+        """
+        根据顶层检索 Provider 生成向量化配置，避免外部 Embedding 与本地 hash 互相兜底。
+        :param config: 当前相似度配置
+        :param provider: 顶层检索 Provider
+        :return: 用于生成向量的配置
+        """
+        resolved = json.loads(json.dumps(config, ensure_ascii=False))
+        embedding_config = resolved.get("embedding") if isinstance(resolved.get("embedding"), dict) else {}
+        if provider == cls.PROVIDER_LOCAL_HASH:
+            embedding_config["provider"] = cls.PROVIDER_LOCAL_HASH
+            embedding_config["model"] = cls.MODEL
+            embedding_config["version"] = cls.VERSION
+            embedding_config["dimension"] = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
+        elif cls._normalize_embedding_provider(embedding_config.get("provider")) != "openai_compatible":
+            raise ValueError(f"检索 Provider={provider} 时，embedding.provider 必须配置为 openai_compatible")
+        resolved["embedding"] = embedding_config
+        return resolved
+
+    @classmethod
+    def _can_reuse_embedding_record(
+        cls,
+        record: EmbeddingRecord | None,
+        content_hash: str,
+        configured_dimension: int,
+        force_rebuild: bool,
+    ) -> bool:
+        """
+        判断已有向量是否可复用，避免重复调用外部 Embedding。
+        :param record: 已有向量记录
+        :param content_hash: 当前向量化内容哈希
+        :param configured_dimension: 当前配置维度
+        :param force_rebuild: 是否强制重建
+        :return: 可以复用返回 True
+        """
+        if force_rebuild or not record:
+            return False
+        return (
+            str(record.content_hash or "") == content_hash
+            and int(record.embedding_dimension or 0) == configured_dimension
+            and isinstance(record.embedding, list)
+            and len(record.embedding) == configured_dimension
+        )
+
+    @classmethod
     def search_tickets(cls, query_db: Session, keyword: str, limit: int = 20) -> list[dict]:
         """
-        使用自然语言进行相似工单检索，优先配置 Provider，失败时回退本地哈希。
+        使用自然语言进行相似工单检索，严格按配置 Provider 查询，不做降级或关键词混合。
         :param query_db: 数据库会话
         :param keyword: 搜索文本
         :param limit: 返回数量
@@ -514,15 +750,13 @@ class TicketEmbeddingService:
         if not config.get("enabled", True):
             return []
         provider = cls._normalize_provider(config.get("provider"))
-        try:
-            if provider == cls.PROVIDER_QDRANT:
-                scored = cls._search_qdrant(query_db, keyword, safe_limit, config)
-            else:
-                scored = cls._search_local_hash(query_db, keyword, safe_limit, config)
-        except Exception as exc:
-            logger.warning(f"工单相似度Provider检索失败，回退本地哈希: provider={provider}, error={exc}")
+        logger.info(f"工单相似度检索开始: provider={provider}, keywordChars={len(keyword or '')}, limit={safe_limit}")
+        if provider == cls.PROVIDER_QDRANT:
+            scored = cls._search_qdrant(query_db, keyword, safe_limit, config)
+        elif provider == cls.PROVIDER_EMBEDDING:
+            scored = cls._search_embedding(query_db, keyword, safe_limit, config)
+        else:
             scored = cls._search_local_hash(query_db, keyword, safe_limit, config)
-        scored = cls._merge_keyword_scores(query_db, keyword, safe_limit, scored, config)
         return cls._build_ticket_search_result(query_db, scored, safe_limit, config)
 
     @classmethod
@@ -541,10 +775,42 @@ class TicketEmbeddingService:
         :param config: 相似度配置
         :return: 工单ID到分数的映射
         """
+        local_config = cls._config_for_vector_provider(config, cls.PROVIDER_LOCAL_HASH)
+        query_vector = cls.embed_text(keyword, local_config)
+        model = cls.MODEL
+        version = cls.VERSION
+        scored: dict[int, float] = {}
+        for record in TicketDao.list_ticket_embedding_records(query_db, model, version):
+            if not isinstance(record.embedding, list):
+                continue
+            score = cls._cosine(query_vector, record.embedding)
+            if score > config.get("threshold", 0.05):
+                scored[record.object_id] = max(scored.get(record.object_id, 0.0), score)
+        return dict(sorted(scored.items(), key=lambda item: item[1], reverse=True)[:limit])
+
+    @classmethod
+    def _search_embedding(
+        cls,
+        query_db: Session,
+        keyword: str,
+        limit: int,
+        config: dict[str, Any],
+    ) -> dict[int, float]:
+        """
+        使用本地数据库中保存的外部 Embedding 向量计算余弦相似度。
+        :param query_db: 数据库会话
+        :param keyword: 搜索文本
+        :param limit: 返回数量
+        :param config: 相似度配置
+        :return: 工单ID到分数的映射
+        """
         embedding_config = config.get("embedding") if isinstance(config.get("embedding"), dict) else {}
+        if cls._normalize_embedding_provider(embedding_config.get("provider")) != "openai_compatible":
+            raise ValueError("检索 Provider=embedding 时，embedding.provider 必须配置为 openai_compatible")
         model = str(embedding_config.get("model") or cls.MODEL)
         version = str(embedding_config.get("version") or cls.VERSION)
-        query_vector = cls.embed_text(keyword, config)
+        vector_config = cls._config_for_vector_provider(config, cls.PROVIDER_EMBEDDING)
+        query_vector = cls.embed_text(keyword, vector_config)
         scored: dict[int, float] = {}
         for record in TicketDao.list_ticket_embedding_records(query_db, model, version):
             if not isinstance(record.embedding, list):
@@ -597,32 +863,6 @@ class TicketEmbeddingService:
         return scored
 
     @classmethod
-    def _merge_keyword_scores(
-        cls,
-        query_db: Session,
-        keyword: str,
-        limit: int,
-        scored: dict[int, float],
-        config: dict[str, Any],
-    ) -> dict[int, float]:
-        """
-        合并关键词命中分数，关键词只做弱加分，不再直接置为 100%。
-        :param query_db: 数据库会话
-        :param keyword: 搜索文本
-        :param limit: 返回数量
-        :param scored: 已有向量分数
-        :param config: 相似度配置
-        :return: 合并后的分数映射
-        """
-        keyword_weight = cls._safe_float(config.get("keywordWeight"), 0.15, 0.0, 1.0)
-        vector_weight = cls._safe_float(config.get("vectorWeight"), 0.85, 0.0, 1.0)
-        for index, ticket in enumerate(TicketDao.search_tickets_by_keyword(query_db, keyword, limit)):
-            keyword_score = keyword_weight * (1 - (index / max(limit, 1)) * 0.5)
-            vector_score = max(scored.get(ticket.ticket_id, 0.0), 0.0) * vector_weight
-            scored[ticket.ticket_id] = max(scored.get(ticket.ticket_id, 0.0), min(vector_score + keyword_score, 1.0))
-        return scored
-
-    @classmethod
     def _build_ticket_search_result(
         cls,
         query_db: Session,
@@ -664,6 +904,8 @@ class TicketEmbeddingService:
         text: str,
         model: str,
         version: str,
+        content_hash: str,
+        reused: bool = False,
     ) -> None:
         """
         将单个工单向量写入 Qdrant。
@@ -673,9 +915,16 @@ class TicketEmbeddingService:
         :param text: 入库文本
         :param model: Embedding 模型
         :param version: Embedding 版本
+        :param content_hash: 与本地向量记录一致的内容哈希
+        :param reused: 是否复用已有向量写入 Qdrant
         :return: 无
         """
         qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else {}
+        logger.info(
+            f"Qdrant写入开始: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"collection={qdrant_config.get('collection')}, vectorDimension={len(vector)}, "
+            f"model={model}, version={version}, reused={reused}"
+        )
         cls._ensure_qdrant_collection(config, expected_dimension=len(vector), allow_recreate=True)
         url = cls._qdrant_url(qdrant_config, f"/collections/{qdrant_config.get('collection')}/points")
         payload = {
@@ -692,7 +941,7 @@ class TicketEmbeddingService:
                         "categoryName": ticket.category_name,
                         "model": model,
                         "version": version,
-                        "contentHash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                        "contentHash": content_hash,
                         "updateTime": datetime.now().isoformat(),
                     },
                 }
@@ -705,6 +954,10 @@ class TicketEmbeddingService:
             timeout=cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120),
         )
         cls._raise_for_qdrant_status(response, f"写入工单向量: ticket_id={ticket.ticket_id}")
+        logger.info(
+            f"Qdrant写入完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
+            f"collection={qdrant_config.get('collection')}, vectorDimension={len(vector)}, reused={reused}"
+        )
 
     @classmethod
     def _ensure_qdrant_collection(
@@ -727,6 +980,11 @@ class TicketEmbeddingService:
         detail_response = requests.get(detail_url, headers=headers, timeout=timeout)
         if detail_response.status_code == 200:
             collection_dimension = cls._extract_qdrant_vector_size(detail_response.json())
+            logger.info(
+                f"Qdrant collection检查: collection={collection}, status=exists, "
+                f"collectionDimension={collection_dimension}, expectedDimension={expected_dimension}, "
+                f"allowRecreate={allow_recreate}"
+            )
             if expected_dimension and collection_dimension and collection_dimension != expected_dimension:
                 if allow_recreate and qdrant_config.get("recreateCollectionOnDimensionMismatch", False):
                     logger.warning(
@@ -750,13 +1008,80 @@ class TicketEmbeddingService:
                 )
             return
         if detail_response.status_code != 404 or not qdrant_config.get("createCollection", True):
+            logger.warning(
+                f"Qdrant collection检查失败且不创建: collection={collection}, "
+                f"status={detail_response.status_code}, createCollection={qdrant_config.get('createCollection', True)}"
+            )
             cls._raise_for_qdrant_status(detail_response, f"读取 collection: collection={collection}")
         embedding_config = config.get("embedding") if isinstance(config.get("embedding"), dict) else {}
         configured_dimension = embedding_config.get("dimension") if isinstance(embedding_config, dict) else None
         vector_size = cls._safe_int(expected_dimension or configured_dimension, cls.DIMENSION, 1, 16384)
+        logger.info(
+            f"Qdrant collection不存在，准备创建: collection={collection}, vectorSize={vector_size}, "
+            f"distance={qdrant_config.get('distance') or 'Cosine'}"
+        )
         create_payload = {"vectors": {"size": vector_size, "distance": qdrant_config.get("distance") or "Cosine"}}
         create_response = requests.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
         cls._raise_for_qdrant_status(create_response, f"创建 collection: collection={collection}")
+        logger.info(f"Qdrant collection创建完成: collection={collection}, vectorSize={vector_size}")
+
+    @classmethod
+    def list_qdrant_collections(cls, config: dict[str, Any]) -> dict[str, Any]:
+        """
+        查询 Qdrant collection 列表并解析默认向量维度，供配置页面提示维度匹配情况。
+        :param config: 相似度配置或仅包含 qdrant 的配置
+        :return: collection 列表、当前配置维度和服务地址
+        """
+        qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else config
+        embedding_config = config.get("embedding") if isinstance(config.get("embedding"), dict) else {}
+        url = cls._qdrant_url(qdrant_config, "/collections")
+        headers = cls._qdrant_headers(qdrant_config)
+        timeout = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
+        response = requests.get(url, headers=headers, timeout=timeout)
+        cls._raise_for_qdrant_status(response, "查询 collection 列表")
+        rows = ((response.json().get("result") or {}).get("collections") or [])
+        collections: list[dict[str, Any]] = []
+        for row in rows:
+            collection_name = str((row or {}).get("name") or "").strip()
+            if not collection_name:
+                continue
+            collections.append(cls._get_qdrant_collection_summary(qdrant_config, collection_name, headers, timeout))
+        configured_dimension = cls._safe_int(embedding_config.get("dimension"), 0, 0, 16384)
+        return {
+            "collections": collections,
+            "configuredDimension": configured_dimension or None,
+            "url": str(qdrant_config.get("url") or "").strip(),
+        }
+
+    @classmethod
+    def _get_qdrant_collection_summary(
+        cls,
+        qdrant_config: dict[str, Any],
+        collection_name: str,
+        headers: dict[str, str],
+        timeout: int,
+    ) -> dict[str, Any]:
+        """
+        查询单个 Qdrant collection 摘要信息。
+        :param qdrant_config: Qdrant 配置
+        :param collection_name: collection 名称
+        :param headers: 请求头
+        :param timeout: 超时时间
+        :return: collection 摘要
+        """
+        detail_url = cls._qdrant_url(qdrant_config, f"/collections/{collection_name}")
+        detail_response = requests.get(detail_url, headers=headers, timeout=timeout)
+        cls._raise_for_qdrant_status(detail_response, f"读取 collection: collection={collection_name}")
+        detail = detail_response.json()
+        vector_info = cls._extract_qdrant_vector_info(detail)
+        status = ((detail.get("result") or {}).get("status") if isinstance(detail, dict) else "") or ""
+        return {
+            "name": collection_name,
+            "dimension": vector_info.get("size"),
+            "distance": vector_info.get("distance"),
+            "status": status,
+            "namedVectors": vector_info.get("namedVectors", False),
+        }
 
     @classmethod
     def _recreate_qdrant_collection(
@@ -782,6 +1107,8 @@ class TicketEmbeddingService:
         delete_response = requests.delete(detail_url, headers=headers, timeout=timeout)
         if delete_response.status_code != 404:
             cls._raise_for_qdrant_status(delete_response, f"删除 collection: collection={collection}")
+        else:
+            logger.info(f"Qdrant collection删除跳过: collection={collection}, reason=collection不存在")
         create_payload = {"vectors": {"size": vector_size, "distance": distance}}
         create_response = requests.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
         if create_response.status_code == 409:
@@ -789,8 +1116,13 @@ class TicketEmbeddingService:
             cls._raise_for_qdrant_status(detail_response, f"确认 collection: collection={collection}")
             collection_dimension = cls._extract_qdrant_vector_size(detail_response.json())
             if collection_dimension == vector_size:
+                logger.info(
+                    f"Qdrant collection并发重建已完成: collection={collection}, vectorSize={vector_size}, "
+                    f"reason=创建返回409但维度已匹配"
+                )
                 return
         cls._raise_for_qdrant_status(create_response, f"重建 collection: collection={collection}")
+        logger.info(f"Qdrant collection重建完成: collection={collection}, vectorSize={vector_size}")
 
     @classmethod
     def _extract_qdrant_vector_size(cls, collection_detail: dict[str, Any]) -> int | None:
@@ -799,13 +1131,55 @@ class TicketEmbeddingService:
         :param collection_detail: Qdrant collection 详情响应
         :return: 默认向量维度
         """
+        return cls._extract_qdrant_vector_info(collection_detail).get("size")
+
+    @classmethod
+    def _extract_qdrant_vector_info(cls, collection_detail: dict[str, Any]) -> dict[str, Any]:
+        """
+        从 Qdrant collection 详情中解析向量维度、距离算法和是否命名向量。
+        :param collection_detail: collection 详情响应
+        :return: 向量信息
+        """
         result = collection_detail.get("result") if isinstance(collection_detail, dict) else {}
         config = result.get("config") if isinstance(result, dict) else {}
         params = config.get("params") if isinstance(config, dict) else {}
         vectors = params.get("vectors") if isinstance(params, dict) else {}
         if isinstance(vectors, dict) and "size" in vectors:
-            return cls._safe_int(vectors.get("size"), 0, 0, 16384) or None
-        return None
+            return {
+                "size": cls._safe_int(vectors.get("size"), 0, 0, 16384) or None,
+                "distance": vectors.get("distance"),
+                "namedVectors": False,
+            }
+        if isinstance(vectors, dict) and vectors:
+            first_name = next(iter(vectors.keys()))
+            first_vector = vectors.get(first_name) if isinstance(vectors.get(first_name), dict) else {}
+            return {
+                "size": cls._safe_int(first_vector.get("size"), 0, 0, 16384) or None,
+                "distance": first_vector.get("distance"),
+                "namedVectors": True,
+            }
+        return {"size": None, "distance": None, "namedVectors": False}
+
+    @classmethod
+    def build_config_with_qdrant_override(
+        cls,
+        query_db: Session,
+        qdrant_override: dict[str, Any] | None = None,
+        embedding_override: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        基于已保存配置叠加页面未保存的 Qdrant/Embedding 配置，用于即时预览 collection。
+        :param query_db: 数据库会话
+        :param qdrant_override: 页面当前 Qdrant 表单
+        :param embedding_override: 页面当前 Embedding 表单
+        :return: 合并后的配置
+        """
+        config = cls.get_similarity_config(query_db)
+        if isinstance(qdrant_override, dict):
+            config["qdrant"] = cls._deep_merge(config.get("qdrant") or {}, qdrant_override)
+        if isinstance(embedding_override, dict):
+            config["embedding"] = cls._deep_merge(config.get("embedding") or {}, embedding_override)
+        return cls._normalize_config_for_save(config)
 
     @classmethod
     def _raise_for_qdrant_status(cls, response: requests.Response, action: str) -> None:
@@ -842,6 +1216,10 @@ class TicketEmbeddingService:
         payload: dict[str, Any] = {"model": embedding_config.get("model"), "input": text}
         if dimension > 0:
             payload["dimensions"] = dimension
+        logger.info(
+            f"外部Embedding请求开始: provider=openai_compatible, model={embedding_config.get('model')}, "
+            f"configuredDimension={dimension}, textChars={len(text)}, endpoint={endpoint.split('?')[0]}"
+        )
         response = requests.post(
             endpoint,
             headers=headers,
@@ -854,6 +1232,10 @@ class TicketEmbeddingService:
         if not isinstance(vector, list):
             raise ValueError("Embedding 接口未返回 data[0].embedding")
         result = [float(item) for item in vector]
+        logger.info(
+            f"外部Embedding请求完成: provider=openai_compatible, model={embedding_config.get('model')}, "
+            f"configuredDimension={dimension}, returnedDimension={len(result)}"
+        )
         if dimension > 0 and len(result) != dimension:
             raise ValueError(f"Embedding接口返回维度与配置不一致: expected={dimension}, actual={len(result)}")
         return result
@@ -937,7 +1319,8 @@ class TicketEmbeddingService:
         :return: Provider 编码
         """
         provider = str(value or cls.PROVIDER_LOCAL_HASH).strip().lower().replace("-", "_")
-        return provider if provider in {cls.PROVIDER_LOCAL_HASH, cls.PROVIDER_QDRANT} else cls.PROVIDER_LOCAL_HASH
+        supported = {cls.PROVIDER_LOCAL_HASH, cls.PROVIDER_EMBEDDING, cls.PROVIDER_QDRANT}
+        return provider if provider in supported else cls.PROVIDER_LOCAL_HASH
 
     @classmethod
     def _normalize_embedding_provider(cls, value: Any) -> str:
@@ -976,7 +1359,7 @@ class TicketEmbeddingService:
         normalized = cls._deep_merge(normalized, source)
         normalized["enabled"] = bool(normalized.get("enabled", True))
         normalized["provider"] = cls._normalize_provider(normalized.get("provider"))
-        normalized["fallbackProvider"] = cls._normalize_provider(normalized.get("fallbackProvider"))
+        normalized["fallbackProvider"] = cls.PROVIDER_LOCAL_HASH
         normalized["topK"] = cls._safe_int(normalized.get("topK"), 20, 1, 100)
         normalized["threshold"] = cls._safe_float(normalized.get("threshold"), 0.05, -1.0, 1.0)
         normalized["keywordWeight"] = cls._safe_float(normalized.get("keywordWeight"), 0.15, 0.0, 1.0)
@@ -1074,6 +1457,7 @@ class TicketEmbeddingService:
                 page_size=payload.page_size,
                 provider=payload.provider,
                 include_qdrant=payload.include_qdrant,
+                force_rebuild=payload.force_rebuild,
             )
             result["missingTicketNos"] = missing_ticket_nos[:100]
             logger.info(f"工单向量后台重建完成: result={result}")
@@ -1095,6 +1479,7 @@ class TicketEmbeddingService:
                 page_size=payload.page_size,
                 provider=payload.provider,
                 include_qdrant=payload.include_qdrant,
+                force_rebuild=payload.force_rebuild,
             )
             result["missingTicketNos"] = missing_ticket_nos[:100]
             return result

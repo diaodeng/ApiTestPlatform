@@ -4,7 +4,7 @@
       <div class="page-intro__eyebrow">相似工单检索</div>
       <h2 class="page-intro__title">配置向量检索、Embedding 和自动刷新场景</h2>
       <p class="page-intro__desc">
-        配置保存后立即影响相似工单查询；历史数据需要执行向量重建后才会进入 Qdrant 或刷新本地向量。
+        配置保存后立即影响相似工单查询；Provider 配置为本地哈希或 Embedding 时向量存入数据库 embedding_record，配置为 Qdrant 时只查询 Qdrant。
       </p>
     </section>
 
@@ -27,16 +27,9 @@
           <el-col :xs="24" :md="8">
             <el-form-item label="检索 Provider" prop="provider">
               <el-select v-model="form.provider" style="width: 100%">
-                <el-option label="本地哈希 local_hash" value="local_hash" />
-                <el-option label="Qdrant" value="qdrant" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="降级 Provider" prop="fallbackProvider">
-              <el-select v-model="form.fallbackProvider" style="width: 100%">
-                <el-option label="本地哈希 local_hash" value="local_hash" />
-                <el-option label="Qdrant" value="qdrant" />
+                <el-option label="本地哈希 local_hash（数据库）" value="local_hash" />
+                <el-option label="Embedding（数据库）" value="embedding" />
+                <el-option label="Qdrant（向量库）" value="qdrant" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -52,30 +45,6 @@
                 :min="-1"
                 :max="1"
                 :step="0.01"
-                :precision="2"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="关键词权重">
-              <el-input-number
-                v-model="form.keywordWeight"
-                :min="0"
-                :max="1"
-                :step="0.05"
-                :precision="2"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="向量权重">
-              <el-input-number
-                v-model="form.vectorWeight"
-                :min="0"
-                :max="1"
-                :step="0.05"
                 :precision="2"
                 style="width: 100%"
               />
@@ -106,26 +75,23 @@
     <el-card shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
-          <span>Embedding 服务</span>
-          <el-tag effect="plain">文本转向量</el-tag>
+          <span>{{ usesExternalEmbedding ? 'Embedding 服务' : '本地哈希参数' }}</span>
+          <el-tag effect="plain">{{ embeddingProviderLabel }}</el-tag>
         </div>
       </template>
       <el-form :model="form.embedding" label-width="150px">
         <el-row :gutter="16">
           <el-col :xs="24" :md="8">
-            <el-form-item label="Provider">
-              <el-select v-model="form.embedding.provider" style="width: 100%">
-                <el-option label="本地哈希 local_hash" value="local_hash" />
-                <el-option label="OpenAI兼容接口" value="openai_compatible" />
-              </el-select>
+            <el-form-item label="生成方式">
+              <el-tag effect="plain">{{ embeddingProviderLabel }}</el-tag>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="8">
+          <el-col v-if="usesExternalEmbedding" :xs="24" :md="8">
             <el-form-item label="模型名称">
               <el-input v-model="form.embedding.model" placeholder="如 text-embedding-3-large" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="8">
+          <el-col v-if="usesExternalEmbedding" :xs="24" :md="8">
             <el-form-item label="版本">
               <el-input v-model="form.embedding.version" placeholder="如 v1" />
             </el-form-item>
@@ -145,10 +111,10 @@
               type="info"
               show-icon
               :closable="false"
-              title="OpenAI兼容接口会把该值作为 dimensions 参数下发；同步 Qdrant 时如果外部 Embedding 失败，不会回退本地哈希向量。"
+              :title="embeddingModeTip"
             />
           </el-col>
-          <el-col :xs="24" :md="16">
+          <el-col v-if="usesExternalEmbedding" :xs="24" :md="16">
             <el-form-item label="接口地址">
               <el-input
                 v-model="form.embedding.endpoint"
@@ -156,7 +122,7 @@
               />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="16">
+          <el-col v-if="usesExternalEmbedding" :xs="24" :md="16">
             <el-form-item label="API Key">
               <el-input
                 v-model="form.embedding.apiKey"
@@ -166,7 +132,7 @@
               />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :md="8">
+          <el-col v-if="usesExternalEmbedding" :xs="24" :md="8">
             <el-form-item label="超时秒数">
               <el-input-number
                 v-model="form.embedding.timeoutSeconds"
@@ -180,7 +146,7 @@
       </el-form>
     </el-card>
 
-    <el-card shadow="never" class="config-card mt16">
+    <el-card v-if="usesQdrant" shadow="never" class="config-card mt16">
       <template #header>
         <div class="card-header">
           <span>Qdrant 向量库</span>
@@ -196,7 +162,21 @@
           </el-col>
           <el-col :xs="24" :md="12">
             <el-form-item label="Collection">
-              <el-input v-model="form.qdrant.collection" placeholder="ticket_similarity" />
+              <el-select
+                v-model="form.qdrant.collection"
+                filterable
+                allow-create
+                default-first-option
+                placeholder="选择或输入 collection"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in qdrantCollections"
+                  :key="item.name"
+                  :label="formatCollectionLabel(item)"
+                  :value="item.name"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
@@ -250,6 +230,20 @@
           </el-col>
         </el-row>
       </el-form>
+      <el-space wrap class="mt16">
+        <el-button :loading="loadingCollections" @click="loadQdrantCollections">刷新 Collection</el-button>
+        <el-tag v-if="selectedCollection" :type="dimensionMatched ? 'success' : 'danger'" effect="plain">
+          当前 Collection 维度：{{ selectedCollection.dimension || '未知' }}
+        </el-tag>
+      </el-space>
+      <el-alert
+        v-if="selectedCollection && !dimensionMatched"
+        class="mt16"
+        type="warning"
+        show-icon
+        :closable="false"
+        :title="`当前配置维度 ${form.embedding.dimension || '-'} 与 Collection ${form.qdrant.collection} 维度 ${selectedCollection.dimension || '未知'} 不一致，保存前请调整维度或更换 Collection。`"
+      />
       <el-alert
         v-if="form.qdrant.recreateCollectionOnDimensionMismatch"
         class="mt16"
@@ -287,7 +281,7 @@
       <template #header>
         <div class="card-header">
           <span>手动重建</span>
-          <el-tag type="danger" effect="plain">会请求 Embedding 与 Qdrant</el-tag>
+          <el-tag type="danger" effect="plain">按 Provider 执行</el-tag>
         </div>
       </template>
       <el-form :model="rebuildForm" label-width="150px">
@@ -323,18 +317,12 @@
           <el-col :xs="24" :md="8">
             <el-form-item label="指定 Provider">
               <el-select v-model="rebuildForm.provider" clearable style="width: 100%">
-                <el-option label="跟随配置" value="" />
-                <el-option label="local_hash" value="local_hash" />
-                <el-option label="qdrant" value="qdrant" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="同步 Qdrant">
-              <el-select v-model="rebuildForm.includeQdrantMode" style="width: 100%">
-                <el-option label="跟随配置" value="auto" />
-                <el-option label="强制同步" value="true" />
-                <el-option label="不同步" value="false" />
+                <el-option
+                  v-for="item in rebuildProviderOptions"
+                  :key="item.value || 'default'"
+                  :label="item.label"
+                  :value="item.value"
+                />
               </el-select>
             </el-form-item>
           </el-col>
@@ -348,12 +336,24 @@
               />
             </el-form-item>
           </el-col>
+          <el-col :xs="24" :md="8">
+            <el-form-item label="强制重建">
+              <el-switch
+                v-model="rebuildForm.forceRebuild"
+                inline-prompt
+                active-text="开"
+                inactive-text="关"
+              />
+            </el-form-item>
+          </el-col>
         </el-row>
       </el-form>
       <el-alert v-if="rebuildResult" class="mb16" type="success" show-icon :closable="false">
         <template #title>
           重建结果：总数 {{ rebuildResult.total || 0 }}，成功
-          {{ rebuildResult.processed || 0 }}，失败 {{ rebuildResult.failed || 0 }}
+          {{ rebuildResult.processed || 0 }}，失败 {{ rebuildResult.failed || 0 }}，幂等跳过
+          {{ rebuildResult.idempotentSkipped || 0 }}，复用向量同步Qdrant
+          {{ rebuildResult.qdrantSyncedFromCache || 0 }}
         </template>
       </el-alert>
       <el-space wrap>
@@ -381,6 +381,7 @@
 <script setup name="TicketSimilarityConfig">
   import {
     getTicketSimilarityConfig,
+    listTicketSimilarityQdrantCollections,
     rebuildTicketSimilarity,
     saveTicketSimilarityConfig,
   } from '@/api/ticket/ticket';
@@ -390,8 +391,10 @@
   const loading = ref(false);
   const saving = ref(false);
   const rebuilding = ref(false);
+  const loadingCollections = ref(false);
   const rebuildResult = ref(null);
   const formRef = ref(null);
+  const qdrantCollections = ref([]);
 
   const fieldOptions = [
     { value: 'ticketNo', label: '工单号' },
@@ -425,14 +428,39 @@
 
   const rules = {
     provider: [{ required: true, message: '请选择检索 Provider', trigger: 'change' }],
-    fallbackProvider: [{ required: true, message: '请选择降级 Provider', trigger: 'change' }],
   };
+
+  const usesLocalHash = computed(() => form.provider === 'local_hash');
+  const usesExternalEmbedding = computed(() => ['embedding', 'qdrant'].includes(form.provider));
+  const usesQdrant = computed(() => form.provider === 'qdrant');
+  const embeddingProviderLabel = computed(() =>
+    usesLocalHash.value ? '本地哈希 local_hash' : 'OpenAI兼容接口'
+  );
+  const embeddingModeTip = computed(() =>
+    usesLocalHash.value
+      ? '当前使用本地哈希生成向量，不调用外部 Embedding 接口；隐藏的外部接口配置会保留，切换回 embedding 或 qdrant 后继续显示。'
+      : '当前会按外部 Embedding 配置生成语义向量；失败会直接报错，不会回退本地哈希。'
+  );
+  const rebuildProviderOptions = computed(() => [
+    { label: `跟随配置（${form.provider}）`, value: '' },
+    { label: form.provider, value: form.provider },
+  ]);
+
+  const selectedCollection = computed(() =>
+    qdrantCollections.value.find((item) => item.name === form.qdrant.collection)
+  );
+
+  const dimensionMatched = computed(() => {
+    if (!selectedCollection.value || !selectedCollection.value.dimension) {
+      return true;
+    }
+    return Number(selectedCollection.value.dimension) === Number(form.embedding.dimension);
+  });
 
   function createDefaultForm() {
     return {
       enabled: true,
       provider: 'local_hash',
-      fallbackProvider: 'local_hash',
       topK: 20,
       threshold: 0.05,
       keywordWeight: 0.15,
@@ -483,10 +511,20 @@
     scope: 'all',
     pageSize: 100,
     provider: '',
-    includeQdrantMode: 'auto',
     runInBackground: true,
+    forceRebuild: false,
     ticketNosText: '',
   });
+
+  watch(
+    () => form.provider,
+    (provider) => {
+      form.embedding.provider = provider === 'local_hash' ? 'local_hash' : 'openai_compatible';
+      if (rebuildForm.provider && rebuildForm.provider !== provider) {
+        rebuildForm.provider = '';
+      }
+    }
+  );
 
   function assignConfig(config = {}) {
     const defaults = createDefaultForm();
@@ -499,13 +537,13 @@
       qdrant: { ...defaults.qdrant, ...(config.qdrant || {}) },
       sceneTriggers: { ...defaults.sceneTriggers, ...(config.sceneTriggers || {}) },
     });
+    form.embedding.provider = form.provider === 'local_hash' ? 'local_hash' : 'openai_compatible';
   }
 
   function buildPayload() {
     return {
       enabled: Boolean(form.enabled),
       provider: String(form.provider || 'local_hash').trim(),
-      fallbackProvider: String(form.fallbackProvider || 'local_hash').trim(),
       topK: Number(form.topK || 20),
       threshold: Number(form.threshold || 0.05),
       keywordWeight: Number(form.keywordWeight || 0),
@@ -551,6 +589,10 @@
       if (!valid) {
         return;
       }
+      if (form.provider === 'qdrant' && selectedCollection.value && !dimensionMatched.value) {
+        proxy.$modal.msgWarning('当前配置维度与 Collection 维度不一致，请先调整维度或更换 Collection');
+        return;
+      }
       saving.value = true;
       saveTicketSimilarityConfig(buildPayload())
         .then((response) => {
@@ -577,6 +619,30 @@
     return ticketNos;
   }
 
+  function formatCollectionLabel(item) {
+    const dimension = item.dimension ? `${item.dimension}维` : '维度未知';
+    const distance = item.distance ? ` / ${item.distance}` : '';
+    const status = item.status ? ` / ${item.status}` : '';
+    return `${item.name}（${dimension}${distance}${status}）`;
+  }
+
+  function loadQdrantCollections() {
+    loadingCollections.value = true;
+    listTicketSimilarityQdrantCollections({
+      embedding: buildPayload().embedding,
+      qdrant: buildPayload().qdrant,
+    })
+      .then((response) => {
+        qdrantCollections.value = Array.isArray(response.data?.collections)
+          ? response.data.collections
+          : [];
+        proxy.$modal.msgSuccess('Collection 已刷新');
+      })
+      .finally(() => {
+        loadingCollections.value = false;
+      });
+  }
+
   function handleRebuild() {
     const ticketNos = rebuildForm.scope === 'nos' ? parseTicketNos() : [];
     if (rebuildForm.scope === 'nos' && !ticketNos.length) {
@@ -588,9 +654,9 @@
       ticketNos: ticketNos.length ? ticketNos : null,
       pageSize: Number(rebuildForm.pageSize || 100),
       provider: rebuildForm.provider || null,
-      includeQdrant:
-        rebuildForm.includeQdrantMode === 'auto' ? null : rebuildForm.includeQdrantMode === 'true',
+      includeQdrant: null,
       runInBackground: Boolean(rebuildForm.runInBackground),
+      forceRebuild: Boolean(rebuildForm.forceRebuild),
     };
     rebuilding.value = true;
     rebuildTicketSimilarity(payload)

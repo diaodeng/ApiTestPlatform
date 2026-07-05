@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 import requests
 
-from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.entity.vo.ticket_vo import TicketEmbeddingRebuildRequestModel
+from modules.ticket.service.ai.ticket_embedding_service import ExternalEmbeddingUnavailableError, TicketEmbeddingService
 
 
 class TicketEmbeddingServiceTests(unittest.TestCase):
@@ -145,8 +146,8 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "expected=3, actual=2"):
                 TicketEmbeddingService._embed_text_openai_compatible("测试文本", config)
 
-    def test_qdrant_sync_disables_local_hash_fallback_when_embedding_fails(self):
-        """同步 Qdrant 时外部 Embedding 失败，应阻止回退本地哈希，避免错误维度写入。"""
+    def test_openai_compatible_embedding_fails_without_local_hash_fallback(self):
+        """严格模式下外部 Embedding 失败应直接报错，不回退本地哈希。"""
         config = {
             "embedding": {
                 "provider": "openai_compatible",
@@ -158,8 +159,8 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         }
 
         with patch.object(TicketEmbeddingService, "_embed_text_openai_compatible", side_effect=RuntimeError("521")):
-            with self.assertRaisesRegex(ValueError, "已阻止回退本地哈希写入Qdrant"):
-                TicketEmbeddingService.embed_text("测试文本", config, allow_local_fallback=False)
+            with self.assertRaisesRegex(ExternalEmbeddingUnavailableError, "严格模式不回退本地哈希"):
+                TicketEmbeddingService.embed_text("测试文本", config)
 
     def test_qdrant_recreate_ignores_concurrent_create_conflict_when_dimension_matches(self):
         """并发重建 collection 时，若 409 后确认维度已正确，应视为成功。"""
@@ -184,12 +185,115 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
                 distance="Cosine",
             )
 
+    def test_embedding_content_hash_changes_when_fields_change(self):
+        """向量化字段配置变化时，内容哈希应变化并触发重新生成。"""
+        text = "同一段工单文本"
+        left_hash = TicketEmbeddingService._embedding_content_hash(text, {"fields": ["title", "description"]})
+        right_hash = TicketEmbeddingService._embedding_content_hash(text, {"fields": ["title", "rca"]})
+
+        self.assertNotEqual(left_hash, right_hash)
+
+    def test_can_reuse_embedding_record_requires_hash_dimension_and_vector(self):
+        """幂等复用必须同时满足内容哈希、配置维度和已存向量长度。"""
+        record = type(
+            "MockRecord",
+            (),
+            {"content_hash": "hash-a", "embedding_dimension": 3, "embedding": [0.1, 0.2, 0.3]},
+        )()
+
+        self.assertTrue(TicketEmbeddingService._can_reuse_embedding_record(record, "hash-a", 3, False))
+        self.assertFalse(TicketEmbeddingService._can_reuse_embedding_record(record, "hash-b", 3, False))
+        self.assertFalse(TicketEmbeddingService._can_reuse_embedding_record(record, "hash-a", 2, False))
+        self.assertFalse(TicketEmbeddingService._can_reuse_embedding_record(record, "hash-a", 3, True))
+
+    def test_rebuild_request_normalizes_force_rebuild(self):
+        """重建请求默认不强制，显式传入时按布尔值归一。"""
+        default_payload = TicketEmbeddingRebuildRequestModel()
+        force_payload = TicketEmbeddingRebuildRequestModel(forceRebuild=True)
+
+        self.assertFalse(default_payload.force_rebuild)
+        self.assertTrue(force_payload.force_rebuild)
+
+    def test_normalize_provider_supports_embedding(self):
+        """检索 Provider 支持本地 hash、数据库 Embedding 和 Qdrant 三种严格模式。"""
+        self.assertEqual(TicketEmbeddingService._normalize_provider("embedding"), "embedding")
+        self.assertEqual(TicketEmbeddingService._normalize_provider("qdrant"), "qdrant")
+        self.assertEqual(TicketEmbeddingService._normalize_provider("local-hash"), "local_hash")
+
+    def test_list_qdrant_collections_returns_dimensions(self):
+        """配置页查询 Qdrant collections 时应带出 collection 维度。"""
+        list_response = self._response(200, {"result": {"collections": [{"name": "ticket_similarity"}]}})
+        detail_response = self._response(
+            200,
+            {
+                "result": {
+                    "status": "green",
+                    "config": {"params": {"vectors": {"size": 1024, "distance": "Cosine"}}},
+                }
+            },
+        )
+        config = {
+            "embedding": {"dimension": 1024},
+            "qdrant": {"url": "http://qdrant.local", "collection": "ticket_similarity"},
+        }
+
+        with patch(
+            "modules.ticket.service.ai.ticket_embedding_service.requests.get",
+            side_effect=[list_response, detail_response],
+        ):
+            result = TicketEmbeddingService.list_qdrant_collections(config)
+
+        self.assertEqual(result["collections"][0]["name"], "ticket_similarity")
+        self.assertEqual(result["collections"][0]["dimension"], 1024)
+
     def test_qdrant_http_error_keeps_response_body(self):
         """Qdrant 返回 4xx/5xx 时，异常信息应包含服务端响应体用于定位根因。"""
         response = self._response(400, {"status": {"error": "Vector dimension error"}})
 
         with self.assertRaisesRegex(requests.HTTPError, "Vector dimension error"):
             TicketEmbeddingService._raise_for_qdrant_status(response, "写入工单向量")
+
+    def test_validate_qdrant_config_rejects_existing_collection_dimension_mismatch(self):
+        """保存 Qdrant 配置时，已存在 collection 维度不一致应直接拒绝。"""
+        config = TicketEmbeddingService._normalize_config_for_save(
+            {
+                "provider": "qdrant",
+                "embedding": {
+                    "provider": "openai_compatible",
+                    "endpoint": "http://embedding.local/v1/embeddings",
+                    "model": "mock-embedding",
+                    "dimension": 1024,
+                },
+                "qdrant": {"url": "http://qdrant.local", "collection": "ticket_similarity"},
+            }
+        )
+        detail_response = self._response(
+            200,
+            {"result": {"config": {"params": {"vectors": {"size": 2560, "distance": "Cosine"}}}}},
+        )
+
+        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response):
+            with self.assertRaisesRegex(ValueError, "collectionDimension=2560, configuredDimension=1024"):
+                TicketEmbeddingService._validate_similarity_config(config)
+
+    def test_validate_qdrant_config_allows_missing_collection(self):
+        """保存 Qdrant 配置时，collection 不存在可保存，后续写入链路再按配置自动创建。"""
+        config = TicketEmbeddingService._normalize_config_for_save(
+            {
+                "provider": "qdrant",
+                "embedding": {
+                    "provider": "openai_compatible",
+                    "endpoint": "http://embedding.local/v1/embeddings",
+                    "model": "mock-embedding",
+                    "dimension": 1024,
+                },
+                "qdrant": {"url": "http://qdrant.local", "collection": "ticket_similarity"},
+            }
+        )
+        detail_response = self._response(404, {"status": {"error": "Not found"}})
+
+        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response):
+            TicketEmbeddingService._validate_similarity_config(config)
 
 
 if __name__ == "__main__":

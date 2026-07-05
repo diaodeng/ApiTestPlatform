@@ -65,6 +65,15 @@ export function saveTicketSimilarityConfig(data) {
   });
 }
 
+// 查询 Qdrant Collection 列表
+export function listTicketSimilarityQdrantCollections(data) {
+  return request({
+    url: '/ticket/similarity/qdrant/collections',
+    method: 'post',
+    data,
+  });
+}
+
 // 重建相似工单向量
 export function rebuildTicketSimilarity(data) {
   return request({

@@ -6,7 +6,13 @@
 4. 修复手动重建同步 Qdrant 失败时只显示 `400 Client Error` 的问题：写入/查询前会校验实际向量维度与既有 collection 维度，Qdrant HTTP 异常会携带响应体，便于定位维度或 schema 不匹配。
 5. 相似工单 Qdrant 配置新增“维度不一致时重建”开关，默认关闭；开启后仅在重建写入链路删除旧 collection 并按当前向量维度重建。
 6. 修复外部 Embedding 失败时回退本地 hash 写入 Qdrant 导致 collection 维度反复切换的问题：Qdrant 同步链路会直接失败，OpenAI 兼容请求会携带 `dimensions` 并校验返回维度。
-7. 新增说明文档：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`。
+7. 向量重建新增过程日志和外部 Embedding 失败熔断：批量重建会记录每批、每条工单、请求维度、返回维度和跳过原因；外部接口失败后停止后续请求，避免继续消耗 token。
+8. 工单向量生成新增幂等判断：同一工单在模型、版本、配置维度、向量化字段和最终文本未变化时，手动重建、入库或更新链路会复用本地 `embedding_record`，不再重复调用外部 Embedding；手动页面新增“强制重建”开关用于覆盖该行为。
+9. 幂等命中但本次要求同步 Qdrant 时，会用本地已存向量写入 Qdrant，并在结果中返回 `idempotentSkipped/qdrantSyncedFromCache`。
+10. 相似查询和向量入库改为严格 Provider：`local_hash` 只生成/查询数据库 `embedding_record` 中的本地 hash，`embedding` 只调用外部 Embedding 并查询数据库 `embedding_record`，`qdrant` 只调用外部 Embedding 和 Qdrant；任何失败都直接返回错误或写入日志，不再自动兜底。
+11. 相似工单配置页新增 Qdrant collection 列表刷新，展示 collection 维度、距离算法和状态；当前配置维度与所选 collection 维度不一致时提示并阻止保存，后端保存 Qdrant 配置时也会校验已存在 collection 的维度。
+12. 新增说明文档：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`。
+13. 相似工单配置页改为按检索 Provider 联动展示配置项：`local_hash` 隐藏外部接口和 Qdrant 配置，`embedding` 只显示外部 Embedding 配置，`qdrant` 才显示 Qdrant 配置；隐藏项保留原值，手动重建 Provider 选项跟随当前配置收敛。
 
 ## 2026-07-04
 
@@ -223,7 +229,7 @@
 3. 新增说明文档：`web/public/docs/2026-06-17-ticket-auto-category-debug-logs.md`。
 
 1. 工单相似度检索改为配置化 Provider：默认保留 `local_hash`，新增 `qdrant` Provider 和兼容 OpenAI Embedding 的配置入口。
-2. 相似工单文本扩展为标题、描述、AI 摘要、根因、解决方案和 RCA；关键词命中改为弱加分，不再直接给 100% 相似度。
+2. 相似工单文本扩展为标题、描述、AI 摘要、根因、解决方案和 RCA；后续严格 Provider 模式下查询结果只来自当前向量 Provider，不再混入关键词加分。
 3. 新增 `GET /ticket/similarity/config` 和 `POST /ticket/similarity/rebuild`，支持初始化配置和批量重建历史工单向量。
 4. 新增 `PUT /ticket/similarity/config` 和相似工单配置菜单页，可视化维护 Provider、Embedding、Qdrant、参与字段和 `sceneTriggers` 场景开关。
 5. 外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路会按 `sceneTriggers` 自动刷新工单向量。

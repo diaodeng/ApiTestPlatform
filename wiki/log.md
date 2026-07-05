@@ -8,14 +8,31 @@ updated: 2026-07-05
 
 # 操作日志
 
+## [2026-07-05] INGEST-CODE | 相似工单严格 Provider 与 Collection 维度预览
+
+- 触发：用户要求重新处理向量化和相似查询逻辑，不要兜底；配置 hash 就用 hash，配置 embedding 就只用 embedding，配置 qdrant 就只用 qdrant；配置页需要显示 Qdrant collection 列表和维度。
+- 架构层：工单域 / 相似工单 / 严格 Provider / Qdrant 配置页
+- 更新的页面：`server/modules/ticket/service/ai/ticket_embedding_service.py`、`server/modules/ticket/controller/ticket_config_controller.py`、`server/tests/test_ticket_embedding_service.py`、`web/src/api/ticket/ticket.js`、`web/src/api/ticket/config.js`、`web/src/views/ticket/similarityConfig/index.vue`、`web/public/docs/2026-06-17-ticket-similarity-qdrant-provider.md`、`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-automation-flow.md`
+- 变更传播链：相似工单配置页 Provider -> `TicketEmbeddingService._normalize_provider` -> `vectorize_ticket/search_tickets` -> `local_hash` 只生成/查询数据库 `embedding_record` 本地 hash，`embedding` 只调用外部 Embedding 并查询数据库向量，`qdrant` 只调用外部 Embedding 和 Qdrant；失败不再回退。配置页刷新 collection -> `POST /ticket/similarity/qdrant/collections` -> `list_qdrant_collections` -> Qdrant `/collections` 与 `/collections/{name}` -> 返回维度并和配置维度比较。
+- 关键结论：不使用 Qdrant 时，向量数据存储在数据库 `embedding_record.embedding` JSON 字段，不是本地文件。Qdrant collection 维度与配置维度不一致时页面会提示并阻止保存。
+- 2026-07-05 补充：配置页改为按检索 Provider 联动展示，`local_hash` 隐藏外部接口和 Qdrant 配置，`embedding` 只显示外部 Embedding 配置，`qdrant` 才显示 Qdrant 配置；隐藏字段保留原值，手动重建 Provider 下拉只允许跟随配置或当前 Provider。
+
+## [2026-07-05] INGEST-CODE | 工单向量重建幂等与强制重建
+
+- 触发：用户询问本地 hash 是否适合写入 Qdrant、与真实 Embedding 相似度差异、搜索是否一定使用 Qdrant，并要求手动重建、入库和更新时已生成过的 Embedding 不要重复调用外部接口。
+- 架构层：工单域 / 相似工单 / Embedding 幂等 / Qdrant 同步
+- 更新的页面：`server/modules/ticket/service/ai/ticket_embedding_service.py`、`server/modules/ticket/dao/ticket_dao.py`、`server/modules/ticket/entity/vo/ticket_vo.py`、`web/src/views/ticket/similarityConfig/index.vue`、`server/tests/test_ticket_embedding_service.py`、`web/public/docs/2026-06-17-ticket-similarity-qdrant-provider.md`、`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-automation-flow.md`
+- 变更传播链：相似工单配置页“强制重建” -> `TicketEmbeddingRebuildRequestModel.force_rebuild` -> `TicketEmbeddingService.rebuild_ticket_embeddings(force_rebuild)` -> `vectorize_ticket` -> `TicketDao.get_embedding_record` -> 比较模型、版本、配置维度、向量长度和包含 `fields + text` 的 `content_hash` -> 命中时跳过外部 Embedding；若本次要求同步 Qdrant，则复用本地向量写入 Qdrant。
+- 关键结论：当前严格 Provider 模式下本地 hash 不写 Qdrant；`local_hash` 只用数据库 `embedding_record`，`embedding` 只用外部 Embedding + 数据库 `embedding_record`，`qdrant` 只用外部 Embedding + Qdrant，失败不回退其他 Provider。手动重建默认幂等跳过，`forceRebuild=true` 才强制重新消耗外部 token。
+
 ## [2026-07-05] INGEST-CODE | 工单向量重建 Qdrant 400 诊断增强
 
 - 触发：用户反馈手动重建工单 `INC00001699695` 时 Qdrant `/collections/ticket_similarity/points` 返回 400，日志只显示 `400 Client Error`，无法判断根因。
 - 架构层：工单域 / 相似工单 / Qdrant Provider / 后端诊断
 - 创建的页面：`web/public/docs/2026-07-05-ticket-qdrant-rebuild-400-diagnosis.md`
 - 更新的页面：`server/modules/ticket/service/ai/ticket_embedding_service.py`、`server/tests/test_ticket_embedding_service.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-automation-flow.md`
-- 变更传播链：`TicketEmbeddingService.vectorize_ticket` -> 判断是否同步 Qdrant -> `embed_text(allow_local_fallback=False)` -> `_embed_text_openai_compatible(dimensions=配置维度)` -> `_upsert_qdrant_ticket` -> `_ensure_qdrant_collection(expected_dimension, allow_recreate=True)`；配置允许覆盖时删除并重建 collection；Qdrant 4xx/5xx -> `_raise_for_qdrant_status` -> 异常信息保留响应体。
-- 关键结论：既有 `ticket_similarity` collection 维度与当前 Embedding 实际返回维度不一致会导致 400；外部 Embedding 521 时不允许回退 hash 写 Qdrant，否则会在 2560 和 1024 等维度之间反复删建。若确认旧 Qdrant 向量可丢弃，可开启 `recreateCollectionOnDimensionMismatch` 后全量重建。
+- 变更传播链：`TicketEmbeddingService.rebuild_ticket_embeddings` -> 批次日志/熔断状态 -> `vectorize_ticket` -> 判断是否同步 Qdrant -> `embed_text(allow_local_fallback=False)` -> `_embed_text_openai_compatible(dimensions=配置维度)` -> `_upsert_qdrant_ticket` -> `_ensure_qdrant_collection(expected_dimension, allow_recreate=True)`；配置允许覆盖时删除并重建 collection；Qdrant 4xx/5xx -> `_raise_for_qdrant_status` -> 异常信息保留响应体。
+- 关键结论：既有 `ticket_similarity` collection 维度与当前 Embedding 实际返回维度不一致会导致 400；外部 Embedding 521 时不允许回退 hash 写 Qdrant，否则会在 2560 和 1024 等维度之间反复删建。重建是一条工单一次 Embedding 请求，批量只是在服务端循环；外部异常会熔断后续请求并返回 `abortReason/skipped`。若确认旧 Qdrant 向量可丢弃，可开启 `recreateCollectionOnDimensionMismatch` 后全量重建。
 
 ## [2026-07-05] INGEST-CODE | 相似工单手动重建改用 ticketNo
 

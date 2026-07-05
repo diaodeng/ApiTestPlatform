@@ -1770,6 +1770,35 @@ class TicketDao:
         return record
 
     @classmethod
+    def get_embedding_record(
+        cls,
+        db: Session,
+        object_type: str,
+        object_id: int,
+        model: str,
+        version: str,
+    ) -> EmbeddingRecord | None:
+        """
+        按对象、模型和版本查询单条向量记录，用于向量化幂等判断。
+        :param db: 数据库会话
+        :param object_type: 对象类型
+        :param object_id: 对象ID
+        :param model: 向量模型
+        :param version: 向量版本
+        :return: 命中的向量记录
+        """
+        return (
+            db.query(EmbeddingRecord)
+            .filter(
+                EmbeddingRecord.object_type == object_type,
+                EmbeddingRecord.object_id == object_id,
+                EmbeddingRecord.embedding_model == model,
+                EmbeddingRecord.embedding_version == version,
+            )
+            .first()
+        )
+
+    @classmethod
     def list_ticket_embedding_records(
         cls, db: Session, model: str = "local-hash", version: str = "v1"
     ) -> list[EmbeddingRecord]:

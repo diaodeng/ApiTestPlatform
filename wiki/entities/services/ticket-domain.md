@@ -200,12 +200,15 @@ graph TD
 - AI 协同追问的输出契约需要满足 Codex structured output 约束，`evidence`、`risk_items`、`next_steps` 也必须出现在 `required` 中；`symptom`、`similar_cases`、`sop_suggestion`、`monitoring_suggestion` 等增强字段允许为空或缺省，由服务端归一化补默认值，避免模型未产出扩展字段时任务失败。
 - AI 分析下发给 Agent 的日志正文会做中间截断，默认最多保留首尾约 80 万字符，并记录 `textTruncatedForAi` 与原始字符数，避免追问请求因超大上下文触发 Codex/OpenAI `bad_response_status_code`。
 - 工单关闭时会尝试从工单、RCA、事件和消息流自动生成知识库案例，知识文章关联原工单并刷新工单向量，供下一次相似工单检索复用。
-- 工单相似度检索已抽象为 `TicketEmbeddingService` 配置化 Provider：系统参数 `ticket.similarity.config` 控制 `local_hash` 或 `qdrant`，默认保留本地哈希兜底；Qdrant 不可用时查询会回退本地向量。
-- 相似工单入库文本扩展为标题、描述、AI 摘要、最终根因、解决方案和 RCA，批量重建接口 `POST /ticket/similarity/rebuild` 可刷新历史工单本地 `embedding_record` 并按配置同步 Qdrant；2026-07-05 起手动指定范围优先使用业务工单号 `ticketNos/ticketNo`，旧 `ticketIds` 仅作为兼容入口保留。
+- 工单相似度检索已抽象为 `TicketEmbeddingService` 配置化 Provider：系统参数 `ticket.similarity.config` 控制 `local_hash`、`embedding` 或 `qdrant`。2026-07-05 起采用严格 Provider：配置 hash 就只用 hash，配置 embedding 就只用外部 Embedding + 数据库向量，配置 qdrant 就只用外部 Embedding + Qdrant；失败直接报错或记录日志，不再自动兜底。
+- 相似工单入库文本扩展为标题、描述、AI 摘要、最终根因、解决方案和 RCA，批量重建接口 `POST /ticket/similarity/rebuild` 会按当前 Provider 刷新历史工单向量；2026-07-05 起手动指定范围优先使用业务工单号 `ticketNos/ticketNo`，旧 `ticketIds` 仅作为兼容入口保留。
 - Qdrant 写入和查询前会按本次实际向量长度校验既有 collection 维度；维度不一致时默认提前返回明确错误。配置 `qdrant.recreateCollectionOnDimensionMismatch=true` 后，仅写入/重建链路会删除旧 collection 并按当前维度重建，查询链路不触发删除。Qdrant HTTP 4xx/5xx 异常会带出响应体，避免日志只剩 `400 Client Error`。
-- OpenAI 兼容 Embedding 请求会携带 `embedding.dimension` 作为 `dimensions` 参数并校验返回长度；同步 Qdrant 时外部 Embedding 失败会直接失败，不再回退本地 hash 写入 Qdrant，避免 collection 维度在真实模型和 hash 之间反复切换。
-- 关键词命中在相似度合并中只作为弱加分，不再直接写成 100% 分，避免“包含同一字段文案”导致相似工单统计失真。
-- 相似工单配置已新增独立菜单 `ticket.similarity.config`，页面组件为 `ticket/similarityConfig/index`；页面可保存 Provider、Embedding、Qdrant、参与字段、阈值权重和 `sceneTriggers`，也可手动触发全部或指定工单号向量重建。
+- OpenAI 兼容 Embedding 请求会携带 `embedding.dimension` 作为 `dimensions` 参数并校验返回长度；`provider=qdrant` 时外部 Embedding 或 Qdrant 失败会直接失败，不再回退本地 hash 写入 Qdrant，避免 collection 维度在真实模型和 hash 之间反复切换。
+- 重建粒度是一条工单一次外部 Embedding 请求；批量重建只是循环多条工单。过程日志会记录配置、批次、文本长度、请求维度、返回维度和 Qdrant collection 维度；外部 Embedding 异常会熔断后续请求并返回 `abortReason/skipped`。
+- 2026-07-05 起，工单向量生成支持幂等复用：同一工单的 `embedding.model/version/dimension`、向量化字段列表和最终文本未变化时，`vectorize_ticket` 会复用已有 `embedding_record`，不再调用外部 Embedding；手动重建默认按幂等跳过，`forceRebuild=true` 才强制重建。
+- 幂等命中且当前 `provider=qdrant` 时，服务会用本地已保存向量写入 Qdrant，并在结果中累计 `idempotentSkipped/qdrantSyncedFromCache`。`provider=local_hash` 和 `provider=embedding` 的向量都保存在数据库 `embedding_record.embedding` JSON 字段，不写本地文件；`provider=qdrant` 查询和入库使用 Qdrant，配置页可刷新 collection 列表并显示维度，维度不一致时会提示。
+- 严格 Provider 模式下，相似查询结果只来自当前向量 Provider，不再混入关键词命中分数，避免“包含同一字段文案”导致相似工单统计失真。
+- 相似工单配置已新增独立菜单 `ticket.similarity.config`，页面组件为 `ticket/similarityConfig/index`；页面可保存 Provider、Embedding、Qdrant、参与字段、阈值和 `sceneTriggers`，也可手动触发全部或指定工单号向量重建。配置页按检索 Provider 联动显示：`local_hash` 隐藏外部接口和 Qdrant 配置，`embedding` 只展示外部 Embedding 配置，`qdrant` 才展示 Qdrant 配置；隐藏项只是不显示不清空，手动重建 Provider 选项跟随当前配置收敛。
 - `sceneTriggers` 当前支持 `externalSync`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge` 六类场景；外部同步延后后处理、远端拉取、手动新增/编辑、Excel 导入和关闭工单知识沉淀都会先检查开关，再调用 `vectorize_ticket_for_scene` 或 `vectorize_tickets_for_scene`。
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。

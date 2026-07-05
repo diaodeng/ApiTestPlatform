@@ -809,6 +809,7 @@ class TicketEmbeddingRebuildRequestModel(BaseModel):
     page_size: int = Field(default=100, description="每批处理数量")
     provider: str | None = Field(default=None, description="指定检索提供方，默认读取系统配置")
     include_qdrant: bool | None = Field(default=None, description="是否同步写入 Qdrant，默认由系统配置决定")
+    force_rebuild: bool = Field(default=False, description="是否强制重新生成向量，默认按内容哈希幂等跳过")
     run_in_background: bool = Field(default=True, description="是否后台执行，避免长任务阻塞接口")
 
     @model_validator(mode="after")
@@ -835,6 +836,7 @@ class TicketEmbeddingRebuildRequestModel(BaseModel):
         self.all_tickets = bool(self.all_tickets or not (self.ticket_nos or self.ticket_ids))
         self.page_size = min(max(int(self.page_size or 100), 1), 500)
         self.provider = str(self.provider or "").strip() or None
+        self.force_rebuild = bool(self.force_rebuild)
         return self
 
 
@@ -847,7 +849,7 @@ class TicketSimilarityConfigModel(BaseModel):
 
     enabled: bool = Field(default=True, description="是否启用相似工单检索")
     provider: str = Field(default="local_hash", description="相似度检索 Provider")
-    fallback_provider: str = Field(default="local_hash", description="降级 Provider")
+    fallback_provider: str = Field(default="local_hash", description="历史兼容字段，严格模式不使用")
     top_k: int = Field(default=20, description="默认召回数量")
     threshold: float = Field(default=0.05, description="相似度阈值")
     keyword_weight: float = Field(default=0.15, description="关键词加权")

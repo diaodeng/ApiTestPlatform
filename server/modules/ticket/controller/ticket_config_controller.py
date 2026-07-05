@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -74,6 +74,36 @@ async def save_ticket_similarity_config(
         return ResponseUtil.success(data=saved_config, msg="保存成功")
     except Exception as e:
         query_db.rollback()
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketConfigController.post(
+    "/similarity/qdrant/collections",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:similarity:config:list"))],
+)
+async def list_ticket_similarity_qdrant_collections(
+    request: Request,
+    payload: dict = Body(default_factory=dict),
+    query_db: Session = Depends(get_db),
+):
+    """
+    查询 Qdrant collection 列表接口，用于配置页显示 collection 维度。
+    :param request: 请求对象
+    :param payload: 页面当前 Qdrant 与 Embedding 表单配置
+    :param query_db: 数据库会话
+    :return: collection 名称、维度、距离算法和状态
+    """
+    try:
+        config = await run_in_threadpool(
+            TicketEmbeddingService.build_config_with_qdrant_override,
+            query_db,
+            payload.get("qdrant") if isinstance(payload, dict) else None,
+            payload.get("embedding") if isinstance(payload, dict) else None,
+        )
+        result = await run_in_threadpool(TicketEmbeddingService.list_qdrant_collections, config)
+        return ResponseUtil.success(data=result)
+    except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 
