@@ -1063,6 +1063,17 @@ class TicketAiAnalysisService:
             "selectedPromptTemplateCodes": selected_prompt_template_codes,
             "extraInstruction": extra_instruction,
         }
+        selected_provider_code = (
+            str(request.ai_provider_code or "").strip()
+            if request and request.ai_provider_code
+            else str(context_payload.get("selectedAiProviderCode") or "").strip()
+        )
+        if selected_provider_code:
+            snapshot["selectedAiProviderCode"] = selected_provider_code
+            snapshot["selectedAiProviderName"] = str(context_payload.get("selectedAiProviderName") or "").strip() or None
+            snapshot["selectedAiProviderType"] = str(context_payload.get("selectedAiProviderType") or "").strip() or None
+            snapshot["selectedWorkerModel"] = str(context_payload.get("selectedWorkerModel") or "").strip() or None
+
         if isinstance(context_payload.get("promptLayers"), dict):
             snapshot["promptLayers"] = context_payload.get("promptLayers")
         if isinstance(context_payload.get("selectedPromptTemplates"), list):
