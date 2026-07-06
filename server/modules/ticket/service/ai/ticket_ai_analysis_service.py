@@ -282,9 +282,6 @@ class TicketAiAnalysisService:
         overrides = provider_env_overrides or {}
         has_provider_keys = bool(overrides.get("OPENAI_BASE_URL") or overrides.get("OPENAI_API_KEY"))
         for file_name in ("config.toml", "config.self.toml", "auth.json", "version.json"):
-            # 有 Provider 覆盖时跳过 auth.json，避免本地全局 API Key 覆盖下发配置
-            if has_provider_keys and file_name == "auth.json":
-                continue
             source_file = source_home / file_name
             target_file = codex_home / file_name
             if source_file.exists() and not target_file.exists():
@@ -353,6 +350,20 @@ class TicketAiAnalysisService:
                 logger.info(f"已修改 Codex .env: api_key={'***' if api_key else ''}, base_url={base_url}")
             except Exception as exc:
                 logger.warning(f"修改 Codex .env 失败: {exc}")
+        # 修改 auth.json 中的 OPENAI_API_KEY，Codex CLI 的 requires_openai_auth 从 auth.json 读取认证
+        if api_key:
+            auth_file = codex_home / "auth.json"
+            try:
+                auth_data: dict[str, Any] = {}
+                if auth_file.exists():
+                    auth_data = json.loads(auth_file.read_text(encoding="utf-8"))
+                    if not isinstance(auth_data, dict):
+                        auth_data = {}
+                auth_data["OPENAI_API_KEY"] = api_key
+                auth_file.write_text(json.dumps(auth_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                logger.info("已修改 Codex auth.json 中的 OPENAI_API_KEY")
+            except Exception as exc:
+                logger.warning(f"修改 Codex auth.json 失败: {exc}")
 
     @classmethod
     def _load_codex_env(cls, codex_home: Path) -> dict[str, str]:
