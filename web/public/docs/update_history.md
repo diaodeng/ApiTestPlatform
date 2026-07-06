@@ -4,8 +4,8 @@
 2. OpenAI 兼容 Embedding 请求默认不再自动下发 `dimensions`；配置页新增 `embedding.requestParams` 自定义 JSON 参数，需要维度裁剪时由用户显式填写 `{"dimensions": 1024}`。
 3. `embedding.dimension` 继续用于向量返回长度校验、幂等判断和 Qdrant collection 维度匹配；返回维度不一致时记录错误日志并中断流程。
 4. 新增说明文档：`web/public/docs/2026-07-06-ticket-similarity-bitable-pull-embedding-params.md`。
-5. 修正工单同步项目映射边界：外部推送和飞书多维主动拉取只通过 `ticketVender/ticketModle` 匹配项目/模块映射，不使用 `projectCode/moduleCode` 绑定本地 ID；`projectCode/moduleCode` 仅保留给内网 `remote_pull` 入库使用。
-6. 新增说明文档：`web/public/docs/2026-07-06-ticket-sync-project-vender-code-boundary.md`。
+5. 对照备份分支 `master_params_ticket_back` 恢复工单同步项目/模块识别顺序：先按 `ticketVender/ticketModle` 走映射，未命中再按 `projectCode/moduleCode` 业务码兜底，不引入标题/描述全文匹配项目映射。
+6. 新增说明文档：`web/public/docs/2026-07-06-ticket-sync-project-mapping-backup-parity.md`。
 
 ## 2026-07-05
 

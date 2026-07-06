@@ -207,8 +207,8 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertIsNone(detected["projectId"])
         self.assertEqual(detected["projectName"], "外部项目文本")
 
-    def test_external_detection_ignores_project_and_module_code(self):
-        """外部推送或多维拉取不应通过 projectCode/moduleCode 绑定本地项目模块。"""
+    def test_external_detection_uses_project_and_module_code_after_mapping_miss(self):
+        """外部推送在 ticketVender/ticketModle 映射未命中后，应按拆分前逻辑使用业务码兜底。"""
         project = SimpleNamespace(project_id=101, project_name="支付平台", project_code="pay")
         module = SimpleNamespace(module_id=201, module_name="支付模块", module_code="pos")
         sync_object = SimpleNamespace(
@@ -237,6 +237,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None),
             patch.object(TicketSyncFieldMappingService, "resolve_project_by_ticket_vender", return_value=(None, "")),
             patch.object(TicketSyncFieldMappingService, "resolve_module_by_ticket_modle", return_value=None),
+            patch.object(TicketSyncFieldMappingService, "resolve_vendor_by_project", return_value=None),
         ):
             detected = TicketSyncAutomationService.detect_fields(
                 db=_ModelQueryDb(project=project, module=module),
@@ -254,13 +255,13 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 apply_external_mappings=True,
             )
 
-        self.assertIsNone(detected["projectId"])
-        self.assertEqual(detected["projectName"], "外部项目文本")
-        self.assertIsNone(detected["moduleId"])
-        self.assertEqual(detected["moduleName"], "外部模块文本")
+        self.assertEqual(detected["projectId"], 101)
+        self.assertEqual(detected["projectName"], "支付平台")
+        self.assertEqual(detected["moduleId"], 201)
+        self.assertEqual(detected["moduleName"], "支付模块")
 
     def test_remote_pull_detection_uses_project_and_module_code(self):
-        """内网拉取外部数据时仍应通过 projectCode/moduleCode 绑定本地项目模块。"""
+        """内网拉取外部数据时也应通过 projectCode/moduleCode 绑定本地项目模块。"""
         project = SimpleNamespace(project_id=101, project_name="支付平台", project_code="pay")
         module = SimpleNamespace(module_id=201, module_name="支付模块", module_code="pos")
         sync_object = SimpleNamespace(
