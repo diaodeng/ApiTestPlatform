@@ -120,16 +120,26 @@ class TicketAiAnalysisService:
         return [*command_parts, "-m", normalized_model]
 
     @classmethod
-    def _prepare_codex_home(cls, workspace_dir: Path) -> Path:
+    def _prepare_codex_home(
+        cls,
+        workspace_dir: Path,
+        provider_env_overrides: dict[str, str] | None = None,
+    ) -> Path:
         """
         准备独立的 Codex home 目录。
         :param workspace_dir: 当前任务工作区
+        :param provider_env_overrides: Provider 环境变量覆盖项
         :return: Codex home 目录
         """
         source_home = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
         codex_home = workspace_dir / ".codex_home"
         codex_home.mkdir(parents=True, exist_ok=True)
+        overrides = provider_env_overrides or {}
+        has_provider_keys = bool(overrides.get("OPENAI_BASE_URL") or overrides.get("OPENAI_API_KEY"))
         for file_name in ("config.toml", "config.self.toml", "auth.json", "version.json"):
+            # 有 Provider 覆盖时跳过 auth.json，避免本地全局 API Key 覆盖下发配置
+            if has_provider_keys and file_name == "auth.json":
+                continue
             source_file = source_home / file_name
             target_file = codex_home / file_name
             if source_file.exists() and not target_file.exists():
@@ -138,7 +148,66 @@ class TicketAiAnalysisService:
         target_env = codex_home / ".env"
         if source_env.exists() and not target_env.exists():
             shutil.copy2(source_env, target_env)
+        if has_provider_keys:
+            cls._patch_codex_config_for_provider(codex_home, overrides)
         return codex_home
+
+    @staticmethod
+    def _patch_codex_config_for_provider(codex_home: Path, overrides: dict[str, str]) -> None:
+        """
+        修改副本 config.toml 和 .env，使 Provider 下发的 base_url 和 api_key 生效。
+        Codex CLI 读 config.toml 中 model_providers 的 base_url 优先级高于 OPENAI_BASE_URL 环境变量，
+        读 auth.json 中的 OPENAI_API_KEY 优先级也高于环境变量，因此需要直接修改副本文件。
+        :param codex_home: Codex home 目录
+        :param overrides: Provider 环境变量覆盖项
+        :return: 无
+        """
+        base_url = str(overrides.get("OPENAI_BASE_URL") or "").strip()
+        api_key = str(overrides.get("OPENAI_API_KEY") or "").strip()
+        # 修改 config.toml 中的 base_url
+        if base_url:
+            config_file = codex_home / "config.toml"
+            if config_file.exists():
+                try:
+                    config_text = config_file.read_text(encoding="utf-8")
+                    new_config = re.sub(
+                        r'^(base_url\s*=\s*)"[^"]*"',
+                        rf'\1"{base_url}"',
+                        config_text,
+                        flags=re.MULTILINE,
+                    )
+                    if new_config != config_text:
+                        config_file.write_text(new_config, encoding="utf-8")
+                        logger.info(f"已修改 Codex config.toml base_url: {base_url}")
+                except Exception as exc:
+                    logger.warning(f"修改 Codex config.toml 失败: {exc}")
+        # 修改 .env 中的 OPENAI_API_KEY 和 OPENAI_BASE_URL
+        if base_url or api_key:
+            env_file = codex_home / ".env"
+            try:
+                lines: list[str] = []
+                if env_file.exists():
+                    lines = env_file.read_text(encoding="utf-8").splitlines()
+                updated_keys: set[str] = set()
+                new_lines: list[str] = []
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped.startswith("OPENAI_API_KEY=") and api_key:
+                        new_lines.append(f"OPENAI_API_KEY={api_key}")
+                        updated_keys.add("OPENAI_API_KEY")
+                    elif stripped.startswith("OPENAI_BASE_URL=") and base_url:
+                        new_lines.append(f"OPENAI_BASE_URL={base_url}")
+                        updated_keys.add("OPENAI_BASE_URL")
+                    else:
+                        new_lines.append(line)
+                if "OPENAI_API_KEY" not in updated_keys and api_key:
+                    new_lines.append(f"OPENAI_API_KEY={api_key}")
+                if "OPENAI_BASE_URL" not in updated_keys and base_url:
+                    new_lines.append(f"OPENAI_BASE_URL={base_url}")
+                env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                logger.info(f"已修改 Codex .env: api_key={'***' if api_key else ''}, base_url={base_url}")
+            except Exception as exc:
+                logger.warning(f"修改 Codex .env 失败: {exc}")
 
     @classmethod
     def _resolve_worker_command_parts(cls, command_parts: list[str]) -> list[str]:
@@ -1569,7 +1638,7 @@ class TicketAiAnalysisService:
                     ]
                 )
                 command = cls._inject_worker_model(command, selected_worker_model)
-                codex_home = cls._prepare_codex_home(workspace_dir)
+                codex_home = cls._prepare_codex_home(workspace_dir, provider_env_overrides)
                 env_values = cls._load_codex_env(codex_home)
                 env_values["CODEX_HOME"] = str(codex_home)
                 env_values = cls._apply_env_overrides(env_values, provider_env_overrides)
