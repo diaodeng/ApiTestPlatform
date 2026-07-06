@@ -255,11 +255,10 @@
 ## 业务码匹配
 
 - `project_code`
-  - 项目业务码，建议人工维护并在内网/公网之间同步保持一致，外部同步时会优先用它匹配项目。
+  - 项目业务码，建议人工维护并在内网/公网之间同步保持一致，仅内网 `remote_pull` 拉取公网 pending 工单后再入库时使用。
 - `module_code`
-  - 模块业务码，建议跟随项目一起同步维护；外部同步时如果同时带了 `project_code` 和 `module_code`，会优先按业务码直接落库。
+  - 模块业务码，建议跟随项目一起同步维护；仅内网 `remote_pull` 场景会结合 `project_code` 按业务码直接落库。
 - 兼容顺序
-  - 业务码优先
-  - 再看 `projectMappings` / `moduleMappings`
-  - 再回退到项目/模块名称兜底
-  - 如果公网和内网要使用同一套业务码，优先人工将内网的项目和模块同步到公网，而不是依赖名称自动生成或自动推导
+  - 外部推送和飞书多维主动拉取：只看 `ticketVender` / `ticketModle` 对应的 `projectMappings` / `moduleMappings`
+  - 内网 `remote_pull`：优先通过 `projectCode/moduleCode` 匹配本地项目/模块，未命中时只保留远端项目/模块名称
+  - 如果公网和内网要使用同一套业务码，优先人工维护项目和模块业务码，不依赖跨环境 ID 一致

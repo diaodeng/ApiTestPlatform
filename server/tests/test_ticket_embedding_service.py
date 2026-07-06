@@ -116,8 +116,8 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
 
         self.assertEqual(put_mock.call_args.kwargs["json"]["vectors"]["size"], 768)
 
-    def test_openai_compatible_embedding_sends_configured_dimensions(self):
-        """调用 OpenAI 兼容 Embedding 时，应按配置传递 dimensions 并校验返回维度。"""
+    def test_openai_compatible_embedding_does_not_send_dimensions_by_default(self):
+        """调用 OpenAI 兼容 Embedding 时，默认不传 dimensions，但仍校验返回维度。"""
         response = self._response(200, {"data": [{"embedding": [0.1, 0.2, 0.3]}]})
         config = {
             "endpoint": "http://embedding.local/v1/embeddings",
@@ -130,7 +130,41 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
             vector = TicketEmbeddingService._embed_text_openai_compatible("测试文本", config)
 
         self.assertEqual(vector, [0.1, 0.2, 0.3])
+        self.assertNotIn("dimensions", post.call_args.kwargs["json"])
+
+    def test_openai_compatible_embedding_sends_custom_request_params(self):
+        """自定义请求参数为 JSON 对象时，应合并到 Embedding 请求体。"""
+        response = self._response(200, {"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+        config = {
+            "endpoint": "http://embedding.local/v1/embeddings",
+            "model": "mock-embedding",
+            "dimension": 3,
+            "timeoutSeconds": 15,
+            "requestParams": {"dimensions": 3, "encoding_format": "float"},
+        }
+
+        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.post", return_value=response) as post:
+            vector = TicketEmbeddingService._embed_text_openai_compatible("测试文本", config)
+
+        self.assertEqual(vector, [0.1, 0.2, 0.3])
         self.assertEqual(post.call_args.kwargs["json"]["dimensions"], 3)
+        self.assertEqual(post.call_args.kwargs["json"]["encoding_format"], "float")
+
+    def test_bitable_pull_scene_trigger_is_independent_from_external_sync(self):
+        """多维主动拉取入库应使用独立场景开关，不受 externalSync 开关影响。"""
+        config = TicketEmbeddingService._normalize_config_for_save(
+            {"sceneTriggers": {"externalSync": False, "bitablePull": True}}
+        )
+
+        self.assertFalse(TicketEmbeddingService.should_vectorize_for_scene(config, "externalSync"))
+        self.assertTrue(TicketEmbeddingService.should_vectorize_for_scene(config, "bitablePull"))
+
+    def test_bitable_pull_scene_trigger_inherits_external_sync_for_legacy_config(self):
+        """旧配置缺少 bitablePull 时，应继承 externalSync，避免升级后重新打开主动拉取向量化。"""
+        config = TicketEmbeddingService._normalize_config_for_save({"sceneTriggers": {"externalSync": False}})
+
+        self.assertFalse(config["sceneTriggers"]["externalSync"])
+        self.assertFalse(config["sceneTriggers"]["bitablePull"])
 
     def test_openai_compatible_embedding_dimension_mismatch_fails(self):
         """外部 Embedding 返回维度与配置不一致时，应直接失败而不是继续写入 Qdrant。"""

@@ -142,6 +142,16 @@
               />
             </el-form-item>
           </el-col>
+          <el-col v-if="usesExternalEmbedding" :xs="24" :md="24">
+            <el-form-item label="自定义请求参数">
+              <el-input
+                v-model="embeddingRequestParamsText"
+                type="textarea"
+                :rows="4"
+                placeholder='JSON对象，例如 {"dimensions": 1024, "encoding_format": "float"}'
+              />
+            </el-form-item>
+          </el-col>
         </el-row>
       </el-form>
     </el-card>
@@ -395,6 +405,7 @@
   const rebuildResult = ref(null);
   const formRef = ref(null);
   const qdrantCollections = ref([]);
+  const embeddingRequestParamsText = ref('{}');
 
   const fieldOptions = [
     { value: 'ticketNo', label: '工单号' },
@@ -418,6 +429,11 @@
       key: 'externalSync',
       label: '外部同步入库',
       desc: '外部系统 POST /ticket/sync/external 后刷新向量',
+    },
+    {
+      key: 'bitablePull',
+      label: '多维主动拉取入库',
+      desc: '飞书多维表格主动拉取并落库后刷新向量',
     },
     { key: 'remotePull', label: '远端拉取入库', desc: '内网从公网拉取并落库后刷新向量' },
     { key: 'manualCreate', label: '手动新增', desc: '工单列表手动新增成功后刷新向量' },
@@ -485,6 +501,7 @@
         endpoint: '',
         apiKey: '',
         timeoutSeconds: 15,
+        requestParams: {},
       },
       qdrant: {
         url: 'http://127.0.0.1:6333',
@@ -497,6 +514,7 @@
       },
       sceneTriggers: {
         externalSync: true,
+        bitablePull: true,
         remotePull: true,
         manualCreate: true,
         manualUpdate: true,
@@ -528,19 +546,38 @@
 
   function assignConfig(config = {}) {
     const defaults = createDefaultForm();
+    const embeddingConfig = { ...defaults.embedding, ...(config.embedding || {}) };
     Object.assign(form, {
       ...defaults,
       ...config,
       fields:
         Array.isArray(config.fields) && config.fields.length ? config.fields : defaults.fields,
-      embedding: { ...defaults.embedding, ...(config.embedding || {}) },
+      embedding: embeddingConfig,
       qdrant: { ...defaults.qdrant, ...(config.qdrant || {}) },
       sceneTriggers: { ...defaults.sceneTriggers, ...(config.sceneTriggers || {}) },
     });
     form.embedding.provider = form.provider === 'local_hash' ? 'local_hash' : 'openai_compatible';
+    embeddingRequestParamsText.value = formatRequestParams(form.embedding.requestParams);
   }
 
-  function buildPayload() {
+  function formatRequestParams(value) {
+    const params = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    return JSON.stringify(params, null, 2);
+  }
+
+  function parseRequestParams() {
+    const rawText = String(embeddingRequestParamsText.value || '').trim();
+    if (!rawText) {
+      return {};
+    }
+    const parsed = JSON.parse(rawText);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('自定义请求参数必须是 JSON 对象');
+    }
+    return parsed;
+  }
+
+  function buildPayload(requestParams = null) {
     return {
       enabled: Boolean(form.enabled),
       provider: String(form.provider || 'local_hash').trim(),
@@ -557,6 +594,10 @@
         endpoint: String(form.embedding.endpoint || '').trim(),
         apiKey: String(form.embedding.apiKey || '').trim(),
         timeoutSeconds: Number(form.embedding.timeoutSeconds || 15),
+        requestParams:
+          requestParams && typeof requestParams === 'object' && !Array.isArray(requestParams)
+            ? requestParams
+            : {},
       },
       qdrant: {
         url: String(form.qdrant.url || '').trim(),
@@ -593,8 +634,15 @@
         proxy.$modal.msgWarning('当前配置维度与 Collection 维度不一致，请先调整维度或更换 Collection');
         return;
       }
+      let requestParams = {};
+      try {
+        requestParams = parseRequestParams();
+      } catch (error) {
+        proxy.$modal.msgWarning(error.message || '自定义请求参数不是有效 JSON 对象');
+        return;
+      }
       saving.value = true;
-      saveTicketSimilarityConfig(buildPayload())
+      saveTicketSimilarityConfig(buildPayload(requestParams))
         .then((response) => {
           assignConfig(response.data || {});
           proxy.$modal.msgSuccess('保存成功');
@@ -628,9 +676,18 @@
 
   function loadQdrantCollections() {
     loadingCollections.value = true;
+    let requestParams = {};
+    try {
+      requestParams = parseRequestParams();
+    } catch (error) {
+      proxy.$modal.msgWarning(error.message || '自定义请求参数不是有效 JSON 对象');
+      loadingCollections.value = false;
+      return;
+    }
+    const payload = buildPayload(requestParams);
     listTicketSimilarityQdrantCollections({
-      embedding: buildPayload().embedding,
-      qdrant: buildPayload().qdrant,
+      embedding: payload.embedding,
+      qdrant: payload.qdrant,
     })
       .then((response) => {
         qdrantCollections.value = Array.isArray(response.data?.collections)

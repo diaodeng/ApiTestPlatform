@@ -207,6 +207,113 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertIsNone(detected["projectId"])
         self.assertEqual(detected["projectName"], "外部项目文本")
 
+    def test_external_detection_ignores_project_and_module_code(self):
+        """外部推送或多维拉取不应通过 projectCode/moduleCode 绑定本地项目模块。"""
+        project = SimpleNamespace(project_id=101, project_name="支付平台", project_code="pay")
+        module = SimpleNamespace(module_id=201, module_name="支付模块", module_code="pos")
+        sync_object = SimpleNamespace(
+            raw_payload={"ticketVender": "外部项目文本", "ticketModle": "外部模块文本"},
+            extra_data={},
+            project_code="pay",
+            project_id=None,
+            project_name="",
+            merchant_name="",
+            module_code="pos",
+            module_name="",
+            module_id=None,
+            log_pull_config={},
+            status="",
+            current_assignee_id=None,
+            current_assignee_name="",
+            version_key="",
+            ticket_no="EXT-CODE",
+            title="外部工单",
+            description="外部描述",
+            root_cause=None,
+            solution=None,
+        )
+
+        with (
+            patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None),
+            patch.object(TicketSyncFieldMappingService, "resolve_project_by_ticket_vender", return_value=(None, "")),
+            patch.object(TicketSyncFieldMappingService, "resolve_module_by_ticket_modle", return_value=None),
+        ):
+            detected = TicketSyncAutomationService.detect_fields(
+                db=_ModelQueryDb(project=project, module=module),
+                sync_object=sync_object,
+                config={
+                    "projectMappings": [],
+                    "moduleMappings": [],
+                    "vendorMappings": [],
+                    "statusMappings": [],
+                    "assigneeMappings": [],
+                    "posPatterns": [],
+                    "scoPatterns": [],
+                    "versionPatterns": [],
+                },
+                apply_external_mappings=True,
+            )
+
+        self.assertIsNone(detected["projectId"])
+        self.assertEqual(detected["projectName"], "外部项目文本")
+        self.assertIsNone(detected["moduleId"])
+        self.assertEqual(detected["moduleName"], "外部模块文本")
+
+    def test_remote_pull_detection_uses_project_and_module_code(self):
+        """内网拉取外部数据时仍应通过 projectCode/moduleCode 绑定本地项目模块。"""
+        project = SimpleNamespace(project_id=101, project_name="支付平台", project_code="pay")
+        module = SimpleNamespace(module_id=201, module_name="支付模块", module_code="pos")
+        sync_object = SimpleNamespace(
+            raw_payload={},
+            extra_data={},
+            project_code="pay",
+            project_id=None,
+            project_name="远端项目文本",
+            merchant_name="远端项目文本",
+            module_code="pos",
+            module_name="远端模块文本",
+            module_id=None,
+            log_pull_config={},
+            status="processing",
+            current_assignee_id=None,
+            current_assignee_name="",
+            version_key="",
+            ticket_no="REMOTE-CODE",
+            title="远端工单",
+            description="远端描述",
+            root_cause=None,
+            solution=None,
+        )
+
+        with (
+            patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None),
+            patch.object(
+                TicketSyncFieldMappingService,
+                "resolve_external_person_by_mapping_or_email",
+                side_effect=[(None, ""), (None, ""), (None, "")],
+            ),
+        ):
+            detected = TicketSyncAutomationService.detect_fields(
+                db=_ModelQueryDb(project=project, module=module),
+                sync_object=sync_object,
+                config={
+                    "projectMappings": [],
+                    "moduleMappings": [],
+                    "vendorMappings": [],
+                    "statusMappings": [],
+                    "assigneeMappings": [],
+                    "posPatterns": [],
+                    "scoPatterns": [],
+                    "versionPatterns": [],
+                },
+                apply_external_mappings=False,
+            )
+
+        self.assertEqual(detected["projectId"], 101)
+        self.assertEqual(detected["projectName"], "支付平台")
+        self.assertEqual(detected["moduleId"], 201)
+        self.assertEqual(detected["moduleName"], "支付模块")
+
     def test_external_upsert_fills_project_name_from_detected_text(self):
         """已有工单项目为空时，外部推送映射失败也应保留 ticketVender 文本。"""
         sync_object = SimpleNamespace(
@@ -2149,6 +2256,35 @@ class _TicketListQuery:
 
     def all(self):
         return list(self.rows)
+
+
+class _ModelQueryDb:
+    """按模型类型返回最小查询链，避免单元测试依赖真实数据库。"""
+
+    def __init__(self, *, project=None, module=None):
+        self.project = project
+        self.module = module
+
+    def query(self, model, *_args, **_kwargs):
+        model_name = getattr(model, "__name__", "")
+        if model_name == "HrmProject":
+            return _SingleRowQuery(self.project)
+        if model_name == "HrmModule":
+            return _SingleRowQuery(self.module)
+        return _EmptyQuery()
+
+
+class _SingleRowQuery:
+    """提供单条记录查询链。"""
+
+    def __init__(self, row):
+        self.row = row
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return self.row
 
 
 if __name__ == "__main__":

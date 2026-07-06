@@ -3,10 +3,26 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-05
+updated: 2026-07-06
 ---
 
 # 操作日志
+
+## [2026-07-06] INGEST-CODE | 相似工单主动拉取场景与 Embedding 自定义参数
+
+- 触发：用户反馈关闭自动刷新场景开关后，飞书多维表格主动拉取仍会向量化；同时部分 Embedding 模型不支持默认 `dimensions` 参数。
+- 架构层：工单域 / 相似工单 / 自动向量刷新 / Embedding 请求参数
+- 更新的页面：`server/modules/ticket/service/ai/ticket_embedding_service.py`、`server/modules/ticket/service/sync/ticket_bitable_pull_service.py`、`server/modules/ticket/service/sync/ticket_sync_post_process_service.py`、`server/tests/test_ticket_embedding_service.py`、`web/src/views/ticket/similarityConfig/index.vue`、`web/public/docs/2026-07-06-ticket-similarity-bitable-pull-embedding-params.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：相似工单配置 `sceneTriggers.bitablePull` -> 主动拉取 `sync_scene=bitable_pull` -> 延后后处理映射 `bitablePull` -> `vectorize_ticket_for_scene` 独立判断；旧配置缺少 `bitablePull` 时继承 `externalSync`；Embedding 配置 `requestParams` -> `_embed_text_openai_compatible` 合并请求体 -> `embedding.dimension` 只校验返回维度。
+- 关键结论：`enabled` 是相似检索总开关，不是某个入库入口开关；多维主动拉取入库现在有独立自动向量化开关。外部 Embedding 默认不再传 `dimensions`，需要时在自定义 JSON 中显式添加。
+
+## [2026-07-06] INGEST-CODE | 工单同步项目映射边界修正
+
+- 触发：用户要求不要新增全文兜底，外部推送和飞书多维主动拉取只能通过 `ticketVender` 匹配项目；`projectCode/moduleCode` 只用于内网拉取外部数据后的本地入库。
+- 架构层：工单域 / 外部同步入库 / 同步字段映射
+- 创建的页面：`web/public/docs/2026-07-06-ticket-sync-project-vender-code-boundary.md`
+- 更新的页面：`server/modules/ticket/service/sync/ticket_sync_field_mapping_service.py`、`server/modules/ticket/service/sync/ticket_sync_automation_service.py`、`server/tests/test_ticket_sync_mapping_boundary.py`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`、`web/public/docs/update_history.md`
+- 变更传播链：`TicketSyncAutomationService.detect_fields` -> 外部链路 `ticketVender/ticketModle` 映射 -> 内网 `remote_pull` 业务码匹配 -> `TicketSyncPayloadService.build_upsert_payload` -> 工单 `project_id/module_id` 入库。
 
 ## [2026-07-05] INGEST-CODE | 相似工单严格 Provider 与 Collection 维度预览
 

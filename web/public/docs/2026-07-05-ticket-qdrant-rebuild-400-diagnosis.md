@@ -20,7 +20,7 @@ PUT /collections/ticket_similarity/points 400
 5. 新增 `_raise_for_qdrant_status`，Qdrant 4xx/5xx 异常会携带响应体前 1000 字符，后续日志能看到服务端原始错误。
 6. 新增 `qdrant.recreateCollectionOnDimensionMismatch` 开关，默认关闭；开启后仅在写入/重建链路维度不一致时删除旧 collection 并按当前向量维度重建。
 7. 查询链路不会因为该开关删除 collection；查询失败会直接返回错误，不再回退本地向量。
-8. OpenAI 兼容 Embedding 请求会把 `embedding.dimension` 作为 `dimensions` 参数下发，并校验返回向量长度。
+8. OpenAI 兼容 Embedding 请求默认不下发 `dimensions`，只用 `embedding.dimension` 校验返回向量长度；如模型支持维度裁剪，可在 `embedding.requestParams` 中显式配置 `{"dimensions": 1024}`。
 9. 同步 Qdrant 时，外部 Embedding 失败会直接让本条重建失败，不再回退本地 hash 写入 Qdrant，避免 collection 在真实模型维度和本地 hash 维度之间反复重建。
 10. collection 重建遇到并发 409 时，会再次读取 collection 详情；若维度已经符合当前向量维度，则视为成功。
 11. 重建过程新增关键日志：开始配置、批次进度、单工单文本长度、Embedding 请求维度、返回维度、Qdrant collection 维度、执行或跳过原因。
@@ -36,7 +36,7 @@ PUT /collections/ticket_similarity/points 400
 - Qdrant `ticket_similarity` collection 之前按旧维度创建，后来更换了 Embedding 模型。
 - 历史版本外部 Embedding 接口失败后回退本地 hash，实际写入维度变回配置维度或 128，和既有 collection 不一致；当前严格模式已取消该回退。
 - 历史版本多个重建任务并发执行时，一个任务按真实 Embedding 维度重建，另一个任务因外部接口失败按 hash 维度重建，会导致 collection 维度来回切换；当前严格模式下外部异常会失败并熔断。
-- 日志中的 `vectorDimension=2560` 来源是本次代码拿到的实际向量长度，通常来自外部 Embedding 接口返回值或旧 collection 的既有维度；若页面配置是 1024，则应检查外部接口是否支持并遵守 `dimensions=1024`。
+- 日志中的 `vectorDimension=2560` 来源是本次代码拿到的实际向量长度，通常来自外部 Embedding 接口返回值或旧 collection 的既有维度；若页面配置是 1024，则应检查外部接口实际返回维度，或确认是否需要在 `embedding.requestParams` 中显式配置 `dimensions=1024`。
 
 ## 请求粒度
 
@@ -68,7 +68,8 @@ PUT /collections/ticket_similarity/points 400
 - 2026-07-05 09:07:30 +08:00：执行 `uv run python -m unittest tests.test_ticket_embedding_service`，通过 3 个测试。
 - 2026-07-05 09:07:30 +08:00：执行 `uv run ruff check modules\ticket\service\ai\ticket_embedding_service.py tests\test_ticket_embedding_service.py`，通过。
 - 2026-07-05 09:18:00 +08:00：新增维度不一致时可配置重建 collection 的后端和页面开关。
-- 2026-07-05 10:12:00 +08:00：禁止 Qdrant 同步时回退本地 hash，Embedding 请求补充 `dimensions` 参数并校验返回维度。
+- 2026-07-05 10:12:00 +08:00：禁止 Qdrant 同步时回退本地 hash，Embedding 请求校验返回维度。
+- 2026-07-06 11:15:00 +08:00：Embedding 请求默认不再补充 `dimensions`，改由 `embedding.requestParams` 自定义透传。
 - 2026-07-05 10:20:00 +08:00：新增批量重建过程日志与外部 Embedding 失败熔断，明确一工单一次 Embedding 请求。
 - 2026-07-05 10:55:00 +08:00：新增向量重建幂等跳过和强制重建开关，执行 `uv run python -m unittest tests.test_ticket_embedding_service` 通过 12 个测试。
 - 2026-07-05 10:55:00 +08:00：执行 `uv run ruff check modules\ticket\service\ai\ticket_embedding_service.py tests\test_ticket_embedding_service.py`，通过。

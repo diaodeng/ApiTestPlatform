@@ -403,7 +403,12 @@ class TicketSyncPostProcessService:
                 logger.warning(f"外部工单同步延后自动化失败: ticket_no={sync_object.ticket_no}, error={exc}")
         ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
         try:
-            vector_scene = "remotePull" if sync_scene == "remote_pull" else "externalSync"
+            vector_scene_map = {
+                "remote_pull": "remotePull",
+                "bitable_pull": "bitablePull",
+                "external_sync": "externalSync",
+            }
+            vector_scene = vector_scene_map.get(sync_scene, "externalSync")
             TicketEmbeddingService.vectorize_ticket_for_scene(db, ticket, vector_scene)
             db.commit()
         except Exception as exc:

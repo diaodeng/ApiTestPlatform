@@ -13,7 +13,7 @@
 5. 查询结果只来自当前 Provider 的向量召回，不再混入关键词命中加分，避免“包含同一字段文案”导致相似工单统计失真。
 6. 新增批量重建接口，支持把历史工单按配置字段重新写入当前 Provider：`local_hash` 和 `embedding` 写数据库 `embedding_record`，`qdrant` 写 Qdrant。
 7. 新增相似工单配置页面 `ticket/similarityConfig/index`，可视化维护 Provider、Embedding、Qdrant、场景触发开关，并提供手动重建按钮。
-8. 新增 `sceneTriggers` 场景开关，外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路都会按配置决定是否刷新向量。
+8. 新增 `sceneTriggers` 场景开关，外部同步、多维主动拉取、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路都会按配置决定是否刷新向量。
 9. 向量生成新增幂等判断：同一工单在模型、版本、配置维度、参与字段和最终向量文本都未变化时，直接复用 `embedding_record`，不再调用外部 Embedding 接口。
 
 ## 系统参数
@@ -49,7 +49,8 @@
     "dimension": 128,
     "endpoint": "",
     "apiKey": "",
-    "timeoutSeconds": 15
+    "timeoutSeconds": 15,
+    "requestParams": {}
   },
   "qdrant": {
     "url": "http://127.0.0.1:6333",
@@ -62,6 +63,7 @@
   },
   "sceneTriggers": {
     "externalSync": true,
+    "bitablePull": true,
     "remotePull": true,
     "manualCreate": true,
     "manualUpdate": true,
@@ -85,7 +87,8 @@ Provider 说明：
 - `embedding.provider`: 推荐使用 `openai_compatible`
 - `embedding.endpoint`: 兼容 OpenAI Embedding 的接口地址
 - `embedding.model`: 实际 Embedding 模型名
-- `embedding.dimension`: 实际模型维度，会作为 Embedding 请求 `dimensions` 参数下发，且必须与 Qdrant collection 一致
+- `embedding.dimension`: 实际模型维度，用于校验 Embedding 返回长度、幂等判断和 Qdrant collection 维度匹配；默认不会作为 `dimensions` 参数下发
+- `embedding.requestParams`: 自定义 Embedding 请求体参数，JSON 对象格式；模型支持 `dimensions` 时可手动配置 `{"dimensions": 1024}`
 - `qdrant.url`: Qdrant 服务地址
 - `qdrant.collection`: collection 名称
 
@@ -96,10 +99,10 @@ Provider 说明：
 页面能力：
 
 - 保存基础检索配置：启用状态、Provider、召回数量、阈值、关键词权重、向量权重、参与向量化字段。
-- 保存 Embedding 配置：页面按检索 Provider 联动展示。`local_hash` 只显示本地哈希和维度；`embedding/qdrant` 显示兼容 OpenAI Embedding 的 endpoint、model、dimension、apiKey、timeout。
+- 保存 Embedding 配置：页面按检索 Provider 联动展示。`local_hash` 只显示本地哈希和维度；`embedding/qdrant` 显示兼容 OpenAI Embedding 的 endpoint、model、dimension、apiKey、timeout 和自定义请求参数。
 - 保存 Qdrant 配置：仅 `provider=qdrant` 时展示 url、apiKey、collection、distance、timeout、是否自动创建 collection、维度不一致时是否删除并重建 collection。切换到其他 Provider 时隐藏但不清空原 Qdrant 配置。
 - 查询 Qdrant collection 列表：页面会通过 `POST /ticket/similarity/qdrant/collections` 显示 collection 名称、维度、距离算法和状态；当前配置维度与所选 collection 维度不一致时会提示并阻止保存。
-- 保存场景触发开关：`externalSync`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge`。
+- 保存场景触发开关：`externalSync`、`bitablePull`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge`。
 - 手动重建历史向量：支持全部有效工单或指定工单号 `ticketNo`，支持同步/后台执行。手动重建 Provider 选项跟随当前检索 Provider 收敛，只允许“跟随配置”或当前 Provider，避免选择当前页面配置不支持的组合；是否写 Qdrant 只由最终 Provider 是否为 `qdrant` 决定。
 
 ## 接口

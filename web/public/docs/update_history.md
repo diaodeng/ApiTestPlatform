@@ -1,3 +1,12 @@
+## 2026-07-06
+
+1. 相似工单自动刷新场景新增“多维主动拉取入库”开关 `sceneTriggers.bitablePull`；飞书多维表格主动拉取入库和延后后处理改用 `bitable_pull` 场景，不再被 `externalSync` 开关隐式控制。旧配置缺少该开关时继承 `externalSync` 的值。
+2. OpenAI 兼容 Embedding 请求默认不再自动下发 `dimensions`；配置页新增 `embedding.requestParams` 自定义 JSON 参数，需要维度裁剪时由用户显式填写 `{"dimensions": 1024}`。
+3. `embedding.dimension` 继续用于向量返回长度校验、幂等判断和 Qdrant collection 维度匹配；返回维度不一致时记录错误日志并中断流程。
+4. 新增说明文档：`web/public/docs/2026-07-06-ticket-similarity-bitable-pull-embedding-params.md`。
+5. 修正工单同步项目映射边界：外部推送和飞书多维主动拉取只通过 `ticketVender/ticketModle` 匹配项目/模块映射，不使用 `projectCode/moduleCode` 绑定本地 ID；`projectCode/moduleCode` 仅保留给内网 `remote_pull` 入库使用。
+6. 新增说明文档：`web/public/docs/2026-07-06-ticket-sync-project-vender-code-boundary.md`。
+
 ## 2026-07-05
 
 1. 相似工单配置页手动重建范围从系统内部 `ticketId` 改为业务工单号 `ticketNo`；后端新增 `ticketNos` 入参并保留旧 `ticketIds` 兼容。
@@ -5,7 +14,7 @@
 3. 新增说明文档：`web/public/docs/2026-07-05-ticket-similarity-rebuild-ticket-no.md`。
 4. 修复手动重建同步 Qdrant 失败时只显示 `400 Client Error` 的问题：写入/查询前会校验实际向量维度与既有 collection 维度，Qdrant HTTP 异常会携带响应体，便于定位维度或 schema 不匹配。
 5. 相似工单 Qdrant 配置新增“维度不一致时重建”开关，默认关闭；开启后仅在重建写入链路删除旧 collection 并按当前向量维度重建。
-6. 修复外部 Embedding 失败时回退本地 hash 写入 Qdrant 导致 collection 维度反复切换的问题：Qdrant 同步链路会直接失败，OpenAI 兼容请求会携带 `dimensions` 并校验返回维度。
+6. 修复外部 Embedding 失败时回退本地 hash 写入 Qdrant 导致 collection 维度反复切换的问题：Qdrant 同步链路会直接失败，OpenAI 兼容请求会校验返回维度。
 7. 向量重建新增过程日志和外部 Embedding 失败熔断：批量重建会记录每批、每条工单、请求维度、返回维度和跳过原因；外部接口失败后停止后续请求，避免继续消耗 token。
 8. 工单向量生成新增幂等判断：同一工单在模型、版本、配置维度、向量化字段和最终文本未变化时，手动重建、入库或更新链路会复用本地 `embedding_record`，不再重复调用外部 Embedding；手动页面新增“强制重建”开关用于覆盖该行为。
 9. 幂等命中但本次要求同步 Qdrant 时，会用本地已存向量写入 Qdrant，并在结果中返回 `idempotentSkipped/qdrantSyncedFromCache`。

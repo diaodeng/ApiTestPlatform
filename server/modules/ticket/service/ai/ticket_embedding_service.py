@@ -65,6 +65,7 @@ class TicketEmbeddingService:
             "endpoint": "",
             "apiKey": "",
             "timeoutSeconds": 15,
+            "requestParams": {},
         },
         "qdrant": {
             "url": "http://127.0.0.1:6333",
@@ -77,6 +78,7 @@ class TicketEmbeddingService:
         },
         "sceneTriggers": {
             "externalSync": True,
+            "bitablePull": True,
             "remotePull": True,
             "manualCreate": True,
             "manualUpdate": True,
@@ -95,10 +97,14 @@ class TicketEmbeddingService:
         config = json.loads(json.dumps(cls.DEFAULT_CONFIG, ensure_ascii=False))
         config_info = ConfigDao.get_config_detail_by_key(query_db, cls.CONFIG_KEY)
         raw_value = getattr(config_info, "config_value", None)
+        raw_scene_triggers: dict[str, Any] = {}
         if raw_value:
             try:
                 parsed = json.loads(raw_value)
                 if isinstance(parsed, dict):
+                    raw_scene_triggers = (
+                        parsed.get("sceneTriggers") if isinstance(parsed.get("sceneTriggers"), dict) else {}
+                    )
                     config = cls._deep_merge(config, parsed)
             except Exception as exc:
                 logger.warning(f"工单相似度配置解析失败，使用默认配置: key={cls.CONFIG_KEY}, error={exc}")
@@ -110,6 +116,8 @@ class TicketEmbeddingService:
         embedding_config = config.get("embedding") if isinstance(config.get("embedding"), dict) else {}
         embedding_config["provider"] = cls._normalize_embedding_provider(embedding_config.get("provider"))
         embedding_config["dimension"] = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
+        request_params = embedding_config.get("requestParams")
+        embedding_config["requestParams"] = dict(request_params) if isinstance(request_params, dict) else {}
         config["embedding"] = embedding_config
         qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else {}
         qdrant_config["timeoutSeconds"] = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
@@ -119,8 +127,15 @@ class TicketEmbeddingService:
         )
         config["qdrant"] = qdrant_config
         scene_triggers = config.get("sceneTriggers") if isinstance(config.get("sceneTriggers"), dict) else {}
+        bitable_pull_default = cls.DEFAULT_CONFIG["sceneTriggers"]["bitablePull"]
+        if "bitablePull" not in raw_scene_triggers and "externalSync" in raw_scene_triggers:
+            bitable_pull_default = bool(raw_scene_triggers.get("externalSync"))
         config["sceneTriggers"] = {
-            key: bool(scene_triggers.get(key, default_value))
+            key: (
+                bool(bitable_pull_default)
+                if key == "bitablePull" and "bitablePull" not in raw_scene_triggers
+                else bool(scene_triggers.get(key, default_value))
+            )
             for key, default_value in cls.DEFAULT_CONFIG["sceneTriggers"].items()
         }
         return config
@@ -1212,13 +1227,15 @@ class TicketEmbeddingService:
         api_key = str(embedding_config.get("apiKey") or "").strip()
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        dimension = cls._safe_int(embedding_config.get("dimension"), 0, 0, 16384)
         payload: dict[str, Any] = {"model": embedding_config.get("model"), "input": text}
-        if dimension > 0:
-            payload["dimensions"] = dimension
+        request_params = embedding_config.get("requestParams")
+        if isinstance(request_params, dict):
+            payload.update(request_params)
+        dimension = cls._safe_int(embedding_config.get("dimension"), 0, 0, 16384)
         logger.info(
             f"外部Embedding请求开始: provider=openai_compatible, model={embedding_config.get('model')}, "
-            f"configuredDimension={dimension}, textChars={len(text)}, endpoint={endpoint.split('?')[0]}"
+            f"configuredDimension={dimension}, requestParamKeys={list(payload.keys())}, "
+            f"textChars={len(text)}, endpoint={endpoint.split('?')[0]}"
         )
         response = requests.post(
             endpoint,
@@ -1226,6 +1243,11 @@ class TicketEmbeddingService:
             json=payload,
             timeout=cls._safe_int(embedding_config.get("timeoutSeconds"), 15, 1, 120),
         )
+        if response.status_code != 200:
+            logger.error(
+                f"请求embeddings接口异常: endpoint={endpoint.split('?')[0]}, "
+                f"headerKeys={list(headers.keys())}, response={response.text}"
+            )
         response.raise_for_status()
         data = response.json()
         vector = ((data.get("data") or [{}])[0] or {}).get("embedding")
@@ -1237,6 +1259,10 @@ class TicketEmbeddingService:
             f"configuredDimension={dimension}, returnedDimension={len(result)}"
         )
         if dimension > 0 and len(result) != dimension:
+            logger.error(
+                f"Embedding接口返回维度与配置不一致，流程中断: model={embedding_config.get('model')}, "
+                f"expected={dimension}, actual={len(result)}, endpoint={endpoint.split('?')[0]}"
+            )
             raise ValueError(f"Embedding接口返回维度与配置不一致: expected={dimension}, actual={len(result)}")
         return result
 
@@ -1377,6 +1403,8 @@ class TicketEmbeddingService:
         embedding_config["endpoint"] = str(embedding_config.get("endpoint") or "").strip()
         embedding_config["apiKey"] = str(embedding_config.get("apiKey") or "").strip()
         embedding_config["timeoutSeconds"] = cls._safe_int(embedding_config.get("timeoutSeconds"), 15, 1, 120)
+        request_params = embedding_config.get("requestParams")
+        embedding_config["requestParams"] = dict(request_params) if isinstance(request_params, dict) else {}
         normalized["embedding"] = embedding_config
         qdrant_config = normalized.get("qdrant") if isinstance(normalized.get("qdrant"), dict) else {}
         qdrant_config["url"] = str(qdrant_config.get("url") or "").strip() or cls.DEFAULT_CONFIG["qdrant"]["url"]
@@ -1391,9 +1419,17 @@ class TicketEmbeddingService:
             qdrant_config.get("recreateCollectionOnDimensionMismatch", False)
         )
         normalized["qdrant"] = qdrant_config
+        source_scene_triggers = source.get("sceneTriggers") if isinstance(source.get("sceneTriggers"), dict) else {}
         scene_triggers = normalized.get("sceneTriggers") if isinstance(normalized.get("sceneTriggers"), dict) else {}
+        bitable_pull_default = cls.DEFAULT_CONFIG["sceneTriggers"]["bitablePull"]
+        if "bitablePull" not in source_scene_triggers and "externalSync" in source_scene_triggers:
+            bitable_pull_default = bool(source_scene_triggers.get("externalSync"))
         normalized["sceneTriggers"] = {
-            key: bool(scene_triggers.get(key, default_value))
+            key: (
+                bool(bitable_pull_default)
+                if key == "bitablePull" and "bitablePull" not in source_scene_triggers
+                else bool(scene_triggers.get(key, default_value))
+            )
             for key, default_value in cls.DEFAULT_CONFIG["sceneTriggers"].items()
         }
         return normalized

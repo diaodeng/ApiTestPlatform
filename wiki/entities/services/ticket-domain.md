@@ -105,7 +105,7 @@ graph TD
 - 公网外部推单更新已有工单时，若新 `ticketModle` 有文本但未命中有效 HRM 模块 ID，会清空旧 `module_id` 并用新模块文本覆盖 `module_name`，避免外部模块变化后仍展示旧模块；远端拉取入库也会兼容 `moduleName/module_name` 与外部字段 `ticketModle/ticketModel/ticket_model`。
 - 同步状态统一写入 `ticket.extra_data.external_sync`，不再依赖单一“是否已同步”布尔值，而是按 `revision + consumers.{consumer}.delivered_revision` 判断某个消费方是否已经拿到当前版本。
 - `/ticket/sync/pending` 只会返回真正带同步元数据的工单，避免把普通人工创建的工单误返回给内网同步系统。
-- 外部同步后的自动化链路支持规则化识别项目、模块、商家、门店、POS/SCO、版本号，识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。
+- 外部同步后的自动化链路支持规则化识别项目、模块、商家、门店、POS/SCO、版本号，识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。外部推送和飞书多维主动拉取只通过 `ticketVender/ticketModle` 匹配 `projectMappings/moduleMappings`；`projectCode/moduleCode` 仅用于内网 `remote_pull` 入库按业务码绑定本地项目/模块。
 - 外部同步延后后处理会继承入库请求 tid：Celery 可用时随 `module_ticket.sync_deferred_post_process` 投递，Celery 不可用回退 FastAPI 本地后台任务时通过 `trace_context` 设置，保证入库、自动化、AI 和群推送日志可按同一个 tid 串联；定时任务主动拉取等非 HTTP 入口由 Celery Worker 生成 `job-xxxxxxxx`。
 - 外部同步识别项目失败时会保留 `ticketVender/projectName/merchantName` 原始文本到 `merchant_name`，模块识别失败时保留 `ticketModle/moduleName` 原始文本到 `module_name`，避免本地 HRM 未配置映射时入库数据丢失。
 - 识别和自动化配置统一由系统参数 `ticket.sync.automation` 驱动，优先通过映射规则、正则和默认参数适配不同工单系统，避免把定制话术写死在服务代码里。
@@ -203,13 +203,13 @@ graph TD
 - 工单相似度检索已抽象为 `TicketEmbeddingService` 配置化 Provider：系统参数 `ticket.similarity.config` 控制 `local_hash`、`embedding` 或 `qdrant`。2026-07-05 起采用严格 Provider：配置 hash 就只用 hash，配置 embedding 就只用外部 Embedding + 数据库向量，配置 qdrant 就只用外部 Embedding + Qdrant；失败直接报错或记录日志，不再自动兜底。
 - 相似工单入库文本扩展为标题、描述、AI 摘要、最终根因、解决方案和 RCA，批量重建接口 `POST /ticket/similarity/rebuild` 会按当前 Provider 刷新历史工单向量；2026-07-05 起手动指定范围优先使用业务工单号 `ticketNos/ticketNo`，旧 `ticketIds` 仅作为兼容入口保留。
 - Qdrant 写入和查询前会按本次实际向量长度校验既有 collection 维度；维度不一致时默认提前返回明确错误。配置 `qdrant.recreateCollectionOnDimensionMismatch=true` 后，仅写入/重建链路会删除旧 collection 并按当前维度重建，查询链路不触发删除。Qdrant HTTP 4xx/5xx 异常会带出响应体，避免日志只剩 `400 Client Error`。
-- OpenAI 兼容 Embedding 请求会携带 `embedding.dimension` 作为 `dimensions` 参数并校验返回长度；`provider=qdrant` 时外部 Embedding 或 Qdrant 失败会直接失败，不再回退本地 hash 写入 Qdrant，避免 collection 维度在真实模型和 hash 之间反复切换。
+- OpenAI 兼容 Embedding 请求默认不携带 `dimensions`，仅用 `embedding.dimension` 校验返回长度、参与幂等判断并匹配 Qdrant collection；需要模型维度裁剪时可在 `embedding.requestParams` 自定义 JSON 中显式添加 `dimensions`。`provider=qdrant` 时外部 Embedding 或 Qdrant 失败会直接失败，不再回退本地 hash 写入 Qdrant，避免 collection 维度在真实模型和 hash 之间反复切换。
 - 重建粒度是一条工单一次外部 Embedding 请求；批量重建只是循环多条工单。过程日志会记录配置、批次、文本长度、请求维度、返回维度和 Qdrant collection 维度；外部 Embedding 异常会熔断后续请求并返回 `abortReason/skipped`。
 - 2026-07-05 起，工单向量生成支持幂等复用：同一工单的 `embedding.model/version/dimension`、向量化字段列表和最终文本未变化时，`vectorize_ticket` 会复用已有 `embedding_record`，不再调用外部 Embedding；手动重建默认按幂等跳过，`forceRebuild=true` 才强制重建。
 - 幂等命中且当前 `provider=qdrant` 时，服务会用本地已保存向量写入 Qdrant，并在结果中累计 `idempotentSkipped/qdrantSyncedFromCache`。`provider=local_hash` 和 `provider=embedding` 的向量都保存在数据库 `embedding_record.embedding` JSON 字段，不写本地文件；`provider=qdrant` 查询和入库使用 Qdrant，配置页可刷新 collection 列表并显示维度，维度不一致时会提示。
 - 严格 Provider 模式下，相似查询结果只来自当前向量 Provider，不再混入关键词命中分数，避免“包含同一字段文案”导致相似工单统计失真。
-- 相似工单配置已新增独立菜单 `ticket.similarity.config`，页面组件为 `ticket/similarityConfig/index`；页面可保存 Provider、Embedding、Qdrant、参与字段、阈值和 `sceneTriggers`，也可手动触发全部或指定工单号向量重建。配置页按检索 Provider 联动显示：`local_hash` 隐藏外部接口和 Qdrant 配置，`embedding` 只展示外部 Embedding 配置，`qdrant` 才展示 Qdrant 配置；隐藏项只是不显示不清空，手动重建 Provider 选项跟随当前配置收敛。
-- `sceneTriggers` 当前支持 `externalSync`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge` 六类场景；外部同步延后后处理、远端拉取、手动新增/编辑、Excel 导入和关闭工单知识沉淀都会先检查开关，再调用 `vectorize_ticket_for_scene` 或 `vectorize_tickets_for_scene`。
+- 相似工单配置已新增独立菜单 `ticket.similarity.config`，页面组件为 `ticket/similarityConfig/index`；页面可保存 Provider、Embedding、Qdrant、参与字段、阈值和 `sceneTriggers`，也可手动触发全部或指定工单号向量重建。配置页按检索 Provider 联动显示：`local_hash` 隐藏外部接口和 Qdrant 配置，`embedding` 只展示外部 Embedding 配置，`qdrant` 才展示 Qdrant 配置；隐藏项只是不显示不清空，手动重建 Provider 选项跟随当前配置收敛。2026-07-06 起外部 Embedding 配置新增 `requestParams` JSON 自定义请求参数。
+- `sceneTriggers` 当前支持 `externalSync`、`bitablePull`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge` 七类场景；外部同步延后后处理、多维主动拉取入库、远端拉取、手动新增/编辑、Excel 导入和关闭工单知识沉淀都会先检查开关，再调用 `vectorize_ticket_for_scene` 或 `vectorize_tickets_for_scene`。多维主动拉取入库使用独立 `bitablePull`，不再被 `externalSync` 隐式控制；旧配置缺少 `bitablePull` 时继承 `externalSync`，避免升级后重新打开已关闭链路。
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
 - AI 分析任务提交前会校验解析到的 Agent 是否已连接服务端；指定 Agent 离线时接口直接返回明确失败原因，不再创建必然失败的后台任务。提交或重试后若后台快速失败，前端会短轮询任务终态并弹出任务 `error_message`。

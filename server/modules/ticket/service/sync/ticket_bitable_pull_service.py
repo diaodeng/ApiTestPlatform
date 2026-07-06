@@ -372,7 +372,7 @@ class TicketBitablePullService:
                     db,
                     sync_object,
                     fallback_user,
-                    "external_sync",
+                    "bitable_pull",
                     True,
                 )
                 if result.is_success:
@@ -380,13 +380,13 @@ class TicketBitablePullService:
                     deferred_dispatch = TicketSyncPostProcessService.dispatch_deferred_sync_post_process_task(
                         sync_object.model_dump(),
                         deferred_current_user_payload,
-                        "external_sync",
+                        "bitable_pull",
                     )
                     if deferred_dispatch.get("mode") != TicketSyncPostProcessService.CELERY_DISPATCH_MODE:
                         TicketSyncPostProcessService.run_deferred_sync_post_process(
                             sync_object.model_dump(),
                             deferred_current_user_payload,
-                            "external_sync",
+                            "bitable_pull",
                         )
                 else:
                     summary["failedCount"] += 1

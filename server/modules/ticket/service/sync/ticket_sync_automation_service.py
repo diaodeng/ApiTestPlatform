@@ -152,7 +152,7 @@ class TicketSyncAutomationService:
                 ticket_vender=ticket_vender,
                 project_mappings=config.get("projectMappings") or [],
             )
-        if not project and str(sync_object.project_code or "").strip():
+        if not apply_external_mappings and not project and str(sync_object.project_code or "").strip():
             project = (
                 db.query(HrmProject)
                 .filter(
@@ -181,7 +181,7 @@ class TicketSyncAutomationService:
                 project_id=getattr(project, "project_id", None),
                 module_mappings=config.get("moduleMappings") or [],
             )
-        if not module and str(sync_object.module_code or "").strip():
+        if not apply_external_mappings and not module and str(sync_object.module_code or "").strip():
             module_query = db.query(HrmModule).filter(
                 func.lower(HrmModule.module_code) == str(sync_object.module_code).strip().lower(),
                 HrmModule.status == QtrDataStatusEnum.normal.value,
