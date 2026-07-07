@@ -233,6 +233,7 @@ class TicketSyncPostProcessService:
                     source_id=ticket.ticket_id,
                     source_ref=sync_object.ticket_no,
                     current_user_name=_user_name(current_user),
+                    sync_scene=sync_scene,
                 )
                 sync_object, ai_extract_apply_meta = cls.apply_ai_extract_to_sync_object(
                     sync_object,

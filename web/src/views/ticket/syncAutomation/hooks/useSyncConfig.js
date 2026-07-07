@@ -316,6 +316,14 @@ export function useSyncConfig(proxy) {
         promptCode: 'ticket_stat_classify_default',
         promptContent: '',
       },
+      aiSyncExtract: {
+        externalPushEnabled: false,
+        remotePullEnabled: false,
+        bitablePullEnabled: false,
+        providerCode: '',
+        promptCode: 'ticket_sync_extract_default',
+        extractFields: ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
+      },
       statClassification: normalizeStatClassificationConfig(),
       externalSyncRequiredFields: [
         'ticketNo', 'description', 'internalPriority', 'ticketVender',
@@ -656,6 +664,18 @@ export function useSyncConfig(proxy) {
       promptContent: aiClassification.promptContent || '',
     }
 
+    const aiSyncExtract = payload.aiSyncExtract || {}
+    form.aiSyncExtract = {
+      externalPushEnabled: Boolean(aiSyncExtract.externalPushEnabled),
+      remotePullEnabled: Boolean(aiSyncExtract.remotePullEnabled),
+      bitablePullEnabled: Boolean(aiSyncExtract.bitablePullEnabled),
+      providerCode: aiSyncExtract.providerCode || '',
+      promptCode: aiSyncExtract.promptCode || '',
+      extractFields: Array.isArray(aiSyncExtract.extractFields)
+        ? aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)
+        : ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
+    }
+
     form.projectMappings = normalizeArray(payload.projectMappings)
     form.moduleMappings = normalizeArray(payload.moduleMappings)
     form.vendorMappings = normalizeArray(payload.vendorMappings)
@@ -899,6 +919,16 @@ export function useSyncConfig(proxy) {
         providerCode: String(payload.aiClassification?.providerCode || '').trim(),
         promptCode: String(payload.aiClassification?.promptCode || '').trim() || 'ticket_stat_classify_default',
         promptContent: '',
+      }
+      payload.aiSyncExtract = {
+        externalPushEnabled: Boolean(payload.aiSyncExtract?.externalPushEnabled),
+        remotePullEnabled: Boolean(payload.aiSyncExtract?.remotePullEnabled),
+        bitablePullEnabled: Boolean(payload.aiSyncExtract?.bitablePullEnabled),
+        providerCode: String(payload.aiSyncExtract?.providerCode || '').trim(),
+        promptCode: String(payload.aiSyncExtract?.promptCode || '').trim(),
+        extractFields: Array.isArray(payload.aiSyncExtract?.extractFields)
+          ? Array.from(new Set(payload.aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)))
+          : ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
       }
       payload.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
         ? Array.from(new Set(payload.externalSyncRequiredFields.map((item) => String(item || '').trim()).filter(Boolean)))

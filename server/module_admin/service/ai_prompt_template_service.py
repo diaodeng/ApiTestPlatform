@@ -93,6 +93,15 @@ class AiPromptTemplateService:
             "enabled": True,
             "remark": "工单日志参数提取默认提示词占位模板，允许先选中后再补充内容",
         },
+        {
+            "template_code": "ticket_sync_extract_default",
+            "template_name": "工单同步AI提取默认提示词",
+            "template_category": "common",
+            "prompt_content": "",
+            "sort": 22,
+            "enabled": True,
+            "remark": "工单同步时从工单信息中提取门店/POS/SCO/日期/版本号等字段，启动时会自动补齐内置内容",
+        },
     )
 
     @classmethod
@@ -146,10 +155,19 @@ class AiPromptTemplateService:
                     existing.prompt_content = TicketLightAiService.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT
                     existing.update_by = "system"
                     existing.update_time = now
+                elif (
+                    item["template_code"] == "ticket_sync_extract_default"
+                    and not str(getattr(existing, "prompt_content", "") or "").strip()
+                ):
+                    existing.prompt_content = TicketLightAiService.DEFAULT_SYNC_EXTRACT_PROMPT
+                    existing.update_by = "system"
+                    existing.update_time = now
                 continue
             prompt_content = item["prompt_content"]
             if item["template_code"] == "ticket_stat_classify_default":
                 prompt_content = TicketLightAiService.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT
+            elif item["template_code"] == "ticket_sync_extract_default":
+                prompt_content = TicketLightAiService.DEFAULT_SYNC_EXTRACT_PROMPT
             db.add(
                 SysAiPromptTemplate(
                     template_code=item["template_code"],

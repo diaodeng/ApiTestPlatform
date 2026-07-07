@@ -176,7 +176,26 @@ class TicketSyncConfigService:
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
             },
+            "aiSyncExtract": cls.default_ai_sync_extract_config(),
         }
+
+    # --- AI 同步提取默认配置 ---
+
+    @classmethod
+    def default_ai_sync_extract_config(cls) -> dict[str, Any]:
+        """
+        构建 AI 同步提取默认配置。
+
+        :return: AI 同步提取配置默认值。
+        """
+        return {
+            "externalPushEnabled": False,
+            "remotePullEnabled": False,
+            "bitablePullEnabled": False,
+            "providerCode": "",
+            "promptCode": "",
+        }
+
 
     # --- migrated from TicketSyncService._default_feishu_auth_config ---
 
@@ -1434,6 +1453,16 @@ class TicketSyncConfigService:
         summary_report["includeClosed"] = bool(summary_report.get("includeClosed", True))
         summary_report["messageTemplate"] = str(summary_report.get("messageTemplate") or "").strip()
         merged["summaryReport"] = summary_report
+
+        ai_sync_extract = merged.get("aiSyncExtract") if isinstance(merged.get("aiSyncExtract"), dict) else {}
+        default_ai_sync_extract = cls.default_ai_sync_extract_config()
+        ai_sync_extract = {**default_ai_sync_extract, **ai_sync_extract}
+        ai_sync_extract["externalPushEnabled"] = bool(ai_sync_extract.get("externalPushEnabled"))
+        ai_sync_extract["remotePullEnabled"] = bool(ai_sync_extract.get("remotePullEnabled"))
+        ai_sync_extract["bitablePullEnabled"] = bool(ai_sync_extract.get("bitablePullEnabled"))
+        ai_sync_extract["providerCode"] = str(ai_sync_extract.get("providerCode") or "").strip()
+        ai_sync_extract["promptCode"] = str(ai_sync_extract.get("promptCode") or "").strip()
+        merged["aiSyncExtract"] = ai_sync_extract
         if not isinstance(merged.get("projectMappings"), list):
             merged["projectMappings"] = []
         if not isinstance(merged.get("moduleMappings"), list):

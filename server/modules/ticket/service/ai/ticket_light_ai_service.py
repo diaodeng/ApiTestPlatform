@@ -117,6 +117,34 @@ class TicketLightAiService:
         "- confidence 使用 0 到 1 的小数。"
     )
 
+    DEFAULT_SYNC_EXTRACT_PROMPT = (
+        "你是工单信息提取助手。请从工单标题、描述和原始入参中提取关键信息。"
+        "输出一个严格 JSON 对象，不要输出 Markdown。\n\n"
+        "提取目标：\n"
+        "1. title: 如果工单标题不够清晰，可以生成一个更简洁的标题（30字以内）\n"
+        "2. category: 从可选分类中选择一个最匹配的分类\n"
+        "3. storeName: 门店名称，如'北京一店'、'上海旗舰店'等\n"
+        "4. posNo: POS编号，必须是纯数字\n"
+        "5. scoNo: SCO编号，必须是纯数字\n"
+        "6. logDate: 日志日期，格式 YYYY-MM-DD\n"
+        "7. versionKey: 版本号，如'1.0.0.0'、'v2.3.1.0'等\n\n"
+        "提取规则：\n"
+        "- 如果某个字段在工单中找不到明确信息，返回空字符串或null\n"
+        "- posNo和scoNo必须是纯数字，不要包含其他字符\n"
+        "- logDate必须是YYYY-MM-DD格式\n"
+        "- 不要编造不存在的信息\n\n"
+        "输出 JSON 格式：\n"
+        "{\n"
+        '  "title": "简洁标题",\n'
+        '  "category": "分类名称",\n'
+        '  "storeName": "门店名称",\n'
+        '  "posNo": "POS编号",\n'
+        '  "scoNo": "SCO编号",\n'
+        '  "logDate": "YYYY-MM-DD",\n'
+        '  "versionKey": "版本号"\n'
+        "}"
+    )
+
     @classmethod
     def is_translation_enabled(cls, db: Session) -> bool:
         """
@@ -147,29 +175,32 @@ class TicketLightAiService:
         config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_LOG_EXTRACT_ENABLED).first()
         return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
 
-    # 场景名称映射：sync_scene -> config_key
+    # 场景名称映射：sync_scene -> aiSyncExtract 配置键
     SCENE_SYNC_EXTRACT_CONFIG_MAP = {
-        "external_sync": "ticket.ai.sync_extract.external_push.enabled",
-        "remote_pull": "ticket.ai.sync_extract.remote_pull.enabled",
-        "bitable_pull": "ticket.ai.sync_extract.bitable_pull.enabled",
+        "external_sync": "externalPushEnabled",
+        "remote_pull": "remotePullEnabled",
+        "bitable_pull": "bitablePullEnabled",
     }
 
     @classmethod
     def is_sync_extract_enabled_for_scene(cls, db: Session, sync_scene: str) -> bool:
         """
         判断指定同步场景是否启用AI统一提取。
-        优先读取场景独立开关，未配置时兜底读取总开关 ticket.ai.log_extract.enabled。
+        从同步配置 JSON 的 aiSyncExtract 中读取场景级开关。
         :param db: 数据库会话
         :param sync_scene: 同步场景，支持 external_sync/remote_pull/bitable_pull
         :return: 是否启用该场景的AI提取
         """
+        from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+        sync_config = TicketSyncConfigService.load_sync_config(db)
+        ai_sync_extract = sync_config.get("aiSyncExtract") if isinstance(sync_config.get("aiSyncExtract"), dict) else {}
         scene_config_key = cls.SCENE_SYNC_EXTRACT_CONFIG_MAP.get(sync_scene)
         if scene_config_key:
-            scene_row = db.query(SysConfig).filter(SysConfig.config_key == scene_config_key).first()
-            if scene_row is not None:
-                return str(getattr(scene_row, "config_value", "") or "").strip().lower() == "true"
-        # 场景独立开关未配置时，兜底使用总开关
-        return cls.is_log_extract_enabled(db)
+            scene_value = ai_sync_extract.get(scene_config_key)
+            if scene_value is not None:
+                return bool(scene_value)
+        # 场景独立开关未配置时，默认不启用
+        return False
 
     @classmethod
     def extract_version_key_from_text(cls, text: str | None) -> str:
@@ -1131,6 +1162,7 @@ class TicketLightAiService:
         source_id: int | None = None,
         source_ref: str | None = None,
         current_user_name: str | None = None,
+        sync_scene: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """
         统一提取工单同步所需信息（标题、分类、POS/SCO、日志日期）。
@@ -1142,6 +1174,7 @@ class TicketLightAiService:
         :param source_id: 来源ID
         :param source_ref: 来源引用
         :param current_user_name: 当前用户名称
+        :param sync_scene: 同步场景（external_sync/remote_pull/bitable_pull），用于场景级开关判断
         :return: (提取结果, 元信息)
         """
         title_text = str(title or "").strip()
@@ -1155,19 +1188,36 @@ class TicketLightAiService:
         empty_result = {
             "title": "",
             "categoryName": "",
+            "store": "",
             "posNo": None,
             "scoNo": None,
             "logDate": "",
+            "versionKey": "",
         }
         if not title_text and not content and not isinstance(raw_payload, dict):
             return empty_result, {"provider_code": "", "prompt_code": "", "skipped": True}
-        if not cls.is_log_extract_enabled(db):
+        # 使用场景级开关控制 AI 提取，不再依赖总开关 ticket.ai.log_extract.enabled
+        if sync_scene and not cls.is_sync_extract_enabled_for_scene(db, sync_scene):
+            logger.info(f"AI同步提取已跳过：场景 {sync_scene} 未启用")
             return empty_result, {"provider_code": "", "prompt_code": "", "skipped": True}
 
-        provider_code, prompt_code = cls._resolve_task_settings(
-            db, cls.CONFIG_LOG_EXTRACT_PROVIDER, cls.CONFIG_LOG_EXTRACT_PROMPT
-        )
+        # 从同步配置 JSON 中读取 AI 提取的 Provider 和提示词编码
+        from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+        sync_config = TicketSyncConfigService.load_sync_config(db)
+        ai_sync_extract = sync_config.get("aiSyncExtract") if isinstance(sync_config.get("aiSyncExtract"), dict) else {}
+        provider_code = str(ai_sync_extract.get("providerCode") or "").strip()
+        prompt_code = str(ai_sync_extract.get("promptCode") or "").strip()
+        # 兜底：如果同步配置中未配置，则使用旧的 sys_config 键
         if not provider_code or not prompt_code:
+            fallback_provider, fallback_prompt = cls._resolve_task_settings(
+                db, cls.CONFIG_LOG_EXTRACT_PROVIDER, cls.CONFIG_LOG_EXTRACT_PROMPT
+            )
+            provider_code = provider_code or fallback_provider
+            prompt_code = prompt_code or fallback_prompt
+        # 最终兜底：使用默认提示词编码
+        if not prompt_code:
+            prompt_code = "ticket_sync_extract_default"
+        if not provider_code:
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
                     task_type="ticket_sync_extract",
@@ -1304,13 +1354,36 @@ class TicketLightAiService:
                 or parsed_payload.get("modify_time")
             )
             normalized_category = cls._normalize_ticket_category(category_candidate)
-            extracted = {
-                "title": title_candidate,
-                "categoryName": normalized_category,
-                "posNo": pos_no,
-                "scoNo": sco_no,
-                "logDate": log_date,
-            }
+            # 从 AI 响应中提取门店和版本号
+            store_name = str(
+                parsed_payload.get("storeName")
+                or parsed_payload.get("store")
+                or parsed_payload.get("store_name")
+                or ""
+            ).strip()
+            version_key = str(
+                parsed_payload.get("versionKey")
+                or parsed_payload.get("version_key")
+                or parsed_payload.get("version")
+                or ""
+            ).strip()
+            # 根据 extractFields 配置过滤提取的字段
+            extract_fields = set(ai_sync_extract.get("extractFields") or [])
+            extracted = {}
+            # title 和 categoryName 始终提取（用于工单标题和分类）
+            extracted["title"] = title_candidate
+            extracted["categoryName"] = normalized_category
+            # 以下字段根据配置决定是否提取
+            if "storeName" in extract_fields and store_name:
+                extracted["store"] = store_name
+            if "posNo" in extract_fields:
+                extracted["posNo"] = pos_no
+            if "scoNo" in extract_fields:
+                extracted["scoNo"] = sco_no
+            if "logDate" in extract_fields:
+                extracted["logDate"] = log_date
+            if "versionKey" in extract_fields and version_key:
+                extracted["versionKey"] = version_key
             cls._finish_execution_record(
                 db,
                 execution_id,

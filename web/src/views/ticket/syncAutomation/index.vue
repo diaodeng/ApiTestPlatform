@@ -873,6 +873,118 @@
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
+                <span>工单同步AI提取</span>
+                <el-tag type="info" effect="plain">按场景独立控制AI提取开关</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.aiSyncExtract" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="外部推送提取">
+                    <el-switch
+                      v-model="form.aiSyncExtract.externalPushEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="mapping-desc" style="margin-top: 4px; font-size: 12px;">
+                      外部系统推送工单时，启用AI提取下方勾选的字段
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="远端拉取提取">
+                    <el-switch
+                      v-model="form.aiSyncExtract.remotePullEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="mapping-desc" style="margin-top: 4px; font-size: 12px;">
+                      从远端系统拉取工单时，启用AI提取下方勾选的字段
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="多维表格提取">
+                    <el-switch
+                      v-model="form.aiSyncExtract.bitablePullEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="mapping-desc" style="margin-top: 4px; font-size: 12px;">
+                      从飞书多维表格拉取工单时，启用AI提取下方勾选的字段
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Provider 编码">
+                    <el-select
+                      v-model="form.aiSyncExtract.providerCode"
+                      placeholder="请选择 Provider；留空则使用 AI 配置中心"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in providerOptions"
+                        :key="item.providerCode"
+                        :label="formatProviderOptionLabel(item)"
+                        :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="提示词编码">
+                    <el-select
+                      v-model="form.aiSyncExtract.promptCode"
+                      placeholder="请选择提示词模板；留空使用默认模板"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in promptOptions"
+                        :key="item.templateCode || item.value"
+                        :label="formatPromptOptionLabel(item)"
+                        :value="item.templateCode || item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <el-divider content-position="left">提取字段配置</el-divider>
+              <el-row :gutter="16">
+                <el-col :span="24">
+                  <el-form-item label="AI提取字段">
+                    <el-checkbox-group v-model="form.aiSyncExtract.extractFields">
+                      <el-checkbox label="storeName">门店名称</el-checkbox>
+                      <el-checkbox label="posNo">POS编号</el-checkbox>
+                      <el-checkbox label="scoNo">SCO编号</el-checkbox>
+                      <el-checkbox label="logDate">日志日期</el-checkbox>
+                      <el-checkbox label="versionKey">版本号</el-checkbox>
+                    </el-checkbox-group>
+                    <div class="mapping-desc" style="margin-top: 4px; font-size: 12px;">
+                      勾选需要从工单描述中AI提取的字段，未勾选的字段将不会被提取
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <div class="mapping-desc" style="margin-top: 8px;">
+                    说明：场景独立开关控制是否在该场景下启用AI提取。总开关 ticket.ai.log_extract.enabled 仅控制从日志中提取版本号，不影响本处的AI提取逻辑。
+                  </div>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
                 <span>工单群消息推送</span>
                 <el-tag type="success" effect="plain">推送配置</el-tag>
               </div>
