@@ -133,7 +133,9 @@ async def search_ticket_natural_language(
         if not ticket_ids:
             return ResponseUtil.success(data=[])
         
-        # 自然语言搜索按相似度排序，清除其他排序字段
+        # 自然语言搜索按相似度排序，清除关键字和排序字段
+        # keyword 会被 DAO 层当作 SQL LIKE 条件，自然语言文本不适合 LIKE 匹配，必须清除
+        query.keyword = None
         query.ticket_ids = ",".join(str(tid) for tid in ticket_ids)
         query.sort_field = None
         query.sort_order = None

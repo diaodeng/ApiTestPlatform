@@ -263,12 +263,14 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     queryParams.value.submitEndTime = submitEndTime || undefined
     const params = {
       ...buildTicketListQueryParams(),
-      keyword: naturalKeyword.value,
       limit: queryParams.value.pageSize
     }
-    // 自然语言搜索按相似度排序，不传排序字段
+    // 清除普通关键字和排序字段，避免与自然语言搜索冲突
+    delete params.keyword
     delete params.sortField
     delete params.sortOrder
+    // 自然语言关键字作为独立参数传递
+    params.keyword = naturalKeyword.value
     return searchTicketNaturalLanguage(params).then(response => {
       ticketList.value = response.rows || response.data || []
       total.value = response.total || ticketList.value.length
