@@ -342,6 +342,13 @@
         @sort-change="handleTicketSortChange"
       >
         <el-table-column
+          v-if="isTicketColumnVisible('index')"
+          label="序号"
+          type="index"
+          width="60"
+          align="center"
+        />
+        <el-table-column
           v-if="isTicketColumnVisible('ticketNo')"
           label="工单编号"
           prop="ticketNo"
@@ -357,6 +364,20 @@
           sortable="custom"
           show-overflow-tooltip
         />
+        <el-table-column
+          v-if="isTicketColumnVisible('similarityScore')"
+          label="相似度"
+          prop="similarityScore"
+          width="100"
+          align="center"
+        >
+          <template #default="scope">
+            <span v-if="scope.row.similarityScore != null">
+              {{ (scope.row.similarityScore * 100).toFixed(1) }}%
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column
           v-if="isTicketColumnVisible('status')"
           label="状态"

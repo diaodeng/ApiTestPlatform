@@ -133,22 +133,26 @@ async def search_ticket_natural_language(
         if not ticket_ids:
             return ResponseUtil.success(data=[])
         
-        # 用自然语言搜索的工单ID作为过滤条件，调用普通列表查询
+        # 自然语言搜索按相似度排序，清除其他排序字段
         query.ticket_ids = ",".join(str(tid) for tid in ticket_ids)
+        query.sort_field = None
+        query.sort_order = None
+        query.is_page = False
         query_result = TicketService.get_ticket_list_services(query_db, query)
         
+        rows = query_result if isinstance(query_result, list) else (query_result.rows if hasattr(query_result, "rows") and query_result.rows else [])
         # 为结果添加相似度分数
-        rows = query_result.rows if hasattr(query_result, "rows") and query_result.rows else query_result
-        if isinstance(rows, list):
-            for item in rows:
-                if isinstance(item, dict):
-                    ticket_id = item.get("ticketId")
-                    if ticket_id and ticket_id in ticket_id_score_map:
-                        item["similarityScore"] = ticket_id_score_map[ticket_id]
-        
-        if hasattr(query_result, "rows"):
-            return ResponseUtil.success(model_content=query_result)
-        return ResponseUtil.success(data=query_result)
+        for item in rows:
+            if isinstance(item, dict):
+                ticket_id = item.get("ticketId")
+                if ticket_id and ticket_id in ticket_id_score_map:
+                    item["similarityScore"] = ticket_id_score_map[ticket_id]
+        # 按相似度分数由高到低排序
+        rows.sort(
+            key=lambda item: item.get("similarityScore", 0) if isinstance(item, dict) else 0,
+            reverse=True,
+        )
+        return ResponseUtil.success(data=rows)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

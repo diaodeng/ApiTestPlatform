@@ -38,8 +38,10 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
   // === 列配置 ===
   const columnConfigOpen = ref(false)
   const ticketColumnOptions = [
+    { key: 'index', label: '序号' },
     { key: 'ticketNo', label: '工单编号', required: true },
     { key: 'title', label: '标题', required: true },
+    { key: 'similarityScore', label: '相似度' },
     { key: 'status', label: '状态' },
     { key: 'processStatus', label: '处理状态' },
     { key: 'project', label: '项目' },
@@ -255,9 +257,21 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
   function handleNaturalSearch() {
     if (!naturalKeyword.value) { handleQuery(); return }
     loading.value = true
-    return searchTicketNaturalLanguage({ keyword: naturalKeyword.value, limit: queryParams.value.pageSize }).then(response => {
-      ticketList.value = response.data || []
-      total.value = ticketList.value.length
+    const rangeValues = Array.isArray(submitTimeRange.value) ? submitTimeRange.value : []
+    const [submitBeginTime, submitEndTime] = rangeValues
+    queryParams.value.submitBeginTime = submitBeginTime || undefined
+    queryParams.value.submitEndTime = submitEndTime || undefined
+    const params = {
+      ...buildTicketListQueryParams(),
+      keyword: naturalKeyword.value,
+      limit: queryParams.value.pageSize
+    }
+    // 自然语言搜索按相似度排序，不传排序字段
+    delete params.sortField
+    delete params.sortOrder
+    return searchTicketNaturalLanguage(params).then(response => {
+      ticketList.value = response.rows || response.data || []
+      total.value = response.total || ticketList.value.length
     }).finally(() => { loading.value = false })
   }
 
