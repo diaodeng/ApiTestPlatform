@@ -3,10 +3,19 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-06
+updated: 2026-07-07
 ---
 
 # 操作日志
+
+## [2026-07-07] INGEST-CODE | 工单 AI hybrid 日志模式强制检索原始目录
+
+- 触发：用户反馈选择“摘要 + 完整目录”后 Agent 仍主要读取摘要，遗漏完整日志目录中的异常，怀疑与 Provider 生效和上下文长度限制有关。
+- 架构层：工单域 / AI 分析 / Agent 日志目录读取 / Provider 执行上下文
+- 创建的页面：`web/public/docs/2026-07-07-ticket-ai-hybrid-log-source-search.md`
+- 更新的页面：`server/modules/ticket/service/ai/ticket_ai_analysis_service.py`、`client_new/services/ticket_ai_analysis_service.py`、`server/tests/test_ticket_ai_analysis_prompt.py`、`web/public/docs/update_history.md`
+- 变更传播链：前端 `logAnalysisMode=hybrid` -> 服务端任务上下文 `logAnalysisMode` -> Agent 工作区 `logs_ai_digest.txt/source_logs_manifest.json/source_logs/` -> prompt 要求摘要仅作索引并必须 `rg` 检索原始目录。
+- 关键结论：Provider 生效会影响实际模型和上游上下文窗口，但项目代码没有 200K 的 AI 日志目录限制；当前日志正文快照上限是 800000 字符，摘要上限是 300000 字符，`source_logs/` 原始目录仍应解压保留。hybrid 漏日志的直接风险来自指令允许模型停在摘要层，已改为必须检索原始目录。
 
 ## [2026-07-06] INGEST-CODE | 相似工单主动拉取场景与 Embedding 自定义参数
 

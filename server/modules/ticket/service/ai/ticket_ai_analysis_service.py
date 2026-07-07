@@ -1330,7 +1330,9 @@ class TicketAiAnalysisService:
      {workspace_path}/source_logs/ 定点读取原始日志。
    - `full_directory`：不要依赖摘要，直接读取 {workspace_path}/source_logs/；先用 rg 搜索错误关键词、
      工单号、门店/POS、交易号和用户额外说明中的关键词，再打开命中文件上下文。
-   - `hybrid`：先阅读摘要，再使用 {workspace_path}/source_logs/ 完整目录复核关键证据。
+   - `hybrid`：摘要只作为定位索引。阅读摘要后，必须查看 {workspace_path}/source_logs_manifest.json
+     或列出 {workspace_path}/source_logs/ 文件清单，并至少对 {workspace_path}/source_logs/ 执行一次
+     rg 关键词检索；最终证据尽量引用原始日志文件路径和行号，不要只引用 logs_ai_digest.txt。
    **请严格按照上述模式执行，不要自行切换为其他模式。**
 4. 如果 `sourceLogPull.agentShouldExtractWindow` 为 true，请按 `requestedBeginTime/requestedEndTime`
    在 {workspace_path}/source_logs/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、

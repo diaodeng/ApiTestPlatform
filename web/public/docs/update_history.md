@@ -1,3 +1,9 @@
+## 2026-07-07
+
+1. 工单 AI “摘要 + 完整目录”（`hybrid`）模式强化为必须检索 `source_logs/` 原始日志目录：摘要只作为定位索引，prompt 要求查看 manifest 或文件清单，并至少执行一次 `rg` 关键词检索。
+2. Agent 生成的 `logs_ai_digest.txt` 说明同步区分 `digest` 与 `hybrid`，避免 hybrid 分析停留在摘要层。
+3. 新增说明文档：`web/public/docs/2026-07-07-ticket-ai-hybrid-log-source-search.md`。
+
 ## 2026-07-06
 
 1. 相似工单自动刷新场景新增“多维主动拉取入库”开关 `sceneTriggers.bitablePull`；飞书多维表格主动拉取入库和延后后处理改用 `bitable_pull` 场景，不再被 `externalSync` 开关隐式控制。旧配置缺少该开关时继承 `externalSync` 的值。

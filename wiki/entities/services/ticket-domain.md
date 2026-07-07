@@ -6,7 +6,7 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-04
+freshness: 2026-07-07
 created: 2026-05-20
 updated: 2026-07-05
 related_files:
@@ -151,7 +151,7 @@ graph TD
 - 工单自动化通知统一复用已有推送配置，页面侧可选择具体推送项和成功/失败通知开关；自动 AI 成功和失败都会发送消息，便于业务闭环确认。
 - 参数配置说明改为通用提示按钮组件 `PromptButton`，后续可在其他页面复用。
 - 日志拉取时间范围支持可空：有时间范围时按“开始/结束时间”或“时间点+前后分钟范围”提取入库；未填时间范围时只下载整包压缩文件，不落日志正文，供 AI 分析时由 Agent 基于 `commandResultUrl` 在本地工作区下载并解压整包。
-- AI 整包日志分析不再默认让 Codex 通读 `source_logs/` 完整日志目录；Agent 会先生成受控大小的 `logs_ai_digest.txt`，prompt 要求优先读取摘要，证据不足时再按摘要文件名和行号定点读取原始日志。
+- AI 整包日志分析支持三种模式：`digest` 允许优先读取受控大小的 `logs_ai_digest.txt`，证据不足时定点读取原始日志；`full_directory` 不生成摘要，要求直接检索 `source_logs/`；`hybrid` 会生成摘要但摘要只作为定位索引，Agent 必须查看 `source_logs_manifest.json` 或文件清单，并至少对 `source_logs/` 执行一次 `rg` 关键词检索，最终证据尽量引用原始日志文件路径和行号。
 - 日志拉取管理页新增拉取日期展示，并提供日志下载和记录删除能力；删除会同步清理本地或 FTP 归档文件，未关联工单的独立记录也能直接下载。
 - 日志拉取下载接口支持 `source=auto/service/original`：管理页“下载日志”使用 `auto`，优先本服务归档文件，本服务文件不存在或未下载时回退外部原始地址；工单详情页“归档地址”使用 `service` 只下载本服务归档，“原始压缩包”使用 `original` 只下载外部原始地址。工单详情页日志拉取列表展示商家、门店、POSID，便于同一工单下区分不同 POS 的拉取记录。
 - 为避免大文件下载卡住 FastAPI 事件循环，工单详情页“原始压缩包”改为浏览器直接打开 `commandResultUrl`，不再由后端代理下载外部压缩包；HTTP 形式的归档地址也直接浏览器打开，本地/FTP 归档仍走后端鉴权下载。
