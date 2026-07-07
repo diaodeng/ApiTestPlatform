@@ -153,6 +153,7 @@ class TicketQueryModel(QueryModel):
     internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     reporter_id: int | None = Field(default=None, description="提单人ID")
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
+    ticket_ids: str | None = Field(default=None, description="工单ID列表，逗号分隔字符串，用于自然语言搜索后的过滤")
     submit_begin_time: datetime | None = Field(default=None, description="提交时间筛选开始，优先使用外部createTime")
     submit_end_time: datetime | None = Field(default=None, description="提交时间筛选结束，优先使用外部createTime")
     sort_field: str | None = Field(default="submitTime", description="排序字段，默认按提交时间排序")

@@ -581,6 +581,7 @@ class TicketDao:
         internal_owner_ids = _normalize_int_list(query.internal_owner_ids) or _normalize_int_list(
             query.internal_owner_id
         )
+        ticket_ids = _normalize_int_list(query.ticket_ids)
         latest_log_status = _latest_log_pull_status_expr(Ticket.ticket_id)
         latest_ai_status = _latest_ai_status_expr(Ticket.ticket_id)
         submit_time_expr = _ticket_submit_time_expr()
@@ -633,6 +634,7 @@ class TicketDao:
                 if query.internal_owner_name
                 else True,
                 Ticket.reporter_id == query.reporter_id if query.reporter_id else True,
+                Ticket.ticket_id.in_(ticket_ids) if ticket_ids else True,
                 Ticket.create_time >= begin_time if begin_time else True,
                 Ticket.create_time <= end_time if end_time else True,
                 submit_time_expr >= submit_begin_time if submit_begin_time else True,

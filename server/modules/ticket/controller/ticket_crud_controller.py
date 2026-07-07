@@ -106,19 +106,49 @@ async def import_ticket_excel(
 async def search_ticket_natural_language(
     request: Request,
     keyword: str,
+    query: TicketQueryModel = Depends(TicketQueryModel.as_query),
     limit: int = 20,
     query_db: Session = Depends(get_db),
 ):
     """
-    自然语言搜索工单接口。
+    自然语言搜索工单接口，支持其他过滤条件。
+    先执行自然语言搜索得到工单ID和分数，再用这些ID作为过滤条件查询工单列表。
     :param request: 请求对象
     :param keyword: 自然语言搜索文本
+    :param query: 工单查询条件，支持工单状态、项目、商家、模块、优先级等筛选
     :param limit: 返回数量限制
     :param query_db: 数据库会话
-    :return: 按相关性排序的工单列表
+    :return: 按相关性排序的工单列表，包含过滤条件和相似度分数
     """
     try:
-        return ResponseUtil.success(data=TicketEmbeddingService.search_tickets(query_db, keyword, limit))
+        # 先执行自然语言搜索，得到工单ID和分数的映射
+        search_results = TicketEmbeddingService.search_tickets(query_db, keyword, limit)
+        if not search_results:
+            return ResponseUtil.success(data=[])
+        
+        # 提取工单ID列表和分数映射
+        ticket_id_score_map = {item.get("ticketId"): item.get("score", 0) for item in search_results if item.get("ticketId")}
+        ticket_ids = list(ticket_id_score_map.keys())
+        
+        if not ticket_ids:
+            return ResponseUtil.success(data=[])
+        
+        # 用自然语言搜索的工单ID作为过滤条件，调用普通列表查询
+        query.ticket_ids = ",".join(str(tid) for tid in ticket_ids)
+        query_result = TicketService.get_ticket_list_services(query_db, query)
+        
+        # 为结果添加相似度分数
+        rows = query_result.rows if hasattr(query_result, "rows") and query_result.rows else query_result
+        if isinstance(rows, list):
+            for item in rows:
+                if isinstance(item, dict):
+                    ticket_id = item.get("ticketId")
+                    if ticket_id and ticket_id in ticket_id_score_map:
+                        item["similarityScore"] = ticket_id_score_map[ticket_id]
+        
+        if hasattr(query_result, "rows"):
+            return ResponseUtil.success(model_content=query_result)
+        return ResponseUtil.success(data=query_result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
